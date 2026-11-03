@@ -291,9 +291,12 @@ func componentData(root string, c *Component) (map[string]any, error) {
 		d.Select = job.Name
 		if job.Shards > 1 {
 			jobs = append(jobs, shardsOf(d))
-			d.Needs = job.Name + "-shard"
+			d.Needs = shardsName(job.Name)
 		}
 		jobs = append(jobs, d)
+	}
+	if err := checkBuildCachePrefixes(c, jobs); err != nil {
+		return nil, err
 	}
 	images := c.Outputs.Images
 	imageTimeout, publishTimeout := 45, 30
@@ -385,12 +388,33 @@ func hooksRunGo(root string, c *Component, skip []string) (bool, error) {
 // The entry holds every dependency compiled, and a run compiles again
 // and tests again only the packages of its module that changed since
 // the entry was saved.
+// shardsName names the matrix job of a sharded job. The name starts
+// with shard- and not with the job's name, because the job's build
+// cache restores every key that begins with its name and a dash
+// (checkBuildCachePrefixes).
+func shardsName(job string) string { return "shard-" + job }
+
+// checkBuildCachePrefixes fails when one job's Go build cache would
+// restore another's entries. A restore that misses its key takes the
+// newest entry whose key begins with go-build-...-<job>-, so the entries
+// of a job named <job>-<more> match too, and they hold another build.
+func checkBuildCachePrefixes(c *Component, jobs []jobData) error {
+	for _, a := range jobs {
+		for _, b := range jobs {
+			if a.Go && b.Go && a.Cache.Build && b.Cache.Build && strings.HasPrefix(b.Name, a.Name+"-") {
+				return fmt.Errorf("%s: the job %q restores the build cache of job %q, because its restore takes every key that begins with its name and a dash", c.Name(), a.Name, b.Name)
+			}
+		}
+	}
+	return nil
+}
+
 // shardsOf answers the matrix job that runs a sharded job's ShardRun
 // once for each shard. Each shard keeps the job's toolchain, caches,
 // and timeout, and sets SHARD and SHARDS beside the job's own env.
 func shardsOf(d jobData) jobData {
 	shards := d
-	shards.Name = d.Name + "-shard"
+	shards.Name = shardsName(d.Name)
 	shards.Run = d.ShardRun
 	shards.Matrix = make([]int, d.Shards)
 	for i := range shards.Matrix {

@@ -346,8 +346,8 @@ func (c *Component) validate(path string) error {
 		}
 	}
 	for _, job := range c.Jobs {
-		if job.Shards > 1 && jobs[job.Name+"-shard"] {
-			return fmt.Errorf("%s: the job %q takes the name of the shards of job %q", path, job.Name+"-shard", job.Name)
+		if job.Shards > 1 && jobs[shardsName(job.Name)] {
+			return fmt.Errorf("%s: the job %q takes the name of the shards of job %q", path, shardsName(job.Name), job.Name)
 		}
 	}
 	if jobs["images"] || jobs["publish"] {

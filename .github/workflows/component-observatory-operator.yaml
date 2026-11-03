@@ -72,7 +72,7 @@ env:
   GOPROXY: https://proxy.golang.org|direct
 
 jobs:
-  go-shard:
+  shard-go:
     if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'go') }}
     runs-on: ubuntu-26.04
     # The shards of the job go. Each runs the tests of its share
@@ -189,7 +189,7 @@ jobs:
       # The job go merges these files from every shard.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: coverage-observatory-operator-go-shard-${{ matrix.shard }}
+          name: coverage-observatory-operator-shard-go-${{ matrix.shard }}
           path: |
             observatory-operator/coverage.out
           if-no-files-found: error
@@ -199,7 +199,7 @@ jobs:
     if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'go') }}
     # The job merges the coverage files of its shards and checks them,
     # so it waits for every shard.
-    needs: go-shard
+    needs: shard-go
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     defaults:
@@ -287,7 +287,7 @@ jobs:
       # Each shard's files are in a directory named for its artifact.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: coverage-observatory-operator-go-shard-*
+          pattern: coverage-observatory-operator-shard-go-*
           path: observatory-operator/coverage-shards
 
       - run: make test-go-gate

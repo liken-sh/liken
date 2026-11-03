@@ -8,7 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// shardedJobs is the go and go-shard jobs of a component's workflow,
+// shardedJobs is the go and shard-go jobs of a component's workflow,
 // as the YAML parser reads them.
 type shardedJobs struct {
 	Jobs map[string]struct {
@@ -53,7 +53,7 @@ func TestAShardedJobRunsItsShardsAndThenMergesThem(t *testing.T) {
 	if err := yaml.Unmarshal(files[".github/workflows/component-app.yaml"], &workflow); err != nil {
 		t.Fatal(err)
 	}
-	shards, gate := workflow.Jobs["go-shard"], workflow.Jobs["go"]
+	shards, gate := workflow.Jobs["shard-go"], workflow.Jobs["go"]
 
 	selects := "contains(fromJSON(inputs.jobs), 'go')"
 	if !strings.Contains(shards.If, selects) || !strings.Contains(gate.If, selects) {
@@ -68,7 +68,7 @@ func TestAShardedJobRunsItsShardsAndThenMergesThem(t *testing.T) {
 	if want := map[string]string{"SHARD": "${{ matrix.shard }}", "SHARDS": "3", "CGO_ENABLED": "1"}; !reflect.DeepEqual(shards.Env, want) {
 		t.Errorf("the shards' env is %v, not %v", shards.Env, want)
 	}
-	if gate.Needs != "go-shard" {
+	if gate.Needs != "shard-go" {
 		t.Errorf("the job needs %q, not the shards", gate.Needs)
 	}
 	if _, ok := gate.Env["SHARD"]; ok {
@@ -101,9 +101,9 @@ func TestAShardedJobRunsItsShardsAndThenMergesThem(t *testing.T) {
 	}{
 		{"the shards run", shardRuns, []string{"make shard"}},
 		{"the job runs", gateRuns, []string{"make gate"}},
-		{"the shards upload", shardUploads, []string{"coverage-app-go-shard-${{ matrix.shard }}"}},
+		{"the shards upload", shardUploads, []string{"coverage-app-shard-go-${{ matrix.shard }}"}},
 		{"the job uploads", gateUploads, []string{"coverage-app-go"}},
-		{"the job downloads", downloads, []string{"coverage-app-go-shard-* -> app/coverage-shards"}},
+		{"the job downloads", downloads, []string{"coverage-app-shard-go-* -> app/coverage-shards"}},
 	} {
 		if !reflect.DeepEqual(c.got, c.want) {
 			t.Errorf("%s %q, not %q", c.what, c.got, c.want)
@@ -118,7 +118,7 @@ func TestAShardedJobIsDeclaredWhole(t *testing.T) {
 		{"shards with no shard-run", "run = \"make gate\"\nshards = 2\ncoverage = [\"c.out\"]\n", "need a shard-run command"},
 		{"a shard-run with no shards", "run = \"make gate\"\nshard-run = \"make shard\"\ncoverage = [\"c.out\"]\n", "need a shard-run command"},
 		{"shards with no coverage", "run = \"make gate\"\nshards = 2\nshard-run = \"make shard\"\n", "needs coverage files"},
-		{"a job named for the shards", "run = \"make gate\"\nshards = 2\nshard-run = \"make shard\"\ncoverage = [\"c.out\"]\n[[jobs]]\nname = \"go-shard\"\ntoolchain = \"go\"\nrun = \"make other\"\n", "takes the name of the shards"},
+		{"a job named for the shards", "run = \"make gate\"\nshards = 2\nshard-run = \"make shard\"\ncoverage = [\"c.out\"]\n[[jobs]]\nname = \"shard-go\"\ntoolchain = \"go\"\nrun = \"make other\"\n", "takes the name of the shards"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := LoadComponents(shardedTree(t, c.job))
@@ -126,5 +126,23 @@ func TestAShardedJobIsDeclaredWhole(t *testing.T) {
 				t.Errorf("the error is %v, not one that says %q", err, c.err)
 			}
 		})
+	}
+}
+
+// A Go build cache restores the newest entry whose key begins with the
+// job's prefix, go-build-...-<job>-, when its own key misses. A job
+// whose name begins with another job's name and a dash would hand that
+// job its entries: a job go-race would hand its -race build to the vet
+// of go.
+func TestNoGoJobRestoresTheBuildCacheOfAnother(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"app/package.toml": "[package]\nname = \"app\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\n[[jobs]]\nname = \"go-race\"\ntoolchain = \"go\"\nrun = \"make race\"\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Workflows(root, components); err == nil || !strings.Contains(err.Error(), "restores the build cache of job \"go-race\"") {
+		t.Errorf("the error is %v, not one about the jobs' build caches", err)
 	}
 }
