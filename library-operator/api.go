@@ -417,7 +417,7 @@ type LibraryStatus struct {
 	Runs []libraryStatusRun `json:"runs,omitempty"`
 	// Gaps is one count per fact of the rows that fact has left to fill.
 	// Waiting is the titles whose identity ended in candidates for a person to
-	// choose from, and Unresolved the titles no provider could name. All three
+	// choose from, and Unresolved the titles TMDb could not name. All three
 	// are the reporter's own numbers.
 	Gaps       map[string]int `json:"gaps,omitempty"`
 	Waiting    int            `json:"waiting"`

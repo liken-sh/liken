@@ -623,12 +623,47 @@ in `.liken/identity.yaml`, and the title counts in `status.waiting`
 until a person names the right `uniqueid` in the `.nfo`. A title no
 provider can name counts in `status.unresolved`.
 
-After identifying a title through TMDb, the identity phase requests its IMDb
-and TVDB ids and writes any returned ids into the `.nfo` file. OMDb uses
-the IMDb id to look up the title. Fanart.tv uses the TMDb id for a
-movie and the TVDB id for a series. These ids identify the title;
+The identity fact gives every title the ids liken keys titles on: the
+TMDb and IMDb ids for a movie, and the TheTVDB, TMDb, and IMDb ids for a
+series. A title stays in the identity gap until it holds all of them,
+whether the ladder named it, a person did, or another tool such as
+Sonarr wrote its `.nfo`.
+
+A title that holds a TheTVDB or IMDb id and no TMDb id never climbs the
+ladder, because a search by name could match a different show with the
+same name. The fact asks TMDb's find call with each of those ids. Where
+every answer names the same title, the fact writes its TMDb id, and the
+ledger's reason names the calls, such as `find by tvdb 113981 and imdb
+tt0099864`. Where two ids name two different titles, both become
+candidates in `.liken/identity.yaml`, and the title counts in
+`status.waiting`. Where TMDb names no title, the title counts in
+`status.unresolved`.
+
+Once a title has its TMDb id, TMDb's external ids call gives the rest,
+and the fact writes each id the title lacks into the `.nfo` file. An id
+the `.nfo` file already holds stays as it is. The TMDb id carries
+`default="true"` only where no other uniqueid carries it, so a file
+Sonarr wrote keeps its TheTVDB id as the default. A title TMDb holds no
+id for is asked again after thirty days, and a call that failed is asked
+again the next day.
+
+Sonarr rewrites `tvshow.nfo` when it refreshes a series, and the rewrite
+drops the TMDb id. The fact writes back the ids its ledger holds,
+without asking TMDb, as long as every id the ledger and the `.nfo` file
+share still agrees. An id a person changed means a different title, so
+the fact asks the find call again.
+
+OMDb uses the IMDb id to look up the title. Fanart.tv uses the TMDb id
+for a movie and the TVDB id for a series. These ids identify the title;
 OMDb and Fanart.tv still require their own API keys, configured through
 each provider's `secretRef`.
+
+A movie's canonical id prefers TMDb, so a movie that held an IMDb id
+alone moves from `movie:imdb:…` to `movie:tmdb:…` on the scan after the
+fact writes its TMDb id. Its old id stays an alias of the new one, and
+the progress store finds a work through its aliases, so the movie keeps
+its place. A series keeps its canonical id, because a series prefers
+TheTVDB.
 
 ### A season that is another show
 

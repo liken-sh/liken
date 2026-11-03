@@ -300,9 +300,9 @@ func gapClause(fact, column, missing string) string {
 //
 // A probe gap is a present video, audio, or text subtitle file whose probed column is not
 // its modified column: no probe has read the file, or the file changed after
-// one did. An identity gap is an item whose id is its folder key, so no
-// provider named it. Both exclude an item with an attempt inside that
-// attempt's own window. A probe closes its own gap through the probed column,
+// one did. An identity gap is a title missing one of the ids liken keys
+// titles on, which includes a title whose id is its folder key. Both
+// exclude an item with an attempt inside that attempt's own window. A probe closes its own gap through the probed column,
 // which it writes with the streams it read. A probe whose record landed
 // nowhere the scanner reads is tried again after the window.
 var gapQueries = map[string]string{
@@ -314,13 +314,8 @@ var gapQueries = map[string]string{
 		`WHERE library = ?1 AND (type IN ('video','audio') OR (type = '` + fileTypeSubtitle + `' AND ` +
 		textSubtitleClause() + `)) AND present = 1 ` +
 		`AND ` + gapClause(factProbe, "path", `probed != modified`),
-	// The folder key stays in the outer condition, not the source, so a
-	// refresh opens a title a provider has already named.
-	factIdentity: `SELECT id FROM (` +
-		`SELECT library, id FROM movies ` +
-		`UNION ALL SELECT library, id FROM series) AS items ` +
-		`WHERE library = ?1 AND ` + gapClause(factIdentity, "id",
-		`id LIKE 'movie:path:%' OR id LIKE 'series:path:%'`),
+	// A title missing one of the ids liken keys titles on.
+	factIdentity:             identityGapSQL(),
 	factOverview:             nfoGapQuery(factOverview),
 	factCertification:        nfoGapQuery(factCertification),
 	factRatingTMDb:           nfoGapQuery(factRatingTMDb),
@@ -359,13 +354,16 @@ var gapQueries = map[string]string{
 }
 
 // The two counts a person reads on the Library beside the gaps. Waiting
-// is the identity attempts that ended in candidates for an item still
-// unidentified, the titles that need a person. Unresolved is the attempts
-// that ended in nothing for an item still unidentified, the titles no
-// provider could name.
+// is the identity attempts that ended in candidates for an item that still
+// has no TMDb id, the titles that need a person. Unresolved is the attempts
+// that ended in nothing for such an item, the titles TMDb could not name by
+// their folder name or by the ids their .nfo file holds. A title with a
+// path id has no TMDb id, so both count it as well.
 const (
-	waitingQuery = `SELECT count(*) FROM attempts WHERE library = ? AND ` + attemptFactColumn + ` = 'identity' AND result = 'candidates' ` +
-		`AND (item LIKE 'movie:path:%' OR item LIKE 'series:path:%')`
-	unresolvedQuery = `SELECT count(*) FROM attempts WHERE library = ? AND ` + attemptFactColumn + ` = 'identity' AND result = 'nothing' ` +
-		`AND (item LIKE 'movie:path:%' OR item LIKE 'series:path:%')`
+	waitingQuery    = identityCountSQL + `'candidates' AND ` + noTMDbIDClause
+	unresolvedQuery = identityCountSQL + `'nothing' AND ` + noTMDbIDClause
+
+	identityCountSQL = `SELECT count(*) FROM attempts WHERE library = ?1 AND ` + attemptFactColumn + ` = 'identity' AND result = `
+	noTMDbIDClause   = `item NOT IN (SELECT item FROM aliases WHERE aliases.library = ?1 ` +
+		`AND (alias LIKE 'movie:tmdb:%' OR alias LIKE 'series:tmdb:%'))`
 )

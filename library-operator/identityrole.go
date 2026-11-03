@@ -44,10 +44,18 @@ func (e *enricher) identityGap(ctx context.Context, client *tmdbClient) error {
 		if !held || !e.inScope(item.path) {
 			continue
 		}
-		e.identifyOne(ctx, client, item)
+		heldIDs, err := e.catalog.titleIDs(ctx, e.library, id)
+		if err != nil {
+			return err
+		}
+		if e.holdsAnID(heldIDs) {
+			e.fillIDs(ctx, client, item, heldIDs)
+		} else {
+			e.identifyOne(ctx, client, item)
+		}
 		asked++
 	}
-	e.logf("asked the provider about %d of the %d titles with no id", asked, len(ids))
+	e.logf("asked the provider about %d of the %d titles missing an id", asked, len(ids))
 	return nil
 }
 
@@ -79,11 +87,7 @@ func (e *enricher) identifyOne(ctx context.Context, client *tmdbClient, item ide
 	}
 }
 
-// The other databases' ids follow the provider's own: one call to TMDb's
-// external ids gives them, each one goes into the .nfo file as its own
-// uniqueid, and the scanner lifts every one into aliases. That is what makes
-// a provider that keys on an IMDb id or a TheTVDB id reachable with no
-// account at that database.
+// The ladder's TMDb id goes in first, and the other databases' ids follow it.
 func (e *enricher) writeIdentity(ctx context.Context, client *tmdbClient, folder string,
 	item identityItem, answer identityAnswer) {
 	id := strconv.Itoa(answer.id)
@@ -93,43 +97,8 @@ func (e *enricher) writeIdentity(ctx context.Context, client *tmdbClient, folder
 		e.recordIdentity(folder, nil, attemptError)
 		return
 	}
-	ids := providerIDs{"tmdb": id}
-	external := e.externalIDs(ctx, client, item, answer.id)
-	for _, provider := range sortedKeys(external) {
-		if err := e.writeUniqueID(nfoPath, rootElement, item.title, provider, external[provider]); err != nil {
-			e.logf("could not write the %s id of %s: %v", provider, opaqueID(item.id), err)
-			continue
-		}
-		ids[provider] = external[provider]
-	}
 	e.logf("identified %s as tmdb %s, by %s", opaqueID(item.id), id, answer.reason)
-	e.recordIdentity(folder, &likenItem{
-		Path: likenSelfPath, ID: ids, Reason: answer.reason, Written: time.Now().UTC(),
-	}, attemptFound)
-}
-
-// An id the provider will not answer for leaves the title with the id it has,
-// because the provider's own id is what the catalog keys on, and the next run
-// asks again.
-func (e *enricher) externalIDs(ctx context.Context, client *tmdbClient,
-	item identityItem, id int) providerIDs {
-	external, err := client.externalIDs(ctx, e.kind, id)
-	if err != nil {
-		e.logf("could not read the other ids of %s: %v", opaqueID(item.id), err)
-		return nil
-	}
-	return external.providerIDs()
-}
-
-// The default mark goes on the provider this operator keys its own ids on, so
-// a reader takes that one first.
-func (e *enricher) writeUniqueID(nfoPath, rootElement, title, provider, id string) error {
-	element := fmt.Appendf(nil, `<uniqueid type=%q>%s</uniqueid>`, provider, id)
-	if provider == "tmdb" {
-		element = fmt.Appendf(nil, `<uniqueid type="tmdb" default="true">%s</uniqueid>`, id)
-	}
-	return e.writer.editNFO(nfoPath, rootElement, title,
-		xmlElement{name: "uniqueid", attribute: "type", value: provider}, element)
+	e.writeOtherIDs(ctx, client, folder, item, providerIDs{"tmdb": id}, answer.reason, true)
 }
 
 // The item entry and the attempt are one write of one file, so a reader never
@@ -145,7 +114,7 @@ func (e *enricher) recordIdentity(folder string, entry *likenItem, result string
 	if err != nil {
 		e.logf("could not record the identity attempt at %s: %v", e.named(folder), err)
 	}
-	if result == attemptFound {
+	if result == attemptFound || result == attemptPartial {
 		e.rescanTitle(folder)
 		return
 	}

@@ -535,11 +535,11 @@ spec:
                 waiting:
                   type: integer
                   minimum: 0
-                  description: "How many titles the identity fact left as candidates for a person to choose from. The candidates are in the title's .liken/identity.yaml. A person puts the right uniqueid into the .nfo, and the next scan identifies the title."
+                  description: "How many titles the identity fact left as candidates for a person to choose from, because the ladder found several matches or the ids in the title's .nfo named different titles on TMDb. The candidates are in the title's .liken/identity.yaml. A person puts the right uniqueid into the .nfo, and the next scan identifies the title."
                 unresolved:
                   type: integer
                   minimum: 0
-                  description: "How many titles no provider could name. A miss is recorded with its date, and the identity fact asks again after its retry interval."
+                  description: "How many titles TMDb could not name, by their folder name or by the IMDb or TheTVDB id their .nfo holds. A miss is recorded with its date, and the identity fact asks again after its retry interval."
                 fights:
                   type: integer
                   minimum: 0
