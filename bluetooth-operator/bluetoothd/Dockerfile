@@ -41,6 +41,31 @@
 # each binary with file(1) and accepts "statically linked" or
 # "static-pie linked".
 
+# The compiler cache of the daemons stage is a cache mount, which
+# BuildKit keeps on one builder and never writes into the registry's
+# layer cache. A CI runner starts with an empty builder, so without
+# help every build that misses the layer cache compiles the
+# cross-compiler and every package cold. The two stages below copy a
+# directory into the cache mount and out of it, and CI runs them
+# around the image's build: cache-seed takes the build context
+# `cache`, which holds the compiler cache that CI restored, and
+# cache-export writes the cache mount's files as its result. The image
+# reads neither stage. Each one runs as uid 1000, br-user in the
+# buildroot image, which owns the cache mount.
+FROM debian AS cache-seed
+USER 1000:1000
+RUN --mount=type=cache,target=/home/br-user/ccache,uid=1000,gid=1000 \
+    --mount=type=bind,from=cache,target=/seed \
+    cp -r /seed/. /home/br-user/ccache/
+
+FROM debian AS cache-files
+USER 1000:1000
+RUN --mount=type=cache,target=/home/br-user/ccache,uid=1000,gid=1000 \
+    mkdir /tmp/ccache && cp -r /home/br-user/ccache/. /tmp/ccache/
+
+FROM scratch AS cache-export
+COPY --from=cache-files /tmp/ccache/ /
+
 FROM buildroot AS daemons
 
 # The buildroot commit and the digest of its tarball are the pin in
@@ -82,11 +107,13 @@ COPY --from=userland --chown=br-user:br-user patches/ external/patches/
 # directories hold several gigabytes, and without the deletion they are
 # a layer of this step: the CI build compresses that layer into the
 # registry's layer cache, and a later build that reads the layer
-# downloads it again.
+# downloads it again. CCACHE_MAXSIZE caps the compiler cache, which CI
+# saves between runners through the stages above, so the saved cache
+# does not grow with each build.
 RUN --mount=type=cache,target=/home/br-user/dl,uid=1000,gid=1000 \
     --mount=type=cache,target=/home/br-user/ccache,uid=1000,gid=1000 \
     set -eu; \
-    BR2_DL_DIR=/home/br-user/dl BR2_CCACHE_DIR=/home/br-user/ccache \
+    BR2_DL_DIR=/home/br-user/dl BR2_CCACHE_DIR=/home/br-user/ccache CCACHE_MAXSIZE=500M \
         bash external/buildroot.sh /home/br-user/buildroot /home/br-user/output bluetoothd.config; \
     make --no-print-directory -s -C buildroot O=/home/br-user/output show-info >/home/br-user/show-info.json; \
     cd /home/br-user/output; \

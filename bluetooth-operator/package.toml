@@ -63,6 +63,10 @@ contexts = { kubernetes = "kubernetes", notices = "notices", userland = "liken/u
 # glib, dbus, and BlueZ from source, which takes longer than the
 # default limit of the images and publish jobs.
 timeout = 120
+# The same build reads its compiler cache from a cache mount, and CI
+# saves the mount between runners, so a build after a buildroot bump
+# compiles only what the bump changed.
+cache-mount = true
 
 # The CLI image carries the same version as the operator, so the base
 # binary pulls a CLI that never drifts from the operator it faces. It is

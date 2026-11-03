@@ -357,6 +357,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      # An image whose package.toml sets cache-mount keeps a cache
+      # mount, such as a compiler cache, that BuildKit never writes into
+      # the registry's layer cache. So the job restores the files of an
+      # earlier build into .image-cache/ and copies them into the mount
+      # with the image's cache-seed target before the build. The build
+      # reads the mount only when it misses the layer cache. The key
+      # holds the run, so the restore takes the newest entry that main
+      # saved.
+      - id: image-cache
+        if: ${{ matrix.cache }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .image-cache/${{ matrix.image }}
+          key: image-cache-${{ matrix.image }}-${{ github.run_id }}
+          restore-keys: image-cache-${{ matrix.image }}-
+
+      - name: seed the cache mount
+        if: ${{ matrix.cache }}
+        run: |
+          mkdir -p ".image-cache/${{ matrix.image }}"
+          find ".image-cache/${{ matrix.image }}" -type f | sort > "$RUNNER_TEMP/image-cache-before"
+          docker buildx bake -f docker-bake.hcl "${{ matrix.image }}-cache-seed"
+
       # An image for more than one platform cannot load into the
       # runner's Docker daemon, so only a single-platform image loads,
       # and only a loaded image has a smoke check. The build reads the
@@ -377,6 +400,28 @@ jobs:
       - name: smoke check
         if: ${{ matrix.smoke != '' && matrix.load }}
         run: bash "${{ matrix.smoke }}" "ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version || 'check' }}"
+
+      # Only main saves the cache, as with the Go caches, and only when
+      # the build added files to the mount: a build that hit the layer
+      # cache compiled nothing, and its entry would repeat the one it
+      # restored.
+      - id: image-cache-export
+        name: copy the cache mount out
+        if: ${{ matrix.cache && github.ref == 'refs/heads/main' }}
+        run: |
+          docker buildx bake -f docker-bake.hcl "${{ matrix.image }}-cache-export"
+          find ".image-cache/${{ matrix.image }}" -type f | sort > "$RUNNER_TEMP/image-cache-after"
+          if cmp -s "$RUNNER_TEMP/image-cache-before" "$RUNNER_TEMP/image-cache-after"; then
+            echo changed=false >> "$GITHUB_OUTPUT"
+          else
+            echo changed=true >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: ${{ steps.image-cache-export.outputs.changed == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .image-cache/${{ matrix.image }}
+          key: ${{ steps.image-cache.outputs.cache-primary-key }}
 
   publish:
     if: ${{ inputs.stage == 'publish' || inputs.dryrun }}

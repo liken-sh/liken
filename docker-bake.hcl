@@ -712,6 +712,7 @@ target "bluetoothd" {
   platforms  = ["linux/amd64"]
   contexts = {
     "buildroot" = "docker-image://registry.gitlab.com/buildroot.org/buildroot/base:20250218.2110@sha256:340aa0de68e8e13e4eca70a00aaf94ec68d3a3891c28f3e7495d844829a8c958"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
     "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
     "kubernetes" = "kubernetes"
     "manifest" = "toolchains/manifest"
@@ -1249,4 +1250,43 @@ target "per-node-csi-driver" {
   tags       = ["ghcr.io/liken-sh/per-node-csi-driver:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/per-node-csi-driver:buildcache"]
   cache-to   = CACHE_WRITE == "per-node-csi-driver" ? ["type=registry,ref=ghcr.io/liken-sh/per-node-csi-driver:buildcache,mode=max,ignore-error=true"] : []
+}
+
+# CI runs this target before the image's build, to copy the
+# image's cache mount from .image-cache/. It is in no group.
+target "bluetoothd-cache-seed" {
+  context    = "bluetooth-operator"
+  dockerfile = "bluetoothd/Dockerfile"
+  target     = "cache-seed"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "buildroot" = "docker-image://registry.gitlab.com/buildroot.org/buildroot/base:20250218.2110@sha256:340aa0de68e8e13e4eca70a00aaf94ec68d3a3891c28f3e7495d844829a8c958"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
+    "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
+    "kubernetes" = "kubernetes"
+    "manifest" = "toolchains/manifest"
+    "notices" = "notices"
+    "userland" = "liken/userland"
+    "cache" = ".image-cache/bluetoothd"
+  }
+  output = ["type=cacheonly"]
+}
+
+# CI runs this target after the image's build, to copy the
+# image's cache mount into .image-cache/. It is in no group.
+target "bluetoothd-cache-export" {
+  context    = "bluetooth-operator"
+  dockerfile = "bluetoothd/Dockerfile"
+  target     = "cache-export"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "buildroot" = "docker-image://registry.gitlab.com/buildroot.org/buildroot/base:20250218.2110@sha256:340aa0de68e8e13e4eca70a00aaf94ec68d3a3891c28f3e7495d844829a8c958"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
+    "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
+    "kubernetes" = "kubernetes"
+    "manifest" = "toolchains/manifest"
+    "notices" = "notices"
+    "userland" = "liken/userland"
+  }
+  output = ["type=local,dest=.image-cache/bluetoothd"]
 }

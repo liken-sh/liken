@@ -79,4 +79,17 @@ target "{% .Name %}" {
   ){% else %}  cache-from = ["type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache"]
   cache-to   = CACHE_WRITE == "{% .Name %}" ? ["type=registry,ref=ghcr.io/liken-sh/{% .Name %}:buildcache,mode=max,ignore-error=true"] : []{% end %}
 }
+{% end %}{% range .Caches %}
+# CI runs this target {% if eq .Stage "cache-seed" %}before{% else %}after{% end %} the image's build, to copy the
+# image's cache mount {% if eq .Stage "cache-seed" %}from{% else %}into{% end %} .image-cache/. It is in no group.
+target "{% .Name %}" {
+  context    = "{% .Context %}"
+  dockerfile = "{% .Dockerfile %}"
+  target     = "{% .Stage %}"
+  platforms  = [{% range $i, $p := .Platforms %}{% if $i %}, {% end %}"{% $p %}"{% end %}]
+  contexts = {{% range .Contexts %}
+    "{% .Name %}" = "{% .Value %}"{% end %}
+  }
+  output = ["{% .Output %}"]
+}
 {% end %}

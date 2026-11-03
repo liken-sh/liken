@@ -14,6 +14,9 @@ type ImageRun struct {
 	// runner's Docker daemon, so its smoke check can run.
 	Load  bool   `json:"load"`
 	Smoke string `json:"smoke"`
+	// Cache is true for an image whose cache mount the job restores
+	// before the build and saves after it.
+	Cache bool `json:"cache"`
 }
 
 // everything lists every job and every image of the component.
@@ -24,7 +27,7 @@ func everything(c *Component) ([]string, []ImageRun) {
 	}
 	var images []ImageRun
 	for _, image := range c.Outputs.Images {
-		images = append(images, ImageRun{Image: image.Name, Pinned: c.Pinned(), Load: len(image.Platforms) <= 1, Smoke: image.Smoke})
+		images = append(images, ImageRun{Image: image.Name, Pinned: c.Pinned(), Load: len(image.Platforms) <= 1, Smoke: image.Smoke, Cache: image.CacheMount})
 	}
 	return jobs, images
 }

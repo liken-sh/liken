@@ -34,6 +34,58 @@ type bakeTarget struct {
 	Args      []bakeArg
 }
 
+// A cacheTarget builds one of the stages that copy an image's cache
+// mount into the build and out of it. It has no tag and reads no
+// layer cache from the registry, so on a CI runner, whose builder
+// starts empty, each stage runs. It does not set no-cache, because
+// BuildKit gives a step that runs without the cache a new, empty
+// cache mount.
+type cacheTarget struct {
+	Name, Context, Dockerfile, Stage, Output string
+	Platforms                                []string
+	Contexts                                 []bakeContext
+}
+
+// cacheDir is the directory, relative to the repository root, that
+// holds an image's cache mount between the images job's steps.
+func cacheDir(image string) string { return ".image-cache/" + image }
+
+// cacheStages are the stages of a Dockerfile whose image sets
+// cache-mount.
+var cacheStages = []string{"cache-seed", "cache-export"}
+
+// cacheTargets gives the image's cache-seed and cache-export targets.
+// The seed takes the image's cache directory as the context `cache`,
+// and the export writes the mount's files into the same directory.
+func cacheTargets(root string, t bakeTarget) ([]cacheTarget, error) {
+	parsed, err := readDockerfile(filepath.Join(root, t.Context, t.Dockerfile))
+	if err != nil {
+		return nil, err
+	}
+	var targets []cacheTarget
+	for _, stage := range cacheStages {
+		if !slices.ContainsFunc(parsed.Stages, func(s Stage) bool { return s.Name == stage }) {
+			return nil, fmt.Errorf("%s sets cache-mount, and %s has no stage %s", t.Name, path.Join(t.Context, t.Dockerfile), stage)
+		}
+		ct := cacheTarget{
+			Name:       t.Name + "-" + stage,
+			Context:    t.Context,
+			Dockerfile: t.Dockerfile,
+			Stage:      stage,
+			Output:     "type=cacheonly",
+			Platforms:  t.Platforms,
+			Contexts:   slices.Clone(t.Contexts),
+		}
+		if stage == "cache-seed" {
+			ct.Contexts = append(ct.Contexts, bakeContext{"cache", cacheDir(t.Name)})
+		} else {
+			ct.Output = "type=local,dest=" + cacheDir(t.Name)
+		}
+		targets = append(targets, ct)
+	}
+	return targets, nil
+}
+
 // Bake renders the bake file: one target for each image, named for the
 // image. A Dockerfile that builds on another image of the repository
 // names it bare, as in FROM mpv, and the target maps that name to the
@@ -44,6 +96,7 @@ type bakeTarget struct {
 func Bake(root string, components map[string]*Component) ([]byte, error) {
 	producer := ImageProducers(components)
 	var targets []bakeTarget
+	var caches []cacheTarget
 	for _, c := range dependencyOrder(components) {
 		for _, image := range c.Outputs.Images {
 			t, err := newBakeTarget(root, c, image, producer, components)
@@ -51,6 +104,13 @@ func Bake(root string, components map[string]*Component) ([]byte, error) {
 				return nil, err
 			}
 			targets = append(targets, t)
+			if image.CacheMount {
+				ct, err := cacheTargets(root, t)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", c.Name(), err)
+				}
+				caches = append(caches, ct...)
+			}
 		}
 	}
 	tools, err := readToolchains(root)
@@ -61,7 +121,7 @@ func Bake(root string, components map[string]*Component) ([]byte, error) {
 	for _, name := range slices.Sorted(maps.Keys(tools.Build)) {
 		toolchains = append(toolchains, bakeContext{name, "docker-image://" + tools.Build[name]})
 	}
-	return render("docker-bake.hcl.tmpl", map[string]any{"Targets": targets, "Toolchains": toolchains})
+	return render("docker-bake.hcl.tmpl", map[string]any{"Targets": targets, "Caches": caches, "Toolchains": toolchains})
 }
 
 func newBakeTarget(root string, c *Component, image Image, producer map[string]string, components map[string]*Component) (bakeTarget, error) {

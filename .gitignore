@@ -3,3 +3,7 @@
 
 # The credentials .envrc loads. .envrc.private.example lists them.
 .envrc.private
+
+# The cache mounts that an images job copies out of a build and saves.
+# ci/templates/component.yaml.tmpl gives the steps.
+/.image-cache/

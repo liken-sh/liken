@@ -160,6 +160,13 @@ type Image struct {
 	// the built image. It takes the image reference as its first
 	// argument.
 	Smoke string `toml:"smoke"`
+	// CacheMount is true for an image whose Dockerfile keeps a cache
+	// mount, such as a compiler cache, that CI saves between runners.
+	// The Dockerfile has a stage cache-seed, which copies the build
+	// context `cache` into the mount, and a stage cache-export, whose
+	// result is the mount's files. The images job runs the first
+	// before the image's build and the second after it.
+	CacheMount bool `toml:"cache-mount"`
 }
 
 func (c *Component) Name() string { return c.Package.Name }
