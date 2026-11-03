@@ -36,7 +36,7 @@ func TestTheGapTablesAreTheTablesAGapQueryReads(t *testing.T) {
 		want  []string
 	}{
 		{facts: []string{factProbe}, want: []string{"files"}},
-		{facts: []string{factIdentity}, want: []string{"movies", "series"}},
+		{facts: []string{factIdentity}, want: []string{"aliases", "movies", "series"}},
 		{facts: []string{factMarks}, want: []string{"episodes", "file_items", "files", "movies", "series"}},
 		{facts: []string{"no such fact"}, want: []string{}},
 	}

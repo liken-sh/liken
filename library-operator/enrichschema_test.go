@@ -126,6 +126,10 @@ func TestEveryGapQueryRunsAgainstTheRealSchema(t *testing.T) {
 			{Path: "One (2001)/one.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, Modified: ledgerTime.Unix(), Items: []string{"movie:path:one-2001"}},
 			{Path: "Two (2002)/two.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, DurationMs: 6540000, Modified: ledgerTime.Unix(), Probed: ledgerTime.Unix(), Items: []string{"movie:tmdb:2"}},
 		},
+		aliases: []aliasRow{
+			{Alias: "movie:tmdb:2", Library: "house/movies", Item: "movie:tmdb:2", Source: aliasSourceProvider},
+			{Alias: "movie:imdb:tt2", Library: "house/movies", Item: "movie:tmdb:2", Source: aliasSourceProvider},
+		},
 	}
 	if err := upsertWalk(ctx, catalog, seed); err != nil {
 		t.Fatal(err)
@@ -191,6 +195,10 @@ func TestTheWaitingAndUnresolvedCountsReadTheAttemptsTable(t *testing.T) {
 		{Library: "house/movies", Item: "movie:path:one", Fact: factIdentity, At: ledgerTime.Unix(), Result: attemptCandidates},
 		{Library: "house/movies", Item: "series:path:show", Fact: factIdentity, At: ledgerTime.Unix(), Result: attemptNothing},
 		{Library: "house/movies", Item: "movie:tmdb:2", Fact: factIdentity, At: ledgerTime.Unix(), Result: attemptCandidates},
+		{Library: "house/movies", Item: "series:tvdb:7", Fact: factIdentity, At: ledgerTime.Unix(), Result: attemptNothing},
+	}, aliases: []aliasRow{
+		{Alias: "movie:tmdb:2", Library: "house/movies", Item: "movie:tmdb:2", Source: aliasSourceProvider},
+		{Alias: "series:tvdb:7", Library: "house/movies", Item: "series:tvdb:7", Source: aliasSourceProvider},
 	}}
 	if err := upsertWalk(ctx, catalog, seed); err != nil {
 		t.Fatal(err)
@@ -201,9 +209,9 @@ func TestTheWaitingAndUnresolvedCountsReadTheAttemptsTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if waiting != 1 {
-		t.Errorf("waiting = %d, want the one unidentified title with candidates", waiting)
+		t.Errorf("waiting = %d, want the one title with no TMDb id and candidates", waiting)
 	}
-	if unresolved != 1 {
-		t.Errorf("unresolved = %d, want the one title no provider named", unresolved)
+	if unresolved != 2 {
+		t.Errorf("unresolved = %d, want the path title and the series whose TheTVDB id TMDb did not find", unresolved)
 	}
 }
