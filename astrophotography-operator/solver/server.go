@@ -36,12 +36,14 @@ type Server struct {
 	// failed receives the error of a watch of the index directory that
 	// ended for good.
 	failed chan error
+	// done closes when the watch of the index directory has stopped.
+	done chan struct{}
 }
 
 // newServer serves an engine's solve and an index set, and logs each
 // solve to logs.
 func newServer(s solve, set *indexSet, logs io.Writer) *Server {
-	return &Server{solve: s, set: set, turn: make(chan struct{}, 1), logs: logs, failed: make(chan error, 1)}
+	return &Server{solve: s, set: set, turn: make(chan struct{}, 1), logs: logs, failed: make(chan error, 1), done: make(chan struct{})}
 }
 
 // Failed receives the error of a watch of the index directory that
@@ -49,6 +51,13 @@ func newServer(s solve, set *indexSet, logs io.Writer) *Server {
 // set no longer follows the directory after it, so the solver mode
 // ends, and the kubelet starts the container again.
 func (s *Server) Failed() <-chan error { return s.failed }
+
+// Done closes when the watch of the index directory has stopped, after
+// the context of Start ends or the watch fails. A watch can apply one
+// more event after the context ends, and that event writes the
+// configuration into the work directory, so a caller that removes the
+// work directory waits on Done first.
+func (s *Server) Done() <-chan struct{} { return s.done }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {

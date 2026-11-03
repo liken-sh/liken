@@ -29,11 +29,7 @@ var (
 func startWatching(t *testing.T, indexes string) (*Server, string) {
 	t.Helper()
 	work := t.TempDir()
-	s, err := Start(t.Context(), Options{Indexes: indexes, Work: work, CPULimit: 60}, io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return s, work
+	return startUntilCleanup(t, Options{Indexes: indexes, Work: work, CPULimit: 60}, io.Discard), work
 }
 
 // waitForSeries waits until the server serves the series, and fails

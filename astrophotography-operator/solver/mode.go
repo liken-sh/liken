@@ -67,6 +67,7 @@ func Start(ctx context.Context, o Options, logs io.Writer) (*Server, error) {
 	engine := Engine{Program: o.Engine, Config: config, Work: o.Work, Timeout: o.Timeout}
 	s := newServer(engine.Solve, set, logs)
 	go func() {
+		defer close(s.done)
 		if err := w.run(ctx, watch, inside); err != nil {
 			s.failed <- err
 		}
