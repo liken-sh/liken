@@ -157,7 +157,7 @@ jobs:{% range .Jobs %}
       - run: {% .Run %}{% else %}
 
       - run: |{% range $lines %}
-          {% . %}{% end %}{% end %}{% if eq .Toolchain "codeql" %}{% template "codeql-analyze" . %}{% end %}{% end %}{% if eq .Toolchain "os" %}{% template "os-go-save" %}{% end %}{% if .Go %}{% template "go-save" .Cache %}{% end %}{% if eq .Toolchain "hugo" %}
+          {% . %}{% end %}{% end %}{% if eq .Toolchain "codeql" %}{% template "codeql-analyze" . %}{% end %}{% end %}{% if eq .Toolchain "os" %}{% template "os-go-save" %}{% template "userland-ccache-save" %}{% end %}{% if .Go %}{% template "go-save" .Cache %}{% end %}{% if eq .Toolchain "hugo" %}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
         uses: {% action "actions/cache/save" %}
@@ -323,7 +323,7 @@ jobs:{% range .Jobs %}
       - name: publish to the channel
         if: ${{ !inputs.dryrun }}
         working-directory: {% .Dir %}
-        run: releases/publish.sh "${{ inputs.version }}"{% template "os-go-save" %}{% else %}
+        run: releases/publish.sh "${{ inputs.version }}"{% template "os-go-save" %}{% template "userland-ccache-save" %}{% else %}
 {% template "go-restore" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}{% if .Images %}
 
       - uses: {% action "docker/setup-buildx-action" %}{% end %}

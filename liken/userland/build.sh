@@ -81,12 +81,19 @@ mv "$work/buildroot-$commit" "$work/buildroot"
 # buildroot.sh builds os.config and writes legal-info, and then
 # `show-info` prints the JSON that generate-cyclonedx turns into the
 # SBOM.
+#
+# CCACHE_MAXSIZE caps the compiler cache. One build of every program
+# writes a small part of the cap, and ccache deletes the entries that
+# were used least recently when the cache passes it. CI saves the
+# cache after each build of new inputs and restores it into the next,
+# so the cap keeps that entry from growing with each build.
 echo "building the static programs with buildroot ${commit:0:12}; the log is userland/_build/build.log"
 "$runtime" run --rm -i \
     -u "$(id -u):$(id -g)" \
     -e HOME=/tmp \
     -e BR2_DL_DIR=/dl \
     -e BR2_CCACHE_DIR=/ccache \
+    -e CCACHE_MAXSIZE=500M \
     -v "$here:/external:ro" \
     -v "$work:/work" \
     -v "$here/cache/dl:/dl" \

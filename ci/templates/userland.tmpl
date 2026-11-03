@@ -1,0 +1,11 @@
+{% define "userland-ccache-save" %}
+
+      # The build-setup action restored buildroot's compiler cache because
+      # this job built the userland. Only main saves the cache, as with
+      # the Go caches, so a branch never writes an entry that pushes one
+      # of main's out of the repository's 10 GB.
+      - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.userland-build == 'true' }}
+        uses: {% action "actions/cache/save" %}
+        with:
+          path: liken/userland/cache/ccache
+          key: ${{ steps.build-setup.outputs.userland-ccache-key }}{% end %}

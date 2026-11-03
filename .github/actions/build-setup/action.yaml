@@ -16,6 +16,12 @@ outputs:
   go-build-hit:
     description: Whether the Go build cache's key matched exactly
     value: ${{ steps.go-build.outputs.cache-hit }}
+  userland-build:
+    description: Whether the job builds the userland with buildroot, and so saves the compiler cache
+    value: ${{ steps.userland.outputs.build }}
+  userland-ccache-key:
+    description: The key of buildroot's compiler cache, for the job's save step
+    value: ${{ steps.userland-ccache.outputs.cache-primary-key }}
 
 runs:
   using: composite
@@ -135,6 +141,31 @@ runs:
     - if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       shell: bash
       run: echo LIKEN_USERLAND_PUSH=1 >> "$GITHUB_ENV"
+
+    # A build of the userland compiles buildroot's cross-compiler and
+    # every program with ccache, and a runner starts with an empty
+    # cache. So a job that must build the userland restores the compiler
+    # cache of an earlier build, and most of the compiler's own sources
+    # and of the programs hit it. A job that pulls the userland skips
+    # the restore, because it compiles nothing. The key holds the hash
+    # of the userland's tree, so main saves a new entry after each build
+    # of new inputs, and the restore takes the newest entry. build.sh
+    # caps the cache's size, so an entry does not grow with each build.
+    - id: userland
+      shell: bash
+      run: |
+        if liken/userland/artifact.sh available; then
+          echo build=false >> "$GITHUB_OUTPUT"
+        else
+          echo build=true >> "$GITHUB_OUTPUT"
+        fi
+    - id: userland-ccache
+      if: ${{ steps.userland.outputs.build == 'true' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: liken/userland/cache/ccache
+        key: userland-ccache-${{ hashFiles('liken/userland/**', 'toolchains/images.toml') }}
+        restore-keys: userland-ccache-
 
     # This is one cache for each vendored domain, keyed on the same
     # prerequisites that liken/Makefile declares for that domain's

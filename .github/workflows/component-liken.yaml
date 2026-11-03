@@ -387,6 +387,16 @@ jobs:
           path: ~/.cache/go-build
           key: ${{ steps.build-setup.outputs.go-build-key }}
 
+      # The build-setup action restored buildroot's compiler cache because
+      # this job built the userland. Only main saves the cache, as with
+      # the Go caches, so a branch never writes an entry that pushes one
+      # of main's out of the repository's 10 GB.
+      - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.userland-build == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: liken/userland/cache/ccache
+          key: ${{ steps.build-setup.outputs.userland-ccache-key }}
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -537,3 +547,13 @@ jobs:
         with:
           path: ~/.cache/go-build
           key: ${{ steps.build-setup.outputs.go-build-key }}
+
+      # The build-setup action restored buildroot's compiler cache because
+      # this job built the userland. Only main saves the cache, as with
+      # the Go caches, so a branch never writes an entry that pushes one
+      # of main's out of the repository's 10 GB.
+      - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.userland-build == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: liken/userland/cache/ccache
+          key: ${{ steps.build-setup.outputs.userland-ccache-key }}

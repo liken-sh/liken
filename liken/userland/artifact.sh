@@ -13,6 +13,8 @@
 #                                             dist/ that build.sh just
 #                                             wrote, and push it when
 #                                             LIKEN_USERLAND_PUSH=1
+#   userland/artifact.sh available            succeed when `restore`
+#                                             needs no build
 #
 # The Makefile runs `restore`, and runs build.sh and then `save` only
 # when `restore` fails. So a failed pull costs a build and never fails
@@ -197,11 +199,27 @@ save() {
     fi
 }
 
+# available: succeed when `restore` can make dist/ current without a
+# build, because dist/ holds the key of the tree or the registry holds
+# a tag for it. It reads only the manifest, so it costs a request and
+# not a download. CI runs it before the build, and restores buildroot's
+# compiler cache only when it fails.
+available() {
+    local key
+    key="$(key)" || return 1
+    [[ "$(cat "$out/key" 2>/dev/null)" == "$key" ]] && return 0
+    mkdir -p "$here/cache"
+    work="$(mktemp -d "$here/cache/artifact.XXXXXX")"
+    run_oras "$work" true manifest fetch --plain-http="$plain_http" "$repository:$key" >/dev/null 2>&1 ||
+        { [[ -f "$config" ]] && run_oras "$work" false manifest fetch --plain-http="$plain_http" "$repository:$key" >/dev/null 2>&1; }
+}
+
 case "${1:-}" in
 restore)
     shift
     restore "$@"
     ;;
 save) save ;;
-*) fail "usage: artifact.sh restore <output>... | artifact.sh save" ;;
+available) available ;;
+*) fail "usage: artifact.sh restore <output>... | artifact.sh save | artifact.sh available" ;;
 esac
