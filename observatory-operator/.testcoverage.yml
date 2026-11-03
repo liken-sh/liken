@@ -41,4 +41,9 @@ threshold:
   # request fails, at each call in each step. The fakes can fail any
   # one call, and the tests fail one call in each step
   # (failures_test.go); a test for every other call would repeat them.
-  total: 95
+  #
+  # The floor is a point under the total, not a fraction of one,
+  # because a few early returns run only when a goroutine reads the
+  # stores between two events, so the count of covered statements
+  # moves by a few from one run to the next.
+  total: 94
