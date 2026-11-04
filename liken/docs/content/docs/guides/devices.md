@@ -1,13 +1,14 @@
 ---
 title: Give a workload a device
 weight: 70
-description: "Give a pod a device through Dynamic Resource Allocation: a GPU for a Deployment, or a USB adapter that one pod holds alone. Use when a workload needs hardware, or when a pod with a device claim does not schedule."
+description: "Give a pod a device through Dynamic Resource Allocation: a GPU for a Deployment, a USB adapter that one pod holds alone, or /dev/kvm for a pod that boots virtual machines. Use when a workload needs hardware, or when a pod with a device claim does not schedule."
 ---
 
 # Give a workload a device
 
 This guide gives a pod a piece of hardware: a GPU for a transcoder,
-and a USB adapter that one pod holds alone. No step here needs a
+a USB adapter that one pod holds alone, and `/dev/kvm` for a pod that
+boots virtual machines. No step here needs a
 privileged pod or a host path.
 
 [Devices](/docs/reference/devices/) describes what `liken` publishes and
@@ -375,6 +376,97 @@ that names it, by design, and `liken` does not refuse the second pod. A
 device node does not grant exclusive access by itself. The kernel
 enforces exclusive access, through `O_EXCL` and the driver's own open
 path. Use a template to give the device to one pod only.
+
+## 6. Run a virtual machine in a pod
+
+A pod that boots a virtual machine, with QEMU, Firecracker, or Cloud
+Hypervisor, claims `/dev/kvm` the same way a transcoder claims a GPU,
+and runs with no privilege. First declare the vendor module for the
+machine's CPU in `spec.modules`, as
+[Load the drivers](/docs/guides/hardware-modules/#run-virtual-machines)
+describes. The node then publishes `misc-kvm`:
+
+    kubectl get resourceslice <node>-liken.sh -o yaml
+
+    - name: misc-kvm
+      allowMultipleAllocations: true
+      attributes:
+        class: {string: virtualization}
+        driver: {string: kvm_intel}
+        kvm: {bool: true}
+        nested: {bool: true}
+        subsystem: {string: misc}
+
+Write a class that selects it:
+
+    apiVersion: resource.k8s.io/v1
+    kind: DeviceClass
+    metadata:
+      name: kvm
+    spec:
+      selectors:
+        - cel:
+            expression: |
+              device.driver == "liken.sh" &&
+              has(device.attributes["liken.sh"].kvm)
+
+Add `has(device.attributes["liken.sh"].nested)` for a guest that runs
+virtual machines itself. Write classes for `vhostNet` and `vhostVsock`
+the same way when the monitor opens `/dev/vhost-net` or
+`/dev/vhost-vsock`.
+
+Claim it from a template, so each pod gets a claim of its own. The
+device allocates to any number of claims, so pods on one node run
+guests at the same time:
+
+    apiVersion: resource.k8s.io/v1
+    kind: ResourceClaimTemplate
+    metadata:
+      name: kvm
+      namespace: ci
+    spec:
+      spec:
+        devices:
+          requests:
+            - name: kvm
+              exactly:
+                deviceClassName: kvm
+
+    spec:
+      template:
+        spec:
+          resourceClaims:
+            - name: kvm
+              resourceClaimTemplateName: kvm
+          containers:
+            - name: runner
+              image: ...
+              resources:
+                requests:
+                  memory: 3Gi
+                claims:
+                  - name: kvm
+
+The container receives `/dev/kvm` with mode `0666`, so a monitor that
+runs as a user other than root opens it. A guest's memory is the
+memory of the monitor's process, so the container's memory request
+and limit must cover the guest's memory and the monitor's own.
+
+A guest on a tap network also needs `/dev/net/tun`. The container
+runtime admits that node to every container without a claim, so make
+it in the container and add the capability that makes the interface:
+
+    securityContext:
+      capabilities:
+        add: ["NET_ADMIN"]
+
+    mknod /dev/net/tun c 10 200
+
+A pod with `hostUsers: false` cannot open these nodes, because the
+runtime mounts the machine's own node, mode `0600`, into a user
+namespace. The
+[device reference](/docs/reference/devices/#virtualization-devices)
+gives the detail, and how each pod gets vsock addresses of its own.
 
 ## When a claim does not schedule
 

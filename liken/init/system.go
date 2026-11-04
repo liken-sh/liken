@@ -33,7 +33,7 @@ var sysctlDir = machine.SysctlDir
 // console shows the same order every time.
 //
 // Init calls this twice: once for the settings every liken machine
-// holds, in machine.OSSysctls, and once for the Machine spec's own
+// holds, in machine.DefaultSysctls, and once for the Machine spec's own
 // sysctls. Printing each parameter on both passes is deliberate. A
 // reader of the boot log sees what the OS set, and then sees which of
 // those values this deployment chose to override.

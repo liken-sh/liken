@@ -90,6 +90,13 @@ attached to the kernel's serio layer, and a pod that received the tty
 could end the attachment under every other claim. See
 [Serial-line adapters](#serial-line-adapters).
 
+The node also publishes up to three virtualization devices, which
+come from no bus: `/dev/kvm`, `/dev/vhost-net`, and `/dev/vhost-vsock`.
+A program that boots a virtual machine opens them, and the default
+device rules of the container runtime refuse them to every container
+that holds no claim. Each one appears when its module is loaded. See
+[Virtualization devices](#virtualization-devices).
+
 The slice is an allocation offer, not a full record of the machine's
 hardware. The scheduler can allocate only what a slice lists, so the
 slice contents control which devices workloads can claim.
@@ -111,7 +118,9 @@ no walk.
 A device's name is its bus and its address, in lowercase, with dashes
 in place of the punctuation: `pci-0000-00-02-0`, `usb-2-1-1-0`. A
 board device's address is the name the firmware gives it, so a
-firmware TPM is `platform-msft0101-00`. A name stops at 63
+firmware TPM is `platform-msft0101-00`. A virtualization device's name
+is `misc-` and the kernel's name for its node: `misc-kvm`,
+`misc-vhost-net`, and `misc-vhost-vsock`. A name stops at 63
 characters, the limit of a DNS label.
 
 The address gives the slot, not the unit. If you replace a dongle
@@ -135,12 +144,16 @@ correct result.
 |---|---|---|
 | `bus` | string | `pci` or `usb`, or for a board device, the bus the kernel registered it on, such as `platform` |
 | `address` | string | the device's address on that bus: `0000:00:02.0` on PCI, the port path on USB, and the firmware's name for a board device, such as `MSFT0101:00`. Every device `liken` publishes for one physical device has the same address |
-| `driver` | string | the name of the bound driver, such as `i915` |
-| `class` | string | the type of device, in one word: `display`, `multimedia`, `serial-bus` |
+| `driver` | string | the name of the bound driver, such as `i915`. On `misc-kvm`, the vendor module that registered `/dev/kvm`: `kvm_intel` or `kvm_amd` |
+| `class` | string | the type of device, in one word: `display`, `multimedia`, `serial-bus`, or `virtualization` for a virtualization device |
 | `classCode` | string | the full class code that the bus published: six hex digits on PCI, two on USB |
 | `subsystem` | string | the kind of device that `liken` published: `drm`, `sound`, `tty`, `cec`. It is absent when the delivery is a mix `liken` has no name for, and when the device delivers no node of its own, as a Bluetooth adapter does |
 | `renderNode` | bool | the device supplies a DRM render node |
 | `displayNode` | bool | the device supplies a DRM card node, which provides modesetting |
+| `kvm` | bool | the device supplies `/dev/kvm` |
+| `nested` | bool | on `misc-kvm`, the vendor module's `nested` parameter is on, so a guest can run KVM itself |
+| `vhostNet` | bool | the device supplies `/dev/vhost-net` |
+| `vhostVsock` | bool | the device supplies `/dev/vhost-vsock` |
 | `name` | string | the name of the device in words, from its own strings or from the PCI database |
 | `modalias` | string | the identifier that the kernel uses to match drivers |
 | `serial` | string | the serial number of the hardware, when it has one |
@@ -243,6 +256,14 @@ devices, both exclusive: the CEC bus, with `subsystem: cec`, and the
 TV remote's input device, with the suffix `-input` and
 `subsystem: input`.
 [Serial-line adapters](#serial-line-adapters) gives the reasons.
+
+The three virtualization devices publish `allowMultipleAllocations`.
+Each open of `/dev/kvm` makes a virtual machine of its own, and each
+open of a vhost node makes a vhost worker of its own, so nothing that
+one claim does through its open file reaches another claim. The
+devices have no capacity: a guest's memory is the memory of its
+monitor's process, so the pod's own requests limit how many guests a
+node holds.
 
 A device that delivers one kind of node publishes as one device,
 unless it is a GPU. When a device delivers a mix that `liken` has no
@@ -489,6 +510,58 @@ returns. A published name follows the USB port, so an adapter moved
 to another port is a different device. When a pod owns the claim, the
 eviction gives its claimant a new pod, and the new pod's claim is
 allocated the adapter in its new port.
+
+### Virtualization devices
+
+A program that boots a virtual machine, such as QEMU, Firecracker, or
+Cloud Hypervisor, opens `/dev/kvm`. QEMU also opens `/dev/vhost-net`
+to move a tap device's packets in the kernel, and `/dev/vhost-vsock`
+to give a guest a vsock address. The kernel registers these nodes as
+misc devices, outside every bus, and the node publishes each one as a
+device of its own when it exists:
+
+| Device | Node | Module to declare in `spec.modules` |
+|---|---|---|
+| `misc-kvm` | `/dev/kvm` | `kvm_intel` or `kvm_amd` |
+| `misc-vhost-net` | `/dev/vhost-net` | `vhost_net` |
+| `misc-vhost-vsock` | `/dev/vhost-vsock` | `vhost_vsock` |
+
+The kernel registers `/dev/kvm` only after the vendor module loads,
+and the vendor module loads only when the CPU has VT-x or AMD-V and
+the firmware turns it on. So `misc-kvm` in the slice means that
+virtual machines work on that node. When the firmware turns
+virtualization off, the Machine's `status.modules` reports the module
+`Failed`.
+
+The node publishes no other misc device. Some of them give the
+machine itself to whatever opens them: `loop-control` and
+`device-mapper` make block devices on the host. `/dev/net/tun` needs
+no claim, because the container runtime's default device rules
+already admit it to every container. A pod that needs a tap device
+makes the node with `mknod /dev/net/tun c 10 200`, which the default
+capabilities allow, and adds the `NET_ADMIN` capability to make the
+interface in its own network namespace.
+
+A claim delivers each node with mode `0666`, so a monitor that runs as
+a user other than root opens it. This is the mode that systemd's
+default rules give these three nodes. The node on the machine itself
+keeps mode `0600`, and the container runtime refuses it to every
+container that holds no claim. A pod with `hostUsers: false` runs in a
+user namespace, where the runtime mounts the machine's own node in
+place of a new one, so such a pod cannot open these nodes.
+
+A guest's vsock address, its CID, is unique in its network namespace.
+`liken` sets `net.vsock.child_ns_mode` to `local` when the `vsock`
+module is loaded, so each pod's network namespace has addresses of its
+own. Two pods can each start a guest at CID 3, and no pod reaches
+another pod's guests. A pod with `hostNetwork: true` shares the
+machine's own namespace, which reaches no pod's guests. The node
+offers `misc-vhost-vsock` only while the parameter reads `local`, so a
+Machine whose `spec.sysctls` sets it to `global` publishes no
+`misc-vhost-vsock`. The kernel takes one value for the parameter and
+refuses a different one after it, so a change to it in `spec.sysctls`
+takes effect at the next boot. Until then, the Machine's
+`SysctlsApplied` condition reports the refused write.
 
 ## An unplugged device evicts its pods
 

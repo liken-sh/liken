@@ -85,6 +85,7 @@ func publishDeviceInventory(r *reader, node *nodeObject, facts *machine.MachineS
 			return withoutHeld(hardware.InspectDelivery(draSysfsRoot, d), held)
 		},
 		protectionOf(facts), serio)
+	devices = withVirtualization(devices, virtualizationSliceDevices(draSysfsRoot, sysctlRoot))
 	if len(devices) > maxSliceDevices {
 		fmt.Fprintf(os.Stderr, "device inventory: %d devices exceed one slice's capacity of %d; dropping the overflow\n",
 			len(devices), maxSliceDevices)
@@ -314,6 +315,17 @@ func inventoryDevices(discovered []hardware.Device,
 	// same slice. This lets the change detection in
 	// WriteResourceSlice see actual inventory changes, and nothing
 	// caused only by the order of the walk.
+	slices.SortFunc(out, func(a, b kubernetes.SliceDevice) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return out
+}
+
+// withVirtualization joins the virtualization devices to the
+// hardware's, and sorts the whole list by name again, so the same
+// machine always publishes the same slice.
+func withVirtualization(devices, virtual []kubernetes.SliceDevice) []kubernetes.SliceDevice {
+	out := append(slices.Clone(devices), virtual...)
 	slices.SortFunc(out, func(a, b kubernetes.SliceDevice) int {
 		return strings.Compare(a.Name, b.Name)
 	})

@@ -170,8 +170,13 @@ func (p *draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePre
 // prefix alone identifies nothing.
 //
 // A device that the protection withholds answers errWithheld, and a
-// name that no present device publishes answers errNotPublished.
+// name that no present device publishes answers errNotPublished. A
+// virtualization device's name resolves from its own table
+// (publishingvirtualization.go), because no hardware is behind it.
 func resolveAllocated(name string, sysRoot string, byName map[string]hardware.Device, serio []machine.SerioAttachment, platform protection) (publishedDevice, error) {
+	if published, ok, err := resolveVirtualization(name, sysRoot, sysctlRoot); ok {
+		return published, err
+	}
 	if device, ok := byName[name]; ok {
 		delivery := claimDelivery(sysRoot, device)
 		if platform.withholds(delivery) {

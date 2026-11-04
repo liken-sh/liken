@@ -78,6 +78,11 @@ func rebindClaimDevices(claimUID string, devices func() map[string]hardware.Devi
 		if !ok {
 			continue
 		}
+		if _, virtual := virtualizationNamed(allocated); virtual {
+			// A virtualization device has no hardware and no driver to
+			// bind again.
+			continue
+		}
 		device, ok := resolveHardware(allocated, devices())
 		if !ok {
 			fmt.Fprintf(os.Stderr, "dra: claim %s held device %s, which this machine does not publish now\n",

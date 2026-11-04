@@ -84,7 +84,9 @@ func usbDevices(sysRoot string) []Device {
 // /devices/virtual/ can, because the inventory starts from every node
 // outside it. Under /devices/virtual/ the walks read only the misc
 // class, where /dev/uhid and /dev/uinput appear when their modules
-// load (MiscNode).
+// load (MiscNode), and so do /dev/kvm, /dev/vhost-net, and
+// /dev/vhost-vsock, which machine-operator publishes as virtualization
+// devices.
 //
 // The rest of /devices/virtual/ is the noise a node that runs
 // Kubernetes makes. Each pod that starts or stops adds or removes a

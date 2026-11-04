@@ -107,7 +107,13 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	// without a reboot. status.sysctls reports the two together, so an
 	// operator sees every parameter liken sets and its actual value in
 	// one place.
-	sysctls, missing, defaultsErr, specErr := applySysctls(sysctlRoot, machine.OSSysctls, m.Spec.Sysctls, out, r.sysctls)
+	//
+	// A module's parameter that has no file yet is not a failure, and
+	// it joins the missing list, so the check of the sysctls applies it
+	// when the module loads (machine.ModuleSysctls).
+	defaults, absent := machine.DefaultSysctls(sysctlRoot, m.Spec.Sysctls)
+	sysctls, missing, defaultsErr, specErr := applySysctls(sysctlRoot, defaults, m.Spec.Sysctls, out, r.sysctls)
+	missing = append(missing, absent...)
 	status.Sysctls = sysctls
 	if out != nil {
 		out.sysctls, out.sysctlsMissing = sysctls, missing

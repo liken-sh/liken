@@ -320,7 +320,13 @@ func main() {
 	// The operator applies both sets again once the cluster is up.
 	// This is what makes a live kubectl edit take effect without a
 	// reboot, and what returns a parameter something else changed.
-	applySysctls(machine.OSSysctls)
+	//
+	// The settings of a module's parameters (machine.ModuleSysctls)
+	// apply with the first set, where the module registered them. Init
+	// loaded the declared modules above, so a machine that declares the
+	// module has the file by now.
+	defaults, _ := machine.DefaultSysctls(sysctlDir, m.Spec.Sysctls)
+	applySysctls(defaults)
 	applySysctls(m.Spec.Sysctls)
 
 	// Resource limits follow the same defaults-then-spec order, and

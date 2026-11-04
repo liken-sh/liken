@@ -101,6 +101,28 @@ needs a reboot, and a change in the order alone stages for the next
 boot with no reboot request, because the machine asks for nothing it
 can apply live.
 
+### Run virtual machines
+
+The unclaimed report does not name the modules that run virtual
+machines, because the CPU already has a driver. To let a pod boot a
+virtual machine, declare the vendor module for the machine's CPU,
+`kvm_intel` or `kvm_amd`. Add `vhost_net` for a guest whose tap
+network QEMU moves in the kernel, and `vhost_vsock` for a guest with a
+vsock address:
+
+    spec:
+      modules:
+        - kvm_intel
+        - vhost_net
+        - vhost_vsock
+
+The node then publishes `misc-kvm`, `misc-vhost-net`, and
+`misc-vhost-vsock`, and a pod claims them
+([Run a virtual machine in a pod](https://liken.sh/docs/guides/devices/#6-run-a-virtual-machine-in-a-pod)).
+If `status.modules` reports `kvm_intel` or `kvm_amd` as `Failed`,
+virtualization is usually off in the firmware setup, under a name such
+as VT-x, VMX, SVM, or AMD-V.
+
 ### Attach a USB-CEC adapter
 
 A USB-CEC adapter's driver is a serio driver. It binds to a serio

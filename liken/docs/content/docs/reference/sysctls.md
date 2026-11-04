@@ -135,6 +135,23 @@ machine's own network card appears before `liken` applies these values. So
 | `net.ipv4.conf.all.accept_source_route`, `net.ipv4.conf.default.accept_source_route` | `0` | Refuses a packet that carries its own return path. Nothing on a server uses this, and it is a way to reach an address that ordinary routing protects. |
 | `net.ipv4.conf.all.promote_secondaries`, `net.ipv4.conf.default.promote_secondaries` | `1` | Keeps an interface's other addresses when its primary address is removed. The kernel's default deletes them all. |
 
+### Settings of a module
+
+A module registers some parameters when it loads, so a machine that
+does not declare the module has no such parameter. `liken` sets each
+of these only where the file exists, and a machine without it reports
+no fault. When the module loads after the boot, the operator's check
+every ten seconds finds the new file and applies the value.
+
+A name in `spec.sysctls` is the only write of such a parameter, at boot
+too, because the kernel takes one value and refuses a different one
+after it with `EBUSY`. A change to one of them in `spec.sysctls` takes
+effect at the next boot.
+
+| Parameter | Value | Module | Why |
+| --- | --- | --- | --- |
+| `net.vsock.child_ns_mode` | `local` | `vsock`, which `vhost_vsock` loads | Gives each pod's network namespace vsock addresses of its own, so two pods can each start a guest at the same address, and no pod reaches another pod's guests. `machine-operator` offers `/dev/vhost-vsock` to a claim only while this reads `local`. See [Virtualization devices](/docs/reference/devices/#virtualization-devices). |
+
 ## Settings that are not sysctls
 
 Not every kernel setting is a sysctl. Four other kinds matter.

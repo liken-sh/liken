@@ -98,7 +98,9 @@ type cdiDeviceNode struct {
 // absent when the kubelet prepares the claim. The runtime then
 // creates the node with mknod and writes the matching cgroup rule,
 // and the container can open the device the moment the kernel
-// registers it.
+// registers it. A virtualization node states its numbers too, with the
+// mode that lets a user other than root open it
+// (virtualizationFileMode).
 func deviceNodes(paths []string) []cdiDeviceNode {
 	nodes := make([]cdiDeviceNode, 0, len(paths))
 	for _, path := range paths {
@@ -106,6 +108,10 @@ func deviceNodes(paths []string) []cdiDeviceNode {
 		if major, minor, ok := hardware.EvdevNumbers(path); ok {
 			mode := evdevFileMode
 			node.Type, node.Major, node.Minor, node.FileMode = "c", major, minor, &mode
+		}
+		if minor, ok := virtualizationMinor(path); ok {
+			mode := virtualizationFileMode
+			node.Type, node.Major, node.Minor, node.FileMode = "c", miscMajor, minor, &mode
 		}
 		nodes = append(nodes, node)
 	}

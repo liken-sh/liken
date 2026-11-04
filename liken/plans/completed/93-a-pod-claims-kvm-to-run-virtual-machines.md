@@ -1,6 +1,8 @@
 # 93. A pod claims KVM to run virtual machines
 
-Milestone 93. Proposed 2026-11-04. Not built.
+Milestone 93. Proposed and built on 2026-11-04. None of the drills
+below has run. Question 1, a pod with `hostUsers: false`, is not
+built, and the guide states the limit.
 
 A workload that boots a virtual machine, such as a CI runner that
 starts Firecracker microVMs or a QEMU test fleet like the `lab`, needs
@@ -52,7 +54,7 @@ already reads a misc device's node, for the `/dev/uhid` and
 
 ## Why the OS publishes it
 
-[Milestone 38](completed/38-device-attributes-and-sharing.md) set the
+[Milestone 38](38-device-attributes-and-sharing.md) set the
 rule: `liken` publishes the facts about hardware that no other layer
 can observe, in the slice, because no other layer can add them there
 later. KVM passes that test. The node exists only when the CPU has
@@ -243,11 +245,36 @@ own network namespace.
   the misc class.
 
 The unplugged-device pass of
-[milestone 89](completed/89-an-unplugged-device-evicts-its-pod.md)
+[milestone 89](89-an-unplugged-device-evicts-its-pod.md)
 must treat a table device that leaves as it treats a bus device that
 leaves. `rmmod` refuses a module while a process holds its node open,
 so the case is a claim that no running process holds open. The build
 checks that the pass finds these devices by their published names.
+
+## Changes during the build
+
+- **The class word.** Each virtualization device also carries
+  `class: virtualization`. The device metric, `liken_devices{class}`,
+  takes its label from `class`, and a device without one counts as
+  `unknown`.
+- **No eviction for a virtualization device that leaves.** The
+  unplugged-device pass reads the bus and address of the hardware
+  under a claim, and a virtualization device has neither, so a claim
+  on one never takes the `liken.sh/unplugged` taint. The refresh of
+  the claim's CDI specification still names the absent node when the
+  device leaves, so the next container of the claim fails to start
+  and the kubelet retries it. `rmmod` refuses the module while a
+  process holds the node open, so a running guest cannot lose it.
+- **The rebinding of drivers skips these devices.** The unprepare
+  call binds a driver again to each USB interface a claim held, and
+  it logged a virtualization device as a device the machine does not
+  publish. It now skips them, because they have no driver to bind.
+- **One function for the defaults.** `machine.DefaultSysctls` answers
+  the defaults that init and the operator apply: `OSSysctls`, and
+  each entry of the new table `machine.ModuleSysctls` that has a file
+  and that the spec does not name. The operator adds each absent entry
+  to the parameters its check of the sysctls watches for, so the
+  value applies within ten seconds of a live load of `vhost_vsock`.
 
 ## What this plan does not publish
 
