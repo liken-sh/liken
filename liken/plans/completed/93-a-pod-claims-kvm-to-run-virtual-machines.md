@@ -1,8 +1,10 @@
 # 93. A pod claims KVM to run virtual machines
 
-Milestone 93. Proposed and built on 2026-11-04. None of the drills
-below has run. Question 1, a pod with `hostUsers: false`, is not
-built, and the guide states the limit.
+Milestone 93. Proposed and built on 2026-11-04. Every drill below ran
+on `liken-1` and `stick-1` on 2026-11-04, with lab release
+2026.11.04-901 from commit 3aa01f74, and passed. Question 1, a pod with
+`hostUsers: false`, is not built: drill 7 confirmed the limit, and the
+guide states it.
 
 A workload that boots a virtual machine, such as a CI runner that
 starts Firecracker microVMs or a QEMU test fleet like the `lab`, needs
@@ -393,3 +395,44 @@ On `liken-1` and `stick-1`:
    claim that cannot be allocated.
 7. The pod of drill 2 with `hostUsers: false` records what happens,
    for question 1.
+
+### What the drills measured
+
+Each drill pod ran Alpine 3.22's QEMU with `-accel kvm -cpu host`, and
+booted Alpine's `linux-virt` kernel with no root filesystem. QEMU ran
+as uid 1000 through `setpriv`, except in drill 5, where it ran as root
+in the container to open the tap device.
+
+1. `liken-1`'s slice held `misc-kvm` with `driver: kvm_intel` and
+   `nested: true`, `misc-vhost-net`, and `misc-vhost-vsock`, all three
+   with `allowMultipleAllocations: true`. `vhost_net` loaded live
+   when it was added to `spec.modules`, before the upgrade, and the
+   device was in the slice after it. `stick-1`'s slice held none of
+   the three. `status.sysctls` on `liken-1` read
+   `net.vsock.child_ns_mode: local`, and `SysctlsApplied` read
+   `Applied`.
+2. The container received `/dev/kvm` as `crw-rw-rw- 0 0 10, 232`.
+   QEMU as uid 1000 booted the guest to its panic,
+   `VFS: Unable to mount root fs`, in under one second of guest time.
+   A pod with no claim had no `/dev/kvm`, and QEMU stopped with
+   `-accel kvm: Could not access KVM kernel module: No such file or
+   directory`.
+3. Two such pods on `liken-1` both allocated `misc-kvm` and both
+   booted their guests.
+4. Two pods with no node selector, which tolerated `stick-1`'s taint,
+   each started a guest with `-device vhost-vsock-pci,guest-cid=3`.
+   Both ran on `liken-1`, and their guests ran at the same time for
+   45 seconds. As a control, the same two pods with
+   `hostNetwork: true` share the host's `global` namespace: the first
+   guest started, and the second stopped with
+   `vhost-vsock: unable to set guest cid: Address in use`.
+5. A pod with `NET_ADMIN` made `/dev/net/tun` with `mknod`, made
+   `tap0`, and booted a guest on `-netdev tap,...,vhost=on` through
+   its claim on `misc-vhost-net`, delivered as `10, 238`.
+6. A pod whose claim asked for `kvm`, with a node selector for
+   `stick-1` and a toleration of its taint, stayed `Pending`. The
+   scheduler's event read `0/2 nodes are available: 1 cannot allocate
+   all claims, 1 node(s) didn't match Pod's node affinity/selector`.
+7. With `hostUsers: false`, the container's `/dev/kvm` was
+   `crw------- 65534 65534`, the host's node mounted into the user
+   namespace, and QEMU stopped with `Permission denied`.
