@@ -124,6 +124,7 @@ jobs:
       actions: ${{ steps.plan.outputs.actions }}
       trivy: ${{ steps.plan.outputs.trivy }}
       trivy-db: ${{ steps.plan.outputs.trivy-db }}
+      bases: ${{ steps.bases.outputs.bases }}
     steps:
       # The plan diffs against the commit before the push and against
       # each component's release tag, so it needs the history and the
@@ -143,7 +144,17 @@ jobs:
           PUBLISH: ${{ vars.PUBLISH }}
           PROBE: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: go run . plan -root ..{% template "go-save" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}
+        run: go run . plan -root ..
+
+      # Every build of the run pulls the published image of each pinned
+      # base that passes its checks, and builds every other base from
+      # the tree. The command is the one that `make bases` runs on a
+      # workstation, and its output is the override file that each
+      # build writes beside docker-bake.hcl. A check runs once here, so
+      # every build of the run uses the same bases.
+      - id: bases
+        working-directory: ci
+        run: go run . bases -root ..{% template "go-save" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}
 
   # The files at the top of the repository belong to no component: the
   # plans, the agent files, and the workflows. The root
@@ -241,7 +252,8 @@ jobs:
       version: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['{% .Name %}'].jobs) }}{% if .Images %}
-      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['{% .Name %}'].images) }}{% end %}
+      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['{% .Name %}'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}{% end %}
     permissions:
       contents: read
       packages: write{% if .SecurityEvents %}
@@ -262,7 +274,8 @@ jobs:
       version: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].version }}
       publish: ${{ fromJSON(needs.plan.outputs.components)['{% .Name %}'].publish }}
       jobs: '[]'{% if .Images %}
-      images: '[]'{% end %}
+      images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}{% end %}
     permissions:
       contents: read
       packages: write{% if .SecurityEvents %}

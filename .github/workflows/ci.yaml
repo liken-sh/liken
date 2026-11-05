@@ -124,6 +124,7 @@ jobs:
       actions: ${{ steps.plan.outputs.actions }}
       trivy: ${{ steps.plan.outputs.trivy }}
       trivy-db: ${{ steps.plan.outputs.trivy-db }}
+      bases: ${{ steps.bases.outputs.bases }}
     steps:
       # The plan diffs against the commit before the push and against
       # each component's release tag, so it needs the history and the
@@ -210,6 +211,16 @@ jobs:
           PROBE: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
           GITHUB_TOKEN: ${{ github.token }}
         run: go run . plan -root ..
+
+      # Every build of the run pulls the published image of each pinned
+      # base that passes its checks, and builds every other base from
+      # the tree. The command is the one that `make bases` runs on a
+      # workstation, and its output is the override file that each
+      # build writes beside docker-bake.hcl. A check runs once here, so
+      # every build of the run uses the same bases.
+      - id: bases
+        working-directory: ci
+        run: go run . bases -root ..
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -618,6 +629,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vulkan'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vulkan'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -635,6 +647,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['vulkan'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -652,6 +665,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['astrometry'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['astrometry'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['astrometry'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -669,6 +683,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['astrometry'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -715,6 +730,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['trust'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['trust'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['trust'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -732,6 +748,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['trust'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -749,6 +766,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['indi'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['indi'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['indi'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -766,6 +784,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['indi'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -783,6 +802,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['weston'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['weston'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['weston'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -800,6 +820,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['weston'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -817,6 +838,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['observatory-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['observatory-operator'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -834,6 +856,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['observatory-operator'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -851,6 +874,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['astrophotography-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['astrophotography-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['astrophotography-operator'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -868,6 +892,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['astrophotography-operator'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -885,6 +910,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['audio-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['audio-operator'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -902,6 +928,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['audio-operator'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -933,6 +960,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['bluetooth-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['bluetooth-operator'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -950,6 +978,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['bluetooth-operator'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -997,6 +1026,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vaapi'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['vaapi'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1014,6 +1044,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['vaapi'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1031,6 +1062,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['ffmpeg'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['ffmpeg'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1048,6 +1080,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['ffmpeg'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1065,6 +1098,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['display-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['display-operator'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1082,6 +1116,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['display-operator'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1099,6 +1134,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['equipment-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['equipment-operator'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1116,6 +1152,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['equipment-operator'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1133,6 +1170,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['firmware-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['firmware-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['firmware-operator'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1150,6 +1188,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['firmware-operator'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1167,6 +1206,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['git-csi-driver'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['git-csi-driver'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1184,6 +1224,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['git-csi-driver'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1216,6 +1257,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['library-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['library-operator'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1233,6 +1275,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['library-operator'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1284,6 +1327,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['mpv'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['mpv'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['mpv'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1301,6 +1345,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['mpv'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1318,6 +1363,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['media-operator'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1335,6 +1381,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['media-operator'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1352,6 +1399,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['people-operator'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['people-operator'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1369,6 +1417,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['people-operator'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1386,6 +1435,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].publish }}
       jobs: ${{ toJSON(fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].jobs) }}
       images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].images) }}
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write
@@ -1403,6 +1453,7 @@ jobs:
       publish: ${{ fromJSON(needs.plan.outputs.components)['per-node-csi-driver'].publish }}
       jobs: '[]'
       images: '[]'
+      bases: ${{ needs.plan.outputs.bases }}
     permissions:
       contents: read
       packages: write

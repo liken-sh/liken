@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -268,6 +270,51 @@ func (r Registry) Labels(pkg, tag string) (map[string]string, error) {
 	}
 	return blob.Config.Labels, nil
 }
+
+// Digest resolves the tag to the digest of the manifest that the
+// registry serves for it: the sha256 of the manifest's bytes, which is
+// what a reference by digest names. A tag or a package that does not
+// exist has no digest and no error, the same as Labels.
+func (r Registry) Digest(pkg, tag string) (string, bool, error) {
+	token, err := r.bearer(pkg, "pull")
+	if refused, ok := err.(tokenRefused); ok && r.Token == "" &&
+		(refused.code == http.StatusForbidden || refused.code == http.StatusUnauthorized || refused.code == http.StatusNotFound) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/v2/%s/%s/manifests/%s", r.Base, r.Owner, pkg, tag), nil)
+	if err != nil {
+		return "", false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", manifestTypes)
+	resp, err := r.client().Do(req)
+	if err != nil {
+		return "", false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", false, fmt.Errorf("reading %s:%s: %s", pkg, tag, resp.Status)
+	}
+	sum := sha256.New()
+	n, err := io.Copy(sum, io.LimitReader(resp.Body, manifestLimit+1))
+	if err != nil {
+		return "", false, err
+	}
+	if n > manifestLimit {
+		return "", false, fmt.Errorf("the manifest of %s:%s is larger than %d bytes", pkg, tag, manifestLimit)
+	}
+	return "sha256:" + hex.EncodeToString(sum.Sum(nil)), true, nil
+}
+
+// manifestLimit caps the manifest that Digest reads. An index of a
+// pinned image is a few kilobytes.
+const manifestLimit = 4 << 20
 
 // orNotFound names a missing object that the registry's index or
 // manifest points at, where get reports it as no error.

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -42,12 +43,14 @@ type world struct {
 	out      *bytes.Buffer
 	err      *bytes.Buffer
 	recorded *recorder
+	// signed holds each image reference whose signature verifies.
+	signed map[string]bool
 }
 
 func newWorld(t *testing.T, fake *fakeRegistry) *world {
 	t.Helper()
 	registry := fake.serve(t)
-	w := &world{env: map[string]string{}, out: &bytes.Buffer{}, err: &bytes.Buffer{}, recorded: &recorder{}}
+	w := &world{env: map[string]string{}, out: &bytes.Buffer{}, err: &bytes.Buffer{}, recorded: &recorder{}, signed: map[string]bool{}}
 	w.World = World{
 		Published: Published{Registry: registry, Channel: channel(t, fixtureVersions), Client: http.DefaultClient},
 		Registry: func(token string) Registry {
@@ -55,7 +58,13 @@ func newWorld(t *testing.T, fake *fakeRegistry) *world {
 			r.Token = token
 			return r
 		},
-		Run:    w.recorded.run,
+		Run: w.recorded.run,
+		VerifyImage: func(root, reference, identity string) error {
+			if !w.signed[reference] || !strings.Contains(identity, "component-") {
+				return fmt.Errorf("no signature of %s verifies", identity)
+			}
+			return nil
+		},
 		Getenv: func(key string) string { return w.env[key] },
 		Stdout: w.out,
 		Stderr: w.err,

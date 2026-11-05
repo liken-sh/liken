@@ -440,9 +440,22 @@ Every image builds through `docker-bake.hcl`, on a workstation and in
 CI, as the target of the same name:
 `docker buildx bake media-operator-player --load` at the top of the
 repository. A Dockerfile that builds on a base image of the repository
-names it bare, as in `FROM mpv`, and the bake file builds that base
-from its own directory at the same commit. No Dockerfile names a
-published tag of a base.
+names it bare, as in `FROM mpv`, and no Dockerfile names a published
+tag of a base. The bake file gives the build the base's published
+image when that image is the build of the tree's recipe, and builds
+the base from its own directory at the same commit when it is not.
+`make bases` at the top of the repository checks the published tag of
+each pinned base that an image builds on. The check passes when a
+signature of the base's own workflow covers the image's digest, and
+the `sh.liken.recipe` label read through that digest equals the recipe
+of the tree. `make bases` writes the reference and digest of each base
+that passes into `docker-bake.override.hcl`, which bake reads after
+the generated file and git ignores. CI's plan job runs the same
+command once for each run, and every build of the run reads its
+output. So a release does not install a base's packages from
+snapshot.debian.org again, and a commit that raises a base's revision
+builds the new base, and its consumers on it, from the tree until the
+base's tag is published. Root plan 89 holds the reasons.
 
 The base images, `vulkan`, `vaapi`, `ffmpeg`, `mpv`, and `weston`, are
 pinned components: each states a version, the date of the snapshot of

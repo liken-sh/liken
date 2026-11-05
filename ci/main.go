@@ -7,6 +7,7 @@
 //
 //	go run ./ci generate [-check]   write the workflows, the bake file, and dependabot.yml, or check them
 //	go run ./ci plan                decide what this workflow run does
+//	go run ./ci bases [-out FILE]   check each pinned base's published image, and write docker-bake.override.hcl
 //	go run ./ci deps                check each [depends] against the code
 //	go run ./ci pins                check the pins, the downloads, and the actions against AGENTS.md
 //	go run ./ci namespaces          check that a namespace override moves no deploy object
@@ -35,12 +36,13 @@ import (
 
 func main() {
 	world := World{
-		Published: Published{Registry: ghcr(""), Channel: "https://releases.liken.sh", Client: httpClient},
-		Registry:  ghcr,
-		Run:       ExecRunner,
-		Getenv:    os.Getenv,
-		Stdout:    os.Stdout,
-		Stderr:    os.Stderr,
+		Published:   Published{Registry: ghcr(""), Channel: "https://releases.liken.sh", Client: httpClient},
+		Registry:    ghcr,
+		Run:         ExecRunner,
+		VerifyImage: cosignVerify,
+		Getenv:      os.Getenv,
+		Stdout:      os.Stdout,
+		Stderr:      os.Stderr,
 	}
 	if err := world.run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "ci:", err)
@@ -57,15 +59,18 @@ type World struct {
 	// Registry returns a client of ghcr.io that uses the token.
 	Registry func(token string) Registry
 	Run      Runner
-	Getenv   func(string) string
-	Stdout   io.Writer
-	Stderr   io.Writer
+	// VerifyImage checks that a signature of the identity covers the
+	// image reference.
+	VerifyImage func(root, reference, identity string) error
+	Getenv      func(string) string
+	Stdout      io.Writer
+	Stderr      io.Writer
 }
 
 func (w World) run(args []string) error {
 	stdout := w.Stdout
 	if len(args) == 0 {
-		return fmt.Errorf("name a command: generate, plan, deps, pins, namespaces, publish, scan, record, sites, reports, or profile")
+		return fmt.Errorf("name a command: generate, plan, bases, deps, pins, namespaces, publish, scan, record, sites, reports, or profile")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := flags.String("root", ".", "the repository root")
@@ -78,6 +83,7 @@ func (w World) run(args []string) error {
 	tag := flags.String("tag", "", "record: the release tag")
 	site := flags.String("site", "", "reports, profile: the address of the site that serves the profiles now")
 	dest := flags.String("dest", "", "reports: the site's tree, where the profiles publish")
+	out := flags.String("out", "", "bases: the override file to write, or empty for docker-bake.override.hcl at the root")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -90,6 +96,8 @@ func (w World) run(args []string) error {
 		return generate(*root, components, *check, stdout)
 	case "plan":
 		return w.plan(*root, components)
+	case "bases":
+		return w.bases(*root, components, *out)
 	case "deps":
 		return deps(*root, components, stdout)
 	case "pins":

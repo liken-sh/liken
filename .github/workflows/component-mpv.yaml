@@ -54,6 +54,13 @@ on:
       images:
         type: string
         required: true
+      # The override file that `ci bases` wrote in the plan job. It
+      # points each build at the published image of every pinned base
+      # that passed its checks, and every other base builds from the
+      # tree. ci/bases.go gives the checks.
+      bases:
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -95,9 +102,10 @@ jobs:
 
   # Each image builds through docker-bake.hcl at the top of the
   # repository, as the target of the same name. A Dockerfile that
-  # builds on a base of the repository, as in FROM mpv, gets that base's
-  # target as a named context, so the base builds at this commit, from
-  # its layer cache when nothing in it changed.
+  # builds on a base of the repository, as in FROM mpv, gets that base
+  # as a named context: the base's published image when the override
+  # file names it, and otherwise the base's target, so the base builds
+  # at this commit, from its layer cache when nothing in it changed.
   #
   # The layer cache is on ghcr, as a :buildcache tag beside each image.
   # Every build reads it. Every push to main and every run that
@@ -131,6 +139,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The plan job checked the published image of each pinned base,
+      # and this file points the build at each one that passed.
+      - name: write the published bases
+        env:
+          BASES: ${{ inputs.bases }}
+        run: printf '%s\n' "$BASES" > docker-bake.override.hcl
+
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # A pinned base writes its branch cache on every branch, so its job
@@ -163,17 +178,20 @@ jobs:
         run: |
           mkdir -p ".image-cache/${{ matrix.image }}"
           find ".image-cache/${{ matrix.image }}" -type f | sort > "$RUNNER_TEMP/image-cache-before"
-          docker buildx bake -f docker-bake.hcl "${{ matrix.image }}-cache-seed"
+          docker buildx bake -f docker-bake.hcl -f docker-bake.override.hcl "${{ matrix.image }}-cache-seed"
 
       # An image for more than one platform cannot load into the
       # runner's Docker daemon, so only a single-platform image loads,
       # and only a loaded image has a smoke check. The build reads the
       # bake file from the checkout, so a named context reaches the
       # directories of the repository.
-      - uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # v7.5.0
+      - if: ${{ !matrix.published }}
+        uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # v7.5.0
         with:
           source: .
-          files: docker-bake.hcl
+          files: |
+            docker-bake.hcl
+            docker-bake.override.hcl
           targets: ${{ matrix.image }}
           load: ${{ matrix.load }}
           push: false
@@ -181,6 +199,14 @@ jobs:
             VERSION=${{ inputs.version || 'check' }}
             CACHE_WRITE=${{ (inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && matrix.image || '' }}
             BRANCH_CACHE=${{ matrix.image }}
+
+      # A pinned image whose tag is published with the tree's recipe is
+      # the build of this commit's recipe, so the job pulls it by its
+      # tag and checks it, and builds nothing. ci/plan.go gives the
+      # rule.
+      - name: pull the published image
+        if: ${{ matrix.published }}
+        run: docker pull "ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version }}"
 
       - name: smoke check
         if: ${{ matrix.smoke != '' && matrix.load }}
@@ -194,7 +220,7 @@ jobs:
         name: copy the cache mount out
         if: ${{ matrix.cache && github.ref == 'refs/heads/main' }}
         run: |
-          docker buildx bake -f docker-bake.hcl "${{ matrix.image }}-cache-export"
+          docker buildx bake -f docker-bake.hcl -f docker-bake.override.hcl "${{ matrix.image }}-cache-export"
           find ".image-cache/${{ matrix.image }}" -type f | sort > "$RUNNER_TEMP/image-cache-after"
           if cmp -s "$RUNNER_TEMP/image-cache-before" "$RUNNER_TEMP/image-cache-after"; then
             echo changed=false >> "$GITHUB_OUTPUT"
@@ -341,6 +367,13 @@ jobs:
           mkdir -p "$RUNNER_TEMP/trivy-bin"
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/trivy-bin" trivy
           echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
+
+      # The plan job checked the published image of each pinned base,
+      # and this file points the build at each one that passed.
+      - name: write the published bases
+        env:
+          BASES: ${{ inputs.bases }}
+        run: printf '%s\n' "$BASES" > docker-bake.override.hcl
 
       # Each image builds again through docker-bake.hcl, and pushes. An
       # image that ran in the images job above builds from the layers that

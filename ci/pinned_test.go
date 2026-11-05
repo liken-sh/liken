@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -75,6 +76,41 @@ func TestAPublishedPinnedTagRunsItsJobsWhenItsPathsChange(t *testing.T) {
 	if d := decisions["base"]; !d.Check || d.Publish != publishNone ||
 		d.Reason != "changed: base/README.md; 20260928-1 is published, and its recipe matches" {
 		t.Errorf("base: %+v", d)
+	}
+}
+
+// A published pinned tag whose recipe matches the tree is the build of
+// that recipe, so a check never builds it again from its upstream
+// servers. When a change reaches its images, such as a new workflow,
+// each image with a smoke check is pulled and checked, and every other
+// image runs nothing.
+func TestAPublishedPinnedImageIsPulledAndCheckedNeverBuilt(t *testing.T) {
+	r := newRepo(t, map[string]string{
+		"tool/package.toml": "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"tool\"\n",
+		"tool/Dockerfile":   "FROM debian@sha256:aaa\n",
+		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n" +
+			"[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n[[outputs.images]]\nname = \"base\"\nsmoke = \"base/smoke/base.sh\"\n",
+		"base/Dockerfile":       "FROM tool\n",
+		"base/smoke/base.sh":    "true\n",
+		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[[outputs.images]]\nname = \"operator\"\n",
+		"operator/Dockerfile":   "FROM base\n",
+	})
+	r.run("tag", "2026.09.28-001")
+	before := r.run("rev-parse", "HEAD")
+	r.write(".github/workflows/component-base.yaml", "name: component-base\n")
+	r.write(".github/workflows/component-tool.yaml", "name: component-tool\n")
+	r.commit("change the workflows")
+	e := Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true}
+	decisions, err := r.pinnedPlanner(map[string]bool{"tool": true, "base": true}, nil).Plan(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ImageRun{{Image: "base", Pinned: true, Load: true, Smoke: "base/smoke/base.sh", Published: true}}
+	if d := decisions["base"]; !d.Check || d.Publish != publishNone || !reflect.DeepEqual(d.Images, want) {
+		t.Errorf("base: %+v", d)
+	}
+	if d := decisions["tool"]; len(d.Images) != 0 {
+		t.Errorf("tool: %+v", d)
 	}
 }
 

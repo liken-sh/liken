@@ -6,13 +6,27 @@
 # Each image of the repository is one target here, named for the
 # image. A Dockerfile that builds on another image of the repository
 # names that image bare, as in FROM mpv, and the target's contexts map
-# the name to the other image's target. So a consumer always builds on
-# the base of the same commit, and never on a published tag:
+# the name to the other image's target, so the consumer builds on the
+# base of the same commit:
 #
 #   docker buildx bake media-operator-player --load
 #
 # builds mpv and every base under it first, from the layer cache on
 # ghcr.io for each layer that did not change.
+#
+# A base of a pinned component builds from snapshot.debian.org and
+# other upstream servers, and a consumer that built every base again
+# would depend on each of those servers for each release. So a consumer
+# takes a pinned base from ghcr.io when the base's image there is the
+# build of the tree's recipe. `make bases` at the top of the repository
+# checks each pinned base's published tag: the signature of its
+# component's workflow, and the recipe label against the recipe of the
+# tree. For each base that passes, it writes the image's reference and
+# digest into docker-bake.override.hcl, which bake reads after this
+# file and git ignores. A base with no such variable builds from the
+# tree, so a commit that raises a base's revision builds the new base,
+# and its consumers on it, until the base's tag is published. CI runs
+# the same command in the plan job and gives each build its file.
 
 # VERSION is the version a tracked image carries: the release tag, a
 # development version, or "check" for a build that publishes nothing.
@@ -40,7 +54,11 @@ variable "CACHE_WRITE" {
 variable "BRANCH_CACHE" {
   default = ""
 }
-
+{% range .Published %}
+variable "{% . %}" {
+  default = ""
+}
+{% end %}
 # The toolchains target maps the bare name of each build image in
 # toolchains/images.toml to its reference and digest. No image builds
 # from it, and it is in no group. A bake file beside a Dockerfile whose
@@ -65,7 +83,7 @@ target "{% .Name %}" {
   target     = "{% .Target %}"{% end %}
   platforms  = [{% range $i, $p := .Platforms %}{% if $i %}, {% end %}"{% $p %}"{% end %}]{% if .Contexts %}
   contexts = {{% range .Contexts %}
-    "{% .Name %}" = "{% .Value %}"{% end %}
+    "{% .Name %}" = {% template "context" . %}{% end %}
   }{% end %}
   args = {
     VERSION = {% if .Pinned %}"{% .Version %}"{% else %}VERSION{% end %}{% range .Args %}
@@ -88,8 +106,9 @@ target "{% .Name %}" {
   target     = "{% .Stage %}"
   platforms  = [{% range $i, $p := .Platforms %}{% if $i %}, {% end %}"{% $p %}"{% end %}]
   contexts = {{% range .Contexts %}
-    "{% .Name %}" = "{% .Value %}"{% end %}
+    "{% .Name %}" = {% template "context" . %}{% end %}
   }
   output = ["{% .Output %}"]
 }
 {% end %}
+{% define "context" %}{% if .Published %}{% .Published %} != "" ? "docker-image://${{% .Published %}}" : "{% .Value %}"{% else %}"{% .Value %}"{% end %}{% end %}

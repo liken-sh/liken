@@ -50,13 +50,16 @@ func TestTheBakeFileBuildsEachConsumerOnTheBaseInTheTree(t *testing.T) {
   target     = "app"
   platforms  = ["linux/amd64"]
   contexts = {
-    "base" = "target:base"
+    "base" = PUBLISHED_BASE != "" ? "docker-image://${PUBLISHED_BASE}" : "target:base"
     "brand" = "brand"
   }
   args = {
     VERSION = VERSION
   }
   tags       = ["ghcr.io/liken-sh/app:${VERSION}", "ghcr.io/liken-sh/app-sidecar:${VERSION}"]`,
+		`variable "PUBLISHED_BASE" {
+  default = ""
+}`,
 		`target "app-browser" {
   context    = "app/browser"
   dockerfile = "Dockerfile"
@@ -66,6 +69,60 @@ func TestTheBakeFileBuildsEachConsumerOnTheBaseInTheTree(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("the bake file lacks:\n%s\n\nin:\n%s", want, text)
 		}
+	}
+}
+
+// A consumer of a tracked image builds it from the tree every time,
+// because only a pinned component publishes under a tag that a recipe
+// can vouch for.
+func TestTheBakeFileBuildsATrackedBaseFromTheTreeAlways(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"lib/package.toml": "[package]\nname = \"lib\"\n[[outputs.images]]\nname = \"lib\"\n",
+		"lib/Dockerfile":   "FROM scratch\n",
+		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"lib\"]\n[[outputs.images]]\nname = \"app\"\n",
+		"app/Dockerfile":   "FROM lib\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Bake(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := string(out); !strings.Contains(text, `"lib" = "target:lib"`) || strings.Contains(text, "PUBLISHED_LIB") {
+		t.Errorf("the bake file builds the tracked base lib some other way:\n%s", text)
+	}
+}
+
+// The recipe of a consumer names a pinned base by its target, whether
+// a build pulls the base or builds it, so publishing a base changes no
+// recipe above it.
+func TestASettingOfTheRecipeNamesAPublishedBaseByItsTarget(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"base-image\"\n",
+		"base/Dockerfile":   "FROM scratch\n",
+		"app/package.toml":  "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\"]\n[[outputs.images]]\nname = \"app\"\n",
+		"app/Dockerfile":    "FROM base-image\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := components["app"]
+	target, err := newBakeTarget(root, app, app.Outputs.Images[0], ImageProducers(components), components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings := target.settings(); !strings.Contains(settings, "contexts=base-image=target:base-image ") {
+		t.Errorf("the settings name the base some other way: %s", settings)
+	}
+	out, err := Bake(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"base-image" = PUBLISHED_BASE_IMAGE != "" ? "docker-image://${PUBLISHED_BASE_IMAGE}" : "target:base-image"`) {
+		t.Errorf("the bake file names the base some other way:\n%s", out)
 	}
 }
 

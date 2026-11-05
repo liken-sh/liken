@@ -17,7 +17,19 @@ const bakeFile = "docker-bake.hcl"
 // names none.
 var defaultPlatforms = []string{"linux/amd64"}
 
-type bakeContext struct{ Name, Value string }
+// A bakeContext is one named context of a target. Value is what the
+// recipe reads: a directory, an outside image by its digest, or
+// target:<image> for an image of the repository. Published names the
+// bake variable that can point a base of a pinned component at its
+// published image instead, and is empty for every other context.
+type bakeContext struct{ Name, Value, Published string }
+
+// publishedVariable names the bake variable that holds the published
+// reference of a pinned base, such as PUBLISHED_FFMPEG. `ci bases`
+// writes it into the override file when the image passes its checks.
+func publishedVariable(image string) string {
+	return "PUBLISHED_" + strings.ToUpper(strings.ReplaceAll(image, "-", "_"))
+}
 
 // bakeArg is a build argument with a fixed value.
 type bakeArg struct{ Name, Value string }
@@ -77,7 +89,7 @@ func cacheTargets(root string, t bakeTarget) ([]cacheTarget, error) {
 			Contexts:   slices.Clone(t.Contexts),
 		}
 		if stage == "cache-seed" {
-			ct.Contexts = append(ct.Contexts, bakeContext{"cache", cacheDir(t.Name)})
+			ct.Contexts = append(ct.Contexts, bakeContext{Name: "cache", Value: cacheDir(t.Name)})
 		} else {
 			ct.Output = "type=local,dest=" + cacheDir(t.Name)
 		}
@@ -117,11 +129,20 @@ func Bake(root string, components map[string]*Component) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	var published []string
+	for _, t := range targets {
+		for _, c := range t.Contexts {
+			if c.Published != "" && !slices.Contains(published, c.Published) {
+				published = append(published, c.Published)
+			}
+		}
+	}
+	slices.Sort(published)
 	var toolchains []bakeContext
 	for _, name := range slices.Sorted(maps.Keys(tools.Build)) {
-		toolchains = append(toolchains, bakeContext{name, "docker-image://" + tools.Build[name]})
+		toolchains = append(toolchains, bakeContext{Name: name, Value: "docker-image://" + tools.Build[name]})
 	}
-	return render("docker-bake.hcl.tmpl", map[string]any{"Targets": targets, "Caches": caches, "Toolchains": toolchains})
+	return render("docker-bake.hcl.tmpl", map[string]any{"Targets": targets, "Caches": caches, "Toolchains": toolchains, "Published": published})
 }
 
 func newBakeTarget(root string, c *Component, image Image, producer map[string]string, components map[string]*Component) (bakeTarget, error) {
@@ -158,7 +179,13 @@ func newBakeTarget(root string, c *Component, image Image, producer map[string]s
 		t.Platforms = defaultPlatforms
 	}
 	for _, name := range slices.Sorted(maps.Keys(contexts)) {
-		t.Contexts = append(t.Contexts, bakeContext{name, contexts[name]})
+		context := bakeContext{Name: name, Value: contexts[name]}
+		if base, ok := strings.CutPrefix(context.Value, "target:"); ok {
+			if owner, ok := components[producer[base]]; ok && owner.Pinned() {
+				context.Published = publishedVariable(base)
+			}
+		}
+		t.Contexts = append(t.Contexts, context)
 	}
 	args, err := versionArgs(c, image, components)
 	if err != nil {

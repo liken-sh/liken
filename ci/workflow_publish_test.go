@@ -321,3 +321,42 @@ func TestOnlyAComponentThatUploadsIsGrantedSecurityEvents(t *testing.T) {
 		}
 	}
 }
+
+// The plan job runs `ci bases` once, and each build of the run writes
+// its output as the override file and reads it after the bake file, so
+// every build of the run uses the same published bases.
+func TestEveryBuildReadsTheBasesThatThePlanJobChecked(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ncache-mount = true\n",
+		"base/Dockerfile":   "FROM scratch AS cache-seed\nFROM scratch AS cache-export\nFROM scratch\n",
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ci := string(files[".github/workflows/ci.yaml"])
+	component := string(files[".github/workflows/component-base.yaml"])
+	write := "      - name: write the published bases\n        env:\n          BASES: ${{ inputs.bases }}\n        run: printf '%s\\n' \"$BASES\" > docker-bake.override.hcl\n"
+	for _, c := range []struct{ file, text, want string }{
+		{"ci.yaml", ci, "      bases: ${{ steps.bases.outputs.bases }}\n"},
+		{"ci.yaml", ci, "      - id: bases\n        working-directory: ci\n        run: go run . bases -root ..\n"},
+		{"ci.yaml", ci, "      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['base'].images) }}\n      bases: ${{ needs.plan.outputs.bases }}\n"},
+		{"ci.yaml", ci, "      images: '[]'\n      bases: ${{ needs.plan.outputs.bases }}\n"},
+		{"component-base.yaml", component, "      - uses: " + pinnedText("actions/checkout") + "\n\n      # The plan job checked the published image of each pinned base,\n"},
+		{"component-base.yaml", component, write + "\n      - uses: " + pinnedText("docker/setup-buildx-action")},
+		{"component-base.yaml", component, write + "\n      # Each image builds again"},
+		{"component-base.yaml", component, "files: |\n            docker-bake.hcl\n            docker-bake.override.hcl\n"},
+		{"component-base.yaml", component, `docker buildx bake -f docker-bake.hcl -f docker-bake.override.hcl "${{ matrix.image }}-cache-seed"`},
+		{"component-base.yaml", component, `docker buildx bake -f docker-bake.hcl -f docker-bake.override.hcl "${{ matrix.image }}-cache-export"`},
+		{"component-base.yaml", component, "      - if: ${{ !matrix.published }}\n        uses: " + pinnedText("docker/bake-action")},
+		{"component-base.yaml", component, "        if: ${{ matrix.published }}\n        run: docker pull \"ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version }}\"\n"},
+	} {
+		if !strings.Contains(c.text, c.want) {
+			t.Errorf("%s lacks:\n%s", c.file, c.want)
+		}
+	}
+}

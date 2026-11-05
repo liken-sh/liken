@@ -17,6 +17,10 @@ type ImageRun struct {
 	// Cache is true for an image whose cache mount the job restores
 	// before the build and saves after it.
 	Cache bool `json:"cache"`
+	// Published is true for an image of a pinned component whose tag
+	// is published with the tree's recipe. The job pulls that image and
+	// runs its smoke check, and builds nothing.
+	Published bool `json:"published"`
 }
 
 // everything lists every job and every image of the component.

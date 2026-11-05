@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -193,6 +195,33 @@ func TestTheLabelsOfAnImageAreRead(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The digest is the hash of the manifest's bytes, so a reference by
+// that digest names exactly the index that the registry served.
+func TestATagResolvesToTheDigestOfItsManifest(t *testing.T) {
+	registry := imageFixture().serve(t)
+	cases := []struct {
+		pkg, tag, want string
+		found          bool
+	}{
+		{"base", "1", sha256Of(imageFixture().manifests["base/1"]), true},
+		{"base", "9", "", false},
+		{"missing", "1", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.pkg+":"+c.tag, func(t *testing.T) {
+			digest, found, err := registry.Digest(c.pkg, c.tag)
+			if err != nil || digest != c.want || found != c.found {
+				t.Errorf("digest %q, found %t, err %v", digest, found, err)
+			}
+		})
+	}
+}
+
+func sha256Of(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func TestAnIndexThatPointsAtNothingIsAnError(t *testing.T) {

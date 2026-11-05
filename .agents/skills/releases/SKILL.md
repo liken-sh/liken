@@ -120,6 +120,13 @@ run, every job runs.
   or an image it builds on. A run that publishes also runs each image
   that reads the `VERSION` build argument, so the image passes its
   smoke check at the version that the publish pushes.
+* An image of a pinned component whose tag is published with the
+  tree's recipe never builds in a check, because the published image
+  is the build of that recipe. When a change reaches it, the images
+  job pulls the published image and runs its smoke check, and an image
+  with no smoke check runs nothing. A dry run of its publish builds
+  nothing either, because a publish of a published tag only signs it
+  again.
 * The site deploys when a manual's job or a job with a coverage
   profile ran, when the site's build changed, or when every job runs.
 
@@ -149,13 +156,34 @@ differs from it: the recipe changed, and the revision did not. The
 `bump-components` skill holds the rule for a new revision.
 
 A pinned component moves `:latest` to its tag when it publishes, so a
-person who pulls a base by hand gets the current pin. No consumer
-reads a published base: every consumer builds `FROM` the base in the tree,
-through `docker-bake.hcl`, so a change to a base reaches each
-consumer at the same commit, and the consumer releases because its
-dependency's directory changed. The workstation harness in
-`media-operator/local/` builds the same way, through its own bake
-target beside the repository's.
+person who pulls a base by hand gets the current pin. No build reads
+`:latest`. A consumer reads a published base only by its digest, and
+only after `ci bases` checks it:
+
+* the base's tag in the tree resolves to a digest on ghcr.io;
+* a signature of the base's own workflow, `component-<base>.yaml` at
+  `refs/heads/main` or at a release tag, covers that digest;
+* the `sh.liken.recipe` label read through that digest equals the
+  tree's recipe.
+
+The recipe covers every input of the build, so an image that passes is
+the one a build from the tree would make, and the signature proves
+that CI built it. `make bases` runs the check on a workstation and
+writes `docker-bake.override.hcl`, which `docker buildx bake` reads
+after `docker-bake.hcl`. The plan job runs the same command once for
+each run, and each images job and publish job writes its output as
+the same file, so every build of a run uses the same bases. The plan's
+summary has a section, "The pinned bases", that lists each base and
+whether the run pulls it or builds it from the tree, with the reason.
+
+A base that fails a check, or whose tag is not published yet, builds
+from the tree. So a commit that raises a base's revision builds the
+new base and tests its consumers on it at that commit, and every run
+after the base's publish pulls it. A change to a base still reaches
+each consumer, and the consumer releases because its dependency's
+directory changed. The workstation harness in `media-operator/local/`
+names its bake files with `-f` and reads no override file, so it
+builds every base from the tree.
 
 ## Where the outputs go
 

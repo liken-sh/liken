@@ -7,3 +7,8 @@
 # The cache mounts that an images job copies out of a build and saves.
 # ci/templates/component.yaml.tmpl gives the steps.
 /.image-cache/
+
+# The published bases that `make bases` checked. What it holds depends
+# on the registry when it ran, so each workstation and each CI run
+# writes its own. ci/bases.go gives the checks.
+/docker-bake.override.hcl

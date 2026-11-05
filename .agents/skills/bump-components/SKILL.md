@@ -260,6 +260,12 @@ A new snapshot sets every revision to 1, so it needs no cascade. When
 CI fails with "the recipe of N pinned components changed with no new
 revision", the message names each component to raise.
 
+A new revision has no published image until `main` publishes it, so
+the first run of the bump builds the new base from the tree, from
+snapshot.debian.org, and builds each consumer on it. Every run after
+that pulls the base by its digest, and `make bases` on a workstation
+does the same. A bump needs no second commit.
+
 The files that a base's `.dockerignore` leaves out, such as its
 `README.md` and its `smoke/` check, are not in the recipe, and a
 change to them needs no revision.

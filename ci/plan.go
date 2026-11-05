@@ -313,12 +313,33 @@ func (p Planner) selectJobs(c *Component, d *Decision, sel selector, all bool) {
 	_, workflow := sel.diff.Workflows[c.Name()]
 	if all || workflow || c.Pinned() && d.Changed {
 		d.Jobs, d.Images = everything(c)
-		return
+	} else {
+		d.Jobs, d.Images = sel.Select(c, d.Publish != publishNone)
 	}
-	d.Jobs, d.Images = sel.Select(c, d.Publish != publishNone)
+	if c.Pinned() && !d.Changed {
+		d.Images = pullPublished(d.Images)
+	}
 	if len(d.Jobs) == 0 && len(d.Images) == 0 {
 		d.Check, d.Reason = false, "no job or image reads the change; "+d.Reason
 	}
+}
+
+// pullPublished turns the images of a pinned component whose tag is
+// published with the tree's recipe into checks of the published
+// images. The recipe covers every input of the build, so the published
+// image is what a build from the tree would make, and a build would
+// only reach the upstream servers again. An image with a smoke check
+// that loads is pulled and checked, and every other image runs
+// nothing.
+func pullPublished(images []ImageRun) []ImageRun {
+	var pulled []ImageRun
+	for _, image := range images {
+		if image.Smoke != "" && image.Load {
+			image.Published, image.Cache = true, false
+			pulled = append(pulled, image)
+		}
+	}
+	return pulled
 }
 
 // dryRun runs the component's publish job in its dry mode when the

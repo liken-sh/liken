@@ -429,13 +429,46 @@ func TestADryRunRefusesAVersionOfTheWrongShape(t *testing.T) {
 	}
 }
 
-func TestADryRunOfAPinnedComponentBuildsItsTagAndPushesNothing(t *testing.T) {
-	p, rec, components := pinnedPublishFixture(t, map[string][]string{"base": {"20260928-1"}})
-	if err := p.Publish(components["base"], "20260928-1", publishDry); err != nil {
+// A dry run does what the publish of the same tag would do, and
+// pushes nothing. A pinned tag that is not published yet builds. A
+// published one would only be signed again, so its dry run builds
+// nothing, and never reaches the base's upstream servers.
+func TestADryRunOfAPinnedComponentBuildsOnlyATagThatIsNotPublished(t *testing.T) {
+	cases := []struct {
+		name   string
+		tags   []string
+		builds bool
+	}{
+		{"not published", []string{"20260927-1"}, true},
+		{"published", []string{"20260928-1"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p, rec, components := pinnedPublishFixture(t, map[string][]string{"base": c.tags})
+			if err := p.Publish(components["base"], "20260928-1", publishDry); err != nil {
+				t.Fatal(err)
+			}
+			built := len(rec.commands) == 1 && !strings.Contains(rec.commands[0], "--push") &&
+				strings.Contains(rec.commands[0], "--set base.labels.sh.liken.recipe=sha256:")
+			if built != c.builds || len(rec.commands) > 1 {
+				t.Errorf("commands:\n%s", strings.Join(rec.commands, "\n"))
+			}
+		})
+	}
+}
+
+// The publish builds on the published bases that the plan job checked,
+// when the job wrote the override file, and on the tree's when it did
+// not.
+func TestThePublishReadsTheOverrideFileWhenItIsThere(t *testing.T) {
+	p, rec, components := pinnedPublishFixture(t, map[string][]string{"base": {"20260927-1"}})
+	if err := os.WriteFile(filepath.Join(p.Root, overrideFile), []byte("# no bases\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if len(rec.commands) != 1 || strings.Contains(rec.commands[0], "--push") ||
-		!strings.Contains(rec.commands[0], "--set base.labels.sh.liken.recipe=sha256:") {
-		t.Errorf("commands:\n%s", strings.Join(rec.commands, "\n"))
+	if err := p.Publish(components["base"], "20260928-1", publishRelease); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(rec.commands[0], "docker buildx bake --file docker-bake.hcl --file docker-bake.override.hcl --push ") {
+		t.Errorf("the build reads other files: %s", rec.commands[0])
 	}
 }

@@ -16,10 +16,12 @@
 # weston and ffmpeg are base images of the repository, each in its own
 # directory at the top. The bake file at the top of the repository
 # gives this build each one as a named context, so FROM weston builds
-# on the weston image of the same commit, never on a published tag. The
-# compositor that the pod runs is then the same set of bytes that the
-# weston image holds, and a node that draws with the compositor and
-# the clients holds glibc, libdrm and LLVM once.
+# on the weston image of this commit's recipe: the published image when
+# its recipe matches the tree, and otherwise the image that the bake
+# file builds from the same commit. The compositor that the pod runs is
+# then the same set of bytes that the weston image holds, and a node
+# that draws with the compositor and the clients holds glibc, libdrm
+# and LLVM once.
 
 FROM golang AS build
 # proxy.golang.org sometimes drops a module download partway through

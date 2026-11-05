@@ -75,9 +75,10 @@ type Publisher struct {
 // change to it, before a release needs it.
 //
 // A pinned component publishes its own tag in any mode, with its
-// recipe hash as a label, and then moves :latest to it. Every consumer
-// in the repository builds on the base in the tree, so no build reads
-// :latest, but a person who pulls a base by hand reads it. Publish
+// recipe hash as a label, and then moves :latest to it. A consumer in
+// the repository builds on a base by its digest or from the tree, so
+// no build reads :latest, but a person who pulls a base by hand reads
+// it. Publish
 // takes only the tree's own pin, and the plan publishes a pin only
 // once, so the newest pin is the one that holds :latest.
 func (p Publisher) Publish(c *Component, version, mode string) error {
@@ -170,6 +171,10 @@ func (p Publisher) image(c *Component, image Image, version, mode string, labels
 	}
 	names := append([]string{image.Name}, image.Aliases...)
 	dry := mode == publishDry
+	if slices.Contains(tags, version) && dry && c.Pinned() {
+		fmt.Printf("%s is already published, so a publish would only sign it again, and the dry run builds nothing\n", ref(image.Name, version))
+		return nil
+	}
 	if slices.Contains(tags, version) && !dry {
 		fmt.Printf("%s is already published; a published version never changes\n", ref(image.Name, version))
 		var references []string
@@ -183,6 +188,12 @@ func (p Publisher) image(c *Component, image Image, version, mode string, labels
 		target := image.Name
 		set := func(key, value string) []string { return []string{"--set", target + "." + key + "=" + value} }
 		args := []string{"buildx", "bake", "--file", bakeFile}
+		// The override file points the build at the published image of
+		// each pinned base that passed its checks. With no file, every
+		// base builds from the tree.
+		if _, err := os.Stat(filepath.Join(p.Root, overrideFile)); err == nil {
+			args = append(args, "--file", overrideFile)
+		}
 		if !dry {
 			args = append(args, "--push")
 		}

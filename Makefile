@@ -5,6 +5,8 @@
 #   make workflows  write .github/workflows/ and docker-bake.hcl from
 #                   every package.toml, and .github/dependabot.yml
 #                   from every go.mod and Cargo.lock
+#   make bases      point the builds at each pinned base's published
+#                   image that matches the tree
 #   make images     build every image into the local Docker daemon
 #   make docs       build every manual into dist/docs/, for a preview
 #   make preview    build them, then serve dist/docs/ at localhost
@@ -27,6 +29,18 @@ workflows:
 .PHONY: versions
 versions:
 	@./versions.sh
+
+# Each pinned base that an image builds on, checked on ghcr.io: a
+# signature of the base's own workflow covers its digest, and its
+# recipe label equals the tree's recipe. The command writes each base
+# that passes into docker-bake.override.hcl, which bake reads after
+# docker-bake.hcl, so a build pulls that base instead of installing its
+# packages again. A base that fails a check builds from the tree. The
+# check reaches the network and runs cosign in Docker, so no build
+# depends on this target. CI's plan job runs the same command.
+.PHONY: bases
+bases:
+	cd ci && go run . bases -root ..
 
 # Every image of the repository, through the bake file, into the local
 # Docker daemon, each tagged the way the bake file names it. The Docker
