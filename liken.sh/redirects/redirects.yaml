@@ -44,8 +44,14 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            # The image gives the `caddy` binary the file capability
+            # `CAP_NET_BIND_SERVICE`, and the kernel refuses to start a
+            # binary whose file capability is outside the bounding set.
+            # Caddy listens on 8080 and does not use the capability, but
+            # it must stay in the set for the binary to start.
             capabilities:
               drop: [ALL]
+              add: [NET_BIND_SERVICE]
           resources:
             requests:
               cpu: 10m
