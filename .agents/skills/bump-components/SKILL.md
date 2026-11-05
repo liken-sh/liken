@@ -69,7 +69,7 @@ The report has these sources:
 | `bluetooth-operator/bluetoothd/latest.sh` | the buildroot commit that the bluetoothd image builds with, which follows `liken/userland/VERSION`, step 5e |
 | `library-operator/latest.sh` | OpenVINO, Intel's compute-runtime, gmmlib, and the graphics compiler in the appearances image, step 5e |
 | `ci/latest.sh` | the GitHub Actions, prek, and the hook revisions |
-| `liken.sh/latest.sh` | Flatcar and the Terraform providers |
+| `liken.sh/latest.sh` | the Terraform providers |
 
 ## 2. Bump
 

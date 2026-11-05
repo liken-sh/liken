@@ -12,8 +12,9 @@
 # The archived repositories keep their Pages sites and their custom
 # domains, because GitHub refuses every change to an archived
 # repository. The zone has no records for those names, so the
-# wildcard in redirects.tf sends them to the redirect host, and their
-# Pages sites answer only at the github.io address.
+# wildcard in redirects.tf sends them to the cluster that runs the
+# redirects, and their Pages sites answer only at the github.io
+# address.
 #
 # One thing stays outside this file on purpose. GitHub issues and
 # renews each Pages certificate on its own, so there is nothing to
@@ -29,8 +30,8 @@ locals {
   # An archived repository moved into liken as a directory of the same
   # name, with its history. It stays in this map because it still
   # exists, read-only, with its Pages site. The wildcard in
-  # redirects.tf sends the site's old name to the redirect host, so the
-  # site answers only at the github.io address. GitHub refuses
+  # redirects.tf sends the site's old name to the cluster that runs the
+  # redirects, so the site answers only at the github.io address. GitHub refuses
   # every change to an archived repository, so its entry must not
   # change after the archive.
   repositories = {

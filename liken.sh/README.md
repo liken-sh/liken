@@ -52,141 +52,42 @@ records, and www CNAMEs to the organization's Pages hostname.
 GitHub issues and renews the site's certificate, so only the
 channel's name needs the certificate workflow above.
 
-## The redirect host
+## The redirects
 
 Each operator's API group, such as `bluetooth.liken.sh`, and each CSI
 driver's name, such as `git.liken.sh`, is also the address of its
 manual, because a cluster shows those names. The manuals are sections
-of the one site, so a small machine answers each name with a 301 to
+of the one site, so each name answers with a 301 to
 `https://liken.sh/<name>/`, with the same path and query.
-`redirects.tf` declares the machine, and its comments explain each
-choice.
 
-The machine is a Linode Nanode in `us-east` that runs Flatcar
-Container Linux. Its only state comes from one Ignition config, which
-Terraform renders from `redirects.bu` and the `Caddyfile` and passes
-as the instance's user data. The config starts one container, the
-official Caddy image, pinned by digest. Caddy gets and renews a Let's
-Encrypt certificate for each name in `redirect_names` over HTTP-01 or
-TLS-ALPN-01, so the host holds no DNS token. Plain HTTP gets the same
-301, so a name redirects before it has its certificate. A request for
-any other name gets a 404. A firewall passes TCP ports 80 and 443 and
-ICMP, and drops everything else.
+Neither Linode DNS nor GitHub Pages serves a redirect, so a workload
+in a Kubernetes cluster answers. `redirects/` is that workload as a
+kustomize base: Caddy, its `Service`, and an `Ingress` that lists the
+names. The cluster applies the base from this repository, for example
+with a Flux `GitRepository` on this repository and a `Kustomization`
+with the path `./liken.sh/redirects`. The cluster's ingress controller
+ends TLS and passes plain HTTP to Caddy, so the cluster supplies the
+certificate for the `redirects-tls` `Secret`, and Caddy holds no
+state.
 
-### The redirects in a cluster
-
-`redirects/` is the same service as a kustomize base that a
-Kubernetes cluster applies remotely, for example with a Flux
-`GitRepository` on this repository and a `Kustomization` with the path
-`./liken.sh/redirects`. Caddy answers plain HTTP behind the cluster's
-ingress controller, which ends TLS, so the cluster supplies the
-certificate for the `redirects-tls` `Secret`. The `Ingress` lists the
-names, and a new name needs an entry there and in `redirect_names`
-until the DNS records point at the cluster.
-
-### What replaces the host
-
-A change to `flatcar.mk`, `redirects.bu`, the `Caddyfile`, or a
-variable replaces the instance. Nothing on the host changes by hand.
-The certificates are on the instance's disk, so a new instance asks
-Let's Encrypt for a new certificate for each name in
-`redirect_names`, nine by default. In any seven days, Let's Encrypt
-issues at most 5 certificates for one name and at most 50 for all of
-liken.sh, so replace the host at most a few times a week. A reboot
-keeps the certificates.
-
-The Caddyfile and the text of the Caddy unit reach the user data byte
-for byte, so an edit there replaces the host, even an edit to
-whitespace. Their explanations are in YAML comments in `redirects.bu`
-and in `redirects.tf`, which do not reach the user data.
-
-### The Flatcar release
-
-`flatcar.mk` pins Flatcar 4459.2.4, and the pin sets only the release
-that a new host boots first. Flatcar's automatic updates stay on:
-about 10 minutes after the first boot, the host checks for an update
-and installs the current stable release. It reboots five minutes
-after the install, and it follows the stable channel from then on. So a pin that is months old does not
-make an old host.
-
-The pin is 4459.2.4 because it is the newest stable release with
-Flatcar's first disk layout. Its image is 4,756,340,736 bytes
-uncompressed, and Linode refuses an image larger than 6144 MiB. Later
-releases use a larger layout, and their images are about 8 GB, so a
-new pin must still have the first layout. An update does not change
-the partitions, and Flatcar plans to keep updating the first layout
-until at least 2030 (flatcar/Flatcar#1917).
-
-A plan needs no download: `redirects.tf` reads the version and the
-MD5 digest from `flatcar.mk`. Only an apply that creates the Linode
-image uploads the file, so run this before such an apply, in each
-checkout:
-
-    make flatcar
-
-The target downloads the image into `flatcar/`, which is not in
-history. It checks the image against the SHA-512 digest in
-`flatcar.mk`, and it checks that the image is small enough for
-Linode.
-
-To move the pin, check the signature on the new release's digests
-with Flatcar's image signing key, whose ID is `E25D9AED0593B34A`
-(`https://www.flatcar.org/security/image-signing-key/`):
-
-    base=https://stable.release.flatcar-linux.net/amd64-usr/<version>
-    curl -LO $base/flatcar_production_akamai_image.bin.gz.DIGESTS.asc
-    gpg --verify flatcar_production_akamai_image.bin.gz.DIGESTS.asc
-
-Put the version and the MD5 and SHA-512 lines from that file into
-`flatcar.mk`. Then run `make flatcar` and `terraform apply`. The new
-image replaces the old one and the instance.
-
-### Move the Caddy release
-
-Set `caddy_image` in `redirects.tf` to the new tag and the digest of
-its multi-platform index. The image comes from ECR Public's copy of
-Docker's official images, and this command prints the digest, which
-is the same as Docker Hub's:
-
-    docker buildx imagetools inspect public.ecr.aws/docker/library/caddy:<tag>
+`redirects.tf` points the wildcard record at the cluster's address,
+`redirects_ipv4`. A name with a record of its own never matches the
+wildcard, so the apex, `www`, `releases`, `log`, and the verification
+records keep their answers. A name that the `Ingress` does not list
+gets a 404 over plain HTTP.
 
 ### Add a name
 
-Add the name to `redirect_names` in `redirects.tf`. The wildcard
-records send every subdomain without a record of its own to the host,
-but a record of its own always wins over the wildcard. So a name
-redirects only when no other record in `terraform.tf` claims it.
+Add the name to the `Ingress` in `redirects/redirects.yaml`, in both
+`tls.hosts` and `rules`. The name must have no record of its own in
+`terraform.tf`, so that the wildcard sends it to the cluster.
 
 ### Check a name
-
-The operator and driver names have no records of their own, so the
-wildcard records send them to the host. To check a name, read the
-host's ID and addresses with `terraform output redirect_host`, then:
 
     dig +short display.liken.sh
     curl -sI http://display.liken.sh/docs/
     curl -sI https://display.liken.sh/docs/
 
-`dig` gives the host's address, and each `curl` answers with a 301
+`dig` gives the cluster's address, and each `curl` answers with a 301
 to `https://liken.sh/display/docs/`. `curl -v` shows a certificate
 from Let's Encrypt.
-
-A new host asks for its certificates at its first boot, before the
-changed wildcard records reach every resolver, so its first
-attempts can fail. Caddy retries a failed certificate with a longer
-wait each time, a few minutes apart at first and up to six hours
-apart later, and it stops after 30 days until it restarts. A reboot
-restarts Caddy, and so does each Flatcar update. If a name still
-has no certificate, reboot the instance in Linode's Cloud Manager,
-or with `linode-cli linodes reboot <id>`.
-
-### No SSH
-
-The host has no SSH: sshd is masked, the core user has no keys, and
-the firewall drops port 22. In an emergency, open the instance's
-Lish console in Linode's Cloud Manager and reboot the instance. Lish
-shows the serial console. When the GRUB menu appears, press `e` on
-the default entry, add `flatcar.autologin` to the kernel command
-line, and boot. The console then logs in as core without a password.
-The better repair is almost always a new instance: change what is
-wrong in this directory, and apply.

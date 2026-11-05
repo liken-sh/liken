@@ -4,8 +4,8 @@
 # channel. The release channel is the object storage bucket that
 # holds published releases, the credential that lets this repo's CI
 # upload them, and the token that keeps the channel's TLS certificate
-# fresh. redirects.tf declares the one machine, the host that
-# redirects the old manual names to the site.
+# fresh. redirects.tf sends the old manual names to the cluster that
+# redirects them to the site.
 #
 # The channel lives in object storage, rather than on a liken
 # machine, for a reason worth stating plainly: machines upgrade
@@ -47,20 +47,6 @@ terraform {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 6.0"
-    }
-    # The ct provider transpiles the redirect host's Butane config to
-    # Ignition during the plan (redirects.tf). Its minor versions
-    # change which Butane and Ignition versions it accepts, so the pin
-    # is exact.
-    ct = {
-      source  = "poseidon/ct"
-      version = "0.14.0"
-    }
-    # The random provider makes the one root password that Linode's
-    # API requires for the redirect host's disk (redirects.tf).
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.0"
     }
   }
 
@@ -213,8 +199,9 @@ resource "linode_domain_record" "www" {
 # The operators' and drivers' names, such as display.liken.sh and
 # git.liken.sh, have no records in this file. Each name is also the
 # address of a manual, and the manuals are sections of the one site,
-# so the wildcard records in redirects.tf send each name to the
-# redirect host, which answers with a 301 to liken.sh/<name>/.
+# so the wildcard record in redirects.tf sends each name to the
+# cluster that runs redirects/, which answers with a 301 to
+# liken.sh/<name>/.
 
 # The devlog at log.liken.sh is a Pages site of its own. The
 # liken-sh/log repository claims the name as its custom domain, and

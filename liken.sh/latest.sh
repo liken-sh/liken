@@ -3,13 +3,7 @@
 # Report what the liken.sh domain pins, and what each upstream offers
 # now.
 #
-# The domain pins the Flatcar release that the redirect host boots
-# first, in flatcar.mk, and the Terraform providers, in terraform.tf.
-#
-# Flatcar publishes four channels: lts, stable, beta, and alpha. A
-# release starts in alpha and moves through beta to stable, so alpha
-# is the newest channel. The channel of the pin is the channel whose
-# release list holds it. The release lists come from flatcar.org.
+# The domain pins the Terraform providers, in terraform.tf.
 #
 # The providers come from the Terraform registry, and each upstream
 # builds its provider from source, so their rows have no channel. A
@@ -18,45 +12,15 @@
 # release. An exact version compares the whole version.
 #
 # Usage:
-#   liken.sh/latest.sh                    report Flatcar and every provider
+#   liken.sh/latest.sh                    report every provider
 #   liken.sh/latest.sh --bump <provider>  move one provider, such as
 #                                         provider:linode, in terraform.tf
-#
-# A Flatcar bump also checks the signature of the release's DIGESTS
-# file, so it stays a hand edit. README.md gives the steps.
 
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source-path=SCRIPTDIR source=../toolchains/pin.sh
 source "$here/../toolchains/pin.sh"
-
-channels=(lts stable beta alpha)
-
-# releases <channel> prints every release in the channel, oldest
-# first.
-releases() {
-    fetch_text "https://www.flatcar.org/releases-json/releases-$1.json" --max-time 30 |
-        jq -r 'keys[] | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' | sort -V
-}
-
-flatcar="$(sed -n 's/^FLATCAR_VERSION := //p' "$here/flatcar.mk")"
-channel=""
-for c in "${channels[@]}"; do
-    if releases "$c" 2>/dev/null | grep -qx "$flatcar"; then
-        channel="$c"
-        break
-    fi
-done
-alpha="$(releases alpha)" || alpha=""
-
-# The pin holds on the newest release with Flatcar's first disk layout.
-# A later layout makes an image larger than the 6144 MiB that Linode
-# accepts, and the host leaves the pin for the current stable release
-# at its first update. README.md gives the measurements.
-row flatcar "$flatcar" "$(tail -1 <<<"${alpha:-?}")" "${channel:-?}" alpha \
-    "the newest release whose image fits Linode's 6144 MiB limit; liken.sh/README.md" \
-    "the release that the redirect host boots first"
 
 # providers prints "name source constraint" for each provider in the
 # required_providers block.
@@ -97,7 +61,7 @@ fi
 target="${2:-}"
 target="${target#provider:}"
 read -r _ source constraint < <(providers | awk -v n="$target" '$1 == n') ||
-    fail "terraform.tf has no provider named ${target:-?}; Flatcar moves by hand"
+    fail "terraform.tf has no provider named ${target:-?}"
 newest="$(newest_provider "$source")" || newest=""
 [[ -n "$newest" ]] || fail "the Terraform registry did not answer for $source"
 new="$(latest_constraint "$constraint" "$newest")"

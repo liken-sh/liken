@@ -10,8 +10,6 @@
 #   image/       assembled install media and disk images
 #   channel/     verified downloads from the release channel, cached
 #                by version; redownloadable, so never source
-#   flatcar/     the redirect host's Flatcar image, which `make
-#                flatcar` downloads; about 550 MB, and redownloadable
 #
 # The liken CLI writes identity/, image/, and channel/ into a
 # cluster's directory. This directory is not one, but a cluster made
@@ -21,4 +19,3 @@
 identity/
 image/
 channel/
-flatcar/
