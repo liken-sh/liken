@@ -15,6 +15,7 @@ spec:
     - cel:
         expression: >-
           device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].bus) &&
           device.attributes["liken.sh"].bus == "usb"
 ---
 # The firmware is in the upload's image and the device is on a USB

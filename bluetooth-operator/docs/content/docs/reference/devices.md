@@ -257,7 +257,7 @@ and they split by owner:
 | `DeviceClass` | Selector | Who claims it |
 |---|---|---|
 | `bluetooth-input` | `device.driver == "bluetooth.liken.sh"` and the `input` attribute, guarded | your workloads, one paired input device each |
-| `bluetooth-adapter` | `device.driver == "liken.sh" && device.attributes["liken.sh"].driver == "btusb"` | the operator's own pod, for the raw radio |
+| `bluetooth-adapter` | `device.driver == "liken.sh" && has(device.attributes["liken.sh"].driver) && device.attributes["liken.sh"].driver == "btusb"` | the operator's own pod, for the raw radio |
 
 `bluetooth-adapter` ships with the deploy base, because the
 operator's own claim template names it and the pod cannot start

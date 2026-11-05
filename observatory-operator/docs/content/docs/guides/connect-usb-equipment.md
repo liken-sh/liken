@@ -137,7 +137,9 @@ spec:
     - cel:
         expression: |
           device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].vendor) &&
           device.attributes["liken.sh"].vendor == "0403" &&
+          has(device.attributes["liken.sh"].product) &&
           device.attributes["liken.sh"].product == "6001" &&
           has(device.attributes["liken.sh"].serial) &&
           device.attributes["liken.sh"].serial == "A10KXYZ1"

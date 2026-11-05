@@ -55,4 +55,5 @@ spec:
           device.driver == "liken.sh" &&
           has(device.attributes["liken.sh"].subsystem) &&
           device.attributes["liken.sh"].subsystem == "i2c-dev" &&
+          has(device.attributes["liken.sh"].class) &&
           device.attributes["liken.sh"].class == "display"

@@ -125,27 +125,55 @@ func TestOnlyTheVirtualizationNodesPublish(t *testing.T) {
 	}
 }
 
-func TestTheVhostDevicesCarryTheirOwnAttribute(t *testing.T) {
-	sysRoot, sysctlRoot := t.TempDir(), t.TempDir()
-	miscDevice(t, sysRoot, "vhost-net", 238)
-	miscDevice(t, sysRoot, "vhost-vsock", 241)
-	vsockNamespaceMode(t, sysctlRoot, "local")
-
-	got := map[string]map[string]kubernetes.DeviceAttribute{}
-	for _, d := range virtualizationSliceDevices(sysRoot, sysctlRoot) {
-		got[d.Name] = d.Attributes
+// Each vhost device names the module that registered its node as its
+// driver, the way misc-kvm names its vendor module, so a selector that
+// reads driver reads the same fact on every virtualization device. A
+// kernel that builds the module in with no parameters has no
+// /sys/module entry for it, and the device then has no driver.
+func TestTheVhostDevicesCarryTheirOwnAttributeAndModule(t *testing.T) {
+	cases := []struct {
+		name    string
+		modules []string
+		want    map[string]map[string]kubernetes.DeviceAttribute
+	}{
+		{"modules loaded", []string{"vhost_net", "vhost_vsock"}, map[string]map[string]kubernetes.DeviceAttribute{
+			"misc-vhost-net": {
+				"class": kubernetes.AttrString("virtualization"), "subsystem": kubernetes.AttrString("misc"), "vhostNet": boolAttr(),
+				"driver": kubernetes.AttrString("vhost_net"),
+			},
+			"misc-vhost-vsock": {
+				"class": kubernetes.AttrString("virtualization"), "subsystem": kubernetes.AttrString("misc"), "vhostVsock": boolAttr(),
+				"driver": kubernetes.AttrString("vhost_vsock"),
+			},
+		}},
+		{"no module entries", nil, map[string]map[string]kubernetes.DeviceAttribute{
+			"misc-vhost-net": {
+				"class": kubernetes.AttrString("virtualization"), "subsystem": kubernetes.AttrString("misc"), "vhostNet": boolAttr(),
+			},
+			"misc-vhost-vsock": {
+				"class": kubernetes.AttrString("virtualization"), "subsystem": kubernetes.AttrString("misc"), "vhostVsock": boolAttr(),
+			},
+		}},
 	}
-
-	want := map[string]map[string]kubernetes.DeviceAttribute{
-		"misc-vhost-net": {
-			"class": kubernetes.AttrString("virtualization"), "subsystem": kubernetes.AttrString("misc"), "vhostNet": boolAttr(),
-		},
-		"misc-vhost-vsock": {
-			"class": kubernetes.AttrString("virtualization"), "subsystem": kubernetes.AttrString("misc"), "vhostVsock": boolAttr(),
-		},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("attributes = %+v, want %+v", got, want)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sysRoot, sysctlRoot := t.TempDir(), t.TempDir()
+			miscDevice(t, sysRoot, "vhost-net", 238)
+			miscDevice(t, sysRoot, "vhost-vsock", 241)
+			vsockNamespaceMode(t, sysctlRoot, "local")
+			for _, module := range c.modules {
+				if err := os.MkdirAll(filepath.Join(sysRoot, "module", module), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := map[string]map[string]kubernetes.DeviceAttribute{}
+			for _, d := range virtualizationSliceDevices(sysRoot, sysctlRoot) {
+				got[d.Name] = d.Attributes
+			}
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("attributes = %+v, want %+v", got, c.want)
+			}
+		})
 	}
 }
 

@@ -140,11 +140,21 @@ hardware does not have an attribute, the attribute is absent, not
 empty. Thus `has(device.attributes["liken.sh"].serial)` gives a
 correct result.
 
+A selector must check an attribute with `has()` before it reads it,
+for every attribute, because no attribute is on every device. A
+virtualization device such as `misc-vhost-net` has no `bus` and no
+`driver`. The scheduler runs a `DeviceClass` selector on every device
+of every node, and a selector that reads an absent attribute fails with
+a CEL error, "no such key". The scheduler then fails every claim of the
+class on that node, not only the claim of that one device. So write
+`has(device.attributes["liken.sh"].bus) && device.attributes["liken.sh"].bus == "usb"`,
+not the comparison alone.
+
 | Attribute | Type | What it is |
 |---|---|---|
 | `bus` | string | `pci` or `usb`, or for a board device, the bus the kernel registered it on, such as `platform` |
 | `address` | string | the device's address on that bus: `0000:00:02.0` on PCI, the port path on USB, and the firmware's name for a board device, such as `MSFT0101:00`. Every device `liken` publishes for one physical device has the same address |
-| `driver` | string | the name of the bound driver, such as `i915`. On `misc-kvm`, the vendor module that registered `/dev/kvm`: `kvm_intel` or `kvm_amd` |
+| `driver` | string | the name of the bound driver, such as `i915`. A virtualization device has no bound driver, so it names the module that registered its node: on `misc-kvm`, the vendor module, `kvm_intel` or `kvm_amd`, and on `misc-vhost-net` and `misc-vhost-vsock`, `vhost_net` and `vhost_vsock`. A module built into the kernel with no parameters has no entry in `/sys/module`, and the device then has no `driver` |
 | `class` | string | the type of device, in one word: `display`, `multimedia`, `serial-bus`, or `virtualization` for a virtualization device |
 | `classCode` | string | the full class code that the bus published: six hex digits on PCI, two on USB |
 | `subsystem` | string | the kind of device that `liken` published: `drm`, `sound`, `tty`, `cec`. It is absent when the delivery is a mix `liken` has no name for, and when the device delivers no node of its own, as a Bluetooth adapter does |

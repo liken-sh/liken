@@ -41,12 +41,16 @@ import (
 )
 
 // virtualizationDevice is one row of the table: the kernel's name for
-// the misc device, the attribute that states what it is, and the minor
-// number the kernel fixes for it in include/linux/miscdevice.h.
+// the misc device, the attribute that states what it is, the minor
+// number the kernel fixes for it in include/linux/miscdevice.h, and
+// the module that registers the node, which the device publishes as
+// its driver. kvm has no module here, because /dev/kvm comes from one
+// of two vendor modules, and kvmAttributes finds which.
 type virtualizationDevice struct {
 	misc      string
 	attribute string
 	minor     int
+	module    string
 	// offered answers whether the machine offers the device, beyond
 	// its node existing. Most rows need nothing more.
 	offered func(sysctlRoot string) bool
@@ -54,8 +58,8 @@ type virtualizationDevice struct {
 
 var virtualizationDevices = []virtualizationDevice{
 	{misc: "kvm", attribute: "kvm", minor: 232},
-	{misc: "vhost-net", attribute: "vhostNet", minor: 238},
-	{misc: "vhost-vsock", attribute: "vhostVsock", minor: 241, offered: vsockNamespacePerPod},
+	{misc: "vhost-net", attribute: "vhostNet", minor: 238, module: "vhost_net"},
+	{misc: "vhost-vsock", attribute: "vhostVsock", minor: 241, module: "vhost_vsock", offered: vsockNamespacePerPod},
 }
 
 // The misc major number, which every misc device shares.
@@ -138,6 +142,15 @@ func virtualizationSliceDevices(sysRoot, sysctlRoot string) []kubernetes.SliceDe
 		}
 		if v.misc == "kvm" {
 			kvmAttributes(sysRoot, attrs)
+		}
+		// A misc device has no bound driver, so driver names the
+		// module that registered the node. A class that reads driver
+		// with no has() then matches nothing here instead of failing
+		// on a CEL error, though every selector should still guard the
+		// read: a module built into the kernel with no parameters has
+		// no /sys/module entry, and the device then has no driver.
+		if _, err := os.Stat(filepath.Join(sysRoot, "module", v.module)); v.module != "" && err == nil {
+			attrs["driver"] = kubernetes.AttrString(v.module)
 		}
 		shared := true
 		out = append(out, kubernetes.SliceDevice{

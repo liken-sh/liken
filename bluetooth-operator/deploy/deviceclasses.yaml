@@ -21,4 +21,5 @@ spec:
     - cel:
         expression: |
           device.driver == "liken.sh" &&
+          has(device.attributes["liken.sh"].driver) &&
           device.attributes["liken.sh"].driver == "btusb"

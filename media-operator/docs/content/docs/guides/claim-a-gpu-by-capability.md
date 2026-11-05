@@ -85,7 +85,9 @@ spec:
     - cel:
         expression: |
           device.driver == "media.liken.sh" &&
+          has(device.attributes["media.liken.sh"].decodeHEVCMain10) &&
           device.attributes["media.liken.sh"].decodeHEVCMain10 &&
+          has(device.attributes["media.liken.sh"].scale10bit) &&
           device.attributes["media.liken.sh"].scale10bit
 ```
 
