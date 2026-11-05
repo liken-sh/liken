@@ -93,6 +93,8 @@ func TestADeleteRemovesOnlyThatCenteringFrame(t *testing.T) {
 		{PathCentering + "0f3a", http.StatusNoContent},
 		{PathCentering + "0f3a", http.StatusNotFound},
 		{PathCentering + "..", http.StatusBadRequest},
+		{PathCentering + "../_centering/1b2c", http.StatusBadRequest},
+		{PathCentering + ".", http.StatusBadRequest},
 		{PathCentering + "*", http.StatusBadRequest},
 		{PathCentering, http.StatusBadRequest},
 	}

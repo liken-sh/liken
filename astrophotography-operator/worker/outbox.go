@@ -45,9 +45,13 @@ func (e Extractor) State() (OutboxAnswer, error) {
 }
 
 // RemoveCentering deletes the centering frame of one FRAMEID from every
-// camera's and reservation's directory that holds it.
+// camera's and reservation's directory that holds it. A FRAMEID is one
+// local file name: filepath.IsLocal refuses an empty name, "..", and
+// an absolute path, and the name must be its own base, so it holds no
+// separator. It must also hold no pattern of filepath.Glob, and no
+// backslash, which Glob reads as an escape.
 func (e Extractor) RemoveCentering(frameID string) error {
-	if frameID == "" || frameID == "." || frameID == ".." || strings.ContainsAny(frameID, `/\*?[`) {
+	if !filepath.IsLocal(frameID) || filepath.Base(frameID) != frameID || frameID == "." || strings.ContainsAny(frameID, `\*?[`) {
 		return fmt.Errorf("%w: %q is not a FRAMEID", ErrBadRequest, frameID)
 	}
 	matches, _ := filepath.Glob(filepath.Join(e.Outbox, "*", "*", outbox.Centering, frameID+outbox.Extension))
