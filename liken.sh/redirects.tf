@@ -283,30 +283,29 @@ resource "linode_instance_config" "redirects" {
   }
 }
 
-# The wildcard records send every subdomain of liken.sh to the host.
-# In DNS, a name with a record of its own never matches a wildcard, so
-# the apex, www, releases, log, and the verification records keep
-# their answers, and a name in redirect_names must have no record of
-# its own. A name with no record and no entry in redirect_names
-# reaches the host too. It gets a 404 over plain HTTP, and its TLS
-# handshake fails over HTTPS, because Caddy has no certificate for it.
+# The cluster that runs redirects/ answers the manuals' names. Its
+# address is a Linode reserved IPv4 address, which stays the same when
+# the cluster's machine is replaced. The cluster has no reserved IPv6
+# address, so the names have no AAAA record.
+variable "redirects_ipv4" {
+  description = "The public IPv4 address of the cluster that runs liken.sh/redirects"
+  type        = string
+  default     = "172.104.31.162"
+}
 
-# The instance has one IPv4 address, its public one, because it has no
-# private interface. one() fails the plan if the set ever holds a
-# second address.
+# The wildcard record sends every subdomain of liken.sh to the
+# cluster. In DNS, a name with a record of its own never matches a
+# wildcard, so the apex, www, releases, log, and the verification
+# records keep their answers, and a manual's name must have no record
+# of its own. A name that the cluster's Ingress does not list gets a
+# 404 over plain HTTP, and the cluster's default certificate over
+# HTTPS.
 
 resource "linode_domain_record" "redirects_a" {
   domain_id   = linode_domain.liken_sh.id
   name        = "*"
   record_type = "A"
-  target      = one(linode_instance.redirects.ipv4)
-}
-
-resource "linode_domain_record" "redirects_aaaa" {
-  domain_id   = linode_domain.liken_sh.id
-  name        = "*"
-  record_type = "AAAA"
-  target      = split("/", linode_instance.redirects.ipv6)[0]
+  target      = var.redirects_ipv4
 }
 
 # The instance's ID and addresses, for the checks and the reboot in
