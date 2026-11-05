@@ -15,10 +15,14 @@
 # commit e4f99a8554 reserves the page, so the kernel never writes it.
 # liken/plans/88-disruptions.md records the hang and the evidence.
 #
-# The pin is a Debian package version (firmware/VERSION). The package
-# leaves Debian's pool when a newer build replaces it, so this fetch
+# The pin is a Debian package version (firmware/VERSION). The fetch
+# reads the package from Debian's pool while sid holds it. The package
+# leaves the pool when a newer build replaces it, so then the fetch
 # reads it from snapshot.debian.org, which keeps every package Debian
-# ever published. The digest below is the SHA256 of the package that
+# ever published. The pool comes first because the snapshot's servers
+# can stay down for days, and a fetch that needs them fails the OS's
+# build and its release, which run the UEFI smoke drill on this
+# firmware. The digest below is the SHA256 of the package that
 # latest.sh --bump downloaded and checked through sid's signed
 # InRelease file and its Packages index, and the fetch fails with an
 # error when the download disagrees.
@@ -48,12 +52,17 @@ cache="$here/cache"
 deb="$cache/ovmf-generic_${version}_all.deb"
 out="$here/dist/$version"
 
-if ! digest_matches "$digest" "$deb"; then
+encoded="${version//+/%2B}"
+# ovmf-generic is a binary of the source package edk2, so the pool
+# keeps it under pool/main/e/edk2/. fetch_verified fails the subshell
+# alone when the pool has no such file, and the snapshot is the next
+# source. Either source must give the bytes of the pinned SHA256.
+if ! digest_matches "$digest" "$deb" &&
+    ! (fetch_verified "https://deb.debian.org/debian/pool/main/e/edk2/ovmf-generic_${encoded}_all.deb" "$digest" "$deb"); then
     # snapshot.debian.org names each file by its SHA1, and answers the
     # SHA1 of a package version from its metadata service. The SHA1
     # only finds the file; the pinned SHA256 decides whether its bytes
     # are good.
-    encoded="${version//+/%2B}"
     sha1="$(fetch_text "https://snapshot.debian.org/mr/binary/ovmf-generic/$encoded/binfiles" |
         python3 -c 'import json, sys; print(json.load(sys.stdin)["result"][0]["hash"])')"
     fetch_verified "https://snapshot.debian.org/file/$sha1" "$digest" "$deb"
