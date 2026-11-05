@@ -1,0 +1,126 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redirects
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redirects
+  template:
+    metadata:
+      labels:
+        app: redirects
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: caddy
+          # The official Caddy image, from Amazon ECR Public's copy of
+          # Docker's official images, because Docker Hub limits
+          # anonymous pulls for each address. The digest is the same as
+          # the digest of Docker Hub's `library/caddy:2.11.4`.
+          image: public.ecr.aws/docker/library/caddy:2.11.4@sha256:0c994536bddb66445885237f1a5dcc1916bccea922661c76b4e9fc24061f9b52
+          args: [caddy, run, --config, /etc/caddy/Caddyfile]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            tcpSocket:
+              port: http
+          env:
+            # Caddy writes nothing here with this Caddyfile, but it
+            # makes these directories at start, and the root filesystem
+            # is read-only.
+            - name: XDG_DATA_HOME
+              value: /tmp/data
+            - name: XDG_CONFIG_HOME
+              value: /tmp/config
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: caddyfile
+              mountPath: /etc/caddy
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: caddyfile
+          configMap:
+            name: redirects-caddyfile
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redirects
+spec:
+  selector:
+    app: redirects
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# The names that redirect. Each one is an operator's API group or a CSI
+# driver's name, and the first label is the section of `liken.sh` that
+# holds its manual. The ingress controller routes only these names to
+# Caddy, so a request for any other name does not reach it.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: redirects
+spec:
+  tls:
+    - secretName: redirects-tls
+      hosts:
+        - audio.liken.sh
+        - bluetooth.liken.sh
+        - display.liken.sh
+        - equipment.liken.sh
+        - git.liken.sh
+        - library.liken.sh
+        - media.liken.sh
+        - people.liken.sh
+        - per-node.liken.sh
+  rules:
+    - host: audio.liken.sh
+      http: &caddy
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: redirects
+                port:
+                  name: http
+    - host: bluetooth.liken.sh
+      http: *caddy
+    - host: display.liken.sh
+      http: *caddy
+    - host: equipment.liken.sh
+      http: *caddy
+    - host: git.liken.sh
+      http: *caddy
+    - host: library.liken.sh
+      http: *caddy
+    - host: media.liken.sh
+      http: *caddy
+    - host: people.liken.sh
+      http: *caddy
+    - host: per-node.liken.sh
+      http: *caddy

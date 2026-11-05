@@ -73,6 +73,17 @@ TLS-ALPN-01, so the host holds no DNS token. Plain HTTP gets the same
 any other name gets a 404. A firewall passes TCP ports 80 and 443 and
 ICMP, and drops everything else.
 
+### The redirects in a cluster
+
+`redirects/` is the same service as a kustomize base that a
+Kubernetes cluster applies remotely, for example with a Flux
+`GitRepository` on this repository and a `Kustomization` with the path
+`./liken.sh/redirects`. Caddy answers plain HTTP behind the cluster's
+ingress controller, which ends TLS, so the cluster supplies the
+certificate for the `redirects-tls` `Secret`. The `Ingress` lists the
+names, and a new name needs an entry there and in `redirect_names`
+until the DNS records point at the cluster.
+
 ### What replaces the host
 
 A change to `flatcar.mk`, `redirects.bu`, the `Caddyfile`, or a
