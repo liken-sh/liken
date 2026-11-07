@@ -189,7 +189,7 @@ exactly one `Catalog` in the namespace before the first `Library`. A
     spec:
       storage: {}
 
-An empty `storage` provisions a `1Gi` claim on the default class.
+An empty `storage` provisions a `2Gi` claim on the default class.
 [Catalog](https://liken.sh/library/docs/reference/catalogs/) describes every field, and
 [The catalog](https://liken.sh/library/docs/guides/catalog/) describes what the pod it creates
 does.

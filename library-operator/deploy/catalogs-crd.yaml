@@ -69,10 +69,14 @@ spec:
                   properties:
                     size:
                       type: string
-                      default: 1Gi
+                      default: 2Gi
                       description: >-
-                        The size of each agent's catalog volume. Small
-                        by default.
+                        The size of each agent's catalog volume. A
+                        catalog of 1,500 films and 200 series is about
+                        850 MB at rest, and a copy's first sync reaches
+                        about one and a half times that before
+                        Corrosion returns the pages it staged the
+                        changes in.
                     storageClassName:
                       type: string
                       minLength: 1

@@ -50,6 +50,18 @@ func TestTheSchemaTakesACopyCountForBothStores(t *testing.T) {
 	}
 }
 
+// The size the API server writes into a Catalog that names none is the
+// size the operator gives a claim when the field is empty, so a Catalog
+// written before the default existed gets the same claims as a new one.
+func TestTheSchemaDefaultsTheSizeTheOperatorProvisions(t *testing.T) {
+	size := schemaField(t, catalogSchema(t), "schema", "openAPIV3Schema", "properties",
+		"spec", "properties", "storage", "properties", "size").(map[string]any)
+
+	if size["default"] != catalogStorageSize(&NamespaceCatalog{}) {
+		t.Errorf("schema default = %v, operator default = %v", size["default"], catalogStorageSize(&NamespaceCatalog{}))
+	}
+}
+
 // The count the API server defaults is the count the operator stands,
 // and a Catalog that names one of its own stands that many.
 func TestTheOperatorStandsTheCopyCountTheSchemaAdmits(t *testing.T) {

@@ -27,7 +27,7 @@ cluster's members use to find one another:
       namespace: media
     spec:
       storage:
-        size: 1Gi
+        size: 2Gi
         storageClassName: local-path
       screens:
         storageClassName: local-path
@@ -35,18 +35,34 @@ cluster's members use to find one another:
           size: 2Gi
 
 Every member holds the whole namespace's catalog, because the cluster
-gossips every row to every peer. `spec.storage.size` sets the size of
+gossips every row to every peer. A write reaches the members by
+broadcast as it happens, and each member applies a small write about a
+second after it arrives. A member that missed the broadcast receives
+the write at its next sync with its peers, which comes at most a minute
+later. `spec.storage.size` sets the size of
 new catalog claims for the durable replicas, each `Library`'s `Jobs`,
 and screens. `spec.storage.claimName` names an existing claim for the
 durable replicas in place of the one the operator provisions.
 [Catalog](/docs/reference/catalogs/) describes every field.
+
+Size the claim for about twice the catalog's size at rest. A catalog
+of 1,500 films, 200 series, and 8,000 episodes, with their files,
+streams, and people, is about 850 MB, and most of that is the clock
+rows Corrosion's cr-sqlite layer keeps for each column of each row. A
+copy that syncs onto an empty claim receives the whole catalog, holds
+each large change in a buffer table until every part of it has
+arrived, and then applies it. The pages the buffer used stay in the
+file until Corrosion's incremental vacuum returns them, a few minutes
+later, so the file reaches about one and a half times its size at rest.
+The default of `2Gi` holds that. `corro_db_size` on each agent's
+metrics port reports the file's size.
 
 The listing shows the storage size, requested replica count, and
 readiness:
 
     $ kubectl -n media get catalogs
     NAME    SIZE   COPIES   READY   AGE
-    media   1Gi    1        True    3d
+    media   2Gi    1        True    3d
 
 `Ready` follows the catalog replica pods and the storage configuration.
 A replica that cannot run keeps the catalog from becoming ready;

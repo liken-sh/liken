@@ -63,7 +63,7 @@ happens once:
       namespace: media
     spec:
       storage:
-        size: 1Gi
+        size: 2Gi
       screens:
         storageClassName: local-path
 

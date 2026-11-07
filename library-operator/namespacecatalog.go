@@ -202,10 +202,14 @@ type CatalogScreen struct {
 	Phase    string `json:"phase,omitempty"`
 }
 
-// The default catalog volume size. A catalog of movies and series is
-// megabytes, and a catalog of a photo library in the millions is low
-// gigabytes, so the default is small.
-const defaultCatalogSize = "1Gi"
+// The default catalog volume size. A catalog of 1,500 films and 200
+// series is about 850 MB at rest, and most of that is cr-sqlite's clock
+// rows, one for each column of each row. A copy that receives the whole
+// catalog, on its first sync, stages every change in Corrosion's buffer
+// table before it applies it, and holds those pages until Corrosion's
+// incremental vacuum returns them, so the file reaches about one and a
+// half times its size at rest. Plan 87 has the measurements.
+const defaultCatalogSize = "2Gi"
 
 // catalogStorageSize resolves the size the agents take: the Catalog's own
 // value, or the small default when it names none.
