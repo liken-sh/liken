@@ -46,7 +46,7 @@ func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 		api.putBus(scannedBus("den", tvDevice, receiverDevice))
 		api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 		api.putReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
-		controller := newCECBusController(api.client)
+		controller := newCECBusController(api.client, testNamespace)
 		log := &logBuffer{}
 		controller.log = log
 		controller.buses = snapshot(t, api, cecBusesPath)

@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -55,5 +56,43 @@ func TestTheDaemonSetStaysOffANodeLabeledNone(t *testing.T) {
 	if len(terms) != 1 || len(terms[0].MatchExpressions) != 1 ||
 		!equality.Semantic.DeepEqual(terms[0].MatchExpressions[0], want) {
 		t.Errorf("the node affinity is %+v, want one term that holds only %+v", terms, want)
+	}
+}
+
+// The pod watch selects the DaemonSet's pods by their label, and the
+// probes reach the listener the DaemonSet names, so the manifest and
+// the code must agree.
+func TestTheDaemonSetMatchesThePodWatchAndTheProbe(t *testing.T) {
+	t.Parallel()
+	daemonSet := daemonSetIn(t, "deploy/cec.yaml")
+	key, value, _ := strings.Cut(cecPodSelector, "=")
+	mustMatch(t, daemonSet.Spec.Template.Labels[key], value)
+	container := daemonSet.Spec.Template.Spec.Containers[0]
+	environment := map[string]corev1.EnvVar{}
+	for _, variable := range container.Env {
+		environment[variable.Name] = variable
+	}
+	mustMatch(t, environment[cecProbeVariable].Value, ":9200")
+	mustMatch(t, environment[podNamespaceVariable].ValueFrom.FieldRef.FieldPath, "metadata.namespace")
+	for _, probe := range []*corev1.Probe{container.ReadinessProbe, container.LivenessProbe} {
+		mustMatch(t, probe.HTTPGet.Path, "/healthz")
+		mustMatch(t, probe.HTTPGet.Port.String(), container.Ports[0].Name)
+		if time.Duration(probe.TimeoutSeconds)*time.Second <= cecProbeWait {
+			t.Errorf("a probe waits %ds, not longer than the handler's %s", probe.TimeoutSeconds, cecProbeWait)
+		}
+	}
+	window := func(probe *corev1.Probe) time.Duration {
+		return time.Duration(probe.PeriodSeconds*probe.FailureThreshold) * time.Second
+	}
+	// A new pod's entry stays current for the readiness window, the
+	// time a Ready pod whose loop stops answering takes to lose
+	// readiness. The window covers one 30-second request to the API
+	// server and a join scan, and the liveness window is longer still.
+	mustMatch(t, window(container.ReadinessProbe), cecStartupGrace)
+	if window(container.ReadinessProbe) < time.Minute {
+		t.Errorf("the readiness window is %s, shorter than a request and a scan", window(container.ReadinessProbe))
+	}
+	if window(container.LivenessProbe) < 2*window(container.ReadinessProbe) {
+		t.Errorf("the liveness window is %s, not clearly longer than the readiness window %s", window(container.LivenessProbe), window(container.ReadinessProbe))
 	}
 }

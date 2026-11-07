@@ -73,7 +73,7 @@ func readTelevisions(c *Client, held *watchStore) (*TelevisionList, error) {
 // first. A cluster without the Television definition has no
 // Television, and the watch holds none until the definition arrives.
 func watchTelevisions(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
-	watchCollection(ctx, client, televisionResource, "", apierrors.IsNotFound, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
+	watchCollection(ctx, client, informer.Source{Resource: televisionResource}, apierrors.IsNotFound, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
 }
 
 // applyTelevision sends one apply body under one field manager. force

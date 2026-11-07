@@ -48,8 +48,11 @@ func (n *cecNode) pass(ctx context.Context) error {
 	if bus == nil {
 		return n.idle()
 	}
+	recheck := reportedEntries(bus, n.liveness()).recheck
 	n.mutex.Lock()
 	n.bus = bus.Metadata.Name
+	n.stored = storedEntry(bus, n.machine)
+	n.recheck = recheck
 	n.mutex.Unlock()
 	adapter, _ := bus.Spec.names(n.machine)
 	want := n.desired(bus.Spec, adapter.Display)
@@ -163,7 +166,7 @@ func (n *cecNode) leave(bus string) {
 	}
 	n.mutex.Lock()
 	n.bus = ""
-	n.written = nil
+	n.stored = nil
 	n.mutex.Unlock()
 }
 
@@ -221,4 +224,16 @@ func (n *cecNode) logDeclared(declared []*CECBus) {
 		fmt.Fprintf(n.log, "%d CECBuses name machine %s: %s; the adapter follows %s, the first by name\n",
 			len(names), n.machine, set, declared[0].Metadata.Name)
 	}
+}
+
+// storedEntry answers a machine's entry in the bus, and nil when the
+// bus holds none.
+func storedEntry(bus *CECBus, machine string) *CECAdapterStatus {
+	for index := range bus.Status.Adapters {
+		if bus.Status.Adapters[index].Machine == machine {
+			entry := bus.Status.Adapters[index]
+			return &entry
+		}
+	}
+	return nil
 }

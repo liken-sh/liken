@@ -150,7 +150,7 @@ spec:
                       reportedAt:
                         type: string
                         format: date-time
-                        description: "When the node workload last wrote this entry. It writes the entry every 30 seconds even when nothing changed, and the conditions treat an entry older than 90 seconds as stale, because its pod stopped without a word. The write goes to the API server, and the adapter sends nothing on the CEC wire for it."
+                        description: "When the node workload last wrote this entry. It writes the entry only when the entry changes, so this is the time of the last change. The age of the entry does not make it stale: the conditions treat an entry that is not Stopped as stale when no pod of the equipment-operator-cec DaemonSet runs on the entry's machine, when the pod there stopped being Ready after the entry was written, or when a new pod there is still not Ready 60 seconds after its first entry."
                       devices:
                         type: array
                         description: "The devices this adapter found. In Control the adapter scans the bus once when it joins: it polls every logical address and asks each device that answers for its facts. After that it sends no question on a timer. It adds a device that it hears arrive, such as by the Report Physical Address a device broadcasts when it joins, and asks that device once for the facts its message left out. It keeps each fact current from the messages the devices send, and it removes a device only when a question to it goes unacknowledged. A device that leaves the bus in silence stays in the list until the adapter joins again. In Listen the adapter reports the devices it hears."

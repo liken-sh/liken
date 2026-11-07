@@ -1081,7 +1081,7 @@ func serve(ctx context.Context, client *Client, config settings, readings *metri
 	}
 	operator.networkDiscoveryOff = config.networkDiscoveryOff
 	var started sync.WaitGroup
-	buses := newCECBusController(client)
+	buses := newCECBusController(client, config.namespace)
 	buses.recorder = recorder
 	buses.sharedReceivers = true
 	// The two loops share the Receiver and Television stores, so the

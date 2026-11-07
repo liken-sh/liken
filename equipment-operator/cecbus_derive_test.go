@@ -1,7 +1,8 @@
 package main
 
 // The Deployment's derivation for one CECBus: the merged device list
-// and the four conditions, from the adapters' entries alone.
+// and the four conditions, from the adapters' entries and the pods of
+// the node workload.
 
 import (
 	"testing"
@@ -43,8 +44,8 @@ func busWith(mode CECMode, machines []string, entries ...CECAdapterStatus) *CECB
 	for _, machine := range machines {
 		bus.Spec.Adapters = append(bus.Spec.Adapters, CECBusAdapter{Machine: machine, Display: "acm-0001-receiver"})
 	}
-	// Every entry reports at derivedAt unless a case states another
-	// time, so only a case about staleness sees a stale entry.
+	// Every entry reports at derivedAt, so a message that names the
+	// time of the last write is the same in every case.
 	for index := range entries {
 		if entries[index].ReportedAt == "" {
 			entries[index].ReportedAt = timestamp(derivedAt)
@@ -54,11 +55,26 @@ func busWith(mode CECMode, machines []string, entries ...CECAdapterStatus) *CECB
 	return bus
 }
 
-// reportedAt sets when an entry last reported.
-func reportedAt(entry CECAdapterStatus, at time.Time) CECAdapterStatus {
-	entry.ReportedAt = timestamp(at)
-	return entry
+// podsAt is what the pods show at a time, by machine.
+func podsAt(now time.Time, machines map[string]podState) podLiveness {
+	return podLiveness{machines: machines, now: now}
 }
+
+// The states of one machine's pods, against the entries busWith writes
+// at derivedAt.
+var (
+	// ready is a Ready pod.
+	ready = podState{ready: true}
+	// lost is a pod that stopped being Ready a second after the write.
+	lost = podState{since: derivedAt.Add(time.Second)}
+	// starting is a pod that has not been Ready since a second before
+	// the write, as a new pod is when its first entry lands.
+	starting = podState{since: derivedAt.Add(-time.Second)}
+)
+
+// allReady is a Ready pod of the node workload on each machine the
+// cases name, so only a case about staleness sees a stale entry.
+var allReady = podsAt(derivedAt, map[string]podState{"node-1": ready, "node-2": ready})
 
 // stopped is an entry whose node workload stopped and released the
 // adapter.
@@ -108,16 +124,8 @@ func TestTheConditionsSayWhatTheAdaptersDid(t *testing.T) {
 		{"an adapter that has not scanned is not judged", busWith(CECControl, two,
 			scannedEntry("node-1", 4, tvDevice),
 			CECAdapterStatus{Machine: "node-2", State: AdapterJoined, PhysicalAddress: "1.4.0.0", LogicalAddress: logical(8), OSDName: "den"}), conditionCoherent, ConditionTrue, reasonOneAdapter},
-		{"a stale entry has not joined", busWith(CECControl, one, reportedAt(scannedEntry("node-1", 4, tvDevice), derivedAt.Add(-2*time.Minute))), conditionJoined, ConditionUnknown, reasonStale},
-		{"a stale entry has no address", busWith(CECControl, one, reportedAt(scannedEntry("node-1", 4, tvDevice), derivedAt.Add(-2*time.Minute))), conditionAddressKnown, ConditionUnknown, reasonStale},
-		{"a stale entry has not scanned", busWith(CECControl, one, reportedAt(scannedEntry("node-1", 4, tvDevice), derivedAt.Add(-2*time.Minute))), conditionScanned, ConditionUnknown, reasonStale},
-		{"a stale entry sees no one", busWith(CECControl, two,
-			scannedEntry("node-1", 4, adapterSeen("node-2", 8)),
-			reportedAt(scannedEntry("node-2", 8, adapterSeen("node-1", 4)), derivedAt.Add(-2*time.Minute))), conditionCoherent, ConditionUnknown, reasonStale},
-		{"an entry with no report time is stale", busWith(CECControl, one, reportedAt(scannedEntry("node-1", 4, tvDevice), time.Time{})), conditionJoined, ConditionUnknown, reasonStale},
 		{"a stopped adapter has not joined", busWith(CECControl, one, stopped("node-1")), conditionJoined, ConditionFalse, reasonStopped},
 		{"a stopped adapter has not scanned", busWith(CECControl, one, stopped("node-1")), conditionScanned, ConditionFalse, reasonStopped},
-		{"a recent entry is not stale", busWith(CECControl, one, reportedAt(scannedEntry("node-1", 4, tvDevice), derivedAt.Add(-time.Minute))), conditionJoined, ConditionTrue, conditionJoined},
 		{"a bus in Listen joins nothing", busWith(CECListen, one, CECAdapterStatus{Machine: "node-1", State: AdapterListening}), conditionJoined, ConditionFalse, reasonListening},
 		{"a bus in Listen announces no address", busWith(CECListen, one, CECAdapterStatus{Machine: "node-1", State: AdapterListening}), conditionAddressKnown, ConditionFalse, reasonListening},
 		{"a bus in Listen cannot judge coherence", busWith(CECListen, one), conditionCoherent, ConditionUnknown, reasonListening},
@@ -126,7 +134,7 @@ func TestTheConditionsSayWhatTheAdaptersDid(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, conditions := deriveCECBus(c.bus, derivedAt)
+			_, conditions := deriveCECBus(c.bus, allReady, derivedAt)
 
 			got := conditionOf(conditions, c.kind)
 			if got.Status != c.status || got.Reason != c.reason || got.Message == "" || got.ObservedGeneration != 3 {
@@ -151,14 +159,12 @@ func TestTheConditionMessagesNameTheAdapterAndTheCause(t *testing.T) {
 			conditionScanned, "no device answered the polls of the adapter on node-1; the HDMI cable at the adapter's output may not carry the CEC wire"},
 		{"two wires", busWith(CECControl, []string{"node-1", "node-2"}, scannedEntry("node-1", 4, tvDevice), scannedEntry("node-2", 4, tvDevice)),
 			conditionCoherent, `the adapter on node-1 does not see the adapter on node-2 at physical address 1.4.0.0; the two adapters may be on different wires`},
-		{"a stale entry", busWith(CECControl, []string{"node-1"}, reportedAt(scannedEntry("node-1", 4, tvDevice), derivedAt.Add(-2*time.Minute))),
-			conditionJoined, "the node workload on node-1 last reported at 2026-09-26T11:58:00Z, more than 1m30s ago; it may have stopped"},
 		{"a stopped adapter", busWith(CECControl, []string{"node-1"}, stopped("node-1")),
 			conditionJoined, "the node workload on node-1 stopped and released the adapter: the node workload received terminated"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, conditions := deriveCECBus(c.bus, derivedAt)
+			_, conditions := deriveCECBus(c.bus, allReady, derivedAt)
 
 			mustMatch(t, conditionOf(conditions, c.kind).Message, c.message)
 		})
@@ -168,10 +174,10 @@ func TestTheConditionMessagesNameTheAdapterAndTheCause(t *testing.T) {
 func TestAConditionKeepsItsTransitionTimeWhileItHolds(t *testing.T) {
 	t.Parallel()
 	bus := busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice))
-	_, first := deriveCECBus(bus, derivedAt)
+	_, first := deriveCECBus(bus, allReady, derivedAt)
 	bus.Status.Conditions = first
 
-	_, later := deriveCECBus(bus, derivedAt.Add(time.Minute))
+	_, later := deriveCECBus(bus, allReady, derivedAt.Add(time.Minute))
 
 	mustDeepEqual(t, later, first)
 }
@@ -200,10 +206,6 @@ func TestTheDevicesMergeAcrossAdapters(t *testing.T) {
 		{"a device with no address comes last", []CECAdapterStatus{
 			scannedEntry("node-1", 4, CECDevice{LogicalAddress: 1, Type: "Recording"}, receiverDevice),
 		}, []CECDevice{receiverDevice, {LogicalAddress: 1, Type: "Recording"}}},
-		{"a stale entry's devices are left out", []CECAdapterStatus{
-			scannedEntry("node-1", 4, tvDevice),
-			reportedAt(scannedEntry("node-2", 8, receiverDevice), derivedAt.Add(-2*time.Minute)),
-		}, []CECDevice{tvDevice}},
 		// The System Audio Mode carries the time an adapter read or heard
 		// it, so the newer report wins whichever adapter made it.
 		{"the newer System Audio Mode wins", []CECAdapterStatus{
@@ -225,9 +227,143 @@ func TestTheDevicesMergeAcrossAdapters(t *testing.T) {
 				machines = append(machines, entry.Machine)
 			}
 
-			devices, _ := deriveCECBus(busWith(CECControl, machines, c.entries...), derivedAt)
+			devices, _ := deriveCECBus(busWith(CECControl, machines, c.entries...), allReady, derivedAt)
 
 			mustDeepEqual(t, devices, c.want)
 		})
 	}
+}
+
+// An entry that is not Stopped describes its adapter while a pod of the
+// node workload on its machine is Ready, and while a pod there starts:
+// one that has not become Ready since the write, until cecStartupGrace
+// after it. A Stopped entry is the node workload's own last word, and
+// wins over what the pods show.
+func TestAnEntryIsCurrentWhileItsMachinesPodIsReadyOrStarting(t *testing.T) {
+	t.Parallel()
+	one := []string{"node-1"}
+	two := []string{"node-1", "node-2"}
+	entry := scannedEntry("node-1", 4, tvDevice)
+	lostOne := podsAt(derivedAt, map[string]podState{"node-1": lost, "node-2": ready})
+	startingOne := podsAt(derivedAt.Add(cecStartupGrace-time.Second), map[string]podState{"node-1": starting})
+	pastGrace := podsAt(derivedAt.Add(cecStartupGrace), map[string]podState{"node-1": starting})
+	gone := podsAt(derivedAt, map[string]podState{"node-2": ready})
+	cases := []struct {
+		name   string
+		bus    *CECBus
+		live   podLiveness
+		kind   string
+		status ConditionStatus
+		reason string
+	}{
+		{"a Ready pod's entry joined", busWith(CECControl, one, entry), allReady, conditionJoined, ConditionTrue, conditionJoined},
+		{"a pod that lost readiness after the write has not joined", busWith(CECControl, one, entry), lostOne, conditionJoined, ConditionUnknown, reasonStale},
+		{"a pod that lost readiness has no address", busWith(CECControl, one, entry), lostOne, conditionAddressKnown, ConditionUnknown, reasonStale},
+		{"a pod that lost readiness has not scanned", busWith(CECControl, one, entry), lostOne, conditionScanned, ConditionUnknown, reasonStale},
+		{"a starting pod's fresh entry joined", busWith(CECControl, one, entry), startingOne, conditionJoined, ConditionTrue, conditionJoined},
+		{"a starting pod past the grace has not joined", busWith(CECControl, one, entry), pastGrace, conditionJoined, ConditionUnknown, reasonStale},
+		{"no pod has not joined", busWith(CECControl, one, entry), gone, conditionJoined, ConditionUnknown, reasonStale},
+		{"a stale entry sees no one", busWith(CECControl, two,
+			scannedEntry("node-1", 4, adapterSeen("node-2", 8)),
+			scannedEntry("node-2", 8, adapterSeen("node-1", 4))), lostOne, conditionCoherent, ConditionUnknown, reasonStale},
+		{"a Stopped entry wins over a Ready pod", busWith(CECControl, one, stopped("node-1")), allReady, conditionJoined, ConditionFalse, reasonStopped},
+		{"a Stopped entry wins over no pod", busWith(CECControl, one, stopped("node-1")), gone, conditionJoined, ConditionFalse, reasonStopped},
+		{"unread pods judge no entry", busWith(CECControl, one, entry), podLiveness{}, conditionJoined, ConditionTrue, conditionJoined},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, conditions := deriveCECBus(c.bus, c.live, derivedAt)
+
+			got := conditionOf(conditions, c.kind)
+			if got.Status != c.status || got.Reason != c.reason {
+				t.Errorf("%s = %+v, want %s %s", c.kind, got, c.status, c.reason)
+			}
+		})
+	}
+}
+
+// The stale verdict says what the pods showed.
+func TestTheStaleMessageSaysWhatThePodsShow(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		live    podLiveness
+		message string
+	}{
+		{"a pod that lost readiness", podsAt(derivedAt, map[string]podState{"node-1": lost}),
+			"the equipment-operator-cec pod on machine node-1 stopped being Ready at 2026-09-26T12:00:01Z, after its entry was last written at 2026-09-26T12:00:00Z, so the entry may not describe the adapter"},
+		{"a pod past the grace", podsAt(derivedAt.Add(cecStartupGrace), map[string]podState{"node-1": starting}),
+			"the equipment-operator-cec pod on machine node-1 has not been Ready in the 1m0s since its entry was written at 2026-09-26T12:00:00Z, so the entry may not describe the adapter"},
+		{"no pod", podsAt(derivedAt, map[string]podState{}),
+			"no equipment-operator-cec pod runs on machine node-1, so its entry, last written at 2026-09-26T12:00:00Z, may not describe the adapter"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, conditions := deriveCECBus(busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice)), c.live, derivedAt)
+
+			mustMatch(t, conditionOf(conditions, conditionJoined).Message, c.message)
+		})
+	}
+}
+
+// An entry in a starting pod's grace names the end of the grace, so
+// the loop passes again then. Every other entry names no time.
+func TestAStartingPodsEntryNamesTheEndOfItsGrace(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		live    podLiveness
+		recheck time.Time
+	}{
+		{"a starting pod", podsAt(derivedAt, map[string]podState{"node-1": starting, "node-2": ready}), derivedAt.Add(cecStartupGrace)},
+		{"Ready pods", allReady, time.Time{}},
+		{"a pod that lost readiness", podsAt(derivedAt, map[string]podState{"node-1": lost, "node-2": ready}), time.Time{}},
+		{"a starting pod past the grace", podsAt(derivedAt.Add(cecStartupGrace), map[string]podState{"node-1": starting, "node-2": ready}), time.Time{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bus := busWith(CECControl, []string{"node-1", "node-2"}, scannedEntry("node-1", 4), scannedEntry("node-2", 8))
+
+			mustMatch(t, reportedEntries(bus, c.live).recheck, c.recheck)
+		})
+	}
+}
+
+// A stale entry's devices describe the wire as it was, so the merged
+// list leaves them out.
+func TestAStaleEntrysDevicesAreLeftOut(t *testing.T) {
+	t.Parallel()
+	bus := busWith(CECControl, []string{"node-1", "node-2"}, scannedEntry("node-1", 4, tvDevice), scannedEntry("node-2", 8, receiverDevice))
+
+	devices, _ := deriveCECBus(bus, podsAt(derivedAt, map[string]podState{"node-1": ready, "node-2": lost}), derivedAt)
+
+	mustDeepEqual(t, devices, []CECDevice{tvDevice})
+}
+
+// One Ready pod on a machine is enough, as during a rollout that runs
+// the old pod and the new one there for a moment. Of the pods that are
+// not Ready, the latest change of the Ready condition counts.
+func TestOneReadyPodOnAMachineIsEnough(t *testing.T) {
+	t.Parallel()
+	pod := func(node string, ready bool, changed time.Time) cecPod {
+		status := "False"
+		if ready {
+			status = "True"
+		}
+		var made cecPod
+		made.Spec.NodeName = node
+		made.Status.Conditions = []podCondition{{Type: "Ready", Status: status, LastTransitionTime: timestamp(changed)}}
+		return made
+	}
+
+	live := livenessOf([]cecPod{
+		pod("node-1", false, derivedAt), pod("node-1", true, derivedAt),
+		pod("node-2", false, derivedAt), pod("node-2", false, derivedAt.Add(time.Minute)),
+		pod("", true, derivedAt),
+	}, derivedAt)
+
+	mustDeepEqual(t, live, podsAt(derivedAt, map[string]podState{
+		"node-1": {ready: true, since: derivedAt},
+		"node-2": {since: derivedAt.Add(time.Minute)},
+	}))
 }

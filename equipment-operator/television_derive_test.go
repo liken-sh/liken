@@ -26,7 +26,7 @@ func tvOn(bus string) *Television {
 // derive derives the Television tvOn makes, which is in charge of its
 // bus.
 func derive(bus *CECBus, displays []Display, receivers []Receiver) televisionDerived {
-	return deriveTelevision(tvOn("den"), "den", bus, displays, receivers, derivedAt)
+	return deriveTelevision(tvOn("den"), "den", bus, displays, receivers, allReady, derivedAt)
 }
 
 func TestReachableSaysWhetherTheTVAnswers(t *testing.T) {
@@ -35,7 +35,7 @@ func TestReachableSaysWhetherTheTVAnswers(t *testing.T) {
 	silent.Power = ""
 	stale := derivedBus(CECControl, ConditionUnknown)
 	stale.Status.Conditions[0].Reason = reasonStale
-	stale.Status.Conditions[0].Message = "the node workload on node-1 last reported at 2026-09-26T11:00:00Z, more than 1m30s ago; it may have stopped"
+	stale.Status.Conditions[0].Message = "the equipment-operator-cec pod on machine node-1 is not Ready, so its entry, last written at 2026-09-26T11:00:00Z, may not describe the adapter"
 	cases := []struct {
 		name    string
 		bus     *CECBus
@@ -52,7 +52,7 @@ func TestReachableSaysWhetherTheTVAnswers(t *testing.T) {
 		{"a bus that has not scanned", derivedBus(CECControl, ConditionUnknown), ConditionUnknown, reasonNotScanned,
 			"CECBus den has not finished a scan: the adapter on node-1 has not finished a scan"},
 		{"a bus whose adapter entry is stale", stale, ConditionUnknown, reasonStale,
-			"CECBus den: the node workload on node-1 last reported at 2026-09-26T11:00:00Z, more than 1m30s ago; it may have stopped"},
+			"CECBus den: the equipment-operator-cec pod on machine node-1 is not Ready, so its entry, last written at 2026-09-26T11:00:00Z, may not describe the adapter"},
 		{"a bus in Listen", derivedBus(CECListen, ConditionFalse, tvDevice), ConditionUnknown, reasonListening,
 			"CECBus den is in Listen, so no adapter asks the TV for its power"},
 		{"no bus", nil, ConditionFalse, reasonNoBus, "CECBus den does not exist"},
@@ -115,7 +115,7 @@ func TestInChargeNamesTheTelevisionThatSpeaksForTheBus(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := deriveTelevision(tvOn("den"), c.chosen, derivedBus(CECControl, ConditionTrue, tvDevice), nil, nil, derivedAt).inCharge
+			got := deriveTelevision(tvOn("den"), c.chosen, derivedBus(CECControl, ConditionTrue, tvDevice), nil, nil, allReady, derivedAt).inCharge
 
 			if got.Status != c.status || got.Reason != c.reason || got.Message != c.message {
 				t.Errorf("got %+v", got)
@@ -204,7 +204,7 @@ func TestReachableKeepsItsTransitionTime(t *testing.T) {
 	earlier := time.Date(2026, 9, 26, 11, 0, 0, 0, time.UTC)
 	television.Status.Conditions = []Condition{{Type: conditionReachable, Status: ConditionTrue, LastTransitionTime: earlier}}
 
-	derived := deriveTelevision(television, "den", derivedBus(CECControl, ConditionTrue, tvDevice), nil, nil, derivedAt)
+	derived := deriveTelevision(television, "den", derivedBus(CECControl, ConditionTrue, tvDevice), nil, nil, allReady, derivedAt)
 
 	mustMatch(t, derived.reachable.LastTransitionTime, earlier)
 }

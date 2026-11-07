@@ -32,6 +32,10 @@ type cecAPI struct {
 	displays    map[string]*Display
 	televisions map[string]*Television
 	receivers   map[string]Receiver
+	// pods holds the node workload's pods a test declared, by name, and
+	// podsDeclared says a test declared them (cecpodapi_test.go).
+	pods         map[string]fakePod
+	podsDeclared bool
 	// owners names the field manager of each condition of each
 	// Television, by name and type, so an apply removes the conditions
 	// its manager owns and no longer states.
@@ -307,6 +311,8 @@ func (a *cecAPI) collection(path string) map[string]map[string]any {
 		for name, display := range a.displays {
 			objects[name] = display
 		}
+	case fakePodsPath:
+		objects = a.podObjects()
 	}
 	kind := fakeKinds[path]
 	fields := make(map[string]map[string]any, len(objects))
@@ -397,7 +403,7 @@ func (a *cecAPI) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	if a.serveTelevisionAPI(w, r) {
+	if a.servePodAPI(w, r) || a.serveTelevisionAPI(w, r) {
 		return
 	}
 	switch {

@@ -108,8 +108,10 @@ type CECAdapterStatus struct {
 	ActiveSource string `json:"activeSource,omitempty"`
 	Message      string `json:"message,omitempty"`
 	// ReportedAt is when the node workload last wrote the entry. It
-	// writes the entry on a steady interval even when nothing changed,
-	// so an old time means the pod stopped without a word.
+	// writes the entry only when the entry changes, so an old time is
+	// the time of the last change, not a sign that the pod stopped. The
+	// pod's Ready condition says whether the entry is current
+	// (cecpods.go).
 	ReportedAt string `json:"reportedAt,omitempty"`
 }
 

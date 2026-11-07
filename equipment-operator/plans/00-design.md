@@ -251,6 +251,8 @@ number. Each later plan has its own number in this directory:
   inputs, zones, and web setup. Not built.
 - [18](completed/18-system-audio-mode-on-the-wake.md), System Audio
   Mode on the wake.
+- [19](completed/19-an-entry-is-current-while-its-pod-is-ready.md), an
+  adapter's entry is current while its pod is `Ready`.
 
 [Plan 77](../../plans/completed/77-the-media-bus-stops-at-media-operator.md),
 at the top of the repository, moved the level, power, and input asks

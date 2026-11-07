@@ -56,15 +56,15 @@ func TestTheNodeListsAnAbsentKindOnlyAtItsStart(t *testing.T) {
 }
 
 // The Deployment's loop on a cluster without the Television definition
-// reads the Televisions from its store at each tick of its clock, and
-// sends no list of them.
+// reads the Televisions from its store at each pass, and sends no list
+// of them.
 func TestTheLoopListsAnAbsentKindOnlyAtItsStart(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
 		api.noTelevisionDefinition = true
 		api.putBus(*busWith(CECControl, []string{"node-1"}))
-		controller := newCECBusController(api.client)
+		controller := newCECBusController(api.client, testNamespace)
 		ctx, cancel := context.WithCancel(context.Background())
 		stopped := make(chan struct{})
 		go func() {
@@ -76,7 +76,10 @@ func TestTheLoopListsAnAbsentKindOnlyAtItsStart(t *testing.T) {
 		synctest.Wait()
 		before := api.readCountOf(televisionsPath)
 
-		time.Sleep(3 * cecBusClock)
+		for range 3 {
+			api.nudge()
+			synctest.Wait()
+		}
 
 		mustMatch(t, api.readCountOf(televisionsPath), before)
 	})

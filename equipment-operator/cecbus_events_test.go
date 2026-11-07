@@ -15,7 +15,7 @@ import (
 // startEventedBuses is the Deployment's CECBus loop at derivedAt, with
 // a recorder.
 func startEventedBuses(api *cecAPI, t *testing.T) *cecBusController {
-	controller := newCECBusController(api.client)
+	controller := newCECBusController(api.client, testNamespace)
 	controller.now = func() time.Time { return derivedAt }
 	controller.recorder = testRecorder(t, api.client)
 	return controller

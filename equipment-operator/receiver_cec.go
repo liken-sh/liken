@@ -127,6 +127,7 @@ func (c *cecBusController) passReceiverCEC(receivers []Receiver, buses map[strin
 		}
 		if err := ApplyReceiverCEC(c.client, receiver.Metadata.Name, next); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the status.cec of Receiver %s: %v\n", receiver.Metadata.Name, err)
+			c.retryLater()
 			continue
 		}
 		before := ""

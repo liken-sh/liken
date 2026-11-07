@@ -57,6 +57,9 @@ spec:
       maxUnavailable: 100%
   template:
     metadata:
+      # The Deployment and every pod of this DaemonSet watch the pods
+      # with this label, to tell whether an adapter's entry is current
+      # (cecpods.go).
       labels:
         app: equipment-operator-cec
     spec:
@@ -96,6 +99,54 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            # The namespace holds the pods of every node workload, which
+            # the pod watches to tell whether another adapter's entry is
+            # current.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CEC_PROBE_ADDRESS
+              value: ":9200"
+          ports:
+            - name: probe
+              containerPort: 9200
+          # Each probe asks the loop of the node workload to answer, and
+          # the handler waits two seconds for it (cecnode_probe.go). A
+          # pod that lost readiness after its last entry makes the entry
+          # stale, so the Deployment stops counting the adapter's report.
+          #
+          # The readiness probe runs every 20 seconds and fails after 3
+          # misses, so a loop that stops answering makes its entry stale
+          # after about 60 seconds. A pass can block the loop for longer
+          # than a few seconds and still be working: one request to the
+          # API server can take 30 seconds, and a change of mode waits
+          # for a join scan, which gives a silent address several
+          # one-second tries. 60 seconds covers one such request and a
+          # scan. The window is also cecStartupGrace in cecpods.go, the
+          # time a new pod's entry stays current before the pod is
+          # Ready, and a test keeps the two equal.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: probe
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # The liveness probe restarts the container after 5 misses 30
+          # seconds apart, about 150 seconds. That is clearly longer than
+          # the readiness probe, because a restart does not repair an API
+          # server that answers slowly, and a loop that waits on one
+          # should lose only its readiness. The start of the node
+          # workload lists the API server before the loop answers, and
+          # the window covers that list too.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probe
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 5
           securityContext:
             # One capability. The kernel lets a process open a CEC
             # adapter as a monitor only with CAP_NET_ADMIN, and Listen is

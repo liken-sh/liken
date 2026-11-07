@@ -629,7 +629,7 @@ func TestServeAnswersTheErrorWhenTheFirstListFails(t *testing.T) {
 		api := startFakeAPI(t)
 		api.breakTheList()
 
-		mustFail(t, serve(t.Context(), api.client, settings{dial: testNetwork.dial, listen: testNetwork.bind}, testMetrics(t)))
+		mustFail(t, serve(t.Context(), api.client, settings{namespace: testNamespace, dial: testNetwork.dial, listen: testNetwork.bind}, testMetrics(t)))
 	})
 }
 
@@ -645,7 +645,7 @@ func TestServeRunsTheLoopUntilItsContextEnds(t *testing.T) {
 		stopped := make(chan struct{})
 		go func() {
 			defer close(stopped)
-			mustSucceed(t, serve(ctx, api.client, settings{networkDiscoveryOff: true, dial: testNetwork.dial, listen: testNetwork.bind}, testMetrics(t)))
+			mustSucceed(t, serve(ctx, api.client, settings{namespace: testNamespace, networkDiscoveryOff: true, dial: testNetwork.dial, listen: testNetwork.bind}, testMetrics(t)))
 		}()
 
 		api.waitForStatus(t, connected)

@@ -160,7 +160,7 @@ func TestServeReturnsAfterTheRecordersLastWrite(t *testing.T) {
 		api.gateEvents()
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		config := settings{networkDiscoveryOff: true, dial: testNetwork.dial, listen: testNetwork.bind}
+		config := settings{namespace: testNamespace, networkDiscoveryOff: true, dial: testNetwork.dial, listen: testNetwork.bind}
 		returned := make(chan error, 1)
 		go func() { returned <- serve(ctx, api.client, config, testMetrics(t)) }()
 		api.waitForStatus(t, connected)
@@ -286,7 +286,7 @@ func TestAWaitingCopyDoesNothingUntilItLeads(t *testing.T) {
 		done := make(chan error, 1)
 		go func() {
 			_, err := waiting.actWhileLeading(ctx, func(client *Client) error {
-				return operateAsLeader(ctx, client, settings{metricsAddress: ":9260", dial: testNetwork.dial})
+				return operateAsLeader(ctx, client, settings{namespace: testNamespace, metricsAddress: ":9260", dial: testNetwork.dial})
 			})
 			done <- err
 		}()

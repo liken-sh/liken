@@ -184,7 +184,7 @@ func TestADisplayNameIsWhatControlNeedsFirst(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		_, device := usbAdapter(cecRoom())
-		node, err := newCECNode(startCECAPI(t).client, "node-1", device)
+		node, err := newCECNode(startCECAPI(t).client, testNamespace, "node-1", device)
 		mustSucceed(t, err)
 
 		want := node.desired(CECBusSpec{Mode: CECControl}, "")

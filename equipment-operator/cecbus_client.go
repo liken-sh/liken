@@ -57,7 +57,7 @@ func readCECBuses(c *Client, held *watchStore) (*CECBusList, error) {
 // workloads write, and a node workload reads the Deployment's. restarted
 // is called for each watch opened again after the first.
 func watchCECBuses(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
-	watchCollection(ctx, client, cecBusResource, "", nil, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
+	watchCollection(ctx, client, informer.Source{Resource: cecBusResource}, nil, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
 }
 
 // applyCECBus sends one apply body under one field manager. force
@@ -215,7 +215,7 @@ func readDisplay(c *Client, held *watchStore, name string) (*Display, error) {
 // definition arrives.
 func watchDisplays(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
 	displays := markHandler[Display, displayPlace]{what: "the Displays", wake: wake, mark: displayMark}
-	watchCollection(ctx, client, displayResource, "", apierrors.IsNotFound, displays.handler(), func() { poke(wake) }, restarted, held)
+	watchCollection(ctx, client, informer.Source{Resource: displayResource}, apierrors.IsNotFound, displays.handler(), func() { poke(wake) }, restarted, held)
 }
 
 // nodeDisplays answers the node workload's Display watch on one
@@ -231,7 +231,7 @@ func watchDisplays(ctx context.Context, client *Client, wake chan<- struct{}, re
 // runs.
 func nodeDisplays(machine string) func(context.Context, *Client, chan<- struct{}, func(), *watchStore) {
 	return func(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
-		watchCollection(ctx, client, displayResource, displayNodeSelector(machine), displaysUnselectable, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
+		watchCollection(ctx, client, informer.Source{Resource: displayResource, FieldSelector: displayNodeSelector(machine)}, displaysUnselectable, wakeOnEvery(wake), func() { poke(wake) }, restarted, held)
 	}
 }
 
@@ -266,7 +266,7 @@ func displayMark(display Display) displayPlace {
 // status write wakes nothing.
 func watchReceiverSpecs(ctx context.Context, client *Client, wake chan<- struct{}, restarted func(), held *watchStore) {
 	receivers := markHandler[Receiver, specMark]{what: "the Receivers", wake: wake, mark: receiverSpecMark}
-	watchCollection(ctx, client, receiverResource, "", nil, receivers.handler(), func() { poke(wake) }, restarted, held)
+	watchCollection(ctx, client, informer.Source{Resource: receiverResource}, nil, receivers.handler(), func() { poke(wake) }, restarted, held)
 }
 
 // specMark is an object's metadata.generation, which the API server

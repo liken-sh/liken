@@ -40,7 +40,7 @@ func (b *logBuffer) lines() []string {
 // test ends.
 func loggedNode(t *testing.T, api *cecAPI, device *cec.Device) *logBuffer {
 	t.Helper()
-	node, err := newCECNode(api.client, "node-1", device)
+	node, err := newCECNode(api.client, testNamespace, "node-1", device)
 	mustSucceed(t, err)
 	log := &logBuffer{}
 	node.log = log
@@ -73,8 +73,8 @@ func TestTheNodeLogsWhatTheAdapterHeldAndEachStateChange(t *testing.T) {
 		api.scanned(t, "node-1")
 		settled := len(log.lines())
 		before := api.writesOf("node-1")
-		time.Sleep(3*cecReportInterval + cecReportInterval/2)
-		mustMatch(t, api.writesOf("node-1"), before+3)
+		time.Sleep(10 * time.Minute)
+		mustMatch(t, api.writesOf("node-1"), before)
 
 		// The first pass can report Joined before the first scan ends, so
 		// the log holds one or two state changes before it settles.

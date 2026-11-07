@@ -28,9 +28,16 @@ func cecRoom() *cectest.Bus {
 // ends, and answers the channel its exit error arrives on.
 func startNode(t *testing.T, api *cecAPI, machine string, device *cec.Device) <-chan error {
 	t.Helper()
-	node, err := newCECNode(api.client, machine, device)
+	node, err := newCECNode(api.client, testNamespace, machine, device)
 	mustSucceed(t, err)
 	node.recorder = testRecorder(t, api.client)
+	return runCECNode(t, node)
+}
+
+// runCECNode runs one node workload until the test ends, and answers the
+// channel its exit error arrives on.
+func runCECNode(t *testing.T, node *cecNode) <-chan error {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	stopped := make(chan struct{})
@@ -136,7 +143,7 @@ func TestABusOfTheMachinesNameThatNamesAnotherMachineIsLeftAlone(t *testing.T) {
 		api := startCECAPI(t)
 		api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
 		_, device := usbAdapter(cecRoom())
-		node, err := newCECNode(api.client, "node-1", device)
+		node, err := newCECNode(api.client, testNamespace, "node-1", device)
 		mustSucceed(t, err)
 		list, err := ListCECBuses(api.client)
 		mustSucceed(t, err)
@@ -162,7 +169,7 @@ func TestABusOfTheMachinesNameThatAListMissedIsLeftAlone(t *testing.T) {
 		api := startCECAPI(t)
 		api.putBus(CECBus{Metadata: ObjectMeta{Name: "node-1"}, Spec: CECBusSpec{Mode: CECListen, Adapters: []CECBusAdapter{{Machine: "node-2"}}}})
 		_, device := usbAdapter(cecRoom())
-		node, err := newCECNode(api.client, "node-1", device)
+		node, err := newCECNode(api.client, testNamespace, "node-1", device)
 		mustSucceed(t, err)
 
 		chosen := node.choose(&CECBusList{})
@@ -187,7 +194,7 @@ func TestABusCreatedAfterTheReadIsLeftAlone(t *testing.T) {
 		api.createdUnseen = "node-1"
 		api.mutex.Unlock()
 		_, device := usbAdapter(cecRoom())
-		node, err := newCECNode(api.client, "node-1", device)
+		node, err := newCECNode(api.client, testNamespace, "node-1", device)
 		mustSucceed(t, err)
 
 		chosen := node.choose(&CECBusList{})
@@ -297,18 +304,21 @@ func TestServeCECStopsOnWhatItLacks(t *testing.T) {
 	withNode := t.TempDir()
 	mustSucceed(t, writeEmpty(withNode+"/cec0"))
 	cases := []struct {
-		name    string
-		node    string
-		devices string
-		message string
+		name      string
+		node      string
+		namespace string
+		devices   string
+		message   string
 	}{
-		{"no node name", "", withNode, "NODE_NAME is unset; the DaemonSet must state the node"},
-		{"no adapter", "node-1", t.TempDir(), "the pod's claim delivered no cec node"},
-		{"no cluster", "node-1", withNode, "in-cluster config: not running in a cluster: KUBERNETES_SERVICE_HOST unset"},
+		{"no node name", "", testNamespace, withNode, "NODE_NAME is unset; the DaemonSet must state the node"},
+		{"no namespace", "node-1", "", withNode, "POD_NAMESPACE is unset; the DaemonSet must state the pod's namespace"},
+		{"no adapter", "node-1", testNamespace, t.TempDir(), "the pod's claim delivered no cec node"},
+		{"no cluster", "node-1", testNamespace, withNode, "in-cluster config: not running in a cluster: KUBERNETES_SERVICE_HOST unset"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Setenv(nodeNameVariable, c.node)
+			t.Setenv(podNamespaceVariable, c.namespace)
 			t.Setenv(cecDeviceVariable, "")
 			t.Setenv("KUBERNETES_SERVICE_HOST", "")
 
@@ -323,6 +333,7 @@ func TestServeCECStopsOnWhatItLacks(t *testing.T) {
 
 func TestServeCECNamesAnAdapterItCannotOpen(t *testing.T) {
 	t.Setenv(nodeNameVariable, "node-1")
+	t.Setenv(podNamespaceVariable, testNamespace)
 	t.Setenv(cecDeviceVariable, t.TempDir()+"/cec9")
 
 	err := serveCEC(t.Context(), "/dev")
@@ -376,7 +387,7 @@ func TestTheNodeWorkloadStopsWhereItCannotStart(t *testing.T) {
 			adapter, device := usbAdapter(cecRoom())
 			adapter.Unplug()
 
-			_, err := newCECNode(startCECAPI(t).client, "node-1", device)
+			_, err := newCECNode(startCECAPI(t).client, testNamespace, "node-1", device)
 
 			if !cec.IsGone(err) {
 				t.Errorf("got %v, want ENODEV", err)
@@ -387,7 +398,7 @@ func TestTheNodeWorkloadStopsWhereItCannotStart(t *testing.T) {
 		t.Parallel()
 		synctest.Test(t, func(t *testing.T) {
 			_, device := usbAdapter(cecRoom())
-			node, err := newCECNode(testAPIClient(t, (&cannedAPI{}).handler()), "node-1", device)
+			node, err := newCECNode(testAPIClient(t, (&cannedAPI{}).handler()), testNamespace, "node-1", device)
 			mustSucceed(t, err)
 
 			err = node.run(t.Context())

@@ -54,7 +54,7 @@ func (n *cecNode) commands(bus *CECBus) (cec.LogicalAddress, bool) {
 	if !control || logical == nil {
 		return 0, false
 	}
-	entries := reportedEntries(bus, n.now())
+	entries := reportedEntries(bus, n.liveness())
 	for _, adapter := range bus.Spec.Adapters {
 		if adapter.Machine == n.machine {
 			return cec.LogicalAddress(*logical), true

@@ -15,9 +15,10 @@ import (
 )
 
 // passTelevisions derives every Television from the buses as the CECBus
-// pass derived them. A read that fails skips the pass, because a
-// status derived from a partial read would remove facts that are still
-// true, and the next pass reads again.
+// pass derived them, and live is what the node workload's pods show. A
+// read that fails skips the pass, because a status derived from a
+// partial read would remove facts that are still true, and the pass
+// after cecBusRetry reads again.
 //
 // This pass creates, deletes, and writes the status of Televisions, and
 // compares each status with the one stored. The store can hold the copy
@@ -27,20 +28,23 @@ import (
 // Television, and a pass does not create a Television again or write a
 // status again (objectcache.go). This loop writes no Display, and of
 // a Receiver it writes status.cec alone (receiver_cec.go).
-func (c *cecBusController) passTelevisions(buses []CECBus) {
+func (c *cecBusController) passTelevisions(buses []CECBus, live podLiveness) {
 	televisions, err := readTelevisions(c.client, c.televisions)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing Televisions: %v\n", err)
+		c.retryLater()
 		return
 	}
 	displays, err := readDisplays(c.client, c.displays)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing Displays: %v\n", err)
+		c.retryLater()
 		return
 	}
 	receivers, err := readReceivers(c.client, c.receivers)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listing Receivers: %v\n", err)
+		c.retryLater()
 		return
 	}
 	byName := map[string]*CECBus{}
@@ -54,6 +58,7 @@ func (c *cecBusController) passTelevisions(buses []CECBus) {
 	for _, name := range prune {
 		if err := DeleteTelevision(c.client, name); err != nil {
 			fmt.Fprintf(os.Stderr, "pruning Television %s: %v\n", name, err)
+			c.retryLater()
 			continue
 		}
 		why := replacedBy(televisions.Items, name)
@@ -72,13 +77,14 @@ func (c *cecBusController) passTelevisions(buses []CECBus) {
 		if chosen := televisionFor(televisions.Items, television.bus()); chosen != nil {
 			inCharge = chosen.Metadata.Name
 		}
-		derived := deriveTelevision(television, inCharge, byName[television.bus()], displays.Items, receivers.Items, c.now())
+		derived := deriveTelevision(television, inCharge, byName[television.bus()], displays.Items, receivers.Items, live, c.now())
 		derivedOf[television.Metadata.Name] = derived
 		if televisionUnchanged(television.Status, derived) {
 			continue
 		}
 		if err := ApplyTelevisionDerived(c.client, television.Metadata.Name, derived); err != nil {
 			fmt.Fprintf(os.Stderr, "writing the status of Television %s: %v\n", television.Metadata.Name, err)
+			c.retryLater()
 			continue
 		}
 		postTransitions(c.recorder, reference("Television", television.Metadata), television.Status.Conditions, []Condition{derived.reachable, derived.inCharge})
@@ -95,6 +101,7 @@ func (c *cecBusController) createDiscoveredTelevision(bus string, found *CECBus)
 	created, err := CreateDiscoveredTelevision(c.client, bus)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "creating Television %s: %v\n", discoveredTelevisionName(bus), err)
+		c.retryLater()
 		return
 	}
 	if !created {

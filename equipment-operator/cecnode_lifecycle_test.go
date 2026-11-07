@@ -1,6 +1,6 @@
 package main
 
-// The node workload's life around the adapter: the steady report, the
+// The node workload's life around the adapter: the quiet report, the
 // release when it stops, the release when no bus names its machine,
 // and the retries. cecnode_test.go holds the fixtures.
 
@@ -22,7 +22,7 @@ func joinedNode(t *testing.T, api *cecAPI, wire *cectest.Bus) (*cectest.Adapter,
 	adapter, device := usbAdapter(wire)
 	api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 	api.putBus(controlBus("den", CECBusAdapter{Machine: "node-1", Display: "acm-0001-receiver"}))
-	node, err := newCECNode(api.client, "node-1", device)
+	node, err := newCECNode(api.client, testNamespace, "node-1", device)
 	mustSucceed(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -50,17 +50,19 @@ func TestAStopEndsAWriteThatWaitsOutA429(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		_, cancel, done := joinedNode(t, api, cecRoom())
+		wire := cecRoom()
+		_, cancel, done := joinedNode(t, api, wire)
 		api.mutex.Lock()
 		api.throttlingEntries = true
 		api.mutex.Unlock()
-		time.Sleep(cecReportInterval + time.Second)
-		api.mutex.Lock()
-		throttles := api.entryThrottles
-		api.mutex.Unlock()
-		if throttles == 0 {
-			t.Fatal("no heartbeat met the 429")
-		}
+
+		wire.Send(cec.ActiveSource(8, 0x1500))
+
+		api.waitUntil(t, "an entry write to meet the 429", func() bool {
+			api.mutex.Lock()
+			defer api.mutex.Unlock()
+			return api.entryThrottles > 0
+		})
 		began := time.Now()
 
 		cancel()
@@ -80,29 +82,31 @@ func TestAStopEndsAWriteThatWaitsOutA429(t *testing.T) {
 }
 
 // A SIGTERM lets a write already sent run to its answer, so the
-// Stopped entry is the last write and no heartbeat lands after it.
+// Stopped entry is the last write and no earlier entry lands after it.
 func TestAStopLetsAWriteInFlightLandBeforeTheStoppedEntry(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
-		_, cancel, done := joinedNode(t, api, cecRoom())
+		wire := cecRoom()
+		_, cancel, done := joinedNode(t, api, wire)
 		release := make(chan struct{})
 		arrived := make(chan struct{}, 64)
 		stoppedEntry := make(chan struct{}, 1)
 		api.mutex.Lock()
 		api.holdingEntries, api.heldEntry, api.stoppedEntry = release, arrived, stoppedEntry
 		api.mutex.Unlock()
+		wire.Send(cec.ActiveSource(8, 0x1500))
 		select {
 		case <-arrived:
-		case <-time.After(cecReportInterval + testTimeout):
-			t.Fatal("no heartbeat reached the API server")
+		case <-time.After(testTimeout):
+			t.Fatal("no entry write reached the API server")
 		}
 
 		cancel()
-		// A workload that cut the heartbeat writes its Stopped entry while
-		// the API server still holds the heartbeat. The server answers the
-		// heartbeat once the Stopped entry arrives, or after a bound that
-		// ends the wait of a workload that waits for its answer.
+		// A workload that cut the write in flight writes its Stopped entry
+		// while the API server still holds the earlier write. The server
+		// answers that write once the Stopped entry arrives, or after a
+		// bound that ends the wait of a workload that waits for its answer.
 		select {
 		case <-stoppedEntry:
 		case <-time.After(300 * time.Millisecond):
@@ -121,17 +125,19 @@ func TestAStopLetsAWriteInFlightLandBeforeTheStoppedEntry(t *testing.T) {
 	})
 }
 
-func TestTheEntryIsWrittenOnASteadyInterval(t *testing.T) {
+// An adapter whose entry does not change writes nothing, however long
+// it runs, because the Deployment reads whether the entry is current
+// from the node workload's pod and not from the entry's age.
+func TestAnIdleNodeWritesNoEntry(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
 		joinedNode(t, api, cecRoom())
 		before := api.writesOf("node-1")
 
-		time.Sleep(3*cecReportInterval + cecReportInterval/2)
+		time.Sleep(10 * time.Minute)
 
-		mustMatch(t, api.writesOf("node-1"), before+3)
-
+		mustMatch(t, api.writesOf("node-1"), before)
 		entry, _ := api.entry("den", "node-1")
 		if _, err := time.Parse(time.RFC3339, entry.ReportedAt); err != nil {
 			t.Errorf("reportedAt = %q: %v", entry.ReportedAt, err)
@@ -306,4 +312,36 @@ func TestAClaimTheKernelCompletesLaterJoins(t *testing.T) {
 			return false
 		})
 	})
+}
+
+// The node workload compares its entry with the one the API server
+// stores, so an entry that a restore or another writer removed or
+// changed is written again on a quiet bus, with no change on the wire.
+func TestAStoredEntryThatDiffersIsWrittenAgain(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(*cecAPI)
+	}{
+		{"removed", func(api *cecAPI) { api.dropEntry("den", "node-1") }},
+		{"changed", func(api *cecAPI) {
+			api.alterEntry("den", "node-1", func(entry *CECAdapterStatus) { entry.State = AdapterJoining })
+		}},
+	}
+	t.Parallel()
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				api := startCECAPI(t)
+				wire := cecRoom()
+				joinedNode(t, api, wire)
+				sent := len(wire.Sent())
+
+				c.change(api)
+
+				api.waitForEntry(t, "den", "node-1", func(entry CECAdapterStatus) bool { return entry.State == AdapterScanned })
+				mustMatch(t, len(wire.Sent()), sent)
+			})
+		})
+	}
 }

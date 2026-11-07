@@ -5,8 +5,10 @@
 # protocol or one a person declared: discovery defers to a claimed
 # identity and prunes only the objects that carry its own marker label.
 # It also derives each CECBus's and each Television's status, and
-# creates and deletes the Televisions its own discovery makes. The CEC
-# node workload has its own identity, at the end of this file.
+# creates and deletes the Televisions its own discovery makes. It reads
+# the pods of the CEC node workload, through a Role near the end of
+# this file. The CEC node workload has its own identity, at the end of
+# this file.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -125,9 +127,40 @@ subjects:
     name: equipment-operator
     namespace: liken-system
 ---
+# The pods of the CEC node workload. The Deployment and each pod of the
+# node workload watch them, by the DaemonSet's pod label, and count an
+# adapter's entry as current only while a pod on its machine is Ready.
+# A namespaced Role, because the pods are in the operator's own
+# namespace. A watch by label selector needs list and watch on the
+# whole resource.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: equipment-operator-cec-pods
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: equipment-operator-cec-pods
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: equipment-operator-cec-pods
+subjects:
+  - kind: ServiceAccount
+    name: equipment-operator
+    namespace: liken-system
+  - kind: ServiceAccount
+    name: equipment-operator-cec
+    namespace: liken-system
+---
 # The CEC node workload's identity, apart from the Deployment's, so the
 # pod on an adapter's machine can reach only the CECBus and Television
-# objects and the Displays it reads.
+# objects, the Displays it reads, and the pods of the node workload.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

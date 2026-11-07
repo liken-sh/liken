@@ -100,7 +100,7 @@ func TestTheStartingListsWaitOutA429(t *testing.T) {
 				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 				defer cancel()
 
-				err := serve(ctx, testAPIClient(t, http.HandlerFunc(api.handle)), settings{networkDiscoveryOff: true, dial: testNetwork.dial, listen: testNetwork.bind}, testMetrics(t))
+				err := serve(ctx, testAPIClient(t, http.HandlerFunc(api.handle)), settings{namespace: testNamespace, networkDiscoveryOff: true, dial: testNetwork.dial, listen: testNetwork.bind}, testMetrics(t))
 
 				mustSucceed(t, err)
 			})
@@ -110,7 +110,7 @@ func TestTheStartingListsWaitOutA429(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				api := &busyAPI{busy: c.busy, header: c.header, body: initializingBody}
 				_, device := usbAdapter(cecRoom())
-				node, err := newCECNode(testAPIClient(t, http.HandlerFunc(api.handle)), "node-1", device)
+				node, err := newCECNode(testAPIClient(t, http.HandlerFunc(api.handle)), testNamespace, "node-1", device)
 				mustSucceed(t, err)
 				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 				defer cancel()

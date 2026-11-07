@@ -77,30 +77,31 @@ func (c *Client) watcher() (dynamic.Interface, error) {
 // (objectcache.go), and tells a caller that waits for a change when
 // the store takes one.
 //
-// fieldSelector, when it is not empty, narrows the list and the watch
-// to the objects it selects.
+// source names the collection, and its namespace and selectors, when
+// they are not empty, narrow the list and the watch to the objects they
+// select.
 //
 // absent, when it is not nil, names the refusals that mean the
 // collection is not there to watch, such as the 404 of a kind whose
 // definition another operator installs. The store then holds an empty
 // collection until the kind arrives.
-func watchCollection(ctx context.Context, client *Client, resource schema.GroupVersionResource, fieldSelector string, absent func(error) bool, handler cache.ResourceEventHandler, synced, restarted func(), held *watchStore) {
+func watchCollection(ctx context.Context, client *Client, source informer.Source, absent func(error) bool, handler cache.ResourceEventHandler, synced, restarted func(), held *watchStore) {
 	watcher, err := client.watcher()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "watching %s: %v\n", resource.Resource, err)
+		fmt.Fprintf(os.Stderr, "watching %s: %v\n", source, err)
 		return
 	}
 	if held != nil {
 		handler = bothHandlers(handler, held.announcer())
 	}
-	collection := informer.Start(ctx, watcher, informer.Source{Resource: resource, FieldSelector: fieldSelector}, informer.Options{
+	collection := informer.Start(ctx, watcher, source, informer.Options{
 		Handler:       handler,
 		Synced:        synced,
 		Reopened:      restarted,
 		Absent:        absent,
 		AbsentRecheck: optionalRecheck,
 	})
-	held.hold(collection.View(), fieldSelector != "")
+	held.hold(collection.View(), source.FieldSelector != "" || source.LabelSelector != "")
 	defer held.release()
 	<-collection.Done()
 }
@@ -192,7 +193,7 @@ func watchReceivers(ctx context.Context, client *Client, wake, specWake chan<- s
 			poke(specWake)
 		}
 	}
-	watchCollection(ctx, client, receiverResource, "", nil, handler, synced, readings.watchRestarted, held)
+	watchCollection(ctx, client, informer.Source{Resource: receiverResource}, nil, handler, synced, readings.watchRestarted, held)
 }
 
 // bothHandlers sends each change to two handlers, in order.

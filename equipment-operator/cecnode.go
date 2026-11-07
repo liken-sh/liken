@@ -9,12 +9,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -34,15 +34,6 @@ const (
 	// leaves it unset and finds the one node its claim delivered.
 	cecDeviceVariable = "CEC_DEVICE"
 )
-
-// How often the node workload writes its entry when nothing changed.
-// The time of each write is the entry's reportedAt, and the Deployment
-// treats an entry as stale once it is three intervals old, so a pod
-// that dies without a word stops counting within a few minutes. The
-// write goes to the API server and sends nothing on the CEC wire. It
-// is a variable because the tests on the kernel's vivid driver run on
-// the real clock, and shorten it.
-var cecReportInterval = 30 * time.Second
 
 // cecStopWrite bounds the write of the Stopped entry after the node
 // workload's context ends. The kubelet gives a pod 30 seconds after
@@ -87,6 +78,13 @@ func serveCEC(ctx context.Context, devices string) error {
 	if machine == "" {
 		return fmt.Errorf("%s is unset; the DaemonSet must state the node", nodeNameVariable)
 	}
+	// The pod's namespace holds the pods of every node workload, which
+	// the pass reads to tell whether another adapter's entry is current
+	// (cecpods.go).
+	namespace := os.Getenv(podNamespaceVariable)
+	if namespace == "" {
+		return fmt.Errorf("%s is unset; the DaemonSet must state the pod's namespace", podNamespaceVariable)
+	}
 	path, err := findAdapter(devices)
 	if err != nil {
 		return err
@@ -100,7 +98,10 @@ func serveCEC(ctx context.Context, devices string) error {
 	if err != nil {
 		return fmt.Errorf("in-cluster config: %w", err)
 	}
-	node, err := newCECNode(client, machine, device)
+	node, err := newCECNode(client, namespace, machine, device)
+	if err == nil {
+		_, err = node.serveProbe(ctx, os.Getenv(cecProbeVariable))
+	}
 	if err == nil {
 		node.recorder = events.New(ctx, client.Client, "equipment-operator-cec", events.Options{})
 		err = node.run(ctx)
@@ -119,8 +120,10 @@ type cecNode struct {
 	recorder *events.Recorder
 	// The stores of the watches each pass reads (objectcache.go). The
 	// Display store holds the Displays of this machine; the node
-	// workload writes no Display.
-	buses, televisions, displays *watchStore
+	// workload writes no Display. The pod store holds the node
+	// workload's pods in namespace (cecpods.go).
+	buses, televisions, displays, pods *watchStore
+	namespace                          string
 
 	machine   string
 	device    *cec.Device
@@ -135,16 +138,24 @@ type cecNode struct {
 	failed chan error
 	// retryAsk asks the loop for a pass after cecAPIRetry.
 	retryAsk chan struct{}
+	// probes takes each probe's question to the loop, which closes the
+	// channel it receives to answer (cecnode_probe.go).
+	probes chan chan struct{}
 
 	mutex sync.Mutex
 	// bus is the CECBus this adapter reports to, and applied is the
 	// configuration the adapter runs.
 	bus     string
 	applied adapterConfig
-	// entry is the report as it stands now, and written is the last
-	// report the API server accepted, with no reportedAt.
-	entry   CECAdapterStatus
-	written *CECAdapterStatus
+	// entry is the report as it stands now, and stored is this
+	// machine's entry in the bus as the last pass read it, or nil when
+	// the bus holds none.
+	entry  CECAdapterStatus
+	stored *CECAdapterStatus
+	// recheck is the end of the earliest grace of another adapter's
+	// entry whose pod is starting, when the loop passes again, and zero
+	// when no entry is in a grace (cecpods.go).
+	recheck time.Time
 	// resync asks the next pass to read the adapter's addresses from
 	// the kernel, because the kernel reported a state change.
 	resync bool
@@ -233,13 +244,14 @@ type cecNode struct {
 
 // newCECNode reads the adapter's capabilities, which every later
 // choice depends on.
-func newCECNode(client *Client, machine string, device *cec.Device) (*cecNode, error) {
+func newCECNode(client *Client, namespace, machine string, device *cec.Device) (*cecNode, error) {
 	caps, err := device.Caps()
 	if err != nil {
 		return nil, err
 	}
 	return &cecNode{
 		client:      client,
+		namespace:   namespace,
 		machine:     machine,
 		device:      device,
 		caps:        caps,
@@ -249,11 +261,13 @@ func newCECNode(client *Client, machine string, device *cec.Device) (*cecNode, e
 		wake:        make(chan struct{}, 1),
 		dirty:       make(chan struct{}, 1),
 		retryAsk:    make(chan struct{}, 1),
+		probes:      make(chan chan struct{}),
 		failed:      make(chan error, 1),
 		stopMode:    func() {},
 		buses:       &watchStore{},
 		televisions: &watchStore{},
 		displays:    &watchStore{},
+		pods:        &watchStore{},
 		source:      cec.InvalidPhysicalAddress,
 		sources:     make(chan struct{}, 1),
 	}, nil
@@ -265,12 +279,12 @@ func newCECNode(client *Client, machine string, device *cec.Device) (*cecNode, e
 func (n *cecNode) run(ctx context.Context) error {
 	n.logOpened()
 	loop, cancel := context.WithCancel(ctx)
-	// The client's wait after a 429 ends when the loop does, so a
-	// heartbeat that meets an API server that is not ready holds a
+	// The client's wait after a 429 ends when the loop does, so an
+	// entry write that meets an API server that is not ready holds a
 	// SIGTERM for no more than the request itself. A request already sent
-	// runs to its answer: a heartbeat cut at the SIGTERM could still land
-	// after the Stopped entry, and a verdict write cut then would be lost
-	// and its CEC command sent again. The client is bound before anything
+	// runs to its answer: an entry write cut at the SIGTERM could still
+	// land after the Stopped entry, and a verdict write cut then would be
+	// lost and its CEC command sent again. The client is bound before anything
 	// the loop starts reads it.
 	n.client = n.client.withWaits(loop)
 	var started sync.WaitGroup
@@ -352,13 +366,14 @@ func (n *cecNode) logState(bus string, entry CECAdapterStatus) {
 // is the scan when the adapter joins; startMode states the rest. In the
 // API, the subscriptions are the watches of CECBuses, Televisions, and
 // Displays, and the baseline is each pass's read of the watches' stores
-// (objectcache.go). client-go's
-// reflector runs each watch: it resumes a watch that drops from its
-// last version and reads again after a 410, and the watch wakes the
-// loop when its own first read is done (watch.go). No timer re-reads
-// a state. The timers here are clocks: the heartbeat that keeps
-// reportedAt current, and the retry of a join or an API call that
-// failed.
+// (objectcache.go). The watch of the node workload's pods tells the
+// pass which other adapters' entries are current (cecpods.go).
+// client-go's reflector runs each watch: it resumes a watch that drops
+// from its last version and reads again after a 410, and the watch
+// wakes the loop when its own first read is done (watch.go). No timer
+// re-reads a state, and the entry is written only when it changes. The
+// timers here are clocks: the retry of a join or an API call that
+// failed, and the end of a starting pod's grace (cecpods.go).
 func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	err := untilAnswered(ctx, func() error {
 		_, err := ListCECBuses(n.client)
@@ -395,30 +410,40 @@ func (n *cecNode) loop(ctx context.Context, started *sync.WaitGroup) error {
 	}
 	started.Go(func() { watchTelevisions(ctx, n.client, n.wake, nil, n.televisions) })
 	started.Go(func() { nodeDisplays(n.machine)(ctx, n.client, n.wake, nil, n.displays) })
-	heartbeat := time.NewTicker(cecReportInterval)
-	defer heartbeat.Stop()
+	// The pods are listed once before the watch for the same reason as
+	// the Televisions: a missing grant ends the node workload at its
+	// start, where a person sees it.
+	err = untilAnswered(ctx, func() error {
+		_, err := readCECPods(n.client, nil, n.namespace, n.now())
+		return err
+	})
+	if ctx.Err() != nil {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("listing the equipment-operator-cec pods in %s: %w", n.namespace, err)
+	}
+	started.Go(func() { cecPods(n.namespace)(ctx, n.client, n.wake, nil, n.pods) })
 	var retry <-chan time.Time
-	force := true
 	for {
 		if err := n.pass(ctx); err != nil {
 			return err
 		}
-		n.report(force)
-		force = false
+		n.report()
 		retry = nil
 		if wait, due := n.retryIn(); due {
 			retry = time.After(wait)
 		}
-		if done, err := n.await(ctx, heartbeat.C, retry); done {
+		if done, err := n.await(ctx, retry); done {
 			return err
 		}
 	}
 }
 
-// await waits for the loop's next pass: an event, or the retry clock. The
-// heartbeat and a request for a retry are handled here and run no
-// pass. done says the node workload ends, with err as its cause.
-func (n *cecNode) await(ctx context.Context, heartbeat <-chan time.Time, retry <-chan time.Time) (bool, error) {
+// await waits for the loop's next pass: an event, or the retry clock. A
+// probe's question and a request for a retry are handled here and run
+// no pass. done says the node workload ends, with err as its cause.
+func (n *cecNode) await(ctx context.Context, retry <-chan time.Time) (bool, error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -435,10 +460,10 @@ func (n *cecNode) await(ctx context.Context, heartbeat <-chan time.Time, retry <
 			if retry == nil {
 				retry = time.After(cecAPIRetry)
 			}
-		case <-heartbeat:
-			// The heartbeat is a clock and reads nothing: it writes the
-			// entry again so its reportedAt stays current, and runs no pass.
-			n.report(true)
+		case answer := <-n.probes:
+			// The probe asks only whether the loop reaches this select,
+			// so the answer reads nothing and runs no pass.
+			close(answer)
 		}
 	}
 }
@@ -446,7 +471,8 @@ func (n *cecNode) await(ctx context.Context, heartbeat <-chan time.Time, retry <
 // cecAPIRetry is how long the loop waits before it runs a pass again
 // after an API call failed with no event to follow, such as a list the
 // API server refused or a result it did not accept. It is a variable
-// for the same reason as cecReportInterval.
+// because the tests on the kernel's vivid driver run on the real
+// clock, and shorten it.
 var cecAPIRetry = 10 * time.Second
 
 // retryLater asks the loop for a pass after cecAPIRetry, because an API
@@ -458,9 +484,27 @@ func (n *cecNode) retryLater() {
 
 // retryIn answers how long the loop waits before its next pass when no
 // event arrives, and false when it waits for an event alone: a join
-// that failed is tried again at its retryAt, and a result the API
-// server has not accepted after cecAPIRetry.
+// that failed is tried again at its retryAt, a result the API server
+// has not accepted after cecAPIRetry, and another adapter's entry in a
+// starting pod's grace at the end of the grace, when that adapter may
+// lose its turn.
 func (n *cecNode) retryIn() (time.Duration, bool) {
+	wait, due := n.clockRetry()
+	n.mutex.Lock()
+	recheck := n.recheck
+	n.mutex.Unlock()
+	if recheck.IsZero() {
+		return wait, due
+	}
+	until := max(recheck.Sub(n.now()), 0)
+	if due {
+		until = min(until, wait)
+	}
+	return until, true
+}
+
+// clockRetry answers the retries of a join and of an API result.
+func (n *cecNode) clockRetry() (time.Duration, bool) {
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
 	unwritten := n.powered.unwritten != nil || n.woken.unwritten != nil || n.standby.unwritten != nil || n.screenAsk != nil
@@ -516,14 +560,18 @@ func (n *cecNode) release() error {
 	return nil
 }
 
-// report writes this adapter's entry when it changed since the last
-// write the API server accepted, or when force asks for the steady
-// write that keeps reportedAt current.
-func (n *cecNode) report(force bool) {
+// report writes this adapter's entry when it differs from the entry
+// the bus stores, or the bus stores none. The comparison is with the
+// API server's copy and not with the last write, so an entry that a
+// restore or another writer removed or changed is written again. An
+// entry that did not change is not written again: the Deployment reads
+// whether the entry is current from the node workload's pod
+// (cecpods.go), so reportedAt is the time of the last change.
+func (n *cecNode) report() {
 	n.mutex.Lock()
 	bus := n.bus
 	entry := n.entry
-	written := n.written
+	stored := n.stored
 	note := n.displayNote
 	n.mutex.Unlock()
 	if bus == "" || entry.Machine == "" {
@@ -538,7 +586,7 @@ func (n *cecNode) report(force bool) {
 	if note != "" {
 		entry.Message = joinMessages(note, entry.Message)
 	}
-	if written != nil && reflect.DeepEqual(*written, entry) && !force {
+	if sameEntry(stored, entry) {
 		return
 	}
 	n.logState(bus, entry)
@@ -550,8 +598,22 @@ func (n *cecNode) report(force bool) {
 		return
 	}
 	n.mutex.Lock()
-	n.written = &entry
+	n.stored = &stamped
 	n.mutex.Unlock()
+}
+
+// sameEntry answers whether the stored entry holds the report, apart
+// from reportedAt. The two are compared as the API server stores them,
+// in JSON, where an empty list and no list are the same.
+func sameEntry(stored *CECAdapterStatus, entry CECAdapterStatus) bool {
+	if stored == nil {
+		return false
+	}
+	held := *stored
+	held.ReportedAt, entry.ReportedAt = "", ""
+	first, _ := json.Marshal(held)
+	second, _ := json.Marshal(entry)
+	return string(first) == string(second)
 }
 
 // joinMessages puts two messages in one, and leaves out an empty one.
@@ -570,6 +632,21 @@ func (n *cecNode) fail(err error) {
 	case n.failed <- err:
 	default:
 	}
+}
+
+// liveness answers what the node workload's pods show (cecpods.go). A
+// read that fails answers no pods, which judges no other adapter's
+// entry stale, so the adapter can defer to an adapter that is gone
+// until the read works again. The log line says so, and the loop tries
+// again.
+func (n *cecNode) liveness() podLiveness {
+	live, err := readCECPods(n.client, n.pods, n.namespace, n.now())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listing the equipment-operator-cec pods in %s: %v; until the pods can be read, the adapter on %s counts every other adapter's entry as current\n", n.namespace, err, n.machine)
+		n.retryLater()
+		return podLiveness{}
+	}
+	return live
 }
 
 // markDirty asks the loop to write the entry again.

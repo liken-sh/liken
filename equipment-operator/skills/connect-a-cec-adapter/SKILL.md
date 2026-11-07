@@ -209,10 +209,32 @@ that state:
 | `Coherent` | The reason `Apart`: two adapters of the bus do not see each other. | The adapters are on different wires. Check each adapter's cable. |
 | `Scanned` | The reason `NoAnswer`: no device answered the adapter's polls. | Connect another HDMI cable between the adapter and the receiver. |
 
-An adapter entry older than 90 seconds makes each condition `Unknown`
-with the reason `Stale`. A node workload that stopped makes each
-condition `False` with the reason `Stopped`. The
-[`CECBus`](https://liken.sh/equipment/docs/reference/cecbuses/) reference describes every
+The node workload writes its entry under `status.adapters` only when
+the entry changes, so `reportedAt` is the time of the last change and
+an old time is normal on a quiet bus. The operator decides whether an
+entry is current from the node workload's pod instead. An entry makes
+each condition `Unknown` with the reason `Stale` when no
+`equipment-operator-cec` pod runs on the entry's machine, or when the
+pod there stopped being `Ready` after the entry was written. A pod
+stops being `Ready` when its container exits, when its loop stops
+answering the readiness probe, and when the node controller marks the
+pods of a node that stopped reporting. A new pod writes its first
+entry before it is `Ready`, so that entry stays current for 60
+seconds while the pod starts, and goes `Stale` if the pod is still
+not `Ready` then. The message says which of these the operator saw.
+A node workload that stopped and wrote its last entry makes each
+condition `False` with the reason `Stopped`, whatever its pod shows.
+
+Each node workload reads the same pods to decide which adapter sends
+the bus's commands. When a node workload cannot read the pods, it
+logs the failure and counts every other adapter's entry as current
+until the read works, so it can wait for an adapter that is gone. The
+`Deployment` writes no status while it cannot read the pods, and its
+log line names the `Role` that grants the read. To see the pods:
+
+    kubectl get pods -n liken-system -l app=equipment-operator-cec -o wide
+
+The [`CECBus`](https://liken.sh/equipment/docs/reference/cecbuses/) reference describes every
 field.
 
 ## Adopt the Television

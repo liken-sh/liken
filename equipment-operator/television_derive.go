@@ -33,7 +33,7 @@ type televisionDerived struct {
 // chose. bus is the CECBus the Television names, with the device list
 // and the conditions the Deployment derived for it in the same pass, or
 // nil when no such bus exists.
-func deriveTelevision(television *Television, inCharge string, bus *CECBus, displays []Display, receivers []Receiver, now time.Time) televisionDerived {
+func deriveTelevision(television *Television, inCharge string, bus *CECBus, displays []Display, receivers []Receiver, live podLiveness, now time.Time) televisionDerived {
 	derived := televisionDerived{}
 	name := television.bus()
 	tv := tvOf(bus)
@@ -49,7 +49,7 @@ func deriveTelevision(television *Television, inCharge string, bus *CECBus, disp
 	}
 	if bus != nil {
 		derived.displays = televisionDisplays(bus, displays, receivers)
-		derived.activeSource = activeSourceOf(bus, now)
+		derived.activeSource = activeSourceOf(bus, live)
 		derived.activeDisplay = activeDisplayOf(bus, displays, derived.activeSource)
 	}
 	verdict := televisionReachable(name, bus, tv)
@@ -120,8 +120,8 @@ func televisionReachable(name string, bus *CECBus, tv *CECDevice) verdict {
 // adapter on one wire hears the same broadcasts, and an adapter that
 // sent the Active Source records its own, so the adapters agree, and
 // the order only makes the choice stable.
-func activeSourceOf(bus *CECBus, now time.Time) string {
-	entries := reportedEntries(bus, now)
+func activeSourceOf(bus *CECBus, live podLiveness) string {
+	entries := reportedEntries(bus, live)
 	for _, adapter := range bus.Spec.Adapters {
 		if entry, current := entries.current[adapter.Machine]; current && entry.ActiveSource != "" {
 			return entry.ActiveSource

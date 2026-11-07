@@ -26,8 +26,8 @@ func sentTo(wire *cectest.Bus, address cec.LogicalAddress) []cec.Message {
 }
 
 // After the scan, a bus where nothing happens hears nothing from the
-// adapter: not over many heartbeats, and not over passes that API
-// events run.
+// adapter: not over many minutes, and not over passes that API events
+// run.
 func TestAnIdleBusHearsNothingAfterTheJoinScan(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
@@ -38,14 +38,11 @@ func TestAnIdleBusHearsNothingAfterTheJoinScan(t *testing.T) {
 
 		for range 20 {
 			api.nudge()
-			time.Sleep(cecReportInterval)
+			time.Sleep(30 * time.Second)
 		}
 
 		if sent := wire.Sent()[scanned:]; len(sent) != 0 {
 			t.Errorf("the adapter sent %v after its scan", sent)
-		}
-		if writes := api.writesOf("node-1"); writes < 20 {
-			t.Errorf("the node workload wrote its entry %d times; the heartbeat did not run", writes)
 		}
 	})
 }

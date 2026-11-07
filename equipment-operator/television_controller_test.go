@@ -29,7 +29,7 @@ func scannedBus(name string, devices ...CECDevice) CECBus {
 // passes runs the Deployment's pass as many times as asked.
 func passes(t *testing.T, api *cecAPI, count int) {
 	t.Helper()
-	controller := newCECBusController(api.client)
+	controller := newCECBusController(api.client, testNamespace)
 	for range count {
 		mustSucceed(t, controller.pass())
 	}
@@ -184,7 +184,7 @@ func TestTheDeploymentLoopFollowsTheTelevisions(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			newCECBusController(api.client).run(ctx, newMetrics("test"))
+			newCECBusController(api.client, testNamespace).run(ctx, newMetrics("test"))
 		}()
 		t.Cleanup(func() { cancel(); <-done })
 		api.waitForTelevision(t, "den", func(Television) bool { return true })
@@ -203,7 +203,7 @@ func runDeploymentLoop(t *testing.T, api *cecAPI) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		newCECBusController(api.client).run(ctx, newMetrics("test"))
+		newCECBusController(api.client, testNamespace).run(ctx, newMetrics("test"))
 	}()
 	t.Cleanup(func() { cancel(); <-done })
 }
@@ -241,7 +241,7 @@ func runServe(t *testing.T, api *cecAPI) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = serve(ctx, api.client, settings{dial: testNetwork.dial, listen: testNetwork.bind}, testMetrics(t))
+		_ = serve(ctx, api.client, settings{namespace: testNamespace, dial: testNetwork.dial, listen: testNetwork.bind}, testMetrics(t))
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -317,6 +317,7 @@ func TestTheTelevisionPassSkipsAFailedReadAndSurvivesARefusedWrite(t *testing.T)
 		"GET " + televisionsPath: televisions,
 		"GET " + displaysPath:    DisplayList{},
 		"GET " + receiversPath:   ReceiverList{},
+		"GET " + fakePodsPath:    readyPods("node-1"),
 	}
 	without := func(path string) map[string]any {
 		answers := map[string]any{}
@@ -346,7 +347,7 @@ func TestTheTelevisionPassSkipsAFailedReadAndSurvivesARefusedWrite(t *testing.T)
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				api := &cannedAPI{answers: c.answers, statuses: c.statuses}
-				controller := newCECBusController(testAPIClient(t, api.handler()))
+				controller := newCECBusController(testAPIClient(t, api.handler()), testNamespace)
 				controller.now = func() time.Time { return derivedAt }
 
 				mustSucceed(t, controller.pass())
@@ -395,7 +396,7 @@ func TestDeleteTelevisionSettlesOnGoneAndReportsARefusal(t *testing.T) {
 // its log in a buffer.
 func loggedPasses(t *testing.T, api *cecAPI, count int) *logBuffer {
 	t.Helper()
-	controller := newCECBusController(api.client)
+	controller := newCECBusController(api.client, testNamespace)
 	log := &logBuffer{}
 	controller.log = log
 	for range count {
@@ -455,8 +456,8 @@ func TestCreateDiscoveredTelevisionLogsOnlyWhatItCreated(t *testing.T) {
 					api.putTelevision(Television{Metadata: ObjectMeta{Name: "den"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
 				}
 				bus := scannedBus("den", tvDevice)
-				bus.Status.Devices, _ = deriveCECBus(&bus, time.Now())
-				controller := newCECBusController(api.client)
+				bus.Status.Devices, _ = deriveCECBus(&bus, allReady, time.Now())
+				controller := newCECBusController(api.client, testNamespace)
 				log := &logBuffer{}
 				controller.log = log
 

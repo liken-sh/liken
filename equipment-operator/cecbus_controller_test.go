@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -16,7 +17,7 @@ func TestTheLoopWritesWhatItDerives(t *testing.T) {
 		api := startCECAPI(t)
 		bus := *busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice))
 		api.putBus(bus)
-		controller := newCECBusController(api.client)
+		controller := newCECBusController(api.client, testNamespace)
 		controller.now = func() time.Time { return derivedAt }
 
 		mustSucceed(t, controller.pass())
@@ -32,7 +33,7 @@ func TestASecondPassWritesNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := startCECAPI(t)
 		api.putBus(*busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice)))
-		controller := newCECBusController(api.client)
+		controller := newCECBusController(api.client, testNamespace)
 		controller.now = func() time.Time { return derivedAt }
 		// The bus has a TV, so the first pass creates the Television that
 		// discovery owns, and the second pass writes that Television's status.
@@ -59,7 +60,7 @@ func TestTheLoopFollowsAnAdaptersReport(t *testing.T) {
 		stopped := make(chan struct{})
 		go func() {
 			defer close(stopped)
-			newCECBusController(api.client).run(ctx, testMetrics(t))
+			newCECBusController(api.client, testNamespace).run(ctx, testMetrics(t))
 		}()
 		t.Cleanup(func() { cancel(); <-stopped })
 
@@ -81,7 +82,7 @@ func TestTheLoopWaitsForTheDefinition(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*cecBusRetry+time.Second)
 		defer cancel()
 
-		newCECBusController(testAPIClient(t, api.handler())).run(ctx, testMetrics(t))
+		newCECBusController(testAPIClient(t, api.handler()), testNamespace).run(ctx, testMetrics(t))
 
 		mustMatch(t, api.sent(), 3)
 	})
@@ -114,8 +115,8 @@ func TestDeleteCECBusSettlesOnGoneAndReportsARefusal(t *testing.T) {
 	}
 }
 
-// A failed list is the pass's error, and a refused write is logged and
-// left for the next pass.
+// A failed list of the buses or of the pods is the pass's error, and a
+// refused write is logged and left for the next pass.
 func TestAPassReportsAFailedListAndSurvivesARefusedWrite(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -123,7 +124,8 @@ func TestAPassReportsAFailedListAndSurvivesARefusedWrite(t *testing.T) {
 		wantErr bool
 	}{
 		{"no collection", map[string]any{}, true},
-		{"a refused write", map[string]any{"GET " + cecBusesPath: CECBusList{Items: []CECBus{*busWith(CECListen, []string{"node-1"})}}}, false},
+		{"no pods", map[string]any{"GET " + cecBusesPath: CECBusList{Items: []CECBus{*busWith(CECListen, []string{"node-1"})}}}, true},
+		{"a refused write", map[string]any{"GET " + cecBusesPath: CECBusList{Items: []CECBus{*busWith(CECListen, []string{"node-1"})}}, "GET " + fakePodsPath: readyPods("node-1")}, false},
 	}
 	t.Parallel()
 	for _, c := range cases {
@@ -132,7 +134,7 @@ func TestAPassReportsAFailedListAndSurvivesARefusedWrite(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				api := &cannedAPI{answers: c.answers}
 
-				err := newCECBusController(testAPIClient(t, api.handler())).pass()
+				err := newCECBusController(testAPIClient(t, api.handler()), testNamespace).pass()
 
 				if (err != nil) != c.wantErr {
 					t.Errorf("got %v, want an error: %v", err, c.wantErr)
@@ -142,22 +144,20 @@ func TestAPassReportsAFailedListAndSurvivesARefusedWrite(t *testing.T) {
 	}
 }
 
-// A pod that dies writes nothing more, so the clock is what finds its
-// entry stale.
-func TestTheClockFindsAnEntryGoneStale(t *testing.T) {
+// A refused list of the pods names the Role that grants it, so a person
+// who reads the log knows what to fix.
+func TestARefusedPodListNamesTheRole(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		api := startCECAPI(t)
-		api.putBus(*busWith(CECControl, []string{"node-1"}, scannedEntry("node-1", 4, tvDevice)))
-		controller := newCECBusController(api.client)
-		controller.now = func() time.Time { return derivedAt }
-		mustSucceed(t, controller.pass())
+		api := &cannedAPI{
+			answers:  map[string]any{"GET " + cecBusesPath: CECBusList{Items: []CECBus{*busWith(CECListen, []string{"node-1"})}}},
+			statuses: map[string]int{"GET " + fakePodsPath: http.StatusForbidden},
+		}
 
-		controller.now = func() time.Time { return derivedAt.Add(2 * time.Minute) }
-		mustSucceed(t, controller.pass())
+		err := newCECBusController(testAPIClient(t, api.handler()), testNamespace).pass()
 
-		bus, _ := api.bus("den")
-		mustMatch(t, conditionOf(bus.Status.Conditions, conditionJoined).Reason, reasonStale)
-		mustDeepEqual(t, bus.Status.Devices, []CECDevice(nil))
+		if err == nil || !strings.Contains(err.Error(), "the Role equipment-operator-cec-pods must grant get, list, and watch on pods in liken-system") {
+			t.Errorf("got %v", err)
+		}
 	})
 }

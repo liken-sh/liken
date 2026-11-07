@@ -212,7 +212,7 @@ func (n *cecNode) passWake(bus *CECBus, television *Television) {
 		// A wake is a newer press than a standby in progress, and the two
 		// send the TV opposite commands, so the standby stops first.
 		n.cancelStandby()
-		n.startWake(*television, own, physical, othersOf(bus, n.machine, n.now()))
+		n.startWake(*television, own, physical, othersOf(bus, n.machine, n.liveness()))
 	}
 }
 
@@ -232,9 +232,9 @@ func sessionOf(television *Television) *TelevisionSession {
 
 // othersOf maps the physical address that each other adapter of the
 // bus announces to its machine, from the current entries.
-func othersOf(bus *CECBus, machine string, now time.Time) map[cec.PhysicalAddress]string {
+func othersOf(bus *CECBus, machine string, live podLiveness) map[cec.PhysicalAddress]string {
 	others := map[cec.PhysicalAddress]string{}
-	for other, entry := range reportedEntries(bus, now).current {
+	for other, entry := range reportedEntries(bus, live).current {
 		if address, err := cec.ParsePhysicalAddress(entry.PhysicalAddress); err == nil && other != machine {
 			others[address] = other
 		}
@@ -260,7 +260,7 @@ func (n *cecNode) speaksFor(bus *CECBus, display string) (cec.LogicalAddress, ce
 	if !control || logical == nil || err != nil {
 		return 0, 0, false
 	}
-	entries := reportedEntries(bus, n.now())
+	entries := reportedEntries(bus, n.liveness())
 	for _, adapter := range bus.Spec.Adapters {
 		if adapter.Display != display {
 			continue

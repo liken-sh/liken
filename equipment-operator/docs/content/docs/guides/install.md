@@ -49,6 +49,18 @@ reference describes what the pod reports, and the
 [`Television`](/docs/reference/televisions/) reference describes the
 TV that a `CECBus` in `Control` finds.
 
+The pod serves a readiness probe and a liveness probe at `/healthz` on
+port 9200. Each probe asks the node workload's loop to answer, so a
+pod whose loop stops answering stops being `Ready` after about 60
+seconds, and the kubelet restarts its container after about 150
+seconds. The operator's `Deployment` and each node workload watch
+these pods in `liken-system` to decide whether an adapter's report is
+current, as
+[Connect a CEC adapter](/docs/guides/connect-a-cec-adapter/#give-the-adapter-control)
+describes. `rbac.yaml` grants both identities `get`, `list`, and
+`watch` on pods in the namespace, through the
+`equipment-operator-cec-pods` `Role`.
+
 For GitOps, point a `Kustomization` at the base and pin `<version>`
 to the operator's version, which is the release tag that last
 published it. The [GitHub release](https://github.com/liken-sh/liken/releases)

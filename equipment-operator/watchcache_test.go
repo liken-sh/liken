@@ -236,7 +236,7 @@ func TestTheCECBusPassReadsTheStores(t *testing.T) {
 				api.putDisplay("acm-0001-receiver", "node-1", "1.3.0.0")
 				api.putReceiver(wiredReceiver("den", "node-1", "acm-0001-receiver"))
 				api.putTelevision(Television{Metadata: ObjectMeta{Name: "lounge"}, Spec: TelevisionSpec{CEC: &TelevisionCEC{Bus: "den"}}})
-				controller := newCECBusController(api.client)
+				controller := newCECBusController(api.client, testNamespace)
 				if c.watched {
 					startWatches(t, api.client, map[*watchStore]watchFunc{
 						controller.buses: watchCECBuses, controller.televisions: watchTelevisions,
@@ -277,7 +277,7 @@ func TestTheCECBusPassReadsTheStores(t *testing.T) {
 func runNode(t *testing.T, api *cecAPI) *cecNode {
 	t.Helper()
 	_, device := usbAdapter(cecRoom())
-	node, err := newCECNode(api.client, "node-1", device)
+	node, err := newCECNode(api.client, testNamespace, "node-1", device)
 	mustSucceed(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
