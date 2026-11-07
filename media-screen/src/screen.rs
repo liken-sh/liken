@@ -473,13 +473,19 @@ impl Screen {
     /// only lifts it too, for every client: the stock idle screen lowers
     /// the shade on back, so a back that reached it would undo the wake,
     /// and one rule for every client keeps a press of back from undoing
-    /// the wake there. A repeat that finds the shade down only wakes it,
-    /// because the control was held while the shade came down and its
-    /// press acted before that.
+    /// the wake there.
     ///
-    /// A control whose press or repeat only woke the screen holds until its
-    /// release, and its repeats do nothing. They find the shade up, so
-    /// without the hold a held back would lower the shade again and a held
+    /// A repeat that finds the shade down does nothing, not even wake the
+    /// screen. The control was held while the shade came down, by the
+    /// quiet window, by the client's answer to its own press, or by a sleep
+    /// ask, and its press acted before that. A wake on the repeat would
+    /// lift the shade the client just asked for, or light a panel that was
+    /// just turned off.
+    ///
+    /// A control whose press only woke the screen, or whose repeat found
+    /// the shade down, holds until its release, and its repeats do nothing.
+    /// Without the hold, its later repeats would find the shade up and reach
+    /// the client: a held back would lower the shade again, and a held
     /// select on a dark panel would act blind. The controller's next press
     /// ends the hold too, so a release the bus lost holds nothing for long.
     ///
@@ -488,9 +494,9 @@ impl Screen {
     ///
     /// A press acts only while the remote's mark names this `Player`. A pad
     /// pointed at another room touches nothing here, not the shade and not
-    /// the client. A release changes nothing at all: the standing pod holds
-    /// the repeat and stops it at the release, so this crate has nothing to
-    /// stop.
+    /// the client. A release reaches no client and moves no shade, because
+    /// the standing pod holds the repeat and stops it at the release. Its
+    /// one effect here is to end the hold of its control.
     fn on_press(&mut self, index: usize, payload: &[u8], now: Instant) -> Vec<Effect> {
         let Some(press) = press::parse(payload) else {
             return Vec::new();
@@ -536,6 +542,9 @@ impl Screen {
             self.woke_only[index] = None;
         } else if self.woke_only[index].as_deref() == Some(press.key.as_str()) {
             return Vec::new();
+        } else if self.asleep {
+            self.woke_only[index] = Some(press.key);
+            return Vec::new();
         }
         let down = press.down();
 
@@ -562,7 +571,7 @@ impl Screen {
             let back = keys::back(&press.key);
             self.asleep = false;
             moment = Some(Moment::Wake);
-            if self.idle && down && !dark && !back {
+            if self.idle && !dark && !back {
                 line = Some(format!(
                     "{trigger} woke the screen and passed to the client"
                 ));
@@ -571,7 +580,7 @@ impl Screen {
                 self.woke_only[index] = Some(press.key.clone());
                 let why = if dark {
                     ", because the panel was off"
-                } else if back && down {
+                } else if back {
                     ", because back on the shade only lifts it"
                 } else {
                     ""

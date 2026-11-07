@@ -143,24 +143,58 @@ fn back_on_the_shade_says_why_it_only_lifted_it() {
     );
 }
 
-// A repeat that finds the shade down belongs to a control held while the
-// shade came down, and that control's press acted before it did.
-#[test]
-fn a_repeat_that_finds_the_shade_down_only_wakes_it() {
-    let now = Instant::now();
-    let mut screen = shaded(now);
+/// A unit whose client brought the shade down on a held back's press, the
+/// way the stock idle screen answers back.
+fn held_back_lowered_the_shade(now: Instant) -> Screen {
+    let mut screen = idling(&wiring(), now);
+    screen.deliver(SOFA_EVENTS, &key("KEY_BACK", 1), false, now);
+    screen.sleep(now);
+    screen
+}
 
-    assert_eq!(
-        moments(screen.deliver(SOFA_EVENTS, &key("KEY_UP", 2), false, now)),
-        [Moment::Wake]
-    );
+/// A unit that `media-operator` asked to sleep while a control was held.
+fn asked_to_sleep_during_a_hold(now: Instant) -> Screen {
+    let mut screen = idling(&wiring(), now);
+    screen.deliver(SOFA_EVENTS, &key("KEY_UP", 1), false, now);
+    screen.deliver(POWER, br#"{"action":"sleep"}"#, false, now);
+    screen
+}
+
+// A repeat that finds the shade down belongs to a control held while the
+// shade came down, and that control's press acted before the shade did. A
+// wake on the repeat would lift the shade the client just asked for, or light
+// a panel that was just turned off, so the repeat does nothing.
+#[test]
+fn a_repeat_that_finds_the_shade_down_does_nothing() {
+    let now = Instant::now();
+    for (mut screen, name, way) in [
+        (shaded(now), "KEY_UP", "the quiet window"),
+        (
+            held_back_lowered_the_shade(now),
+            "KEY_BACK",
+            "the client's shade",
+        ),
+        (asked_to_sleep_during_a_hold(now), "KEY_UP", "a sleep ask"),
+        (off_window_ran_out(now), "KEY_SELECT", "the off window"),
+    ] {
+        let desire = screen.desire;
+
+        assert!(
+            screen
+                .deliver(SOFA_EVENTS, &key(name, 2), false, now)
+                .is_empty(),
+            "{way}"
+        );
+        assert!(screen.asleep, "{way}");
+        assert_eq!(screen.desire, desire, "{way}");
+    }
 }
 
 // A control held down repeats until its release. When its press only woke
 // the screen, its repeats find the shade up, and without the hold they would
 // act where the press did not: a held back would lower the shade again, and
 // a held select on a dark panel would act blind. A repeat that finds the
-// shade down holds the same way.
+// shade down holds the same way, so the shade stays down for the whole hold.
 #[test]
 fn a_held_control_whose_press_only_woke_the_screen_repeats_nothing() {
     let now = Instant::now();

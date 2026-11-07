@@ -225,9 +225,12 @@ receives `sleep` on the power topic. Back, `KEY_BACK`, `KEY_ESC`,
 for every client.
 The operator's own client lowers the shade on back, and one rule for
 every client keeps a press of back from undoing the wake there. A
-repeat that finds the screen asleep only wakes it. The client
-receives none of the repeats of a control whose press or repeat only
-woke the screen, until the control is released.
+repeat that finds the screen asleep does nothing, because the control
+was held while the shade came down and its press acted before that: a
+wake on the repeat would lift a shade the client just lowered, or
+light a panel that was just turned off. The client receives none of
+the repeats of a control whose press only woke the screen, or whose
+repeat found the screen asleep, until the control is released.
 
 The power keys, `KEY_POWER`, `KEY_POWER2`, `KEY_SLEEP`, and
 `KEY_WAKEUP`, are the media operator's: it reads them from the same
