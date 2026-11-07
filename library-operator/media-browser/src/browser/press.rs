@@ -77,7 +77,7 @@ impl<S: Source, A: Art> Browser<S, A> {
         // the exit of a state the shade came down over, and the press that
         // lifted the shade arrives in the same fold, so without this rule
         // that press would act on nothing.
-        if self.loading.as_ref().is_some_and(|state| !state.leaving()) {
+        if self.curtain_stands() {
             match name == "escape" || name == "backspace" {
                 true => {
                     self.presented();

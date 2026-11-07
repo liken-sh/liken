@@ -357,8 +357,9 @@ impl<S: Source, A: Art> Browser<S, A> {
     // Raise the picker where the browser has no answer to who is watching.
     // The answer is whether it went up, which is a frame to draw. A
     // browser that knows no people never asks. Neither does one under the
-    // shade or under the loading state, because nobody sees a picker drawn
-    // there.
+    // shade or under a standing loading state, because nobody sees a picker
+    // drawn there. A loading state that has begun to leave asks, because a
+    // press there reaches the page (press.rs), and the ask must come first.
     fn ask(&mut self) -> bool {
         // The idle window ends an answer whether or not anybody pressed, so
         // the message on the bus goes here as well as on a press.
@@ -367,12 +368,19 @@ impl<S: Source, A: Art> Browser<S, A> {
         }
         let due = self.picker.is_none()
             && !self.asleep()
-            && self.loading.is_none()
+            && !self.curtain_stands()
             && self.audience.needs_answer(self.clock);
         if due {
             self.raise_picker();
         }
         due
+    }
+
+    // Whether a loading state stands over the page and has not begun to
+    // leave. The press gate and the ask read the same test, so a press that
+    // reaches the page never skips the ask.
+    fn curtain_stands(&self) -> bool {
+        self.loading.as_ref().is_some_and(|state| !state.leaving())
     }
 
     // Take the picker's answer: set who is watching, drop the gate, put

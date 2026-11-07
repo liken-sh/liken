@@ -188,6 +188,27 @@ fn a_press_after_the_idle_hours_asks_again_and_moves_no_focus_under_it() {
     assert_eq!(showing_page(&browser).focus, Focus::Buttons(0));
 }
 
+// A `Play` that never left `Idle` leaves its curtain standing under the
+// shade. The wake starts the curtain's exit, and the press that lifted the
+// shade reaches the page, so the ask must reach it too: a select there
+// would otherwise play under a room that answered hours ago.
+#[test]
+fn the_press_that_lifts_the_shade_over_a_curtain_after_the_idle_hours_asks_again() {
+    let (mut browser, bus) = watching(&["first", "second"], &["first"]);
+    open_the_film(&mut browser);
+    browser.key("enter");
+    let asked = requests(&bus).len();
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Sleep];
+    browser.pump(1.0);
+
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![Moment::Wake, Moment::Press("KEY_SELECT".into())];
+    browser.pump(IDLE_SECONDS + 2.0);
+
+    assert!(browser.picker.is_some());
+    assert_eq!(requests(&bus).len(), asked);
+}
+
 // A home press under a film is answered ahead of the picker. The picker
 // the press cleared is asked again over the home page.
 #[test]
