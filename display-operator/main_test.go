@@ -307,7 +307,7 @@ func TestReconcileTaintsEveryOutputWhileNoCompositorServes(t *testing.T) {
 
 	// The socket file is there and nothing answers on it, which is what
 	// a compositor killed uncleanly leaves.
-	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()), noCurrentModes, noPanelControls, newLinkHistory(), nil)
+	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()), noCurrentModes, noPanelControls, newLinkHistory(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestReconcileRecordsTheHardwareTripleAndTheObservations(t *testing.T) {
 	readings := newMetrics("display-operator", "dev")
 
 	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()),
-		noCurrentModes, noPanelControls, newLinkHistory(), readings)
+		noCurrentModes, noPanelControls, newLinkHistory(), nil, readings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 	}}
 	client := testClient(t, fixture.handler(t))
 
-	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, newLinkHistory(), nil); err != nil {
+	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, newLinkHistory(), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.updated == nil {
@@ -405,7 +405,7 @@ func TestAMonitorThatGoesDarkKeepsItsScreenPublished(t *testing.T) {
 	pass := func() SliceDevice {
 		t.Helper()
 		fixture.created = nil
-		if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, links, nil); err != nil {
+		if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, links, nil, nil); err != nil {
 			t.Fatal(err)
 		}
 		if fixture.created == nil {
@@ -459,7 +459,7 @@ func publishedModes(t *testing.T, current func() (map[string]string, error)) map
 	client := testClient(t, fixture.handler(t))
 
 	socket := servingSocket(t, t.TempDir())
-	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, current, noPanelControls, newLinkHistory(), nil); err != nil {
+	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, current, noPanelControls, newLinkHistory(), nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.created == nil {
@@ -530,7 +530,7 @@ func TestAnAbsentCompositorIsNoFailedCardObservation(t *testing.T) {
 			pass := func(current func() (map[string]string, error)) {
 				t.Helper()
 				if err := reconcile(client, "liken-1", testOwner(), "card1", socket,
-					current, noPanelControls, newLinkHistory(), readings); err != nil {
+					current, noPanelControls, newLinkHistory(), nil, readings); err != nil {
 					t.Fatal(err)
 				}
 			}

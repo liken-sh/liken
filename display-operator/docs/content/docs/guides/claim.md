@@ -356,6 +356,14 @@ A monitor somebody really unplugged therefore keeps its devices
 claimable, and your pod keeps drawing into nothing. Read the
 `Connected` condition on the `Display` to see what the wire says.
 
+The operator reports a monitor dark only after its connector has read
+no monitor for 5 seconds. An A/V receiver in standby can drop hot plug
+detect for a fraction of a second several times a minute, and the
+monitor answers again with the same EDID each time. A drop that short
+changes nothing in the slice or on the `Display`: its windows,
+conditions, and `Event`s stay as they were. The compositor still
+disables the output for the length of each drop.
+
 **A monitor moved to another connector.** A claim that selects by
 `model` or by `serial` instead of by `connector` follows the
 monitor. The eviction controller ends the old pod on the dark

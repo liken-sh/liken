@@ -18,6 +18,15 @@ each uevent and find nothing to write: no slice write and no status
 write in a sample hour. So the cost is log volume and CPU, and one
 mode set on the port every few seconds.
 
+A spell measured on 2026-11-06 with a later build cost more: the
+`Display` of the port, the `Player` on it, audio-operator's slice, and
+the `CECBus` were written on every burst, because a pass that read
+the connector during a drop reported the monitor gone.
+[Plan 32](../completed/32-a-short-hotplug-drop-changes-nothing.md)
+holds each reader through a drop shorter than 5 seconds, so the cost
+of a spell is again the log lines and the mode sets. The plan also
+records how long the drops last and when the bursts stopped.
+
 ## When the pulses happen
 
 The first spell came before the CEC bus was logged. The second began

@@ -249,7 +249,7 @@ and `kubectl describe` shows it once, with the count.
 | Reason | Type | Condition or action |
 | --- | --- | --- |
 | `PanelAttached` | Normal | `Connected` is `True`: a panel is on the connector. |
-| `NoPanel` | Normal | `Connected` is `False`: the connector serves no EDID for this monitor. |
+| `NoPanel` | Normal | `Connected` is `False`: the connector has served no EDID for this monitor for 5 seconds. |
 | `AnswersDDC` | Normal | `Responsive` is `True`. |
 | `NoDDCReply` | Normal | `Responsive` is `False`. A panel in standby does not answer DDC/CI. |
 | `Serving` | Normal | `CompositorServing` is `True`. |

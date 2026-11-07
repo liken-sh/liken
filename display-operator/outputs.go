@@ -101,6 +101,10 @@ type Output struct {
 	// than the one it left with, so the devices taint while a monitor is
 	// on the wire. It is false until withLinks has run.
 	Replaced bool
+	// Held says sysfs reads the connector dark and this is its last lit
+	// reading, because the drop is still shorter than hotplugSettle
+	// (hotplughold.go). Connected stays true while it is held.
+	Held bool
 }
 
 // monitor answers the monitor this connector is responsible for: the

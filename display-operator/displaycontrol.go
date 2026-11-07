@@ -242,6 +242,13 @@ func (d *displayControl) pass(ctx context.Context) error {
 		failures = append(failures, err)
 	}
 	for name, output := range present {
+		// A connector in a short hotplug drop counts as present, so the
+		// sweep below leaves its Display alone. Its panel is not on the
+		// wire, so the pass reads and writes nothing for it, and its
+		// Display keeps what the last lit pass wrote (hotplughold.go).
+		if output.Held {
+			continue
+		}
 		if err := d.reconcile(ctx, name, output, held, ambiguous[name]); err != nil {
 			failures = append(failures, fmt.Errorf("%s: %w", name, err))
 		}

@@ -287,12 +287,25 @@ func operate() {
 		fatal("watching for kernel events: %v", err)
 	}
 
-	// One walk of the card answers every reader: the Display
-	// controller, the placement pass, and the slice publisher's own
-	// pass all name the same connectors and monitors.
-	screensOf := func() []Output {
-		return screens(card, plugin.currentModes, plugin.connectorModes)
+	// The end of a hotplug hold schedules one more pass through the
+	// settled channel, the way a failed write does, so a monitor that
+	// stayed away is reported at the hold's deadline (hotplughold.go).
+	retries := make(chan struct{}, 1)
+	again := func() {
+		select {
+		case retries <- struct{}{}:
+		default:
+		}
 	}
+
+	// One walk of the card answers the Display controller and the
+	// placement pass, so the two name the same connectors and monitors,
+	// and one hold covers both. The slice publisher's pass makes its
+	// own walk, behind a hold of its own.
+	screensOf := newHotplugHold(again).wrap(func() []Output {
+		return screens(card, plugin.currentModes, plugin.connectorModes)
+	})
+	sliceHold := newHotplugHold(again)
 
 	// The Display controller runs beside the slice publisher and
 	// writes the panels' own resources. It reads the same connectors
@@ -399,7 +412,6 @@ func operate() {
 	// A write that failed schedules one more pass through the same
 	// channel every other source uses. The retry costs the loop no
 	// time and takes the same settle window.
-	retries := make(chan struct{}, 1)
 	// The link history is the operator's own, one for the process,
 	// because the answer it holds is measured across passes.
 	links := newLinkHistory()
@@ -421,16 +433,12 @@ func operate() {
 	plugin.links = links
 	publish := func() {
 		err := readings.reconciled(kindResourceSlice, func() error {
-			return reconcile(client, nodeName, owner, card, socketPath, plugin.currentModes, plugin.controls, links, readings)
+			return reconcile(client, nodeName, owner, card, socketPath, plugin.currentModes, plugin.controls, links,
+				sliceHold, readings)
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "publishing the slice: %v; retrying in %s\n", err, writeRetryDelay)
-			time.AfterFunc(writeRetryDelay, func() {
-				select {
-				case retries <- struct{}{}:
-				default:
-				}
-			})
+			time.AfterFunc(writeRetryDelay, again)
 		}
 		if growth, err := restarts.growth(); err != nil {
 			fmt.Fprintf(os.Stderr, "reading how often the compositor restarted: %v\n", err)
@@ -582,7 +590,7 @@ func eventsEnded(ctx context.Context) error {
 // other caller may pass one in.
 func reconcile(client *apiclient.Client, nodeName string, owner OwnerReference, card, socketPath string,
 	currentModes func() (map[string]string, error), controls *panelControls, links *linkHistory,
-	readings *metrics) error {
+	hold *hotplugHold, readings *metrics) error {
 	outputs := discoverOutputs(sysRoot, card)
 	if len(outputs) == 0 {
 		return fmt.Errorf("%s registers no connectors, so the published slice stays as it is", card)
@@ -603,7 +611,10 @@ func reconcile(client *apiclient.Client, nodeName string, owner OwnerReference, 
 	default:
 		readings.recordObservation("card", true, now)
 	}
-	withModes := withCurrentModes(outputs, modes)
+	// The hold sees the reading this pass composed, so a connector in
+	// a short drop publishes the device it published while lit: the
+	// same monitor, modes, current mode, and controls.
+	withModes := hold.apply(withControls(withCurrentModes(outputs, modes), controls))
 
 	// The claim answer is the same file read the canvas heal already
 	// makes. Reusing it here means the connected and claimed gauges
@@ -619,7 +630,7 @@ func reconcile(client *apiclient.Client, nodeName string, owner OwnerReference, 
 	// is cached against the monitor's EDID, so a pass over unchanged
 	// hardware sends nothing on any i2c wire, and a panel that refuses
 	// DDC/CI publishes no control attribute and no control device.
-	devices := sliceDevices(withLinks(withControls(withModes, controls), links))
+	devices := sliceDevices(withLinks(withModes, links))
 	// The compositor source is this handshake: the same check that
 	// decides the NoExecute taint below. A socket that refuses the
 	// connect and a socket that accepts and answers nothing are both a
@@ -724,10 +735,10 @@ func endHungCompositor(socketPath string, frozen *hungCompositor, repair func() 
 		socketPath, compositorHungLimit)
 }
 
-// wakes turns the kernel's drm events, the write retries, the
-// compositor's socket, the output watch's connections, the layout
-// module's reports, and the resources a pass reads into one channel of
-// wakes, with a backstop tick in it.
+// wakes turns the kernel's drm events, the write retries and the ends
+// of hotplug holds, the compositor's socket, the output watch's
+// connections, the layout module's reports, and the resources a pass
+// reads into one channel of wakes, with a backstop tick in it.
 // Nothing on any of them holds state that the loop uses: each wake
 // means look again, and the look is a fresh read of sysfs, of the
 // module's store, and of the resources.
