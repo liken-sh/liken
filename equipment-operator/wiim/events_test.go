@@ -28,8 +28,11 @@ type fakeEvents struct {
 	refuse              bool
 	noSID               bool
 	closeAfterSubscribe bool
-	renewals            int
-	unsubscribed        []string
+	// refuseRenewals answers a renewal 412, the way an amp that rebooted
+	// answers a SID it no longer holds.
+	refuseRenewals bool
+	renewals       int
+	unsubscribed   []string
 }
 
 func startFakeEvents(t *testing.T) *fakeEvents {
@@ -52,7 +55,12 @@ func (f *fakeEvents) handle(w http.ResponseWriter, r *http.Request) {
 		if sid := r.Header.Get("SID"); sid != "" {
 			f.mutex.Lock()
 			f.renewals++
+			refuseRenewal := f.refuseRenewals
 			f.mutex.Unlock()
+			if refuseRenewal {
+				w.WriteHeader(http.StatusPreconditionFailed)
+				return
+			}
 			w.Header().Set("SID", sid)
 			w.Header().Set("TIMEOUT", "Second-1800")
 			return

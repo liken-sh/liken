@@ -49,6 +49,10 @@ type fakeAmp struct {
 	answers  map[string]string
 	failing  int
 	setter   string
+	// broken names the commands the fake answers with a 500, and onRead
+	// runs before the fake answers each command.
+	broken map[string]bool
+	onRead func(command string)
 }
 
 func startFakeAmp(t *testing.T) *fakeAmp {
@@ -93,8 +97,15 @@ func (f *fakeAmp) handle(w http.ResponseWriter, r *http.Request) {
 	answer, held := f.answers[command]
 	failing := f.failing
 	setterAnswer := f.setter
+	if f.broken[command] {
+		failing = http.StatusInternalServerError
+	}
+	onRead := f.onRead
 	f.mutex.Unlock()
 
+	if onRead != nil {
+		onRead(command)
+	}
 	if failing != 0 {
 		w.WriteHeader(failing)
 		return

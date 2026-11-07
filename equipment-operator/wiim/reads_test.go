@@ -267,6 +267,14 @@ func intPtr(value int) *int { return &value }
 // the amp's commands, so a test reads the order of the two.
 func subscribedAmp(t *testing.T) (*fakeAmp, *Client) {
 	t.Helper()
+	amp, _, client := subscribedAmpWithEvents(t)
+	return amp, client
+}
+
+// subscribedAmpWithEvents is subscribedAmp with the fake's UPnP side,
+// for a test that changes how the UPnP side answers.
+func subscribedAmpWithEvents(t *testing.T) (*fakeAmp, *fakeEvents, *Client) {
+	t.Helper()
 	amp := startFakeAmp(t)
 	amp.answers[shutdownCommand] = "0"
 	events := &fakeEvents{callbacks: map[string]string{}, sids: map[string]string{}}
@@ -282,7 +290,7 @@ func subscribedAmp(t *testing.T) (*fakeAmp, *Client) {
 	t.Cleanup(cancel)
 	client.startEvents(ctx)
 	t.Cleanup(client.stopEvents)
-	return amp, client
+	return amp, events, client
 }
 
 // The first poll checks the amp's identity, opens the subscriptions,

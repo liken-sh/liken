@@ -127,6 +127,9 @@ type Client struct {
 	// settingsRead is when a poll last read every family.
 	resync       bool
 	settingsRead time.Time
+	// owed holds the families a setter's read back left to the poll that
+	// held the reads (readback.go).
+	owed family
 	// misses counts the polls in a row the device did not answer, cleared
 	// by the next poll it does.
 	misses int
@@ -320,6 +323,7 @@ func (c *Client) poll(ctx context.Context) bool {
 			c.readSleep(ctx, &next)
 		}
 	}
+	c.readOwed(ctx, &next)
 
 	// A poll's reads were taken before any event that arrived while it
 	// ran, so the evented fields keep the event's value.
@@ -371,25 +375,6 @@ func (c *Client) readSettings(ctx context.Context, next *Status) {
 	c.readBluetooth(ctx, next)
 	c.readPresets(ctx, next)
 	c.readControls(ctx, next)
-}
-
-// readBack reads the families a setter changed, so the next compare of
-// a declared setting reads the amp's own answer and not the value from
-// before the send.
-func (c *Client) readBack(ctx context.Context, reads ...func(context.Context, *Status)) {
-	if len(reads) == 0 {
-		return
-	}
-	c.reads.Lock()
-	defer c.reads.Unlock()
-	c.mutex.Lock()
-	next := c.state
-	c.mutex.Unlock()
-	for _, read := range reads {
-		read(ctx, &next)
-	}
-	c.mergeEvents(&next)
-	c.publish(next)
 }
 
 // isForeign answers whether the device reported a project that is not a
@@ -1097,7 +1082,7 @@ func (c *Client) SetSleep(zone string, minutes int) error {
 	if err := c.send(context.Background(), setShutdownPrefix+seconds); err != nil {
 		return err
 	}
-	c.readBack(context.Background(), c.readSleep)
+	c.readBack(context.Background(), familySleep)
 	return nil
 }
 
