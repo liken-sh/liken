@@ -120,14 +120,22 @@ locals {
       topics      = []
     }
     # A fork keeps its issues on the upstream project, so this one has
-    # none of its own.
+    # none of its own. Its merges keep GitHub's defaults.
     corrosion = {
-      description = "liken's shallow fork of Corrosion: the ghcr image and a short stack of upstream-bound changes"
-      cname       = null
-      homepage    = "https://superfly.github.io/corrosion/"
-      topics      = []
-      has_issues  = false
+      description    = "liken's shallow fork of Corrosion: the ghcr image and a short stack of upstream-bound changes"
+      cname          = null
+      homepage       = "https://superfly.github.io/corrosion/"
+      topics         = []
+      has_issues     = false
+      merge_defaults = true
     }
+  }
+}
+
+locals {
+  merge_defaults = {
+    for name, repo in local.repositories :
+    name => lookup(repo, "archived", false) || lookup(repo, "merge_defaults", false)
   }
 }
 
@@ -158,6 +166,16 @@ resource "github_repository" "repositories" {
   allow_auto_merge            = true
   delete_branch_on_merge      = true
   web_commit_signoff_required = false
+
+  # A squash merge takes the pull request's title and body as its
+  # commit message, and a pull request offers to update its branch
+  # from the base. An archived repository keeps GitHub's defaults,
+  # the values it had when it was archived, because GitHub refuses
+  # every change to it. merge_defaults keeps them on a repository that
+  # is not archived.
+  allow_update_branch         = !local.merge_defaults[each.key]
+  squash_merge_commit_title   = local.merge_defaults[each.key] ? "COMMIT_OR_PR_TITLE" : "PR_TITLE"
+  squash_merge_commit_message = local.merge_defaults[each.key] ? "COMMIT_MESSAGES" : "PR_BODY"
 
   lifecycle {
     # Terraform must never delete a repository because an entry left
