@@ -6,6 +6,15 @@
 name = "brand"
 license = "MIT"
 
+# The voice rules, the motion rules, and the editing prompt are prose that
+# people and agents read. No build reads them: the images take the iced
+# crate, the mark, the stylesheet, and the fonts, and the OS takes the mark
+# and the stylesheet. So an edit to them releases no component that depends
+# on brand. The manuals still check against them, because every component
+# with a manual runs its checks on any change in brand/.
+[outputs]
+exclude = ["voice.md", "motion.md", "editing-prompt.md"]
+
 [[jobs]]
 name = "go"
 toolchain = "go"
