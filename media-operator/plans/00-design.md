@@ -3,9 +3,9 @@
 The media operator is a media routing and playback layer expressed
 as Kubernetes resources. It runs on a
 [`liken`](https://liken.sh/) cluster above the hardware operators:
-[`display-operator`](https://display.liken.sh),
-[`audio-operator`](https://audio.liken.sh), and
-[`bluetooth-operator`](https://bluetooth.liken.sh). Those operators
+[`display-operator`](https://liken.sh/display/),
+[`audio-operator`](https://liken.sh/audio/), and
+[`bluetooth-operator`](https://liken.sh/bluetooth/). Those operators
 publish each display, speaker, and controller as a claimable DRA
 device. This operator declares which devices form a unit, what plays
 on that unit right now, and which physical remote drives it. It is a

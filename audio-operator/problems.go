@@ -18,10 +18,10 @@ import (
 // failure rather than the status code, so one status can carry more
 // than one type. The first five are shared by the three capture APIs
 // under liken's own host, and wrong-target is this domain's own under
-// the audio host.
+// the audio manual's section of liken.sh.
 const (
 	problemBase       = "https://liken.sh/problems/"
-	problemDomainBase = apiHost + "/problems/"
+	problemDomainBase = "https://liken.sh/audio/problems/"
 
 	problemNoNode         = problemBase + "no-node"
 	problemNotAcceptable  = problemBase + "not-acceptable"

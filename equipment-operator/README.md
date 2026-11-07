@@ -83,6 +83,6 @@ another source that claims it, at most twice. `status.session` holds
 the session, `status.wokeAt` and the `WakeApplied` condition report
 what the wake did, and an edit of `spec.power` goes before a wake.
 
-The manual is at [equipment.liken.sh](https://liken.sh/equipment/).
+The manual is at [liken.sh/equipment](https://liken.sh/equipment/).
 `plans/` holds the design documents. `make test` runs every check CI
 runs.

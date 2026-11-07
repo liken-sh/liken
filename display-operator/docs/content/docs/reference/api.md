@@ -304,7 +304,7 @@ encoder's last lines.
 
 ```json
 {
-  "type": "https://display.liken.sh/problems/capture-denied",
+  "type": "https://liken.sh/display/problems/capture-denied",
   "title": "The compositor denied the capture",
   "status": 500,
   "detail": "unauthorized",
@@ -319,9 +319,9 @@ encoder's last lines.
 | `https://liken.sh/problems/capture-busy` | the output is already being captured | 503 |
 | `https://liken.sh/problems/upstream-failed` | the capture container refused the connection, is absent, or is not ready | 503 |
 | `https://liken.sh/problems/away` | the `Display` has no panel on its connector. `detail` is the `Connected` condition's message | 409 |
-| `https://display.liken.sh/problems/capture-denied` | the compositor denied the capture. `detail` is its `unauthorized` | 500 |
-| `https://display.liken.sh/problems/compositor-down` | the compositor is not serving the screen. `detail` is the `CompositorServing` condition's message | 503 |
-| `https://display.liken.sh/problems/encoder-failed` | the encode produced no picture | 500 |
+| `https://liken.sh/display/problems/capture-denied` | the compositor denied the capture. `detail` is its `unauthorized` | 500 |
+| `https://liken.sh/display/problems/compositor-down` | the compositor is not serving the screen. `detail` is the `CompositorServing` condition's message | 503 |
+| `https://liken.sh/display/problems/encoder-failed` | the encode produced no picture | 500 |
 
 The first five types are the ones the three capture APIs share. The
 last three are this API's own, because only the display domain has a

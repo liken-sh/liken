@@ -179,7 +179,7 @@ The same as every `liken` repository. A pushed calendar tag
 (`2026.09.07-001`) is a release and moves `:latest`. A push to main is
 a development build named `<release>-dev-<count>-<sha>` that never
 moves `:latest`. `release.yaml` waits for `ci.yaml` to pass before it
-pushes an image. The manual publishes to `per-node.liken.sh` from the
+pushes an image. The manual publishes to `liken.sh/per-node/` from the
 same run.
 
 ## Limits, stated

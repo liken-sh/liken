@@ -110,7 +110,7 @@ never reveals that a name exists.
 Every error is an RFC 9457 problem document. `type` is a URL: the
 shared types `no-node`, `not-acceptable`, `capture-busy`,
 `upstream-failed`, and `away` under `https://liken.sh/problems/`, and
-this domain's `wrong-target` under `https://audio.liken.sh/problems/`.
+this domain's `wrong-target` under `https://liken.sh/audio/problems/`.
 With `about:blank`, `title` is the status phrase (section 4.2.1).
 `instance` is the request path plus `#` plus the request id, and the
 log line carries the same id. `detail` carries the source's own words
@@ -142,7 +142,7 @@ guarantee, that a `GET` on that URI would return the same
 representation, does not hold for a live capture and is not claimed.
 
 Every response carries `Link: </v1/audio/openapi.json>;
-rel="service-desc"` and `Link: <https://audio.liken.sh/docs/reference/api/>;
+rel="service-desc"` and `Link: <https://liken.sh/audio/docs/reference/api/>;
 rel="service-doc"` (RFC 8631), and `rel="describedby"` absolute to
 `https://kubernetes.default.svc/apis/audio.liken.sh/v1alpha1/sinks/{name}`,
 because a relative reference would resolve against the wrong server

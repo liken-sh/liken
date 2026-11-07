@@ -1,9 +1,0 @@
-{
-	admin off
-	persist_config off
-	auto_https off
-}
-
-:8080 {
-	redir https://liken.sh/{labels.2}{uri} 301
-}

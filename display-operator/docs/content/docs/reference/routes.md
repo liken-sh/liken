@@ -821,7 +821,7 @@ The methods this route allows
 | <span id="problem--instance"></span>`instance` | string | yes |  |
 | <span id="problem--status"></span>`status` | integer | yes |  |
 | <span id="problem--title"></span>`title` | string | yes |  |
-| <span id="problem--type"></span>`type` | string (uri) | yes | One of: `about:blank`, `https://liken.sh/problems/no-node`, `https://liken.sh/problems/not-acceptable`, `https://liken.sh/problems/capture-busy`, `https://liken.sh/problems/upstream-failed`, `https://liken.sh/problems/away`, `https://display.liken.sh/problems/capture-denied`, `https://display.liken.sh/problems/compositor-down`, `https://display.liken.sh/problems/encoder-failed`. |
+| <span id="problem--type"></span>`type` | string (uri) | yes | One of: `about:blank`, `https://liken.sh/problems/no-node`, `https://liken.sh/problems/not-acceptable`, `https://liken.sh/problems/capture-busy`, `https://liken.sh/problems/upstream-failed`, `https://liken.sh/problems/away`, `https://liken.sh/display/problems/capture-denied`, `https://liken.sh/display/problems/compositor-down`, `https://liken.sh/display/problems/encoder-failed`. |
 
 #### Problem.acceptable[]
 

@@ -24,7 +24,7 @@ The pattern these documents follow is documented in the top-level
 and this operator's own instance,
 [milestone 57](https://github.com/liken-sh/liken/blob/main/plans/completed/57-the-display-operator.md).
 
-The manual at [display.liken.sh](https://display.liken.sh) says how
+The manual at [liken.sh/display](https://liken.sh/display/) says how
 to deploy the operator and how to claim an output. These documents
 say why it is built the way it is.
 

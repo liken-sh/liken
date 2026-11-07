@@ -16,10 +16,11 @@ import (
 
 // The problem types the three capture APIs share live under liken.sh,
 // so a client handles one type the same way whichever API answered.
-// A type only this domain answers lives under display.liken.sh.
+// A type only this domain answers lives under the display manual's
+// section of liken.sh.
 const (
 	sharedProblemBase  = "https://liken.sh/problems/"
-	displayProblemBase = "https://display.liken.sh/problems/"
+	displayProblemBase = "https://liken.sh/display/problems/"
 )
 
 // The eight typed problems this API answers with. no-node,

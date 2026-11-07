@@ -30,7 +30,7 @@ contracts any DRA driver gets.
 
 ## The manual
 
-**[display.liken.sh](https://liken.sh/display/)** is the manual, and
+**[liken.sh/display](https://liken.sh/display/)** is the manual, and
 it serves the deployment manifests as raw YAML, so an install starts
 and ends there:
 

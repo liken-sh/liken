@@ -1,4 +1,4 @@
-# The docs domain builds the manual for people.liken.sh. The
+# The docs domain builds the manual served at liken.sh/people. The
 # reference page is generated, never edited: crdref, the generator
 # the brand component publishes, renders it from deploy/people-crd.yaml,
 # so a schema edit is a manual edit. GENERATED lists that page, and

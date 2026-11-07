@@ -140,7 +140,7 @@ stands for `/v1/media/namespaces/{ns}/players/{name}/`.
 | `/metrics` on `:9200` | Prometheus | 200 | `text/plain; version=0.0.4` |
 
 Every response carries `Link: </v1/media/openapi.json>;
-rel="service-desc"` and `Link: <https://media.liken.sh/docs/reference/api/>;
+rel="service-desc"` and `Link: <https://liken.sh/media/docs/reference/api/>;
 rel="service-doc"` (RFC 8631), and `Link: <https://kubernetes.default.svc/apis/media.liken.sh/v1alpha1/namespaces/{ns}/players/{name}>;
 rel="describedby"` on every `Player` route. Every response carries
 `Vary: Accept`, on the extension routes too, because RFC 9110 section
@@ -429,7 +429,7 @@ Link: <https://audio-api.liken-system.svc/v1/audio/sinks/hdmi-0-pch/audio.opus?t
 Link: <https://kubernetes.default.svc/apis/media.liken.sh/v1alpha1/namespaces/media/players/studio>;
       rel="describedby"
 Link: </v1/media/openapi.json>; rel="service-desc"
-Link: <https://media.liken.sh/docs/reference/api/>; rel="service-doc"
+Link: <https://liken.sh/media/docs/reference/api/>; rel="service-doc"
 ```
 
 The `Link` fields are wrapped for reading; each is one field line on

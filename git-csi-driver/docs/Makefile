@@ -1,6 +1,6 @@
-# The docs domain builds the manual for git.liken.sh, with the same
-# `make build` every manual runs, so the root Makefile and CI build each
-# manual one way.
+# The docs domain builds the manual served at liken.sh/git, with the
+# same `make build` every manual runs, so the root Makefile and CI build
+# each manual one way.
 HUGO := go tool hugo
 
 SKILLS := go tool skills

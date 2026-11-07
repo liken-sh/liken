@@ -40,7 +40,7 @@ skills/<slug>/SKILL.md                 committed; CI fails when stale
 `skills/` in this repository is a Go program, run as `go tool skills`
 and pinned in each docs module the way `crdref` is:
 
-    go tool skills -base https://media.liken.sh content/docs/guides ../skills
+    go tool skills -base https://liken.sh/media/ content/docs/guides ../skills
 
 For every `*.md` in the guides directory except `_index.md`, it
 writes `<out>/<slug>/SKILL.md`. The slug is the file's base name,

@@ -164,7 +164,7 @@ func TestAnUpstreamAnswerMapsToThisAPIsOwnStatus(t *testing.T) {
 		{
 			name: "a compositor that denied the capture", status: http.StatusInternalServerError,
 			contentType: problemContentType,
-			body:        `{"type":"https://display.liken.sh/problems/capture-denied","title":"Denied","status":500,"detail":"unauthorized"}`,
+			body:        `{"type":"https://liken.sh/display/problems/capture-denied","title":"Denied","status":500,"detail":"unauthorized"}`,
 			want:        http.StatusBadGateway, kind: problemUpstreamFailed, detail: "unauthorized",
 		},
 		{

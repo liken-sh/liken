@@ -351,7 +351,7 @@ with the display and media APIs. The last one belongs to this API.
 | `https://liken.sh/problems/capture-busy` | the capture container is at its tap limit | `503` |
 | `https://liken.sh/problems/upstream-failed` | the capture container answered something this API cannot relay, or sent no headers in time | `502`, `504` |
 | `https://liken.sh/problems/away` | the object is away: it has no `status.node` | `409` |
-| `https://audio.liken.sh/problems/wrong-target` | the tap connected to a node other than the one you asked for | `500` |
+| `https://liken.sh/audio/problems/wrong-target` | the tap connected to a node other than the one you asked for | `500` |
 
 ## Discovery
 

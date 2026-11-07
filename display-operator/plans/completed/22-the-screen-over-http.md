@@ -69,7 +69,7 @@ ingress is not v1 work; v1 is one `Service` per domain.
 Every response carries `Content-Type` (RFC 9110 section 8.3), `Date`
 (section 6.6.1), `Vary: Accept` (section 12.5.5), and two `Link`
 fields (RFC 8288): `</v1/display/openapi.json>; rel="service-desc"`
-and `<https://display.liken.sh/docs/reference/api/>; rel="service-doc"`,
+and `<https://liken.sh/display/docs/reference/api/>; rel="service-doc"`,
 the relations RFC 8631 defines. `Vary` goes on extension routes too,
 where `Accept` only decides between 200 and 406, for 12.5.5's second
 purpose: to say the response was subject to negotiation. Every route
@@ -234,7 +234,7 @@ Every error is `application/problem+json` with `type`, `title`,
 plus `#` plus the request id, and the log line carries the same id.
 Shared types live under `https://liken.sh/problems/` (`no-node`,
 `not-acceptable`, `capture-busy`, `upstream-failed`); display's own
-under `https://display.liken.sh/problems/` (`capture-denied`,
+under `https://liken.sh/display/problems/` (`capture-denied`,
 `compositor-down`, `encoder-failed`), because only this domain has a
 compositor and an encoder. With `about:blank`, `title` is the status
 phrase (RFC 9457 section 4.2.1). `detail` carries the source's own
@@ -248,7 +248,7 @@ the cluster, so they go to the log line and never to the caller.
 
 ```json
 {
-  "type": "https://display.liken.sh/problems/capture-denied",
+  "type": "https://liken.sh/display/problems/capture-denied",
   "title": "The compositor denied the capture",
   "status": 500,
   "detail": "unauthorized",

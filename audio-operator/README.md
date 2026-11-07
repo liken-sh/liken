@@ -55,7 +55,7 @@ two operators.
 
 ## The manual
 
-**[audio.liken.sh](https://liken.sh/audio/)** is the manual, and it
+**[liken.sh/audio](https://liken.sh/audio/)** is the manual, and it
 serves the deployment manifests as raw YAML, so an install starts
 and ends there:
 

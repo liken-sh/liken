@@ -23,7 +23,7 @@ The driver defines no custom resources and has no controller. A
 `PersistentVolume` names the driver and the handle, and a
 `PersistentVolumeClaim` binds to it.
 
-The manual is at [per-node.liken.sh](https://liken.sh/per-node/). The
+The manual is at [liken.sh/per-node](https://liken.sh/per-node/). The
 design is [`plans/00-design.md`](plans/00-design.md), and
 [`plans/`](plans/) holds the plans that build it.
 

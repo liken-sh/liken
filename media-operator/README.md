@@ -37,7 +37,7 @@ in the `Play`'s own namespace. Media
 library management is a separate concern, and this project does
 none of it.
 
-The manual is at [media.liken.sh](https://liken.sh/media/): the
+The manual is at [liken.sh/media](https://liken.sh/media/): the
 install guide, the reference for each resource, and the message bus
 every pod and any of your own programs share.
 [`plans/00-design.md`](plans/00-design.md) is the design: the

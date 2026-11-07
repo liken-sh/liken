@@ -1,4 +1,4 @@
-# The docs domain builds the manual for equipment.liken.sh. The
+# The docs domain builds the manual served at liken.sh/equipment. The
 # reference pages for the three resources are generated, never edited:
 # crdref, the generator the brand component publishes, renders each
 # one from its CRD in deploy/, so a schema edit is a manual edit.

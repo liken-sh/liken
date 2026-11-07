@@ -10,7 +10,7 @@ import (
 
 // base is the fixture site's base URL. Every expected URL in this
 // file is written against it.
-const base = "https://media.liken.sh"
+const base = "https://liken.sh/media"
 
 // The golden file is the contract: one guide that holds every link
 // shape, and the exact skill it must produce.
@@ -111,27 +111,27 @@ func TestGenerateRewritesLinks(t *testing.T) {
 		{
 			"absolute",
 			"Read [the reference](/docs/reference/remote/).",
-			"Read [the reference](https://media.liken.sh/docs/reference/remote/).",
+			"Read [the reference](https://liken.sh/media/docs/reference/remote/).",
 		},
 		{
 			"absolute with a fragment",
 			"Read [the field](/docs/reference/remote/#spec).",
-			"Read [the field](https://media.liken.sh/docs/reference/remote/#spec).",
+			"Read [the field](https://liken.sh/media/docs/reference/remote/#spec).",
 		},
 		{
 			"relative to the section",
 			"Read [the adapter guide](../claim/).",
-			"Read [the adapter guide](https://media.liken.sh/docs/guides/claim/).",
+			"Read [the adapter guide](https://liken.sh/media/docs/guides/claim/).",
 		},
 		{
 			"relative to the guide",
 			"Read [the key map](keys/).",
-			"Read [the key map](https://media.liken.sh/docs/guides/pair-a-remote/keys/).",
+			"Read [the key map](https://liken.sh/media/docs/guides/pair-a-remote/keys/).",
 		},
 		{
 			"relative with a fragment",
 			"Read [the keys](../claim/#keys).",
-			"Read [the keys](https://media.liken.sh/docs/guides/claim/#keys).",
+			"Read [the keys](https://liken.sh/media/docs/guides/claim/#keys).",
 		},
 		{
 			"fragment only",
@@ -166,7 +166,7 @@ func TestGenerateRewritesLinks(t *testing.T) {
 		{
 			"image with a title",
 			`![the mark](/brand/liken.svg "A patch of crustose lichen.")`,
-			`![the mark](https://media.liken.sh/brand/liken.svg "A patch of crustose lichen.")`,
+			`![the mark](https://liken.sh/media/brand/liken.svg "A patch of crustose lichen.")`,
 		},
 		{
 			"fenced code",
@@ -176,7 +176,7 @@ func TestGenerateRewritesLinks(t *testing.T) {
 		{
 			"indented code",
 			"    kubectl get [remotes](/docs/reference/remote/)",
-			"    kubectl get [remotes](https://media.liken.sh/docs/reference/remote/)",
+			"    kubectl get [remotes](https://liken.sh/media/docs/reference/remote/)",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -203,7 +203,7 @@ func TestGenerateTrimsATrailingSlashFromTheBase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "(https://media.liken.sh/docs/reference/remote/)") {
+	if !strings.Contains(string(got), "(https://liken.sh/media/docs/reference/remote/)") {
 		t.Errorf("the base's trailing slash survived:\n%s", string(got))
 	}
 }

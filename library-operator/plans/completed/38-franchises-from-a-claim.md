@@ -23,7 +23,7 @@ second printer column, a `status.commit` that no other kind reports, an
 image with git and its runtime in it, and a scanner that reaches a forge
 on its own.
 
-The [git CSI driver](https://git.liken.sh/) serves a repository as a
+The [git CSI driver](https://liken.sh/git/) serves a repository as a
 volume, and its plan 07 serves one as a `ReadOnlyMany` claim that
 follows its ref. With that claim, a franchises library is a library like
 the others: a claim that holds its truth, which the scanner walks.
