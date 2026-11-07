@@ -96,6 +96,12 @@ is not a button to map. A `Keymap` row on `KEY_UNKNOWN` acts
 on every wake, and on any real button that the kernel also reports as
 `KEY_UNKNOWN`, so do not bind it.
 
+A press on a sleeping idle screen lifts the shade and acts on the
+screen in the same press, except back. A button that reaches the
+screen as `KEY_BACK`, `KEY_ESC`, or `KEY_EXIT`, from the base mapping
+or from a `Keymap` row, only lifts the shade, because the screen
+answers back at its top level by bringing the shade down again.
+
 If the controller has modes, press every button in every mode. A
 combined remote can emit different codes for one button per mode. An
 air-mouse shell emits `BTN_LEFT` for its OK button in mouse mode, and

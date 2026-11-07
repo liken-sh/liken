@@ -20,7 +20,9 @@ pub const CYCLE: &str = "KEY_CYCLEWINDOWS";
 /// with, so a client reads all three. This crate never sleeps the
 /// screen on a press: only the client knows whether back has anywhere
 /// to go, and the client asks for the shade with
-/// [`super::Screen::sleep`].
+/// [`super::Screen::sleep`]. Back on the shade only lifts it and never
+/// reaches the client, so the client's answer cannot bring the shade
+/// straight down again.
 pub const BACK: [&str; 3] = ["KEY_BACK", "KEY_ESC", "KEY_EXIT"];
 
 /// The four power keys: the two power synonyms a shell and a Bluetooth

@@ -55,7 +55,6 @@ fn the_press_that_lifts_the_shade_reaches_the_client_after_the_wake() {
         "KEY_DOWN",
         "KEY_A",
         "KEY_HOMEPAGE",
-        "KEY_BACK",
         "KEY_PLAYPAUSE",
         "KEY_VOLUMEUP",
         "KEY_UNKNOWN",
@@ -109,6 +108,38 @@ fn a_press_on_a_dark_panel_only_wakes_it_and_lights_the_panel() {
         assert_eq!(moments(effects.clone()), [Moment::Wake], "{way}");
         assert_eq!(publishes(effects), [desire(crate::panel::ON)], "{way}");
     }
+}
+
+// Both clients answer back by asking for the shade at their top level, so a
+// back that lifted the shade and reached the client would bring it down again.
+#[test]
+fn back_on_the_shade_only_lifts_it() {
+    let now = Instant::now();
+    for name in keys::BACK {
+        let mut screen = shaded(now);
+
+        assert_eq!(
+            moments(screen.deliver(SOFA_EVENTS, &key(name, 1), false, now)),
+            [Moment::Wake],
+            "{name}"
+        );
+        assert!(!screen.asleep, "{name}");
+    }
+}
+
+#[test]
+fn back_on_the_shade_says_why_it_only_lifted_it() {
+    let now = Instant::now();
+    let mut screen = shaded(now);
+
+    screen.deliver(SOFA_EVENTS, &key("KEY_BACK", 1), false, now);
+
+    assert_eq!(
+        screen.take_lines(),
+        [
+            "KEY_BACK from remote house/sofa woke the screen and did nothing else, because back on the shade only lifts it"
+        ]
+    );
 }
 
 // A repeat that finds the shade down belongs to a control held while the

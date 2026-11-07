@@ -40,9 +40,10 @@ pub enum Moment {
     /// The quiet window ran out, or the client asked for the shade.
     Sleep,
     /// A press, a live mark, or a starting `Play` lifted the shade. When a
-    /// press lifted it over a lit panel while the unit plays nothing, the
-    /// press follows as a [`Moment::Press`] in the same fold, so the client
-    /// lifts its shade first and then acts on the press.
+    /// press other than back lifted it over a lit panel while the unit
+    /// plays nothing, the press follows as a [`Moment::Press`] in the same
+    /// fold, so the client lifts its shade first and then acts on the
+    /// press.
     Wake,
     /// A live mark named this `Player`. `remote` is the controller's place in
     /// `spec.remotes`, which is the order the status lists the parts in.
@@ -462,9 +463,13 @@ impl Screen {
     /// twice after each quiet stretch. A press on a panel that is dark,
     /// because the off window ran out or `media-operator` asked the screen
     /// to sleep, only wakes the screen: the person pressed at a dark TV
-    /// and could not see what the press would act on. A repeat that finds
-    /// the shade down only wakes it too, because the control was held
-    /// while the shade came down and its press acted before that.
+    /// and could not see what the press would act on. Back on the shade
+    /// only lifts it too: a client answers back at its top level by asking
+    /// for the shade, and the stock idle screen has no other level, so a
+    /// back that reached the client could bring the shade down again, and
+    /// the person would see no change. A repeat
+    /// that finds the shade down only wakes it, because the control was
+    /// held while the shade came down and its press acted before that.
     ///
     /// Every other key, while the unit plays nothing, reaches the client.
     /// Every press but a power press restarts the quiet window.
@@ -532,9 +537,10 @@ impl Screen {
             // The desire is read before the wake states the on desire, so it
             // still says whether the panel was dark when the person pressed.
             let dark = self.desire == Some(panel::OFF);
+            let back = keys::back(&press.key);
             self.asleep = false;
             moment = Some(Moment::Wake);
-            if self.idle && down && !dark {
+            if self.idle && down && !dark && !back {
                 line = Some(format!(
                     "{trigger} woke the screen and passed to the client"
                 ));
@@ -542,6 +548,8 @@ impl Screen {
             } else {
                 let why = if dark {
                     ", because the panel was off"
+                } else if back && down {
+                    ", because back on the shade only lifts it"
                 } else {
                     ""
                 };
