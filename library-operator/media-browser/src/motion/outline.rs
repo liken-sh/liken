@@ -1,7 +1,7 @@
 // The focus outline in motion. Each of its four edges is a value of its
-// own, so the edge on the side a press points to can arrive first and the
-// edge behind it can follow. For a moment the outline spans both slots,
-// then it closes on the new one. Nothing overshoots, so the outline never
+// own, so an outline that moves between slots of two sizes changes size on
+// the way. Every edge moves over the same length on the same curve, so the
+// outline glides as one piece. Nothing overshoots, so the outline never
 // draws past the slot it lands on.
 
 use iced_winit::core::Rectangle;
@@ -63,32 +63,16 @@ impl Outline {
             .fold(f64::NEG_INFINITY, f64::max)
     }
 
-    /// Travel to this rectangle from the one drawn at this second. On each
-    /// axis the edge on the side of travel leads and the opposite edge
-    /// follows; an axis the outline does not cross changes size on the
-    /// lead's length. `pace` scales every length, and is below 1 while a
-    /// key is held.
+    /// Glide to this rectangle from the one drawn at this second, every
+    /// edge over the same length. `pace` scales the length, and is below 1
+    /// while a key is held.
     pub fn travel(&mut self, to: Rectangle, clock: f64, pace: f64) {
-        let now = self.at(clock);
-        let lead = look::LEAD * pace;
-        let follow = look::FOLLOW * pace;
-        let (left, right) = lengths(to.center_x() - now.center_x(), lead, follow);
-        let (top, bottom) = lengths(to.center_y() - now.center_y(), lead, follow);
-        self.left.go(to.x, clock, left);
-        self.right.go(to.x + to.width, clock, right);
-        self.top.go(to.y, clock, top);
-        self.bottom.go(to.y + to.height, clock, bottom);
+        let length = look::GLIDE * pace;
+        self.left.go(to.x, clock, length);
+        self.right.go(to.x + to.width, clock, length);
+        self.top.go(to.y, clock, length);
+        self.bottom.go(to.y + to.height, clock, length);
         self.to = to;
-    }
-}
-
-// The lengths of the near and the far edge of one axis, for a move of this
-// many pixels along it toward the far edge's side.
-fn lengths(toward_far: f32, lead: f64, follow: f64) -> (f64, f64) {
-    match toward_far {
-        moved if moved > 0.0 => (follow, lead),
-        moved if moved < 0.0 => (lead, follow),
-        _ => (lead, lead),
     }
 }
 
@@ -122,43 +106,34 @@ mod tests {
     }
 
     #[test]
-    fn a_right_press_moves_the_right_edge_first_and_the_left_edge_after() {
-        let outline = moved(slot(200.0, 0.0));
-        let half = outline.at(look::LEAD / 2.0);
-        assert_eq!(half.x + half.width, 200.0);
-        assert!(half.x < 100.0, "{half:?}");
-
-        let led = outline.at(look::LEAD);
-        assert_eq!(led.x + led.width, 300.0);
-        assert!(led.x < 200.0, "{led:?}");
-        assert_eq!(led.y, 0.0);
-        assert_eq!(led.height, 150.0);
-    }
-
-    #[test]
-    fn the_outline_lands_on_the_new_slot_when_the_follow_ends() {
+    fn every_edge_moves_together_so_the_outline_keeps_its_size() {
         for to in [slot(200.0, 0.0), slot(-200.0, 0.0), slot(0.0, 300.0)] {
             let outline = moved(to);
-            assert_eq!(outline.at(look::FOLLOW), to);
-            assert_eq!(outline.ends(), look::FOLLOW);
+            for step in 1..10 {
+                let drawn = outline.at(look::GLIDE * f64::from(step) / 10.0);
+                assert!((drawn.width - 100.0).abs() < 1e-3, "{drawn:?}");
+                assert!((drawn.height - 150.0).abs() < 1e-3, "{drawn:?}");
+            }
         }
     }
 
     #[test]
-    fn a_left_press_leads_with_the_left_edge() {
-        let outline = moved(slot(-200.0, 0.0));
-        let led = outline.at(look::LEAD);
-        assert_eq!(led.x, -200.0);
-        assert!(led.x + led.width > -100.0, "{led:?}");
+    fn between_slots_of_two_sizes_the_outline_changes_size_on_the_way() {
+        let to = Rectangle {
+            width: 300.0,
+            ..slot(200.0, 0.0)
+        };
+        let half = moved(to).at(look::GLIDE / 2.0);
+        assert!(half.width > 100.0 && half.width < 300.0, "{half:?}");
     }
 
     #[test]
-    fn a_down_press_leads_with_the_bottom_edge() {
-        let outline = moved(slot(0.0, 300.0));
-        let led = outline.at(look::LEAD);
-        assert_eq!(led.y + led.height, 450.0);
-        assert!(led.y < 300.0, "{led:?}");
-        assert_eq!(led.x, 0.0);
+    fn the_outline_lands_on_the_new_slot_when_the_glide_ends() {
+        for to in [slot(200.0, 0.0), slot(-200.0, 0.0), slot(0.0, 300.0)] {
+            let outline = moved(to);
+            assert_eq!(outline.at(look::GLIDE), to);
+            assert_eq!(outline.ends(), look::GLIDE);
+        }
     }
 
     #[test]
@@ -177,7 +152,7 @@ mod tests {
         let drawn = outline.at(0.1);
         outline.travel(slot(400.0, 0.0), 0.1, 1.0);
         assert_eq!(outline.at(0.1), drawn);
-        assert_eq!(outline.at(0.1 + look::FOLLOW), slot(400.0, 0.0));
+        assert_eq!(outline.at(0.1 + look::GLIDE), slot(400.0, 0.0));
     }
 
     // A slot whose left edge and width are no sum of powers of two, as a
@@ -196,14 +171,14 @@ mod tests {
     fn the_outline_moves_to_the_very_rectangle_it_was_sent_to() {
         assert_eq!(Outline::still(uneven()).to(), uneven());
         assert_eq!(moved(uneven()).to(), uneven());
-        assert_eq!(moved(uneven()).at(look::FOLLOW), uneven());
+        assert_eq!(moved(uneven()).at(look::GLIDE), uneven());
     }
 
     #[test]
     fn a_held_key_shortens_every_length_by_its_pace() {
         let mut outline = Outline::still(slot(0.0, 0.0));
         outline.travel(slot(200.0, 0.0), 0.0, 0.5);
-        assert_eq!(outline.ends(), look::FOLLOW * 0.5);
-        assert_eq!(outline.at(look::FOLLOW * 0.5), slot(200.0, 0.0));
+        assert_eq!(outline.ends(), look::GLIDE * 0.5);
+        assert_eq!(outline.at(look::GLIDE * 0.5), slot(200.0, 0.0));
     }
 }

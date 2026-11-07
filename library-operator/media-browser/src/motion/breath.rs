@@ -113,7 +113,7 @@ mod tests {
 
     fn rested() -> Breath {
         let mut breath = Breath::default();
-        breath.press(QUIET - look::FOLLOW, QUIET);
+        breath.press(QUIET - look::GLIDE, QUIET);
         breath
     }
 
@@ -148,7 +148,7 @@ mod tests {
     fn a_press_releases_the_breath_from_the_brightness_drawn_then() {
         let mut breath = rested();
         let peak = FIRST + look::BREATH / 2.0;
-        breath.press(peak, peak + look::FOLLOW);
+        breath.press(peak, peak + look::GLIDE);
         let cases = [
             (0.0, 1.0),
             (look::BREATH_RELEASE / 2.0, 0.5),

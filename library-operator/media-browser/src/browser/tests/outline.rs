@@ -52,30 +52,29 @@ fn on_the_libraries() -> Browser<Fake, NoArt> {
 }
 
 #[test]
-fn a_right_press_moves_the_right_edge_ahead_of_the_left() {
+fn a_right_press_glides_the_outline_as_one_piece() {
     let mut browser = on_the_libraries();
     let from = drawn_at(&mut browser, PRESS);
     press(&mut browser, "right", PRESS);
     let to = resting(&browser);
     assert!(to.x > from.x, "{from:?} {to:?}");
 
-    let part = drawn_at(&mut browser, PRESS + look::LEAD * 0.75);
-    let right = part.x + part.width;
-    assert!(
-        right > (from.x + from.width + to.x + to.width) / 2.0,
-        "{part:?}"
-    );
-    assert!(part.x < (from.x + to.x) / 2.0, "{part:?}");
+    let part = drawn_at(&mut browser, PRESS + look::GLIDE / 2.0);
+    let left = (part.x - from.x) / (to.x - from.x);
+    let right =
+        (part.x + part.width - from.x - from.width) / (to.x + to.width - from.x - from.width);
+    assert!((left - right).abs() < 1e-3, "{part:?}");
+    assert!(left > 0.0 && left < 1.0, "{part:?}");
 }
 
 #[test]
-fn the_outline_lands_on_the_new_slots_mark_when_the_follow_ends() {
+fn the_outline_lands_on_the_new_slots_mark_when_the_glide_ends() {
     let mut browser = on_the_libraries();
     press(&mut browser, "right", PRESS);
     let to = resting(&browser);
 
-    assert_ne!(drawn_at(&mut browser, PRESS + look::FOLLOW * 0.9), to);
-    assert_eq!(drawn_at(&mut browser, PRESS + look::FOLLOW), to);
+    assert_ne!(drawn_at(&mut browser, PRESS + look::GLIDE * 0.9), to);
+    assert_eq!(drawn_at(&mut browser, PRESS + look::GLIDE), to);
 }
 
 #[test]
@@ -89,7 +88,7 @@ fn a_second_press_mid_travel_starts_from_the_rectangle_drawn_then() {
     assert_eq!(drawn_at(&mut browser, PRESS + 0.1), between);
     let back = resting(&browser);
     assert_ne!(back, between);
-    assert_eq!(drawn_at(&mut browser, PRESS + 0.1 + look::FOLLOW), back);
+    assert_eq!(drawn_at(&mut browser, PRESS + 0.1 + look::GLIDE), back);
 }
 
 // A held key repeats faster than the outline's longest motion, so each
@@ -98,8 +97,8 @@ fn a_second_press_mid_travel_starts_from_the_rectangle_drawn_then() {
 #[test]
 fn a_held_key_shortens_the_motion_to_the_interval_but_not_below_a_third() {
     let cases = [
-        (look::FOLLOW / 2.0, look::FOLLOW / 2.0),
-        (look::FOLLOW / 10.0, look::FOLLOW * look::HELD_FLOOR),
+        (look::GLIDE / 2.0, look::GLIDE / 2.0),
+        (look::GLIDE / 10.0, look::GLIDE * look::HELD_FLOOR),
     ];
     for (interval, length) in cases {
         let mut browser = on_the_libraries();
@@ -136,10 +135,10 @@ fn up_from_a_wall_travels_onto_the_strip() {
 
     assert!(browser.on_strip);
     let to = resting(&browser);
-    let part = drawn_at(&mut browser, PRESS + 1.0 + look::LEAD / 2.0);
+    let part = drawn_at(&mut browser, PRESS + 1.0 + look::GLIDE / 2.0);
     assert_ne!(part, from);
     assert_ne!(part, to);
-    assert_eq!(drawn_at(&mut browser, PRESS + 1.0 + look::FOLLOW), to);
+    assert_eq!(drawn_at(&mut browser, PRESS + 1.0 + look::GLIDE), to);
 }
 
 // A long wall centers the row that holds focus, so a press down in its
@@ -160,7 +159,7 @@ fn a_wall_that_centers_its_row_slides_under_a_still_outline() {
     assert_eq!(showing_wall(&browser).slots.focus, 4 * wall::COLUMNS);
     assert!(same_place(resting(&browser), from));
     assert!(same_place(
-        drawn_at(&mut browser, PRESS + look::LEAD / 2.0),
+        drawn_at(&mut browser, PRESS + look::GLIDE / 2.0),
         from
     ));
     assert_eq!(
@@ -173,7 +172,7 @@ fn a_wall_that_centers_its_row_slides_under_a_still_outline() {
 fn the_outline_breathes_only_after_the_rest_has_lasted_the_delay() {
     let mut browser = on_the_libraries();
     press(&mut browser, "right", PRESS);
-    let quiet = PRESS + look::FOLLOW;
+    let quiet = PRESS + look::GLIDE;
     let first = quiet + look::BREATH_DELAY;
     let peak = first + look::BREATH / 2.0;
 
@@ -202,7 +201,7 @@ fn the_outline_breathes_only_after_the_rest_has_lasted_the_delay() {
 fn a_press_releases_the_breath_from_the_brightness_drawn_then() {
     let mut browser = on_the_libraries();
     press(&mut browser, "right", PRESS);
-    let peak = PRESS + look::FOLLOW + look::BREATH_DELAY + look::BREATH / 2.0;
+    let peak = PRESS + look::GLIDE + look::BREATH_DELAY + look::BREATH / 2.0;
 
     press(&mut browser, "left", peak);
 
@@ -232,7 +231,7 @@ fn a_press_releases_the_breath_from_the_brightness_drawn_then() {
 // a film starts, so the case reads the outline's share of the schedule.
 #[test]
 fn the_outline_asks_for_frames_only_while_it_moves_or_breathes() {
-    let quiet = PRESS + look::FOLLOW;
+    let quiet = PRESS + look::GLIDE;
     let first = quiet + look::BREATH_DELAY;
     let cases = [
         (None, PRESS + 0.1, Some(PRESS + 0.1)),
@@ -318,12 +317,10 @@ fn a_press_on_the_picker_moves_the_outline_to_the_next_tile() {
     let to = resting(&browser);
     assert!(to.x > from.x, "{from:?} {to:?}");
 
-    let part = drawn_at(&mut browser, PRESS + look::LEAD * 0.75);
-    assert!(
-        part.x < to.x && part.x + part.width > from.x + from.width,
-        "{part:?}"
-    );
-    assert_eq!(drawn_at(&mut browser, PRESS + look::FOLLOW), to);
+    let part = drawn_at(&mut browser, PRESS + look::GLIDE / 2.0);
+    assert!(part.x > from.x && part.x < to.x, "{part:?}");
+    assert!((part.width - to.width).abs() < 1e-3, "{part:?}");
+    assert_eq!(drawn_at(&mut browser, PRESS + look::GLIDE), to);
 }
 
 // The outline on the pages a wall or a strip opens.

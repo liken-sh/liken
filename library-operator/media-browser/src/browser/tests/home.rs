@@ -334,7 +334,7 @@ fn a_rest_on_a_title_asks_for_its_backdrop_and_on_a_library_for_nothing() {
     browser.tick(0.0);
     browser.key("right");
     browser.minute = Some(MINUTE);
-    assert_eq!(browser.next_frame(look::FOLLOW), Some(REST));
+    assert_eq!(browser.next_frame(look::GLIDE), Some(REST));
     browser.tick(REST);
     assert!(browser.store.get_mut().asked.contains(&(
         SERIALS.into(),

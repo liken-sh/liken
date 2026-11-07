@@ -176,27 +176,21 @@ pub const LIGHTS_DOWN: f64 = 1.2;
 /// most of the way up as the last of the film goes. Tuned by eye.
 pub const LIGHTS_UP: f64 = 0.3;
 
-/// How long the leading edge of the focus outline takes to reach the slot
-/// focus moved to, in seconds. The leading edge is the one on the side the
-/// press points to: the right edge on a right press, the bottom edge on a
-/// down press. It is short, because from a couch the eye follows the press
-/// to the next slot at once, and an outline that arrives late reads as a
-/// slow remote.
-pub const LEAD: f64 = 0.07;
-
-/// How long the trailing edge of the focus outline takes to leave the slot
-/// focus moved from, in seconds. It is longer than `LEAD`, so for a moment
-/// the outline spans both slots and then closes behind the press, and the
-/// eye reads which way focus went.
-pub const FOLLOW: f64 = 0.13;
+/// How long the focus outline takes to glide from the slot focus left to
+/// the slot focus moved to, in seconds. All four edges move together, so
+/// the outline slides and changes size on the way, and arrives in one
+/// piece. It is short, because from a couch the eye follows the press to
+/// the next slot at once, and an outline that arrives late reads as a slow
+/// remote.
+pub const GLIDE: f64 = 0.11;
 
 /// How long a row or a wall takes to scroll to the place a press moves it
-/// to, in seconds. It sits between `LEAD` and `FOLLOW`, so the row lands
-/// while the outline closes on the slot and the two read as one motion.
-pub const SCROLL: f64 = 0.11;
+/// to, in seconds. It is the outline's glide, so the row lands as the
+/// outline does and the two read as one motion.
+pub const SCROLL: f64 = GLIDE;
 
 /// The shortest share of its length a motion runs at while a key is held.
-/// A remote repeats a held key faster than `FOLLOW`, so each length then
+/// A remote repeats a held key faster than `GLIDE`, so each length then
 /// shrinks to the time between two presses and the outline never falls
 /// behind the remote. It stops at a third, because a motion shorter than
 /// that is a jump of a frame or two.
@@ -329,9 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn the_outline_leads_with_one_edge_and_the_row_lands_between_the_two() {
-        const { assert!(LEAD < SCROLL) };
-        const { assert!(SCROLL < FOLLOW) };
+    fn a_held_key_shortens_a_motion_to_a_share_of_it() {
         const { assert!(HELD_FLOOR > 0.0) };
         const { assert!(HELD_FLOOR < 1.0) };
     }

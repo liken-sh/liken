@@ -19,10 +19,13 @@ fn down(at: Rectangle) -> (f32, f32) {
 }
 
 // Whether the outline drawn part way through a move from `from` to `to`
-// has its far edge past the middle of its travel and its near edge short
-// of the middle of its own: the leading edge ahead.
-fn leads(from: (f32, f32), part: (f32, f32), to: (f32, f32)) -> bool {
-    part.1 > (from.1 + to.1) / 2.0 && part.0 < (from.0 + to.0) / 2.0
+// has moved both edges the same share of their own travel, short of the
+// end: the outline glides as one piece.
+fn glides(from: (f32, f32), part: (f32, f32), to: (f32, f32)) -> bool {
+    let share = |from: f32, part: f32, to: f32| (part - from) / (to - from);
+    let near = share(from.0, part.0, to.0);
+    let far = share(from.1, part.1, to.1);
+    (near - far).abs() < 1e-3 && near > 0.0 && near < 1.0
 }
 
 // The browser on the first film's page, with focus on its first button.
@@ -42,12 +45,12 @@ fn a_press_down_on_a_films_page_moves_the_outline_to_the_mark() {
     let to = resting(&browser);
     assert_eq!(showing_page(&browser).focus, Focus::Marks(0));
 
-    let part = drawn_at(&mut browser, PRESS + look::LEAD * 0.75);
+    let part = drawn_at(&mut browser, PRESS + look::GLIDE / 2.0);
     assert!(
-        leads(down(from), down(part), down(to)),
+        glides(down(from), down(part), down(to)),
         "{from:?} {part:?} {to:?}"
     );
-    assert_eq!(drawn_at(&mut browser, PRESS + look::FOLLOW), to);
+    assert_eq!(drawn_at(&mut browser, PRESS + look::GLIDE), to);
 }
 
 // The browser on the serial's page, with focus on the first still.
@@ -68,12 +71,12 @@ fn a_press_right_on_a_shows_page_moves_the_outline_to_the_next_still() {
     let to = resting(&browser);
     assert_eq!(showing_series(&browser).focus, SeriesFocus::Still(1));
 
-    let part = drawn_at(&mut browser, PRESS + look::LEAD * 0.75);
+    let part = drawn_at(&mut browser, PRESS + look::GLIDE / 2.0);
     assert!(
-        leads(across(from), across(part), across(to)),
+        glides(across(from), across(part), across(to)),
         "{from:?} {part:?} {to:?}"
     );
-    assert_eq!(drawn_at(&mut browser, PRESS + look::FOLLOW), to);
+    assert_eq!(drawn_at(&mut browser, PRESS + look::GLIDE), to);
 }
 
 // The browser on the person the first film credits, with focus on the
@@ -98,12 +101,12 @@ fn a_press_right_on_a_persons_page_moves_the_outline_to_the_next_work() {
     let to = resting(&browser);
     assert_eq!(showing_person(&browser).works.focus, 1);
 
-    let part = drawn_at(&mut browser, PRESS + look::LEAD * 0.75);
+    let part = drawn_at(&mut browser, PRESS + look::GLIDE / 2.0);
     assert!(
-        leads(across(from), across(part), across(to)),
+        glides(across(from), across(part), across(to)),
         "{from:?} {part:?} {to:?}"
     );
-    assert_eq!(drawn_at(&mut browser, PRESS + look::FOLLOW), to);
+    assert_eq!(drawn_at(&mut browser, PRESS + look::GLIDE), to);
 }
 
 // The browser on the Cycle's page, opened from the home page's franchises
@@ -133,10 +136,10 @@ fn a_press_down_on_a_franchises_page_moves_the_outline_to_the_next_row() {
     let to = resting(&browser);
     assert_eq!(showing_franchise(&browser).focus, 1);
 
-    let part = drawn_at(&mut browser, PRESS + look::LEAD * 0.75);
+    let part = drawn_at(&mut browser, PRESS + look::GLIDE / 2.0);
     assert!(
-        leads(down(from), down(part), down(to)),
+        glides(down(from), down(part), down(to)),
         "{from:?} {part:?} {to:?}"
     );
-    assert_eq!(drawn_at(&mut browser, PRESS + look::FOLLOW), to);
+    assert_eq!(drawn_at(&mut browser, PRESS + look::GLIDE), to);
 }

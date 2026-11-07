@@ -36,10 +36,10 @@ mark still at rest, so motion indicates work in progress.
 The focus outline is not the mark, and the rules above do not apply to
 it. It moves on every change of focus, because a person on a couch
 looks for focus after each press. When focus moves, the outline
-travels from where it is drawn to the item that takes focus. The edge
-on the side of travel arrives first and the opposite edge follows, so
-for a moment the outline spans both items and then closes on the new
-one. A row or a grid that scrolls on the same press eases to rest in
+glides from where it is drawn to the item that takes focus. All four
+edges move together over the same short time, so the outline slides as
+one piece and changes size on the way when the two items differ. A row
+or a grid that scrolls on the same press eases to rest in
 the same time, and the outline goes to where the item rests, so the
 two land together. Nothing overshoots. When presses arrive faster than
 the motion, as from a held key, the motion shortens so the outline

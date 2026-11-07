@@ -20,7 +20,7 @@ impl Pace {
     pub fn press(&mut self, at: f64) -> f64 {
         let interval = self.last.map_or(f64::INFINITY, |last| at - last);
         self.last = Some(at);
-        (interval / look::FOLLOW).clamp(look::HELD_FLOOR, 1.0)
+        (interval / look::GLIDE).clamp(look::HELD_FLOOR, 1.0)
     }
 }
 
@@ -37,11 +37,11 @@ mod tests {
 
     #[test]
     fn a_held_key_runs_each_motion_in_the_time_between_two_presses() {
-        let half = look::FOLLOW / 2.0;
+        let half = look::GLIDE / 2.0;
         let cases = [
             (half, 0.5),
-            (look::FOLLOW, 1.0),
-            (look::FOLLOW / 10.0, look::HELD_FLOOR),
+            (look::GLIDE, 1.0),
+            (look::GLIDE / 10.0, look::HELD_FLOOR),
         ];
         for (interval, share) in cases {
             let mut pace = Pace::default();

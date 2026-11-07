@@ -33,6 +33,15 @@ page answer `Screen::marked` and `Screen::follow` like the home page
 and the walls, every scroll on them eases, and no screen strokes a mark
 of its own. The page backdrop's fade is not built.
 
+Status on 2026-11-06: the outline glides. Watching it on the screens
+of a home cluster, the lead and the follow below read as distracting,
+and inconsistent from one press to the next, because the span between
+the two slots changes with their distance and their sizes. So all four
+edges now move together over one length, `GLIDE`, 110 ms, which is
+`SCROLL`, and a row and the outline land together. `LEAD` and `FOLLOW`
+are gone. The held key's rule is unchanged, as a share of `GLIDE`. The
+section below keeps the lead and the follow as they were decided.
+
 ## The focus outline
 
 When a press moves focus, the outline's four edges move from where the
