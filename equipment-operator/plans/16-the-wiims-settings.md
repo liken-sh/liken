@@ -156,6 +156,11 @@ the `Receiver`s: `equipment-operator`, both CEC pods, and
   The client also reads every family on the first poll that the amp
   answers after the client called it unreachable, and it forgets its
   subscriptions at that moment, because a reboot of the amp drops them.
+  The first poll the amp answers after any missed poll renews both
+  subscriptions, so a reboot shorter than three polls is found too: the
+  amp refuses the renewal, and the client subscribes again and reads
+  every family. A full read with a failed request is done again on the
+  next poll.
 * The read after a write reads only the family of each field the amp
   took: `getChannelBalance`, `getStatusEx` for the name, and the
   controls for the light and the buttons. A sleep timer is read back

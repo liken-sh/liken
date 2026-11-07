@@ -42,7 +42,8 @@ changed on every read would write the `Receiver` every 10 seconds. The
 operator sets each gauge when it reads the amp, every 10 seconds, and
 deletes a series that the amp stops reporting: the Wi-Fi series of an
 amp on its wired port, and the remote series while no remote is
-connected. The operator reads the amp's link rate as Mbit/s and the
+connected. While the operator reports the amp unreachable, the amp
+has no `equipment_wiim_*` series. The operator reads the amp's link rate as Mbit/s and the
 remote's charge as a percentage, and the gauges convert them to bits
 per second and to a ratio. No WiiM document states either unit; the
 values that live amps report fit them.

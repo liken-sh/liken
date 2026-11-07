@@ -103,21 +103,29 @@ applies only while a subscription is not live.
 
 The poll reads more only on a trigger:
 
-- `getMetaInfo` when the player reports another track.
+- `getMetaInfo` when the player reports another track, and again on
+  each poll until it answers the title the player names.
 - `getShutdown` while the last read found a sleep timer running.
 - Every settings family on the first poll, on the poll that opens a
   subscription, on the first poll the amp answers after the client
   called it unreachable, and once 30 minutes have passed since the
   last such read. The 30-minute read is the backstop for a change made
   in the WiiM Home app, which pushes no event. The subscriptions open
-  before the read, after `getStatusEx` has checked the identity.
+  before the read, after `getStatusEx` has checked the identity. A
+  full read in which a request failed is done again on the next poll.
 - The family of a setter, read back right after the setter: the
   balance, `getStatusEx` for the name, the controls for the light and
-  the buttons, and `getShutdown` for the sleep timer.
+  the buttons, and `getShutdown` for the sleep timer. The read back
+  never waits for a poll, because the controller's pass sends the
+  setter: while a poll runs, the poll reads the family before it
+  publishes. The read back writes only the fields it read.
 
-When the client calls the amp unreachable, it forgets its
-subscriptions, because a reboot drops them at the amp. The next
-answered poll subscribes again.
+A reboot drops the amp's subscriptions while the client still holds
+them. So the first poll the amp answers after a missed poll renews
+both subscriptions, and a renewal the amp refuses opens a new
+subscription and reads every family. When the client calls the amp
+unreachable, it forgets its subscriptions and clears its readings, so
+the gauges leave the scrape. The next answered poll subscribes again.
 
 `status.wiim` leaves out each value that changes on its own between
 two reads, because each status write reaches every watcher of every

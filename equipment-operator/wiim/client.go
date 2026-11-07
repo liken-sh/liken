@@ -130,6 +130,14 @@ type Client struct {
 	// owed holds the families a setter's read back left to the poll that
 	// held the reads (readback.go).
 	owed family
+
+	// readFailures counts the reads the amp did not answer, so a poll
+	// tells a full read that answered from one that did not. trackOwed
+	// is set while the last getMetaInfo did not answer the track the
+	// player names, so the next poll reads it again. Only the holder of
+	// reads touches either.
+	readFailures int
+	trackOwed    bool
 	// misses counts the polls in a row the device did not answer, cleared
 	// by the next poll it does.
 	misses int
@@ -306,17 +314,25 @@ func (c *Client) poll(ctx context.Context) bool {
 		c.miss()
 		return true
 	}
-	c.answered()
+	if c.answered() {
+		// An amp that missed a poll may have rebooted, and a reboot drops
+		// its subscriptions while the client still holds them. A renewal
+		// asks the amp whether it holds them: it refuses a SID it does not
+		// hold, which drops the subscription, and manageSubscriptions then
+		// opens a new one and the poll reads every family.
+		c.renewAll(ctx)
+	}
 	c.report(CommandOK)
 
 	opened := c.manageSubscriptions(ctx)
 	every := c.readsEveryFamily(opened)
+	failures := c.readFailures
 	heard := next.Playback
 	c.readPlayback(ctx, &next)
 	if every {
 		c.readSettings(ctx, &next)
 	} else {
-		if trackMoved(heard, next.Playback) {
+		if trackMoved(heard, next.Playback) || c.trackOwed {
 			c.readNowPlaying(ctx, &next)
 		}
 		if next.Timers.SleepSeconds > 0 {
@@ -332,7 +348,9 @@ func (c *Client) poll(ctx context.Context) bool {
 	// sends already reports it.
 	c.mutex.Lock()
 	c.surveyed = true
-	if every {
+	// A full read with a read the amp did not answer leaves that family
+	// as it was, so the next poll reads every family again.
+	if every && c.readFailures == failures {
 		c.resync = false
 		c.settingsRead = time.Now()
 	}
@@ -420,17 +438,22 @@ func (c *Client) miss() {
 func (c *Client) lose() {
 	c.mutex.Lock()
 	c.resync = true
+	// The readings of an amp that does not answer are not current, so
+	// each gauge leaves the scrape instead of holding its last value.
+	c.readings = Readings{}
 	c.mutex.Unlock()
 	c.forgetSubscriptions()
 	c.record(equipment.ConditionFalse)
 }
 
 // answered clears the run of failed polls after one the device
-// answered.
-func (c *Client) answered() {
+// answered, and answers whether the run held any.
+func (c *Client) answered() (missed bool) {
 	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	missed = c.misses > 0
 	c.misses = 0
-	c.mutex.Unlock()
+	return missed
 }
 
 // identityMatches answers whether the device's reported uuid is the one
@@ -577,6 +600,7 @@ func (c *Client) call(ctx context.Context, command string) ([]byte, error) {
 func (c *Client) read(ctx context.Context, command string, parse func([]byte)) {
 	body, err := c.call(ctx, command)
 	if err != nil {
+		c.readFailures++
 		return
 	}
 	if isMiss(body) {
@@ -646,17 +670,28 @@ func (c *Client) readPlayback(ctx context.Context, next *Status) {
 // readNowPlaying reads the current track as plain JSON. A source with
 // no track answers "Failed", and the track is cleared rather than left
 // stale.
+//
+// The read is owed again until it answers the track the player names:
+// a title that matches the player's, or no track while the player names
+// none. The player can name a track before getMetaInfo has it, and
+// without this the track would stay empty until the next track or the
+// next read of every family.
 func (c *Client) readNowPlaying(ctx context.Context, next *Status) {
+	playing := next.Playback.Title
+	c.trackOwed = true
 	body, err := c.call(ctx, metaCommand)
-	if err != nil || isMiss(body) {
+	if err != nil {
+		c.readFailures++
 		next.NowPlaying = nil
 		return
 	}
 	var meta metaInfo
-	if json.Unmarshal(body, &meta) != nil {
+	if isMiss(body) || json.Unmarshal(body, &meta) != nil {
 		next.NowPlaying = nil
+		c.trackOwed = playing != ""
 		return
 	}
+	c.trackOwed = playing != "" && meta.MetaData.Title != playing
 	next.NowPlaying = &NowPlaying{
 		Title:      meta.MetaData.Title,
 		Subtitle:   meta.MetaData.Subtitle,

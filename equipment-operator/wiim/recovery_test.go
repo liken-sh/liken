@@ -1,0 +1,129 @@
+// How the client recovers from a read that failed: a track read that
+// did not answer, a full read with a failed read in it, and an amp that
+// missed polls and may have rebooted.
+
+package wiim
+
+import (
+	"context"
+	"net/http"
+	"slices"
+	"strings"
+	"testing"
+	"testing/synctest"
+)
+
+// A track read that fails is owed, so the next poll reads the track
+// again, and the poll after the answer does not.
+func TestAFailedTrackReadIsReadAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp, client := quietAmp(t)
+		amp.answer(playerCommand, strings.Replace(playerJSON, `"Title":"486176652061204369676172"`, `"Title":"4D6F6E6579"`, 1))
+		amp.answer(metaCommand, "Failed")
+		client.poll(context.Background())
+		mustMatch(t, client.Status().NowPlaying, (*NowPlaying)(nil))
+
+		amp.answer(metaCommand, strings.Replace(metaJSON, `"title":"Have a Cigar"`, `"title":"Money"`, 1))
+		amp.clear()
+		client.poll(context.Background())
+		mustMatch(t, amp.sent(), []string{statusCommand, playerCommand, metaCommand})
+		mustMatch(t, client.Status().NowPlaying.Title, "Money")
+
+		amp.clear()
+		client.poll(context.Background())
+		mustMatch(t, amp.sent(), []string{statusCommand, playerCommand})
+	})
+}
+
+// A full read with a read that failed is done again on the next poll,
+// because the family that failed still holds what it held before.
+func TestAFullReadWithAFailedReadIsDoneAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		amp.answer(shutdownCommand, "0")
+		amp.mutex.Lock()
+		amp.broken = map[string]bool{balanceCommand: true}
+		amp.mutex.Unlock()
+		client := amp.client(nil)
+		client.poll(context.Background())
+
+		amp.mutex.Lock()
+		amp.broken = nil
+		amp.mutex.Unlock()
+		amp.clear()
+		client.poll(context.Background())
+
+		mustMatch(t, holdsEveryRead(amp.sent()), true)
+	})
+}
+
+// An amp the client called unreachable reports no readings, so each
+// gauge leaves the scrape instead of holding its last value.
+func TestAnUnreachableAmpReportsNoReadings(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp, client := quietAmp(t)
+		amp.mutex.Lock()
+		amp.failing = http.StatusInternalServerError
+		amp.mutex.Unlock()
+
+		for range pollFailures {
+			client.poll(context.Background())
+		}
+
+		mustMatch(t, client.Readings(), Readings{})
+	})
+}
+
+// An amp that misses one poll may have rebooted, and a reboot drops
+// its subscriptions, so the first poll it answers renews both at once.
+// An amp that refuses the renewal gets new subscriptions and a read of
+// every family. An amp that takes it holds the subscriptions, and the
+// poll reads only the probe and the player.
+func TestAPollAfterAMissRenewsTheSubscriptions(t *testing.T) {
+	cases := []struct {
+		name      string
+		refused   bool
+		subscribe int
+		every     bool
+	}{
+		{"an amp that rebooted", true, 2, true},
+		{"an amp that kept them", false, 1, false},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				amp, events, client := subscribedAmpWithEvents(t)
+				client.poll(context.Background())
+				amp.mutex.Lock()
+				amp.failing = http.StatusInternalServerError
+				amp.mutex.Unlock()
+				client.poll(context.Background())
+
+				amp.mutex.Lock()
+				amp.failing = 0
+				amp.mutex.Unlock()
+				events.mutex.Lock()
+				events.refuseRenewals = one.refused
+				events.mutex.Unlock()
+				amp.clear()
+				client.poll(context.Background())
+
+				sent := amp.sent()
+				mustMatch(t, countOf(sent, "SUBSCRIBE "+renderControlPath), one.subscribe)
+				mustMatch(t, countOf(sent, "SUBSCRIBE "+avTransportPath), one.subscribe)
+				mustMatch(t, holdsEveryRead(sent), one.every)
+				mustMatch(t, client.subscribed(renderControlPath), true)
+				mustMatch(t, client.subscribed(avTransportPath), true)
+			})
+		})
+	}
+}
+
+func countOf(commands []string, command string) int {
+	count := 0
+	for index := slices.Index(commands, command); index >= 0; index = slices.Index(commands, command) {
+		count++
+		commands = commands[index+1:]
+	}
+	return count
+}

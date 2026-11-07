@@ -301,6 +301,21 @@ func (c *Client) dropSubscription(path string) {
 	c.subscriptionsMutex.Unlock()
 }
 
+// renewAll renews every subscription the client holds, whatever its
+// grant. A renewal the amp refuses drops the subscription, and the next
+// manageSubscriptions opens it again.
+func (c *Client) renewAll(ctx context.Context) {
+	c.eventsMutex.Lock()
+	server := c.events
+	c.eventsMutex.Unlock()
+	if server == nil {
+		return
+	}
+	for _, path := range eventPaths {
+		c.renew(ctx, server, path)
+	}
+}
+
 // forgetSubscriptions drops every subscription without an UNSUBSCRIBE,
 // for an amp that does not answer. The next answered poll subscribes
 // again. A subscription the amp still holds sends to the callback under
