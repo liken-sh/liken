@@ -298,7 +298,7 @@ func operate() {
 	}
 	// Each drm uevent is counted before it wakes a pass, so the hold
 	// can tell a connector that stayed dark from one that moved.
-	hotplugs := newHotplugCounts()
+	hotplugs := newHotplugCounts(card)
 	uevents = countHotplugs(ctx, uevents, hotplugs)
 	hold := newCardHold(retries, hotplugs.count)
 

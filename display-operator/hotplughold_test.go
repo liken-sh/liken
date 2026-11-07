@@ -87,15 +87,19 @@ func TestAHotplugEventBetweenDarkReadsStartsTheHoldAgain(t *testing.T) {
 		events []drmEvent
 		held   bool
 	}{
-		{"an event that names no connector", []drmEvent{{Action: "change"}}, true},
-		{"an event that names this connector", []drmEvent{{Action: "change", Connector: "403"}}, true},
-		{"an event that names another connector", []drmEvent{{Action: "change", Connector: "409"}}, false},
+		{"an event that names no connector", []drmEvent{{Action: "change", DevPath: cardPath}}, true},
+		{"an event that names this connector", []drmEvent{{Action: "change", DevPath: cardPath, Connector: "403"}}, true},
+		{"an event that names another connector", []drmEvent{{Action: "change", DevPath: cardPath, Connector: "409"}}, false},
+		// DRM numbers connectors per device, so another card's 403 is
+		// another connector.
+		{"an event of another card", []drmEvent{{Action: "change", DevPath: otherCardPath, Connector: "403"}}, false},
+		{"an event the socket lost", []drmEvent{{Action: "lost events", DevPath: "the uevent socket answered ENOBUFS"}}, true},
 		{"no event between the reads", nil, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				counts := newHotplugCounts()
+				counts := newHotplugCounts("card1")
 				view := newHotplugHold(nil, counts.count).view()
 				view.apply([]Output{numbered(litOutput("HDMI-A-1", labMonitor()))})
 				view.apply([]Output{numbered(darkOutput("HDMI-A-1"))})
@@ -114,6 +118,10 @@ func TestAHotplugEventBetweenDarkReadsStartsTheHoldAgain(t *testing.T) {
 	}
 }
 
+// otherCardPath is a second GPU's card on the same machine, whose
+// events the uevent socket carries too.
+const otherCardPath = "/devices/pci0000:00/0000:03:00.0/drm/card0"
+
 // numbered gives a reading the DRM object id the kernel gave
 // HDMI-A-1, which a hotplug event names it by.
 func numbered(output Output) Output {
@@ -127,7 +135,7 @@ func numbered(output Output) Output {
 // monitor that really left by at most the ceiling, and never hides it.
 func TestAFlappingNeighbourDelaysAnUnplugOnlyToTheCeiling(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		counts := newHotplugCounts()
+		counts := newHotplugCounts("card1")
 		view := newHotplugHold(nil, counts.count).view()
 		view.apply([]Output{litOutput("HDMI-A-1", labMonitor())})
 		dark := []Output{darkOutput("HDMI-A-1")}
@@ -135,7 +143,7 @@ func TestAFlappingNeighbourDelaysAnUnplugOnlyToTheCeiling(t *testing.T) {
 		reported := time.Duration(0)
 		for elapsed := 3 * time.Second; elapsed <= hotplugCeiling+2*hotplugSettle; elapsed += 3 * time.Second {
 			time.Sleep(3 * time.Second)
-			counts.add(drmEvent{Action: "change"})
+			counts.add(drmEvent{Action: "change", DevPath: cardPath})
 			if got := view.apply(dark)[0]; !got.Held && reported == 0 {
 				reported = elapsed
 			}
@@ -246,11 +254,11 @@ func TestTheEndOfAHoldReachesTheLoop(t *testing.T) {
 // wakes reads a count that includes it.
 func TestEachDRMEventIsCountedBeforeItWakesThePass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		counts := newHotplugCounts()
+		counts := newHotplugCounts("card1")
 		in := make(chan drmEvent, 1)
 		out := countHotplugs(t.Context(), in, counts)
 
-		in <- drmEvent{Action: "change", DevPath: "/devices/drm/card1", Connector: "403"}
+		in <- drmEvent{Action: "change", DevPath: cardPath, Connector: "403"}
 		<-out
 
 		if got := counts.count("403"); got != 1 {

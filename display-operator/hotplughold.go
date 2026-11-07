@@ -31,6 +31,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 )
@@ -240,22 +241,43 @@ func (h *hotplugHold) release(connector string) {
 	}
 }
 
-// hotplugCounts counts the drm uevents the operator has read: the
-// ones that name no connector, which may concern any connector of the
-// card, and the ones that name one connector by its DRM object id.
+// hotplugCounts counts the drm uevents the operator has read about its
+// own card: the ones that name no connector, which may concern any
+// connector of the card, and the ones that name one connector by its
+// DRM object id.
+//
+// The uevent socket carries the events of every card on the machine,
+// and DRM numbers connectors per device, so another card's connector
+// 403 is not this card's. An event of another card counts for nothing.
+// A loss of events names no card, and counts for every connector,
+// because the lost event may have been this card's.
 type hotplugCounts struct {
 	mu       sync.Mutex
+	card     string
 	any      uint64
 	ofObject map[string]uint64
 }
 
-func newHotplugCounts() *hotplugCounts {
-	return &hotplugCounts{ofObject: map[string]uint64{}}
+func newHotplugCounts(card string) *hotplugCounts {
+	return &hotplugCounts{card: card, ofObject: map[string]uint64{}}
+}
+
+// ofCard answers whether a devpath is this card's: the card itself,
+// /devices/.../drm/card1, or a device under it.
+func (c *hotplugCounts) ofCard(devpath string) bool {
+	return strings.HasSuffix(devpath, "/"+c.card) || strings.Contains(devpath, "/"+c.card+"/")
 }
 
 func (c *hotplugCounts) add(event drmEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if event.Action == lostEventsAction {
+		c.any++
+		return
+	}
+	if !c.ofCard(event.DevPath) {
+		return
+	}
 	if event.Connector == "" {
 		c.any++
 		return

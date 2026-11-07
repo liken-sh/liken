@@ -172,6 +172,9 @@ func readUevents(fd, cancelRead int, events chan<- drmEvent) {
 	}
 }
 
+// lostEventsAction is the Action of the event that reports a loss.
+const lostEventsAction = "lost events"
+
 // lostUevents turns a receive error into an event when the error left
 // a datagram unread. ENOBUFS is the usual one: the kernel's receive
 // buffer overflowed and it dropped datagrams before this read ran.
@@ -183,7 +186,7 @@ func lostUevents(err error) (drmEvent, bool) {
 	if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR) {
 		return drmEvent{}, false
 	}
-	return drmEvent{Action: "lost events", DevPath: "the uevent socket answered " + err.Error()}, true
+	return drmEvent{Action: lostEventsAction, DevPath: "the uevent socket answered " + err.Error()}, true
 }
 
 // sendDRMEvent offers one event without blocking. A full channel
