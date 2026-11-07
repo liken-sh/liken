@@ -294,6 +294,10 @@ type VendorID uint32
 // the value the kernel uses for an adapter with none.
 const VendorUnknown VendorID = vendorIDNone
 
+// vendorZero is the vendor a Device Vendor ID of 000000 states, which
+// names no vendor (learn in directory.go).
+const vendorZero VendorID = 0
+
 // String writes the OUI as six lowercase hex digits, the way the IEEE
 // registry lists it without separators.
 func (v VendorID) String() string {

@@ -76,6 +76,40 @@ func TestTheDirectoryLearnsOneFactFromEachMessage(t *testing.T) {
 	}
 }
 
+// A Device Vendor ID of 000000 names no vendor, and it never replaces
+// a vendor the device stated before. A device that states another real
+// vendor is still believed.
+func TestAVendorOfZeroNamesNoVendor(t *testing.T) {
+	cases := []struct {
+		name    string
+		reports []cec.VendorID
+		want    cec.VendorID
+		changed bool
+	}{
+		{"a zero after a known vendor", []cec.VendorID{0x00903e, 0}, 0x00903e, false},
+		{"a zero from a device with no vendor yet", []cec.VendorID{0}, cec.VendorUnknown, false},
+		{"another real vendor", []cec.VendorID{0x00903e, 0x00e091}, 0x00e091, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			directory := cec.NewDirectory()
+			directory.SetOwn(4)
+			directory.Present(0)
+			changed := false
+			for _, vendor := range c.reports {
+				changed = directory.Observe(cec.DeviceVendorID(0, vendor))
+			}
+
+			if got := directory.Lookup(0).Vendor; got != c.want {
+				t.Errorf("the directory holds the vendor %v, want %v", got, c.want)
+			}
+			if changed != c.changed {
+				t.Errorf("the last report changed the directory: %v, want %v", changed, c.changed)
+			}
+		})
+	}
+}
+
 func TestTheDirectoryIgnoresNoDevice(t *testing.T) {
 	cases := []struct {
 		name    string

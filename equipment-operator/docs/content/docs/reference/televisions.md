@@ -55,7 +55,7 @@ The TV as the adapters of its CECBus found it. The operator copies each fact fro
 | <span id="statuscec--physicaladdress"></span>`physicalAddress` | string | no | The TV's physical address, 0.0.0.0. |
 | <span id="statuscec--logicaladdress"></span>`logicalAddress` | integer | yes | The TV's logical address, 0. |
 | <span id="statuscec--osdname"></span>`osdName` | string | no | The name the TV reports, at most 14 characters. |
-| <span id="statuscec--vendor"></span>`vendor` | string | no | The TV's IEEE OUI, as six hex digits. |
+| <span id="statuscec--vendor"></span>`vendor` | string | no | The TV's IEEE OUI, as six hex digits. A Device Vendor ID of 000000 names no vendor, so it never replaces a vendor the device stated before, and the field is absent until the device states a real one. |
 | <span id="statuscec--cecversion"></span>`cecVersion` | string | no | The CEC version the TV reports: 1.3a, 1.4, or 2.0. |
 
 ### status.session

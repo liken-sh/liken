@@ -337,7 +337,7 @@ The receiver as the audio system of a CECBus, from the device at logical address
 | <span id="statuscec--logicaladdress"></span>`logicalAddress` | integer | yes | The receiver's logical address, which is 5 for an audio system. |
 | <span id="statuscec--physicaladdress"></span>`physicalAddress` | string | no | The receiver's place in the HDMI tree, in the dotted form 1.0.0.0. |
 | <span id="statuscec--osdname"></span>`osdName` | string | no | The name the receiver reports on the bus, at most 14 characters. |
-| <span id="statuscec--vendor"></span>`vendor` | string | no | The receiver's IEEE OUI on the bus, as six hex digits. |
+| <span id="statuscec--vendor"></span>`vendor` | string | no | The receiver's IEEE OUI on the bus, as six hex digits. A Device Vendor ID of 000000 names no vendor, so it never replaces a vendor the device stated before, and the field is absent until the device states a real one. |
 | <span id="statuscec--cecversion"></span>`cecVersion` | string | no | The CEC version the receiver reports: 1.3a, 1.4, or 2.0. |
 | <span id="statuscec--systemaudiomode"></span>`systemAudioMode` | string | no | The System Audio Mode the receiver last stated. While it is On, the TV mutes its own speakers and sends its remote's volume keys to the receiver (HDMI-CEC 1.3a, CEC 13.15.2). A wake through this receiver asks for On, and the receiver broadcasts Off before standby. Absent while no adapter holds a value. One of: `On`, `Off`. |
 | <span id="statuscec--systemaudiomodeat"></span>`systemAudioModeAt` | string | no | When an adapter of the bus last read or heard systemAudioMode. |

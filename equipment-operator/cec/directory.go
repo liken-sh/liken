@@ -224,7 +224,14 @@ func learn(peer *Peer, message Message, now time.Time) {
 	case opcode == OpSetOSDName && len(operands) > 0:
 		peer.OSDName = string(operands)
 	case opcode == OpDeviceVendorID && len(operands) >= 3:
-		peer.Vendor = VendorID(operands[0])<<16 | VendorID(operands[1])<<8 | VendorID(operands[2])
+		// A vendor of 000000 is a device that states none. libCEC reads
+		// it as an unknown vendor, and a TV in standby behind an A/V
+		// receiver has stated it between reports of its real vendor. A
+		// vendor read from it would replace the real one and change
+		// back on the next report, so the peer keeps what it held.
+		if vendor := VendorID(operands[0])<<16 | VendorID(operands[1])<<8 | VendorID(operands[2]); vendor != vendorZero {
+			peer.Vendor = vendor
+		}
 	case opcode == OpCECVersion && len(operands) >= 1:
 		peer.Version = Version(operands[0])
 	case opcode == OpReportPowerStatus && len(operands) >= 1:

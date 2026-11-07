@@ -174,7 +174,7 @@ spec:
                                 description: "The name the device reports, at most 14 characters."
                               vendor:
                                 type: string
-                                description: "The device's IEEE OUI, as six hex digits."
+                                description: "The device's IEEE OUI, as six hex digits. A Device Vendor ID of 000000 names no vendor, so it never replaces a vendor the device stated before, and the field is absent until the device states a real one."
                               cecVersion:
                                 type: string
                                 description: "The CEC version the device reports: 1.3a, 1.4, or 2.0."
@@ -212,7 +212,7 @@ spec:
                         description: "The name the device reports, at most 14 characters."
                       vendor:
                         type: string
-                        description: "The device's IEEE OUI, as six hex digits."
+                        description: "The device's IEEE OUI, as six hex digits. A Device Vendor ID of 000000 names no vendor, so it never replaces a vendor the device stated before, and the field is absent until the device states a real one."
                       cecVersion:
                         type: string
                         description: "The CEC version the device reports: 1.3a, 1.4, or 2.0."
