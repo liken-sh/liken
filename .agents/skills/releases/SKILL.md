@@ -65,7 +65,13 @@ do Go tests or `testdata/`. A change there does not release the
 component. A `.dockerignore` is an input: it decides what an image's
 build receives. A component's `package.toml` can name more such paths in
 `exclude` under `[outputs]`: `liken` names `deploy/monitoring/`,
-because a fleet fetches it by git and the channel holds no part of it.
+because a fleet fetches it by git and the channel holds no part of it,
+and `brand` names its prose, `voice.md`, `motion.md`, and
+`editing-prompt.md`. A change to a `package.toml` that touches only its
+`[[jobs]]` or its `exclude` paths runs the component's checks and
+releases nothing, because the jobs are what the checks run and no build
+reads either part. A change to any other part of it releases the
+component.
 A change under `plans/` also runs none of the component's jobs,
 because no build, test, or drill reads a plan. A push or a pull
 request that changes only plans, in the top-level `plans/` or in a

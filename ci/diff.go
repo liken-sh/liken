@@ -3,10 +3,13 @@ package main
 import (
 	"bytes"
 	"maps"
+	"path"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,6 +25,12 @@ type Diff struct {
 	// Files are the changed files, less the generated workflows, the
 	// bake file, and the other files under .github/.
 	Files []string
+	// Checks holds each changed package.toml whose change is only in
+	// its jobs or its excluded paths. The jobs are what the component's
+	// checks run, and the excluded paths name files no output is built
+	// from, so the change runs the component's own checks and gives no
+	// output a new version.
+	Checks map[string]bool
 	// Workflows maps each component whose workflow changed to the file
 	// that changed: its own generated workflow, its call in the root
 	// workflow, or a local action that its workflow uses.
@@ -54,7 +63,7 @@ var componentWorkflow = regexp.MustCompile(`^\.github/workflows/component-(.+)\.
 // runs each component whose workflow uses any local action, because
 // one action can use another.
 func (g Git) ReadDiff(components map[string]*Component, from, to string) (Diff, error) {
-	d := Diff{Workflows: map[string]string{}, Publishes: map[string]string{}, Targets: map[string]bool{}}
+	d := Diff{Workflows: map[string]string{}, Publishes: map[string]string{}, Targets: map[string]bool{}, Checks: map[string]bool{}}
 	files, err := g.Changed(from, to)
 	if err != nil {
 		return d, err
@@ -90,6 +99,13 @@ func (g Git) ReadDiff(components map[string]*Component, from, to string) (Diff, 
 			}
 		default:
 			d.Files = append(d.Files, file)
+			if path.Base(file) == packageFile {
+				checks, err := g.checksOnly(from, to, file)
+				if err != nil {
+					return d, err
+				}
+				d.Checks[file] = checks
+			}
 		}
 	}
 	if action != "" {
@@ -104,6 +120,38 @@ func (g Git) ReadDiff(components map[string]*Component, from, to string) (Diff, 
 		}
 	}
 	return d, nil
+}
+
+// outputFiles are the changed files less each package.toml whose change
+// is only in what the checks read.
+func (d Diff) outputFiles() []string {
+	return slices.DeleteFunc(slices.Clone(d.Files), func(file string) bool { return d.Checks[file] })
+}
+
+// checksOnly is true when a package.toml differs between the two commits
+// only in its jobs and its excluded paths. A file missing at either commit,
+// or one that does not parse, is a change to everything it holds.
+func (g Git) checksOnly(from, to, file string) (bool, error) {
+	var parts [2]map[string]any
+	for i, rev := range []string{from, to} {
+		text, found, err := g.Show(rev, file)
+		if err != nil || !found {
+			return false, err
+		}
+		if _, err := toml.Decode(text, &parts[i]); err != nil {
+			return false, nil
+		}
+		delete(parts[i], "jobs")
+		// An outputs table that held only the excluded paths is the same
+		// as no outputs table.
+		if outputs, ok := parts[i]["outputs"].(map[string]any); ok {
+			delete(outputs, "exclude")
+			if len(outputs) == 0 {
+				delete(parts[i], "outputs")
+			}
+		}
+	}
+	return reflect.DeepEqual(parts[0], parts[1]), nil
 }
 
 // rootWorkflowDiff names each component whose calls in the root

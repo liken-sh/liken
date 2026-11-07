@@ -14,6 +14,9 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// packageFile is the file that makes a directory a component.
+const packageFile = "package.toml"
+
 // A Component is a directory with a package.toml. The directory name
 // is the component's name, the prefix of its image names, and the
 // name of its jobs in the workflow.
@@ -244,7 +247,7 @@ func LoadComponents(root string) (map[string]*Component, error) {
 				return filepath.SkipDir
 			}
 		}
-		if d.IsDir() || d.Name() != "package.toml" {
+		if d.IsDir() || d.Name() != packageFile {
 			return nil
 		}
 		dir, err := filepath.Rel(root, filepath.Dir(path))

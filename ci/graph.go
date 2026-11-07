@@ -173,7 +173,7 @@ func outputFile(c *Component, files []string) string {
 // an image in its closure.
 func ReleaseChanged(components map[string]*Component, name string, d Diff) (bool, string) {
 	for _, n := range Closure(components, name) {
-		what := outputFile(components[n], d.Files)
+		what := outputFile(components[n], d.outputFiles())
 		if what == "" {
 			what = targetChanged(components[n], d)
 		}
@@ -213,7 +213,7 @@ func CheckChanged(components map[string]*Component, name string, d Diff) (bool, 
 	}
 	for _, n := range Closure(components, name) {
 		dep := components[n]
-		if file := outputFile(dep, d.Files); file != "" {
+		if file := outputFile(dep, d.outputFiles()); file != "" {
 			return true, file
 		}
 		if brand := components["brand"]; brand != nil && dep.Docs != nil {
