@@ -18,6 +18,7 @@ use iced_winit::core::{Color, Rectangle};
 
 use super::{Card, Tone, area, artwork, card, progress, scroll, text};
 use crate::art::Art;
+use crate::audience::faces::Faces;
 use crate::look;
 
 /// The wall's column count, fixed so focus movement is a function of
@@ -160,6 +161,9 @@ pub fn scrolled(focus: usize, count: usize, columns: usize, cells: &Cells, heigh
 /// One wall to draw: the items, the focus, the region it draws in, the
 /// shape of a slot, and how far its rows have scrolled.
 pub struct Grid<'a, T> {
+    /// The faces a film's slot draws along the foot of its poster, and
+    /// nothing on a wall that draws no film.
+    pub faces: Option<&'a Faces>,
     /// The items in draw order.
     pub items: &'a [T],
     /// The focused item's index, or nothing where focus is elsewhere on
@@ -215,6 +219,9 @@ pub fn draw<T: Card, A: Art>(
             Tone::Full,
         );
         progress::draw(frame, item, slot);
+        if let Some(faces) = grid.faces {
+            progress::faces(frame, item, slot, faces);
+        }
         let focused = Some(index) == grid.focus;
         // A card's lines clip to their own bands, and a band's clip does
         // not inherit the wall's, so a line whose band has left the region

@@ -15,6 +15,7 @@ pub mod lights;
 pub mod loading;
 pub mod movie;
 pub mod person;
+pub mod reached;
 pub mod series;
 pub mod slots;
 pub mod stripes;
@@ -223,11 +224,22 @@ impl Screen {
     /// browser reads its continue-watching row on terms of its own.
     pub fn draws_progress_of(&self, library: &str, item: &str) -> bool {
         match self {
-            Self::Movie(screen) => screen.library == library && screen.id == item,
-            Self::Series(screen) => screen.library == library && screen.id == item,
-            Self::Wall(screen) => wall::progress::draws(&screen.slots.items, library, item),
+            Self::Movie(screen) => {
+                (screen.library == library && screen.id == item)
+                    || screen
+                        .set
+                        .as_ref()
+                        .is_some_and(|set| reached::draws(&set.members, library, item))
+                    || screen.franchises.draws(library, item)
+            }
+            Self::Series(screen) => {
+                (screen.library == library && screen.id == item)
+                    || screen.franchises.draws(library, item)
+            }
+            Self::Wall(screen) => reached::draws(&screen.slots.items, library, item),
+            Self::Person(screen) => reached::draws(&screen.works.items, library, item),
             Self::Franchise(screen) => screen.holds(library, item),
-            Self::Home(_) | Self::Person(_) => false,
+            Self::Home(_) => false,
         }
     }
 
@@ -252,11 +264,16 @@ impl Screen {
         viewers: &[Viewer],
     ) {
         match self {
-            Self::Movie(screen) => screen.read_progress(source, people),
-            Self::Series(screen) => series::progress::read(screen, source, people),
-            Self::Wall(screen) => screen.read_progress(source, people),
+            Self::Movie(screen) => screen.read_progress(source, people, viewers),
+            Self::Series(screen) => {
+                series::progress::read(screen, source, people);
+                let reach = source.film_reach(people);
+                screen.franchises.reach(&reach, people, viewers);
+            }
+            Self::Wall(screen) => screen.read_progress(source, people, viewers),
             Self::Franchise(screen) => franchise::progress::read(screen, source, people, viewers),
-            _ => {}
+            Self::Person(screen) => reached::read(&mut screen.works.items, source, people, viewers),
+            Self::Home(_) => {}
         }
     }
 
@@ -293,10 +310,10 @@ impl Screen {
     ) -> Element<'a, Infallible, Theme, Renderer> {
         match self {
             Self::Home(screen) => screen.view(store, faces, held, at),
-            Self::Wall(screen) => screen.view(store, held, at),
-            Self::Movie(screen) => screen.view(store, curtain, held, at),
-            Self::Series(screen) => screen.view(store, curtain, held, at),
-            Self::Person(screen) => screen.view(store, at),
+            Self::Wall(screen) => screen.view(store, faces, held, at),
+            Self::Movie(screen) => screen.view(store, faces, curtain, held, at),
+            Self::Series(screen) => screen.view(store, faces, curtain, held, at),
+            Self::Person(screen) => screen.view(store, faces, at),
             Self::Franchise(screen) => screen.view(store, faces, at),
         }
     }
@@ -365,7 +382,7 @@ impl Screen {
 /// the band the card draws them in, so no frame measures them and no
 /// line runs past its cell. A strip cuts every card at its read, and a
 /// wall cuts the page of rows around its focus.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Item {
     pub library: String,
     pub art_library: String,
@@ -396,6 +413,9 @@ pub struct Item {
     /// How far a play of the work reached, on the slots of the
     /// continue-watching row, and nothing on every other item.
     pub progress: Option<Played>,
+    /// How far the people watching got in a film, which every poster of
+    /// a film draws. See [`reached`].
+    pub reached: reached::Reached,
     // The franchise member a press opens the franchise page on. It is set
     // only on a card of the continue-watching row whose first reason is a
     // franchise, and it is nothing on every other item.
@@ -539,6 +559,7 @@ impl Item {
             episode: slot.episode,
             new: slot.new,
             progress: slot.progress,
+            reached: Default::default(),
             franchise: None,
         }
     }
@@ -677,7 +698,13 @@ impl Card for Item {
     }
 
     fn watched(&self) -> Option<f32> {
-        self.progress.map(|played| played.fraction())
+        self.reached
+            .share
+            .or_else(|| self.progress.map(|played| played.fraction()))
+    }
+
+    fn faces(&self) -> &[crate::audience::Viewer] {
+        &self.reached.faces
     }
 }
 

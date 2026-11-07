@@ -15,9 +15,9 @@ use crate::catalog::pool::Candidate;
 use crate::catalog::recency::DRAWN;
 use crate::catalog::{
     Answer, Change, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, Identity,
-    LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Played, Progress,
-    Query, Resume, Selection, SeriesDetails, Slot, Sort, Source, TILES, Touched, library_name,
-    recency,
+    LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Progress, Query,
+    Reach, Resume, Seen, Selection, SeriesDetails, Slot, Sort, Source, TILES, Touched, Work,
+    library_name, recency,
 };
 use crate::harness::Waker;
 
@@ -33,6 +33,7 @@ mod pool;
 mod progress;
 mod recent;
 mod search;
+mod seen;
 mod series;
 mod touched;
 mod updates;
@@ -54,6 +55,8 @@ pub struct LocalCatalog {
     // holds owns them and stops them when it drops. The second source over
     // the same file reads alone and stops nothing.
     streams: bool,
+    // The last answer of the progress read. See `seen.rs`.
+    kept: Option<seen::Kept>,
 }
 
 type PersonEntries = Arc<Vec<(String, String)>>;
@@ -91,6 +94,7 @@ impl LocalCatalog {
             shelf,
             page_reads: None,
             streams: true,
+            kept: None,
         }
     }
 
@@ -132,6 +136,10 @@ impl LocalCatalog {
                 Ok(connection) => {
                     self.attach(&connection);
                     self.connection = Some(connection);
+                    // A new connection's `data_version` counts from its own
+                    // start, so a copy checked against the old one could
+                    // match by chance.
+                    self.kept = None;
                 }
                 Err(error) => {
                     eprintln!(
@@ -172,13 +180,34 @@ impl LocalCatalog {
         self.read_result(run).unwrap_or_default()
     }
 
-    // A progress read runs only where a store is attached. A source without
-    // one answers empty and keeps its connection.
-    fn stored<T>(&mut self, run: impl FnOnce(&Connection) -> rusqlite::Result<Vec<T>>) -> Vec<T> {
+    // Every play this audience is on, from the kept copy while neither file
+    // has changed, and from one read of the store otherwise. A failed read
+    // answers nothing and keeps no copy, so the next call reads again. A
+    // source with no store attached answers nothing and keeps its
+    // connection.
+    fn seen(&mut self, people: &[String]) -> Arc<Vec<Seen>> {
         if self.store.is_none() {
-            return Vec::new();
+            return Arc::default();
         }
-        self.read(run)
+        let Ok(versions) = self.read_result(seen::versions) else {
+            return Arc::default();
+        };
+        if let Some(kept) = self
+            .kept
+            .as_ref()
+            .filter(|kept| kept.answers(people, versions))
+        {
+            return kept.seen.clone();
+        }
+        match self.read_result(|connection| progress::seen(connection, people)) {
+            Ok(plays) => {
+                let kept = seen::Kept::new(people, versions, plays);
+                let answer = kept.seen.clone();
+                self.kept = Some(kept);
+                answer
+            }
+            Err(_) => Arc::default(),
+        }
     }
 
     fn person_entries(&mut self, library: &str, path: &str) -> Option<PersonEntries> {
@@ -540,17 +569,15 @@ impl Source for LocalCatalog {
     }
 
     fn continue_watching(&mut self, people: &[String]) -> Vec<Resume> {
-        self.stored(|connection| progress::resumes(connection, people))
+        crate::catalog::progress::seen::every(&self.seen(people), people, None)
     }
 
     fn plays_of(&mut self, library: &str, id: &str, people: &[String]) -> Vec<Resume> {
-        self.stored(|connection| progress::plays(connection, library, id, people))
+        crate::catalog::progress::seen::every(&self.seen(people), people, Some((library, id)))
     }
 
-    fn progress_by_item(&mut self, library: &str, people: &[String]) -> HashMap<String, Played> {
-        self.stored(|connection| progress::by_item(connection, library, people))
-            .into_iter()
-            .collect()
+    fn film_reach(&mut self, people: &[String]) -> HashMap<Work, Reach> {
+        crate::catalog::progress::seen::films(&self.seen(people), people)
     }
 
     fn episode_progress(
@@ -559,7 +586,7 @@ impl Source for LocalCatalog {
         series: &str,
         people: &[String],
     ) -> Vec<Progress> {
-        self.stored(|connection| progress::episodes(connection, library, series, people))
+        crate::catalog::progress::seen::episodes(&self.seen(people), library, series, people)
     }
 
     fn changed(&mut self) -> Change {
@@ -612,6 +639,7 @@ impl Source for LocalCatalog {
             shelf: self.shelf.clone(),
             page_reads: None,
             streams: false,
+            kept: None,
         }))
     }
 }

@@ -4,6 +4,7 @@
 // leaves no hole where they would have been. The measure gives every block
 // its place, and the focused block decides how far the stack has scrolled.
 
+use crate::audience::faces::Faces;
 use std::cell::RefCell;
 use std::convert::Infallible;
 
@@ -114,6 +115,7 @@ pub(super) fn rows<'a>(
     let mut rows = Vec::new();
     if let (Some(set), Some(block)) = (&movie.set, &blocks.strip) {
         rows.push(Across::Strip(strip::Strip {
+            faces: None,
             room: None,
             members: &set.members,
             current: Some(set.current),
@@ -134,6 +136,7 @@ pub(super) fn rows<'a>(
     let franchises = movie.franchises.bands().iter().zip(&blocks.franchises);
     for (index, (band, block)) in franchises.enumerate() {
         rows.push(Across::Strip(strip::Strip {
+            faces: None,
             room: None,
             members: &band.members,
             current: band.current,
@@ -179,6 +182,8 @@ pub struct Page<'a, A> {
     pub movie: &'a Movie,
     /// The store the logo and the strip's posters come from.
     pub store: &'a RefCell<A>,
+    /// The faces a film's poster draws along its foot.
+    pub faces: &'a Faces,
     /// Whether the loading state has lifted the logo off the page, so the
     /// head leaves its box empty.
     pub lifted: bool,
@@ -285,7 +290,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             .enumerate()
         {
             let scroll = movie.rows.at(index, row.scrolled(), self.at);
-            row.at(scroll).draw(&mut frame, store);
+            row.at(scroll).faced(self.faces).draw(&mut frame, store);
         }
 
         let mut at = Point::new(region.x, blocks.foot.top - offset);

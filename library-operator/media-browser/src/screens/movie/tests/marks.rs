@@ -178,7 +178,7 @@ fn a_progress_read_that_drops_a_mark_keeps_focus_on_a_mark_it_holds() {
     page.focus = Focus::Marks(1);
     source.plays = vec![own(reached(6_720, true, 20), true)];
 
-    page.read_progress(&mut source, &["someone".to_string()]);
+    page.read_progress(&mut source, &["someone".to_string()], &[]);
 
     assert_eq!(page.marks(), [Mark::Cleared]);
     assert_eq!(page.focus, Focus::Marks(0));

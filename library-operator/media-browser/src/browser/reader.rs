@@ -14,7 +14,7 @@ use crate::audience::Viewer;
 use crate::catalog::Source;
 use crate::catalog::draw::Date;
 use crate::harness::Waker;
-use crate::screens::home::{self, Page, Strip};
+use crate::screens::home::{self, Page};
 
 /// What the browser asks for a home page. One read runs at a time, and
 /// an ask made while one runs is served by one read after it, so a burst
@@ -141,7 +141,7 @@ impl Reader {
 #[derive(Debug)]
 pub enum Landed {
     Page(Page),
-    Row(Strip),
+    Row(home::RowRead),
 }
 
 // Which read an ask is for.

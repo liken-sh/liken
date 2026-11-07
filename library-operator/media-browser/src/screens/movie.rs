@@ -15,6 +15,7 @@ mod page;
 pub mod row;
 pub mod watch;
 
+use crate::audience::faces::Faces;
 use std::cell::RefCell;
 use std::convert::Infallible;
 
@@ -26,11 +27,13 @@ use super::{
     InFranchise, Item, Screen, Step, TitleMark, facts, foot, franchise, person, stripes, upnext,
 };
 use crate::art::Art;
+use crate::audience::Viewer;
 use crate::catalog::draw::Date;
 use crate::catalog::progress::thread;
 use crate::catalog::{MovieDetails, MovieSet, Progress, Query, Selection, Slot, Source};
 use crate::focus;
 use crate::motion::{Glide, Rows};
+use crate::screens::reached;
 use crate::views::curtain::{Curtain, Head, Layer};
 use crate::views::{layers, ratings};
 
@@ -218,7 +221,17 @@ impl Movie {
     // continue-watching row agree. A film with no play that names exactly
     // these people, or one they cleared to 0, carries no progress. A film
     // they finished carries its finished play, so the row offers the clear.
-    pub fn read_progress(&mut self, source: &mut dyn Source, people: &[String]) {
+    pub fn read_progress(
+        &mut self,
+        source: &mut dyn Source,
+        people: &[String],
+        viewers: &[Viewer],
+    ) {
+        let reach = source.film_reach(people);
+        if let Some(set) = self.set.as_mut() {
+            reached::fill(&mut set.members, &reach, people, viewers);
+        }
+        self.franchises.reach(&reach, people, viewers);
         let plays: Vec<thread::Play> = source
             .plays_of(&self.library, &self.id, people)
             .into_iter()
@@ -279,6 +292,7 @@ impl Movie {
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
+        faces: &'a Faces,
         curtain: Option<Curtain<'a>>,
         held: bool,
         at: f64,
@@ -291,6 +305,7 @@ impl Movie {
             front: page::Page {
                 movie: self,
                 store,
+                faces,
                 lifted: curtain.is_some(),
                 held,
                 at,

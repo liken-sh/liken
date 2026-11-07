@@ -164,6 +164,13 @@ pub trait Card {
     fn watched(&self) -> Option<f32> {
         None
     }
+
+    /// The people watching who have a play of the work, which draw as
+    /// faces along the foot of the art. Empty on every slot but a film's,
+    /// and while one person or nobody watches.
+    fn faces(&self) -> &[crate::audience::Viewer] {
+        &[]
+    }
 }
 
 /// How bright a slot's art draws.

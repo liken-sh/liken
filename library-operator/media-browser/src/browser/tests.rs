@@ -50,8 +50,8 @@ use crate::catalog::pool::Candidate;
 use crate::catalog::{
     Answer, Change, Credit, CreditSlot, Credits, Entry, Episode, FileFacts, Fold, Franchise,
     FranchiseEntry, GenreEntry, GenreSort, Held, Identity, InSeries, LibraryEntry, Membership,
-    MovieDetails, MovieSet, Order, Person, PlayItem, Played, Presentation, Progress, Query, Resume,
-    SeriesDetails, Slot, Title, Touched,
+    MovieDetails, MovieSet, Order, Person, PlayItem, Presentation, Progress, Query, Reach, Resume,
+    SeriesDetails, Slot, Title, Touched, Work,
 };
 use crate::screens::home::Home;
 use crate::screens::movie::Focus;
@@ -664,14 +664,22 @@ impl Source for Fake {
         self.continues.clone()
     }
 
-    // The plays of one library, out of the same rows the work read answers
-    // from, so one fixture field feeds a page and a wall alike.
-    fn progress_by_item(&mut self, library: &str, people: &[String]) -> HashMap<String, Played> {
+    // The reach of every film, out of the same rows the work read answers
+    // from, so one fixture field feeds a page and a wall alike. Every person
+    // of the audience reached the row's share.
+    fn film_reach(&mut self, people: &[String]) -> HashMap<Work, Reach> {
         self.watching = people.to_vec();
+        let audience = match people.is_empty() {
+            true => vec![String::new()],
+            false => people.to_vec(),
+        };
         self.reached
             .iter()
-            .filter(|((held, _), _)| held == library)
-            .map(|((_, id), progress)| (id.clone(), progress.played()))
+            .map(|(work, progress)| {
+                let share = progress.played().fraction();
+                let people = audience.iter().map(|name| (name.clone(), share)).collect();
+                (work.clone(), Reach { people })
+            })
             .collect()
     }
 

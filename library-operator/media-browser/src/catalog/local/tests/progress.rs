@@ -7,7 +7,7 @@ mod touched;
 mod work;
 
 use super::*;
-use crate::catalog::{Played, Progress, Resume};
+use crate::catalog::{Progress, Resume, Work};
 
 // The progress store's own schema, the one file every agent of the progress
 // cluster loads, so a schema change tests the reads against itself.

@@ -57,11 +57,29 @@ pub fn circle(thumbnail: &Thumbnail, side: u32) -> Option<RgbaImage> {
     Some(face)
 }
 
+/// A disc of one color that fills a square of this side, with the edge
+/// antialiased the way [`circle`] cuts a face.
+pub fn disc(side: u32, color: iced_winit::core::Color) -> RgbaImage {
+    let [red, green, blue, alpha] = color.into_rgba8();
+    let radius = side as f32 / 2.0;
+    RgbaImage::from_fn(side, side, |x, y| {
+        let across = x as f32 + 0.5 - radius;
+        let down = y as f32 + 0.5 - radius;
+        let inside = (radius - across.hypot(down) + 0.5).clamp(0.0, 1.0);
+        image::Rgba([red, green, blue, (f32::from(alpha) * inside).round() as u8])
+    })
+}
+
 /// The faces of the known people, by `Person` name and by the logical
 /// size each screen draws them at.
 #[derive(Debug, Clone)]
 pub struct Faces {
     faces: Vec<Cut>,
+    // One plain disc at each side the faces were cut at, which a letter
+    // draws on where a face draws over art. A filled path would not do
+    // there, because the renderer paints every path of a layer under every
+    // image of that layer, and so under the poster.
+    discs: Vec<(u32, Image)>,
     // The scale of the last cut, which turns a logical size into the side
     // a face was cut at.
     scale: f32,
@@ -71,6 +89,7 @@ impl Default for Faces {
     fn default() -> Self {
         Self {
             faces: Vec::new(),
+            discs: Vec::new(),
             scale: 1.0,
         }
     }
@@ -106,6 +125,14 @@ impl Faces {
     pub fn refresh(&mut self, people: &[Person], sizes: &[f32], scale: f32) {
         let held = std::mem::take(&mut self.faces);
         self.scale = scale;
+        self.discs = sizes
+            .iter()
+            .map(|size| {
+                let side = side(*size, scale);
+                let pixels = disc(side, crate::look::muted()).into_raw().into();
+                (side, Image::at_scale(side, side, scale, pixels))
+            })
+            .collect();
         for person in people {
             let Some(thumbnail) = &person.thumbnail else {
                 continue;
@@ -143,6 +170,16 @@ impl Faces {
             .find(|face| face.name == name && face.side == side)?
             .image
             .as_ref()
+    }
+
+    /// The plain disc a letter draws on at this logical size, or nothing
+    /// where no cut asked for this size.
+    pub fn disc(&self, size: f32) -> Option<&Image> {
+        let side = side(size, self.scale);
+        self.discs
+            .iter()
+            .find(|(cut, _)| *cut == side)
+            .map(|(_, image)| image)
     }
 
     /// What a circle of this logical size draws for this viewer: their

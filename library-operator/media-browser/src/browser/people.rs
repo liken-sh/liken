@@ -20,9 +20,14 @@ use crate::catalog::Source;
 use crate::{screens, views};
 
 // Every logical size a screen draws a face at: the face inside a
-// picker's tile, and the circle of the room that the strip, the
-// continue-watching row's heading, and a franchise page draw.
-const SIZES: [f32; 2] = [screens::audience::FACE, views::clock::strip::CIRCLE];
+// picker's tile, the circle of the room that the strip, the
+// continue-watching row's heading, and a franchise page draw, and the
+// faces along the foot of a film's poster.
+const SIZES: [f32; 3] = [
+    screens::audience::FACE,
+    views::clock::strip::CIRCLE,
+    views::progress::FACE,
+];
 
 impl<S: Source, A: Art> Browser<S, A> {
     // Take what the watch read since the last pass. A read that failed

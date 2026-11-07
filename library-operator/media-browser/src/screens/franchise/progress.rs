@@ -12,6 +12,7 @@ use crate::catalog::franchise::Entry;
 use crate::catalog::progress::thread;
 use crate::catalog::{Progress, Resume, Source};
 use crate::screens::home::resume::containers::{Episodes, Leaf, Work, on_leaves};
+use crate::screens::reached::Reached;
 
 // The kind word a held series carries.
 const SERIES: &str = "series";
@@ -24,6 +25,10 @@ pub struct Marks {
     /// The share of each row's member the room reached, in the wall's
     /// own order, and none for a row no play of theirs names.
     pub bars: Vec<Option<f32>>,
+    /// The people of the room with a play of each row's film, which draw
+    /// along the foot of its poster, in the wall's own order. A series
+    /// row and a gap draw none, and nor does any row of a room of one.
+    pub faces: Vec<Vec<Viewer>>,
     /// The row the room's thread stands on, and none where no thread of
     /// theirs stands, or the room finished the story.
     pub room: Option<usize>,
@@ -40,6 +45,11 @@ impl Marks {
     /// The bar one row draws, and none for a row the read did not reach.
     pub fn bar(&self, row: usize) -> Option<f32> {
         self.bars.get(row).copied().flatten()
+    }
+
+    /// The faces one row draws, and none for a row the read did not reach.
+    pub fn faces(&self, row: usize) -> &[Viewer] {
+        self.faces.get(row).map(Vec::as_slice).unwrap_or_default()
     }
 
     /// Whether any marker stands. The circles take their column only
@@ -60,10 +70,12 @@ pub fn read(page: &mut Franchise, source: &mut dyn Source, people: &[String], vi
     let rows = rows(&page.entries, &leaves);
     let played = plays(source, &page.entries, people);
     let room = stands(&leaves, &rows, &played);
-    let bars = bars(source, &page.entries, &leaves, &played, people);
+    let films = films(source, &page.entries, people, viewers);
+    let bars = bars(source, &page.entries, &leaves, &films, people);
     let solo = solo(source, &page.entries, people, viewers, &leaves, &rows, room);
     page.marks = Marks {
         bars,
+        faces: films.into_iter().map(|film| film.faces).collect(),
         viewers: match room {
             Some(_) => viewers.to_vec(),
             None => Vec::new(),
@@ -149,6 +161,27 @@ fn plays(
     played
 }
 
+// How far the room got in the film of every row, the way every film
+// poster draws it, and nothing for a series row or a gap.
+fn films(
+    source: &mut dyn Source,
+    entries: &[Entry],
+    people: &[String],
+    viewers: &[Viewer],
+) -> Vec<Reached> {
+    let reach = source.film_reach(people);
+    entries
+        .iter()
+        .map(|entry| match entry.held.as_ref() {
+            Some(held) if held.kind != SERIES => {
+                let work = (held.library.clone(), held.id.clone());
+                Reached::of(reach.get(&work), people, viewers)
+            }
+            _ => Reached::default(),
+        })
+        .collect()
+}
+
 // The bar under every row: the share of a film the room reached, the
 // share of a series member's own run they reached, and nothing under a
 // row no library holds.
@@ -156,15 +189,16 @@ fn bars(
     source: &mut dyn Source,
     entries: &[Entry],
     leaves: &[Leaf],
-    played: &HashMap<Work, Vec<Resume>>,
+    films: &[Reached],
     people: &[String],
 ) -> Vec<Option<f32>> {
     entries
         .iter()
-        .map(|entry| {
+        .zip(films)
+        .map(|(entry, film)| {
             let held = entry.held.as_ref()?;
             if held.kind != SERIES {
-                return film(played.get(&(held.library.clone(), held.id.clone()))?);
+                return film.share;
             }
             let covered = leaves
                 .iter()
@@ -178,16 +212,6 @@ fn bars(
             run(&inside, covered)
         })
         .collect()
-}
-
-/// The share of a film the room reached: the share of its running time
-/// their latest play stopped at, which is the share the film walls draw.
-/// A film no play of theirs names draws no bar.
-pub fn film(plays: &[Resume]) -> Option<f32> {
-    plays
-        .iter()
-        .max_by_key(|play| play.progress.recorded)
-        .map(|play| play.progress.played().fraction())
 }
 
 /// The share of one series member's run the room reached: an episode

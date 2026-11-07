@@ -140,6 +140,7 @@ pub(super) fn viewed<'a>(
     faces: &'a Faces,
 ) -> strip::Strip<'a, Item> {
     strip::Strip {
+        faces: Some(faces),
         headed: false,
         room: Some(strip::Room {
             viewers: &row.viewers,

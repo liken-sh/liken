@@ -26,7 +26,7 @@ use iced_winit::core::{Element, Length, Rectangle, Theme};
 use self::banner::Banner;
 use self::layers::{Ground, Program};
 use self::layout::Layout;
-pub use self::page::{Page, read, read_row};
+pub use self::page::{Page, RowRead, read, read_row};
 use self::rows::{GENRE, LIBRARY, rows};
 pub use self::rows::{Last, Row, Strip};
 use super::{Screen, Step, slots};
@@ -201,7 +201,9 @@ impl Home {
     /// every other row stays. A page read for an empty audience holds no
     /// row, and a row read for it is dropped: the page is read whole when
     /// the audience changes.
-    pub fn apply_row(&mut self, mut fresh: Strip) {
+    pub fn apply_row(&mut self, read: RowRead) {
+        page::reach_rows(&mut self.blocks, &read.reach, &self.people, &self.viewers);
+        let mut fresh = read.row;
         let Some(Block::Strip(held)) = self
             .blocks
             .iter_mut()

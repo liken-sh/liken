@@ -159,3 +159,77 @@ fn the_strip_and_the_rows_heading_draw_the_picture_of_a_person_in_the_room() {
         run.log
     );
 }
+
+// A film's poster draws the faces of the people in the room who played it.
+// Two people are in the room, one with a picture and one without, and the
+// fixture's play names both, so the film's poster on the recency row draws
+// the red picture and a letter on a disc. A press of down moves from the
+// continue-watching row to the recency row, and the page scrolls the row's
+// heading, and the face it draws, up under the band. So the red under the
+// band is the poster's face alone.
+#[test]
+fn a_films_poster_draws_the_faces_of_the_people_who_played_it() {
+    let dir = workspace("poster-faces");
+    let frames = dir.join("frames");
+    let (database, _volume) = fixture(&dir);
+    let progress = super::progress::store(&dir, &database);
+    rusqlite::Connection::open(&progress)
+        .expect("open the fixture store")
+        .execute(
+            "INSERT INTO play_people (play, person) VALUES ('one', 'second')",
+            (),
+        )
+        .expect("put the second person on the play");
+    let people = dir.join("people.json");
+    let list = serde_json::json!([
+        {"name": "first", "displayName": "First", "thumbnail": thumbnail([220, 30, 30])},
+        {"name": "second", "displayName": "Second"},
+    ]);
+    std::fs::write(&people, list.to_string()).expect("write the person list");
+
+    let run = headless(
+        &dir,
+        &[
+            "--catalog",
+            &text(&database),
+            "--updates",
+            "http://127.0.0.1:1",
+            "--progress",
+            &text(&progress),
+            "--people",
+            &text(&people),
+            "--audience",
+            "first,second",
+            "--script",
+            "2.0:down",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "4.0",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "20",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    let path = frames.join("004.00.png");
+    drawn(&path, &run);
+    let pixels = image::open(&path)
+        .unwrap_or_else(|error| panic!("{}: {error}\n{}", path.display(), run.log))
+        .to_rgb8();
+    let band = media_browser::views::band::HEIGHT as u32;
+    let under = pixels
+        .enumerate_pixels()
+        .filter(|(_, y, pixel)| *y > band && red(pixel.0))
+        .count();
+    let disc = |side: f32| (std::f32::consts::PI * side * side / 4.0) as usize;
+    let poster = disc(media_browser::views::progress::FACE);
+
+    assert!(
+        under > poster / 2 && under < 2 * poster,
+        "the frame under the band holds {under} red pixels, and the poster's face holds about {poster}\n{}",
+        run.log
+    );
+}

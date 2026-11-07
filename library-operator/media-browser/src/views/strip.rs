@@ -153,6 +153,9 @@ pub struct Last<'a> {
 /// row ends with its members, and `lines` is the caption lines under
 /// each slot.
 pub struct Strip<'a, T> {
+    /// The faces a film's slot draws along the foot of its poster, and
+    /// nothing on a strip that draws no film.
+    pub faces: Option<&'a Faces>,
     /// The members in the order the catalog answered them.
     pub members: &'a [T],
     /// The index of the member the page is about. It draws at full
@@ -321,6 +324,9 @@ pub fn draw<T: Card, A: Art>(
                 }
                 pilled(frame, member, slot);
                 progress::draw(frame, member, slot);
+                if let Some(faces) = strip.faces {
+                    progress::faces(frame, member, slot, faces);
+                }
                 if strip.lines > 0 {
                     card::draw(frame, member, caption_band(slot));
                 }
@@ -471,6 +477,7 @@ mod tests {
         focus: Option<usize>,
     ) -> Strip<'a, Member> {
         Strip {
+            faces: None,
             room: None,
             members,
             current,

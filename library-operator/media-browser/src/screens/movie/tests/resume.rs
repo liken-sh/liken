@@ -24,7 +24,7 @@ fn after_plays(plays: Vec<Resume>) -> (Movie, Films) {
     };
     let mut page =
         Movie::open("screening/films", "two", &mut source).expect("the catalog holds this movie");
-    page.read_progress(&mut source, &[WATCHER.to_string()]);
+    page.read_progress(&mut source, &[WATCHER.to_string()], &[]);
     (page, source)
 }
 
@@ -186,7 +186,7 @@ fn a_progress_read_that_shortens_the_row_keeps_focus_on_a_button_it_holds() {
     page.key("right", &mut source);
     source.plays = vec![own(reached(REACHED, true, 20), true)];
 
-    page.read_progress(&mut source, &[WATCHER.to_string()]);
+    page.read_progress(&mut source, &[WATCHER.to_string()], &[]);
 
     assert_eq!(words(&page), ["Play", "Trailer"]);
     assert_eq!(page.focus, Focus::Buttons(1));

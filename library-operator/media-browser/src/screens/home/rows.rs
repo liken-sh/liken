@@ -367,6 +367,7 @@ fn library_item(entry: LibraryEntry) -> Item {
         episode: None,
         new: 0,
         progress: None,
+        reached: Default::default(),
         franchise: None,
     }
 }
@@ -394,6 +395,7 @@ fn genre_item(entry: GenreEntry) -> Item {
         episode: None,
         new: 0,
         progress: None,
+        reached: Default::default(),
         franchise: None,
     }
 }
@@ -425,6 +427,7 @@ fn franchise_item(entry: FranchiseEntry) -> Item {
         episode: None,
         new: 0,
         progress: None,
+        reached: Default::default(),
         franchise: None,
     }
 }

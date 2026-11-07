@@ -53,7 +53,7 @@ pub mod mark;
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
 pub use identity::Identity;
 pub use mark::Mark;
-pub use progress::{Played, Progress, Resume, Touched};
+pub use progress::{Played, Progress, Reach, Resume, Seen, Touched, Work};
 pub use query::{Answer, Counts, Fold, GenreSort, InSeries, Order, Query, Slot, Sort};
 
 /// How many posters the tile of a library or a genre draws, as a 2x2.
@@ -574,13 +574,10 @@ pub trait Source {
         Vec::new()
     }
 
-    /// Every movie of one library these people have a play of, keyed by the
-    /// movie's id, with the latest play's position and duration. Finished
-    /// plays are in it; series ids are not. A source with no progress store
-    /// answers an empty map.
-    // A movie is in the map when every one of these people has a play of it,
-    // in any group.
-    fn progress_by_item(&mut self, _library: &str, _people: &[String]) -> HashMap<String, Played> {
+    /// How far each of these people got in every film any of them has a
+    /// play of, across every library, keyed by the film's library and id.
+    /// A source with no progress store answers an empty map.
+    fn film_reach(&mut self, _people: &[String]) -> HashMap<Work, Reach> {
         HashMap::new()
     }
 

@@ -121,6 +121,7 @@ impl Slots {
     pub fn grid(&self, region: Rectangle, lines: usize) -> wall::Grid<'_, Item> {
         let cells = wall::lined(region.width, wall::POSTER, wall::COLUMNS, lines);
         wall::Grid {
+            faces: None,
             items: &self.items,
             focus: Some(self.focus),
             library: "",

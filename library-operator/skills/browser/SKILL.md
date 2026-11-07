@@ -162,6 +162,20 @@ restarts inside those hours draws the same room and asks nobody.
 [The library bus](https://liken.sh/library/docs/reference/bus/#who-is-watching) gives the
 message.
 
+Every film poster shows who at the screen has seen the film, so you can
+pick a film that nobody has to watch again, or one that everyone has
+started. This covers the walls, the rows of the home page, the strips of
+a title's page, and the franchise page. The bar under the poster shows
+how far everyone at the screen got. Each person's share is their
+furthest play of the film, alone or with anyone, and a play past the
+finished point counts as the whole film. A clear takes back that
+person's earlier plays, so only the plays after it count. The bar shows the least of
+those shares, so a film that one person has not started draws no bar.
+When two or more people are at the screen, a face for each of them who
+has a play of the film draws along the foot of the poster. A person with
+no picture draws as the first letter of their name. A series poster
+draws neither.
+
 A movie's page shows its art, its facts, its people, and the set or
 franchise it is part of. Under the plot, the playback row holds Play,
 or Resume and Start over for a film the people at the screen are in the

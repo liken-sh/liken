@@ -9,6 +9,7 @@
 mod motion;
 mod page;
 
+use crate::audience::faces::Faces;
 use std::cell::RefCell;
 use std::convert::Infallible;
 
@@ -146,11 +147,13 @@ impl Person {
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
+        faces: &'a Faces,
         at: f64,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         iced_widget::canvas(page::Page {
             person: self,
             store,
+            faces,
             at,
         })
         .width(Length::Fill)

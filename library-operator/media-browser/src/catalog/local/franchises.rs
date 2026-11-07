@@ -13,16 +13,32 @@ use super::item;
 use crate::catalog::FranchiseEntry;
 use crate::catalog::franchise::{Calendar, Entry, Era, Franchise, Held, MOVIE, Membership, SERIES};
 
-// The two item tables as one list of members, which both reads join
-// through. The kind column names the table a row came from, so a press
-// on a slot opens the page of its own kind.
-const ITEMS: &str = "SELECT library, id, title, art, arts, released, slug, body, duration, \
-                            'movies' AS kind \
-                     FROM movies \
-                     UNION ALL \
-                     SELECT library, id, title, art, arts, released, slug, body, duration, \
-                            'series' AS kind \
-                     FROM series";
+// The two item tables as one list of members, which every read joins
+// through, as the two common table expressions `wanted` and `items`. The
+// kind column names the table a row came from, so a press on a slot opens
+// the page of its own kind. `members` is the condition on
+// `franchise_members m` that picks the members a read draws, and the list
+// holds only the works those members name. SQLite cannot move a join's
+// condition into a UNION ALL on the right side of a join, so a list of
+// every item would be copied into a temporary table, bodies and all, and
+// indexed again on every read, which was most of the cost of opening a
+// franchise page.
+fn items(members: &str) -> String {
+    format!(
+        "wanted AS (\
+           SELECT DISTINCT a.library, a.item FROM franchise_members m \
+           JOIN aliases a ON a.alias = m.alias WHERE {members}\
+         ), items AS (\
+           SELECT movies.library, movies.id, title, art, arts, released, slug, body, duration, \
+                  'movies' AS kind \
+           FROM wanted JOIN movies ON movies.library = wanted.library AND movies.id = wanted.item \
+           UNION ALL \
+           SELECT series.library, series.id, title, art, arts, released, slug, body, duration, \
+                  'series' AS kind \
+           FROM wanted JOIN series ON series.library = wanted.library AND series.id = wanted.item\
+         )"
+    )
+}
 
 // The member columns both reads answer with, in the order [`entry`]
 // takes them. The last of them is the held item, which is NULL for
@@ -61,9 +77,10 @@ pub fn all(connection: &Connection) -> rusqlite::Result<Vec<FranchiseEntry>> {
         )
     };
     let sql = format!(
-        "WITH items AS ({ITEMS}) \
+        "WITH {items} \
          SELECT f.library, f.id, f.title, f.art, f.slug, {art}, {holder}, {movies}, {series} \
          FROM franchises f ORDER BY f.sort_key, f.library, f.id",
+        items = items("1"),
         art = member("i.art"),
         holder = member("i.library"),
         movies = kind(MOVIE),
@@ -135,7 +152,7 @@ fn memberships_of(
         "WITH mine AS ({mine}), found AS (\
            SELECT DISTINCT library, franchise FROM franchise_members \
            WHERE alias IN (SELECT alias FROM mine)\
-         ), items AS ({ITEMS}) \
+         ), {items} \
          SELECT m.library, m.franchise, \
            (SELECT title FROM franchises named \
             WHERE named.library = m.library AND named.id = m.franchise), \
@@ -151,7 +168,8 @@ fn memberships_of(
          JOIN aliases a ON a.alias = m.alias \
          JOIN items i ON i.library = a.library AND i.id = a.item \
          GROUP BY m.library, m.franchise, m.position \
-         ORDER BY m.library, m.franchise, m.position"
+         ORDER BY m.library, m.franchise, m.position",
+        items = items("(m.library, m.franchise) IN (SELECT library, franchise FROM found)"),
     );
     let members = collect(connection, &sql, params, |row| {
         // The membership's own five columns stand before the member's.
@@ -278,14 +296,15 @@ fn runs(json: &str) -> Vec<(i64, i64)> {
 // does not.
 fn entries(connection: &Connection, library: &str, id: &str) -> rusqlite::Result<Vec<Entry>> {
     let sql = format!(
-        "WITH items AS ({ITEMS}) \
+        "WITH {items} \
          SELECT {COLUMNS}, {HELD}, json_extract(i.body, '$.plot') \
          FROM franchise_members m \
          LEFT JOIN aliases a ON a.alias = m.alias \
          LEFT JOIN items i ON i.library = a.library AND i.id = a.item \
          WHERE m.library = ?1 AND m.franchise = ?2 \
          GROUP BY m.position \
-         ORDER BY m.position"
+         ORDER BY m.position",
+        items = items("m.library = ?1 AND m.franchise = ?2"),
     );
     collect(connection, &sql, &[&library, &id], |row| {
         let mut member = entry(row, 0)?;

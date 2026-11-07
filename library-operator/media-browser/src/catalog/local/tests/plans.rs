@@ -91,22 +91,32 @@ fn progress_requires_index(read: impl Fn(&Connection, &[String]) -> rusqlite::Re
 }
 
 #[test]
-fn the_continue_watching_read_requires_the_shipped_item_index() {
-    progress_requires_index(|connection, people| progress::resumes(connection, people).map(|_| ()));
+fn the_progress_read_requires_the_shipped_item_index() {
+    progress_requires_index(|connection, people| progress::seen(connection, people).map(|_| ()));
 }
 
+// Every screen that draws a poster reads the progress, so the read finds
+// the audience's plays through `play_people_person` and each play's rows
+// by their keys, and never walks a whole table of the store.
 #[test]
-fn the_plays_read_requires_the_shipped_item_index() {
-    progress_requires_index(|connection, people| {
-        progress::plays(connection, "test/shows", "series:1", people).map(|_| ())
-    });
-}
+fn the_progress_read_walks_no_table_of_the_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let connection = with_progress(&dir);
+    let people = ["someone".to_string(), "another".to_string()];
 
-#[test]
-fn the_episode_progress_read_requires_the_shipped_item_index() {
-    progress_requires_index(|connection, people| {
-        progress::episodes(connection, "test/shows", "series:1", people).map(|_| ())
-    });
+    let plan = progress::plan(&connection, &people).unwrap();
+    eprintln!("PLAN {plan:#?}");
+
+    let walks: Vec<&String> = plan
+        .iter()
+        .filter(|line| line.starts_with("SCAN") && !line.contains("CONSTANT ROW"))
+        .collect();
+    assert!(
+        walks
+            .iter()
+            .all(|line| line.contains(" named") || line.contains(" works")),
+        "{plan:#?}"
+    );
 }
 
 #[test]

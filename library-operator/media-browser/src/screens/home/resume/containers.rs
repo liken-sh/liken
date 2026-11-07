@@ -134,7 +134,7 @@ pub(crate) fn still(library: &str, series: &str, name: &str, episode: Episode) -
 
 // The library and the id a play names: the film's, or the series' for an
 // episode.
-pub type Work = (String, String);
+pub use crate::catalog::Work;
 
 // The plays of the audience on these leaves, each with the leaf's index,
 // for the walk. `plays` is every play of the audience keyed by the work it

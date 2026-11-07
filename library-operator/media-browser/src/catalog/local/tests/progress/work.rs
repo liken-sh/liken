@@ -166,57 +166,55 @@ fn a_shelf(catalog: &Path) {
     insert_alias(catalog, FILMS, FILMS_SHOW, FILMS_SHOW);
 }
 
-// The map a wall of one library reads, as pairs a test compares in order.
-fn by_item(source: &mut dyn Source, library: &str, people: &[&str]) -> Vec<(String, Played)> {
-    let mut pairs: Vec<(String, Played)> = source
-        .progress_by_item(library, &names(people))
+// The reach of every film the audience played, as pairs a test compares in
+// order.
+fn reach(source: &mut dyn Source, people: &[&str]) -> Vec<(Work, Vec<(String, f32)>)> {
+    let mut pairs: Vec<(Work, Vec<(String, f32)>)> = source
+        .film_reach(&names(people))
         .into_iter()
+        .map(|(work, reach)| (work, reach.people))
         .collect();
     pairs.sort_by(|one, other| one.0.cmp(&other.0));
     pairs
 }
 
+fn work(library: &str, id: &str) -> Work {
+    (library.to_string(), id.to_string())
+}
+
+fn person(name: &str, share: f32) -> (String, f32) {
+    (name.to_string(), share)
+}
+
 #[test]
-fn every_film_of_one_library_the_audience_played_answers_its_latest_play() {
+fn every_film_the_audience_played_answers_its_furthest_play() {
     let dir = TempDir::new().unwrap();
     let catalog = fixture(&dir);
     let store = progress_fixture(&dir);
     a_shelf(&catalog);
-    film_play(&store, "old", &["first"], (60, 6000, 10));
-    film_play(&store, "new", &["first"], (900, 6000, 20));
+    film_play(&store, "far", &["first"], (3000, 6000, 10));
+    film_play(&store, "again", &["first"], (600, 6000, 20));
     insert_play(
         &store,
         "other",
         &[OTHER_ALIAS],
         &["first"],
-        (5900, 6000, 30),
+        (1500, 6000, 30),
         (0, 0),
     );
     let mut source = source_over(&catalog, store);
 
     assert_eq!(
-        by_item(&mut source, FILMS, &["first"]),
+        reach(&mut source, &["first"]),
         [
-            (
-                FILM.to_string(),
-                Played {
-                    position: 900,
-                    duration: 6000
-                }
-            ),
-            (
-                OTHER_FILM.to_string(),
-                Played {
-                    position: 5900,
-                    duration: 6000
-                }
-            ),
+            (work(FILMS, FILM), vec![person("first", 0.5)]),
+            (work(FILMS, OTHER_FILM), vec![person("first", 0.25)]),
         ]
     );
 }
 
 #[test]
-fn a_film_is_marked_when_every_person_has_a_play_of_it_in_any_group() {
+fn each_person_reaches_their_own_plays_in_any_group() {
     let dir = TempDir::new().unwrap();
     let catalog = fixture(&dir);
     let store = progress_fixture(&dir);
@@ -226,20 +224,20 @@ fn a_film_is_marked_when_every_person_has_a_play_of_it_in_any_group() {
     let mut source = source_over(&catalog, store);
 
     assert_eq!(
-        by_item(&mut source, FILMS, &["first", "second"]),
+        reach(&mut source, &["first", "second"]),
         [(
-            FILM.to_string(),
-            Played {
-                position: 3000,
-                duration: 6000
-            }
+            work(FILMS, FILM),
+            vec![person("first", 0.1), person("second", 0.5)]
         )]
     );
-    assert_eq!(by_item(&mut source, FILMS, &["first", "fourth"]), []);
+    assert_eq!(
+        reach(&mut source, &["first", "fourth"]),
+        [(work(FILMS, FILM), vec![person("first", 0.1)])]
+    );
 }
 
 #[test]
-fn a_series_the_audience_played_is_no_item_of_the_map() {
+fn a_series_the_audience_played_reaches_no_film() {
     let dir = TempDir::new().unwrap();
     let catalog = fixture(&dir);
     let store = progress_fixture(&dir);
@@ -254,11 +252,11 @@ fn a_series_the_audience_played_is_no_item_of_the_map() {
     );
     let mut source = source_over(&catalog, store);
 
-    assert_eq!(by_item(&mut source, FILMS, &["first"]), []);
+    assert_eq!(reach(&mut source, &["first"]), []);
 }
 
 #[test]
-fn a_film_no_play_of_the_audience_names_is_no_item_of_the_map() {
+fn a_film_no_play_of_the_audience_names_reaches_nothing() {
     let dir = TempDir::new().unwrap();
     let catalog = fixture(&dir);
     let store = progress_fixture(&dir);
@@ -266,45 +264,44 @@ fn a_film_no_play_of_the_audience_names_is_no_item_of_the_map() {
     film_play(&store, "one", &["second"], (600, 6000, 10));
     let mut source = source_over(&catalog, store);
 
-    let played = source.progress_by_item(FILMS, &names(&["first"]));
-    assert!(!played.contains_key(SPARE_FILM), "{played:?}");
-    assert!(played.is_empty(), "{played:?}");
+    assert_eq!(reach(&mut source, &["first"]), []);
 }
 
 #[test]
-fn a_film_the_audience_finished_still_answers_its_play() {
+fn a_film_the_audience_finished_reaches_the_whole_film() {
     let dir = TempDir::new().unwrap();
     let catalog = fixture(&dir);
     let store = progress_fixture(&dir);
     a_shelf(&catalog);
-    film_play(&store, "one", &["first"], (6000, 6000, 10));
+    film_play(&store, "one", &["first"], (5900, 6000, 10));
     end_play(&store, "one", 30);
     let mut source = source_over(&catalog, store);
 
     assert_eq!(
-        by_item(&mut source, FILMS, &["first"]),
-        [(
-            FILM.to_string(),
-            Played {
-                position: 6000,
-                duration: 6000
-            }
-        )]
+        reach(&mut source, &["first"]),
+        [(work(FILMS, FILM), vec![person("first", 1.0)])]
     );
 }
 
+// The kept copy of the store's answer is checked against both files on
+// each read, so a play the agent writes after a read reaches the next one.
 #[test]
-fn a_library_the_audience_played_nothing_in_answers_an_empty_map() {
+fn a_play_written_after_a_read_reaches_the_next_read() {
     let dir = TempDir::new().unwrap();
     let catalog = fixture(&dir);
     let store = progress_fixture(&dir);
     a_shelf(&catalog);
     film_play(&store, "one", &["first"], (600, 6000, 10));
-    let mut source = source_over(&catalog, store);
+    let mut source = source_over(&catalog, store.clone());
+    assert_eq!(
+        reach(&mut source, &["first"]),
+        [(work(FILMS, FILM), vec![person("first", 0.1)])]
+    );
 
-    assert!(
-        source
-            .progress_by_item(SHOWS, &names(&["first"]))
-            .is_empty()
+    film_play(&store, "two", &["first"], (3000, 6000, 20));
+
+    assert_eq!(
+        reach(&mut source, &["first"]),
+        [(work(FILMS, FILM), vec![person("first", 0.5)])]
     );
 }

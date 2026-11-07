@@ -165,21 +165,20 @@ fn a_run_counts_a_finished_episode_whole_and_the_one_in_the_middle_by_its_share(
 }
 
 #[test]
-fn a_film_draws_the_share_of_its_running_time_the_latest_play_reached() {
-    let played = |recorded: i64, position: i64| Resume {
-        progress: Progress {
-            position,
-            duration: RUNTIME,
-            recorded,
-            ..Progress::default()
-        },
-        ..Resume::default()
-    };
+fn a_film_draws_the_least_share_anyone_in_the_room_reached_and_their_faces() {
+    let page = page(&[
+        night(FIRST, (0, 0), "AB", 10, RUNTIME / 2),
+        night(FIRST, (0, 0), "C", 20, RUNTIME / 4),
+    ]);
 
-    assert_eq!(film(&[played(10, RUNTIME / 4)]), Some(0.25));
-    assert_eq!(
-        film(&[played(10, RUNTIME / 4), played(20, RUNTIME / 2)]),
-        Some(0.5)
-    );
-    assert_eq!(film(&[]), None);
+    assert_eq!(page.marks.bar(0), Some(0.25));
+    assert_eq!(page.marks.faces(0), viewers());
+}
+
+#[test]
+fn a_film_one_person_of_the_room_has_not_played_draws_no_bar() {
+    let page = page(&[night(FIRST, (0, 0), "AB", 10, RUNTIME / 2)]);
+
+    assert_eq!(page.marks.bar(0), None);
+    assert_eq!(page.marks.faces(0), [viewer("A"), viewer("B")]);
 }

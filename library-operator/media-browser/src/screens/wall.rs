@@ -15,6 +15,8 @@ use iced_winit::core::{Element, Length, Rectangle, Theme, mouse};
 use super::Step;
 use super::slots::Slots;
 use crate::art::Art;
+use crate::audience::Viewer;
+use crate::audience::faces::Faces;
 use crate::catalog::{Query, Source};
 use crate::focus;
 use crate::motion::Glide;
@@ -25,7 +27,7 @@ use crate::views::{area, band, clip_marked, screen, wall};
 mod motion;
 // The progress module: the bars the wall's film slots draw, read per
 // library the slots span.
-pub(crate) mod progress;
+
 // The rail module: which walls draw one, what its bars say, and how it
 // draws beside the slots.
 mod rail;
@@ -64,6 +66,7 @@ pub struct Wall {
     // draws the same bars again without the browser, which is where the
     // audience is held.
     people: Vec<String>,
+    viewers: Vec<Viewer>,
     // How far the grid has scrolled down, as it eases to the place that
     // keeps the slot the wall stands at in view.
     scroll: Glide,
@@ -79,6 +82,7 @@ impl Wall {
             bars: Vec::new(),
             focus: Focus::Slots,
             people: Vec::new(),
+            viewers: Vec::new(),
             scroll: Glide::still(0.0),
         };
         wall.headed();
@@ -93,7 +97,7 @@ impl Wall {
     /// and a letter typed into the search field both land here.
     pub fn reread(&mut self, source: &mut dyn Source) {
         self.slots.reread(source);
-        progress::read(&mut self.slots.items, source, &self.people);
+        crate::screens::reached::read(&mut self.slots.items, source, &self.people, &self.viewers);
         self.headed();
         self.railed();
     }
@@ -101,9 +105,15 @@ impl Wall {
     /// Read how far these people reached in the films this wall draws, and
     /// hold the names, so every later re-read of the slots draws the bars
     /// again.
-    pub fn read_progress(&mut self, source: &mut dyn Source, people: &[String]) {
+    pub fn read_progress(
+        &mut self,
+        source: &mut dyn Source,
+        people: &[String],
+        viewers: &[Viewer],
+    ) {
         self.people = people.to_vec();
-        progress::read(&mut self.slots.items, source, &self.people);
+        self.viewers = viewers.to_vec();
+        crate::screens::reached::read(&mut self.slots.items, source, &self.people, &self.viewers);
     }
 
     // The bars again, because the answer they name has changed. Focus
@@ -289,12 +299,14 @@ impl Wall {
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
+        faces: &'a Faces,
         held: bool,
         at: f64,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         let grid = canvas(Program {
             wall: self,
             store,
+            faces,
             held,
             at,
         })
@@ -322,6 +334,7 @@ impl Wall {
 struct Program<'a, A> {
     wall: &'a Wall,
     store: &'a RefCell<A>,
+    faces: &'a Faces,
     // Whether the wall holds focus, or the browser's strip over it does.
     held: bool,
     // The second this frame draws, which the scroll eases on.
@@ -350,6 +363,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
             &mut frame,
             &mut *self.store.borrow_mut(),
             &wall::Grid {
+                faces: Some(self.faces),
                 offset: shown.scroll.toward(settled, self.at),
                 ..grid
             },

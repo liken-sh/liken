@@ -2,13 +2,18 @@
 // track the width of the art, with the watched share of it bright. The bar
 // lies along the foot of the art and not inside it, because every mesh of
 // a layer draws under every image of that layer, so a fill inside the art
-// would never show.
+// would never show. While more than one person watches, a film's poster
+// also draws a face for each of them who has a play of it, in a row along
+// the inside of its foot. The faces are images, so they draw over the
+// poster.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::Rectangle;
 
-use super::{Card, area, extent};
+use super::{Card, area, extent, text};
+use crate::audience::Viewer;
+use crate::audience::faces::{Face, Faces};
 use crate::look;
 
 /// How tall the bar is, in logical pixels: thin enough to read as a mark on
@@ -48,9 +53,95 @@ pub fn fill(frame: &mut canvas::Frame<Renderer>, slot: Rectangle, fraction: f32)
     }
 }
 
+/// The side of one face along the foot of a poster, in logical pixels:
+/// small enough that a row of several leaves most of the poster clear.
+pub const FACE: f32 = 28.0;
+
+// The space between two faces, and between the row and the poster's edges.
+const FACE_GAP: f32 = 4.0;
+const FACE_INSET: f32 = 6.0;
+
+/// The box each of this many faces draws in over a poster this size: a row
+/// from the poster's left edge along the inside of its foot. A face that
+/// would run past the poster's right edge draws nowhere.
+pub fn face_boxes(slot: Rectangle, count: usize) -> Vec<Rectangle> {
+    let y = slot.y + slot.height - FACE_INSET - FACE;
+    (0..count)
+        .map(|index| {
+            let x = slot.x + FACE_INSET + index as f32 * (FACE + FACE_GAP);
+            area(x, y, FACE, FACE)
+        })
+        .take_while(|face| face.x + face.width <= slot.x + slot.width - FACE_INSET)
+        .collect()
+}
+
+/// Draw the faces of one slot along the foot of its art, and nothing for a
+/// slot that names none.
+pub fn faces<T: Card>(
+    frame: &mut canvas::Frame<Renderer>,
+    card: &T,
+    slot: Rectangle,
+    faces: &Faces,
+) {
+    people(frame, card.faces(), slot, faces);
+}
+
+/// Draw these people's faces along the foot of this box, for a page that
+/// holds the people itself, and not a card that answers them.
+pub fn people(
+    frame: &mut canvas::Frame<Renderer>,
+    viewers: &[Viewer],
+    slot: Rectangle,
+    faces: &Faces,
+) {
+    for (viewer, at) in viewers.iter().zip(face_boxes(slot, viewers.len())) {
+        face(frame, at, viewer, faces);
+    }
+}
+
+// One face over art: the person's picture, or their letter on a plain disc.
+fn face(frame: &mut canvas::Frame<Renderer>, at: Rectangle, viewer: &Viewer, faces: &Faces) {
+    let letter = match faces.face(viewer, FACE) {
+        Face::Picture(image) => {
+            for (band, handle) in image.bands(at) {
+                frame.draw_image(band, canvas::Image::new(handle));
+            }
+            return;
+        }
+        Face::Letter(letter) => letter,
+    };
+    if let Some(disc) = faces.disc(FACE) {
+        for (band, handle) in disc.bands(at) {
+            frame.draw_image(band, canvas::Image::new(handle));
+        }
+    }
+    let line = text::height(1, look::FACE);
+    text::shown(
+        frame,
+        &letter,
+        area(at.x, at.center_y() - line / 2.0, at.width, line),
+        look::FACE,
+        look::text(),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_faces_run_along_the_inside_of_the_foot_from_the_left() {
+        let boxes = face_boxes(slot(), 2);
+
+        assert_eq!(boxes[0].x, 106.0);
+        assert_eq!(boxes[0].y + boxes[0].height, 644.0);
+        assert_eq!(boxes[1].x, 106.0 + FACE + 4.0);
+    }
+
+    #[test]
+    fn a_face_that_would_leave_the_poster_draws_nowhere() {
+        assert_eq!(face_boxes(area(0.0, 0.0, 80.0, 120.0), 5).len(), 2);
+    }
 
     fn slot() -> Rectangle {
         area(100.0, 200.0, 300.0, 450.0)

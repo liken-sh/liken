@@ -6,8 +6,10 @@ use super::banner::{Banner, Title};
 use super::{Block, Row, Strip, rows};
 use crate::audience::Viewer;
 use crate::catalog::draw::{self, Date};
-use crate::catalog::{Query, Source};
-use crate::screens::Item;
+use std::collections::HashMap;
+
+use crate::catalog::{Query, Reach, Source, Work};
+use crate::screens::{Item, reached};
 
 /// Every row of the home page as one read answered them, with the date
 /// the draw was seeded by.
@@ -72,6 +74,8 @@ pub fn read(source: &mut dyn Source, today: Date, people: &[String], viewers: &[
             strip.reread(source, seconds, &released, people, viewers);
         }
     }
+    let reach = source.film_reach(people);
+    reach_rows(&mut blocks, &reach, people, viewers);
     let titles = titles(&blocks, source);
     if let Some(Block::Banner(banner)) = blocks
         .iter_mut()
@@ -87,13 +91,42 @@ pub fn read(source: &mut dyn Source, today: Date, people: &[String], viewers: &[
     }
 }
 
-/// Read the continue-watching row alone, for a change the progress store
-/// made that can add, move, or remove a card. Every other row of the page
-/// stays as it was read, because no progress change moves them.
-pub fn read_row(source: &mut dyn Source, people: &[String], viewers: &[Viewer]) -> Strip {
-    let mut strip = Strip::new(Row::Continue);
-    strip.reread(source, 0, &[], people, viewers);
-    strip
+/// The continue-watching row, read alone, and how far the audience got in
+/// every film, which the other rows' posters draw.
+#[derive(Debug)]
+pub struct RowRead {
+    pub row: Strip,
+    pub reach: HashMap<Work, Reach>,
+}
+
+/// Read the continue-watching row alone, and the reach the other rows
+/// draw, for a change the progress store made. A change can add, move, or
+/// remove a card of the row, and move the bar or the faces of a film on
+/// any row. No progress change moves a card of any other row.
+pub fn read_row(source: &mut dyn Source, people: &[String], viewers: &[Viewer]) -> RowRead {
+    let mut row = Strip::new(Row::Continue);
+    row.reread(source, 0, &[], people, viewers);
+    RowRead {
+        row,
+        reach: source.film_reach(people),
+    }
+}
+
+/// Hang how far the audience got on the films of every row but the
+/// continue-watching row, whose cards carry the play they resume.
+pub fn reach_rows(
+    blocks: &mut [Block],
+    reach: &HashMap<Work, Reach>,
+    people: &[String],
+    viewers: &[Viewer],
+) {
+    for block in blocks {
+        if let Block::Strip(strip) = block
+            && strip.row != Row::Continue
+        {
+            reached::fill(&mut strip.items, reach, people, viewers);
+        }
+    }
 }
 
 // The items of the released strip, or nothing until it is read.

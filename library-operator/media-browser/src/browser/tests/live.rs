@@ -234,11 +234,8 @@ fn a_play_of_a_film_on_a_wall_draws_its_bar_with_no_press() {
     assert!(browser.pump(1.0));
 
     assert_eq!(
-        showing_wall(&browser).slots.items[1].progress,
-        Some(Played {
-            position: 2_700,
-            duration: 5_400
-        })
+        showing_wall(&browser).slots.items[1].reached.share,
+        Some(0.5)
     );
 }
 

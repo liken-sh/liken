@@ -9,6 +9,7 @@
 // view, at the end of this file, stacks the backdrop, this layer, and the
 // loading state's layer.
 
+use crate::audience::faces::Faces;
 use std::cell::RefCell;
 use std::convert::Infallible;
 
@@ -44,6 +45,8 @@ pub struct Page<'a, A> {
     pub series: &'a Series,
     /// The store the logo and the stills come from.
     pub store: &'a RefCell<A>,
+    /// The faces a film's poster draws along its foot.
+    pub faces: &'a Faces,
     /// Whether the loading state has lifted the logo off the page, so the
     /// head leaves its box empty.
     pub lifted: bool,
@@ -114,7 +117,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             // this second, toward the place this frame's focus rests it at.
             for (index, row) in rows(series, &wall, offset, focus).into_iter().enumerate() {
                 let scroll = series.rows.at(index, row.scrolled(), self.at);
-                row.at(scroll).draw(frame, store);
+                row.at(scroll).faced(self.faces).draw(frame, store);
             }
 
             let mut at = Point::new(region.x + inset, region.y + wall.layout.foot - offset);
@@ -205,6 +208,7 @@ pub(super) fn stills<'a>(
     let band = wall.layout.bands[season];
     let region = layout::stills(wall.region);
     wall::Grid {
+        faces: None,
         items: &series.stills[run.first..run.first + run.count],
         focus: match focus {
             Some(Focus::Still(index)) if index >= run.first && index < run.first + run.count => {
@@ -247,6 +251,7 @@ pub(super) fn rows<'a>(
         .zip(&wall.layout.franchises);
     for (index, (band, top)) in franchises.enumerate() {
         rows.push(Across::Strip(strip::Strip {
+            faces: None,
             room: None,
             members: &band.members,
             current: band.current,
@@ -309,6 +314,7 @@ impl Series {
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
+        faces: &'a Faces,
         curtain: Option<Curtain<'a>>,
         held: bool,
         at: f64,
@@ -321,6 +327,7 @@ impl Series {
             front: Page {
                 series: self,
                 store,
+                faces,
                 lifted: curtain.is_some(),
                 held,
                 at,

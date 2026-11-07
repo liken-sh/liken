@@ -39,6 +39,7 @@ fn the_column_takes_the_widest_stack_and_a_gap_and_nothing_where_no_marker_stand
     for (room, viewers, solo, expected) in cases {
         let marks = Marks {
             bars: Vec::new(),
+            faces: Vec::new(),
             room,
             viewers,
             solo,
@@ -85,6 +86,7 @@ fn column() -> Rectangle {
 fn marks() -> Marks {
     Marks {
         bars: Vec::new(),
+        faces: Vec::new(),
         room: Some(1),
         viewers: vec![viewer("A"), viewer("B")],
         solo: vec![(viewer("C"), 0)],

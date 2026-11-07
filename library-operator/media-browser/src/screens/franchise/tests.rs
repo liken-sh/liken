@@ -1,12 +1,14 @@
 // The franchise page over an invented order: the rows it packs, the
 // headings it derives, and where a press takes focus.
 
+use std::collections::HashMap;
+
 use super::*;
 use crate::catalog::franchise::{Calendar, Entry, Era, Held, MOVIE, Membership, SERIES};
 use crate::catalog::progress::finished;
 use crate::catalog::{
     Answer, Change, Credits, Episode, FileFacts, GenreEntry, LibraryEntry, MovieDetails, MovieSet,
-    Person, PlayItem, Progress, Query, Resume, Selection, SeriesDetails, pool,
+    Person, PlayItem, Progress, Query, Reach, Resume, Seen, Selection, SeriesDetails, Work, pool,
 };
 use crate::harness::Waker;
 
@@ -281,6 +283,27 @@ impl Source for Orders {
                 })
             })
             .collect()
+    }
+
+    // The films' reach by the rule the store's answer goes through, over
+    // the same nights.
+    fn film_reach(&mut self, people: &[String]) -> HashMap<Work, Reach> {
+        let seen: Vec<Seen> = self
+            .nights
+            .iter()
+            .filter(|night| night.work.starts_with("movies:"))
+            .map(|night| Seen {
+                resume: Resume {
+                    library: FILMS.to_string(),
+                    kind: "movie".to_string(),
+                    id: night.work.to_string(),
+                    progress: night.progress(),
+                    ..Resume::default()
+                },
+                people: night.people.chars().map(String::from).collect(),
+            })
+            .collect();
+        crate::catalog::progress::seen::films(&seen, people)
     }
 
     fn plays_of(&mut self, library: &str, id: &str, people: &[String]) -> Vec<Resume> {

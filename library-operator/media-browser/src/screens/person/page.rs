@@ -3,6 +3,7 @@
 // region the wall of works scrolls in. The head stands still, because it
 // carries the person and not the work focus is on.
 
+use crate::audience::faces::Faces;
 use std::cell::RefCell;
 use std::convert::Infallible;
 
@@ -64,6 +65,8 @@ pub struct Page<'a, A> {
     pub person: &'a Person,
     /// The store the headshot and the posters come from.
     pub store: &'a RefCell<A>,
+    /// The faces a film's poster draws along its foot.
+    pub faces: &'a Faces,
     /// The second this frame draws, which the wall's scroll eases on.
     pub at: f64,
 }
@@ -111,7 +114,11 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             region.height + wall::HEAD,
         );
         frame.with_clip(clip, |frame| {
-            wall::draw(frame, store, &person.drawn(bounds, self.at));
+            let grid = wall::Grid {
+                faces: Some(self.faces),
+                ..person.drawn(bounds, self.at)
+            };
+            wall::draw(frame, store, &grid);
         });
 
         vec![frame.into_geometry()]

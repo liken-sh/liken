@@ -2,10 +2,12 @@
 // work it names, the rule that says a play finished, and the thread rule
 // the continue-watching row walks.
 
+pub mod seen;
 pub mod thread;
 pub mod touched;
 pub mod watched;
 
+pub use seen::{Reach, Seen, Work};
 pub use touched::Touched;
 pub use watched::{Credits, finished};
 

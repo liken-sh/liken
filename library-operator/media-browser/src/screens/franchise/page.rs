@@ -26,6 +26,7 @@ use super::card::{self, GROUND_TONE};
 use super::wall::{self, Cell, GAP};
 use super::{circles, metro};
 use crate::art::Art;
+use crate::audience::Viewer;
 use crate::audience::faces::Faces;
 use crate::catalog::franchise::Standing;
 use crate::look;
@@ -140,7 +141,11 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                             bounds,
                             cells,
                             art,
-                            page.marks.bar(index),
+                            Foot {
+                                share: page.marks.bar(index),
+                                people: page.marks.faces(index),
+                                faces: self.faces,
+                            },
                         ),
                         false => thin(frame, &row.cell, bounds),
                     }
@@ -399,13 +404,22 @@ fn column(wall: Rectangle, time: f32, region: Rectangle) -> Rectangle {
     area(wall.x, region.y, (time - GAP).max(0.0), region.height)
 }
 
+// What draws along the foot of an entry's art: the bar of the room's
+// share, and the faces of the people in the room who played the film.
+struct Foot<'a> {
+    share: Option<f32>,
+    people: &'a [Viewer],
+    faces: &'a Faces,
+}
+
 // One held entry of the order as a card of three layers: the ground made
 // from its own art, the sharp art at the left, and the words beside the
 // art. The ground draws first, then the art, then the words; the images
 // of one layer draw in the order the canvas drew them, so the sharp art
 // lands over the ground.
-// The bar of the room's progress draws along the foot of the art, the way
-// the film walls draw it.
+// The bar of the room's progress draws along the foot of the art, and the
+// faces of the people in the room who played the film draw over its foot,
+// the way the film walls draw them.
 fn entry<A: Art>(
     frame: &mut canvas::Frame<Renderer>,
     store: &mut A,
@@ -413,7 +427,7 @@ fn entry<A: Art>(
     bounds: Rectangle,
     clip: Rectangle,
     art: f32,
-    share: Option<f32>,
+    foot: Foot<'_>,
 ) {
     ground(frame, store, cell, bounds, clip);
     let box_of = card::art_box(bounds, art);
@@ -422,9 +436,10 @@ fn entry<A: Art>(
         false => card::poster_box(box_of),
     };
     artwork(frame, store, &cell.library, &cell.art, art, "", Tone::Full);
-    if let Some(share) = share {
+    if let Some(share) = foot.share {
         progress::fill(frame, art, share);
     }
+    progress::people(frame, foot.people, art, foot.faces);
     words(frame, cell, card::words_box(bounds, art));
 }
 

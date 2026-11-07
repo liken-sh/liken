@@ -7,13 +7,13 @@
 // the event reads the row.
 //
 // A change is matched against the screen on top, and only that screen's
-// progress is read again. A page reads its one work, a wall reads the bars
-// of its films, and a franchise page reads its members, because where the
-// room stands in a franchise depends on every member. The home page reads
-// its continue-watching row alone, and only for a play that names everyone
-// in the room, because the row reads no other play. Every other row of the
-// home page holds no progress. A change to a work the screen does not draw
-// costs the resolve of the play and nothing more.
+// progress is read again. A page reads its one work and the films of its
+// strips, a wall reads the bars of its films, and a franchise page reads its
+// members, because where the room stands in a franchise depends on every
+// member. The home page reads its continue-watching row and the reach of
+// its films, for a play that names anyone in the room, because every film
+// poster on it draws how far each person got. A change to a work the screen
+// does not draw costs the resolve of the play and nothing more.
 
 use super::Browser;
 use crate::art::Art;
@@ -37,7 +37,10 @@ impl<S: Source, A: Art> Browser<S, A> {
             return false;
         }
         let people = self.audience.current(self.clock).to_vec();
-        if touched.iter().any(|play| play.covers(&people)) {
+        // Every film poster of the home page draws how far each person got,
+        // so a play of any one of them marks the page behind, and the
+        // continue-watching row's own read decides whether its cards move.
+        if touched.iter().any(|play| play.reaches(&people)) {
             self.row_stale = true;
         }
         let Some(top) = self.stack.last_mut() else {

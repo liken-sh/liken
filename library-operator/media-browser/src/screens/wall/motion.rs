@@ -29,6 +29,7 @@ impl Wall {
             region.height,
         );
         let grid = wall::Grid {
+            faces: None,
             items: &self.slots.items,
             focus: Some(standing),
             library: "",

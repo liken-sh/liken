@@ -11,6 +11,7 @@ use iced_winit::core::Rectangle;
 
 use super::{Card, people, strip};
 use crate::art::Art;
+use crate::audience::faces::Faces;
 
 /// One row of a title's page.
 pub enum Across<'a, T, P> {
@@ -20,7 +21,19 @@ pub enum Across<'a, T, P> {
     Stripe(people::Stripe<'a, P>),
 }
 
-impl<T: Card, P: Card> Across<'_, T, P> {
+impl<'a, T: Card, P: Card> Across<'a, T, P> {
+    /// The row with the faces a film's poster draws along its foot. A
+    /// stripe of headshots draws no faces.
+    pub fn faced(self, faces: &'a Faces) -> Self {
+        match self {
+            Self::Strip(row) => Self::Strip(strip::Strip {
+                faces: Some(faces),
+                ..row
+            }),
+            stripe => stripe,
+        }
+    }
+
     /// How far the row scrolls to rest with its anchor in view.
     pub fn scrolled(&self) -> f32 {
         match self {

@@ -40,7 +40,7 @@ fn barred(browser: &Browser<Fake, NoArt>) -> Vec<String> {
         .slots
         .items
         .iter()
-        .filter(|item| item.progress.is_some())
+        .filter(|item| item.reached.share.is_some())
         .map(|item| item.id.clone())
         .collect()
 }
@@ -61,11 +61,8 @@ fn the_film_the_audience_is_in_the_middle_of_carries_a_bar_on_the_library_wall()
 
     assert_eq!(barred(&browser), [HALFWAY]);
     assert_eq!(
-        showing_wall(&browser).slots.items[1].progress,
-        Some(Played {
-            position: 2_700,
-            duration: 5_400
-        })
+        showing_wall(&browser).slots.items[1].reached.share,
+        Some(0.5)
     );
     assert_eq!(browser.source.watching, ["first".to_string()]);
 }

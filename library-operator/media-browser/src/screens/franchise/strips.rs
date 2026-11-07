@@ -6,11 +6,14 @@
 // Every function here is pure over the rows, so the two pages share one
 // ladder.
 
+use std::collections::HashMap;
+
 use super::wall;
+use crate::audience::Viewer;
 use crate::catalog::franchise::Entry;
-use crate::catalog::{Query, Source, franchise};
+use crate::catalog::{Query, Reach, Source, Work, franchise};
 use crate::focus;
-use crate::screens::{self, Item, facts};
+use crate::screens::{self, Item, facts, reached};
 #[cfg(test)]
 use crate::views::Card;
 
@@ -40,7 +43,7 @@ pub enum Move {
 /// of the order and the kinds it holds. `current` is the member this page is
 /// about, which draws marked, and nothing where the page's own title is not
 /// among the held members.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Strip {
     pub library: String,
     pub id: String,
@@ -83,7 +86,7 @@ pub fn scope(movies: i64, series: i64) -> String {
 }
 
 /// Every franchise strip of one title, in the order the pages draw them.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Strips {
     bands: Vec<Strip>,
 }
@@ -122,6 +125,20 @@ impl Strips {
             })
             .collect();
         Self { bands }
+    }
+
+    /// Hang how far these people got on the films of every strip.
+    pub fn reach(&mut self, reach: &HashMap<Work, Reach>, people: &[String], viewers: &[Viewer]) {
+        for band in &mut self.bands {
+            reached::fill(&mut band.members, reach, people, viewers);
+        }
+    }
+
+    /// Whether a strip draws the reach of this film.
+    pub fn draws(&self, library: &str, id: &str) -> bool {
+        self.bands
+            .iter()
+            .any(|band| reached::draws(&band.members, library, id))
     }
 
     /// The strips in draw order.
