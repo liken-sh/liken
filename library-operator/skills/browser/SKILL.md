@@ -94,9 +94,10 @@ T6, lifts the shade and does nothing else on that press, as
 in the `bluetooth-operator` manual describes.
 
 Over the bus, every key a remote sends reaches the browser under the
-kernel's name, except volume, mute, and the cycle key. Those three are
-handled before they reach the browser, and the browser draws the level
-as a fading row. The level arrives on the `Player`'s volume topic. When
+kernel's name, except the cycle key and the power keys.
+`media-operator` reads the volume and mute keys from the same topic and
+changes the level, and the browser binds nothing to them. The browser
+draws the level as a fading row. The level arrives on the `Player`'s volume topic. When
 its payload carries `"indicator": "receiver"`, the receiver draws the
 level on the TV, so the browser draws no row. A payload with no
 `indicator` field means the browser draws the row. So a remote with a keyboard

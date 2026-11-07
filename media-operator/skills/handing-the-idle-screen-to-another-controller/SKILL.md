@@ -230,7 +230,8 @@ was held while the shade came down and its press acted before that: a
 wake on the repeat would lift a shade the client just lowered, or
 light a panel that was just turned off. The client receives none of
 the repeats of a control whose press only woke the screen, or whose
-repeat found the screen asleep, until the control is released.
+repeat found the screen asleep, until the control is released or the
+same remote sends its next press.
 
 The power keys, `KEY_POWER`, `KEY_POWER2`, `KEY_SLEEP`, and
 `KEY_WAKEUP`, are the media operator's: it reads them from the same
