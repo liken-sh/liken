@@ -58,7 +58,7 @@ var questions = []struct {
 }{
 	{GivePhysicalAddress, OpReportPhysicalAddr, func(p Peer) bool { return p.Physical != InvalidPhysicalAddress }},
 	{GiveOSDName, OpSetOSDName, func(p Peer) bool { return p.OSDName != "" }},
-	{GiveDeviceVendorID, OpDeviceVendorID, func(p Peer) bool { return p.Vendor != VendorUnknown }},
+	{GiveDeviceVendorID, OpDeviceVendorID, func(p Peer) bool { return p.Vendor != VendorUnknown || p.NoVendor }},
 	{GetCECVersion, OpCECVersion, func(p Peer) bool { return p.Version != VersionUnknown }},
 	{GiveDevicePowerStatus, OpReportPowerStatus, func(p Peer) bool { return p.Power != PowerUnknown }},
 }

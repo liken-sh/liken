@@ -116,6 +116,29 @@ func TestAnIntroductionAsksOnlyForMissingFacts(t *testing.T) {
 	}
 }
 
+// A device that answers Give Device Vendor ID with 000000 states no
+// vendor, and the answer still counts: the next introduction asks it
+// nothing again, and the vendor reads as unknown.
+func TestAVendorOfZeroIsAskedOnce(t *testing.T) {
+	tv := television
+	tv.Vendor = 0
+	bus := cectest.NewBus()
+	bus.Add(tv)
+	bus.Add(receiver)
+	_, device := joined(t, bus)
+	directory := cec.NewDirectory()
+	directory.SetOwn(4)
+
+	_, err := cec.Introduce(device, directory, 4, 0, nil)
+	mustSucceed(t, err)
+	again, err := cec.Introduce(device, directory, 4, 0, nil)
+	mustSucceed(t, err)
+
+	if again != 0 || directory.Lookup(0).Vendor != cec.VendorUnknown {
+		t.Errorf("the second introduction asked %d questions and the directory holds %+v", again, directory.Lookup(0))
+	}
+}
+
 func TestAnIntroductionForgetsADeviceThatLeft(t *testing.T) {
 	bus := room()
 	_, device := joined(t, bus)

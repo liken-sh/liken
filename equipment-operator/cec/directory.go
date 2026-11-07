@@ -25,8 +25,12 @@ type Peer struct {
 	Type    DeviceType
 	OSDName string
 	Vendor  VendorID
-	Version Version
-	Power   PowerStatus
+	// NoVendor says the device answered Device Vendor ID with 000000,
+	// which names no vendor. Vendor stays VendorUnknown, and the
+	// question counts as answered, so no introduction asks it again.
+	NoVendor bool
+	Version  Version
+	Power    PowerStatus
 	// SystemAudioMode is the System Audio Mode the device last stated,
 	// in a broadcast Set System Audio Mode or a System Audio Mode
 	// Status, and SystemAudioModeAt is when the adapter heard or read
@@ -229,8 +233,12 @@ func learn(peer *Peer, message Message, now time.Time) {
 		// receiver has stated it between reports of its real vendor. A
 		// vendor read from it would replace the real one and change
 		// back on the next report, so the peer keeps what it held.
-		if vendor := VendorID(operands[0])<<16 | VendorID(operands[1])<<8 | VendorID(operands[2]); vendor != vendorZero {
-			peer.Vendor = vendor
+		vendor := VendorID(operands[0])<<16 | VendorID(operands[1])<<8 | VendorID(operands[2])
+		switch {
+		case vendor != vendorZero:
+			peer.Vendor, peer.NoVendor = vendor, false
+		case peer.Vendor == VendorUnknown:
+			peer.NoVendor = true
 		}
 	case opcode == OpCECVersion && len(operands) >= 1:
 		peer.Version = Version(operands[0])

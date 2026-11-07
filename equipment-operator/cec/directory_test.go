@@ -77,8 +77,9 @@ func TestTheDirectoryLearnsOneFactFromEachMessage(t *testing.T) {
 }
 
 // A Device Vendor ID of 000000 names no vendor, and it never replaces
-// a vendor the device stated before. A device that states another real
-// vendor is still believed.
+// a vendor the device stated before. From a device with no vendor yet,
+// it is an answer the directory records once, so no introduction asks
+// again. A device that states another real vendor is still believed.
 func TestAVendorOfZeroNamesNoVendor(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -87,7 +88,8 @@ func TestAVendorOfZeroNamesNoVendor(t *testing.T) {
 		changed bool
 	}{
 		{"a zero after a known vendor", []cec.VendorID{0x00903e, 0}, 0x00903e, false},
-		{"a zero from a device with no vendor yet", []cec.VendorID{0}, cec.VendorUnknown, false},
+		{"a zero from a device with no vendor yet", []cec.VendorID{0}, cec.VendorUnknown, true},
+		{"a second zero", []cec.VendorID{0, 0}, cec.VendorUnknown, false},
 		{"another real vendor", []cec.VendorID{0x00903e, 0x00e091}, 0x00e091, true},
 	}
 	for _, c := range cases {
