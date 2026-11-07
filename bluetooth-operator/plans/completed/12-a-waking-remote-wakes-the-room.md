@@ -3,6 +3,18 @@
 Plan 12. Built 2026-10-11. The drill in [The drill](#the-drill) has not
 run yet.
 
+Status, 2026-11-06: this plan describes the T6 remote, and an X6
+air-mouse remote behaves another way. `btmon` on a home cluster
+recorded every sleep of an X6 as
+`Remote User Terminated Connection (0x13)`, about 20 minutes after the
+remote's last report, so its `Connected` reason is `ClosedByDevice`
+and the relay writes no press for it. The X6 sends the report of the
+button that woke it, such as Home, about 220 ms after encryption, so
+that press reaches the claim. The second press that X6 users made came
+from `media-screen`, which spent a press on a sleeping screen on the
+wake alone. `media-screen` now passes that press to the screen client,
+for every key but back, while nothing plays and the panel is on.
+
 A Bluetooth LE remote that sleeps sends no key for the press that
 wakes it. So today a person presses once to wake the remote, and a
 second time to wake the room. This plan records why each link ended,
