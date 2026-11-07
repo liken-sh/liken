@@ -38,6 +38,19 @@ control protocol, or WiiM's HTTPS API. The operator finds WiiM
 devices on the network and creates a `Receiver` for each one. You
 declare a Denon or Marantz receiver yourself.
 
+A WiiM amp pushes its volume, mute, and play state to the operator as
+UPnP events, so a change made at the amp reaches the `Receiver` when
+the event arrives, with no wait for a read. The amp pushes nothing
+else, so the operator reads its identity and its input every 10
+seconds, and that read also tells the operator when the amp is gone.
+The amp's settings, such as the equalizer, the balance, and the
+timers, change only when a person changes them, so the operator reads
+them when it starts, after it sends one, after the amp comes back, and
+every 30 minutes. A setting changed in the WiiM Home app can take up
+to 30 minutes to show in `status.wiim`. The amp's temperatures and its
+Wi-Fi readings change on their own, so they are
+[metrics](/docs/reference/metrics/) and not status.
+
 ## Televisions and the CEC bus
 
 HDMI-CEC is one wire that every HDMI port in the room shares. A

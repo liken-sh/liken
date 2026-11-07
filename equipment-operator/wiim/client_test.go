@@ -169,7 +169,6 @@ func TestPollFoldsEveryFamily(t *testing.T) {
 		mustMatch(t, status.Device.Internet, true)
 		mustMatch(t, status.Device.Capabilities.PresetKeys, 12)
 		mustMatch(t, status.Device.Security.AES, "1.0")
-		mustMatch(t, status.Device.TemperatureCPU, 32)
 
 		mustMatch(t, status.Network.Interface, "ethernet")
 		mustMatch(t, status.Network.Address, "192.0.2.10")
@@ -398,6 +397,7 @@ func TestAMissOnNowPlayingClearsTheTrack(t *testing.T) {
 		}
 
 		amp.mutex.Lock()
+		amp.answers[playerCommand] = strings.Replace(playerJSON, `"mode":"43"`, `"mode":"40"`, 1)
 		amp.answers[metaCommand] = "Failed"
 		amp.mutex.Unlock()
 		client.poll(context.Background())
@@ -530,21 +530,22 @@ func TestRunPollsUntilTheContextEnds(t *testing.T) {
 	})
 }
 
-// Each setter reaches its own wire command.
+// Each setter reaches its own wire command. The sleep timer is read
+// back after its send, because the poll reads it only while it runs.
 func TestTheSettersReachTheirWireCommands(t *testing.T) {
 	cases := []struct {
 		name string
 		send func(*Client) error
-		want string
+		want []string
 	}{
-		{"volume", func(c *Client) error { return c.SetVolume(equipment.MainZone, 42) }, "setPlayerCmd:vol:42"},
-		{"volume over the top", func(c *Client) error { return c.SetVolume(equipment.MainZone, 500) }, "setPlayerCmd:vol:100"},
-		{"volume under zero", func(c *Client) error { return c.SetVolume(equipment.MainZone, -5) }, "setPlayerCmd:vol:0"},
-		{"mute on", func(c *Client) error { return c.SetMute(equipment.MainZone, true) }, "setPlayerCmd:mute:1"},
-		{"mute off", func(c *Client) error { return c.SetMute(equipment.MainZone, false) }, "setPlayerCmd:mute:0"},
-		{"input", func(c *Client) error { return c.SetInput(equipment.MainZone, "optical") }, "setPlayerCmd:switchmode:optical"},
-		{"sleep", func(c *Client) error { return c.SetSleep(equipment.MainZone, 10) }, "setShutdown:600"},
-		{"sleep off", func(c *Client) error { return c.SetSleep(equipment.MainZone, 0) }, "setShutdown:-1"},
+		{"volume", func(c *Client) error { return c.SetVolume(equipment.MainZone, 42) }, []string{"setPlayerCmd:vol:42"}},
+		{"volume over the top", func(c *Client) error { return c.SetVolume(equipment.MainZone, 500) }, []string{"setPlayerCmd:vol:100"}},
+		{"volume under zero", func(c *Client) error { return c.SetVolume(equipment.MainZone, -5) }, []string{"setPlayerCmd:vol:0"}},
+		{"mute on", func(c *Client) error { return c.SetMute(equipment.MainZone, true) }, []string{"setPlayerCmd:mute:1"}},
+		{"mute off", func(c *Client) error { return c.SetMute(equipment.MainZone, false) }, []string{"setPlayerCmd:mute:0"}},
+		{"input", func(c *Client) error { return c.SetInput(equipment.MainZone, "optical") }, []string{"setPlayerCmd:switchmode:optical"}},
+		{"sleep", func(c *Client) error { return c.SetSleep(equipment.MainZone, 10) }, []string{"setShutdown:600", shutdownCommand}},
+		{"sleep off", func(c *Client) error { return c.SetSleep(equipment.MainZone, 0) }, []string{"setShutdown:-1", shutdownCommand}},
 	}
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
@@ -552,7 +553,7 @@ func TestTheSettersReachTheirWireCommands(t *testing.T) {
 				amp := startFakeAmp(t)
 
 				mustSucceed(t, one.send(amp.client(nil)))
-				mustMatch(t, amp.sent(), []string{one.want})
+				mustMatch(t, amp.sent(), one.want)
 			})
 		})
 	}

@@ -215,8 +215,6 @@ type statusEx struct {
 	TempUUID             string     `json:"temp_uuid"`
 	UPnPUUID             string     `json:"upnp_uuid"`
 	Internet             string     `json:"internet"`
-	Date                 string     `json:"date"`
-	Time                 string     `json:"time"`
 	Timezone             string     `json:"tz"`
 	TimezoneID           string     `json:"app_timezone_id"`
 	PrivacyMode          string     `json:"privacy_mode"`
@@ -259,24 +257,22 @@ type statusEx struct {
 // playerStatus is the playback block getPlayerStatus and
 // getPlayerStatusEx answer.
 type playerStatus struct {
-	Type            string `json:"type"`
-	Channel         string `json:"ch"`
-	Mode            string `json:"mode"`
-	Loop            string `json:"loop"`
-	EQ              string `json:"eq"`
-	Vendor          string `json:"vendor"`
-	Status          string `json:"status"`
-	CurrentPosition string `json:"curpos"`
-	Offset          string `json:"offset_pts"`
-	TotalLength     string `json:"totlen"`
-	Title           string `json:"Title"`
-	Artist          string `json:"Artist"`
-	Album           string `json:"Album"`
-	AlarmFlag       string `json:"alarmflag"`
-	PlaylistCount   string `json:"plicount"`
-	PlaylistIndex   string `json:"plicurr"`
-	Volume          string `json:"vol"`
-	Mute            string `json:"mute"`
+	Type          string `json:"type"`
+	Channel       string `json:"ch"`
+	Mode          string `json:"mode"`
+	Loop          string `json:"loop"`
+	EQ            string `json:"eq"`
+	Vendor        string `json:"vendor"`
+	Status        string `json:"status"`
+	TotalLength   string `json:"totlen"`
+	Title         string `json:"Title"`
+	Artist        string `json:"Artist"`
+	Album         string `json:"Album"`
+	AlarmFlag     string `json:"alarmflag"`
+	PlaylistCount string `json:"plicount"`
+	PlaylistIndex string `json:"plicurr"`
+	Volume        string `json:"vol"`
+	Mute          string `json:"mute"`
 }
 
 // metaInfo is the now-playing block getMetaInfo answers.

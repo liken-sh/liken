@@ -94,10 +94,42 @@ Three other interfaces are open on the same LAN:
 ## The event path
 
 The driver subscribes to the device's GENA events, so a change made
-at the device reaches the state in under a second. The poll stays, at
-ten seconds, for the input, the track, the settings, and the identity
-that push does not reach, and it carries the evented fields when a
-subscription is not live.
+at the device reaches the state when the event arrives. The poll runs
+every ten seconds and sends two GET requests: `getStatusEx`, which is
+the reachability probe and the identity check, and `getPlayerStatus`,
+which carries the input that no subscribed event is known to carry.
+The player's answer also carries the evented fields, which the poll
+applies only while a subscription is not live.
+
+The poll reads more only on a trigger:
+
+- `getMetaInfo` when the player reports another track.
+- `getShutdown` while the last read found a sleep timer running.
+- Every settings family on the first poll, on the poll that opens a
+  subscription, on the first poll the amp answers after the client
+  called it unreachable, and once 30 minutes have passed since the
+  last such read. The 30-minute read is the backstop for a change made
+  in the WiiM Home app, which pushes no event. The subscriptions open
+  before the read, after `getStatusEx` has checked the identity.
+- The family of a setter, read back right after the setter: the
+  balance, `getStatusEx` for the name, the controls for the light and
+  the buttons, and `getShutdown` for the sleep timer.
+
+When the client calls the amp unreachable, it forgets its
+subscriptions, because a reboot drops them at the amp. The next
+answered poll subscribes again.
+
+`status.wiim` leaves out each value that changes on its own between
+two reads, because each status write reaches every watcher of every
+`Receiver`: the clock (`date`, `time`), the track position
+(`curpos`, `offset_pts`), and the seconds left on the sleep timer.
+`Readings` carries the temperatures (`temperature_cpu`,
+`temperature_tmp102`), the Wi-Fi link (`RSSI`, `wlanNoise`,
+`wlanSnr`, `wlanDataRate`), and the remote (`BleRemoteBatterylevel`,
+`BleRemoteRSSI`) to the `equipment_wiim_*` metrics. No document states
+the units of `wlanDataRate` or `BleRemoteBatterylevel`. The driver
+reads them as Mbit/s and percent, which fit the values live amps
+report: 480 on a 5 GHz link, and 60 or 100 for a remote.
 
 The MediaRenderer description is on port 49152. It names the event
 URLs `/upnp/event/rendercontrol1` for RenderingControl and

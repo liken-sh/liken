@@ -10,9 +10,17 @@ import (
 	"github.com/liken-sh/equipment-operator/equipment"
 )
 
-// Status is everything one WiiM reports. It is the device's own
-// vocabulary and the shape written under status.wiim. A block the
-// device did not answer stays empty.
+// Status is what one WiiM reports that a person or a controller acts
+// on. It is the device's own vocabulary and the shape written under
+// status.wiim. A block the device did not answer stays empty.
+//
+// A value that changes on its own between two reads is left out: the
+// amp's clock, its temperatures, the Wi-Fi signal, noise, and rate, the
+// remote's battery and signal, the track position, and the seconds left
+// on the sleep timer. Each one would change the status on every poll,
+// and each status write reaches every watcher of every Receiver.
+// Readings carries the measurements to the metrics instead, and the
+// zone's sleep carries the timer in whole minutes.
 type Status struct {
 	Device     DeviceInfo  `json:"device"`
 	Network    Network     `json:"network"`
@@ -52,11 +60,7 @@ type DeviceInfo struct {
 	Language          string       `json:"language,omitempty"`
 	Timezone          string       `json:"timezone,omitempty"`
 	TimezoneOffset    string       `json:"timezoneOffset,omitempty"`
-	Date              string       `json:"date,omitempty"`
-	Time              string       `json:"time,omitempty"`
 	CommunicationPort string       `json:"communicationPort,omitempty"`
-	TemperatureCPU    int          `json:"temperatureCpu,omitempty"`
-	TemperatureBoard  int          `json:"temperatureBoard,omitempty"`
 	Capabilities      Capabilities `json:"capabilities"`
 	Security          Security     `json:"security"`
 }
@@ -93,18 +97,15 @@ type Security struct {
 }
 
 // Network is the device's current address and link, plus the static
-// configuration it holds.
+// configuration it holds. The link's signal, noise, and rate are
+// Readings.
 type Network struct {
 	Interface string    `json:"interface,omitempty"`
 	Address   string    `json:"address,omitempty"`
 	SSID      string    `json:"ssid,omitempty"`
 	BSSID     string    `json:"bssid,omitempty"`
-	RSSI      int       `json:"rssi,omitempty"`
-	Noise     int       `json:"noise,omitempty"`
-	SNR       int       `json:"snr,omitempty"`
 	Channel   int       `json:"channel,omitempty"`
 	Frequency int       `json:"frequency,omitempty"`
-	DataRate  int       `json:"dataRate,omitempty"`
 	Static    *StaticIP `json:"static,omitempty"`
 }
 
@@ -137,8 +138,6 @@ type Playback struct {
 	Type          int    `json:"type"`
 	Volume        int    `json:"volume"`
 	Mute          bool   `json:"mute"`
-	PositionMS    int    `json:"positionMs"`
-	OffsetMS      int    `json:"offsetMs"`
 	LengthMS      int    `json:"lengthMs"`
 	AlarmFlag     bool   `json:"alarmFlag"`
 	PlaylistCount int    `json:"playlistCount"`
@@ -230,9 +229,10 @@ type Equalizer struct {
 }
 
 // Timers is the sleep timer, the alarm slots, and the idle intervals
-// the device holds.
+// the device holds. SleepSeconds counts down while a timer runs, so the
+// status carries it only as the zone's sleep, in whole minutes.
 type Timers struct {
-	SleepSeconds int       `json:"sleepSeconds"`
+	SleepSeconds int       `json:"-"`
 	Alarms       []Alarm   `json:"alarms,omitempty"`
 	PowerMode    PowerMode `json:"powerMode"`
 }
@@ -272,12 +272,11 @@ type PairedDevice struct {
 	Role    string `json:"role,omitempty"`
 }
 
-// BLERemote is the Bluetooth remote the amp ships with.
+// BLERemote is the Bluetooth remote the amp ships with. Its battery and
+// signal are Readings.
 type BLERemote struct {
 	Supported bool   `json:"supported"`
 	Connected bool   `json:"connected"`
-	Battery   int    `json:"battery,omitempty"`
-	RSSI      int    `json:"rssi,omitempty"`
 	Version   string `json:"version,omitempty"`
 	State     string `json:"state,omitempty"`
 }

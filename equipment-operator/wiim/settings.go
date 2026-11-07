@@ -169,7 +169,36 @@ func (c *Client) Settings() Settings {
 // the fields Pending keeps. A
 // command the receiver refuses stops the apply at that field, and the
 // first error is the one returned.
+//
+// Then it reads back the family of each field the amp took, because
+// the poll reads the settings families only at its backstop interval.
+// The controller's next compare then reads the amp's answer to the
+// send, not the value from before it.
 func (c *Client) ApplySettings(want Settings) error {
+	var took sentSettings
+	err := c.sendSettings(want, &took)
+	var reads []func(context.Context, *Status)
+	if took.balance {
+		reads = append(reads, c.readBalance)
+	}
+	if took.name {
+		reads = append(reads, c.readName)
+	}
+	if took.controls {
+		reads = append(reads, c.readControls)
+	}
+	c.readBack(context.Background(), reads...)
+	return err
+}
+
+// sentSettings records which families the amp took a command for.
+type sentSettings struct {
+	balance, name, controls bool
+}
+
+// sendSettings sends the wire command for every declared field, and
+// stops at the first that the receiver refuses.
+func (c *Client) sendSettings(want Settings, took *sentSettings) error {
 	if want.Audio.Balance != nil {
 		command, err := setBalanceCommand(*want.Audio.Balance)
 		if err != nil {
@@ -178,6 +207,7 @@ func (c *Client) ApplySettings(want Settings) error {
 		if err := c.send(context.Background(), command); err != nil {
 			return err
 		}
+		took.balance = true
 	}
 	if want.Device.Name != nil {
 		command, err := nameCommand(*want.Device.Name)
@@ -187,16 +217,19 @@ func (c *Client) ApplySettings(want Settings) error {
 		if err := c.send(context.Background(), command); err != nil {
 			return err
 		}
+		took.name = true
 	}
 	if want.Device.LED != nil {
 		if err := c.send(context.Background(), switchCommand("LED_SWITCH_SET:", *want.Device.LED)); err != nil {
 			return err
 		}
+		took.controls = true
 	}
 	if want.Device.Buttons != nil {
 		if err := c.send(context.Background(), switchCommand("Button_Enable_SET:", *want.Device.Buttons)); err != nil {
 			return err
 		}
+		took.controls = true
 	}
 	return nil
 }

@@ -127,6 +127,8 @@ type metrics struct {
 	commands    *prometheus.CounterVec
 
 	inputs inputTracker
+
+	wiim wiimGauges
 }
 
 // newMetrics builds the registry for this operator's one process.
@@ -180,6 +182,7 @@ func newMetrics(version string) *metrics {
 		}, []string{"status"}),
 
 		inputs: newInputTracker(),
+		wiim:   newWiimGauges(),
 	}
 
 	// Layer 1. buildInfo always holds 1, and its labels carry the
@@ -201,6 +204,7 @@ func newMetrics(version string) *metrics {
 		m.connected, m.obsValid, m.obsLastGood,
 		m.power, m.volume, m.inputInfo, m.commands,
 	)
+	m.registry.MustRegister(m.wiim.collectors()...)
 
 	// Publishing every kind and every outcome at zero from the first
 	// scrape is what lets Prometheus compute a rate from the second
@@ -315,6 +319,7 @@ func (m *metrics) forgetReceiver(receiver string) {
 	if input, known := m.inputs.forget(receiver); known {
 		m.inputInfo.DeleteLabelValues(receiver, input)
 	}
+	m.wiim.forget(receiver)
 }
 
 // gaugeValue carries a state as one or zero, the shape every boolean

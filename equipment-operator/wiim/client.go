@@ -27,21 +27,33 @@ import (
 // backs off from the healthy interval, because a device that is down
 // should be asked less often than one that answers, not more.
 //
-// The poll runs while the event subscriptions are live, because it is
-// the only path for most of what the status reports. The events carry
-// the volume, the mute, and the transport state. The input, the track
-// and its format, the equalizer, the timers, the presets, the
-// Bluetooth pairings, and the controls have no push, and a person
-// changes each of them in the WiiM app. getPlayerStatus carries the
-// input with the volume and the mute, so a live subscription removes
-// no read. getStatusEx is also how the client finds the amp gone: a
-// subscription stays live on the operator's side until its renewal,
-// which is up to 25 minutes away. One poll is 27 GET requests, each a
-// read that changes nothing on the amp.
+// The poll is a heartbeat, and each one sends two GET requests.
+// getStatusEx is how the client finds the amp gone, because the amp
+// sends no event while nothing changes, and a subscription stays live
+// on the operator's side until its renewal, up to 25 minutes away. The
+// same read checks the amp's identity and carries its name.
+// getPlayerStatus carries the input, which no event the client
+// subscribes to is known to carry; plan 16's drill D2 owes the answer.
+// The events carry the volume, the mute, and the transport state, and
+// the poll leaves those fields to them while a subscription is live.
+//
+// A poll reads more only when it has a reason: the track when the
+// player reports another one, the sleep timer while it counts down,
+// and every family when the client has a reason to think it missed a
+// change (readsEveryFamily).
+//
+// settingsResync is a backstop. The amp pushes no event when a person
+// changes the equalizer, the output, the subwoofer, the balance, a
+// timer, a preset, a pairing, or a control in the WiiM Home app or on
+// the amp: no source that plan 16 cites names an event that carries
+// one, and drill D2 has not run to look for one. Without the backstop,
+// such a change would reach the status only at the next new
+// subscription, and a declared setting the app moved would stay moved.
 var (
 	requestTimeout = 8 * time.Second
 	pollInterval   = 10 * time.Second
 	maxBackoff     = 30 * time.Second
+	settingsResync = 30 * time.Minute
 
 	// pollFailures is how many polls in a row must fail before the
 	// client calls the device unreachable. A burst of commands can make
@@ -100,9 +112,21 @@ type Client struct {
 
 	http *http.Client
 
+	// reads holds one cycle of reads at a time: a poll, or the read back
+	// after a setter. Each cycle copies the state, reads into the copy,
+	// and publishes it, so two cycles that overlapped would publish one
+	// over the other and undo what the first one read.
+	reads sync.Mutex
+
 	mutex     sync.Mutex
 	state     Status
+	readings  Readings
 	reachable equipment.ConditionStatus
+	// resync is set while the next poll must read every family: before
+	// the first one, and after the client called the amp unreachable.
+	// settingsRead is when a poll last read every family.
+	resync       bool
+	settingsRead time.Time
 	// misses counts the polls in a row the device did not answer, cleared
 	// by the next poll it does.
 	misses int
@@ -145,6 +169,7 @@ func NewClient(address string, listener func(equipment.Event)) *Client {
 		Listen:        net.Listen,
 		state:         newStatus(),
 		reachable:     equipment.ConditionUnknown,
+		resync:        true,
 	}
 	c.upnp = &http.Client{
 		Timeout:   requestTimeout,
@@ -209,12 +234,11 @@ func (c *Client) Run(ctx context.Context) {
 	defer c.stopEvents()
 	var waits pollWaits
 	for ctx.Err() == nil {
-		// The poll comes first: its getStatusEx read decides whether the
-		// device is a WiiM, and a device that is not gets no
-		// subscription and no read of its description.
+		// The poll opens the subscriptions after its getStatusEx read,
+		// which decides whether the device is a WiiM: a device that is
+		// not gets no subscription and no read of its description.
 		wait := waits.after(c.poll(ctx))
 		if !c.isForeign() {
-			c.manageSubscriptions(ctx)
 			c.describe(ctx)
 		}
 		select {
@@ -244,17 +268,23 @@ func (w *pollWaits) after(answered bool) time.Duration {
 	return wait
 }
 
-// poll reads the whole command set once. getStatusEx comes first,
-// because it carries the identity: if the device is not the one the
-// spec declares, the client folds nothing and reports unreachable
-// rather than drive the wrong amp. Every other read is best effort, so
-// a command one model does not carry leaves its family as it was.
+// poll reads the probe and the player, and the other families when it
+// has a reason to. getStatusEx comes first, because it carries the
+// identity: if the device is not the one the spec declares, the client
+// folds nothing and reports unreachable rather than drive the wrong
+// amp. Then the subscriptions open, before any other read, so an event
+// the amp pushes during the reads is not lost. Every other read is best
+// effort, so a command one model does not carry leaves its family as it
+// was.
 func (c *Client) poll(ctx context.Context) bool {
+	c.reads.Lock()
+	defer c.reads.Unlock()
 	c.mutex.Lock()
 	next := c.state
 	c.mutex.Unlock()
 
-	if err := c.readStatusEx(ctx, &next); err != nil {
+	device, err := c.readStatusEx(ctx, &next)
+	if err != nil {
 		c.report(CommandFailed)
 		c.miss()
 		return false
@@ -276,15 +306,20 @@ func (c *Client) poll(ctx context.Context) bool {
 	c.answered()
 	c.report(CommandOK)
 
-	c.readStaticIP(ctx, &next)
+	opened := c.manageSubscriptions(ctx)
+	every := c.readsEveryFamily(opened)
+	heard := next.Playback
 	c.readPlayback(ctx, &next)
-	c.readNowPlaying(ctx, &next)
-	c.readAudio(ctx, &next)
-	c.readEqualizer(ctx, &next)
-	c.readTimers(ctx, &next)
-	c.readBluetooth(ctx, &next)
-	c.readPresets(ctx, &next)
-	c.readControls(ctx, &next)
+	if every {
+		c.readSettings(ctx, &next)
+	} else {
+		if trackMoved(heard, next.Playback) {
+			c.readNowPlaying(ctx, &next)
+		}
+		if next.Timers.SleepSeconds > 0 {
+			c.readSleep(ctx, &next)
+		}
+	}
 
 	// A poll's reads were taken before any event that arrived while it
 	// ran, so the evented fields keep the event's value.
@@ -293,9 +328,68 @@ func (c *Client) poll(ctx context.Context) bool {
 	// sends already reports it.
 	c.mutex.Lock()
 	c.surveyed = true
+	if every {
+		c.resync = false
+		c.settingsRead = time.Now()
+	}
+	c.readings = readingsFrom(device, next.Network.Interface == "wifi")
 	c.mutex.Unlock()
 	c.publish(next)
 	return true
+}
+
+// readsEveryFamily answers whether this poll reads every family. It
+// does on the first poll, on the first poll after the amp was called
+// unreachable, on a poll that opened a subscription, and once
+// settingsResync has passed since the last such read. A subscription
+// that opens again after an expiry or a refusal may have missed
+// events, and an amp that was gone may have rebooted or been changed
+// while the client could not see it. A renewal of a live subscription
+// is not a new subscription.
+func (c *Client) readsEveryFamily(opened bool) bool {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.resync || opened || !time.Now().Before(c.settingsRead.Add(settingsResync))
+}
+
+// trackMoved answers whether the player's report names another track
+// than the one before it, which is when the track's details from
+// getMetaInfo can differ.
+func trackMoved(before, after Playback) bool {
+	return before.Title != after.Title || before.Artist != after.Artist || before.Album != after.Album ||
+		before.Mode != after.Mode || before.Vendor != after.Vendor ||
+		before.LengthMS != after.LengthMS || before.PlaylistIndex != after.PlaylistIndex
+}
+
+// readSettings reads every family that no event carries.
+func (c *Client) readSettings(ctx context.Context, next *Status) {
+	c.readStaticIP(ctx, next)
+	c.readNowPlaying(ctx, next)
+	c.readAudio(ctx, next)
+	c.readEqualizer(ctx, next)
+	c.readTimers(ctx, next)
+	c.readBluetooth(ctx, next)
+	c.readPresets(ctx, next)
+	c.readControls(ctx, next)
+}
+
+// readBack reads the families a setter changed, so the next compare of
+// a declared setting reads the amp's own answer and not the value from
+// before the send.
+func (c *Client) readBack(ctx context.Context, reads ...func(context.Context, *Status)) {
+	if len(reads) == 0 {
+		return
+	}
+	c.reads.Lock()
+	defer c.reads.Unlock()
+	c.mutex.Lock()
+	next := c.state
+	c.mutex.Unlock()
+	for _, read := range reads {
+		read(ctx, &next)
+	}
+	c.mergeEvents(&next)
+	c.publish(next)
 }
 
 // isForeign answers whether the device reported a project that is not a
@@ -330,8 +424,20 @@ func (c *Client) miss() {
 	misses := c.misses
 	c.mutex.Unlock()
 	if misses >= pollFailures {
-		c.record(equipment.ConditionFalse)
+		c.lose()
 	}
+}
+
+// lose calls the device unreachable. An amp that is gone may reboot,
+// and a reboot drops its subscriptions while the client still holds
+// them, so the client forgets them and opens them again when the amp
+// answers. The poll that finds the amp again reads every family.
+func (c *Client) lose() {
+	c.mutex.Lock()
+	c.resync = true
+	c.mutex.Unlock()
+	c.forgetSubscriptions()
+	c.record(equipment.ConditionFalse)
 }
 
 // answered clears the run of failed polls after one the device
@@ -502,18 +608,23 @@ func isMiss(body []byte) bool {
 }
 
 // readStatusEx reads the identity and hardware block, which is the one
-// read a poll cannot miss.
-func (c *Client) readStatusEx(ctx context.Context, next *Status) error {
+// read a poll cannot miss, and answers the block for its readings.
+func (c *Client) readStatusEx(ctx context.Context, next *Status) (statusEx, error) {
 	body, err := c.call(ctx, statusCommand)
 	if err != nil {
-		return err
+		return statusEx{}, err
 	}
 	var device statusEx
 	if err := json.Unmarshal(body, &device); err != nil {
-		return fmt.Errorf("%s answered %s: %w", statusCommand, strings.TrimSpace(string(body)), err)
+		return statusEx{}, fmt.Errorf("%s answered %s: %w", statusCommand, strings.TrimSpace(string(body)), err)
 	}
 	applyStatusEx(next, device)
-	return nil
+	return device, nil
+}
+
+// readName reads getStatusEx back after the name was set.
+func (c *Client) readName(ctx context.Context, next *Status) {
+	_, _ = c.readStatusEx(ctx, next)
 }
 
 // readStaticIP reads the static configuration the device holds.
@@ -612,11 +723,7 @@ func (c *Client) readAudio(ctx context.Context, next *Status) {
 		next.Audio.Output.Name = active.DeviceName
 		next.Audio.Output.CardID = active.CardID
 	})
-	c.read(ctx, balanceCommand, func(body []byte) {
-		if value, ok := atof(string(body)); ok {
-			next.Audio.Balance = value
-		}
-	})
+	c.readBalance(ctx, next)
 	c.read(ctx, subCommand, func(body []byte) {
 		var sub subwoofer
 		if json.Unmarshal(body, &sub) != nil {
@@ -675,6 +782,15 @@ func (c *Client) readAudio(ctx context.Context, next *Status) {
 	})
 }
 
+// readBalance reads the left-right balance.
+func (c *Client) readBalance(ctx context.Context, next *Status) {
+	c.read(ctx, balanceCommand, func(body []byte) {
+		if value, ok := atof(string(body)); ok {
+			next.Audio.Balance = value
+		}
+	})
+}
+
 // readEqualizer reads the equalizer's state and its presets.
 func (c *Client) readEqualizer(ctx context.Context, next *Status) {
 	c.read(ctx, eqStatCommand, func(body []byte) {
@@ -694,11 +810,7 @@ func (c *Client) readEqualizer(ctx context.Context, next *Status) {
 // readTimers reads the sleep timer, the idle intervals, and the three
 // alarm slots.
 func (c *Client) readTimers(ctx context.Context, next *Status) {
-	c.read(ctx, shutdownCommand, func(body []byte) {
-		if seconds, ok := atoi(string(body)); ok {
-			next.Timers.SleepSeconds = seconds
-		}
-	})
+	c.readSleep(ctx, next)
 	c.read(ctx, powerModeCommand, func(body []byte) {
 		var mode powerModeTime
 		if json.Unmarshal(body, &mode) != nil {
@@ -732,6 +844,15 @@ func (c *Client) readTimers(ctx context.Context, next *Status) {
 		})
 	}
 	next.Timers.Alarms = alarms
+}
+
+// readSleep reads the seconds left on the sleep timer.
+func (c *Client) readSleep(ctx context.Context, next *Status) {
+	c.read(ctx, shutdownCommand, func(body []byte) {
+		if seconds, ok := atoi(string(body)); ok {
+			next.Timers.SleepSeconds = seconds
+		}
+	})
 }
 
 // readBluetooth reads the pairing state and the paired devices.
@@ -813,11 +934,7 @@ func applyStatusEx(s *Status, d statusEx) {
 	s.Device.Language = d.Language
 	s.Device.Timezone = d.TimezoneID
 	s.Device.TimezoneOffset = d.Timezone
-	s.Device.Date = d.Date
-	s.Device.Time = d.Time
 	s.Device.CommunicationPort = d.CommunicationPort
-	s.Device.TemperatureCPU = intOr(d.TemperatureCPU, 0)
-	s.Device.TemperatureBoard = intOr(d.TemperatureTmp102, 0)
 	s.Device.Capabilities = Capabilities{
 		Cast:          d.CastEnable == "1",
 		PresetKeys:    intOr(d.PresetKey, 0),
@@ -842,18 +959,12 @@ func applyStatusEx(s *Status, d statusEx) {
 	}
 	s.Network.SSID = decodeHex(d.Essid)
 	s.Network.BSSID = d.BSSID
-	s.Network.RSSI = intOr(d.RSSI, 0)
-	s.Network.Noise = intOr(d.WlanNoise, 0)
-	s.Network.SNR = intOr(d.WlanSnr, 0)
 	s.Network.Channel = intOr(d.WifiChannel, 0)
 	s.Network.Frequency = intOr(d.WlanFreq, 0)
-	s.Network.DataRate = intOr(d.WlanDataRate, 0)
 	s.Audio.MaxVolume = intOr(d.MaxVolume, equipment.Unknown)
 	s.Bluetooth.Remote = &BLERemote{
 		Supported: d.BleRemoteControl == "1",
 		Connected: d.BleRemoteConnected == "1",
-		Battery:   intOr(d.BleRemoteBattery, 0),
-		RSSI:      intOr(d.BleRemoteRSSI, 0),
 		Version:   d.BleRemoteVersion,
 		State:     d.BleRemoteState,
 	}
@@ -874,8 +985,6 @@ func applyPlayback(s *Status, p playerStatus) {
 		Type:          intOr(p.Type, 0),
 		Volume:        intOr(p.Volume, equipment.Unknown),
 		Mute:          p.Mute == "1",
-		PositionMS:    intOr(p.CurrentPosition, 0),
-		OffsetMS:      intOr(p.Offset, 0),
 		LengthMS:      intOr(p.TotalLength, 0),
 		AlarmFlag:     p.AlarmFlag == "1",
 		PlaylistCount: intOr(p.PlaylistCount, 0),
@@ -971,7 +1080,9 @@ func (c *Client) SameSoundMode(declared, reported string) bool {
 
 // SetSleep sets the sleep timer in minutes. Zero cancels it, and a
 // positive value pauses playback when the timer reaches zero. The
-// device's own timer is the closest thing it has to power control.
+// device's own timer is the closest thing it has to power control. The
+// timer is read back after the send, because the poll reads it only
+// while the last read found it running.
 func (c *Client) SetSleep(zone string, minutes int) error {
 	if zone != equipment.MainZone {
 		return unknownZone(zone)
@@ -979,10 +1090,15 @@ func (c *Client) SetSleep(zone string, minutes int) error {
 	if minutes < 0 || minutes > maxSleepMinutes {
 		return fmt.Errorf("sleep %d minutes", minutes)
 	}
-	if minutes == 0 {
-		return c.send(context.Background(), setShutdownPrefix+"-1")
+	seconds := "-1"
+	if minutes > 0 {
+		seconds = strconv.Itoa(minutes * 60)
 	}
-	return c.send(context.Background(), setShutdownPrefix+strconv.Itoa(minutes*60))
+	if err := c.send(context.Background(), setShutdownPrefix+seconds); err != nil {
+		return err
+	}
+	c.readBack(context.Background(), c.readSleep)
+	return nil
 }
 
 // unknownZone is the error a setter answers when a caller names a zone

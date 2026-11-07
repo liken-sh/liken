@@ -167,6 +167,9 @@ func (u *receiverUnit) write() {
 	// advances on every settled burst, not only on a burst that changed
 	// what a person reads in status.
 	u.readings.recordObservation(u.name, state, u.driver.VolumeResolution(), now)
+	if u.wiimClient != nil {
+		u.readings.recordWiim(u.name, u.wiimClient.Readings())
+	}
 
 	settings := u.denonSettings()
 	status := buildReceiverStatus(state, settings, u.wiimStatus(), u.driver.Address(), u.driver.VolumeResolution(), u.generation.Load(), u.applied.Conditions, now)

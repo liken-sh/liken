@@ -4,8 +4,9 @@ Proposed on 2026-10-06. Replaces the WiiM part of plan 13
 ([rejected/13-every-setting-a-receiver-exposes.md](rejected/13-every-setting-a-receiver-exposes.md)).
 Plan 14 ([14-one-settings-model-for-every-receiver.md](14-one-settings-model-for-every-receiver.md))
 holds the common settings model, the tiers, and `settingExceptions`
-that this plan uses. Phase 1 can be built now. Drills D1 to D7 have not
-run.
+that this plan uses. Phase 1 can be built now. Phase 2 was built on
+2026-11-06, and its section "What phase 2 built" records how. Drills
+D1 to D7 have not run.
 
 ## The problem
 
@@ -139,6 +140,42 @@ family leaves the backstop. A full read of the settings families is
 about 15 GET requests. At 30 minutes this is about 30 requests an
 hour, against about 9,700 an hour for the whole of today's
 poll.
+
+### What phase 2 built
+
+Built on 2026-11-06. On a home cluster, read-only, three WiiM
+`Receiver`s took about 1,000 status writes an hour before the change.
+Between two versions of a `Receiver`, only `status.wiim.device.time`,
+`device.temperatureCpu`, `network.noise`, and `network.dataRate`
+differed. Each write was about 4 KiB, and it reached every watcher of
+the `Receiver`s: `equipment-operator`, both CEC pods, and
+`media-operator`.
+
+* The settings reads leave the poll as the three times above give,
+  with the 30-minute backstop (`settingsResync` in `wiim/client.go`).
+  The client also reads every family on the first poll that the amp
+  answers after the client called it unreachable, and it forgets its
+  subscriptions at that moment, because a reboot of the amp drops them.
+* The read after a write reads only the family of each field the amp
+  took: `getChannelBalance`, `getStatusEx` for the name, and the
+  controls for the light and the buttons. A sleep timer is read back
+  after `setShutdown`.
+* The steady poll is `getStatusEx` and `getPlayerStatus`: 2 GET
+  requests every 10 seconds, 720 an hour, against 27 every 10 seconds
+  before. The settings read adds 24 requests every 30 minutes, 48 an
+  hour. `getMetaInfo` is read when the player reports another track,
+  and `getShutdown` on each poll while a sleep timer runs.
+* `status.wiim` leaves out the values that change on their own: the
+  amp's clock, the temperatures, the Wi-Fi signal, noise,
+  signal-to-noise ratio, and rate, the remote's battery and signal,
+  the track position, and the seconds left on the sleep timer. The
+  measurements are the `equipment_wiim_*` gauges, and the timer is the
+  zone's `sleep` in whole minutes.
+
+The input stays on the 10-second poll until drill D2 shows whether an
+event carries it. `getStatusEx` stays as the reachability probe. No
+drill of phase 2 has run on an amp: the status write rate and the
+request rate after the change are not measured.
 
 ## The common families
 

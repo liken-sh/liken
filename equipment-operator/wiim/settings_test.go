@@ -22,8 +22,13 @@ func TestSettingsMapsThePolledStatus(t *testing.T) {
 	mustMatch(t, settings.Device.Buttons, boolPtr(false))
 }
 
+// controlReads are the reads of the controls family, which a sent light
+// or button switch is read back through.
+var controlReads = []string{ledCommand, buttonsCommand, cecCommand}
+
 // ApplySettings sends exactly the declared commands, in the fixed audio
-// then device order, and sends nothing for an undeclared field.
+// then device order, and sends nothing for an undeclared field. Then it
+// reads back the family of each command the amp took.
 func TestApplySettingsSendsDeclaredCommands(t *testing.T) {
 	amp := startFakeAmp(t)
 	client := amp.client(nil)
@@ -33,16 +38,16 @@ func TestApplySettingsSendsDeclaredCommands(t *testing.T) {
 		want Settings
 		sent []string
 	}{
-		{"balance", Settings{Audio: AudioSettings{Balance: floatPtr(0.25)}}, []string{"setChannelBalance:0.25"}},
-		{"name", Settings{Device: DeviceSettings{Name: strPtr("Office")}}, []string{"setDeviceName:Office"}},
-		{"led on", Settings{Device: DeviceSettings{LED: boolPtr(true)}}, []string{"LED_SWITCH_SET:1"}},
-		{"led off", Settings{Device: DeviceSettings{LED: boolPtr(false)}}, []string{"LED_SWITCH_SET:0"}},
-		{"buttons on", Settings{Device: DeviceSettings{Buttons: boolPtr(true)}}, []string{"Button_Enable_SET:1"}},
-		{"buttons off", Settings{Device: DeviceSettings{Buttons: boolPtr(false)}}, []string{"Button_Enable_SET:0"}},
+		{"balance", Settings{Audio: AudioSettings{Balance: floatPtr(0.25)}}, []string{"setChannelBalance:0.25", balanceCommand}},
+		{"name", Settings{Device: DeviceSettings{Name: strPtr("Office")}}, []string{"setDeviceName:Office", statusCommand}},
+		{"led on", Settings{Device: DeviceSettings{LED: boolPtr(true)}}, append([]string{"LED_SWITCH_SET:1"}, controlReads...)},
+		{"led off", Settings{Device: DeviceSettings{LED: boolPtr(false)}}, append([]string{"LED_SWITCH_SET:0"}, controlReads...)},
+		{"buttons on", Settings{Device: DeviceSettings{Buttons: boolPtr(true)}}, append([]string{"Button_Enable_SET:1"}, controlReads...)},
+		{"buttons off", Settings{Device: DeviceSettings{Buttons: boolPtr(false)}}, append([]string{"Button_Enable_SET:0"}, controlReads...)},
 		{"combined", Settings{
 			Audio:  AudioSettings{Balance: floatPtr(-0.5)},
 			Device: DeviceSettings{Name: strPtr("Studio"), LED: boolPtr(true), Buttons: boolPtr(false)},
-		}, []string{"setChannelBalance:-0.5", "setDeviceName:Studio", "LED_SWITCH_SET:1", "Button_Enable_SET:0"}},
+		}, append([]string{"setChannelBalance:-0.5", "setDeviceName:Studio", "LED_SWITCH_SET:1", "Button_Enable_SET:0", balanceCommand, statusCommand}, controlReads...)},
 		{"none declared", Settings{}, nil},
 	}
 	for _, one := range cases {

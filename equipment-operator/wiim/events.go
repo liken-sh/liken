@@ -155,14 +155,16 @@ func localAddress(address string) string {
 // whose grant is near its end. It runs on the poll loop. A pass that
 // finds no subscription waits eventRetryInterval before it tries
 // again, and the poll keeps carrying the evented fields in the
-// meantime.
-func (c *Client) manageSubscriptions(ctx context.Context) {
+// meantime. It answers whether it opened a subscription, which is
+// when the poll reads every family, because events may have been
+// missed while none was open.
+func (c *Client) manageSubscriptions(ctx context.Context) (opened bool) {
 	c.eventsMutex.Lock()
 	server := c.events
 	due := time.Now().After(c.eventsRetry)
 	c.eventsMutex.Unlock()
 	if server == nil {
-		return
+		return false
 	}
 	for _, path := range eventPaths {
 		c.subscriptionsMutex.Lock()
@@ -177,12 +179,15 @@ func (c *Client) manageSubscriptions(ctx context.Context) {
 		if !due {
 			continue
 		}
-		if !c.subscribe(ctx, server, path) {
-			c.eventsMutex.Lock()
-			c.eventsRetry = time.Now().Add(eventRetryInterval)
-			c.eventsMutex.Unlock()
+		if c.subscribe(ctx, server, path) {
+			opened = true
+			continue
 		}
+		c.eventsMutex.Lock()
+		c.eventsRetry = time.Now().Add(eventRetryInterval)
+		c.eventsMutex.Unlock()
 	}
+	return opened
 }
 
 // subscribe registers the callback for one service, and answers
@@ -293,6 +298,17 @@ func (c *Client) recordSubscription(path, sid string, seconds int) {
 func (c *Client) dropSubscription(path string) {
 	c.subscriptionsMutex.Lock()
 	delete(c.subscriptions, path)
+	c.subscriptionsMutex.Unlock()
+}
+
+// forgetSubscriptions drops every subscription without an UNSUBSCRIBE,
+// for an amp that does not answer. The next answered poll subscribes
+// again. A subscription the amp still holds sends to the callback under
+// a SID the client no longer takes, so handleNotify drops it until the
+// amp lets it expire.
+func (c *Client) forgetSubscriptions() {
+	c.subscriptionsMutex.Lock()
+	c.subscriptions = map[string]*subscription{}
 	c.subscriptionsMutex.Unlock()
 }
 
