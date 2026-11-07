@@ -1,9 +1,11 @@
 // The order of the writes to the fields that both a poll and an event
 // or a setter write: the volume, the mute, and the play state. A poll
-// copies the state, reads the player, and publishes seconds later, and
-// an event or a setter can write one of these fields in between. So
-// each such write takes a number from one counter, and the poll keeps
-// the held value of a field only when a write after its copy moved it.
+// reads the player and publishes seconds later, and an event or a
+// setter can write one of these fields in between. So each such write
+// takes a number from one counter. Right before the player read, the
+// poll takes the counter and copies the three fields, and at publish
+// it keeps the held value of a field only when a write after that
+// mark moved it.
 // Every other field takes the poll's read, which is the amp's newest
 // answer, whether or not a subscription is live. An amp sends no event
 // again that the client missed, so a held value with no later write is
@@ -19,7 +21,7 @@ type fieldWrites struct {
 }
 
 // eventMark answers the number of the last write so far. A poll takes
-// it with its copy of the state.
+// it right before it reads the player.
 func (c *Client) eventMark() uint64 {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()

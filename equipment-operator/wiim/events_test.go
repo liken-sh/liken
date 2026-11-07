@@ -98,6 +98,15 @@ func (f *fakeEvents) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// subscribed answers whether the client holds a subscription for one
+// service.
+func (c *Client) subscribed(path string) bool {
+	c.subscriptionsMutex.Lock()
+	defer c.subscriptionsMutex.Unlock()
+	sub, ok := c.subscriptions[path]
+	return ok && sub != nil && sub.sid != ""
+}
+
 // notify sends one NOTIFY to the callback the client registered.
 func (f *fakeEvents) notify(t *testing.T, path, seq, body string) {
 	t.Helper()

@@ -37,7 +37,7 @@ import (
 // subscribes to is known to carry; plan 16's drill D2 owes the answer.
 // The events carry the volume, the mute, and the transport state, and
 // the poll keeps a field's event value only when the event came after
-// the poll copied the state (sequence.go).
+// the poll started its read of the player (sequence.go).
 //
 // A poll reads more only when it has a reason: the track when the
 // player reports another one, the sleep timer while it counts down,
@@ -314,12 +314,8 @@ func (w *pollWaits) after(answered bool) time.Duration {
 func (c *Client) poll(ctx context.Context) bool {
 	c.reads.Lock()
 	defer c.reads.Unlock()
-	// The mark is taken with the copy, so a write to a pushed field that
-	// lands at any time after the copy stands over the poll's read
-	// (sequence.go).
 	c.mutex.Lock()
 	next := c.state
-	mark := c.writes
 	c.mutex.Unlock()
 
 	device, err := c.readStatusEx(ctx, &next)
@@ -347,8 +343,12 @@ func (c *Client) poll(ctx context.Context) bool {
 		// its subscriptions while the client still holds them. A renewal
 		// asks the amp whether it holds them: it refuses a SID it does not
 		// hold, which drops the subscription, and manageSubscriptions then
-		// opens a new one and the poll reads every family.
-		c.renewAll(ctx)
+		// opens a new one and the poll reads every family. A refused
+		// renewal is a sign of a reboot, so the failing commands get their
+		// retries back.
+		if c.renewAll(ctx) {
+			c.giveRetriesBack()
+		}
 	}
 	c.report(CommandOK)
 
@@ -356,6 +356,17 @@ func (c *Client) poll(ctx context.Context) bool {
 	every := c.readsEveryFamily(opened)
 	failures := c.readFailures
 	heard := next.Playback
+	// The mark is taken right before the player read, and the pushed
+	// fields are copied with it, so a write that lands after the mark
+	// stands over the read, and a write before it is in the copy and
+	// older than the read (sequence.go). The reads before this one can
+	// take many seconds, and an event in them is older than the read.
+	c.mutex.Lock()
+	mark := c.writes
+	next.Playback.Volume = c.state.Playback.Volume
+	next.Playback.Mute = c.state.Playback.Mute
+	next.Playback.Status = c.state.Playback.Status
+	c.mutex.Unlock()
 	c.readPlayback(ctx, &next)
 	if every {
 		c.readSettings(ctx, &next)
@@ -379,9 +390,13 @@ func (c *Client) poll(ctx context.Context) bool {
 	c.surveyed = true
 	// A full read with a read the amp did not answer leaves that family
 	// as it was, so the next poll reads every family again.
-	if every && c.readFailures == failures {
+	switch {
+	case !every:
+	case c.readFailures == failures:
 		c.resync = false
 		c.settingsRead = time.Now()
+	default:
+		c.resync = true
 	}
 	c.readings = readingsFrom(device, next.Network.Interface == "wifi")
 	c.mutex.Unlock()
@@ -450,23 +465,28 @@ func (c *Client) rejectForeign(project string) {
 // that fail call the device unreachable; fewer than that leave the last
 // answer standing, so a request the device drops under load does not
 // read as the device leaving.
-//
-// A missed poll may be an amp that reboots, and a command that failed
-// while it booted may answer once it is up, so each command that
-// answered before gets its retries again. The caller holds the reads.
 func (c *Client) miss() {
-	clear(c.failedReads)
-	for command := range c.silent {
-		if c.answeredOnce[command] {
-			delete(c.silent, command)
-		}
-	}
 	c.mutex.Lock()
 	c.misses++
 	misses := c.misses
 	c.mutex.Unlock()
 	if misses >= pollFailures {
 		c.lose()
+	}
+}
+
+// giveRetriesBack gives each command that answered before its retries
+// again, on a sign that the amp rebooted: an outage, or a renewal the
+// amp refused. A command that failed while the amp booted may answer
+// once it is up. A single missed poll is no such sign, and giving the
+// retries back on it would undo the bound for a command that always
+// fails. The caller holds the reads.
+func (c *Client) giveRetriesBack() {
+	clear(c.failedReads)
+	for command := range c.silent {
+		if c.answeredOnce[command] {
+			delete(c.silent, command)
+		}
 	}
 }
 
@@ -484,6 +504,7 @@ func (c *Client) lose() {
 	// each gauge leaves the scrape instead of holding its last value.
 	c.readings = Readings{}
 	c.mutex.Unlock()
+	c.giveRetriesBack()
 	c.record(equipment.ConditionFalse)
 }
 

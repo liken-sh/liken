@@ -164,10 +164,10 @@ the `Receiver`s: `equipment-operator`, both CEC pods, and
   full reads in a row. A command that never answered waits for the
   backstop, as the Unsupported tier in `AGENTS.md` requires. A poll
   applies its read of the volume, the mute, and the play state unless
-  an event or a setter wrote the field after the poll copied the
-  state, because the amp does not resend an event the client missed.
-  A missed poll gives each command that answered before its retries
-  again.
+  an event or a setter wrote the field after the poll started its read
+  of the player, because the amp does not resend an event the client
+  missed. An outage or a refused renewal, the signs of a reboot, gives
+  each command that answered before its retries again.
 * The read after a write reads only the family of each field the amp
   took: `getChannelBalance`, `getStatusEx` for the name, and the
   controls for the light and the buttons. A sleep timer is read back
@@ -400,6 +400,12 @@ setting and put it back.
   `Button_Enable_SET` each read back at the value sent.
 * **D6, CEC.** With `setCecPowerCtrl:0`, check whether the amp still
   follows the TV's power and still answers on the bus. Put it back.
+* **D8, a setter and the next poll.** Send `setPlayerCmd:vol:<n>` and
+  `setPlayerCmd:mute:<0|1>`, then read `getPlayerStatus` as soon as
+  each answers `OK`, and record whether the read already names the
+  value sent. The poll applies its read over a setter's value that
+  came before the read, so a read that lags the setter would move the
+  volume back until the next read.
 * **D7, a second model.** On a WiiM Pro or Ultra:
   `setAudioOutputHardwareMode` across the modes its sound-card list
   names, `getTriggeroutStatus`, and `getLightOperationBrightConfig`.

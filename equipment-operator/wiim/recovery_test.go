@@ -338,3 +338,82 @@ func TestAnOutageGivesASilentCommandItsRetriesAgain(t *testing.T) {
 		mustMatch(t, holdsEveryRead(amp.sent()), true)
 	})
 }
+
+// failOnePoll makes the fake miss the next poll, and answer again
+// after it.
+func failOnePoll(amp *fakeAmp, client *Client) {
+	amp.mutex.Lock()
+	amp.failing = http.StatusInternalServerError
+	amp.mutex.Unlock()
+	client.poll(context.Background())
+	amp.mutex.Lock()
+	amp.failing = 0
+	amp.mutex.Unlock()
+}
+
+// A missed poll is not a reboot, so it does not give a failing command
+// its retries again, and the bound on full reads holds.
+func TestASingleMissKeepsTheRetryBound(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp, client := quietAmp(t)
+		breakCommand(amp, balanceCommand, true)
+		time.Sleep(settingsResync)
+		for range readRetries {
+			client.poll(context.Background())
+			failOnePoll(amp, client)
+		}
+
+		amp.clear()
+		client.poll(context.Background())
+
+		mustMatch(t, amp.sent(), []string{statusCommand, playerCommand})
+	})
+}
+
+// An amp that refuses the renewal after a miss has rebooted, so a
+// command left to the backstop gets its retries again.
+func TestARefusedRenewalGivesASilentCommandItsRetriesAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp, events, client := subscribedAmpWithEvents(t)
+		client.poll(context.Background())
+		breakCommand(amp, balanceCommand, true)
+		time.Sleep(settingsResync)
+		for range readRetries {
+			client.poll(context.Background())
+		}
+		events.mutex.Lock()
+		events.refuseRenewals = true
+		events.mutex.Unlock()
+		failOnePoll(amp, client)
+		client.poll(context.Background())
+
+		amp.clear()
+		client.poll(context.Background())
+
+		mustMatch(t, holdsEveryRead(amp.sent()), true)
+	})
+}
+
+// An event that lands before the poll reads the player is older than
+// that read, so the poll's read stands.
+func TestAnEventBeforeThePlayerReadLeavesThePollsRead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp, events, client := subscribedAmpWithEvents(t)
+		client.poll(context.Background())
+		pushed := false
+		amp.mutex.Lock()
+		amp.onRead = func(command string) {
+			if command == statusCommand && !pushed {
+				pushed = true
+				events.notify(t, renderControlPath, "1", renderControlBody("40", "0"))
+			}
+		}
+		amp.mutex.Unlock()
+		amp.answer(playerCommand, strings.Replace(playerJSON, `"vol":"31"`, `"vol":"55"`, 1))
+
+		client.poll(context.Background())
+
+		mustMatch(t, pushed, true)
+		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 55)
+	})
+}

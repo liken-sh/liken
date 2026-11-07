@@ -100,7 +100,7 @@ the reachability probe and the identity check, and `getPlayerStatus`,
 which carries the input that no subscribed event is known to carry.
 The player's answer also carries the evented fields: the volume, the
 mute, and the play state. The poll applies each one unless an event or
-a setter wrote it after the poll copied the state.
+a setter wrote it after the poll started its read of the player.
 
 The poll reads more only on a trigger:
 
@@ -187,9 +187,10 @@ these, and the driver uses them:
 
 A poll does not undo an event. Each write of an event or a setter to
 the volume, the mute, or the play state takes a number from one
-counter, and the poll takes the counter with its copy of the state.
-When it publishes, it keeps the held value of each field that a write
-after its copy moved, because its own read of that field is older.
+counter, and right before it reads the player the poll takes the
+counter and copies the three fields. When it publishes, it keeps the
+held value of each field that a write after that mark moved, because
+its own read of that field is older.
 Every other field takes the poll's read (`sequence.go`).
 
 The port 8819 the `getStatusEx` block calls `communication_port` is

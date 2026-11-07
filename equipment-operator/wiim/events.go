@@ -222,21 +222,22 @@ func (c *Client) subscribe(ctx context.Context, server *eventServer, path string
 	return true
 }
 
-// renew extends a subscription before its grant ends. A renewal the
-// device refuses drops the subscription, and the next pass subscribes
-// it again.
-func (c *Client) renew(ctx context.Context, server *eventServer, path string) {
+// renew extends a subscription before its grant ends, and answers
+// whether the amp answered and refused it, which an amp that rebooted
+// does for a SID it no longer holds. A renewal that fails or is refused
+// drops the subscription, and the next pass subscribes it again.
+func (c *Client) renew(ctx context.Context, server *eventServer, path string) (refused bool) {
 	c.subscriptionsMutex.Lock()
 	sub := c.subscriptions[path]
 	c.subscriptionsMutex.Unlock()
 	if sub == nil {
-		return
+		return false
 	}
 	req, err := http.NewRequestWithContext(ctx, "SUBSCRIBE", c.upnpBase+path, nil)
 	if err != nil {
 		c.dropSubscription(path)
 		c.report(CommandFailed)
-		return
+		return false
 	}
 	req.Header.Set("SID", sub.sid)
 	req.Header.Set("TIMEOUT", "Second-"+fmt.Sprint(subscribeSeconds))
@@ -244,17 +245,18 @@ func (c *Client) renew(ctx context.Context, server *eventServer, path string) {
 	if err != nil {
 		c.dropSubscription(path)
 		c.report(CommandFailed)
-		return
+		return false
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		c.dropSubscription(path)
 		c.report(CommandFailed)
-		return
+		return true
 	}
 	c.recordSubscription(path, sub.sid, timeoutSeconds(resp.Header.Get("TIMEOUT")))
 	c.report(CommandOK)
+	return false
 }
 
 // unsubscribe tells the device to stop sending to the callback.
@@ -302,28 +304,22 @@ func (c *Client) dropSubscription(path string) {
 }
 
 // renewAll renews every subscription the client holds, whatever its
-// grant. A renewal the amp refuses drops the subscription, and the next
-// manageSubscriptions opens it again.
-func (c *Client) renewAll(ctx context.Context) {
+// grant, and answers whether the amp refused a renewal. A renewal the
+// amp refuses drops the subscription, and the next manageSubscriptions
+// opens it again.
+func (c *Client) renewAll(ctx context.Context) (refused bool) {
 	c.eventsMutex.Lock()
 	server := c.events
 	c.eventsMutex.Unlock()
 	if server == nil {
-		return
+		return false
 	}
 	for _, path := range eventPaths {
-		c.renew(ctx, server, path)
+		if c.renew(ctx, server, path) {
+			refused = true
+		}
 	}
-}
-
-// subscribed answers whether the client holds a subscription for one
-// service, which is what lets the poll leave that service's fields to
-// the events.
-func (c *Client) subscribed(path string) bool {
-	c.subscriptionsMutex.Lock()
-	defer c.subscriptionsMutex.Unlock()
-	sub, ok := c.subscriptions[path]
-	return ok && sub != nil && sub.sid != ""
+	return refused
 }
 
 // handleNotify folds one NOTIFY into the state. A NOTIFY for a SID the
