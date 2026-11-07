@@ -124,6 +124,9 @@ The `Screen` condition says why:
   monitor shows another input, or its cable is out. Switch the input
   or seat the cable, and the pod schedules on its own. This park is
   by design, and the pod stays `Pending` until the panel returns.
+  `display-operator` reports a panel gone only after its connector
+  has read no panel for 5 seconds, so an A/V receiver in standby that
+  drops hot plug detect for a moment does not move the condition.
 * `NoDisplay` or `NotReported`: no `Display` carries the monitor the
   claim remembers. Go back to step 1 and confirm the machine
   publishes the screen.
