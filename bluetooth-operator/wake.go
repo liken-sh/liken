@@ -24,10 +24,11 @@ package main
 // starts to move the real node's events. The relay cannot tell which
 // button was pressed, and KEY_UNKNOWN is the kernel's code for a key
 // with no name. A consumer with no binding for it treats it as a press
-// and nothing more: a sleeping media-screen wakes the screen, states the
-// on desire, and hands the press to the screen client, which binds
-// nothing to it, and media-operator asks the receiver for the unit's
-// input. KEY_WAKEUP is not used, because media-operator and
+// and nothing more. A sleeping media-screen wakes the screen. Over a lit
+// panel it hands the press to the screen client, which binds nothing to
+// it. Over a dark panel it states the on desire and hands the client
+// nothing. media-operator asks the receiver for the unit's input either
+// way. KEY_WAKEUP is not used, because media-operator and
 // media-screen read it as the TV remote's own Power On, which sends no
 // input ask.
 //

@@ -96,12 +96,15 @@ on every wake, and on any real button that the kernel also reports as
 `KEY_UNKNOWN`, so do not bind it.
 
 A press on a sleeping idle screen lifts the shade and acts on the
-screen in the same press, except back. A button that reaches the
-screen as `KEY_BACK`, `KEY_ESC`, `KEY_EXIT`, or `KEY_BACKSPACE`, from
-the base mapping or from a `Keymap` row, only lifts the shade, on
-every screen. The stock idle screen lowers the shade on back, and one
-rule for every screen keeps a press of back from undoing the wake
-there.
+screen in the same press, except back, and except while the panel is
+off. A press while the panel is off, after the off window ran out or
+after the `Player` or the TV turned off, only lights the screen,
+because nobody could see what the press would act on. A button that
+reaches the screen as `KEY_BACK`, `KEY_ESC`, `KEY_EXIT`, or
+`KEY_BACKSPACE`, from the base mapping or from a `Keymap` row, only
+lifts the shade, on every screen. The stock idle screen lowers the
+shade on back, and one rule for every screen keeps a press of back
+from undoing the wake there.
 
 If the controller has modes, press every button in every mode. A
 combined remote can emit different codes for one button per mode. An

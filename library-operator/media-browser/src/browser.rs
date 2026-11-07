@@ -1,9 +1,10 @@
 // The media browser: a stack of screens over a catalog source and an
 // art store. The keyboard and the bus fold through one key handler.
 // The home page is always the bottom of the stack, so the screen is never
-// empty, and back from the home page asks for the shade. The
-// `media-screen` crate holds the shade, the focus gate, and the two
-// windows, so a press that reaches this file is one to act on.
+// empty, and back at the home page moves focus to its first row. The
+// browser never asks for the shade: the `media-screen` crate holds the
+// shade, the focus gate, and the two windows, so a press that reaches
+// this file is one to act on.
 
 use std::cell::RefCell;
 use std::convert::Infallible;
@@ -111,8 +112,8 @@ pub struct Browser<S: Source, A: Art> {
     // nothing on a run that named no file.
     people: Option<audience::watch::Watch>,
     // The refresh policy. It holds the shade and the cover, and the
-    // browser decides neither: it asks for the shade, the crate decides,
-    // and the moment comes back here; the bus says in every status
+    // browser decides neither: the crate brings the shade down and lifts
+    // it, and the moment comes back here; the bus says in every status
     // whether a film covers the surface. It also holds every change that
     // waits for a whole screen's read, and it alone says when one runs.
     refresh: Refresh,
