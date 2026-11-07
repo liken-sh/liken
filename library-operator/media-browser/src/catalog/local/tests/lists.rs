@@ -330,3 +330,54 @@ fn a_reader_reads_the_same_file_and_leaves_the_streams_running() {
     drop(source);
     assert!(shared.stop.load(Ordering::Acquire));
 }
+
+// The scan writes a card's rating and tagline into their own columns, so a
+// list reads them there and parses no body. A row the scan has not written
+// since the columns arrived holds NULL in both, and the list reads that row's
+// body instead, so a wall draws the same cards before and after the first
+// walk.
+#[test]
+fn a_wall_reads_the_card_columns_and_the_body_only_where_they_are_unwritten() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_page(
+        &path,
+        "default/films",
+        "movie:tmdb:1",
+        "1999",
+        "",
+        r#"{"contentRating":"G","tagline":"From the body."}"#,
+    );
+    insert_page(
+        &path,
+        "default/films",
+        "movie:tmdb:2",
+        "1999",
+        "",
+        r#"{"contentRating":"G","tagline":"From the body."}"#,
+    );
+    Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE movies SET content_rating = 'R', tagline = 'From the column.' \
+             WHERE id = 'movie:tmdb:2'",
+            [],
+        )
+        .unwrap();
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+
+    let cards: Vec<(String, String)> = source
+        .wall(&library("default/films"))
+        .slots
+        .into_iter()
+        .map(|slot| (slot.rating, slot.tagline))
+        .collect();
+
+    assert_eq!(
+        cards,
+        [
+            ("G".to_string(), "From the body.".to_string()),
+            ("R".to_string(), "From the column.".to_string()),
+        ]
+    );
+}

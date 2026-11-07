@@ -17,8 +17,8 @@ pub fn movie(
     id: &str,
 ) -> rusqlite::Result<Vec<MovieDetails>> {
     let sql = "SELECT title, released, duration, set_id, \
-                      json_extract(body, '$.contentRating'), \
-                      json_extract(body, '$.tagline'), \
+                      IFNULL(content_rating, json_extract(body, '$.contentRating')), \
+                      IFNULL(tagline, json_extract(body, '$.tagline')), \
                       json_extract(body, '$.plot'), \
                       json_extract(body, '$.genres'), \
                       json_extract(body, '$.directors'), \

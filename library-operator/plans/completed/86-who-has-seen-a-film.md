@@ -10,6 +10,16 @@ Status on 2026-11-06: built. The drill on a physical screen has not
 run: the measurements below are from a workstation over a copy of a
 home catalog.
 
+Status later on 2026-11-06: the card columns that "Measured and left"
+names are built. `movies`, `series`, and `episodes` carry
+`content_rating` and `tagline`, every writer of a body writes them from
+the same body, and every read of the two fields reads the columns, with
+the body only for a row whose columns are still NULL. The library
+wall's open went from 14.7 ms to 8.4 ms and the genre wall's from 9.9 ms
+to 5.8 ms, with the columns written. Of the 8.4 ms, the query is
+2.2 ms, and the rest builds the cards and lays out the text of the page
+on screen.
+
 ## The problem
 
 When people at a screen choose a film together, they need to know who

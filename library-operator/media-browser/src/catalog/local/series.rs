@@ -17,8 +17,8 @@ pub fn series(
     id: &str,
 ) -> rusqlite::Result<Vec<SeriesDetails>> {
     let sql = "SELECT item.title, item.released, item.duration, \
-                      json_extract(item.body, '$.contentRating'), \
-                      json_extract(item.body, '$.tagline'), \
+                      IFNULL(item.content_rating, json_extract(item.body, '$.contentRating')), \
+                      IFNULL(item.tagline, json_extract(item.body, '$.tagline')), \
                       json_extract(item.body, '$.plot'), \
                       json_extract(item.body, '$.genres'), \
                       json_extract(item.body, '$.creators'), \

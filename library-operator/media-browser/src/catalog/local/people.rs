@@ -164,8 +164,8 @@ pub fn works(
         let sql = format!(
             "SELECT credits.item, credits.part, credits.role, \
                     {table}.title, {table}.released, {table}.art, \
-                    {table}.duration, json_extract({table}.body, '$.contentRating'), \
-                    {seasons} AS seasons, json_extract({table}.body, '$.tagline') \
+                    {table}.duration, IFNULL({table}.content_rating, json_extract({table}.body, '$.contentRating')), \
+                    {seasons} AS seasons, IFNULL({table}.tagline, json_extract({table}.body, '$.tagline')) \
              FROM credits JOIN {table} ON {table}.library = credits.library \
              AND {table}.id = credits.item \
              WHERE credits.library = ? AND credits.contributor = ? \

@@ -29,11 +29,11 @@ fn items(members: &str) -> String {
            SELECT DISTINCT a.library, a.item FROM franchise_members m \
            JOIN aliases a ON a.alias = m.alias WHERE {members}\
          ), items AS (\
-           SELECT movies.library, movies.id, title, art, arts, released, slug, body, duration, \
+           SELECT movies.library, movies.id, title, art, arts, released, slug, body, duration, tagline, \
                   'movies' AS kind \
            FROM wanted JOIN movies ON movies.library = wanted.library AND movies.id = wanted.item \
            UNION ALL \
-           SELECT series.library, series.id, title, art, arts, released, slug, body, duration, \
+           SELECT series.library, series.id, title, art, arts, released, slug, body, duration, tagline, \
                   'series' AS kind \
            FROM wanted JOIN series ON series.library = wanted.library AND series.id = wanted.item\
          )"
@@ -252,7 +252,7 @@ const HELD: &str = "(SELECT count(*) FROM episodes e \
                                          AND r.franchise = m.franchise \
                                          AND r.position = m.position AND r.season = e.season \
                                          AND r.episode IN (0, e.episode)))) AS held_episodes, \
-                    json_extract(i.body, '$.tagline'), \
+                    IFNULL(i.tagline, json_extract(i.body, '$.tagline')), \
                     (SELECT json_group_array(json_array(r.season, r.episode)) \
                      FROM franchise_runs r \
                      WHERE r.library = m.library AND r.franchise = m.franchise \

@@ -11,8 +11,8 @@ use crate::catalog::{Credit, Title};
 /// The columns every list of titles reads, in the order [`title`] takes
 /// them. The last is the tagline a film's card leads with.
 pub const COLUMNS: &str = "id, title, released, art, duration, \
-                           json_extract(body, '$.contentRating'), \
-                           json_extract(body, '$.tagline')";
+                           IFNULL(content_rating, json_extract(body, '$.contentRating')), \
+                           IFNULL(tagline, json_extract(body, '$.tagline'))";
 
 /// How many columns [`COLUMNS`] names, so a read that selects more after
 /// them counts its own from there.

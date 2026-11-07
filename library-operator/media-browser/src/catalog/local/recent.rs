@@ -54,7 +54,7 @@ fn candidate_sql(order: Order) -> String {
            SELECT {episode_columns}, keys.library, keys.added, 'episodes' AS kind, \
                   keys.series, keys.season, keys.episode, \
                   series.title, series.art, series.released, series.duration, \
-                  json_extract(series.body, '$.contentRating'), series.arts, \
+                  IFNULL(series.content_rating, json_extract(series.body, '$.contentRating')), series.arts, \
                   keys.{key} AS ordering, keys.kind AS tie_kind \
            FROM candidate_keys AS keys \
            JOIN episodes ON episodes.library = keys.library AND episodes.id = keys.id \
@@ -72,8 +72,8 @@ fn candidate_sql(order: Order) -> String {
 // empty strings.
 const MOVIE_COLUMNS: &str = "movies.id, movies.title, movies.released, movies.art, \
                              movies.duration, \
-                             json_extract(movies.body, '$.contentRating'), \
-                             json_extract(movies.body, '$.tagline')";
+                             IFNULL(movies.content_rating, json_extract(movies.body, '$.contentRating')), \
+                             IFNULL(movies.tagline, json_extract(movies.body, '$.tagline'))";
 const EPISODE_COLUMNS: &str = "episodes.id, episodes.title, episodes.released, episodes.art, \
                                episodes.duration, '', ''";
 

@@ -105,9 +105,10 @@ func (c *Catalog) UpdateItemAdded(ctx context.Context, table string, rows []item
 }
 
 // The body and the nfo_facts of a title, the nfo phase's columns, from a
-// re-parse of the .nfo file it wrote.
+// re-parse of the .nfo file it wrote, and the two card columns read out of
+// the same body.
 func (c *Catalog) UpdateItemBodies(ctx context.Context, table string, rows []itemUpdate) (int, error) {
-	return c.updateItems(ctx, table, []string{"body", "nfo_facts"}, rows)
+	return c.updateItems(ctx, table, []string{"body", "nfo_facts", "content_rating", "tagline"}, rows)
 }
 
 // The primary art and the art list of an item, the art phase's columns.
@@ -117,7 +118,8 @@ func (c *Catalog) UpdateItemArt(ctx context.Context, table string, rows []itemUp
 
 func bodyUpdate(library, id string, body any, facts string) itemUpdate {
 	payload, _ := json.Marshal(body)
-	return itemUpdate{Library: library, Id: id, Values: []any{string(payload), facts}}
+	rating, tagline := cardFields(string(payload))
+	return itemUpdate{Library: library, Id: id, Values: []any{string(payload), facts, rating, tagline}}
 }
 
 func artUpdate(library, id, art string, arts []string) itemUpdate {

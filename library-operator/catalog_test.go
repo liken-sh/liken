@@ -143,8 +143,8 @@ func TestUpsertMoviesPostsAParameterizedUpsert(t *testing.T) {
 	if strings.Contains(got.sql, "1001") || strings.Contains(got.sql, "Some Film") {
 		t.Errorf("sql = %q, want no values concatenated in", got.sql)
 	}
-	if len(got.params) != 15 {
-		t.Fatalf("params = %d, want 16", len(got.params))
+	if len(got.params) != 17 {
+		t.Fatalf("params = %d, want 17", len(got.params))
 	}
 	if got.params[14] != "[]" {
 		t.Errorf("params[14] = %v, want an empty arts list", got.params[14])
@@ -213,8 +213,8 @@ func TestUpsertSeriesTargetsTheSeriesTable(t *testing.T) {
 	if !strings.Contains(got.sql, "INSERT INTO series") {
 		t.Errorf("sql = %q, want an upsert on series", got.sql)
 	}
-	if len(got.params) != 14 {
-		t.Errorf("params = %d, want 14", len(got.params))
+	if len(got.params) != 16 {
+		t.Errorf("params = %d, want 16", len(got.params))
 	}
 }
 
@@ -232,8 +232,8 @@ func TestUpsertEpisodesCarriesTheSeriesColumns(t *testing.T) {
 	if !strings.Contains(got.sql, "INSERT INTO episodes") || !strings.Contains(got.sql, "series = excluded.series") {
 		t.Errorf("sql = %q, want an upsert on episodes with the series columns", got.sql)
 	}
-	if len(got.params) != 17 {
-		t.Fatalf("params = %d, want 17", len(got.params))
+	if len(got.params) != 19 {
+		t.Fatalf("params = %d, want 19", len(got.params))
 	}
 	if got.params[12] != "series:tvdb:800001" {
 		t.Errorf("params[12] = %v, want the series id", got.params[12])

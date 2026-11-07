@@ -39,6 +39,14 @@
 --   body      the kind's own shape, as JSON
 --   slug      the legible display name, the-long-survey-1999, for a URL or a screen
 --
+-- Movies, series, and episodes also carry content_rating and tagline, the two
+-- fields of the body that a card draws. Every list on a screen draws them for
+-- each item, and parsing each body for them was most of the cost of a list.
+-- Every writer of a body writes both from the same body in the same statement.
+-- The two have no default, so a row that no writer has written since the
+-- columns arrived holds NULL, and a reader takes the field out of the body
+-- for that row alone.
+--
 -- The seen table the scanner marks and sweeps against is not in this file.
 -- Every table this file names becomes a replicated table that gossips, and
 -- a mark on every row of every walk would flood the readers. The scanner
@@ -61,6 +69,8 @@ CREATE TABLE movies (
     slug TEXT NOT NULL DEFAULT '',
     set_id TEXT NOT NULL DEFAULT '',
     nfo_facts TEXT NOT NULL DEFAULT '',
+    content_rating TEXT,
+    tagline TEXT,
     PRIMARY KEY (library, id)
 );
 
@@ -124,6 +134,8 @@ CREATE TABLE series (
     body TEXT NOT NULL DEFAULT '{}',
     slug TEXT NOT NULL DEFAULT '',
     nfo_facts TEXT NOT NULL DEFAULT '',
+    content_rating TEXT,
+    tagline TEXT,
     PRIMARY KEY (library, id)
 );
 
@@ -161,6 +173,8 @@ CREATE TABLE episodes (
     season INTEGER NOT NULL DEFAULT 0,
     episode INTEGER NOT NULL DEFAULT 0,
     nfo_facts TEXT NOT NULL DEFAULT '',
+    content_rating TEXT,
+    tagline TEXT,
     PRIMARY KEY (library, id)
 );
 

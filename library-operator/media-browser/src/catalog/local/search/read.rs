@@ -41,8 +41,8 @@ fn titles(
 ) -> rusqlite::Result<()> {
     let sql = format!(
         "SELECT library, id, title, sort_key, released, art, duration, \
-                json_extract(body, '$.contentRating'), \
-                json_extract(body, '$.tagline'), \
+                IFNULL(content_rating, json_extract(body, '$.contentRating')), \
+                IFNULL(tagline, json_extract(body, '$.tagline')), \
                 json_extract(body, '$.plot'), {seasons} \
          FROM {table}",
         seasons = item::seasons(table),
