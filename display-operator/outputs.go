@@ -42,6 +42,10 @@ import (
 type Output struct {
 	// Connector is the kernel's own name: HDMI-A-1.
 	Connector string
+	// ConnectorID is the connector's DRM object id, from its
+	// connector_id file, which is how a hotplug event names it. It is
+	// empty on a kernel that publishes no such file.
+	ConnectorID string
 	// Connected reports a monitor on the wire. A connector whose
 	// status is unknown counts as disconnected, because a monitor
 	// that cannot be detected also answers no EDID.
@@ -183,9 +187,10 @@ func discoverOutputs(sysRoot, card string) []Output {
 		}
 		dir := filepath.Join(sysRoot, "class", "drm", entry.Name())
 		output := Output{
-			Connector: connector,
-			Connected: strings.TrimSpace(readFile(filepath.Join(dir, "status"))) == "connected",
-			Modes:     readModes(filepath.Join(dir, "modes")),
+			Connector:   connector,
+			ConnectorID: strings.TrimSpace(readFile(filepath.Join(dir, "connector_id"))),
+			Connected:   strings.TrimSpace(readFile(filepath.Join(dir, "status"))) == "connected",
+			Modes:       readModes(filepath.Join(dir, "modes")),
 		}
 		if edid, err := ParseEDID([]byte(readFile(filepath.Join(dir, "edid")))); err == nil {
 			output.Monitor = edid

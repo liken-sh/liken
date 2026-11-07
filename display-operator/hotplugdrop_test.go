@@ -72,6 +72,47 @@ func TestTheDisplayOfAShortDropKeepsItsStatus(t *testing.T) {
 	})
 }
 
+// An operator that starts while its screen is in a drop reads the
+// connector dark before it has read it lit. The Display it published
+// before carries the monitor, so the new process holds the screen for
+// the settle time like any other drop, and reports the panel gone only
+// if it stays away.
+func TestAnOperatorThatStartsDuringADropKeepsTheDisplay(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+		fixture.passes(2)
+		synctest.Wait()
+		writes := statusWrites(fixture)
+		events := len(fixture.events.About("Display", labDisplayName()))
+
+		fixture.present["HDMI-A-1"] = false
+		links := newLinkHistory()
+		var published []Display
+		for _, display := range fixture.displays {
+			published = append(published, *display)
+		}
+		links.seed(published, "liken-1", fixture.outputs())
+		view := newHotplugHold(nil, nil).view()
+		view.seed(rememberedScreens(fixture.outputs(), links))
+		fixture.control.outputs = view.wrap(fixture.outputs)
+		fixture.passes(1)
+		synctest.Wait()
+
+		if got := statusWrites(fixture) - writes; got != 0 {
+			t.Errorf("the first passes of the new operator made %d status writes, want none", got)
+		}
+
+		time.Sleep(hotplugSettle)
+		fixture.passes(1)
+		synctest.Wait()
+
+		got := eventLines(fixture.events.About("Display", labDisplayName())[events:])
+		if want := []string{"Normal NoPanel no panel on HDMI-A-1"}; !slices.Equal(got, want) {
+			t.Errorf("a panel that stayed away posted %q, want %q", got, want)
+		}
+	})
+}
+
 // The placement pass keeps a screen's windows and layout through a
 // short drop: the compositor destroys the output and creates it again,
 // and the Display reports the same windows before and after. A

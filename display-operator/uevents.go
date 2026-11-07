@@ -42,6 +42,10 @@ import (
 type drmEvent struct {
 	Action  string
 	DevPath string
+	// Connector is the DRM object id of the connector the kernel
+	// attached a hotplug to, from the CONNECTOR property, and empty
+	// when the event names the card alone.
+	Connector string
 }
 
 // parseUevent splits one datagram into its action, its DEVPATH, and
@@ -87,7 +91,7 @@ func drmEventFrom(datagram []byte) (drmEvent, bool) {
 	}
 	switch action {
 	case "add", "change", "remove":
-		return drmEvent{Action: action, DevPath: devpath}, true
+		return drmEvent{Action: action, DevPath: devpath, Connector: values["CONNECTOR"]}, true
 	}
 	return drmEvent{}, false
 }

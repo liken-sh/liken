@@ -78,38 +78,73 @@ func TestEachDropIsHeldForItsOwnSettleTime(t *testing.T) {
 
 // A burst of drops that no pass reads lit between is still a burst of
 // short drops. A hotplug event between two dark reads means the
-// connector moved since the last one, so the hold starts again from
-// the later read. With no event between them, the connector stayed
-// dark, and the hold ends at the settle time.
+// connector may have moved since the last one, so the hold starts
+// again from the later read. An event that names another connector
+// says nothing about this one, and neither does no event at all.
 func TestAHotplugEventBetweenDarkReadsStartsTheHoldAgain(t *testing.T) {
 	cases := []struct {
-		name  string
-		event bool
-		held  bool
+		name   string
+		events []drmEvent
+		held   bool
 	}{
-		{"an event between the reads", true, true},
-		{"no event between the reads", false, false},
+		{"an event that names no connector", []drmEvent{{Action: "change"}}, true},
+		{"an event that names this connector", []drmEvent{{Action: "change", Connector: "403"}}, true},
+		{"an event that names another connector", []drmEvent{{Action: "change", Connector: "409"}}, false},
+		{"no event between the reads", nil, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				var hotplugs atomic.Uint64
-				view := newHotplugHold(nil, hotplugs.Load).view()
-				view.apply([]Output{litOutput("HDMI-A-1", labMonitor())})
-				view.apply([]Output{darkOutput("HDMI-A-1")})
+				counts := newHotplugCounts()
+				view := newHotplugHold(nil, counts.count).view()
+				view.apply([]Output{numbered(litOutput("HDMI-A-1", labMonitor()))})
+				view.apply([]Output{numbered(darkOutput("HDMI-A-1"))})
 				time.Sleep(hotplugSettle - time.Second)
-				if c.event {
-					hotplugs.Add(2)
+				for _, event := range c.events {
+					counts.add(event)
 				}
-				view.apply([]Output{darkOutput("HDMI-A-1")})
+				view.apply([]Output{numbered(darkOutput("HDMI-A-1"))})
 				time.Sleep(2 * time.Second)
 
-				if got := view.apply([]Output{darkOutput("HDMI-A-1")})[0]; got.Held != c.held {
+				if got := view.apply([]Output{numbered(darkOutput("HDMI-A-1"))})[0]; got.Held != c.held {
 					t.Errorf("the connector reads held=%v, want %v", got.Held, c.held)
 				}
 			})
 		})
 	}
+}
+
+// numbered gives a reading the DRM object id the kernel gave
+// HDMI-A-1, which a hotplug event names it by.
+func numbered(output Output) Output {
+	output.ConnectorID = "403"
+	return output
+}
+
+// Events that name no connector start the hold again only until the
+// connector has been dark for hotplugCeiling. A neighbour on the same
+// card that drops every 3 seconds therefore delays the report of a
+// monitor that really left by at most the ceiling, and never hides it.
+func TestAFlappingNeighbourDelaysAnUnplugOnlyToTheCeiling(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		counts := newHotplugCounts()
+		view := newHotplugHold(nil, counts.count).view()
+		view.apply([]Output{litOutput("HDMI-A-1", labMonitor())})
+		dark := []Output{darkOutput("HDMI-A-1")}
+		view.apply(dark)
+		reported := time.Duration(0)
+		for elapsed := 3 * time.Second; elapsed <= hotplugCeiling+2*hotplugSettle; elapsed += 3 * time.Second {
+			time.Sleep(3 * time.Second)
+			counts.add(drmEvent{Action: "change"})
+			if got := view.apply(dark)[0]; !got.Held && reported == 0 {
+				reported = elapsed
+			}
+		}
+
+		if reported == 0 || reported > hotplugCeiling+hotplugSettle {
+			t.Errorf("the unplug was reported %v after it, want by %v", reported, hotplugCeiling+hotplugSettle)
+		}
+	})
 }
 
 // The readers of one hold share each connector's dark time, so the
@@ -211,14 +246,14 @@ func TestTheEndOfAHoldReachesTheLoop(t *testing.T) {
 // wakes reads a count that includes it.
 func TestEachDRMEventIsCountedBeforeItWakesThePass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var count atomic.Uint64
+		counts := newHotplugCounts()
 		in := make(chan drmEvent, 1)
-		out := countHotplugs(t.Context(), in, &count)
+		out := countHotplugs(t.Context(), in, counts)
 
-		in <- drmEvent{Action: "change", DevPath: "/devices/drm/card1"}
+		in <- drmEvent{Action: "change", DevPath: "/devices/drm/card1", Connector: "403"}
 		<-out
 
-		if got := count.Load(); got != 1 {
+		if got := counts.count("403"); got != 1 {
 			t.Errorf("the count is %d after one event, want 1", got)
 		}
 	})

@@ -133,3 +133,13 @@ func TestAReceiveErrorThatLostADatagramWakesTheLoop(t *testing.T) {
 		})
 	}
 }
+
+// A hotplug event that the kernel attaches to one connector names it
+// by its DRM object id in CONNECTOR, and the event carries that id, so
+// a hold can tell which connector moved.
+func TestAHotplugEventNamesItsConnector(t *testing.T) {
+	event, ok := drmEventFrom(datagram("change@"+cardPath, "SUBSYSTEM=drm", "HOTPLUG=1", "CONNECTOR=403"))
+	if !ok || event.Connector != "403" {
+		t.Errorf("drmEventFrom = %+v, %v; want the connector 403", event, ok)
+	}
+}

@@ -36,7 +36,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -299,9 +298,9 @@ func operate() {
 	}
 	// Each drm uevent is counted before it wakes a pass, so the hold
 	// can tell a connector that stayed dark from one that moved.
-	var hotplugs atomic.Uint64
-	uevents = countHotplugs(ctx, uevents, &hotplugs)
-	hold := newCardHold(retries, hotplugs.Load)
+	hotplugs := newHotplugCounts()
+	uevents = countHotplugs(ctx, uevents, hotplugs)
+	hold := newCardHold(retries, hotplugs.count)
 
 	// One walk of the card answers the Display controller and the
 	// placement pass, so the two name the same connectors and monitors,
@@ -309,10 +308,37 @@ func operate() {
 	// makes its own walk, behind a view of its own. The views share
 	// each connector's dark time, so all three report a monitor that
 	// left at one deadline.
-	screensOf := hold.view().wrap(func() []Output {
+	screensView := hold.view()
+	screensOf := screensView.wrap(func() []Output {
 		return screens(card, plugin.currentModes, plugin.connectorModes)
 	})
 	sliceHold := hold.view()
+
+	// The link history is the operator's own, one for the process,
+	// because the answer it holds is measured across passes.
+	links := newLinkHistory()
+	// A restarted operator starts with no history, and a machine that
+	// booted with its panel on another input has no EDID in sysfs
+	// either. The Display resources are what carry a node's screens
+	// across a restart, so the history starts from them. A read that
+	// fails costs the dark screens their identity until a monitor
+	// answers, which is the behavior of an operator with no seed, so it
+	// is reported and not fatal.
+	if displays, err := listDisplays(client); err != nil {
+		fmt.Fprintf(os.Stderr, "reading the screens this node last served: %v\n", err)
+	} else {
+		links.seed(displays, nodeName, discoverOutputs(sysRoot, card))
+	}
+	// An operator that starts during a drop reads its screen dark, and
+	// the Display controller would report the panel gone at once. The
+	// screens' view starts holding each screen the history remembers,
+	// so a screen that answers within the settle time changes nothing,
+	// and one that does not is reported at the hold's deadline.
+	screensView.seed(rememberedScreens(discoverOutputs(sysRoot, card), links))
+	// The prepare path reads the same history the slice is published
+	// from, so a claim on a dark screen is delivered exactly when the
+	// slice still publishes that screen.
+	plugin.links = links
 
 	// The Display controller runs beside the slice publisher and
 	// writes the panels' own resources. It reads the same connectors
@@ -416,28 +442,6 @@ func operate() {
 		restarts.pods = stores
 	}
 
-	// A write that failed schedules one more pass through the same
-	// channel every other source uses. The retry costs the loop no
-	// time and takes the same settle window.
-	// The link history is the operator's own, one for the process,
-	// because the answer it holds is measured across passes.
-	links := newLinkHistory()
-	// A restarted operator starts with no history, and a machine that
-	// booted with its panel on another input has no EDID in sysfs
-	// either. The Display resources are what carry a node's screens
-	// across a restart, so the history starts from them. A read that
-	// fails costs the dark screens their identity until a monitor
-	// answers, which is the behavior of an operator with no seed, so it
-	// is reported and not fatal.
-	if displays, err := listDisplays(client); err != nil {
-		fmt.Fprintf(os.Stderr, "reading the screens this node last served: %v\n", err)
-	} else {
-		links.seed(displays, nodeName, discoverOutputs(sysRoot, card))
-	}
-	// The prepare path reads the same history the slice is published
-	// from, so a claim on a dark screen is delivered exactly when the
-	// slice still publishes that screen.
-	plugin.links = links
 	publish := func() {
 		err := readings.reconciled(kindResourceSlice, func() error {
 			return reconcile(client, nodeName, owner, card, socketPath, plugin.currentModes, plugin.controls, links,

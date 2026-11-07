@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -238,5 +239,24 @@ func TestWithOfferedModesCarriesTheCardsWholeList(t *testing.T) {
 	// list, and the resource publishes no field.
 	if carried[1].OfferedModes != nil {
 		t.Errorf("the connector the card skipped carries %q", carried[1].OfferedModes)
+	}
+}
+
+// Each connector's DRM object id is in its connector_id file, the same
+// id a hotplug event names it by. A kernel that publishes no such file
+// answers none.
+func TestDiscoverOutputsReadsEachConnectorsID(t *testing.T) {
+	root := labSysfs(t)
+	if err := os.WriteFile(filepath.Join(root, "class", "drm", "card1-HDMI-A-1", "connector_id"), []byte("403\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ids := map[string]string{}
+	for _, output := range discoverOutputs(root, "card1") {
+		ids[output.Connector] = output.ConnectorID
+	}
+
+	if want := map[string]string{"DP-1": "", "HDMI-A-1": "403", "HDMI-A-2": ""}; !maps.Equal(ids, want) {
+		t.Errorf("the connector ids are %v, want %v", ids, want)
 	}
 }

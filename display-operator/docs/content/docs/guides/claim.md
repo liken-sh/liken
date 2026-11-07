@@ -362,7 +362,9 @@ detect for a fraction of a second several times a minute, and the
 monitor answers again with the same EDID each time. A drop that short
 changes nothing in the slice or on the `Display`: its windows,
 conditions, and `Event`s stay as they were. The compositor still
-disables the output for the length of each drop.
+disables the output for the length of each drop. While another
+connector of the same card keeps dropping, the report of a monitor
+that left can take up to 20 seconds.
 
 **A monitor moved to another connector.** A claim that selects by
 `model` or by `serial` instead of by `connector` follows the

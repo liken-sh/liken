@@ -117,13 +117,41 @@ The hold covers each drop alone. A burst of three drops spread over
 again. When no pass reads the port lit between two drops, the hold
 learns of the return from the uevents: the operator counts each drm
 uevent before it wakes a pass, and a dark read that finds the count
-moved since the last dark read starts the hold again. The kernel
-names the card in a hotplug uevent, not the connector, so a second
-connector that flaps on the same card also starts the hold again, and
-a monitor that left the first connector is reported only after the
-card has been quiet for the settle time.
+moved since the last dark read starts the hold again. A uevent that
+carries the `CONNECTOR` property names the connector by its DRM object
+id, which sysfs publishes in each connector's `connector_id` file, and
+counts for that connector alone. A uevent with no `CONNECTOR` names
+only the card, so it counts for every connector of the card, and a
+neighbour that flaps on the same card would start the hold again for
+as long as it flaps. So events start a hold again only until the
+connector has been dark for `hotplugCeiling`, 15 seconds, which covers
+a burst of 7 seconds twice over. A monitor that left is reported
+within 20 seconds of the first dark read in the worst case, and 5
+seconds after it when the card is quiet.
+
+An operator that starts while its screen is in a drop reads the
+connector dark before it has read it lit. The link history starts
+from the `Display` resources (`links.seed`), and the screens' view
+starts from the monitor that history remembers on each dark
+connector, so the first dark read starts a hold as it would for a
+drop the process saw begin. The slice's view needs no seed, because
+the link history already publishes a dark connector's remembered
+monitor with no taint.
 
 ## Considered and set aside
+
+- **A swap with no dark read between.** The link history marks a
+  replacement only when it reads the connector dark between two
+  monitors. A swap that finishes inside the slice publisher's settle
+  window of 1.5 seconds gives one pass that reads one monitor lit and
+  the next pass the other, so the device does not taint. Treating
+  every change of identity between two lit reads as a replacement
+  closes that gap, and was not built: plan 23 records that a receiver
+  in standby can pass the TV's own EDID through, which has another
+  identity, so the rule would end the pods on the screen each time
+  such a receiver turned on or off. The receiver measured here served
+  its own EDID in all 709 returns, standby and on, so it does not
+  decide the question for other receivers.
 
 - **A longer settle window on the uevents.** The slice publisher
   already waits for 1.5 seconds of quiet. The placement pass does not

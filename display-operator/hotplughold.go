@@ -32,7 +32,6 @@ package main
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -44,6 +43,16 @@ import (
 // pulls out is reported after this time and the settle window of the
 // slice publisher's loop.
 const hotplugSettle = 5 * time.Second
+
+// hotplugCeiling bounds how long hotplug events keep starting a hold
+// again. A uevent that names no connector can come from a neighbour on
+// the same card, and a neighbour that drops every few seconds would
+// otherwise hide a monitor that left this connector for as long as it
+// drops. Past the ceiling the hold runs out its settle time, so a
+// monitor that left is reported within hotplugCeiling plus
+// hotplugSettle. It covers the bursts plan 32 records, which last up to
+// 7 seconds.
+const hotplugCeiling = 3 * hotplugSettle
 
 // hotplugHold follows each connector across the walks of the card. It
 // holds when each connector was first read dark, which every reader
@@ -60,15 +69,19 @@ type hotplugHold struct {
 	// expired wakes a pass at the end of a hold. A nil expired arms no
 	// timer, for a reader whose own loop reads again.
 	expired func()
-	// hotplugs counts the drm uevents the operator has read. A nil
-	// hotplugs counts none.
-	hotplugs func() uint64
+	// hotplugs answers how many drm uevents the operator has read that
+	// may concern the connector with this DRM object id. A nil hotplugs
+	// counts none.
+	hotplugs func(connectorID string) uint64
 	// dark is when each held connector was first read dark, and the
 	// timer that ends its hold.
 	dark map[string]heldConnector
 }
 
 type heldConnector struct {
+	// first is the first dark read of this outage, and since the read
+	// the hold runs from. A hotplug event moves since and never first.
+	first time.Time
 	since time.Time
 	// seen is the hotplug count at the last dark read. A count that
 	// moved since says the connector may have answered and dropped
@@ -80,7 +93,7 @@ type heldConnector struct {
 	over bool
 }
 
-func newHotplugHold(expired func(), hotplugs func() uint64) *hotplugHold {
+func newHotplugHold(expired func(), hotplugs func(connectorID string) uint64) *hotplugHold {
 	return &hotplugHold{
 		now:      time.Now,
 		expired:  expired,
@@ -92,7 +105,7 @@ func newHotplugHold(expired func(), hotplugs func() uint64) *hotplugHold {
 // newCardHold is the operator's hold. The end of a hold schedules one
 // more pass through the channel a failed write retries on, so a monitor
 // that stayed away is reported at the deadline.
-func newCardHold(retries chan<- struct{}, hotplugs func() uint64) *hotplugHold {
+func newCardHold(retries chan<- struct{}, hotplugs func(connectorID string) uint64) *hotplugHold {
 	return newHotplugHold(func() {
 		select {
 		case retries <- struct{}{}:
@@ -110,6 +123,40 @@ type hotplugView struct {
 
 func (h *hotplugHold) view() *hotplugView {
 	return &hotplugView{hold: h, lit: map[string]Output{}}
+}
+
+// seed gives the view a lit reading for each output, as if it had read
+// it, so the first dark read of that connector starts a hold. A
+// connector the view has read already keeps its own reading.
+func (v *hotplugView) seed(outputs []Output) {
+	v.hold.mu.Lock()
+	defer v.hold.mu.Unlock()
+	for _, output := range outputs {
+		if _, read := v.lit[output.Connector]; !read {
+			v.lit[output.Connector] = output
+		}
+	}
+}
+
+// rememberedScreens answers a lit reading for each dark connector whose
+// monitor the link history remembers: the connector and the monitor's
+// identity, which is all a held reading needs, because a reader acts on
+// a held connector's identity alone.
+func rememberedScreens(outputs []Output, links *linkHistory) []Output {
+	var remembered []Output
+	for _, output := range outputs {
+		if output.Connected {
+			continue
+		}
+		monitor := links.remembered(output.Connector)
+		if monitorID(monitor) == "" {
+			continue
+		}
+		remembered = append(remembered, Output{
+			Connector: output.Connector, ConnectorID: output.ConnectorID, Connected: true, Monitor: monitor,
+		})
+	}
+	return remembered
 }
 
 // wrap puts the view in front of one walk of the card.
@@ -133,10 +180,6 @@ func (v *hotplugView) apply(outputs []Output) []Output {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := h.now()
-	var hotplugs uint64
-	if h.hotplugs != nil {
-		hotplugs = h.hotplugs()
-	}
 	held := make([]Output, len(outputs))
 	for i, output := range outputs {
 		held[i] = output
@@ -150,11 +193,18 @@ func (v *hotplugView) apply(outputs []Output) []Output {
 		if !seen {
 			continue
 		}
-		dark, holding := h.dark[connector]
-		if !holding || (!dark.over && dark.seen != hotplugs) {
-			h.start(connector, now, hotplugs)
-			dark = h.dark[connector]
+		var hotplugs uint64
+		if h.hotplugs != nil {
+			hotplugs = h.hotplugs(output.ConnectorID)
 		}
+		dark, holding := h.dark[connector]
+		switch {
+		case !holding:
+			h.start(connector, now, now, hotplugs)
+		case !dark.over && dark.seen != hotplugs && now.Sub(dark.first) < hotplugCeiling:
+			h.start(connector, dark.first, now, hotplugs)
+		}
+		dark = h.dark[connector]
 		if dark.over || now.Sub(dark.since) >= hotplugSettle {
 			dark.over = true
 			h.dark[connector] = dark
@@ -169,9 +219,9 @@ func (v *hotplugView) apply(outputs []Output) []Output {
 
 // start begins one connector's hold at this read, and arms the timer
 // that ends it. The caller holds the lock.
-func (h *hotplugHold) start(connector string, now time.Time, hotplugs uint64) {
+func (h *hotplugHold) start(connector string, first, now time.Time, hotplugs uint64) {
 	h.release(connector)
-	dark := heldConnector{since: now, seen: hotplugs}
+	dark := heldConnector{first: first, since: now, seen: hotplugs}
 	if h.expired != nil {
 		dark.timer = time.AfterFunc(hotplugSettle, h.expired)
 	}
@@ -190,10 +240,41 @@ func (h *hotplugHold) release(connector string) {
 	}
 }
 
+// hotplugCounts counts the drm uevents the operator has read: the
+// ones that name no connector, which may concern any connector of the
+// card, and the ones that name one connector by its DRM object id.
+type hotplugCounts struct {
+	mu       sync.Mutex
+	any      uint64
+	ofObject map[string]uint64
+}
+
+func newHotplugCounts() *hotplugCounts {
+	return &hotplugCounts{ofObject: map[string]uint64{}}
+}
+
+func (c *hotplugCounts) add(event drmEvent) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if event.Connector == "" {
+		c.any++
+		return
+	}
+	c.ofObject[event.Connector]++
+}
+
+// count answers the events that may concern one connector: every event
+// that names no connector, and every one that names this one.
+func (c *hotplugCounts) count(connectorID string) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.any + c.ofObject[connectorID]
+}
+
 // countHotplugs forwards the kernel's drm events and counts each one
 // before the pass it wakes reads the card, so a hold can tell a
 // connector that stayed dark from one that moved between two reads.
-func countHotplugs(ctx context.Context, in <-chan drmEvent, count *atomic.Uint64) <-chan drmEvent {
+func countHotplugs(ctx context.Context, in <-chan drmEvent, counts *hotplugCounts) <-chan drmEvent {
 	out := make(chan drmEvent, cap(in))
 	go func() {
 		defer close(out)
@@ -205,7 +286,7 @@ func countHotplugs(ctx context.Context, in <-chan drmEvent, count *atomic.Uint64
 				if !ok {
 					return
 				}
-				count.Add(1)
+				counts.add(event)
 				select {
 				case out <- event:
 				case <-ctx.Done():
