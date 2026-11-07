@@ -265,16 +265,21 @@ repairs: `no-monitor` clears when the cable returns, and `no-sink`
 clears only when the pod is replaced and PipeWire declares its nodes
 again.
 
-The operator waits 5 seconds before it reports a monitor gone. An A/V
-receiver in standby can drop hot plug detect for a fraction of a
-second several times a minute, and the graphics driver clears the
-slot's ELD on each drop and writes the same block again when the
-receiver answers. A drop shorter than 5 seconds changes nothing in
-the slice or on the `Sink`, and the channel layout that the ELD gives
-stays, so PipeWire does not restart for it. An operator that starts
-while a slot reads no monitor waits the same 5 seconds before it
-publishes the slot, and its init container waits up to 5 seconds
-for the slot's monitor before it declares the slot's layout.
+The operator reports a monitor gone only after its slot has read no
+monitor for 5 seconds. An A/V receiver in standby can drop hot plug
+detect for a fraction of a second several times a minute, and the
+graphics driver clears the slot's ELD on each drop and writes the
+same block again when the receiver answers. A drop that short changes
+nothing in the slice or on the `Sink`, and the channel layout that the
+ELD gives stays, so PipeWire does not restart for it. While the slot's
+ELD keeps changing, the report of a monitor that left can take up to
+20 seconds.
+
+An operator that starts while a slot is in a drop holds the slot from
+the monitor the previous operator published on it. Its init container
+waits up to 5 seconds for that monitor before it declares the slot's
+layout, and only for a slot whose `Sink` reports a monitor, so the
+HDMI slots that never had one cost no wait.
 
 The analog jack has none of these while its sink is up. Most codecs
 report nothing about the socket, and no signal can prove that sound

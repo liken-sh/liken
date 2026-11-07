@@ -238,16 +238,7 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 	// arrived since the last pass reports its own changes from here
 	// on, and a card whose reader stopped is open again.
 	r.cards.follow(controlCards())
-	// A slot in a short hotplug drop reads as its last reading with a
-	// monitor, so this pass publishes nothing about the drop
-	// (monitorhold.go).
 	outputs, err := r.readCard()
-	outputs = r.monitors.apply(outputs)
-	if err == nil && r.monitors.unsettled(outputs) {
-		fmt.Fprintf(os.Stderr, "an HDMI slot reads no monitor less than %s after the start; "+
-			"the published slice stays until it answers or that time has passed\n", monitorSettle)
-		return nil
-	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the card's outputs: %v\n", err)
 		return nil
@@ -308,7 +299,13 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 	// endpoint whose identity this operator cannot read reaches no
 	// slice and no claim. The inventory holds what was named, because
 	// that is the set a prepare call can name.
+	//
+	// A slot in a short hotplug drop reads as its last reading with a
+	// monitor, so this pass publishes nothing about the drop. The hold
+	// reads the named endpoints, because the seeds the previous
+	// operator's slice gives it are by device name (monitorhold.go).
 	endpoints, refused := nameEndpoints(r.nodeName, outputs)
+	endpoints = r.monitors.apply(endpoints)
 	r.reportRefusals(refused)
 	r.endpoints.publish(endpoints)
 	refreshCDISpecs(r.endpoints, graph)

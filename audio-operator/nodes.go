@@ -352,10 +352,16 @@ const declareMode = "declare"
 // map as the sources (layoutspec.go).
 func declare() {
 	// A slot read during a hotplug drop reads no monitor and would
-	// declare stereo, so the read waits out a drop (monitorhold.go).
+	// declare stereo, so a slot whose Sink reports a monitor and that
+	// reads empty is waited for, up to the settle time (monitorhold.go).
+	// The events open before the first read.
 	ctx, cancel := context.WithTimeout(context.Background(), monitorSettle)
 	defer cancel()
-	outputs, err := awaitMonitors(readEndpoints, cardChanges(ctx), monitorSettle)
+	changes := cardChanges(ctx)
+	outputs, err := readEndpoints()
+	if err == nil {
+		outputs, err = awaitMonitors(readEndpoints, declaredMonitors(outputs), changes, monitorSettle)
+	}
 	if err != nil {
 		fatal("reading the card's outputs: %v", err)
 	}

@@ -285,6 +285,9 @@ func operate() {
 		// stayed away is reported at the hold's deadline.
 		monitors: newMonitorHold(wake),
 	}
+	// A slot in a drop when the operator starts is held from the
+	// monitor the previous operator published on it.
+	operator.monitors.seed(readPublishedSeeds(client, nodeName))
 	// The one recorder of the operator container. It posts the Events
 	// about this machine's Sinks and Sources, with the pod's name as
 	// reportingInstance.

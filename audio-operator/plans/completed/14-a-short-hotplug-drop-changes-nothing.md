@@ -49,16 +49,17 @@ display-operator's `hotplugCeiling`, so both report a monitor that
 left within 20 seconds in the worst case and 5 seconds when the slot
 is quiet.
 
-An operator that starts while a slot is in a drop has no reading
-with a monitor to hold. For the first 5 seconds after the start, a
-pass that reads an HDMI slot empty that it never read with a monitor
-publishes nothing, so the slice the previous operator published
-stays, and a timer wakes the pass at the end of that time. The init
-container reads the card through `awaitMonitors`: when a slot reads
-empty, it waits up to 5 seconds for the slot's ELD to change and
-reads again, so a drop at the start does not declare stereo. A
-machine with nothing on an HDMI port pays that wait on each start
-before PipeWire starts. The analog jack and the USB card are not
+An operator that starts while a slot is in a drop has read no monitor
+on it. The slice the previous operator published names each slot it
+published with a monitor, with every fact of the ELD it read, so the
+operator rebuilds those blocks (`monitorSeeds`) and the hold starts
+from them. The first empty read of such a slot, on the first pass,
+starts a hold like any other drop, and every other output publishes
+at once. The init container reads the card through `awaitMonitors`:
+when a slot whose `Sink` reports a monitor reads empty, it waits up to
+5 seconds for the slot's ELD to change and reads again, so a drop at
+the start does not declare stereo. A GPU's other HDMI slots, which
+have never had a monitor, are not waited for. The analog jack and the USB card are not
 held: neither carries an ELD, and this drop is an HDMI fault.
 
 ## The drill

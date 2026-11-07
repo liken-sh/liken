@@ -6,9 +6,11 @@ package main
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -128,105 +130,147 @@ func TestAMonitorHoldEndsByTheCeiling(t *testing.T) {
 	})
 }
 
-// An operator that starts while an HDMI slot is in a drop has no
-// reading with a monitor to hold. Its passes publish nothing until the
-// slot answers or the settle time since the start has passed, so the
-// slice the previous operator published stays, and a monitor that
-// answers within the settle time costs no taint. A slot still empty at
-// the end is published with the no-monitor taint.
-func TestAnOperatorThatStartsDuringADropWaitsOutTheSettleTime(t *testing.T) {
-	cases := []struct {
-		name    string
-		wait    time.Duration
-		answers bool
-		taint   bool
-	}{
-		{"a monitor that answers inside the settle time", monitorSettle / 2, true, false},
-		{"a monitor that stays away", monitorSettle, false, true},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				slot := newSlotPass(t)
-				if first := slot.run(); first != nil || len(slot.api.requests) != 0 {
-					t.Fatalf("the first pass during a drop published %+v with %v", first, slot.api.requests)
-				}
+// A slice device carries every fact of the ELD the operator publishes,
+// so the next operator can rebuild the block from it and hold the slot
+// as if it had read it.
+func TestAPublishedDeviceGivesBackItsELD(t *testing.T) {
+	for _, name := range []string{"eld-hdmi-lg-ultrawide.bin", "eld-displayport-dell-u2415.bin"} {
+		t.Run(name, func(t *testing.T) {
+			block := *eldFixture(t, name)
+			device := sliceDevices(named(alsaEndpoint{Card: 0, PCM: 3, HDMI: true, Monitor: true, ELD: block}),
+				nil, outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: sinkNodeName(0, 3)}))[0]
 
-				time.Sleep(c.wait)
-				if c.answers {
-					slot.block = eldFixture(t, "eld-hdmi-lg-ultrawide.bin")
-				}
-				published := slot.run()
+			got, ok := publishedELD(device)
 
-				if len(published) != 1 || hasTaint(published[0], noMonitorTaint) != c.taint {
-					t.Errorf("the slot published %+v, want the %s taint %v", published, noMonitorTaint, c.taint)
-				}
-			})
+			if !ok || !reflect.DeepEqual(got, block) {
+				t.Errorf("the device gives back %+v (%v), want %+v", got, ok, block)
+			}
 		})
 	}
 }
 
-// A read too early to publish wakes one pass when the start's settle
-// time ends, so a slot that stays empty is published then.
-func TestAnEarlyReadWakesOnePassAtTheEndOfTheStart(t *testing.T) {
+// Only a device the slice published with a monitor seeds a hold: a
+// device tainted for no monitor, and a device with no ELD facts at
+// all, seed nothing.
+func TestTheSeedsAreTheDevicesPublishedWithAMonitor(t *testing.T) {
+	graph := outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: sinkNodeName(0, 3)})
+	lit := sliceDevices(named(alsaEndpoint{Card: 0, PCM: 3, HDMI: true, Monitor: true,
+		ELD: *eldFixture(t, "eld-hdmi-lg-ultrawide.bin")}), nil, graph)
+	empty := sliceDevices(named(alsaEndpoint{Card: 0, PCM: 3, HDMI: true}), nil, graph)
+	analog := sliceDevices(named(alsaEndpoint{Card: 0, PCM: 0}), nil, graph)
+	cases := []struct {
+		name    string
+		devices []SliceDevice
+		want    []string
+	}{
+		{"a device with a monitor", lit, []string{testSinkName}},
+		{"a device with no monitor", empty, nil},
+		{"an analog device", analog, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			seeds := monitorSeeds(&ResourceSlice{Spec: ResourceSliceSpec{Devices: c.devices}})
+			if got := slices.Sorted(maps.Keys(seeds)); !slices.Equal(got, c.want) {
+				t.Errorf("the seeds are %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// An operator that starts while an HDMI slot is in a drop holds the
+// slot from the monitor the previous operator published on it, so the
+// slice stays as it was, and a monitor that stays away is published
+// with the no-monitor taint at the end of the hold. The hold's clock
+// starts at the first pass that reads the slot empty.
+func TestAnOperatorThatStartsDuringADropHoldsThePublishedMonitor(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var wakes atomic.Int64
-		hold := newMonitorHold(func() { wakes.Add(1) })
-		hold.unsettled([]alsaEndpoint{darkSlot()})
-		hold.unsettled([]alsaEndpoint{darkSlot()})
+		before := newSlotPass(t)
+		before.block = eldFixture(t, "eld-hdmi-lg-ultrawide.bin")
+		published := before.run()
+		time.Sleep(time.Minute)
+
+		slot := newSlotPass(t)
+		slot.api.existing = before.api.created
+		slot.operator.monitors.seed(monitorSeeds(before.api.created))
+		if changed := slot.run(); changed != nil {
+			t.Errorf("the first pass during a drop published %+v, want the slice as it was:\n%+v", changed, published)
+		}
 
 		time.Sleep(monitorSettle)
-		synctest.Wait()
-
-		if got := wakes.Load(); got != 1 {
-			t.Errorf("the start woke %d passes, want 1", got)
+		changed := slot.run()
+		if len(changed) != 1 || !hasTaint(changed[0], noMonitorTaint) {
+			t.Errorf("a monitor that stayed away published %+v, want the %s taint", changed, noMonitorTaint)
 		}
 	})
 }
 
 // The init container reads the card before PipeWire starts, and an
-// empty slot gives a stereo layout. So it waits for the slot's ELD to
-// change, up to the settle time, and reads again. A card with no empty
-// slot is read once.
-func TestTheDeclarationWaitsForAnEmptySlot(t *testing.T) {
+// empty slot gives a stereo layout. So when a slot that the previous
+// operator published with a monitor reads empty, it waits for an ELD
+// change, up to the settle time, and reads again. A slot nobody
+// published with a monitor, which is most of a GPU's HDMI slots, is
+// never waited for.
+func TestTheDeclarationWaitsOnlyForAnExpectedMonitor(t *testing.T) {
 	cases := []struct {
-		name    string
-		first   alsaEndpoint
-		change  bool
-		monitor bool
-		reads   int
+		name     string
+		expected bool
+		change   bool
+		monitor  bool
+		reads    int
+		waited   time.Duration
 	}{
-		{"a slot whose monitor answers", darkSlot(), true, true, 2},
-		{"a slot that stays empty", darkSlot(), false, false, 1},
-		{"a slot with a monitor", alsaEndpoint{}, false, true, 1},
+		{"an expected monitor that answers", true, true, true, 2, 0},
+		{"an expected monitor that stays away", true, false, false, 1, monitorSettle},
+		{"a slot nobody published with a monitor", false, false, false, 1, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				first := c.first
-				if !first.HDMI {
-					first = litSlot(t)
-				}
 				reads := 0
 				read := func() ([]alsaEndpoint, error) {
 					reads++
 					if reads > 1 {
 						return []alsaEndpoint{litSlot(t)}, nil
 					}
-					return []alsaEndpoint{first}, nil
+					return []alsaEndpoint{darkSlot()}, nil
 				}
+				waitFor := func(outputs []alsaEndpoint) bool { return c.expected && !outputs[0].Monitor }
 				changes := make(chan controlEvent, 1)
 				if c.change {
 					changes <- controlEvent{Card: 0, Device: 3, Name: eldElementName}
 				}
 
-				outputs, err := awaitMonitors(read, changes, monitorSettle)
+				start := time.Now()
+				outputs, err := awaitMonitors(read, waitFor, changes, monitorSettle)
+				waited := time.Since(start)
 
-				if err != nil || reads != c.reads || outputs[0].Monitor != c.monitor {
-					t.Errorf("the declaration read %d times and found monitor=%v (%v), want %d and %v",
-						reads, outputs[0].Monitor, err, c.reads, c.monitor)
+				if err != nil || reads != c.reads || outputs[0].Monitor != c.monitor || waited != c.waited {
+					t.Errorf("the declaration read %d times in %v and found monitor=%v (%v), want %d in %v and %v",
+						reads, waited, outputs[0].Monitor, err, c.reads, c.waited, c.monitor)
 				}
 			})
+		})
+	}
+}
+
+// expectedEmpty answers the declaration's wait for one Sink: a slot
+// whose Sink reports a monitor, and that reads empty now, is waited for.
+func TestTheDeclarationExpectsTheMonitorsTheSinksReport(t *testing.T) {
+	slot := named(darkSlot())[0]
+	cases := []struct {
+		name  string
+		sinks map[string]Sink
+		want  bool
+	}{
+		{"a Sink that reports a monitor", map[string]Sink{testSinkName: {Status: SinkStatus{EndpointStatus: EndpointStatus{Monitor: &EndpointMonitor{Display: "gsm-7716"}}}}}, true},
+		{"a Sink with no monitor", map[string]Sink{testSinkName: {}}, false},
+		{"no Sink", map[string]Sink{}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := expectedEmpty(c.sinks)([]alsaEndpoint{slot}); got != c.want {
+				t.Errorf("the declaration waits: %v, want %v", got, c.want)
+			}
 		})
 	}
 }
