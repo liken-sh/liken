@@ -116,9 +116,9 @@ The poll reads more only on a trigger:
   in the WiiM Home app, which pushes no event. The subscriptions open
   before the read, after `getStatusEx` has checked the identity. A
   full read in which a command that answered before failed is done
-  again on the next poll. A command that has never answered is one the
-  model does not serve: the client logs it once and reads it again
-  only on the next full read.
+  again on the next poll, for at most 3 full reads in a row. After
+  that, and for a command that has never answered, the client logs the
+  command once and reads it again only on the next full read.
 - The family of a setter, read back right after the setter: the
   balance, `getStatusEx` for the name, the controls for the light and
   the buttons, and `getShutdown` for the sleep timer. The read back
@@ -134,6 +134,9 @@ unreachable, it clears its readings, so the gauges leave the scrape,
 and it keeps its subscriptions: an amp that was only cut off still
 holds them, and new ones would leave two more on the amp for each
 outage. The renewal on the first answered poll keeps or replaces them.
+The amp does not send again an event the client missed, and a renewal
+brings no full state, so that poll applies its own volume, mute, and
+play state over the evented ones.
 
 `status.wiim` leaves out each value that changes on its own between
 two reads, because each status write reaches every watcher of every

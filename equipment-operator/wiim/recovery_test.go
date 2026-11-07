@@ -12,6 +12,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/equipment-operator/equipment"
 )
 
 // newTrack makes the fake's player report another track.
@@ -194,4 +196,59 @@ func countOf(commands []string, command string) int {
 		commands = commands[index+1:]
 	}
 	return count
+}
+
+// A command that answered once and then fails on every full read is
+// given a bounded number of full reads, then left to the backstop, so
+// it does not make every poll a full read.
+func TestACommandThatStopsAnsweringWaitsForTheBackstop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp, client := quietAmp(t)
+		breakCommand(amp, balanceCommand, true)
+		time.Sleep(settingsResync)
+		for range readRetries {
+			client.poll(context.Background())
+		}
+
+		amp.clear()
+		client.poll(context.Background())
+
+		mustMatch(t, amp.sent(), []string{statusCommand, playerCommand})
+	})
+}
+
+// The amp sends no event it missed while the client could not reach it,
+// and a renewal brings no full state, so the first poll the amp answers
+// after a miss takes the volume from the poll and not from the events.
+func TestAPollAfterAMissTakesTheVolumeFromTheAmp(t *testing.T) {
+	cases := []struct {
+		name   string
+		misses int
+	}{
+		{"one missed poll", 1},
+		{"an outage", pollFailures},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				amp, _, client := subscribedAmpWithEvents(t)
+				client.poll(context.Background())
+				amp.mutex.Lock()
+				amp.failing = http.StatusInternalServerError
+				amp.mutex.Unlock()
+				for range one.misses {
+					client.poll(context.Background())
+				}
+
+				amp.mutex.Lock()
+				amp.failing = 0
+				amp.mutex.Unlock()
+				amp.answer(playerCommand, strings.Replace(playerJSON, `"vol":"31"`, `"vol":"55"`, 1))
+				client.poll(context.Background())
+
+				mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 55)
+				mustMatch(t, client.subscribed(renderControlPath), true)
+			})
+		})
+	}
 }

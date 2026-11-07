@@ -160,9 +160,11 @@ the `Receiver`s: `equipment-operator`, both CEC pods, and
   and the client subscribes again and reads every family. An amp that
   was only cut off takes the renewal, so an outage leaves no extra
   subscription on the amp. A full read in which a command that
-  answered before failed is done again on the next poll. A command
-  that never answered waits for the backstop, as the Unsupported tier
-  in `AGENTS.md` requires.
+  answered before failed is done again on the next poll, for at most 3
+  full reads in a row. A command that never answered waits for the
+  backstop, as the Unsupported tier in `AGENTS.md` requires. The first
+  poll after a miss applies its own volume, mute, and play state,
+  because the amp does not resend an event the client missed.
 * The read after a write reads only the family of each field the amp
   took: `getChannelBalance`, `getStatusEx` for the name, and the
   controls for the light and the buttons. A sleep timer is read back

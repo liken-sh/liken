@@ -71,6 +71,12 @@ const maxSleepMinutes = 1440
 // every poll. A track change starts the count again.
 const trackRetries = 3
 
+// readRetries bounds the full reads in a row that a command which
+// answered before may fail before the client leaves it to the backstop,
+// so a command that stopped answering does not make every poll a full
+// read, each one waiting out requestTimeout.
+const readRetries = 3
+
 // volumeStepMax is the top of the device's own scale, which reads 0 to
 // 100 in whole steps.
 const volumeStepMax = 100
@@ -141,11 +147,14 @@ type Client struct {
 	// before, so a poll tells a full read that answered from one that did
 	// not. answeredOnce holds each command that has answered, and silent
 	// each command that failed before it ever answered, which is logged
-	// once. trackFailures counts the getMetaInfo requests in a row that
-	// failed. Only the holder of reads touches any of them.
+	// once. failedReads counts the failed reads in a row of each command
+	// that answered before. trackFailures counts the getMetaInfo
+	// requests in a row that failed. Only the holder of reads touches any
+	// of them.
 	readFailures  int
 	answeredOnce  map[string]bool
 	silent        map[string]bool
+	failedReads   map[string]int
 	trackFailures int
 	// misses counts the polls in a row the device did not answer, cleared
 	// by the next poll it does.
@@ -323,7 +332,8 @@ func (c *Client) poll(ctx context.Context) bool {
 		c.miss()
 		return true
 	}
-	if c.answered() {
+	missed := c.answered()
+	if missed {
 		// An amp that missed a poll may have rebooted, and a reboot drops
 		// its subscriptions while the client still holds them. A renewal
 		// asks the amp whether it holds them: it refuses a SID it does not
@@ -355,8 +365,14 @@ func (c *Client) poll(ctx context.Context) bool {
 	c.readOwed(ctx, &next)
 
 	// A poll's reads were taken before any event that arrived while it
-	// ran, so the evented fields keep the event's value.
-	c.mergeEvents(&next)
+	// ran, so the evented fields keep the event's value. The first poll
+	// after a miss is the exception: the amp does not send again an
+	// event the client missed while it could not reach the amp, and a
+	// renewal brings no full state, so the held values can be stale and
+	// the poll's own read is the newest answer.
+	if !missed {
+		c.mergeEvents(&next)
+	}
 	// The survey is marked before the publish, so the event the publish
 	// sends already reports it.
 	c.mutex.Lock()
@@ -628,6 +644,8 @@ func (c *Client) read(ctx context.Context, command string, parse func([]byte)) {
 		c.answeredOnce = map[string]bool{}
 	}
 	c.answeredOnce[command] = true
+	delete(c.failedReads, command)
+	delete(c.silent, command)
 	if isMiss(body) {
 		return
 	}
@@ -635,19 +653,31 @@ func (c *Client) read(ctx context.Context, command string, parse func([]byte)) {
 }
 
 // readFailed records one failed request of a read.
+//
+// A command that answered before counts in readFailures, so the poll
+// reads every family again, for readRetries reads in a row. After that,
+// and for a command that has never answered, the command is silent: it
+// is logged once and read again only on the next full read of the
+// backstop.
 func (c *Client) readFailed(command string, err error) {
-	if c.answeredOnce[command] {
-		c.readFailures++
+	if c.silent[command] {
 		return
+	}
+	if c.answeredOnce[command] {
+		if c.failedReads == nil {
+			c.failedReads = map[string]int{}
+		}
+		c.failedReads[command]++
+		if c.failedReads[command] < readRetries {
+			c.readFailures++
+			return
+		}
 	}
 	if c.silent == nil {
 		c.silent = map[string]bool{}
 	}
-	if c.silent[command] {
-		return
-	}
 	c.silent[command] = true
-	fmt.Fprintf(os.Stderr, "wiim: %s has not answered %s, so the client reads it again only on its next read of every family: %v\n", c.address, command, err)
+	fmt.Fprintf(os.Stderr, "wiim: %s does not answer %s, so the client reads it again only on its next read of every family: %v\n", c.address, command, err)
 }
 
 // isMiss answers whether a body is one of the device's words for a
