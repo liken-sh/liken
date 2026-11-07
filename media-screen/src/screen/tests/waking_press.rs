@@ -116,7 +116,7 @@ fn a_press_on_a_dark_panel_only_wakes_it_and_lights_the_panel() {
 #[test]
 fn back_on_the_shade_only_lifts_it() {
     let now = Instant::now();
-    for name in keys::BACK {
+    for name in ["KEY_BACK", "KEY_ESC", "KEY_EXIT", "KEY_BACKSPACE"] {
         let mut screen = shaded(now);
 
         assert_eq!(

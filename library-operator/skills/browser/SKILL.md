@@ -79,8 +79,8 @@ When nothing plays and no press arrives for the `Player`'s
 `fadeAfterSeconds`, the browser draws a black shade over the catalog.
 The press that lifts the shade also acts on the screen under it, so
 the first press of down moves focus and the first press of select
-opens the card in focus. Back is the one key that only lifts the
-shade. The browser never lowers the shade on back, but the stock idle
+opens the card in focus. Back and backspace only lift the shade. The
+browser never lowers the shade on back, but the stock idle
 screen does, and one rule for every screen keeps a press of back from
 undoing the wake there. When three hours have passed with no press
 and the cluster holds a `Person`, that first press raises the person

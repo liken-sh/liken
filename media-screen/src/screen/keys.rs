@@ -16,15 +16,18 @@
 /// is the same name during a film and between films.
 pub const CYCLE: &str = "KEY_CYCLEWINDOWS";
 
-/// The three back synonyms. A shell sends whichever one it was built
-/// with, so a client reads all three. This crate never sleeps the
+/// The keys a client reads as back: the three back synonyms, because a
+/// shell sends whichever one it was built with, and `KEY_BACKSPACE`,
+/// which the media browser reads as back on every screen but the search
+/// wall, where it deletes a character. A client reads all four. This
+/// crate never sleeps the
 /// screen on a press: only the client knows whether back has anywhere
 /// to go, and the client asks for the shade with
 /// [`super::Screen::sleep`]. Back on the shade only lifts it and never
 /// reaches the client. The stock idle screen lowers the shade on back,
 /// and one rule for every client keeps a press of back from undoing the
 /// wake there.
-pub const BACK: [&str; 3] = ["KEY_BACK", "KEY_ESC", "KEY_EXIT"];
+pub const BACK: [&str; 4] = ["KEY_BACK", "KEY_ESC", "KEY_EXIT", "KEY_BACKSPACE"];
 
 /// The four power keys: the two power synonyms a shell and a Bluetooth
 /// remote send, which toggle, and the names the kernel's `rc-cec` keymap
@@ -89,10 +92,10 @@ mod tests {
     }
 
     #[test]
-    fn the_three_back_synonyms_are_the_clients_to_answer() {
-        for key in BACK {
-            assert!(back(key));
-            assert!(!owned(key));
+    fn every_key_a_client_reads_as_back_is_the_clients_to_answer() {
+        for key in ["KEY_BACK", "KEY_ESC", "KEY_EXIT", "KEY_BACKSPACE"] {
+            assert!(back(key), "{key}");
+            assert!(!owned(key), "{key}");
         }
         assert!(!back("KEY_UP"));
     }

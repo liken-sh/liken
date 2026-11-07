@@ -98,10 +98,11 @@ on every wake, and on any real button that the kernel also reports as
 
 A press on a sleeping idle screen lifts the shade and acts on the
 screen in the same press, except back. A button that reaches the
-screen as `KEY_BACK`, `KEY_ESC`, or `KEY_EXIT`, from the base mapping
-or from a `Keymap` row, only lifts the shade, on every screen. The
-stock idle screen lowers the shade on back, and one rule for every
-screen keeps a press of back from undoing the wake there.
+screen as `KEY_BACK`, `KEY_ESC`, `KEY_EXIT`, or `KEY_BACKSPACE`, from
+the base mapping or from a `Keymap` row, only lifts the shade, on
+every screen. The stock idle screen lowers the shade on back, and one
+rule for every screen keeps a press of back from undoing the wake
+there.
 
 If the controller has modes, press every button in every mode. A
 combined remote can emit different codes for one button per mode. An

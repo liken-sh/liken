@@ -220,8 +220,9 @@ twice after each quiet stretch. A press while the panel is off only
 wakes the screen and states the `on` desire, because the person
 pressed at a dark TV and could not see what the press would act on.
 The panel is off after the off window runs out, and after the client
-receives `sleep` on the power topic. Back, `KEY_BACK`, `KEY_ESC`, or
-`KEY_EXIT`, on a sleeping screen only wakes it too, for every client.
+receives `sleep` on the power topic. Back, `KEY_BACK`, `KEY_ESC`,
+`KEY_EXIT`, or `KEY_BACKSPACE`, on a sleeping screen only wakes it too,
+for every client.
 The operator's own client lowers the shade on back, and one rule for
 every client keeps a press of back from undoing the wake there. A
 repeat that finds the screen asleep only wakes it. The client
