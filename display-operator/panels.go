@@ -49,8 +49,12 @@ func (c *panelControls) factsFor(output Output) panelFacts {
 	for {
 		c.mu.Lock()
 		if probed, known := c.probed[output.Connector]; known && probed.monitor == output.Monitor && !c.askAgain(probed) {
+			// The copy is made under the lock, because a restore that
+			// runs on its own goroutine records each readback in the
+			// same map (observe).
+			facts := probed.facts.copy()
 			c.mu.Unlock()
-			return probed.facts.copy()
+			return facts
 		}
 		running, probing := c.probing[output.Connector]
 		if !probing {
