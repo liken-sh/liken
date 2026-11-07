@@ -25,6 +25,9 @@ package main
 // read.
 
 import (
+	"context"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -35,6 +38,12 @@ import (
 // display-operator's plan 32 records, so the screen and its speakers
 // report a monitor that left at the same time.
 const monitorSettle = 5 * time.Second
+
+// monitorCeiling bounds how long ELD changes keep starting a hold again,
+// so a slot whose ELD keeps changing is reported within monitorCeiling
+// plus monitorSettle. It is display-operator's hotplugCeiling, so the
+// screen and its speakers report a monitor that left by the same bound.
+const monitorCeiling = 3 * monitorSettle
 
 // monitorHold follows each HDMI slot across the passes. The reconcile
 // pass reads through it, and the loop's wakes report each ELD change
@@ -52,9 +61,17 @@ type monitorHold struct {
 	dark map[pcmAddress]heldSlot
 	// changes counts the ELD changes the card reported on each slot.
 	changes map[pcmAddress]uint64
+	// started is when the process made the hold, and waiting is the
+	// timer that wakes a pass when the start's settle time ends, armed
+	// by the first read that is too early to publish.
+	started time.Time
+	waiting *time.Timer
 }
 
 type heldSlot struct {
+	// first is the first empty read of this outage, and since the read
+	// the hold runs from. An ELD change moves since and never first.
+	first time.Time
 	since time.Time
 	// seen is the slot's change count at the last empty read.
 	seen  uint64
@@ -62,13 +79,46 @@ type heldSlot struct {
 }
 
 func newMonitorHold(expired func()) *monitorHold {
-	return &monitorHold{
+	h := &monitorHold{
 		now:     time.Now,
 		expired: expired,
 		lit:     map[pcmAddress]alsaEndpoint{},
 		dark:    map[pcmAddress]heldSlot{},
 		changes: map[pcmAddress]uint64{},
 	}
+	h.started = h.now()
+	return h
+}
+
+// unsettled answers whether this read is too early to publish: the
+// process started less than monitorSettle ago, and an HDMI slot reads
+// empty that this process never read with a monitor. An operator that
+// starts during a drop has no reading to hold, so its pass publishes
+// nothing until the slot answers or the time passes, and the slice the
+// previous operator published stays as it was.
+func (h *monitorHold) unsettled(endpoints []alsaEndpoint) bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	left := monitorSettle - h.now().Sub(h.started)
+	if left <= 0 {
+		return false
+	}
+	for _, endpoint := range endpoints {
+		if !endpoint.HDMI || endpoint.Capture || endpoint.Monitor {
+			continue
+		}
+		if _, seen := h.lit[pcmAddress{Card: endpoint.Card, PCM: endpoint.PCM}]; seen {
+			continue
+		}
+		if h.waiting == nil && h.expired != nil {
+			h.waiting = time.AfterFunc(left, h.expired)
+		}
+		return true
+	}
+	return false
 }
 
 // heard records one control event. A change of a slot's ELD element
@@ -112,9 +162,14 @@ func (h *monitorHold) apply(endpoints []alsaEndpoint) []alsaEndpoint {
 			continue
 		}
 		dark, holding := h.dark[slot]
-		if !holding || dark.seen != h.changes[slot] {
+		restart := holding && dark.seen != h.changes[slot] && now.Sub(dark.first) < monitorCeiling
+		if !holding || restart {
+			first := now
+			if holding {
+				first = dark.first
+			}
 			h.release(slot)
-			dark = heldSlot{since: now, seen: h.changes[slot]}
+			dark = heldSlot{first: first, since: now, seen: h.changes[slot]}
 			if h.expired != nil {
 				dark.timer = time.AfterFunc(monitorSettle, h.expired)
 			}
@@ -140,4 +195,74 @@ func (h *monitorHold) release(slot pcmAddress) {
 		}
 		delete(h.dark, slot)
 	}
+}
+
+// awaitMonitors reads the card, and when an HDMI slot reads empty,
+// waits for an ELD change and reads again, until every slot has a
+// monitor or the wait has lasted for deadline. The init container
+// declares each sink's channel layout from this read before PipeWire
+// starts, and a slot read in a drop would declare stereo and cost a
+// PipeWire restart when the monitor answers. changes carries the
+// card's control events, and the subscription opens before the first
+// read, so a change during the read is not lost.
+func awaitMonitors(read func() ([]alsaEndpoint, error), changes <-chan controlEvent,
+	deadline time.Duration) ([]alsaEndpoint, error) {
+	outputs, err := read()
+	if err != nil {
+		return nil, err
+	}
+	timeout := time.NewTimer(deadline)
+	defer timeout.Stop()
+	for emptySlot(outputs) {
+		select {
+		case <-timeout.C:
+			return outputs, nil
+		case event, ok := <-changes:
+			if !ok {
+				return outputs, nil
+			}
+			if event.Name != eldElementName {
+				continue
+			}
+			if outputs, err = read(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return outputs, nil
+}
+
+// emptySlot answers whether an HDMI or DisplayPort playback slot reads
+// no monitor.
+func emptySlot(outputs []alsaEndpoint) bool {
+	for _, output := range outputs {
+		if output.HDMI && !output.Capture && !output.Monitor {
+			return true
+		}
+	}
+	return false
+}
+
+// cardChanges subscribes to the control events of every delivered card
+// and merges them onto one channel until ctx ends. A card whose events
+// do not open adds nothing, and its slots are read once.
+func cardChanges(ctx context.Context) <-chan controlEvent {
+	merged := make(chan controlEvent, 16)
+	for _, card := range controlCards() {
+		events, err := watchControls(ctx, card)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "waiting for the monitors of card %d: %v\n", card, err)
+			continue
+		}
+		go func() {
+			for event := range events {
+				select {
+				case merged <- event:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+	return merged
 }

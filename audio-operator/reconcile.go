@@ -243,6 +243,11 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 	// (monitorhold.go).
 	outputs, err := r.readCard()
 	outputs = r.monitors.apply(outputs)
+	if err == nil && r.monitors.unsettled(outputs) {
+		fmt.Fprintf(os.Stderr, "an HDMI slot reads no monitor less than %s after the start; "+
+			"the published slice stays until it answers or that time has passed\n", monitorSettle)
+		return nil
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the card's outputs: %v\n", err)
 		return nil

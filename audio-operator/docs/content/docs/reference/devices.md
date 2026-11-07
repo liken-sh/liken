@@ -271,7 +271,10 @@ second several times a minute, and the graphics driver clears the
 slot's ELD on each drop and writes the same block again when the
 receiver answers. A drop shorter than 5 seconds changes nothing in
 the slice or on the `Sink`, and the channel layout that the ELD gives
-stays, so PipeWire does not restart for it.
+stays, so PipeWire does not restart for it. An operator that starts
+while a slot reads no monitor waits the same 5 seconds before it
+publishes the slot, and its init container waits up to 5 seconds
+for the slot's monitor before it declares the slot's layout.
 
 The analog jack has none of these while its sink is up. Most codecs
 report nothing about the socket, and no signal can prove that sound

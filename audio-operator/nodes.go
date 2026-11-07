@@ -28,6 +28,7 @@ package main
 // configuration turns the ALSA monitor off everywhere.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -350,7 +351,11 @@ const declareMode = "declare"
 // and a server that does not answer leaves the ELD and the channel
 // map as the sources (layoutspec.go).
 func declare() {
-	outputs, err := readEndpoints()
+	// A slot read during a hotplug drop reads no monitor and would
+	// declare stereo, so the read waits out a drop (monitorhold.go).
+	ctx, cancel := context.WithTimeout(context.Background(), monitorSettle)
+	defer cancel()
+	outputs, err := awaitMonitors(readEndpoints, cardChanges(ctx), monitorSettle)
 	if err != nil {
 		fatal("reading the card's outputs: %v", err)
 	}

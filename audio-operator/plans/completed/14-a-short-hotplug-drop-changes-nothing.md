@@ -43,7 +43,22 @@ The hold is the one debounce in the operator, at the read of the
 card, so the slice, the `Sink` and `Source` resources, and the layout
 all read the same answer. A change of the slot's ELD between two empty reads starts the hold
 again, so a burst of drops that no pass reads lit between does not
-outlast the settle time. The analog jack and the USB card are not
+outlast the settle time. Changes restart a hold only until the slot
+has been empty for `monitorCeiling`, 15 seconds, the same bound as
+display-operator's `hotplugCeiling`, so both report a monitor that
+left within 20 seconds in the worst case and 5 seconds when the slot
+is quiet.
+
+An operator that starts while a slot is in a drop has no reading
+with a monitor to hold. For the first 5 seconds after the start, a
+pass that reads an HDMI slot empty that it never read with a monitor
+publishes nothing, so the slice the previous operator published
+stays, and a timer wakes the pass at the end of that time. The init
+container reads the card through `awaitMonitors`: when a slot reads
+empty, it waits up to 5 seconds for the slot's ELD to change and
+reads again, so a drop at the start does not declare stereo. A
+machine with nothing on an HDMI port pays that wait on each start
+before PipeWire starts. The analog jack and the USB card are not
 held: neither carries an ELD, and this drop is an HDMI fault.
 
 ## The drill

@@ -104,6 +104,133 @@ func TestAnELDChangeBetweenEmptyReadsStartsTheHoldAgain(t *testing.T) {
 	}
 }
 
+// A slot whose own ELD keeps changing starts its hold again only until
+// it has been empty for monitorCeiling, so a monitor that left is
+// reported within the ceiling and the settle time, as display-operator
+// reports the screen.
+func TestAMonitorHoldEndsByTheCeiling(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hold := newMonitorHold(nil)
+		hold.apply([]alsaEndpoint{litSlot(t)})
+		hold.apply([]alsaEndpoint{darkSlot()})
+		reported := time.Duration(0)
+		for elapsed := 3 * time.Second; elapsed <= monitorCeiling+2*monitorSettle; elapsed += 3 * time.Second {
+			time.Sleep(3 * time.Second)
+			hold.heard(controlEvent{Card: 0, Device: 3, Name: eldElementName})
+			if got := hold.apply([]alsaEndpoint{darkSlot()})[0]; !got.Monitor && reported == 0 {
+				reported = elapsed
+			}
+		}
+
+		if reported == 0 || reported > monitorCeiling+monitorSettle {
+			t.Errorf("the slot read empty %v after the drop, want by %v", reported, monitorCeiling+monitorSettle)
+		}
+	})
+}
+
+// An operator that starts while an HDMI slot is in a drop has no
+// reading with a monitor to hold. Its passes publish nothing until the
+// slot answers or the settle time since the start has passed, so the
+// slice the previous operator published stays, and a monitor that
+// answers within the settle time costs no taint. A slot still empty at
+// the end is published with the no-monitor taint.
+func TestAnOperatorThatStartsDuringADropWaitsOutTheSettleTime(t *testing.T) {
+	cases := []struct {
+		name    string
+		wait    time.Duration
+		answers bool
+		taint   bool
+	}{
+		{"a monitor that answers inside the settle time", monitorSettle / 2, true, false},
+		{"a monitor that stays away", monitorSettle, false, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				slot := newSlotPass(t)
+				if first := slot.run(); first != nil || len(slot.api.requests) != 0 {
+					t.Fatalf("the first pass during a drop published %+v with %v", first, slot.api.requests)
+				}
+
+				time.Sleep(c.wait)
+				if c.answers {
+					slot.block = eldFixture(t, "eld-hdmi-lg-ultrawide.bin")
+				}
+				published := slot.run()
+
+				if len(published) != 1 || hasTaint(published[0], noMonitorTaint) != c.taint {
+					t.Errorf("the slot published %+v, want the %s taint %v", published, noMonitorTaint, c.taint)
+				}
+			})
+		})
+	}
+}
+
+// A read too early to publish wakes one pass when the start's settle
+// time ends, so a slot that stays empty is published then.
+func TestAnEarlyReadWakesOnePassAtTheEndOfTheStart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var wakes atomic.Int64
+		hold := newMonitorHold(func() { wakes.Add(1) })
+		hold.unsettled([]alsaEndpoint{darkSlot()})
+		hold.unsettled([]alsaEndpoint{darkSlot()})
+
+		time.Sleep(monitorSettle)
+		synctest.Wait()
+
+		if got := wakes.Load(); got != 1 {
+			t.Errorf("the start woke %d passes, want 1", got)
+		}
+	})
+}
+
+// The init container reads the card before PipeWire starts, and an
+// empty slot gives a stereo layout. So it waits for the slot's ELD to
+// change, up to the settle time, and reads again. A card with no empty
+// slot is read once.
+func TestTheDeclarationWaitsForAnEmptySlot(t *testing.T) {
+	cases := []struct {
+		name    string
+		first   alsaEndpoint
+		change  bool
+		monitor bool
+		reads   int
+	}{
+		{"a slot whose monitor answers", darkSlot(), true, true, 2},
+		{"a slot that stays empty", darkSlot(), false, false, 1},
+		{"a slot with a monitor", alsaEndpoint{}, false, true, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				first := c.first
+				if !first.HDMI {
+					first = litSlot(t)
+				}
+				reads := 0
+				read := func() ([]alsaEndpoint, error) {
+					reads++
+					if reads > 1 {
+						return []alsaEndpoint{litSlot(t)}, nil
+					}
+					return []alsaEndpoint{first}, nil
+				}
+				changes := make(chan controlEvent, 1)
+				if c.change {
+					changes <- controlEvent{Card: 0, Device: 3, Name: eldElementName}
+				}
+
+				outputs, err := awaitMonitors(read, changes, monitorSettle)
+
+				if err != nil || reads != c.reads || outputs[0].Monitor != c.monitor {
+					t.Errorf("the declaration read %d times and found monitor=%v (%v), want %d and %v",
+						reads, outputs[0].Monitor, err, c.reads, c.monitor)
+				}
+			})
+		})
+	}
+}
+
 // The end of a hold wakes a pass once, so a monitor that really left
 // is reported at the deadline. A monitor that answers again inside the
 // settle time wakes nothing extra.
