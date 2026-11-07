@@ -308,19 +308,26 @@ although nobody pressed a button.
 ### When a sleeping remote does not reconnect
 
 A Low Energy remote reconnects because the kernel scans for it while
-it sleeps, and connects when a press makes it advertise. Two bugs
+it sleeps, and connects when a press makes it advertise. Three bugs
 outside this project can stop that scan or that connection, with no
-log line, until the pod restarts. The pod works around both.
+log line, until the pod restarts. The pod works around all three.
 
 - **The kernel leaves the scan off after a failed connection.** When
   a connection to the remote fails, for example because the remote
   stopped advertising while the radio connected, Linux can leave the
-  scan off. The pod's `rescan` container reads the kernel's HCI
-  monitor channel. When a connection to a device that `bluetoothd`
-  reconnects on its own fails, and the kernel does not scan again
-  within 5 seconds, the container adds the device again with the
-  same command `bluetoothd` sent, and the kernel starts the scan. No
-  link drops. The container's log has a line for each one:
+  scan off.
+- **The kernel forgets the remote after a link that closes late.**
+  When the kernel ends a link to the remote, it waits 2 seconds for
+  the radio to close it. A remote that went quiet can make the radio
+  take longer. Then Linux takes the remote off its list of devices to
+  reconnect, and `bluetoothd` still reports the remote connected.
+
+  The pod's `rescan` container reads the kernel's HCI monitor channel
+  for both of these. When a connection to a device that `bluetoothd`
+  reconnects on its own fails, or the kernel ends a link to it, and
+  the kernel does not scan again within 5 seconds, the container adds the device
+  again, and the kernel starts the scan. No link drops. The
+  container's log has a line for each one:
 
       kubectl -n liken-system logs ds/bluetooth-operator -c rescan
 

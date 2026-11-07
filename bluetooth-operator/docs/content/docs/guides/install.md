@@ -277,9 +277,9 @@ The `bluetoothd` container's log has a line for each adapter:
 
 The `bluetoothd` image builds BlueZ from its release with patches
 for bugs that stop a controller from reconnecting, and the `rescan`
-container works around a kernel bug with the same effect.
+container works around two kernel bugs with the same effect.
 [When a sleeping remote does not reconnect](/docs/guides/pair-a-controller/#when-a-sleeping-remote-does-not-reconnect)
-describes both.
+describes each one.
 
 ## Verify
 

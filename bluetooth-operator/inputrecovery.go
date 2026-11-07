@@ -32,6 +32,10 @@ package main
 // The Disconnect can fail on a link that exists only in bluetoothd.
 // bluetoothd can report a device Connected after the kernel dropped
 // the link, and then the kernel answers the disconnect with "no link".
+// bluetoothd/rescan/main.go names a kernel path that drops a link
+// this way and takes the device off the kernel's reconnect list too.
+// The rescan container puts the device back on the list, so the
+// trust that the Connect below relies on holds after that path.
 // BlueZ 5.82 sends no reply to the D-Bus call in that case, so the
 // call runs out its timeout. BlueZ 5.87 reads the same answer as a
 // completed disconnect and replies. A Connect after a failed

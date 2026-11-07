@@ -242,12 +242,13 @@ spec:
               mountPath: /var/run/bluetooth.liken.sh/settings
               readOnly: true
         # start-rescan, as a sidecar that runs as long as the pod. It
-        # works around a kernel bug: after a failed connection to a
-        # bonded Low Energy remote, Linux can leave the radio's passive
-        # scan off with no log line, and the remote then never
-        # reconnects. The program reads the HCI monitor channel, and
-        # when the kernel leaves the scan off after a failed
-        # connection to a device that bluetoothd added for auto
+        # works around two kernel bugs: after a failed connection to a
+        # bonded Low Energy remote, or after a link to it that the host
+        # ended and the controller closed late, Linux can leave the
+        # radio's passive scan off with no log line, and the remote
+        # then never reconnects. The program reads the HCI monitor
+        # channel, and when the kernel leaves the scan off after
+        # either one for a device that bluetoothd added for auto
         # connect, it adds the device again, which starts the scan.
         # bluetoothd/rescan/main.go explains the bug and the fix, and
         # when to delete this container.

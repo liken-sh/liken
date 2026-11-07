@@ -1,8 +1,8 @@
-// start-rescan works around a kernel bug that leaves a bonded
+// start-rescan works around two kernel bugs that leave a bonded
 // Bluetooth Low Energy remote unable to reconnect, with no log line
 // anywhere, until something powers the radio off and on.
 //
-// # The kernel bug
+// # The kernel bugs
 //
 // bluetoothd registers each bonded device that reconnects on its own,
 // such as a HID remote, with the kernel's Add Device command and the
@@ -38,37 +38,62 @@
 // stays off until a person restarts the pod. The remote's presses
 // reach no receiver, and nothing logs.
 //
-// The early return is the same in Linux 6.12 and on Linus Torvalds'
-// master and bluetooth-next as of 2026-10-17, and no patch for it was
-// on the linux-bluetooth patchwork then. liken boots Ubuntu's mainline
-// kernel packages, which this project does not build, so the fix
-// cannot ship as a kernel patch. When an upstream kernel fixes it and
-// liken boots that kernel, delete this program, its container in
+// The second bug takes the device off that list. When a link comes
+// up, le_conn_complete_evt in net/bluetooth/hci_event.c takes the
+// device off the list, and hci_disconn_complete_evt puts it back when
+// the link ends. When the host ends a link, hci_abort_conn_sync in
+// net/bluetooth/hci_sync.c sends HCI Disconnect and waits two seconds
+// for the controller's Disconnection Complete. A remote that stops
+// answering makes the controller take longer: in one trace, a remote
+// sent a directed advertisement and went quiet, the kernel ended the
+// link when its read of the remote's features timed out, and the
+// controller closed the link three seconds later with LL Response
+// Timeout. When the wait runs out, hci_abort_conn_sync ends the link
+// through hci_conn_failed. hci_connect_le_scan_cleanup looks for the
+// device on the list, does not find it, and returns, so the device
+// stays off the list. The kernel deletes the connection, sends no
+// Device Disconnected event, and ignores the Disconnection Complete
+// when it arrives. bluetoothd still reports the device Connected,
+// the scan stays off, and a Device1.Connect does not help:
+// hci_explicit_conn_params_set puts an auto connect device back on the
+// list only when its action is not auto connect.
+//
+// Both bugs are the same in Linux 7.3.1. The first one is the same in
+// Linux 6.12 and on Linus Torvalds' master and bluetooth-next as of
+// 2026-10-17, and no patch for it was on the linux-bluetooth
+// patchwork then. liken boots Ubuntu's mainline kernel packages,
+// which this project does not build, so the fix cannot ship as a
+// kernel patch. When an upstream kernel fixes both and liken boots
+// that kernel, delete this program, its container in
 // deploy/operator.yaml, and the pages of the manual that name it.
 //
 // # The workaround
 //
 // This program reads the HCI monitor channel, the kernel's copy of
 // every HCI command, HCI event, and Management API command on the
-// machine. btmon reads the same channel. The program keeps three
+// machine. btmon reads the same channel. The program keeps four
 // facts for each adapter:
 //
 //   - the devices that bluetoothd added with the auto connect action
 //     and has not removed,
 //   - the LE Create Connection attempt in progress, and the device it
 //     is for,
+//   - the device at the other end of each link that is up,
 //   - and when the kernel last turned the scan on.
 //
-// When an attempt to an auto connect device fails, the program starts
-// a deadline of rescanSettle. The kernel starts the scan again in a
-// few milliseconds when it works, so a scan within the deadline
-// cancels it, and so does a new attempt. When the deadline passes with
-// no scan, the program sends the same Add Device command that
-// bluetoothd sent for the device, with the same action. The kernel
-// already holds that entry, so the command changes no setting. Its
-// one effect is the call to hci_update_passive_scan at the end of
-// add_device_sync in net/bluetooth/mgmt.c, which starts the scan. No
-// connection drops, and the next press reconnects the remote.
+// When an attempt to an auto connect device fails, or the host sends
+// HCI Disconnect for a link to one, the program starts a deadline of
+// rescanSettle. The kernel starts the scan again within about two
+// seconds when it works, so a scan within the deadline cancels it,
+// and so does a new attempt. When the deadline passes with no scan,
+// the program sends Add Device for the device twice: first with the
+// action that allows an incoming connection, then with the auto
+// connect action that bluetoothd sent. The kernel ignores an Add
+// Device that repeats the action it holds (hci_conn_params_set in
+// net/bluetooth/mgmt.c), and each change of action puts the device
+// back on the list. Each command ends in the call to
+// hci_update_passive_scan in add_device_sync, which starts the scan.
+// No connection drops, and the next press reconnects the remote.
 //
 // A failed attempt to a device that bluetoothd did not add for auto
 // connect, such as a Device1.Connect to a speaker, takes the kernel's
@@ -76,8 +101,11 @@
 // such a device, because the command would turn on auto connect for a
 // device that bluetoothd did not choose.
 //
-// bluetoothd does not handle the Device Added event that the command
-// causes, so bluetoothd keeps its own view of the device unchanged.
+// bluetoothd does not handle the Device Added event that each command
+// causes, so bluetoothd keeps its own view of the device unchanged. A
+// Remove Device from bluetoothd, as an unpair sends, cancels a
+// deadline that waits for the device, so a repair never turns auto
+// connect on again for a device that bluetoothd removed.
 //
 // # The order of the containers
 //
@@ -94,8 +122,8 @@
 // The monitor channel needs CAP_NET_RAW, and Add Device needs
 // CAP_NET_ADMIN. The container holds those two and nothing else, so
 // the operator's container keeps no capability. The program writes
-// one log line for each Add Device it sends, with the device, the
-// status of the failed attempt, and the kernel's answer.
+// one log line for each repair it sends, with the device, the failed
+// attempt's status or the ended link, and the kernel's answer.
 package main
 
 import (

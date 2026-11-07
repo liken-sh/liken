@@ -279,7 +279,7 @@ func TestAFailedConnectionThatLeavesTheScanOffAddsTheDeviceAgain(t *testing.T) {
 				attemptStarts(time.Hour),
 				at(time.Second, connectionComplete(hciLEConnectionComplete, 0x3e)),
 			},
-			want: []string{"+1h0m6s hci0 58:AB:4B:24:91:47 type 1 action 2"},
+			want: []string{"+1h0m6s hci0 58:AB:4B:24:91:47 type 1 action 1", "+1h0m6s hci0 58:AB:4B:24:91:47 type 1 action 2"},
 		},
 		{
 			name: "the controller refuses LE Create Connection",
@@ -288,7 +288,7 @@ func TestAFailedConnectionThatLeavesTheScanOffAddsTheDeviceAgain(t *testing.T) {
 				at(time.Hour, setScanEnable(0), commandComplete(hciLESetScanEnable, 0)),
 				at(0, createConnection(remote, 0), commandStatus(hciLECreateConnection, 0x0c)),
 			},
-			want: []string{"+1h0m5s hci0 58:AB:4B:24:91:47 type 1 action 2"},
+			want: []string{"+1h0m5s hci0 58:AB:4B:24:91:47 type 1 action 1", "+1h0m5s hci0 58:AB:4B:24:91:47 type 1 action 2"},
 		},
 		{
 			name: "the kernel cancels the failed connection two seconds later",
@@ -298,7 +298,7 @@ func TestAFailedConnectionThatLeavesTheScanOffAddsTheDeviceAgain(t *testing.T) {
 				at(time.Second, connectionComplete(hciLEEnhancedConnectionComplete, 0x3e)),
 				at(2*time.Second, hciCommand(hciLECreateConnectionCancel), commandComplete(hciLECreateConnectionCancel, 0x0c)),
 			},
-			want: []string{"+1h0m8s hci0 58:AB:4B:24:91:47 type 1 action 2"},
+			want: []string{"+1h0m8s hci0 58:AB:4B:24:91:47 type 1 action 1", "+1h0m8s hci0 58:AB:4B:24:91:47 type 1 action 2"},
 		},
 		{
 			name: "the attempt times out and the controller sends no final event",
@@ -307,7 +307,7 @@ func TestAFailedConnectionThatLeavesTheScanOffAddsTheDeviceAgain(t *testing.T) {
 				attemptStarts(time.Hour),
 				at(20*time.Second, hciCommand(hciLECreateConnectionCancel), commandComplete(hciLECreateConnectionCancel, 0)),
 			},
-			want: []string{"+1h0m25s hci0 58:AB:4B:24:91:47 type 1 action 2"},
+			want: []string{"+1h0m25s hci0 58:AB:4B:24:91:47 type 1 action 1", "+1h0m25s hci0 58:AB:4B:24:91:47 type 1 action 2"},
 		},
 		{
 			name: "an extended connection to a random address fails",
@@ -316,7 +316,7 @@ func TestAFailedConnectionThatLeavesTheScanOffAddsTheDeviceAgain(t *testing.T) {
 				at(time.Hour, extCreateConnection(remote, 1), commandStatus(hciLEExtCreateConnection, 0)),
 				at(time.Second, connectionComplete(hciLEEnhancedConnectionCompleteV2, 0x3e)),
 			},
-			want: []string{"+1h0m6s hci0 58:AB:4B:24:91:47 type 2 action 2"},
+			want: []string{"+1h0m6s hci0 58:AB:4B:24:91:47 type 2 action 1", "+1h0m6s hci0 58:AB:4B:24:91:47 type 2 action 2"},
 		},
 	}
 	for _, c := range cases {

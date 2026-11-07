@@ -63,6 +63,11 @@ const (
 // src/adapter.c).
 const ActionAutoConnect = 0x02
 
+// ActionAllowIncoming is the Add Device action that makes the kernel
+// connect to a Low Energy device only when it sends a directed
+// advertisement to this radio.
+const ActionAllowIncoming = 0x01
+
 // Status is a status code that the kernel answered a command with.
 type Status uint8
 

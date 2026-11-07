@@ -101,23 +101,35 @@ func (w *watcher) act(now time.Time) {
 			}
 			delete(r.repairs, d)
 			if err := w.addDevice(index, d); err != nil {
-				fmt.Fprintf(w.log, "start-rescan: hci%d: a connection to %s failed with HCI status 0x%02x and the kernel did not scan again within %s; adding the device again failed: %v\n",
-					index, d, waiting.status, rescanSettle, err)
+				fmt.Fprintf(w.log, "start-rescan: hci%d: %s and the kernel did not scan again within %s; adding the device again failed: %v\n",
+					index, waiting.cause, rescanSettle, err)
 				continue
 			}
 			r.checks[d] = now.Add(rescanSettle)
-			fmt.Fprintf(w.log, "start-rescan: hci%d: a connection to %s failed with HCI status 0x%02x and the kernel did not scan again within %s; added the device again, so the kernel scans for it\n",
-				index, d, waiting.status, rescanSettle)
+			fmt.Fprintf(w.log, "start-rescan: hci%d: %s and the kernel did not scan again within %s; added the device again, so the kernel scans for it\n",
+				index, waiting.cause, rescanSettle)
 		}
 	}
 }
 
-// addDevice sends the Add Device command that bluetoothd sent for d.
+// addDevice puts d back on the kernel's list of devices to reconnect,
+// with the auto connect action that bluetoothd sent for it.
+//
+// The kernel ignores an Add Device that repeats the action it holds:
+// hci_conn_params_set in net/bluetooth/mgmt.c returns before it
+// touches the list. So the first command names the action that allows
+// an incoming connection, and the second names auto connect again.
+// Each change of action takes the device off the list and puts it
+// back on while it has no link, and each command ends in the call to
+// hci_update_passive_scan, which starts the scan.
 func (w *watcher) addDevice(index uint16, d device) error {
 	channel, err := w.management()
 	if err != nil {
 		return err
 	}
 	defer channel.Close()
+	if err := mgmt.AddDevice(channel, index, d.address, d.kind, mgmt.ActionAllowIncoming); err != nil {
+		return err
+	}
 	return mgmt.AddDevice(channel, index, d.address, d.kind, mgmt.ActionAutoConnect)
 }
