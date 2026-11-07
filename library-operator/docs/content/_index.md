@@ -42,7 +42,8 @@ series, or a checkout of franchise files. The operator runs a scan
 for each one, which reads the files and the metadata beside them into
 the namespace's catalog. The catalog is a SQLite database that
 [Corrosion](https://github.com/superfly/corrosion) copies to every
-screen in the namespace within a second of a change.
+screen in the namespace. A change reaches a screen about a second
+after it is written, plus the time to apply it.
 
 The operator reads and writes the media, the `.nfo` files, and the
 art on the volume in the formats that Kodi and Jellyfin read, and it

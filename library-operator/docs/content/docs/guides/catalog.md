@@ -36,10 +36,12 @@ cluster's members use to find one another:
 
 Every member holds the whole namespace's catalog, because the cluster
 gossips every row to every peer. A write reaches the members by
-broadcast as it happens, and each member applies a small write about a
-second after it arrives. A member that missed the broadcast receives
-the write at its next sync with its peers, which comes at most a minute
-later. `spec.storage.size` sets the size of
+broadcast as it happens. A durable replica or a `Job`'s agent applies
+a small write within a tenth of a second after it arrives, and a
+screen's agent about a second after. A member that missed the
+broadcast receives the write at its next sync with its peers: within
+15 seconds on a durable replica or a `Job`, and within a minute on a
+screen. `spec.storage.size` sets the size of
 new catalog claims for the durable replicas, each `Library`'s `Jobs`,
 and screens. `spec.storage.claimName` names an existing claim for the
 durable replicas in place of the one the operator provisions.
@@ -56,6 +58,20 @@ file until Corrosion's incremental vacuum returns them, a few minutes
 later, so the file reaches about one and a half times its size at rest.
 The default of `2Gi` holds that. `corro_db_size` on each agent's
 metrics port reports the file's size.
+
+The default reaches only a `Catalog` created with it. The API server
+wrote the earlier default, `1Gi`, into every `Catalog` that named no
+size, so an existing `Catalog` keeps `1Gi` until you set it:
+
+    spec:
+      storage:
+        size: 2Gi
+
+A bound claim keeps its size, because its spec is immutable, so the new
+size reaches new claims only. On the `per-node` and `local-path`
+classes the size is a hint and not a limit: the copy can grow past it
+until the node's disk is full, and the per-node driver reports the sum
+of the copy's files as its use.
 
 The listing shows the storage size, requested replica count, and
 readiness:
@@ -245,6 +261,13 @@ use. These measurements are not performance guarantees:
 
 A screen in a namespace with no `Catalog` runs on an `emptyDir` and
 syncs the whole catalog whenever its pod is replaced.
+
+A screen's agent syncs less often than a durable replica's, because
+the screen only reads. Its first syncs come one, two, and four seconds
+after it starts, and the wait doubles to at most a minute. An agent
+that finds no peer in its first syncs, such as a screen that restarts
+before the catalog pods answer, waits up to that minute again, so it
+can take about two minutes to catch up on a change it missed.
 
 A node-local class binds the claim to the node the pod first landed
 on. If the display moves to another machine, the pod cannot schedule

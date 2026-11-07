@@ -2,19 +2,34 @@
 
 This plan, written on 2026-11-06, finds what the Corrosion agents of a
 namespace spend while nothing changes, and why each catalog store is
-about 850 MB, and lowers what it can. The catalog agents now wait up
-to 60 seconds between two syncs, where Corrosion's default waits up to
-15, and they apply a small batch of peer changes after 1,000 ms, where
-they waited 100 ms. New catalog claims are `2Gi` by default, where they
-were `1Gi`. The progress agents are unchanged, so a position that a
-screen reports once a second replicates as before. With 101 actors in
-the catalog, an idle catalog agent on a workstation went from 3.5m of
-CPU and 0.55 kB/s sent to 1.5m and 0.23 kB/s.
+about 850 MB, and lowers what it can. A screen's catalog agent now
+waits up to 60 seconds between two syncs, where Corrosion's default
+waits up to 15, and it applies a small batch of peer changes after
+1,000 ms, where it waited 100 ms. The durable catalog copies, the
+`Jobs`' agents, and every progress agent keep the image's settings, so
+a `Job`'s hand-off and a position that a screen reports once a second
+replicate as before. New catalog claims are `2Gi` by default, where
+they were `1Gi`. In a test where every agent took the screen's
+settings, with 101 actors in the catalog, an idle agent on a
+workstation went from 3.5m of CPU and 0.55 kB/s sent to 1.5m and
+0.23 kB/s. A screen beside durable copies on the default settings
+still answers their syncs, so it saves less traffic than that, by an
+amount this plan did not measure.
 
 Status on 2026-11-07: built. The measurements are from three agents
 on a workstation and from one read of the metrics and the change log
 of a home cluster's agents. The drill on a home cluster after the
 release that carries the change has not run.
+
+Status later on 2026-11-07: a review of the first build found that it
+gave the slower settings to every catalog agent, durable copies
+included. A durable copy fills a gap in a `Job`'s run only at its own
+next sync, and the reviewer's simulation of the random choice of
+peers in `handle_sync` put the chance that a hand-off with a missed
+broadcast outlasts `HANDOFF_TIMEOUT` at 11% with 10 members and 29%
+with 14, at a 60-second ceiling, against 0.01% and 0.7% at 15 seconds.
+So the screens alone now take the slower settings, through variables
+that the screen pod sets, and the sections below say so.
 
 ## The problem
 
@@ -94,8 +109,9 @@ fact's attempt time and the tallies of each run.
 cr-sqlite keeps one clock row for each column of each row that is
 not in the key, with an index on the version, and Corrosion adds a
 second index on the site and the version. So the clock tables are
-about twice the size of the rows they track. The synthetic catalog used the home library's
-item and file counts, and estimated the other tables per title. A
+about twice the size of the rows they track. The synthetic catalog
+used the home library's item and file counts, and estimated the other
+tables per title. A
 later read of `corro_db_table_rows_total` on a home copy found similar
 counts: 208,858 `attempts`, 120,604 `contributor_ids`, 120,943
 `contributor_aliases`, 78,085 `streams`, 74,389 `credits`, 58,149
@@ -122,11 +138,19 @@ A copy that receives a large write holds it in
 arrived, and then applies it. While the seed ran, each peer's file
 reached 1,314 MiB, and one read found 588 MiB of it in that table.
 When the peer had applied the seed, the table was empty and 573 MiB
-were on the freelist. Corrosion runs `incremental_vacuum` every five minutes until
-fewer than 10,000 pages are free, so the file returns to its size at
+were on the freelist. Corrosion runs `incremental_vacuum` every five
+minutes until fewer than 10,000 pages are free, so the file returns to its size at
 rest. A first sync onto an empty directory peaked at 1,414 MiB on
-disk, with the WAL. A `1Gi` claim does not hold that, so the default
-is now `2Gi`.
+disk, with the WAL. A `1Gi` claim on a class that enforces its size
+does not hold that, so the default is now `2Gi`. On the `per-node` and
+`local-path` classes the size is a hint and not a limit, and a copy
+grows past it until the node's disk is full.
+
+The API server has written the default `1Gi` into every `Catalog`
+that named no size, so an existing `Catalog` keeps `1Gi` and the new
+default reaches only a new one. The catalog guide tells an existing
+user to set `spec.storage.size: 2Gi`. A bound claim keeps its size
+either way, because its spec is immutable.
 
 The per-node driver reports a copy's use as the sum of its files'
 sizes, so the survey's 830 MiB includes the WAL and the shared-memory
@@ -136,11 +160,13 @@ file.
 
 A sync sends the peer the newest version the agent holds from every
 actor that ever wrote the catalog, and the peer answers with its own
-list. Corrosion keeps an entry for every actor and removes none. Every
-worker pod on an `emptyDir` is a new actor (plan 78), and so is every
-other agent that starts on an empty directory and writes. So the cost
-of a sync that finds nothing grows with the number of pods that ever
-wrote. The wait between syncs starts at one second, doubles after each
+list. Corrosion keeps an entry for every actor and removes none. An
+agent's actor id is kept in its database, so a new actor is an agent
+on a new or recreated claim: a `Library`'s claim on a node where it
+has not run, a copy whose claim was deleted, or a screen on an
+`emptyDir` in a namespace with no single `Catalog`. The heavy-fact
+workers run no catalog agent since plan 79. So the cost of a sync that
+finds nothing grows with the number of claims that ever wrote. The wait between syncs starts at one second, doubles after each
 sync, and stays at the ceiling, which is 15 seconds by default. The
 backoff never resets, but at the ceiling that changes nothing.
 
@@ -159,8 +185,9 @@ reached its ceiling.
 | 937,675 rows | 101 | 60 s | 2.2m | 0.23 kB/s |
 | 937,675 rows | 101 | 120 s | 2.1m | 0.17 kB/s |
 
-The 100 added actors were short-lived agents on empty directories, like
-worker pods, that each wrote one `runs` row and left. With them, the
+The 100 added actors were short-lived agents on empty directories,
+each a new actor as an agent on a new claim is, that each wrote one
+`runs` row and left. With them, the
 agents at the 15-second ceiling sent 0.35 kB/s more and used 0.9m more
 CPU each. At 60 seconds most of that cost is gone.
 
@@ -189,9 +216,13 @@ and with 101 actors, each ran one 300-second sample at each value:
 
 The writer updated one `runs` row through the first agent once a
 second for 120 seconds, and polled the second agent every 5 ms for the
-new value. The wait before a small batch sets the lag in both rows,
-so a catalog write now lands on a peer about a second after it
-arrives. A batch that reaches the agent's threshold, 90 changes at the
+new value. The wait before a small batch sets the lag in both rows. A
+second run gave each write a random offset of up to 0.9 seconds inside
+its second, so the writes could not fall into step with a timer, and
+with only the reading agent at 1,000 ms. Its 90 writes landed 999 ms
+after the write at the median and 1,004 ms at most, so a single change
+waits about the whole period after it arrives, and a screen applies a
+write about a second after it is written. A batch that reaches the agent's threshold, 90 changes at the
 smallest batch size, is applied at once, so a walk transaction that
 changes its rows does not wait.
 
@@ -219,41 +250,50 @@ the first agent in every table.
 
 Every run after the first reused the address of the agent that had
 just left, and in each of them no row arrived in the first 30 seconds.
-From the first rows to the end, each run took 140 to 170 seconds. So
-the spread is in when the sync starts, and the ceiling does not show
-in the time. The 60-second run logged two changes dropped from the
-apply queue and fetched again, and the others none.
+From the first rows to the end, each run took 140 to 170 seconds, and
+in these runs the ceiling did not change that part. When the first
+rows arrive does depend on the ceiling: an agent that finds its peers
+only after its first syncs have found none waits for the next step of
+the backoff. At a 60-second ceiling the steps after 31 seconds come at
+about 63 and 123 seconds, so such an agent can take about two minutes
+to start. The 60-second run logged two changes dropped from the apply
+queue and fetched again, and the others none.
 
 ## The design
 
-- `corrosion/config.toml` sets `[perf] max_sync_backoff = 60` and
-  `apply_queue_timeout = 1000`. Every catalog agent reads it: the
-  durable copies, the screens' sidecars, and the agents of the
-  `Library` `Jobs` and the workers.
-- `corrosion/progress.toml` keeps Corrosion's default sync ceiling of
-  15 seconds and `apply_queue_timeout = 100`. No setting of the
-  progress agents changes.
+- A screen pod's catalog agent sets `PERF__MAX_SYNC_BACKOFF=60` and
+  `PERF__APPLY_QUEUE_TIMEOUT=1000`, which Corrosion reads over its
+  configuration file (`screenCatalogSidecar` in `screenpod.go`). Every
+  screen takes them, on a claim or on an `emptyDir`.
+- `corrosion/config.toml` keeps Corrosion's default sync ceiling of 15
+  seconds and `apply_queue_timeout = 100`, so the durable copies and
+  the agents of the `Library` `Jobs` run as before.
+- `corrosion/progress.toml` keeps the same two settings, and no
+  setting of the progress agents changes.
 - The default of `spec.storage.size` is `2Gi`. A `Catalog` that names
   a size keeps it, and a bound claim keeps its size, because a bound
   claim's spec is immutable. The progress claim takes `storage.size`
   when `spec.progress.size` is empty, so it is `2Gi` by default too.
 
-A broadcast still carries every write as it happens, and a catalog
-agent applies a small one about a second after it arrives, where it
-applied it in about a tenth of a second. A write that a peer missed
-reaches it at the peer's next sync, which is now at most a minute away
-instead of 15 seconds. A sync only pulls: the agent that starts it
-asks its peers for what it lacks. So a durable copy that missed an
-earlier version of a `Job`'s run fills the gap at its own next sync.
-The `Job` waits for that copy's confirmation for at most two minutes,
-`HANDOFF_TIMEOUT`, and fails and runs again after it. At a ceiling of
-60 seconds the copy syncs at least once in that wait, and it puts the
-peers it lacks versions from first. At 15 seconds it synced about
-eight times. A broadcast is missed when an agent's apply queue is full
-or a peer is unreachable.
+A broadcast still carries every write as it happens. A screen applies
+a small one about a second after it arrives, where it applied it in
+about a tenth of a second, and a write that the screen missed reaches
+it at its next sync, now at most a minute away instead of 15 seconds.
+A screen that restarts and finds its peers late can take about two
+minutes. A sync only pulls: the agent that starts it asks its peers
+for what it lacks. A durable copy that missed an earlier version of a
+`Job`'s run fills the gap at its own next sync, and the `Job` waits
+for that confirmation for at most two minutes, `HANDOFF_TIMEOUT`, so
+the durable copies keep the 15-second ceiling and sync about eight
+times in that wait. A screen confirms no `Job`, so its ceiling does not
+reach the hand-off.
 
 ## What was set aside
 
+- **The slower settings on every catalog agent.** The first build of
+  this plan gave them to the durable copies and the `Jobs` too. The
+  review's simulation above shows that a missed broadcast could then
+  outlast a `Job`'s hand-off.
 - **`WHERE` guards on the upserts, or skipping unchanged files.** A
   write of the same values makes no version and no broadcast, so the
   guards save only the writer's CPU, and they saved 0.7 s of 41.6 s.
@@ -288,7 +328,7 @@ belongs in `liken-sh/corrosion`, and upstream:
 - **Forget actors that are gone.** An actor that has left the cluster,
   whose versions every member holds, needs no entry in the list a sync
   sends. Corrosion has no step that removes one, so the list grows
-  with every worker pod.
+  with every new claim that writes.
 
 ## How the work is proved
 
@@ -299,6 +339,8 @@ Every local run used the pinned image,
 to the three agents' addresses. The agents ran on one docker bridge
 network on a workstation with 22 cores, so the traffic between them
 crossed no physical link. Each number in the tables above is one run.
+A further run started one agent with the two screen variables and
+read its answers, which showed that Corrosion parses both as numbers.
 The scripts that ran them were throwaway: a seeder that writes the
 synthetic catalog through `/v1/transactions` in the scanner's batch
 size, a script that starts short-lived agents as new actors, and a
@@ -312,8 +354,9 @@ queries of `crsql_changes` through the same copy's `/v1/queries`.
 
 Still owed, after the release that carries this change: on the home
 cluster, `corro_transport_tx_bytes_v2_total{traffic="sync"}` and the
-CPU of each catalog agent over an hour with no walk, against the
-numbers above. Before the change, both scraped agents read
+CPU of each screen's catalog agent over an hour with no walk, against
+the numbers above, and the same for a durable copy, which should not
+move. Before the change, both scraped agents read
 `corro_sync_client_needed_v2` 0 and emitted no `corro_db_gaps_sum`,
 which Corrosion writes only when a gap exists. Over the same hour both
 should stay so, and no `Job` should fail on `HANDOFF_TIMEOUT`.

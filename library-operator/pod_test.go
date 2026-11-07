@@ -431,6 +431,37 @@ func TestContainersAskForTheirOwnRoom(t *testing.T) {
 	}
 }
 
+// A screen's catalog agent syncs and applies on the slower idle settings,
+// because it only reads. A durable copy and a Job's agent keep the
+// image's settings, because a Job's hand-off waits on a durable copy
+// that syncs every 15 seconds. An empty value is a variable the pod does
+// not set.
+func TestEachRolesCatalogAgentSyncsOnItsOwnSchedule(t *testing.T) {
+	cases := []struct {
+		name         string
+		pod          *Pod
+		syncCeiling  string
+		applyTimeout string
+	}{
+		{name: "a screen", pod: testScreenPod(denScreen(), houseLibraries()),
+			syncCeiling: "60", applyTimeout: "1000"},
+		{name: "a durable copy", pod: testCatalogPod(housekeepingCatalog(), 0)},
+		{name: "a Library's Job", pod: testScanPod(studioMovies())},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			environment := containerEnvironment(podContainer(t, one.pod, catalogContainer))
+
+			if got := environment["PERF__MAX_SYNC_BACKOFF"]; got != one.syncCeiling {
+				t.Errorf("PERF__MAX_SYNC_BACKOFF = %q, want %q", got, one.syncCeiling)
+			}
+			if got := environment["PERF__APPLY_QUEUE_TIMEOUT"]; got != one.applyTimeout {
+				t.Errorf("PERF__APPLY_QUEUE_TIMEOUT = %q, want %q", got, one.applyTimeout)
+			}
+		})
+	}
+}
+
 // PodContainer reads one container the pod carries by name, across the
 // scanner in containers and the catalog agent in initContainers, so a
 // test names a container and never an index into either list.

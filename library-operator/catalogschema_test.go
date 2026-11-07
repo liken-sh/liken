@@ -50,9 +50,11 @@ func TestTheSchemaTakesACopyCountForBothStores(t *testing.T) {
 	}
 }
 
-// The size the API server writes into a Catalog that names none is the
-// size the operator gives a claim when the field is empty, so a Catalog
-// written before the default existed gets the same claims as a new one.
+// The size the API server writes into a new Catalog that names none is
+// the size the operator gives a claim when the field is empty. An
+// existing Catalog keeps the size the API server wrote when it was
+// created, and only an object that reaches the operator without the
+// field, such as one in a test, takes the operator's own default.
 func TestTheSchemaDefaultsTheSizeTheOperatorProvisions(t *testing.T) {
 	size := schemaField(t, catalogSchema(t), "schema", "openAPIV3Schema", "properties",
 		"spec", "properties", "storage", "properties", "size").(map[string]any)

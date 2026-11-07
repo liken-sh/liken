@@ -87,9 +87,9 @@ bootstrap = ["progress:8788"]
 apply_queue_timeout = 100
 
 # The progress agents keep Corrosion's default sync ceiling of 15
-# seconds, where the catalog agents wait up to 60. A screen reports its
-# position once a second, and a position that a broadcast missed reaches
-# the other copies within 15 seconds by sync.
+# seconds, where a screen's catalog agent waits up to 60. A screen
+# reports its position once a second, and a position that a broadcast
+# missed reaches the other copies within 15 seconds by sync.
 
 [admin]
 # The admin socket answers `corrosion cluster members` and the other

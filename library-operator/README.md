@@ -12,7 +12,8 @@ A `Library` is one root directory of media on a volume: a directory of
 movies, a directory of series, a checkout of franchise files. The
 operator runs a scanner for each `Library`. The scanner reads the files
 and the metadata beside them into a catalog, and a gossip sidecar
-replicates that catalog to every screen within a second of a change. The
+replicates that catalog to every screen. A change reaches a screen
+about a second after it is written, plus the time to apply it. The
 media browser is a native Wayland client. It replaces the idle screen on
 a `Player`, lets a person walk into a library, and starts a `Play` on
 that `Player`.

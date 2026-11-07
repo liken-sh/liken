@@ -234,7 +234,7 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 			// sidecar, on the same terms, so the screen is a member of both
 			// of the namespace's clusters and the browser reads both files.
 			InitContainers: []Container{
-				catalogSidecar(corrosionImage),
+				screenCatalogSidecar(corrosionImage),
 				screenProgressSidecar(corrosionImage),
 			},
 			Containers: []Container{
@@ -264,6 +264,44 @@ func screenTolerations() []Toleration {
 	return []Toleration{
 		{Key: playerTaintKey, Operator: "Exists", Effect: "NoSchedule"},
 	}
+}
+
+// The catalog agent of a screen pod syncs and applies on slower settings
+// than the image's, set through the variables Corrosion reads over its
+// configuration file. A screen only reads the catalog, and it runs for
+// days with nothing to do, so most of its agent's idle cost was syncs
+// that found nothing and two timers that woke it ten times a second.
+//
+// The sync ceiling is the longest wait between two syncs, which repair
+// a write whose broadcast the agent missed. At 60 seconds such a write
+// reaches the screen within about a minute. An agent that finds its
+// peers only after its first syncs have found none waits up to the
+// ceiling again, so it can take about two minutes to catch up.
+//
+// The apply wait is how long the agent holds a small batch of peer
+// changes before it applies it, and its timers wake the idle agent once
+// in each period. At 1,000 ms a single change lands up to a second after
+// it arrives.
+//
+// The durable copies and the Jobs' agents keep the image's settings,
+// because a Job's hand-off waits on a durable copy that repairs a missed
+// broadcast at its own next sync. The progress agent beside this one
+// keeps them too, because a screen reports its position once a second.
+// Plan 87 has the measurements.
+const (
+	screenSyncCeilingVariable  = "PERF__MAX_SYNC_BACKOFF"
+	screenSyncCeilingSeconds   = "60"
+	screenApplyTimeoutVariable = "PERF__APPLY_QUEUE_TIMEOUT"
+	screenApplyTimeoutMillis   = "1000"
+)
+
+func screenCatalogSidecar(image string) Container {
+	agent := catalogSidecar(image)
+	agent.Env = append(agent.Env,
+		EnvVar{Name: screenSyncCeilingVariable, Value: screenSyncCeilingSeconds},
+		EnvVar{Name: screenApplyTimeoutVariable, Value: screenApplyTimeoutMillis},
+	)
+	return agent
 }
 
 // The progress agent of a screen pod: the progress store's own sidecar
