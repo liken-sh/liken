@@ -245,7 +245,7 @@ A speaker leaves the slice only when somebody unpairs it.
 | Key | Effect | When it appears | Who tolerates it |
 |---|---|---|---|
 | `audio.liken.sh/disconnected` | `NoExecute` | the output cannot play now | the consumer, with its own `tolerationSeconds` |
-| `audio.liken.sh/no-monitor` | `NoSchedule` | no monitor answers on this HDMI or DisplayPort output | nobody |
+| `audio.liken.sh/no-monitor` | `NoSchedule` | no monitor has answered on this HDMI or DisplayPort output for 5 seconds | nobody |
 | `audio.liken.sh/no-sink` | `NoSchedule` | PipeWire holds no node for this device, sink or source | nobody |
 
 A paired speaker that is switched off carries the `disconnected`
@@ -264,6 +264,14 @@ play. The two reasons have separate keys because they have separate
 repairs: `no-monitor` clears when the cable returns, and `no-sink`
 clears only when the pod is replaced and PipeWire declares its nodes
 again.
+
+The operator waits 5 seconds before it reports a monitor gone. An A/V
+receiver in standby can drop hot plug detect for a fraction of a
+second several times a minute, and the graphics driver clears the
+slot's ELD on each drop and writes the same block again when the
+receiver answers. A drop shorter than 5 seconds changes nothing in
+the slice or on the `Sink`, and the channel layout that the ELD gives
+stays, so PipeWire does not restart for it.
 
 The analog jack has none of these while its sink is up. Most codecs
 report nothing about the socket, and no signal can prove that sound

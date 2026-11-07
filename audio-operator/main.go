@@ -281,6 +281,9 @@ func operate() {
 		control:   newEndpointControl(client, resources, nodeName, claims, feed, readings),
 		asks:      asks,
 		poke:      wake,
+		// The end of a hotplug hold wakes a pass, so a monitor that
+		// stayed away is reported at the hold's deadline.
+		monitors: newMonitorHold(wake),
 	}
 	// The one recorder of the operator container. It posts the Events
 	// about this machine's Sinks and Sources, with the pod's name as

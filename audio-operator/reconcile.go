@@ -166,6 +166,25 @@ type reconciler struct {
 	// driftReported keeps the divergence report to one line. The
 	// backstop tick runs every minute and the card does not change back.
 	driftReported bool
+
+	// monitors holds each HDMI slot through a short hotplug drop
+	// (monitorhold.go). A nil hold holds nothing, which is what a test
+	// that drops no monitor runs with.
+	monitors *monitorHold
+
+	// cardRead reads the card's endpoints. It is nil on the machine,
+	// where the pass reads them with readEndpoints, and a test sets it
+	// to state an ELD, which no file a test can write carries.
+	cardRead func() ([]alsaEndpoint, error)
+}
+
+// readCard reads the card's endpoints, through the test's seam when it
+// has one.
+func (r *reconciler) readCard() ([]alsaEndpoint, error) {
+	if r.cardRead != nil {
+		return r.cardRead()
+	}
+	return readEndpoints()
 }
 
 // pass runs one reconcile and taints every output when the operator
@@ -219,7 +238,11 @@ func (r *reconciler) reconcile(ctx context.Context) error {
 	// arrived since the last pass reports its own changes from here
 	// on, and a card whose reader stopped is open again.
 	r.cards.follow(controlCards())
-	outputs, err := readEndpoints()
+	// A slot in a short hotplug drop reads as its last reading with a
+	// monitor, so this pass publishes nothing about the drop
+	// (monitorhold.go).
+	outputs, err := r.readCard()
+	outputs = r.monitors.apply(outputs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the card's outputs: %v\n", err)
 		return nil
