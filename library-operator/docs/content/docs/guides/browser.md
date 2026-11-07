@@ -79,9 +79,9 @@ When nothing plays and no press arrives for the `Player`'s
 The press that lifts the shade also acts on the screen under it, so
 the first press of down moves focus and the first press of select
 opens the card in focus. Back is the one key that only lifts the
-shade, because back on the home page brings the shade down, and a
-back that reached the browser could darken the screen again on the
-press that lit it. When three hours have passed with no press
+shade. The browser never lowers the shade on back, but the stock idle
+screen does, and one rule for every screen keeps a press of back from
+undoing the wake there. When three hours have passed with no press
 and the cluster holds a `Person`, that first press raises the person
 picker instead, because the answer to who is watching has lapsed.
 When the panel is off, because

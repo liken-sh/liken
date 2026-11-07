@@ -145,6 +145,11 @@ pub struct Screen {
     /// The last mark each controller's focus topic delivered, one per entry
     /// of `remotes`.
     marks: Vec<Mark>,
+    /// The control each controller holds down whose press or repeat only
+    /// woke the screen, one per entry of `remotes`, until its release or the
+    /// controller's next press. Its repeats find the shade up, and they would
+    /// otherwise reach the client and act where the press did not.
+    woke_only: Vec<Option<String>>,
     /// The topics the client owns. They are the client's own configuration
     /// and not the `Player`'s wiring, so they arrive from the client and not
     /// from a variable the operator sets.
@@ -189,6 +194,7 @@ impl Screen {
             panel_topic: wiring.panel_topic.clone(),
             power_topic: wiring.power_topic.clone(),
             marks: vec![Mark::default(); wiring.remotes.len()],
+            woke_only: vec![None; wiring.remotes.len()],
             remotes: wiring.remotes.clone(),
             client_topics: Vec::new(),
             fade_after: wiring.fade_after,
@@ -464,12 +470,18 @@ impl Screen {
     /// because the off window ran out or `media-operator` asked the screen
     /// to sleep, only wakes the screen: the person pressed at a dark TV
     /// and could not see what the press would act on. Back on the shade
-    /// only lifts it too: a client answers back at its top level by asking
-    /// for the shade, and the stock idle screen has no other level, so a
-    /// back that reached the client could bring the shade down again, and
-    /// the person would see no change. A repeat
-    /// that finds the shade down only wakes it, because the control was
-    /// held while the shade came down and its press acted before that.
+    /// only lifts it too, for every client: the stock idle screen lowers
+    /// the shade on back, so a back that reached it would undo the wake,
+    /// and one rule for every client keeps a press of back from undoing
+    /// the wake there. A repeat that finds the shade down only wakes it,
+    /// because the control was held while the shade came down and its
+    /// press acted before that.
+    ///
+    /// A control whose press or repeat only woke the screen holds until its
+    /// release, and its repeats do nothing. They find the shade up, so
+    /// without the hold a held back would lower the shade again and a held
+    /// select on a dark panel would act blind. The controller's next press
+    /// ends the hold too, so a release the bus lost holds nothing for long.
     ///
     /// Every other key, while the unit plays nothing, reaches the client.
     /// Every press but a power press restarts the quiet window.
@@ -491,6 +503,11 @@ impl Screen {
             press.key,
             remote_name(&self.remotes[index].events)
         );
+        // A release ends the hold of a control whose press only woke the
+        // screen, whether or not the mark still names this `Player`.
+        if !press.edge() && self.woke_only[index].as_deref() == Some(press.key.as_str()) {
+            self.woke_only[index] = None;
+        }
         if !self.holds_focus(index) {
             if press.down() {
                 let mark = &self.marks[index].player;
@@ -513,6 +530,11 @@ impl Screen {
                     "{trigger} left to media-operator, which turns the player off and on"
                 ));
             }
+            return Vec::new();
+        }
+        if press.down() {
+            self.woke_only[index] = None;
+        } else if self.woke_only[index].as_deref() == Some(press.key.as_str()) {
             return Vec::new();
         }
         let down = press.down();
@@ -546,6 +568,7 @@ impl Screen {
                 ));
                 forwarded = Some(press.key);
             } else {
+                self.woke_only[index] = Some(press.key.clone());
                 let why = if dark {
                     ", because the panel was off"
                 } else if back && down {

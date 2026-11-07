@@ -110,8 +110,9 @@ fn a_press_on_a_dark_panel_only_wakes_it_and_lights_the_panel() {
     }
 }
 
-// Both clients answer back by asking for the shade at their top level, so a
-// back that lifted the shade and reached the client would bring it down again.
+// The stock idle screen lowers the shade on back, so a back that lifted the
+// shade and reached it would bring the shade down again. One rule for every
+// client keeps a press of back from undoing the wake there.
 #[test]
 fn back_on_the_shade_only_lifts_it() {
     let now = Instant::now();
@@ -152,6 +153,76 @@ fn a_repeat_that_finds_the_shade_down_only_wakes_it() {
     assert_eq!(
         moments(screen.deliver(SOFA_EVENTS, &key("KEY_UP", 2), false, now)),
         [Moment::Wake]
+    );
+}
+
+// A control held down repeats until its release. When its press only woke
+// the screen, its repeats find the shade up, and without the hold they would
+// act where the press did not: a held back would lower the shade again, and
+// a held select on a dark panel would act blind. A repeat that finds the
+// shade down holds the same way.
+#[test]
+fn a_held_control_whose_press_only_woke_the_screen_repeats_nothing() {
+    let now = Instant::now();
+    for (mut screen, name, first) in [
+        (shaded(now), "KEY_BACK", 1),
+        (off_window_ran_out(now), "KEY_SELECT", 1),
+        (shaded(now), "KEY_UP", 2),
+    ] {
+        screen.deliver(SOFA_EVENTS, &key(name, first), false, now);
+
+        for value in [2, 2, 0] {
+            assert!(
+                screen
+                    .deliver(SOFA_EVENTS, &key(name, value), false, now)
+                    .is_empty(),
+                "{name} at value {value}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_release_ends_the_hold_so_the_next_press_acts() {
+    let now = Instant::now();
+    let mut screen = shaded(now);
+    screen.deliver(SOFA_EVENTS, &key("KEY_BACK", 1), false, now);
+    screen.deliver(SOFA_EVENTS, &key("KEY_BACK", 0), false, now);
+
+    assert_eq!(
+        moments(screen.deliver(SOFA_EVENTS, &key("KEY_BACK", 1), false, now)),
+        [Moment::Press("KEY_BACK".into())]
+    );
+}
+
+#[test]
+fn a_held_control_whose_press_woke_and_acted_repeats_to_the_client() {
+    let now = Instant::now();
+    let mut screen = shaded(now);
+    screen.deliver(SOFA_EVENTS, &key("KEY_DOWN", 1), false, now);
+
+    assert_eq!(
+        moments(screen.deliver(SOFA_EVENTS, &key("KEY_DOWN", 2), false, now)),
+        [Moment::Press("KEY_DOWN".into())]
+    );
+}
+
+// The hold belongs to the controller that pressed, so a second controller's
+// repeats of the same key still act.
+#[test]
+fn a_hold_on_one_controller_leaves_another_controllers_repeats_alone() {
+    let now = Instant::now();
+    let wiring = Wiring {
+        fade_after: Duration::from_secs(600),
+        ..two_remotes()
+    };
+    let mut screen = idling(&wiring, now);
+    screen.tick(now + Duration::from_secs(600));
+    screen.deliver(ARMCHAIR_EVENTS, &key("KEY_BACK", 1), false, now);
+
+    assert_eq!(
+        moments(screen.deliver(SOFA_EVENTS, &key("KEY_BACK", 2), false, now)),
+        [Moment::Press("KEY_BACK".into())]
     );
 }
 

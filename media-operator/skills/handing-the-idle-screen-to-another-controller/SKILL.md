@@ -221,10 +221,12 @@ wakes the screen and states the `on` desire, because the person
 pressed at a dark TV and could not see what the press would act on.
 The panel is off after the off window runs out, and after the client
 receives `sleep` on the power topic. Back, `KEY_BACK`, `KEY_ESC`, or
-`KEY_EXIT`, on a sleeping screen only wakes it too, because a client
-answers back at its top level by bringing its shade down, and a back
-that reached the client could bring the shade straight down again. A
-repeat that finds the screen asleep only wakes it.
+`KEY_EXIT`, on a sleeping screen only wakes it too, for every client.
+The operator's own client lowers the shade on back, and one rule for
+every client keeps a press of back from undoing the wake there. A
+repeat that finds the screen asleep only wakes it. The client
+receives none of the repeats of a control whose press or repeat only
+woke the screen, until the control is released.
 
 The power keys, `KEY_POWER`, `KEY_POWER2`, `KEY_SLEEP`, and
 `KEY_WAKEUP`, are the media operator's: it reads them from the same
