@@ -16,6 +16,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // statusWrites counts the status writes the Display fixture's API
@@ -36,7 +38,7 @@ func statusWrites(f *displayFixture) int {
 func TestTheDisplayOfAShortDropKeepsItsStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
-		fixture.control.outputs = newHotplugHold(nil).wrap(fixture.outputs)
+		fixture.control.outputs = newHotplugHold(nil, nil).view().wrap(fixture.outputs)
 		fixture.passes(2)
 		synctest.Wait()
 		writes := statusWrites(fixture)
@@ -77,9 +79,9 @@ func TestTheDisplayOfAShortDropKeepsItsStatus(t *testing.T) {
 func TestTheWindowsOfAShortDropStayReported(t *testing.T) {
 	fixture := newPlacementFixture(t)
 	clock := time.Unix(0, 0)
-	hold := newHotplugHold(nil)
+	hold := newHotplugHold(nil, nil)
 	hold.now = func() time.Time { return clock }
-	fixture.pass.outputs = hold.wrap(fixture.outputs)
+	fixture.pass.outputs = hold.view().wrap(fixture.outputs)
 	fixture.screen(labMonitor(), DisplaySpec{})
 	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
 	fixture.pod("living-room", "film-0", nil)
@@ -124,49 +126,95 @@ func displayStatusWrites(f *placementFixture) int {
 	return writes
 }
 
-// The slice publishes the same device for a connector inside a short
-// drop, so the drop wakes no pod that waits on a device. A connector
-// that stays dark past the settle time publishes what sysfs says.
-func TestTheSliceOfAShortDropIsTheSame(t *testing.T) {
+// slicePass runs the slice publisher's pass against one hold and one
+// link history, which both live as long as the operator does, and
+// answers the device it published for HDMI-A-1.
+type slicePass struct {
+	t       *testing.T
+	fixture *slicePublishFixture
+	client  *apiclient.Client
+	socket  string
+	view    *hotplugView
+	links   *linkHistory
+}
+
+func newSlicePass(t *testing.T, clock *time.Time) *slicePass {
+	t.Helper()
 	compositorFixture(t)
-	socket := servingSocket(t, t.TempDir())
 	fixture := &slicePublishFixture{}
-	client := testClient(t, fixture.handler(t))
-	clock := time.Unix(0, 0)
-	hold := newHotplugHold(nil)
-	hold.now = func() time.Time { return clock }
+	hold := newHotplugHold(nil, nil)
+	hold.now = func() time.Time { return *clock }
+	links := newLinkHistory()
+	links.now = func() time.Time { return *clock }
+	return &slicePass{t: t, fixture: fixture, client: testClient(t, fixture.handler(t)),
+		socket: servingSocket(t, t.TempDir()), view: hold.view(), links: links}
+}
+
+func (p *slicePass) run() SliceDevice {
+	p.t.Helper()
+	p.fixture.created = nil
 	current := func() (map[string]string, error) {
 		return map[string]string{"HDMI-A-1": "3840x1600"}, nil
 	}
-	pass := func() SliceDevice {
-		t.Helper()
-		fixture.created = nil
-		if err := reconcile(client, "liken-1", testOwner(), "card1", socket, current, noPanelControls,
-			newLinkHistory(), hold, nil); err != nil {
-			t.Fatal(err)
-		}
-		for _, device := range fixture.created.Spec.Devices {
-			if device.Name == "hdmi-a-1" {
-				return device
-			}
-		}
-		t.Fatal("the slice published no hdmi-a-1 device")
-		return SliceDevice{}
+	if err := reconcile(p.client, "liken-1", testOwner(), "card1", p.socket, current, noPanelControls,
+		p.links, p.view, nil); err != nil {
+		p.t.Fatal(err)
 	}
-	lit := pass()
+	for _, device := range p.fixture.created.Spec.Devices {
+		if device.Name == "hdmi-a-1" {
+			return device
+		}
+	}
+	p.t.Fatal("the slice published no hdmi-a-1 device")
+	return SliceDevice{}
+}
+
+// The slice publishes the same device for a connector through a short
+// drop, read as it starts, while it lasts, and after the monitor
+// answers again, so the drop wakes no pod that waits on a device. A
+// connector that stays dark past the settle time publishes what sysfs
+// says.
+func TestTheSliceOfAShortDropIsTheSame(t *testing.T) {
+	clock := time.Unix(0, 0)
+	slice := newSlicePass(t, &clock)
+	lit := slice.run()
 
 	writeConnector(t, sysRoot, "card1", "HDMI-A-1", "")
+	start := slice.run()
 	clock = clock.Add(hotplugSettle / 2)
-	if dark := pass(); !reflect.DeepEqual(dark, lit) {
-		t.Errorf("the connector inside a drop publishes\n%+v\nwant\n%+v", dark, lit)
+	during := slice.run()
+	writeConnector(t, sysRoot, "card1", "HDMI-A-1", "lg-hdr-wqhd")
+	back := slice.run()
+	for name, device := range map[string]SliceDevice{"as it starts": start, "while it lasts": during, "after it": back} {
+		if !reflect.DeepEqual(device, lit) {
+			t.Errorf("the connector %s publishes\n%+v\nwant\n%+v", name, device, lit)
+		}
 	}
 
-	writeConnector(t, sysRoot, "card1", "HDMI-A-1", "lg-hdr-wqhd")
-	pass()
 	writeConnector(t, sysRoot, "card1", "HDMI-A-1", "")
-	pass()
+	slice.run()
 	clock = clock.Add(hotplugSettle)
-	if dark := pass(); reflect.DeepEqual(dark, lit) {
+	if dark := slice.run(); reflect.DeepEqual(dark, lit) {
 		t.Error("a connector dark past the settle time still publishes its lit device")
+	}
+}
+
+// A different monitor that arrives inside the hold is a monitor swap,
+// and the device taints for it the way it does for a swap the hold
+// never saw: the claim on the connector asked for the monitor that
+// left.
+func TestAMonitorSwappedInsideTheHoldTaintsTheDevice(t *testing.T) {
+	clock := time.Unix(0, 0)
+	slice := newSlicePass(t, &clock)
+	slice.run()
+
+	writeConnector(t, sysRoot, "card1", "HDMI-A-1", "")
+	slice.run()
+	clock = clock.Add(time.Second)
+	writeConnector(t, sysRoot, "card1", "HDMI-A-1", "portable-display")
+	swapped := slice.run()
+
+	if !slices.ContainsFunc(swapped.Taints, func(taint DeviceTaint) bool { return taint.Key == disconnectedTaint }) {
+		t.Errorf("the swapped monitor publishes with %+v, want the %s taint", swapped.Taints, disconnectedTaint)
 	}
 }

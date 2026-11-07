@@ -71,11 +71,21 @@ reported then.
 
 The hold sits where each reader composes its view of the card, not
 on the uevent. The Display controller and the placement pass read
-one walk, `screensOf`, so one hold covers both. The slice publisher
-composes its own walk with the controls and the card's current mode,
-so it reads through a hold of its own, and a held connector publishes
-the device it published while lit. The two holds are one type with
-one constant.
+one walk, `screensOf`, through one view of the hold. The slice
+publisher composes its own walk with the controls and the card's
+current mode, so it reads through a second view, and a held connector
+publishes the device it published while lit. Each view keeps its own
+lit reading, and the hold keeps one dark time for each connector that
+both views share, so the `Display`, its windows, and the slice report
+a monitor that left at one deadline, whichever reader read it dark
+first.
+
+The slice publisher's link history (`links.go`) reads the wire before
+the hold does. A monitor that leaves and a different one that answers
+inside the hold is then still a replacement, and the device taints for
+it, because the claim on the connector asked for the monitor that
+left. A lit reading always passes through the hold as it is, so no
+reader shows a different monitor as the held one.
 
 - The Display controller counts a held connector as present, so the
   sweep for panels that left does not write it, and it skips the
@@ -104,7 +114,14 @@ seconds. The pass after the deadline waits for that window again.
 
 The hold covers each drop alone. A burst of three drops spread over
 7 seconds is three holds, and each one ends when the port answers
-again.
+again. When no pass reads the port lit between two drops, the hold
+learns of the return from the uevents: the operator counts each drm
+uevent before it wakes a pass, and a dark read that finds the count
+moved since the last dark read starts the hold again. The kernel
+names the card in a hotplug uevent, not the connector, so a second
+connector that flaps on the same card also starts the hold again, and
+a monitor that left the first connector is reported only after the
+card has been quiet for the settle time.
 
 ## Considered and set aside
 

@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -287,9 +288,8 @@ func operate() {
 		fatal("watching for kernel events: %v", err)
 	}
 
-	// The end of a hotplug hold schedules one more pass through the
-	// settled channel, the way a failed write does, so a monitor that
-	// stayed away is reported at the hold's deadline (hotplughold.go).
+	// A write that failed and the end of a hotplug hold each schedule
+	// one more pass through the settled channel (hotplughold.go).
 	retries := make(chan struct{}, 1)
 	again := func() {
 		select {
@@ -297,15 +297,22 @@ func operate() {
 		default:
 		}
 	}
+	// Each drm uevent is counted before it wakes a pass, so the hold
+	// can tell a connector that stayed dark from one that moved.
+	var hotplugs atomic.Uint64
+	uevents = countHotplugs(ctx, uevents, &hotplugs)
+	hold := newCardHold(retries, hotplugs.Load)
 
 	// One walk of the card answers the Display controller and the
 	// placement pass, so the two name the same connectors and monitors,
-	// and one hold covers both. The slice publisher's pass makes its
-	// own walk, behind a hold of its own.
-	screensOf := newHotplugHold(again).wrap(func() []Output {
+	// and one view of the hold covers both. The slice publisher's pass
+	// makes its own walk, behind a view of its own. The views share
+	// each connector's dark time, so all three report a monitor that
+	// left at one deadline.
+	screensOf := hold.view().wrap(func() []Output {
 		return screens(card, plugin.currentModes, plugin.connectorModes)
 	})
-	sliceHold := newHotplugHold(again)
+	sliceHold := hold.view()
 
 	// The Display controller runs beside the slice publisher and
 	// writes the panels' own resources. It reads the same connectors
@@ -590,7 +597,7 @@ func eventsEnded(ctx context.Context) error {
 // other caller may pass one in.
 func reconcile(client *apiclient.Client, nodeName string, owner OwnerReference, card, socketPath string,
 	currentModes func() (map[string]string, error), controls *panelControls, links *linkHistory,
-	hold *hotplugHold, readings *metrics) error {
+	hold *hotplugView, readings *metrics) error {
 	outputs := discoverOutputs(sysRoot, card)
 	if len(outputs) == 0 {
 		return fmt.Errorf("%s registers no connectors, so the published slice stays as it is", card)
@@ -611,10 +618,17 @@ func reconcile(client *apiclient.Client, nodeName string, owner OwnerReference, 
 	default:
 		readings.recordObservation("card", true, now)
 	}
-	// The hold sees the reading this pass composed, so a connector in
-	// a short drop publishes the device it published while lit: the
-	// same monitor, modes, current mode, and controls.
-	withModes := hold.apply(withControls(withCurrentModes(outputs, modes), controls))
+	// The pass asks each panel what controls it carries. The answer
+	// is cached against the monitor's EDID, so a pass over unchanged
+	// hardware sends nothing on any i2c wire, and a panel that refuses
+	// DDC/CI publishes no control attribute and no control device.
+	//
+	// The link history reads the wire as it is, so a monitor that left
+	// and a different one that arrived inside a hold still reads as a
+	// replacement. The hold reads the history's answer, so a connector
+	// in a short drop publishes the device it published while lit: the
+	// same monitor, modes, current mode, controls, and taints.
+	observed := hold.apply(withLinks(withControls(withCurrentModes(outputs, modes), controls), links))
 
 	// The claim answer is the same file read the canvas heal already
 	// makes. Reusing it here means the connected and claimed gauges
@@ -624,13 +638,8 @@ func reconcile(client *apiclient.Client, nodeName string, owner OwnerReference, 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the claims the kubelet prepared: %v\n", err)
 	}
-	readings.recordOutputs(withModes, claimed)
-
-	// The pass asks each panel what controls it carries. The answer
-	// is cached against the monitor's EDID, so a pass over unchanged
-	// hardware sends nothing on any i2c wire, and a panel that refuses
-	// DDC/CI publishes no control attribute and no control device.
-	devices := sliceDevices(withLinks(withModes, links))
+	readings.recordOutputs(observed, claimed)
+	devices := sliceDevices(observed)
 	// The compositor source is this handshake: the same check that
 	// decides the NoExecute taint below. A socket that refuses the
 	// connect and a socket that accepts and answers nothing are both a
