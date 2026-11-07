@@ -96,13 +96,20 @@ func (p Planner) sinceVerified(e Event, list []comparison) ([]comparison, string
 }
 
 // readDiffs reads the diff with each commit and joins them: a component
-// runs when any one of them reaches it.
+// runs when any one of them reaches it. A package.toml counts as changed
+// only in what the checks read when every diff that names it says so,
+// because the commits can differ: the push's own before and the newest
+// main run that passed can hold different versions of the file.
 func (p Planner) readDiffs(list []comparison, head string) (Diff, error) {
-	joined := Diff{Workflows: map[string]string{}, Publishes: map[string]string{}, Targets: map[string]bool{}}
+	joined := Diff{Workflows: map[string]string{}, Publishes: map[string]string{}, Targets: map[string]bool{}, Checks: map[string]bool{}}
 	for _, c := range list {
 		d, err := p.Git.ReadDiff(p.Components, c.Commit, head)
 		if err != nil {
 			return joined, err
+		}
+		for file, checks := range d.Checks {
+			held, seen := joined.Checks[file]
+			joined.Checks[file] = checks && (held || !seen)
 		}
 		joined.Files = append(joined.Files, d.Files...)
 		for k, v := range d.Workflows {

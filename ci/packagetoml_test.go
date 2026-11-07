@@ -1,7 +1,6 @@
 package main
 
 import (
-	"slices"
 	"strings"
 	"testing"
 )
@@ -78,14 +77,35 @@ func TestAnEditToAnImageReleasesTheComponentAndItsUsers(t *testing.T) {
 }
 
 // The jobs are what the checks run, so an edit to them still runs the
-// component's own checks.
-func TestAnEditToTheJobsStillRunsTheComponentsChecks(t *testing.T) {
-	r, before := generatedFixture(t)
+// component's own checks, and no check of a component that depends on it.
+func TestAnEditToTheJobsRunsOnlyTheComponentsOwnChecks(t *testing.T) {
+	r := configFixture(t)
+	before := r.run("rev-parse", "HEAD")
 	r.write("base/package.toml", baseConfig("make check", ""))
 	r.commit("edit the base's check")
 
-	if got := checked(planPush(t, r, before)); !slices.Contains(got, "base") {
-		t.Errorf("the checks that run: %v", got)
+	decisions := planPush(t, r, before)
+	if !decisions["base"].Check || decisions["operator"].Check {
+		t.Errorf("the checks that run: %v", checked(decisions))
+	}
+}
+
+// A push to main publishes a development build of what changed, and an edit
+// to the jobs changes no output, so it publishes nothing.
+func TestAnEditToTheJobsOnMainPublishesNoDevelopmentBuild(t *testing.T) {
+	r := configFixture(t)
+	before := r.run("rev-parse", "HEAD")
+	r.write("base/package.toml", baseConfig("make check", ""))
+	r.commit("edit the base's check")
+
+	decisions, err := r.planner(fixturePublished).Plan(Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, component := range []string{"base", "operator"} {
+		if d := decisions[component]; d.Publish != publishNone {
+			t.Errorf("%s: %+v", component, d)
+		}
 	}
 }
 
@@ -102,5 +122,23 @@ func TestAnOutputsTableThatHoldsOnlyExcludedPathsReleasesNothing(t *testing.T) {
 
 	if d := decided(t, r)["liken"]; d.Changed {
 		t.Errorf("liken releases: %+v", d)
+	}
+}
+
+// A push to main compares with its own before and with the newest main run
+// that passed. When a run in between changed the base's image and failed,
+// the push's own change is only to the jobs, but the change since the green
+// run is to the image, so the dependent's checks still run.
+func TestAJobsEditAfterAnUnverifiedImageChangeStillRunsTheDependents(t *testing.T) {
+	r := configFixture(t)
+	green := r.run("rev-parse", "HEAD")
+	r.write("base/package.toml", baseConfig("make test", "")+"platforms = [\"linux/arm64\"]\n")
+	before := r.commit("build the base for another platform, in a run that failed")
+	r.write("base/package.toml", baseConfig("make check", "")+"platforms = [\"linux/arm64\"]\n")
+	r.commit("edit the base's check")
+
+	decisions := planGate(t, r, map[string][]string{}, Event{Name: "push", Ref: "refs/heads/main", Before: before, Verified: green, Head: "HEAD"})
+	if !decisions["operator"].Check {
+		t.Errorf("the checks that run: %v", checked(decisions))
 	}
 }

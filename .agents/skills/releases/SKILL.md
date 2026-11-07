@@ -71,7 +71,8 @@ and `brand` names its prose, `voice.md`, `motion.md`, and
 `[[jobs]]` or its `exclude` paths runs the component's checks and
 releases nothing, because the jobs are what the checks run and no build
 reads either part. A change to any other part of it releases the
-component.
+component. A pinned component is the exception: its recipe hashes its
+whole `package.toml`, so any change to the file needs a new revision.
 A change under `plans/` also runs none of the component's jobs,
 because no build, test, or drill reads a plan. A push or a pull
 request that changes only plans, in the top-level `plans/` or in a
