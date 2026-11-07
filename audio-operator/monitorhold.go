@@ -182,6 +182,10 @@ func (h *monitorHold) apply(endpoints []alsaEndpoint) []alsaEndpoint {
 		}
 		held[i] = last
 	}
+	// A seed describes the card as the previous operator left it, so it
+	// serves this first read alone. A slot this read did not hold, such
+	// as one on a card that arrives later, is read as it is.
+	clear(h.seeds)
 	return held
 }
 
@@ -383,4 +387,22 @@ func cardChanges(ctx context.Context) <-chan controlEvent {
 		}()
 	}
 	return merged
+}
+
+// declaredReading reads the card for the init container: it opens the
+// cards' events, reads the card, asks expect which empty slots to wait
+// for, and waits for them. The events stay open until the wait returns,
+// so a wait that starts after a slow read of the Sinks still hears an
+// ELD change at its end.
+func declaredReading(read func() ([]alsaEndpoint, error),
+	expect func([]alsaEndpoint) func([]alsaEndpoint) bool,
+	subscribe func(context.Context) <-chan controlEvent) ([]alsaEndpoint, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	changes := subscribe(ctx)
+	outputs, err := read()
+	if err != nil {
+		return nil, err
+	}
+	return awaitMonitors(read, expect(outputs), changes, monitorSettle)
 }

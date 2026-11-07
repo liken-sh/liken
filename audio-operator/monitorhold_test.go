@@ -204,6 +204,66 @@ func TestAnOperatorThatStartsDuringADropHoldsThePublishedMonitor(t *testing.T) {
 	})
 }
 
+// A seed describes the card as the previous operator left it, so it
+// serves only the first read. A slot the first read did not hold, such
+// as one whose card arrives later, reads as it is and is never lit by a
+// monitor that left long ago.
+func TestASeedServesOnlyTheFirstRead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hold := newMonitorHold(nil)
+		hold.seed(map[string]eld{testSinkName: litSlot(t).ELD})
+		hold.apply(named(alsaEndpoint{Card: 0, PCM: 0}))
+		time.Sleep(time.Hour)
+
+		if got := hold.apply(named(darkSlot()))[0]; got.Monitor {
+			t.Errorf("a slot that arrived after the first read answers the seed's monitor: %+v", got.ELD)
+		}
+	})
+}
+
+// The declaration's wait hears ELD changes for all of its time, however
+// long the read of the Sinks before it took.
+func TestTheDeclarationHearsChangesForTheWholeWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		reads := 0
+		read := func() ([]alsaEndpoint, error) {
+			reads++
+			if reads > 2 {
+				return []alsaEndpoint{litSlot(t)}, nil
+			}
+			return []alsaEndpoint{darkSlot()}, nil
+		}
+		// The Sinks take 3 seconds to read, and the monitor answers 3
+		// seconds into the wait after them.
+		expect := func([]alsaEndpoint) func([]alsaEndpoint) bool {
+			time.Sleep(3 * time.Second)
+			return func(outputs []alsaEndpoint) bool { return !outputs[0].Monitor }
+		}
+		subscribe := func(ctx context.Context) <-chan controlEvent {
+			changes := make(chan controlEvent)
+			go func() {
+				time.Sleep(6 * time.Second)
+				// A subscription whose context ended has stopped reading
+				// the card, and delivers nothing.
+				if ctx.Err() != nil {
+					return
+				}
+				select {
+				case changes <- controlEvent{Card: 0, Device: 3, Name: eldElementName}:
+				case <-ctx.Done():
+				}
+			}()
+			return changes
+		}
+
+		outputs, err := declaredReading(read, expect, subscribe)
+
+		if err != nil || !outputs[0].Monitor {
+			t.Errorf("the declaration found monitor=%v (%v), want the monitor that answered", outputs[0].Monitor, err)
+		}
+	})
+}
+
 // The init container reads the card before PipeWire starts, and an
 // empty slot gives a stereo layout. So when a slot that the previous
 // operator published with a monitor reads empty, it waits for an ELD

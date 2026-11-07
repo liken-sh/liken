@@ -28,7 +28,6 @@ package main
 // configuration turns the ALSA monitor off everywhere.
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -355,13 +354,7 @@ func declare() {
 	// declare stereo, so a slot whose Sink reports a monitor and that
 	// reads empty is waited for, up to the settle time (monitorhold.go).
 	// The events open before the first read.
-	ctx, cancel := context.WithTimeout(context.Background(), monitorSettle)
-	defer cancel()
-	changes := cardChanges(ctx)
-	outputs, err := readEndpoints()
-	if err == nil {
-		outputs, err = awaitMonitors(readEndpoints, declaredMonitors(outputs), changes, monitorSettle)
-	}
+	outputs, err := declaredReading(readEndpoints, declaredMonitors, cardChanges)
 	if err != nil {
 		fatal("reading the card's outputs: %v", err)
 	}
