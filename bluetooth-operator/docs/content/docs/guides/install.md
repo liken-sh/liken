@@ -322,9 +322,9 @@ cluster-scoped, so their `Event`s are in `default`, and
 | `Paired` | Normal | `PairingRequest`, `Peripheral` | The device holds a bond, and the operator created its `Peripheral`. |
 | `BondLost` | Warning | `Peripheral` | `bluetoothd` holds no bond with the device any more. The `Peripheral` stays until you delete it. |
 | `LinkUp` | Normal | `Peripheral` | The device connected. |
-| `Asleep` | Normal | `Peripheral` | The link timed out on a device that sleeps between sessions, such as a remote after an idle hour. |
+| `Asleep` | Normal | `Peripheral` | The link timed out on a device that sleeps between sessions, such as a T6 remote after an idle hour. |
 | `LinkLost` | Normal | `Peripheral` | The link timed out on a device that does not sleep: it went out of range, or its battery ran out. |
-| `ClosedByDevice` | Normal | `Peripheral` | The device ended the link: it was switched off, or it disconnected. |
+| `ClosedByDevice` | Normal | `Peripheral` | The device ended the link: it was switched off, or it disconnected, as an X6 air-mouse remote does after an idle time. |
 | `ClosedByRadio` | Normal | `Peripheral` | This radio ended the link, at an unpair or at the input recovery. |
 | `AuthenticationFailed` | Warning | `Peripheral` | The link ended because the keys did not match. Delete the `Peripheral` and pair the device again. |
 | `NotConnected` | Normal | `Peripheral` | The link ended, and the operator received no reason from `bluetoothd`. |
@@ -340,7 +340,7 @@ cluster-scoped, so their `Event`s are in `default`, and
 The reasons from `LinkUp` to `NotBonded` are the reasons of the
 `Peripheral`'s `Connected` condition, and each change of the condition
 posts one `Event`. A Low Energy remote ends its link after an idle
-hour, so a remote posts about two `Event`s for each session. The
+time, so a remote posts about two `Event`s for each session. The
 `bluetooth_disconnects_total` metric counts the same changes by
 reason. A reconnect of a controller that holds a link with no input
 posts no `Event`, and the `operator` container's log records it. A power cycle of the adapter for the same controller posts

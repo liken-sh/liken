@@ -2,19 +2,31 @@ package main
 
 // The press that wakes the room when a sleeping remote connects.
 //
-// A Bluetooth LE remote ends its link after an idle time, and a press
-// wakes it. The remote sends no report for that press: the relay opens
-// the remote's node before the link is encrypted, and the first report
-// the remote sends is the one for the next press. So without this file,
-// a person presses once to wake the remote and again to wake the room.
+// A Bluetooth LE remote drops its link after an idle time, and a press
+// wakes it and connects it again. Remotes drop the link in two ways, and
+// they differ in the press that wakes them:
+//
+//   - A T6 remote stops answering, so the link times out, and the
+//     Peripheral's Connected condition holds Asleep. The remote sends no
+//     report for the press that wakes it: the relay opens the remote's
+//     node before the link is encrypted, and the first report the remote
+//     sends is the one for the next press.
+//   - An X6 air-mouse remote ends the link itself, so the condition
+//     holds ClosedByDevice. The remote sends the press that wakes it
+//     once the link is encrypted, and that press reaches the claim like
+//     any other.
+//
+// So without this file, a person presses a T6 once to wake the remote
+// and again to wake the room. This file covers the first kind alone.
 //
 // When a remote connects after a sleep, the relay writes one press and
 // one release of KEY_UNKNOWN into the remote's virtual device, before it
 // starts to move the real node's events. The relay cannot tell which
 // button was pressed, and KEY_UNKNOWN is the kernel's code for a key
 // with no name. A consumer with no binding for it treats it as a press
-// and nothing more: a sleeping media-screen wakes the screen and states
-// the on desire, and media-operator asks the receiver for the unit's
+// and nothing more: a sleeping media-screen wakes the screen, states the
+// on desire, and hands the press to the screen client, which binds
+// nothing to it, and media-operator asks the receiver for the unit's
 // input. KEY_WAKEUP is not used, because media-operator and
 // media-screen read it as the TV remote's own Power On, which sends no
 // input ask.
@@ -46,7 +58,8 @@ const (
 // awake, to interference or to a stream of audio on the same radio,
 // also reports a timeout, and it connects again on its own within
 // seconds. A person rarely presses a button within 10 seconds of the
-// moment the remote went to sleep, an idle hour after the last press.
+// moment the remote went to sleep, which on a T6 is an idle hour after
+// the last press.
 const wakeAfter = 10 * time.Second
 
 // follow arms or disarms one controller from the Connected condition a

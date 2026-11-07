@@ -73,6 +73,41 @@ fn the_shade_covers_the_browser_and_lifts_it() {
     assert!(!browser.asleep());
 }
 
+// The crate hands the browser the press that lifted the shade right after
+// the wake, in the same fold, so the press acts on the screen the shade
+// uncovered.
+#[test]
+fn the_press_that_lifts_the_shade_acts_on_the_screen() {
+    let (mut browser, bus) = on_bus(3, vec![Moment::Sleep]);
+    browser.pump(1.0);
+
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![Moment::Wake, Moment::Press("KEY_SELECT".into())];
+    browser.pump(2.0);
+
+    assert!(!browser.asleep());
+    assert!(matches!(browser.top(), screens::Screen::Wall(_)));
+}
+
+// The relay's wake press for a remote that sends none of its own arrives as
+// `KEY_UNKNOWN`, which the browser binds to nothing.
+#[test]
+fn the_wake_press_with_no_name_lifts_the_shade_and_changes_nothing_else() {
+    let (mut browser, bus) = on_bus(3, vec![Moment::Sleep]);
+    browser.pump(1.0);
+    let focus = showing_home(&browser).focus;
+
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![Moment::Wake, Moment::Press("KEY_UNKNOWN".into())];
+    browser.pump(2.0);
+
+    assert!(!browser.asleep());
+    assert!(browser.stack.is_empty());
+    assert_eq!(showing_home(&browser).focus, focus);
+    assert_eq!(strip_at(&browser, 3).focus, 0);
+    assert!(published_nothing(&bus));
+}
+
 #[test]
 fn a_press_that_arrives_asleep_keeps_the_focus() {
     let (mut browser, _bus) = on_bus(3, vec![Moment::Sleep, Moment::Press("KEY_RIGHT".into())]);

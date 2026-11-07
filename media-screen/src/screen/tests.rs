@@ -379,19 +379,6 @@ fn a_press_restarts_the_quiet_window_from_the_press() {
 }
 
 #[test]
-fn a_press_wakes_a_sleeping_screen_and_does_nothing_else() {
-    let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-    screen.asleep = true;
-
-    assert_eq!(
-        moments(screen.deliver(SOFA_EVENTS, &key("KEY_PLAYPAUSE", 1), false, now)),
-        [Moment::Wake]
-    );
-    assert!(!screen.asleep);
-}
-
-#[test]
 fn a_press_this_crate_hands_the_client_states_nothing() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
@@ -577,21 +564,6 @@ fn desire(desire: &'static str) -> Publish {
 }
 
 #[test]
-fn a_press_on_a_sleeping_screen_only_wakes_it() {
-    let now = Instant::now();
-    for name in ["KEY_UP", "KEY_A", "KEY_HOMEPAGE", "KEY_VOLUMEUP"] {
-        let mut screen = idling(&wiring(), now);
-        screen.asleep = true;
-
-        assert_eq!(
-            moments(screen.deliver(SOFA_EVENTS, &key(name, 1), false, now)),
-            [Moment::Wake],
-            "{name}"
-        );
-    }
-}
-
-#[test]
 fn a_press_reaches_no_client_while_a_play_runs() {
     let now = Instant::now();
     let mut screen = focused(&wiring());
@@ -675,17 +647,6 @@ fn a_volume_key_publishes_no_level() {
             "{name}"
         );
     }
-}
-
-#[test]
-fn a_volume_key_on_a_sleeping_screen_only_wakes_it() {
-    let now = Instant::now();
-    let mut screen = idling(&wiring(), now);
-    screen.asleep = true;
-
-    let effects = screen.deliver(SOFA_EVENTS, &key("KEY_VOLUMEUP", 1), false, now);
-
-    assert_eq!(moments(effects), [Moment::Wake]);
 }
 
 // The focus gate.
@@ -1043,3 +1004,4 @@ mod lines;
 mod panel;
 mod power_keys;
 mod power_topic;
+mod waking_press;

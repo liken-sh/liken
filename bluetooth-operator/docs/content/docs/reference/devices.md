@@ -485,13 +485,15 @@ it is paired, and its claims stop parking from then on.
 Events go one way. A gamepad's rumble is a write into the real node,
 and the relay does not carry it back.
 
-A Bluetooth LE remote that sleeps sends no key for the press that
-wakes it. So when a remote connects after a sleep, the operator
-writes one press and one release of `KEY_UNKNOWN` (code 240) into its
-virtual node, before the remote's own events. A consumer that binds
-nothing to `KEY_UNKNOWN` reads it as a press with no meaning, and a
-sleeping screen wakes on it. The press arrives only under all of
-these conditions:
+Some Bluetooth LE remotes send no key for the press that wakes them.
+An X6 air-mouse remote ends its own link and sends the press that
+wakes it, so a claim receives that press with no help. A T6 remote
+lets its link time out and sends no report for that press. So when a
+remote connects after a sleep, the operator writes one press and one
+release of `KEY_UNKNOWN` (code 240) into its virtual node, before the
+remote's own events. A consumer that binds nothing to `KEY_UNKNOWN`
+reads it as a press with no meaning, and a sleeping screen wakes on
+it. The press arrives only under all of these conditions:
 
 * The `Peripheral`'s `Connected` condition held `Asleep`: the link
   timed out on a device that sleeps between sessions.

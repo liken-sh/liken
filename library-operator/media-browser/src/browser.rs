@@ -556,6 +556,11 @@ impl<S: Source, A: Art> Browser<S, A> {
                 self.log.line("the shade is down");
                 self.refresh.shade(true);
             }
+            // A press that lifted the shade over a lit panel is the next
+            // moment of the same fold, so it acts on the page this wake
+            // uncovers. The wake starts the exit of a loading state the
+            // shade came down over, and a state that leaves holds no press
+            // (press.rs).
             Moment::Wake => {
                 self.log.line("the shade is up");
                 self.refresh.shade(false);

@@ -8,13 +8,15 @@ package main
 //
 //   - LinkUp: the link is up.
 //   - Asleep: the link timed out, and the device sleeps between
-//     sessions. A Low Energy remote stops answering after an idle time
-//     and pages the radio again on the next press, so it needs no
+//     sessions. A T6 remote stops answering after an idle time and
+//     pages the radio again on the next press, so it needs no
 //     attention. This reason arms the press that wakes the room
 //     (wake.go).
 //   - LinkLost: the link timed out, and the device does not sleep
 //     between sessions, so it went out of range or its battery ran out.
-//   - ClosedByDevice: the device ended the link.
+//   - ClosedByDevice: the device ended the link. An X6 air-mouse remote
+//     ends its own link after an idle time, and it sends the press that
+//     wakes it, so this reason arms no press.
 //   - ClosedByRadio: this radio ended the link, at an unpair or at the
 //     input recovery.
 //   - AuthenticationFailed: the link ended because the keys did not

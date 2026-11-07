@@ -411,15 +411,56 @@ fn back_during_the_state_returns_the_page_and_cancels_nothing() {
     assert_eq!(browser.stack.len(), 2);
 }
 
+// The browser on a movie page whose film has a trailer, so the page holds a
+// second button to the right of Play, with focus on Play.
+fn on_a_movie_with_a_trailer() -> (Browser<Fake, NoArt>, FakeBus) {
+    let (mut browser, bus) = playing(vec![one_item()]);
+    browser.source.trailers = true;
+    browser.key("enter");
+    browser.key("enter");
+    browser.tick(PRESS);
+    (browser, bus)
+}
+
 #[test]
 fn a_press_during_the_state_reaches_no_screen() {
-    let (mut browser, _bus) = on_a_movie();
-    browser.source.trailers = true;
+    let (mut browser, _bus) = on_a_movie_with_a_trailer();
     browser.key("enter");
 
     browser.key("right");
 
     assert_eq!(showing_page(&browser).focus, Focus::Buttons(0));
+}
+
+// A `Play` that never left `Idle` leaves its curtain standing, and the
+// quiet window brings the shade down over it. The wake starts the
+// curtain's exit, and the press that lifted the shade arrives in the same
+// fold, so it acts on the page and is not spent on the curtain.
+#[test]
+fn the_press_that_lifts_the_shade_over_a_curtain_acts_on_the_page() {
+    let (mut browser, bus) = on_a_movie_with_a_trailer();
+    browser.key("enter");
+    *bus.inbound.lock().expect("no test panics with the lock") = vec![Moment::Sleep];
+    browser.pump(PRESS + 1.0);
+
+    *bus.inbound.lock().expect("no test panics with the lock") =
+        vec![Moment::Wake, Moment::Press("KEY_RIGHT".into())];
+    browser.pump(PRESS + 600.0);
+
+    assert_eq!(showing_page(&browser).focus, Focus::Buttons(1));
+}
+
+// Back starts the curtain's exit, and the page is the screen again from
+// that press, so the next press acts on the page.
+#[test]
+fn a_press_while_the_state_leaves_reaches_the_page() {
+    let (mut browser, _bus) = on_a_movie_with_a_trailer();
+    browser.key("enter");
+    browser.key("escape");
+
+    browser.key("right");
+
+    assert_eq!(showing_page(&browser).focus, Focus::Buttons(1));
 }
 
 // The playback pod answers a remote's home press by asking for home on

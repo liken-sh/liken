@@ -256,9 +256,9 @@ The reason comes from `bluetoothd`'s report of why the link ended:
 | Reason | What it means |
 |---|---|
 | `LinkUp` | The link is up. |
-| `Asleep` | The link timed out on a device that sleeps between sessions. A Low Energy remote ends its link after an idle hour, and its next press connects it again. |
+| `Asleep` | The link timed out on a device that sleeps between sessions. A T6 remote stops answering after an idle hour, and its next press connects it again. |
 | `LinkLost` | The link timed out on a device that does not sleep. It went out of range, or its battery ran out. |
-| `ClosedByDevice` | The device ended the link: it was switched off, or it disconnected. |
+| `ClosedByDevice` | The device ended the link: it was switched off, or it disconnected. An X6 air-mouse remote ends its own link after an idle time, and its next press connects it again. |
 | `ClosedByRadio` | This radio ended the link, at an unpair or when the operator reconnected a controller that sent no input. |
 | `AuthenticationFailed` | The keys did not match. Delete the `Peripheral` and pair the device again. |
 | `NotConnected` | The operator received no reason. The link ended while the operator was not running, or `bluetoothd` restarted. |
@@ -273,16 +273,30 @@ lists.
 
 ### When a remote wakes from sleep
 
-A remote that sleeps sends no key for the press that wakes it. So when
-a remote whose reason is `Asleep` connects again, at least 10 seconds
-after its link ended, the operator writes one `KEY_UNKNOWN` press into
-the remote's virtual node, and the operator's log has a line for it.
-A sleeping screen wakes on that press, so one press of any button
-wakes the remote and the room.
+A remote that sleeps connects again when you press a button, and
+remotes differ in what they send for that press:
 
-The press does not stand for the button you pressed. When the remote
-fell asleep during a film, the first press, such as a pause, does
-nothing, and the second press pauses.
+* An X6 air-mouse remote ends its own link, so its reason is
+  `ClosedByDevice`. It sends the button you pressed once the link is
+  up, and that press reaches the claim like any other.
+* A T6 remote lets its link time out, so its reason is `Asleep`. It
+  sends no key for the press that wakes it. So when a remote whose
+  reason is `Asleep` connects again, at least 10 seconds after its
+  link ended, the operator writes one `KEY_UNKNOWN` press into the
+  remote's virtual node, and the operator's log has a line for it.
+
+Either way, one press of any button wakes the remote and the room. A
+sleeping screen wakes on the press. While nothing plays and the
+screen's panel is on, a press of a real button then acts on the
+screen too, so a press of down on an X6 wakes the screen and moves the
+focus. `KEY_UNKNOWN` means nothing to a screen, so a T6's first press
+only wakes it. The
+[idle screen guide](https://liken.sh/media/docs/guides/handing-the-idle-screen-to-another-controller/#read-the-presses)
+in the `media-operator` manual gives the rules.
+
+The `KEY_UNKNOWN` press does not stand for the button you pressed.
+When a T6 remote fell asleep during a film, the first press, such as a
+pause, does nothing, and the second press pauses.
 
 A remote that went out of range sleeps too. When it comes back into
 range, it can connect with no press, and the operator writes the

@@ -71,8 +71,13 @@ impl<S: Source, A: Art> Browser<S, A> {
         }
         // A press during the loading state reaches no screen under it.
         // Back exits the state here and now, and cancels nothing: the
-        // `Play` this browser asked for is the operator's to run.
-        if self.loading.is_some() {
+        // `Play` this browser asked for is the operator's to run. A state
+        // that has begun to leave holds no press, because the page is the
+        // screen again from the moment the exit starts. The wake starts
+        // the exit of a state the shade came down over, and the press that
+        // lifted the shade arrives in the same fold, so without this rule
+        // that press would act on nothing.
+        if self.loading.as_ref().is_some_and(|state| !state.leaving()) {
             match name == "escape" || name == "backspace" {
                 true => {
                     self.presented();

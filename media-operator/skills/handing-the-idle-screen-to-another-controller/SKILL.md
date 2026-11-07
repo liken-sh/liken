@@ -208,15 +208,28 @@ Set these variables on your container. Each value comes from
 A press arrives on a controller's events topic as
 `{"key": "KEY_UP", "value": 1}`, the same JSON every reader of the
 `Remote`'s events topic gets. A press acts only while the
-controller's focus mark names this `Player`, only while the unit plays
-nothing, and only while the screen is awake. A press on a sleeping
-screen wakes it and does nothing else. The power keys, `KEY_POWER`,
-`KEY_POWER2`, `KEY_SLEEP`, and `KEY_WAKEUP`, are the media operator's:
-it reads them from the same topic and turns the `Player` off and on,
-so the client acts on none of them and moves no shade for them. A
-press of any other key on a `Player` that is off turns it on, and the
-client then receives `wake` on the power topic. A held control arrives again as
-value 2, and a release, value 0, acts on nothing.
+controller's focus mark names this `Player`, and only while the unit
+plays nothing.
+
+A press on a sleeping screen wakes it. While the panel is on, the
+client then receives the press too, after the wake, so it lifts the
+shade and answers the key in one press. The panel stays on behind the
+shade until the off window runs out, and for good when
+`offAfterSeconds` is 0, so without this rule a person would press
+twice after each quiet stretch. A press while the panel is off only
+wakes the screen and states the `on` desire, because the person
+pressed at a dark TV and could not see what the press would act on.
+The panel is off after the off window runs out, and after the client
+receives `sleep` on the power topic. A repeat that finds the screen
+asleep only wakes it.
+
+The power keys, `KEY_POWER`, `KEY_POWER2`, `KEY_SLEEP`, and
+`KEY_WAKEUP`, are the media operator's: it reads them from the same
+topic and turns the `Player` off and on, so the client acts on none
+of them and moves no shade for them. A press of any other key on a
+`Player` that is off turns it on, and the client then receives `wake`
+on the power topic. A held control arrives again as value 2, and a
+release, value 0, acts on nothing.
 
 A live focus mark that moves to this `Player` wakes the screen. A
 repeat of the mark the client already holds wakes nothing, because

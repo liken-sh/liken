@@ -86,10 +86,12 @@ needed. Only a press earns this last line. A release or a repeat logs
 the raw line above it instead, naming the code and saying a Keymap
 binds the press alone.
 
-A Bluetooth LE remote that wakes from sleep does not send the press
-that woke it. `bluetooth-operator` writes a press of `KEY_UNKNOWN`
-(code 240) in its place, so discovery logs that press after each
-wake. It is not a button to map. A `Keymap` row on `KEY_UNKNOWN` acts
+Some Bluetooth LE remotes, such as a T6, do not send the press that
+woke them from sleep. `bluetooth-operator` writes a press of
+`KEY_UNKNOWN` (code 240) in its place, so discovery logs that press
+after each wake of such a remote. An X6 air-mouse remote sends the
+press that woke it, so discovery logs the button itself. `KEY_UNKNOWN`
+is not a button to map. A `Keymap` row on `KEY_UNKNOWN` acts
 on every wake, and on any real button that the kernel also reports as
 `KEY_UNKNOWN`, so do not bind it.
 

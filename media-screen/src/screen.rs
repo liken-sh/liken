@@ -39,7 +39,10 @@ pub enum Moment {
     Press(String),
     /// The quiet window ran out, or the client asked for the shade.
     Sleep,
-    /// A press, a live mark, or a starting `Play` lifted the shade.
+    /// A press, a live mark, or a starting `Play` lifted the shade. When a
+    /// press lifted it over a lit panel while the unit plays nothing, the
+    /// press follows as a [`Moment::Press`] in the same fold, so the client
+    /// lifts its shade first and then acts on the press.
     Wake,
     /// A live mark named this `Player`. `remote` is the controller's place in
     /// `spec.remotes`, which is the order the status lists the parts in.
@@ -448,9 +451,23 @@ impl Screen {
     /// client, in any state. The cycle key asks the operator to move the
     /// mark and does nothing else. A sleeping screen wakes on any other
     /// press, so a person gets the screen back with whatever control they
-    /// touched, and that press does nothing else. Every other key, while
-    /// the unit plays nothing, reaches the client. Every press but a power
-    /// press restarts the quiet window.
+    /// touched.
+    ///
+    /// While the unit plays nothing and the panel is lit, the press that
+    /// lifts the shade then reaches the client too, after the wake, so the
+    /// client lifts its shade and acts on the press. The shade comes down
+    /// over a lit panel after every quiet window, and on a `Player` whose
+    /// off window is zero it is the only thing between the person and the
+    /// client, so a press that only lifted it would make a person press
+    /// twice after each quiet stretch. A press on a panel that is dark,
+    /// because the off window ran out or `media-operator` asked the screen
+    /// to sleep, only wakes the screen: the person pressed at a dark TV
+    /// and could not see what the press would act on. A repeat that finds
+    /// the shade down only wakes it too, because the control was held
+    /// while the shade came down and its press acted before that.
+    ///
+    /// Every other key, while the unit plays nothing, reaches the client.
+    /// Every press but a power press restarts the quiet window.
     ///
     /// A press acts only while the remote's mark names this `Player`. A pad
     /// pointed at another room touches nothing here, not the shade and not
@@ -512,9 +529,26 @@ impl Screen {
                 None => format!("{trigger} ignored, because the remote has no focus topic"),
             });
         } else if self.asleep {
+            // The desire is read before the wake states the on desire, so it
+            // still says whether the panel was dark when the person pressed.
+            let dark = self.desire == Some(panel::OFF);
             self.asleep = false;
             moment = Some(Moment::Wake);
-            line = Some(format!("{trigger} woke the screen and did nothing else"));
+            if self.idle && down && !dark {
+                line = Some(format!(
+                    "{trigger} woke the screen and passed to the client"
+                ));
+                forwarded = Some(press.key);
+            } else {
+                let why = if dark {
+                    ", because the panel was off"
+                } else {
+                    ""
+                };
+                line = Some(format!(
+                    "{trigger} woke the screen and did nothing else{why}"
+                ));
+            }
         } else if self.idle && keys::owned(&press.key) {
             // A repeat of the cycle key asks nothing: one press is one
             // cycle, and the key is the crate's, so it never reaches the

@@ -149,24 +149,6 @@ fn a_desire_with_no_panel_topic_says_so() {
 }
 
 #[test]
-fn a_press_that_wakes_the_screen_says_so_and_names_the_desire_it_lifts() {
-    let now = Instant::now();
-    let mut screen = idling(&windowed(), now);
-    screen.tick(now + Duration::from_secs(600));
-    screen.tick(now + Duration::from_secs(1800));
-    screen.take_lines();
-
-    screen.deliver(SOFA_EVENTS, &key("KEY_UP", 1), false, now);
-
-    assert_eq!(
-        screen.take_lines(),
-        [format!(
-            "KEY_UP from remote house/sofa woke the screen and did nothing else, published panel desire on to {PANEL}"
-        )]
-    );
-}
-
-#[test]
 fn the_client_asking_for_the_shade_writes_a_line() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);

@@ -74,6 +74,21 @@ names this `Player`. Starting a `Play` moves the mark to the `Play`'s
 `Player`. A `Play` ending moves nothing, because the `Player` it names
 is still there, showing its idle screen.
 
+When nothing plays and no press arrives for the `Player`'s
+`fadeAfterSeconds`, the browser draws a black shade over the catalog.
+The press that lifts the shade also acts on the screen under it, so
+the first press of down moves focus and the first press of select
+opens the card in focus. When three hours have passed with no press
+and the cluster holds a `Person`, that first press raises the person
+picker instead, because the answer to who is watching has lapsed.
+When the panel is off, because
+`offAfterSeconds` ran out or the `Player` turned off, the first press
+only lights the screen, because nobody could see what it would act
+on. A remote that sends no key for the press that wakes it, such as a
+T6, lifts the shade and does nothing else on that press, as
+[When a remote wakes from sleep](https://liken.sh/bluetooth/docs/guides/pair-a-controller/#when-a-remote-wakes-from-sleep)
+in the `bluetooth-operator` manual describes.
+
 Over the bus, every key a remote sends reaches the browser under the
 kernel's name, except volume, mute, and the cycle key. Those three are
 handled before they reach the browser, and the browser draws the level
