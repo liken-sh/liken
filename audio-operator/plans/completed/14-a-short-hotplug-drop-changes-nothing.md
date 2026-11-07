@@ -41,7 +41,9 @@ deadline wakes a pass.
 
 The hold is the one debounce in the operator, at the read of the
 card, so the slice, the `Sink` and `Source` resources, and the layout
-all read the same answer. The analog jack and the USB card are not
+all read the same answer. A change of the slot's ELD between two empty reads starts the hold
+again, so a burst of drops that no pass reads lit between does not
+outlast the settle time. The analog jack and the USB card are not
 held: neither carries an ELD, and this drop is an HDMI fault.
 
 ## The drill

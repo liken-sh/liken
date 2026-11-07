@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -124,7 +125,7 @@ func TestWakesCarriesEverySource(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cards := make(chan controlEvent, 1)
 		pokes := make(chan struct{}, 1)
-		out := wakes(t.Context(), nil, cards, pokes)
+		out := wakes(t.Context(), nil, cards, pokes, nil)
 
 		cards <- controlEvent{Card: 0, Name: "Master Playback Volume", Mask: ctlEventMaskValue}
 		waitForWake(t, out)
@@ -143,12 +144,32 @@ func TestWakesCarriesEverySource(t *testing.T) {
 	})
 }
 
+// The merge hands each control event to the monitor hold before the
+// wake reaches the pass, so the pass that reads the card after an ELD
+// change finds it counted.
+func TestWakesHandsEachEventToTheHoldFirst(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cards := make(chan controlEvent, 1)
+		var heard []string
+		out := wakes(t.Context(), nil, cards, make(chan struct{}), func(event controlEvent) {
+			heard = append(heard, event.Name)
+		})
+
+		cards <- controlEvent{Card: 0, Device: 3, Name: eldElementName, Mask: ctlEventMaskValue}
+		waitForWake(t, out)
+
+		if !slices.Equal(heard, []string{eldElementName}) {
+			t.Errorf("the hold heard %q before the wake, want the ELD change", heard)
+		}
+	})
+}
+
 // A source that closes ends the merge, so the operator stops rather
 // than run on with no way to notice a monitor again.
 func TestWakesEndsWhenACardWatcherCloses(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cards := make(chan controlEvent)
-		out := wakes(t.Context(), nil, cards, make(chan struct{}))
+		out := wakes(t.Context(), nil, cards, make(chan struct{}), nil)
 		close(cards)
 
 		if _, open := <-out; open {

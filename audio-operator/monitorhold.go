@@ -19,9 +19,15 @@ package main
 // ends the hold, and nothing the pass writes sees the drop. A slot that
 // is still empty at the end of the hold reads empty, and a timer at
 // that deadline wakes a pass, so a monitor that really left is reported
-// then, and not on the next unrelated event.
+// then, and not on the next unrelated event. A change of the slot's ELD
+// between two empty reads says the monitor answered and dropped again
+// with no pass to read it, so the hold starts again from the later
+// read.
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // monitorSettle is how long a slot's ELD must stay empty before the
 // operator reports that its monitor left. It is the settle time of
@@ -31,9 +37,10 @@ import "time"
 const monitorSettle = 5 * time.Second
 
 // monitorHold follows each HDMI slot across the passes. The reconcile
-// loop is its one caller, and the timer's callback reads none of its
-// state, so it takes no lock.
+// pass reads through it, and the loop's wakes report each ELD change
+// to it from their own goroutine, so every call takes the lock.
 type monitorHold struct {
+	mu  sync.Mutex
 	now func() time.Time
 	// expired wakes a pass at the end of a hold. A nil expired arms no
 	// timer.
@@ -43,10 +50,14 @@ type monitorHold struct {
 	// dark is when each held slot was first read empty, and the timer
 	// that ends its hold.
 	dark map[pcmAddress]heldSlot
+	// changes counts the ELD changes the card reported on each slot.
+	changes map[pcmAddress]uint64
 }
 
 type heldSlot struct {
 	since time.Time
+	// seen is the slot's change count at the last empty read.
+	seen  uint64
 	timer *time.Timer
 }
 
@@ -56,7 +67,20 @@ func newMonitorHold(expired func()) *monitorHold {
 		expired: expired,
 		lit:     map[pcmAddress]alsaEndpoint{},
 		dark:    map[pcmAddress]heldSlot{},
+		changes: map[pcmAddress]uint64{},
 	}
+}
+
+// heard records one control event. A change of a slot's ELD element
+// counts for that slot, and every other event counts for nothing. A
+// nil hold takes the call and records nothing.
+func (h *monitorHold) heard(event controlEvent) {
+	if h == nil || event.Name != eldElementName {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.changes[pcmAddress{Card: event.Card, PCM: int(event.Device)}]++
 }
 
 // apply answers the card's endpoints with each held slot's lit reading
@@ -68,6 +92,8 @@ func (h *monitorHold) apply(endpoints []alsaEndpoint) []alsaEndpoint {
 	if h == nil {
 		return endpoints
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	now := h.now()
 	held := make([]alsaEndpoint, len(endpoints))
 	for i, endpoint := range endpoints {
@@ -86,8 +112,9 @@ func (h *monitorHold) apply(endpoints []alsaEndpoint) []alsaEndpoint {
 			continue
 		}
 		dark, holding := h.dark[slot]
-		if !holding {
-			dark = heldSlot{since: now}
+		if !holding || dark.seen != h.changes[slot] {
+			h.release(slot)
+			dark = heldSlot{since: now, seen: h.changes[slot]}
 			if h.expired != nil {
 				dark.timer = time.AfterFunc(monitorSettle, h.expired)
 			}
@@ -104,7 +131,8 @@ func (h *monitorHold) apply(endpoints []alsaEndpoint) []alsaEndpoint {
 }
 
 // release ends one slot's hold and stops its timer, because a slot
-// whose monitor answered again owes no pass at the deadline.
+// whose monitor answered again owes no pass at the deadline. The caller
+// holds the lock.
 func (h *monitorHold) release(slot pcmAddress) {
 	if dark, holding := h.dark[slot]; holding {
 		if dark.timer != nil {

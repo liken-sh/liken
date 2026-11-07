@@ -334,7 +334,7 @@ func operate() {
 		}
 	}()
 
-	settled := settle(ctx, wakes(ctx, bluez, operator.cards.Events(), pokes),
+	settled := settle(ctx, wakes(ctx, bluez, operator.cards.Events(), pokes, operator.monitors.heard),
 		settleWindow, settleLimit)
 
 	// The first pass runs before any event, because the operator
@@ -365,7 +365,7 @@ func operate() {
 //
 // A closed bluez or cards channel ends the merge.
 func wakes(ctx context.Context, bluez <-chan struct{}, cards <-chan controlEvent,
-	pokes <-chan struct{}) <-chan struct{} {
+	pokes <-chan struct{}, heard func(controlEvent)) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -391,6 +391,11 @@ func wakes(ctx context.Context, bluez <-chan struct{}, cards <-chan controlEvent
 					return
 				}
 				fmt.Printf("control: %s\n", event)
+				// The hold counts each ELD change before the pass it
+				// wakes reads the card (monitorhold.go).
+				if heard != nil {
+					heard(event)
+				}
 				wake()
 			case <-pokes:
 				wake()
