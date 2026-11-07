@@ -36,7 +36,8 @@ import (
 // getPlayerStatus carries the input, which no event the client
 // subscribes to is known to carry; plan 16's drill D2 owes the answer.
 // The events carry the volume, the mute, and the transport state, and
-// the poll leaves those fields to them while a subscription is live.
+// the poll keeps a field's event value only when the event came after
+// the poll copied the state (sequence.go).
 //
 // A poll reads more only when it has a reason: the track when the
 // player reports another one, the sleep timer while it counts down,
@@ -142,6 +143,11 @@ type Client struct {
 	// owed holds the families a setter's read back left to the poll that
 	// held the reads (readback.go).
 	owed family
+	// writes numbers each write of an event or a setter to a field a poll
+	// also reads, and written holds the number of each field's last one
+	// (sequence.go).
+	writes  uint64
+	written fieldWrites
 
 	// readFailures counts the failed requests of commands that answered
 	// before, so a poll tells a full read that answered from one that did
@@ -308,8 +314,12 @@ func (w *pollWaits) after(answered bool) time.Duration {
 func (c *Client) poll(ctx context.Context) bool {
 	c.reads.Lock()
 	defer c.reads.Unlock()
+	// The mark is taken with the copy, so a write to a pushed field that
+	// lands at any time after the copy stands over the poll's read
+	// (sequence.go).
 	c.mutex.Lock()
 	next := c.state
+	mark := c.writes
 	c.mutex.Unlock()
 
 	device, err := c.readStatusEx(ctx, &next)
@@ -332,8 +342,7 @@ func (c *Client) poll(ctx context.Context) bool {
 		c.miss()
 		return true
 	}
-	missed := c.answered()
-	if missed {
+	if c.answered() {
 		// An amp that missed a poll may have rebooted, and a reboot drops
 		// its subscriptions while the client still holds them. A renewal
 		// asks the amp whether it holds them: it refuses a SID it does not
@@ -364,15 +373,6 @@ func (c *Client) poll(ctx context.Context) bool {
 	}
 	c.readOwed(ctx, &next)
 
-	// A poll's reads were taken before any event that arrived while it
-	// ran, so the evented fields keep the event's value. The first poll
-	// after a miss is the exception: the amp does not send again an
-	// event the client missed while it could not reach the amp, and a
-	// renewal brings no full state, so the held values can be stale and
-	// the poll's own read is the newest answer.
-	if !missed {
-		c.mergeEvents(&next)
-	}
 	// The survey is marked before the publish, so the event the publish
 	// sends already reports it.
 	c.mutex.Lock()
@@ -385,7 +385,7 @@ func (c *Client) poll(ctx context.Context) bool {
 	}
 	c.readings = readingsFrom(device, next.Network.Interface == "wifi")
 	c.mutex.Unlock()
-	c.publish(next)
+	c.publishSince(next, mark)
 	return true
 }
 
@@ -450,7 +450,17 @@ func (c *Client) rejectForeign(project string) {
 // that fail call the device unreachable; fewer than that leave the last
 // answer standing, so a request the device drops under load does not
 // read as the device leaving.
+//
+// A missed poll may be an amp that reboots, and a command that failed
+// while it booted may answer once it is up, so each command that
+// answered before gets its retries again. The caller holds the reads.
 func (c *Client) miss() {
+	clear(c.failedReads)
+	for command := range c.silent {
+		if c.answeredOnce[command] {
+			delete(c.silent, command)
+		}
+	}
 	c.mutex.Lock()
 	c.misses++
 	misses := c.misses
@@ -500,20 +510,6 @@ func (c *Client) identityMatches(reported string) bool {
 	return normalizeUUID(c.UUID) == normalizeUUID(reported)
 }
 
-// publish folds the freshly read status in, sets reachability, and
-// tells the listener which fields a hand on the device moved. A poll
-// that moved nothing still reports, so the status writer records the
-// observation while the receiver stands still.
-func (c *Client) publish(next Status) {
-	c.mutex.Lock()
-	previous := c.state
-	wasReachable := c.reachable
-	c.state = next
-	c.reachable = equipment.ConditionTrue
-	c.mutex.Unlock()
-	c.announce(previous, next, wasReachable)
-}
-
 // takeVolume folds the level the device was just told into the held
 // state, and takeMute folds the mute the same way. A poll reaches the
 // device at most once every interval, so without this a press computes
@@ -527,6 +523,7 @@ func (c *Client) takeVolume(volume int) {
 	previous := c.state
 	wasReachable := c.reachable
 	c.state.Playback.Volume = volume
+	c.wrote(&c.written.volume)
 	next := c.state
 	c.mutex.Unlock()
 	c.announce(previous, next, wasReachable)
@@ -537,6 +534,7 @@ func (c *Client) takeMute(muted bool) {
 	previous := c.state
 	wasReachable := c.reachable
 	c.state.Playback.Mute = muted
+	c.wrote(&c.written.mute)
 	next := c.state
 	c.mutex.Unlock()
 	c.announce(previous, next, wasReachable)

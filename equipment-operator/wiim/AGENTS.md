@@ -98,8 +98,9 @@ at the device reaches the state when the event arrives. The poll runs
 every ten seconds and sends two GET requests: `getStatusEx`, which is
 the reachability probe and the identity check, and `getPlayerStatus`,
 which carries the input that no subscribed event is known to carry.
-The player's answer also carries the evented fields, which the poll
-applies only while a subscription is not live.
+The player's answer also carries the evented fields: the volume, the
+mute, and the play state. The poll applies each one unless an event or
+a setter wrote it after the poll copied the state.
 
 The poll reads more only on a trigger:
 
@@ -135,8 +136,8 @@ and it keeps its subscriptions: an amp that was only cut off still
 holds them, and new ones would leave two more on the amp for each
 outage. The renewal on the first answered poll keeps or replaces them.
 The amp does not send again an event the client missed, and a renewal
-brings no full state, so that poll applies its own volume, mute, and
-play state over the evented ones.
+brings no full state, so a held value that no later write moved never
+stands over the poll's read.
 
 `status.wiim` leaves out each value that changes on its own between
 two reads, because each status write reaches every watcher of every
@@ -184,10 +185,12 @@ these, and the driver uses them:
   refused one is reported through the command counter the same way a
   failed read is.
 
-The poll does not overwrite the evented fields while a subscription is
-live. A poll's reads are taken before any event that arrives while it
-runs, so writing them would move a value back to where it stood before
-the change the device already pushed.
+A poll does not undo an event. Each write of an event or a setter to
+the volume, the mute, or the play state takes a number from one
+counter, and the poll takes the counter with its copy of the state.
+When it publishes, it keeps the held value of each field that a write
+after its copy moved, because its own read of that field is older.
+Every other field takes the poll's read (`sequence.go`).
 
 The port 8819 the `getStatusEx` block calls `communication_port` is
 open on a live Amp, and no document names a protocol for it. The

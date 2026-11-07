@@ -162,9 +162,12 @@ the `Receiver`s: `equipment-operator`, both CEC pods, and
   subscription on the amp. A full read in which a command that
   answered before failed is done again on the next poll, for at most 3
   full reads in a row. A command that never answered waits for the
-  backstop, as the Unsupported tier in `AGENTS.md` requires. The first
-  poll after a miss applies its own volume, mute, and play state,
-  because the amp does not resend an event the client missed.
+  backstop, as the Unsupported tier in `AGENTS.md` requires. A poll
+  applies its read of the volume, the mute, and the play state unless
+  an event or a setter wrote the field after the poll copied the
+  state, because the amp does not resend an event the client missed.
+  A missed poll gives each command that answered before its retries
+  again.
 * The read after a write reads only the family of each field the amp
   took: `getChannelBalance`, `getStatusEx` for the name, and the
   controls for the light and the buttons. A sleep timer is read back

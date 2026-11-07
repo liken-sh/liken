@@ -272,31 +272,42 @@ func TestANotifyForAnotherSubscriptionIsDropped(t *testing.T) {
 	})
 }
 
-// A poll does not undo an event: while the subscription is live, the
-// poll's own read of the volume is discarded.
+// A poll does not undo an event: an event that arrived after the poll
+// read the player keeps its value over the poll's older read.
 func TestAPollDoesNotUndoAnEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		client, events, _ := listenerWithEvents(t)
+		mark := client.eventMark()
 		events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
 		events.notify(t, avTransportPath, "0", avTransportBody("PLAYING"))
 
 		next := client.Status()
 		next.Playback.Volume = 29
 		next.Playback.Status = "stop"
-		client.mergeEvents(&next)
-		mustMatch(t, next.Playback.Volume, 30)
-		mustMatch(t, next.Playback.Status, "play")
+		client.publishSince(next, mark)
+
+		mustMatch(t, client.Status().Playback.Volume, 30)
+		mustMatch(t, client.Status().Playback.Status, "play")
 	})
 }
 
-// With no subscription, the poll owns every field.
-func TestAPollOwnsTheFieldsWithNoSubscription(t *testing.T) {
-	client := testClient("127.0.0.1:1", nil)
+// A poll owns every field that no event wrote after it read the
+// player, because its read is the newer answer.
+func TestAPollOwnsTheFieldsNoLaterEventWrote(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		client, events, _ := listenerWithEvents(t)
+		events.notify(t, renderControlPath, "0", renderControlBody("30", "0"))
+		mark := client.eventMark()
+		events.notify(t, avTransportPath, "1", avTransportBody("PLAYING"))
 
-	next := client.Status()
-	next.Playback.Volume = 29
-	client.mergeEvents(&next)
-	mustMatch(t, next.Playback.Volume, 29)
+		next := client.Status()
+		next.Playback.Volume = 29
+		next.Playback.Status = "stop"
+		client.publishSince(next, mark)
+
+		mustMatch(t, client.Status().Playback.Volume, 29)
+		mustMatch(t, client.Status().Playback.Status, "play")
+	})
 }
 
 // A device that refuses the subscription leaves the client on the poll.

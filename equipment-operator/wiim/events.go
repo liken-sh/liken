@@ -355,31 +355,10 @@ func (c *Client) pathForSID(sid string) string {
 	return ""
 }
 
-// mergeEvents keeps a poll from undoing an event. The poll's reads were
-// taken before any event that arrived while it ran, so writing them
-// would move a value back to where it stood before the change the
-// device already pushed. A field whose service is not subscribed is
-// left to the poll, which is the fallback.
-func (c *Client) mergeEvents(next *Status) {
-	rendering := c.subscribed(renderControlPath)
-	transport := c.subscribed(avTransportPath)
-	if !rendering && !transport {
-		return
-	}
-	c.mutex.Lock()
-	held := c.state
-	c.mutex.Unlock()
-	if rendering {
-		next.Playback.Volume = held.Playback.Volume
-		next.Playback.Mute = held.Playback.Mute
-	}
-	if transport {
-		next.Playback.Status = held.Playback.Status
-	}
-}
-
 // foldEvent applies one NOTIFY. The event is the device reporting its
-// own state, so it also clears the run of missed polls.
+// own state, so it also clears the run of missed polls. Each field it
+// writes is numbered, so a poll that read the player before the event
+// does not undo it (sequence.go).
 func (c *Client) foldEvent(path string, body []byte) {
 	fields, ok := parseEvent(path, body)
 	if !ok {
@@ -390,6 +369,15 @@ func (c *Client) foldEvent(path string, body []byte) {
 	wasReachable := c.reachable
 	next := c.state
 	fields.apply(&next)
+	if fields.volume != nil {
+		c.wrote(&c.written.volume)
+	}
+	if fields.mute != nil {
+		c.wrote(&c.written.mute)
+	}
+	if fields.status != nil {
+		c.wrote(&c.written.status)
+	}
 	c.state = next
 	c.reachable = equipment.ConditionTrue
 	c.misses = 0

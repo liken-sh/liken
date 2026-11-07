@@ -231,8 +231,9 @@ func TestAPollAfterAMissTakesTheVolumeFromTheAmp(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				amp, _, client := subscribedAmpWithEvents(t)
+				amp, events, client := subscribedAmpWithEvents(t)
 				client.poll(context.Background())
+				events.notify(t, renderControlPath, "0", renderControlBody("31", "0"))
 				amp.mutex.Lock()
 				amp.failing = http.StatusInternalServerError
 				amp.mutex.Unlock()
@@ -251,4 +252,89 @@ func TestAPollAfterAMissTakesTheVolumeFromTheAmp(t *testing.T) {
 			})
 		})
 	}
+}
+
+// An event that arrives after a miss and before the next answered poll
+// carries only what it moved, here the mute, so the poll still takes
+// the volume the amp reports.
+func TestAnEventAfterAMissLeavesTheVolumeToThePoll(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp, events, client := subscribedAmpWithEvents(t)
+		client.poll(context.Background())
+		events.notify(t, renderControlPath, "0", renderControlBody("31", "0"))
+		amp.mutex.Lock()
+		amp.failing = http.StatusInternalServerError
+		amp.mutex.Unlock()
+		client.poll(context.Background())
+		events.notify(t, renderControlPath, "1", envelope(`<Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/"><InstanceID val="0"><Mute channel="Master" val="1"/></InstanceID></Event>`))
+
+		amp.mutex.Lock()
+		amp.failing = 0
+		amp.mutex.Unlock()
+		amp.answer(playerCommand, strings.NewReplacer(`"vol":"31"`, `"vol":"55"`, `"mute":"0"`, `"mute":"1"`).Replace(playerJSON))
+		client.poll(context.Background())
+
+		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 55)
+		mustMatch(t, client.State().Zones[equipment.MainZone].Mute, true)
+	})
+}
+
+// An event that arrives while the poll after an outage reads every
+// family is newer than the poll's read of the player, so it stands.
+func TestAnEventDuringThePollAfterAnOutageStands(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp, events, client := subscribedAmpWithEvents(t)
+		client.poll(context.Background())
+		events.notify(t, renderControlPath, "0", renderControlBody("31", "0"))
+		amp.mutex.Lock()
+		amp.failing = http.StatusInternalServerError
+		amp.mutex.Unlock()
+		for range pollFailures {
+			client.poll(context.Background())
+		}
+
+		pushed := false
+		amp.mutex.Lock()
+		amp.failing = 0
+		amp.onRead = func(command string) {
+			if command == staticIPCommand && !pushed {
+				pushed = true
+				events.notify(t, renderControlPath, "2", renderControlBody("60", "0"))
+			}
+		}
+		amp.mutex.Unlock()
+		amp.answer(playerCommand, strings.Replace(playerJSON, `"vol":"31"`, `"vol":"55"`, 1))
+		client.poll(context.Background())
+
+		mustMatch(t, pushed, true)
+		mustMatch(t, client.State().Zones[equipment.MainZone].Volume, 60)
+	})
+}
+
+// A command left to the backstop gets its retries again after an
+// outage, because an amp that rebooted may answer it once it is up.
+func TestAnOutageGivesASilentCommandItsRetriesAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp, client := quietAmp(t)
+		breakCommand(amp, balanceCommand, true)
+		time.Sleep(settingsResync)
+		for range readRetries {
+			client.poll(context.Background())
+		}
+		amp.mutex.Lock()
+		amp.failing = http.StatusInternalServerError
+		amp.mutex.Unlock()
+		for range pollFailures {
+			client.poll(context.Background())
+		}
+		amp.mutex.Lock()
+		amp.failing = 0
+		amp.mutex.Unlock()
+		client.poll(context.Background())
+
+		amp.clear()
+		client.poll(context.Background())
+
+		mustMatch(t, holdsEveryRead(amp.sent()), true)
+	})
 }
