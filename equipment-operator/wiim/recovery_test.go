@@ -11,18 +11,30 @@ import (
 	"strings"
 	"testing"
 	"testing/synctest"
+	"time"
 )
 
-// A track read that fails is owed, so the next poll reads the track
-// again, and the poll after the answer does not.
+// newTrack makes the fake's player report another track.
+func newTrack(amp *fakeAmp) {
+	amp.answer(playerCommand, strings.Replace(playerJSON, `"Title":"486176652061204369676172"`, `"Title":"4D6F6E6579"`, 1))
+}
+
+func breakCommand(amp *fakeAmp, command string, broken bool) {
+	amp.mutex.Lock()
+	defer amp.mutex.Unlock()
+	amp.broken = map[string]bool{command: broken}
+}
+
+// A track read whose request fails is owed, so the next poll reads the
+// track again, and the poll after the answer does not.
 func TestAFailedTrackReadIsReadAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		amp, client := quietAmp(t)
-		amp.answer(playerCommand, strings.Replace(playerJSON, `"Title":"486176652061204369676172"`, `"Title":"4D6F6E6579"`, 1))
-		amp.answer(metaCommand, "Failed")
+		newTrack(amp)
+		breakCommand(amp, metaCommand, true)
 		client.poll(context.Background())
-		mustMatch(t, client.Status().NowPlaying, (*NowPlaying)(nil))
 
+		breakCommand(amp, metaCommand, false)
 		amp.answer(metaCommand, strings.Replace(metaJSON, `"title":"Have a Cigar"`, `"title":"Money"`, 1))
 		amp.clear()
 		client.poll(context.Background())
@@ -35,25 +47,81 @@ func TestAFailedTrackReadIsReadAgain(t *testing.T) {
 	})
 }
 
-// A full read with a read that failed is done again on the next poll,
-// because the family that failed still holds what it held before.
+// A track read that keeps failing is tried on a bounded number of
+// polls, not on every poll.
+func TestATrackReadThatKeepsFailingStops(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp, client := quietAmp(t)
+		newTrack(amp)
+		breakCommand(amp, metaCommand, true)
+		for range trackRetries + 2 {
+			client.poll(context.Background())
+		}
+
+		mustMatch(t, countOf(amp.sent(), metaCommand), trackRetries)
+	})
+}
+
+// Any answer to the track read settles it, even one that names another
+// title than the player does, the way line-in, optical, and internet
+// radio answer. Otherwise the track would be read on every poll.
+func TestATrackReadThatAnswersIsSettled(t *testing.T) {
+	cases := []struct {
+		name   string
+		answer string
+	}{
+		{"no track", "Failed"},
+		{"another title", strings.Replace(metaJSON, `"title":"Have a Cigar"`, `"title":"unknow"`, 1)},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				amp, client := quietAmp(t)
+				newTrack(amp)
+				amp.answer(metaCommand, one.answer)
+				client.poll(context.Background())
+
+				amp.clear()
+				client.poll(context.Background())
+				mustMatch(t, amp.sent(), []string{statusCommand, playerCommand})
+			})
+		})
+	}
+}
+
+// A full read in which a command that answered before fails is done
+// again on the next poll, because that family still holds what it held
+// before.
 func TestAFullReadWithAFailedReadIsDoneAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		amp := startFakeAmp(t)
-		amp.answer(shutdownCommand, "0")
-		amp.mutex.Lock()
-		amp.broken = map[string]bool{balanceCommand: true}
-		amp.mutex.Unlock()
-		client := amp.client(nil)
+		amp, client := quietAmp(t)
+		breakCommand(amp, balanceCommand, true)
+		time.Sleep(settingsResync)
 		client.poll(context.Background())
 
-		amp.mutex.Lock()
-		amp.broken = nil
-		amp.mutex.Unlock()
+		breakCommand(amp, balanceCommand, false)
 		amp.clear()
 		client.poll(context.Background())
 
 		mustMatch(t, holdsEveryRead(amp.sent()), true)
+	})
+}
+
+// A command that has never answered is one the model does not serve,
+// so it does not make every poll a full read: the next full read is the
+// backstop's.
+func TestACommandThatNeverAnswersWaitsForTheBackstop(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		amp.answer(shutdownCommand, "0")
+		breakCommand(amp, subCommand, true)
+		client := amp.client(nil)
+		client.poll(context.Background())
+
+		amp.clear()
+		client.poll(context.Background())
+
+		mustMatch(t, amp.sent(), []string{statusCommand, playerCommand})
 	})
 }
 

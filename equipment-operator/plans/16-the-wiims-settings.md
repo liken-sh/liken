@@ -154,13 +154,15 @@ the `Receiver`s: `equipment-operator`, both CEC pods, and
 * The settings reads leave the poll as the three times above give,
   with the 30-minute backstop (`settingsResync` in `wiim/client.go`).
   The client also reads every family on the first poll that the amp
-  answers after the client called it unreachable, and it forgets its
-  subscriptions at that moment, because a reboot of the amp drops them.
-  The first poll the amp answers after any missed poll renews both
-  subscriptions, so a reboot shorter than three polls is found too: the
-  amp refuses the renewal, and the client subscribes again and reads
-  every family. A full read with a failed request is done again on the
-  next poll.
+  answers after the client called it unreachable. The first poll the
+  amp answers after any missed poll renews both subscriptions, so a
+  reboot is found however short it was: the amp refuses the renewal,
+  and the client subscribes again and reads every family. An amp that
+  was only cut off takes the renewal, so an outage leaves no extra
+  subscription on the amp. A full read in which a command that
+  answered before failed is done again on the next poll. A command
+  that never answered waits for the backstop, as the Unsupported tier
+  in `AGENTS.md` requires.
 * The read after a write reads only the family of each field the amp
   took: `getChannelBalance`, `getStatusEx` for the name, and the
   controls for the light and the buttons. A sleep timer is read back

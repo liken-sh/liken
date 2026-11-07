@@ -103,8 +103,11 @@ applies only while a subscription is not live.
 
 The poll reads more only on a trigger:
 
-- `getMetaInfo` when the player reports another track, and again on
-  each poll until it answers the title the player names.
+- `getMetaInfo` when the player reports another track. A request that
+  fails is sent again on the next polls, at most 3 times in all. Any
+  answer settles it, whatever title it names, because on line-in,
+  optical, and internet radio the player and `getMetaInfo` name
+  different titles.
 - `getShutdown` while the last read found a sleep timer running.
 - Every settings family on the first poll, on the poll that opens a
   subscription, on the first poll the amp answers after the client
@@ -112,7 +115,10 @@ The poll reads more only on a trigger:
   last such read. The 30-minute read is the backstop for a change made
   in the WiiM Home app, which pushes no event. The subscriptions open
   before the read, after `getStatusEx` has checked the identity. A
-  full read in which a request failed is done again on the next poll.
+  full read in which a command that answered before failed is done
+  again on the next poll. A command that has never answered is one the
+  model does not serve: the client logs it once and reads it again
+  only on the next full read.
 - The family of a setter, read back right after the setter: the
   balance, `getStatusEx` for the name, the controls for the light and
   the buttons, and `getShutdown` for the sleep timer. The read back
@@ -124,8 +130,10 @@ A reboot drops the amp's subscriptions while the client still holds
 them. So the first poll the amp answers after a missed poll renews
 both subscriptions, and a renewal the amp refuses opens a new
 subscription and reads every family. When the client calls the amp
-unreachable, it forgets its subscriptions and clears its readings, so
-the gauges leave the scrape. The next answered poll subscribes again.
+unreachable, it clears its readings, so the gauges leave the scrape,
+and it keeps its subscriptions: an amp that was only cut off still
+holds them, and new ones would leave two more on the amp for each
+outage. The renewal on the first answered poll keeps or replaces them.
 
 `status.wiim` leaves out each value that changes on its own between
 two reads, because each status write reaches every watcher of every

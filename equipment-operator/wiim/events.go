@@ -316,17 +316,6 @@ func (c *Client) renewAll(ctx context.Context) {
 	}
 }
 
-// forgetSubscriptions drops every subscription without an UNSUBSCRIBE,
-// for an amp that does not answer. The next answered poll subscribes
-// again. A subscription the amp still holds sends to the callback under
-// a SID the client no longer takes, so handleNotify drops it until the
-// amp lets it expire.
-func (c *Client) forgetSubscriptions() {
-	c.subscriptionsMutex.Lock()
-	c.subscriptions = map[string]*subscription{}
-	c.subscriptionsMutex.Unlock()
-}
-
 // subscribed answers whether the client holds a subscription for one
 // service, which is what lets the poll leave that service's fields to
 // the events.

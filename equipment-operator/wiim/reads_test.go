@@ -329,21 +329,47 @@ func TestANewSubscriptionReadsEveryFamily(t *testing.T) {
 	})
 }
 
-// An amp the client called unreachable may have rebooted and dropped
-// its subscriptions, so the client forgets them and subscribes again
-// when the amp answers.
-func TestAnUnreachableAmpLosesItsSubscriptions(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		amp, client := subscribedAmp(t)
-		client.poll(context.Background())
-		amp.mutex.Lock()
-		amp.failing = http.StatusInternalServerError
-		amp.mutex.Unlock()
-		for range pollFailures {
-			client.poll(context.Background())
-		}
+// An amp the client called unreachable may only have been cut off, and
+// then it still holds the subscriptions, so the client keeps them and
+// renews them when the amp answers, rather than open two more on the
+// amp. An amp that rebooted refuses the renewal and is subscribed
+// again. Either way the poll reads every family.
+func TestAnAmpThatComesBackKeepsOrReopensItsSubscriptions(t *testing.T) {
+	cases := []struct {
+		name      string
+		refused   bool
+		subscribe int
+	}{
+		{"an amp that was cut off", false, 1},
+		{"an amp that rebooted", true, 2},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				amp, events, client := subscribedAmpWithEvents(t)
+				client.poll(context.Background())
+				amp.mutex.Lock()
+				amp.failing = http.StatusInternalServerError
+				amp.mutex.Unlock()
+				for range pollFailures {
+					client.poll(context.Background())
+				}
+				mustMatch(t, client.subscribed(renderControlPath), true)
 
-		mustMatch(t, client.subscribed(renderControlPath), false)
-		mustMatch(t, client.subscribed(avTransportPath), false)
-	})
+				amp.mutex.Lock()
+				amp.failing = 0
+				amp.mutex.Unlock()
+				events.mutex.Lock()
+				events.refuseRenewals = one.refused
+				events.mutex.Unlock()
+				amp.clear()
+				client.poll(context.Background())
+
+				sent := amp.sent()
+				mustMatch(t, countOf(sent, "SUBSCRIBE "+renderControlPath), one.subscribe)
+				mustMatch(t, holdsEveryRead(sent), true)
+				mustMatch(t, client.subscribed(renderControlPath), true)
+			})
+		})
+	}
 }
