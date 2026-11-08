@@ -9,7 +9,35 @@ https://claude.ai/artifact/NbZZXiD6bi128PXezcDnN5 (the boards `Axis`,
 the motion rules that the page follows, and plan 86 holds the rule for
 who has seen a film.
 
-Status on 2026-11-08: proposed.
+Status on 2026-11-08: built. The drill on a physical screen has not
+run. The captures below are from the harness on a workstation, over the
+sample catalog.
+
+The final comps settled four points that the first draft of this plan
+left open, and the build follows them. The content region is the one
+`views/screen.rs` gives, from x 96 to x 1824. An axis that does not
+start at a birth starts 3 years before the first credit, and its line
+fades in over those 3 years. "born" and the death before the axis sit
+over the left end of the line, and the words of a death inside the span
+sit under the line, in the row of the decades' years. Every ink of the
+axis is a token in `look.rs`.
+
+The build departs from the contract in three places:
+
+- A writer's card reads "Writer", never the writer's job, such as
+  "Novel". The scanner writes no role for a writer or a director, so
+  the browser has no job to show without a change to the operator.
+- A poster that the edge of the row cuts draws no card and, when its
+  left edge is cut, no faces. The renderer clips each line of text to
+  its own band and drops a line whose band reaches outside the row, so
+  a card cut at the edge would draw past the row or not at all.
+- A series runs when its newest episode in the library aired in the
+  last 2 years, because the catalog holds no status for a series.
+
+While a poster holds focus, its dot on the axis draws as every other
+dot does. Whether that dot takes a mark is open with the user. The
+draw of the dots in `screens/person/axis/draw.rs` is the one place a
+mark would go.
 
 ## The problem
 
@@ -51,15 +79,14 @@ the label all count by this rule.
 **The axis.** The axis is a line the full width of the content region,
 in a band about 150 pixels tall under the head.
 
-- The axis starts at the first credit's year, or at the birth year
-  when the person was born no more than 25 years before the first
-  credit. It ends at the current year when the person has a credit in
-  the last 2 years, and at the last credit's year otherwise. A span
-  under 10 years widens to 10, centered on the credits, or widens at
-  the end when the axis starts at birth.
+- The axis starts at the birth year when the person was born no more
+  than 25 years before the first credit, and 3 years before the first
+  credit otherwise. It ends at the current year when the person has a
+  credit in the last 2 years, and at the last credit's year otherwise.
+  A span under 10 years widens at its end to 10.
 - When the axis starts at birth, the left end is labeled "born" in
-  italic. Otherwise the line fades in from transparent up to the first
-  credit, because the career has no known start on the axis. A person
+  italic. Otherwise the line fades in from transparent over the 3
+  years up to the first credit, because the career has no known start on the axis. A person
   who died before the axis starts, such as a playwright whose plays are
   filmed centuries later, has the faded end labeled "died 1616". A
   death inside the span is a tick labeled "died 1964, age 56", and the
@@ -176,7 +203,10 @@ card shows an age. Age 0 is real and shows as "age 0".
 ## Proof
 
 The unit tests cover the model, the reads, the geometry, and the
-motion. The harness captures the page from the sample catalog with a
-poster in focus, with the axis in focus, in the bars mode, with no
-birth date, and with few credits. The drill on a physical screen has
-not run.
+motion. The geometry tests check the column, the dots, the label, and
+the bright part of the line against the pixel places of the final
+comps. The harness captures the page from the sample catalog, with two
+people at the screen, with a poster in focus, with the axis in focus,
+in the bars mode, with no birth date, with few credits, after a death
+inside the span, and with a death before the axis. The drill on a
+physical screen has not run.

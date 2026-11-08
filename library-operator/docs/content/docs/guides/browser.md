@@ -277,7 +277,53 @@ at least one episode: an earlier one is still to mark, or a later one
 holds progress. So a special does not show it, and neither does an
 episode with every earlier episode finished and no later one started.
 Its glyph is a bar with a triangle that points away from it.
-A person's page shows their credits and their biography.
+
+A person's page shows when the person worked, what they did, and what
+the people at the screen have seen of it. Under the name, a line gives
+the dates of the life, the credits and the years they span, and how
+many of them everyone at the screen has seen, as in
+`born 1970 · 31 credits from 1985 to now · you've seen 9`. A credit
+with no release date is counted after the others, as in
+`, and 3 undated`. The biography follows, cut to 3 lines.
+
+Under the head is the career axis, a timeline of every credit with a
+release date. Each credit is a dot at its release year, and the credits
+of one year stack. An open ring is a credit nobody at the screen has
+seen, a ring with its left half filled is one that some of them have
+seen, and a full dot is one that everyone at the screen has seen. A
+person has seen a film when they finished it, and a series when they
+finished every episode the library holds. When any one year has more
+than 5 credits, the axis draws one bar per year instead: the bright
+part at the bottom is what everyone has seen, and the lighter part over
+it what only some have seen. The axis starts at the birth when the
+first credit came within 25 years of it, and is labeled "born" there.
+Otherwise the line fades in over the 3 years before the first credit.
+It ends now when the person has a credit in the last 2 years. A death
+inside the span is a tick labeled with the year and the age, and the
+line is dimmer after it. A series still running is a bar from its
+first year to now. The brighter part of the line spans the years of
+the posters the row shows.
+
+Under the axis is one row of posters, oldest at the left and the
+credits with no release date at the right end. Under each poster, the
+first line is the character the person played, or the job, such as
+`Director`, and the second is the year and the age, as in
+`1986 · age 15`. A work released after the death reads
+`1996 · 380 years after death`. With no birth date, or with a birth
+date that comes after one of the credits, no card shows an age.
+
+The page opens on the work whose page you came from, or on the newest
+credit. Left and right move one poster. Up moves focus to the axis, on
+that poster's year, and a label over the year gives its count, as in
+`2009 · 11 credits · 3 seen`. Left and right on the axis move to the
+previous or next year with credits, and the row shows that year's
+credits from its left edge. Down or enter returns to the posters: to the
+poster you left when you made no move on the axis, and to the year's
+first credit when you did. Up from the axis moves to the browser's
+strip. A person with fewer than 5 credits with a date, or with credits
+over less than 5 years, has no axis, and up from the row moves to the
+strip.
+
 A franchise's page draws its story order as one lane, with a line per
 universe beside it. Over the first row of each era it draws a heading,
 with the era's length beside its name. An era inside a wider one reads
