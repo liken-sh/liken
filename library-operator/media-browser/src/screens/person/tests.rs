@@ -258,6 +258,21 @@ fn each_credit_is_seen_by_nobody_by_some_or_by_everyone() {
     assert_eq!(page.facts, "died 2019 · 3 credits from 1997 to 1999");
 }
 
+// While a poster holds focus, its dot on the axis takes the accent. While
+// the axis holds focus, the outline marks the year, and no dot does.
+#[test]
+fn only_a_focused_poster_accents_its_credit_on_the_axis() {
+    let (mut page, mut source) = credited(6);
+    assert_eq!(page.accented(), Some(5));
+    page.key("left", &mut source);
+    assert_eq!(page.accented(), Some(4));
+    page.key("up", &mut source);
+    assert_eq!(page.accented(), None);
+
+    let (short, _) = credited(3);
+    assert_eq!(short.accented(), None);
+}
+
 #[test]
 fn the_page_draws_the_progress_of_every_work_it_credits() {
     let (page, _) = credited(3);

@@ -29,15 +29,16 @@ const FRAME: f32 = 2.0;
 const FADE_STEPS: usize = 24;
 
 /// One frame's axis: the axis, the credits its years index into, where
-/// the line is, the bright part of the line as this second draws it, and
-/// the label over the focused year with the `x` of its center, while the
-/// axis holds focus.
+/// the line is, the bright part of the line as this second draws it, the
+/// label over the focused year with the `x` of its center, while the axis
+/// holds focus, and the credit whose poster holds focus, while one does.
 pub struct Drawn<'a> {
     pub axis: &'a Axis,
     pub credits: &'a [Credit],
     pub line: Rectangle,
     pub window: Option<(f32, f32)>,
     pub label: Option<(String, f32)>,
+    pub accented: Option<usize>,
 }
 
 /// Draw the axis.
@@ -54,8 +55,19 @@ pub fn draw(frame: &mut Frame<Renderer>, drawn: &Drawn) {
         frame.fill_rectangle(window.position(), extent(window), look::axis_window());
     }
     match axis.mode {
-        Mode::Dots => dotted(frame, axis, drawn.credits, line),
+        Mode::Dots => dotted(frame, axis, drawn.credits, line, drawn.accented),
         Mode::Bars => barred(frame, axis, line),
+    }
+    // In the bar mode a year's bar holds many credits, so the focused
+    // poster's year takes a short stroke of the accent under its bar, and
+    // the bar keeps the inks that say what was seen.
+    if let Some(year) = drawn
+        .accented
+        .filter(|_| axis.mode == Mode::Bars)
+        .and_then(|credit| axis.year_of(credit))
+    {
+        let mark = axis.bar_mark(line, year);
+        frame.fill_rectangle(mark.position(), extent(mark), look::accent());
     }
     if let Some((words, middle)) = &drawn.label {
         let width = text::measured(words, look::CAPTION);
@@ -153,31 +165,75 @@ fn italic(frame: &mut Frame<Renderer>, words: &str, band: Rectangle) {
     text::faced(frame, words, band, look::FACE, look::faint(), look::ITALIC);
 }
 
-// One dot for each credit, stacked by year from the line up.
-fn dotted(frame: &mut Frame<Renderer>, axis: &Axis, credits: &[Credit], line: Rectangle) {
+// One dot for each credit, stacked by year from the line up. The dot of
+// the credit whose poster holds focus draws in the accent.
+fn dotted(
+    frame: &mut Frame<Renderer>,
+    axis: &Axis,
+    credits: &[Credit],
+    line: Rectangle,
+    accented: Option<usize>,
+) {
     for year in &axis.years {
         for (stacked, index) in year.credits.iter().enumerate() {
             let center = axis.dot(line, year.year, stacked);
-            dot(frame, center, credits[*index].seen);
+            let inks = Inks::of(credits[*index].seen, accented == Some(*index));
+            dot(frame, center, inks);
         }
     }
 }
 
-/// One credit's dot: an open ring nobody has seen, the ring with its left
-/// half filled where some of the people at the screen have seen it, and a
-/// full disc where all of them have. The difference is a shape and not a
-/// color, so it reads for a person who cannot tell the inks apart. The
-/// ring fills with the ground, so a series' bar under it does not show
-/// through.
-fn dot(frame: &mut Frame<Renderer>, center: Point, seen: Seen) {
+/// The inks of one credit's dot. An open ring is a credit nobody has
+/// seen, the ring with its left half filled is one that some of the
+/// people at the screen have seen, and a full disc is one that all of them
+/// have. The difference is a shape and not a color, so it reads for a
+/// person who cannot tell the inks apart. The dot of the poster that holds
+/// focus keeps its shape and draws it in the accent, so the axis shows
+/// where the poster is in the career and what was seen of it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Inks {
+    ring: Option<Color>,
+    half: Option<Color>,
+    disc: Option<Color>,
+}
+
+impl Inks {
+    fn of(seen: Seen, accented: bool) -> Self {
+        let (bright, ring) = match accented {
+            true => (look::accent(), look::accent()),
+            false => (look::text(), look::muted()),
+        };
+        match seen {
+            Seen::Everyone => Self {
+                ring: None,
+                half: None,
+                disc: Some(bright),
+            },
+            Seen::Some => Self {
+                ring: Some(ring),
+                half: Some(bright),
+                disc: None,
+            },
+            Seen::Nobody => Self {
+                ring: Some(ring),
+                half: None,
+                disc: None,
+            },
+        }
+    }
+}
+
+// One dot in its inks. A ring fills with the ground first, so a series'
+// bar under it does not show through.
+fn dot(frame: &mut Frame<Renderer>, center: Point, inks: Inks) {
     let radius = DOT / 2.0;
     let disc = Path::circle(center, radius);
-    if seen == Seen::Everyone {
-        frame.fill(&disc, look::text());
+    if let Some(ink) = inks.disc {
+        frame.fill(&disc, ink);
         return;
     }
     frame.fill(&disc, look::BACKGROUND);
-    if seen == Seen::Some {
+    if let Some(ink) = inks.half {
         let half = Path::new(|path| {
             path.move_to(Point::new(center.x, center.y + radius));
             path.arc(Arc {
@@ -188,12 +244,14 @@ fn dot(frame: &mut Frame<Renderer>, center: Point, seen: Seen) {
             });
             path.close();
         });
-        frame.fill(&half, look::text());
+        frame.fill(&half, ink);
     }
-    frame.stroke(
-        &Path::circle(center, radius - RING / 2.0),
-        Stroke::default().with_color(look::muted()).with_width(RING),
-    );
+    if let Some(ink) = inks.ring {
+        frame.stroke(
+            &Path::circle(center, radius - RING / 2.0),
+            Stroke::default().with_color(ink).with_width(RING),
+        );
+    }
 }
 
 // One bar for each year on one scale: a frame for every credit of the
@@ -222,6 +280,42 @@ fn barred(frame: &mut Frame<Renderer>, axis: &Axis, line: Rectangle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The marks one dot draws: whether it has a ring, a left half, or a
+    // full disc. The shape says the seen state, so the accent never
+    // changes it.
+    fn shape(inks: Inks) -> (bool, bool, bool) {
+        (
+            inks.ring.is_some(),
+            inks.half.is_some(),
+            inks.disc.is_some(),
+        )
+    }
+
+    #[test]
+    fn an_accented_dot_keeps_its_shape_and_takes_the_accent() {
+        let cases = [
+            (Seen::Nobody, (true, false, false)),
+            (Seen::Some, (true, true, false)),
+            (Seen::Everyone, (false, false, true)),
+        ];
+        for (seen, held) in cases {
+            let plain = Inks::of(seen, false);
+            let accented = Inks::of(seen, true);
+            assert_eq!(shape(plain), held, "{seen:?}");
+            assert_eq!(shape(accented), held, "{seen:?}");
+            let inks = [accented.ring, accented.half, accented.disc];
+            assert!(
+                inks.into_iter().flatten().all(|ink| ink == look::accent()),
+                "{seen:?}"
+            );
+            let inks = [plain.ring, plain.half, plain.disc];
+            assert!(
+                inks.into_iter().flatten().all(|ink| ink != look::accent()),
+                "{seen:?}"
+            );
+        }
+    }
 
     #[test]
     fn two_bands_of_words_overlap_only_where_they_share_some_of_the_line() {

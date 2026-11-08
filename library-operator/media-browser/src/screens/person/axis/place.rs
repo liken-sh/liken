@@ -54,6 +54,11 @@ const LEFT_WORDS: f32 = 28.0;
 // over the column's outline, so the outline never covers its words.
 const LABEL: f32 = 121.0;
 
+// How far under the line the mark of a focused poster's year starts in
+// the bar mode, and how tall it is.
+const BAR_MARK_DOWN: f32 = 5.0;
+const BAR_MARK: f32 = 3.0;
+
 /// How tall a running series' bar is, and how tall the bright part of the
 /// line is.
 pub const RUN: f32 = 4.0;
@@ -124,6 +129,14 @@ impl Axis {
             area(left + BAR_INSET, line.y - everyone, inner, everyone),
             area(left + BAR_INSET, line.y - everyone - some, inner, some),
         ]
+    }
+
+    /// The mark under one year's bar while the poster of one of its credits
+    /// holds focus: as wide as the bar, under the bright part of the line
+    /// and over the decades' years.
+    pub fn bar_mark(&self, line: Rectangle, index: usize) -> Rectangle {
+        let [frame, _, _] = self.bar(line, index);
+        area(frame.x, line.y + BAR_MARK_DOWN, frame.width, BAR_MARK)
     }
 
     /// One decade tick, at the first day of its year.
@@ -272,6 +285,20 @@ mod tests {
         let middle = axis.label_band(LINE, 900.0, 200.0);
         assert_eq!(middle.x, 800.0);
         assert_eq!(middle.y, 336.0);
+    }
+
+    // The mark of a focused poster's year in the bar mode is a short
+    // stroke under the bar, between the line and the decades' years, so
+    // it touches neither the bar nor the bright part of the line.
+    #[test]
+    fn the_mark_of_a_year_stands_under_its_bar() {
+        let axis = mara();
+        let [frame, _, _] = axis.bar(LINE, 3);
+        let mark = axis.bar_mark(LINE, 3);
+        assert_eq!(mark.x, frame.x);
+        assert_eq!(mark.width, frame.width);
+        assert!(mark.y > LINE.y + WINDOW, "{mark:?}");
+        assert!(mark.y + mark.height < Axis::tick_labels(LINE), "{mark:?}");
     }
 
     #[test]

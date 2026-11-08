@@ -52,6 +52,14 @@ impl Person {
         Some(axis.column(line(bounds), year).center_x())
     }
 
+    /// The credit whose dot takes the accent: the one whose poster holds
+    /// focus, on a page with an axis, where the credit has a year. While
+    /// the axis holds focus, the outline marks the year and no dot does.
+    pub fn accented(&self) -> Option<usize> {
+        let index = self.walk.poster()?;
+        self.axis.as_ref()?.year_of(index).map(|_| index)
+    }
+
     /// How far the row has scrolled as this second draws it.
     pub(super) fn row_at(&self, bounds: Rectangle, at: f64) -> f32 {
         self.row.toward(self.settled_row(bounds), at)

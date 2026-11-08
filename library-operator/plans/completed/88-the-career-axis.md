@@ -34,10 +34,13 @@ The build departs from the contract in three places:
 - A series runs when its newest episode in the library aired in the
   last 2 years, because the catalog holds no status for a series.
 
-While a poster holds focus, its dot on the axis draws as every other
-dot does. Whether that dot takes a mark is open with the user. The
-draw of the dots in `screens/person/axis/draw.rs` is the one place a
-mark would go.
+Status later on 2026-11-08: while a poster holds focus, its dot on the
+axis draws in the accent and keeps its shape, so the ring, the half,
+and the disc still say what was seen. In the bar mode, a short stroke
+of the accent under the bar marks the poster's year, because the bar
+holds every credit of the year and its inks say what was seen. While
+the axis holds focus, the outline marks the year and no dot or bar
+takes the accent.
 
 ## The problem
 

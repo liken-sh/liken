@@ -313,7 +313,9 @@ first line is the character the person played, or the job, such as
 date that comes after one of the credits, no card shows an age.
 
 The page opens on the work whose page you came from, or on the newest
-credit. Left and right move one poster. Up moves focus to the axis, on
+credit. Left and right move one poster. The dot of the poster in focus
+draws in green and keeps its shape, and in the bar mode a short green
+stroke under the bar marks its year. Up moves focus to the axis, on
 that poster's year, and a label over the year gives its count, as in
 `2009 · 11 credits · 3 seen`. Left and right on the axis move to the
 previous or next year with credits, and the row shows that year's
