@@ -168,6 +168,7 @@ group "default" {
 }
 
 target "vulkan" {
+  description = "The Vulkan loader, the Intel and AMD Vulkan drivers, and the Wayland client libraries, on scratch."
   context    = "vulkan"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -186,6 +187,7 @@ target "vulkan" {
 }
 
 target "astrometry" {
+  description = "The astrometry.net solver and SourceExtractor, with every library they load, for the plate solving of astrophotography-operator."
   context    = "astrometry"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -205,6 +207,7 @@ target "astrometry" {
 }
 
 target "trust" {
+  description = "Mozilla's CA bundle, in the form curl publishes it, at the path where OpenSSL, GnuTLS, libcurl, and Go read it."
   context    = "trust"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -224,6 +227,7 @@ target "trust" {
 }
 
 target "indi" {
+  description = "indiserver, socat, and every program in indi-bin: the core INDI drivers, simulators, and tools."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi"
@@ -245,6 +249,7 @@ target "indi" {
 }
 
 target "indi-simulators" {
+  description = "The GSC star catalog and the gsc program, which the INDI CCD and guide simulators read to draw stars."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-simulators"
@@ -266,6 +271,7 @@ target "indi-simulators" {
 }
 
 target "indi-phd2" {
+  description = "PHD2, the guider, as a client of an INDI server."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-phd2"
@@ -287,6 +293,7 @@ target "indi-phd2" {
 }
 
 target "indi-open" {
+  description = "The third-party INDI drivers that link no vendor SDK."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-open"
@@ -308,6 +315,7 @@ target "indi-open" {
 }
 
 target "indi-zwo" {
+  description = "INDI drivers for ZWO cameras, EFW filter wheels, EAF focusers, the CAA rotator, and the USB-to-ST4 adapter."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-zwo"
@@ -329,6 +337,7 @@ target "indi-zwo" {
 }
 
 target "indi-qhy" {
+  description = "INDI drivers for QHY cameras."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-qhy"
@@ -350,6 +359,7 @@ target "indi-qhy" {
 }
 
 target "indi-playerone" {
+  description = "INDI drivers for Player One cameras and the Player One filter wheel."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-playerone"
@@ -371,6 +381,7 @@ target "indi-playerone" {
 }
 
 target "indi-svbony" {
+  description = "INDI drivers for SVBony cameras on SVBony's own SDK."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-svbony"
@@ -392,6 +403,7 @@ target "indi-svbony" {
 }
 
 target "indi-atik" {
+  description = "INDI drivers for Atik cameras and filter wheels."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-atik"
@@ -413,6 +425,7 @@ target "indi-atik" {
 }
 
 target "indi-fli" {
+  description = "INDI drivers for Finger Lakes Instrumentation cameras, focusers, and filter wheels, and the Kepler cameras."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-fli"
@@ -434,6 +447,7 @@ target "indi-fli" {
 }
 
 target "indi-sbig" {
+  description = "INDI drivers for SBIG cameras."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-sbig"
@@ -455,6 +469,7 @@ target "indi-sbig" {
 }
 
 target "indi-mi" {
+  description = "INDI drivers for Moravian Instruments cameras and filter wheels."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-mi"
@@ -476,6 +491,7 @@ target "indi-mi" {
 }
 
 target "indi-qsi" {
+  description = "INDI drivers for Quantum Scientific Imaging cameras."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-qsi"
@@ -497,6 +513,7 @@ target "indi-qsi" {
 }
 
 target "indi-apogee" {
+  description = "INDI drivers for Apogee cameras and filter wheels."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-apogee"
@@ -518,6 +535,7 @@ target "indi-apogee" {
 }
 
 target "indi-astroasis" {
+  description = "INDI drivers for the Astroasis Oasis focuser and filter wheel."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-astroasis"
@@ -539,6 +557,7 @@ target "indi-astroasis" {
 }
 
 target "indi-gphoto" {
+  description = "INDI drivers for Canon, Nikon, Sony, Fuji, and Pentax cameras through gphoto2."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-gphoto"
@@ -560,6 +579,7 @@ target "indi-gphoto" {
 }
 
 target "indi-touptek" {
+  description = "INDI drivers for the eleven camera brands that use the ToupTek SDK, including ToupTek, Altair, Omegon, and SVBony."
   context    = "indi"
   dockerfile = "Dockerfile"
   target     = "indi-touptek"
@@ -581,6 +601,7 @@ target "indi-touptek" {
 }
 
 target "weston" {
+  description = "The Weston compositor on the vulkan image, with liken's hotplug shim and its ivi-shell layout controller."
   context    = "weston"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -603,6 +624,7 @@ target "weston" {
 }
 
 target "observatory-operator" {
+  description = "observatory-operator, which runs an observatory's mount, cameras, and other INDI equipment on the cluster."
   context    = "observatory-operator"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -620,6 +642,7 @@ target "observatory-operator" {
 }
 
 target "observatory-operator-cli" {
+  description = "kubectl-liken-observatory, the kubectl plugin that the liken toolkit pulls from this image."
   context    = "observatory-operator"
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
@@ -639,6 +662,7 @@ target "observatory-operator-cli" {
 }
 
 target "astrophotography-operator" {
+  description = "astrophotography-operator, which takes the pictures you ask for on a telescope that observatory-operator runs."
   context    = "astrophotography-operator"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -657,6 +681,7 @@ target "astrophotography-operator" {
 }
 
 target "astrophotography-operator-worker" {
+  description = "astrophotography-operator's program on the astrometry image, for the solver pods and the workers that extract stars from each frame."
   context    = "astrophotography-operator"
   dockerfile = "Dockerfile.worker"
   platforms  = ["linux/amd64"]
@@ -676,6 +701,7 @@ target "astrophotography-operator-worker" {
 }
 
 target "audio-operator" {
+  description = "audio-operator and the PipeWire and WirePlumber daemons that its pod runs to play and record sound on a machine."
   context    = "audio-operator"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -696,6 +722,7 @@ target "audio-operator" {
 }
 
 target "audio-operator-cli" {
+  description = "kubectl-liken-audio, the kubectl plugin that the liken toolkit pulls from this image."
   context    = "audio-operator"
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
@@ -715,6 +742,7 @@ target "audio-operator-cli" {
 }
 
 target "bluetooth-operator" {
+  description = "bluetooth-operator, which pairs Bluetooth controllers and remotes and gives each one to one pod."
   context    = "bluetooth-operator"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -732,6 +760,7 @@ target "bluetooth-operator" {
 }
 
 target "bluetooth-bondfetch" {
+  description = "The init container that restores a Bluetooth adapter's bonds from its Secret before bluetoothd starts."
   context    = "bluetooth-operator"
   dockerfile = "bondfetch/Dockerfile"
   platforms  = ["linux/amd64"]
@@ -749,6 +778,7 @@ target "bluetooth-bondfetch" {
 }
 
 target "bluetoothd" {
+  description = "BlueZ's bluetoothd, dbus-daemon, and btmon as static programs, with the entrypoints that bluetooth-operator's pod runs."
   context    = "bluetooth-operator"
   dockerfile = "bluetoothd/Dockerfile"
   platforms  = ["linux/amd64"]
@@ -770,6 +800,7 @@ target "bluetoothd" {
 }
 
 target "bluetooth-operator-cli" {
+  description = "kubectl-liken-bluetooth, the kubectl plugin that the liken toolkit pulls from this image."
   context    = "bluetooth-operator"
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
@@ -789,6 +820,7 @@ target "bluetooth-operator-cli" {
 }
 
 target "vaapi" {
+  description = "The VA-API loader, Intel's media driver, and Mesa's VA driver on the vulkan image, for programs that decode video on the GPU."
   context    = "vaapi"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -809,6 +841,7 @@ target "vaapi" {
 }
 
 target "ffmpeg" {
+  description = "Debian's ffmpeg and ffprobe on the vaapi image, with every library they load."
   context    = "ffmpeg"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -829,6 +862,7 @@ target "ffmpeg" {
 }
 
 target "display-operator" {
+  description = "display-operator on the weston image, for the DaemonSet that runs the compositor on each machine with a monitor."
   context    = "display-operator"
   dockerfile = "Dockerfile"
   target     = "display-operator"
@@ -848,6 +882,7 @@ target "display-operator" {
 }
 
 target "display-capture" {
+  description = "display-operator's program on the ffmpeg image, for the container that captures a Display's screenshots, clips, and streams."
   context    = "display-operator"
   dockerfile = "Dockerfile"
   target     = "display-capture"
@@ -867,6 +902,7 @@ target "display-capture" {
 }
 
 target "display-api" {
+  description = "display-operator's program alone, for the display-api Deployment that serves the captures over HTTP."
   context    = "display-operator"
   dockerfile = "Dockerfile"
   target     = "display-api"
@@ -885,6 +921,7 @@ target "display-api" {
 }
 
 target "display-operator-cli" {
+  description = "kubectl-liken-display, the kubectl plugin that the liken toolkit pulls from this image."
   context    = "display-operator"
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
@@ -904,6 +941,7 @@ target "display-operator-cli" {
 }
 
 target "equipment-operator" {
+  description = "equipment-operator, which controls a TV over HDMI-CEC and an A/V receiver over the network."
   context    = "equipment-operator"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -921,6 +959,7 @@ target "equipment-operator" {
 }
 
 target "firmware-operator" {
+  description = "firmware-operator, which uploads firmware to the USB devices that hold none, finds firmware updates, and applies the ones you approve."
   context    = "firmware-operator"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -939,6 +978,7 @@ target "firmware-operator" {
 }
 
 target "firmware-operator-scan" {
+  description = "fwupd and the scan program that firmware-operator runs on a machine to find, rehearse, and apply firmware updates."
   context    = "firmware-operator"
   dockerfile = "scan/Dockerfile"
   platforms  = ["linux/amd64"]
@@ -960,6 +1000,7 @@ target "firmware-operator-scan" {
 }
 
 target "git-csi-driver" {
+  description = "git-csi-driver, which mounts a git repository as a Kubernetes volume, with the git and ssh that it runs."
   context    = "git-csi-driver"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -981,6 +1022,7 @@ target "git-csi-driver" {
 }
 
 target "library-operator" {
+  description = "library-operator, which keeps a catalog of films and series and puts a media browser on every screen."
   context    = "library-operator"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -999,6 +1041,7 @@ target "library-operator" {
 }
 
 target "library-operator-ffmpeg" {
+  description = "library-operator's pod program on the ffmpeg image, for the Jobs that probe a media file and make its trickplay images."
   context    = "library-operator"
   dockerfile = "Dockerfile.ffmpeg"
   platforms  = ["linux/amd64"]
@@ -1018,6 +1061,7 @@ target "library-operator-ffmpeg" {
 }
 
 target "library-operator-media-browser" {
+  description = "The media browser, which shows a namespace's catalog on a Player's screen and starts playback, on the vulkan image."
   context    = "library-operator/media-browser"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -1038,6 +1082,7 @@ target "library-operator-media-browser" {
 }
 
 target "library-operator-appearances" {
+  description = "The appearances tool, OpenVINO, and two face models on the ffmpeg image, for the Job that finds credited people in keyframes."
   context    = "library-operator"
   dockerfile = "Dockerfile.appearances"
   platforms  = ["linux/amd64"]
@@ -1062,6 +1107,7 @@ target "library-operator-appearances" {
 }
 
 target "library-operator-corrosion" {
+  description = "Corrosion, from liken's fork, which replicates the catalog and the progress store to each scanner and media browser."
   context    = "library-operator/corrosion"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -1077,6 +1123,7 @@ target "library-operator-corrosion" {
 }
 
 target "library-operator-cli" {
+  description = "kubectl-liken-library, the kubectl plugin that the liken toolkit pulls from this image."
   context    = "library-operator"
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
@@ -1096,6 +1143,7 @@ target "library-operator-cli" {
 }
 
 target "mpv" {
+  description = "mpv on the ffmpeg image, with every library and data file it opens by name."
   context    = "mpv"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -1116,6 +1164,7 @@ target "mpv" {
 }
 
 target "media-operator" {
+  description = "media-operator, and the pod build of the same program that each sidecar runs."
   context    = "media-operator"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -1133,6 +1182,7 @@ target "media-operator" {
 }
 
 target "media-operator-player" {
+  description = "mpv, the brand's fonts, and media-operator's player shim, for the pod that plays a film on a Player's screen."
   context    = "media-operator"
   dockerfile = "Dockerfile.player"
   platforms  = ["linux/amd64"]
@@ -1156,6 +1206,7 @@ target "media-operator-player" {
 }
 
 target "media-operator-idle" {
+  description = "The idle screen that a Player shows while nothing plays, on the vulkan image."
   context    = "media-operator"
   dockerfile = "Dockerfile.screen"
   target     = "idle"
@@ -1180,6 +1231,7 @@ target "media-operator-idle" {
 }
 
 target "media-operator-display" {
+  description = "The display that media-operator draws over a playing film, with the scrubber, the clock, the track menus, and what plays next, on the vulkan image."
   context    = "media-operator"
   dockerfile = "Dockerfile.screen"
   target     = "display"
@@ -1204,6 +1256,7 @@ target "media-operator-display" {
 }
 
 target "media-operator-api" {
+  description = "media-operator's HTTP API on the ffmpeg image, which captures a Player's screen and sound."
   context    = "media-operator"
   dockerfile = "Dockerfile.api"
   platforms  = ["linux/amd64"]
@@ -1222,6 +1275,7 @@ target "media-operator-api" {
 }
 
 target "media-operator-capabilities" {
+  description = "The agent that asks each render node's driver through libva what it decodes, encodes, and scales, on the vaapi image."
   context    = "media-operator"
   dockerfile = "Dockerfile.capabilities"
   platforms  = ["linux/amd64"]
@@ -1241,6 +1295,7 @@ target "media-operator-capabilities" {
 }
 
 target "media-operator-cli" {
+  description = "kubectl-liken-media, the kubectl plugin that the liken toolkit pulls from this image."
   context    = "media-operator"
   dockerfile = "Dockerfile.cli"
   platforms  = ["linux/amd64"]
@@ -1260,6 +1315,7 @@ target "media-operator-cli" {
 }
 
 target "people-operator" {
+  description = "people-operator, which keeps the Person objects of a cluster and decodes their pictures."
   context    = "people-operator"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -1278,6 +1334,7 @@ target "people-operator" {
 }
 
 target "per-node-csi-driver" {
+  description = "per-node-csi-driver, which gives a pod a directory on the node it runs on."
   context    = "per-node-csi-driver"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]

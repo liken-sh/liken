@@ -25,7 +25,7 @@ func readsFixture(t *testing.T) (*repo, string) {
 		"screen/package.toml":     "[package]\nname = \"screen\"\n",
 		"screen/Cargo.toml":       "[package]\nname = \"screen\"\n[lib]\npath = \"src/lib.rs\"\n",
 		"screen/src/lib.rs":       "pub fn draw() {}\n",
-		"base/package.toml":       "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml":       "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"base/Dockerfile":         "FROM scratch\n",
 		"operator/package.toml": `[package]
 name = "operator"
@@ -54,6 +54,7 @@ toolchain = "prek"
 deploy = "deploy"
 [[outputs.images]]
 name = "operator"
+description = "The operator image."
 `,
 		"operator/go.mod":                 "module example.com/operator\n\nreplace example.com/kubernetes => ../kubernetes\n",
 		"operator/main.go":                "package main\n",

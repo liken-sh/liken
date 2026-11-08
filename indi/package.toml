@@ -41,85 +41,102 @@ skip = ["gofmt", "go-vet", "go-mod-tidy"]
 
 [[outputs.images]]
 name = "indi"
+description = "indiserver, socat, and every program in indi-bin: the core INDI drivers, simulators, and tools."
 target = "indi"
 smoke = "indi/smoke/indi.sh"
 
 [[outputs.images]]
 name = "indi-simulators"
+description = "The GSC star catalog and the gsc program, which the INDI CCD and guide simulators read to draw stars."
 target = "indi-simulators"
 smoke = "indi/smoke/simulators.sh"
 
 [[outputs.images]]
 name = "indi-phd2"
+description = "PHD2, the guider, as a client of an INDI server."
 target = "indi-phd2"
 smoke = "indi/smoke/phd2.sh"
 
 [[outputs.images]]
 name = "indi-open"
+description = "The third-party INDI drivers that link no vendor SDK."
 target = "indi-open"
 smoke = "indi/smoke/drivers.sh"
 
 [[outputs.images]]
 name = "indi-zwo"
+description = "INDI drivers for ZWO cameras, EFW filter wheels, EAF focusers, the CAA rotator, and the USB-to-ST4 adapter."
 target = "indi-zwo"
 smoke = "indi/smoke/drivers.sh"
 
 [[outputs.images]]
 name = "indi-qhy"
+description = "INDI drivers for QHY cameras."
 target = "indi-qhy"
 smoke = "indi/smoke/qhy.sh"
 
 [[outputs.images]]
 name = "indi-playerone"
+description = "INDI drivers for Player One cameras and the Player One filter wheel."
 target = "indi-playerone"
 smoke = "indi/smoke/drivers.sh"
 
 [[outputs.images]]
 name = "indi-svbony"
+description = "INDI drivers for SVBony cameras on SVBony's own SDK."
 target = "indi-svbony"
 smoke = "indi/smoke/drivers.sh"
 
 [[outputs.images]]
 name = "indi-atik"
+description = "INDI drivers for Atik cameras and filter wheels."
 target = "indi-atik"
 smoke = "indi/smoke/drivers.sh"
 
 [[outputs.images]]
 name = "indi-fli"
+description = "INDI drivers for Finger Lakes Instrumentation cameras, focusers, and filter wheels, and the Kepler cameras."
 target = "indi-fli"
 smoke = "indi/smoke/drivers.sh"
 
 [[outputs.images]]
 name = "indi-sbig"
+description = "INDI drivers for SBIG cameras."
 target = "indi-sbig"
 smoke = "indi/smoke/drivers.sh"
 
 [[outputs.images]]
 name = "indi-mi"
+description = "INDI drivers for Moravian Instruments cameras and filter wheels."
 target = "indi-mi"
 smoke = "indi/smoke/drivers.sh"
 
 [[outputs.images]]
 name = "indi-qsi"
+description = "INDI drivers for Quantum Scientific Imaging cameras."
 target = "indi-qsi"
 smoke = "indi/smoke/drivers.sh"
 
 [[outputs.images]]
 name = "indi-apogee"
+description = "INDI drivers for Apogee cameras and filter wheels."
 target = "indi-apogee"
 smoke = "indi/smoke/drivers.sh"
 
 [[outputs.images]]
 name = "indi-astroasis"
+description = "INDI drivers for the Astroasis Oasis focuser and filter wheel."
 target = "indi-astroasis"
 smoke = "indi/smoke/drivers.sh"
 
 [[outputs.images]]
 name = "indi-gphoto"
+description = "INDI drivers for Canon, Nikon, Sony, Fuji, and Pentax cameras through gphoto2."
 target = "indi-gphoto"
 smoke = "indi/smoke/drivers.sh"
 
 [[outputs.images]]
 name = "indi-touptek"
+description = "INDI drivers for the eleven camera brands that use the ToupTek SDK, including ToupTek, Altair, Omegon, and SVBony."
 target = "indi-touptek"
 smoke = "indi/smoke/drivers.sh"

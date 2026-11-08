@@ -45,5 +45,6 @@ deploy = "deploy"
 # license files of the modules the binary links.
 [[outputs.images]]
 name = "people-operator"
+description = "people-operator, which keeps the Person objects of a cluster and decodes their pictures."
 file = "Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices" }

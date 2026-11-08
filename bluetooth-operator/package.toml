@@ -43,16 +43,19 @@ deploy = "deploy"
 # ../kubernetes.
 [[outputs.images]]
 name = "bluetooth-operator"
+description = "bluetooth-operator, which pairs Bluetooth controllers and remotes and gives each one to one pod."
 file = "Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 
 [[outputs.images]]
 name = "bluetooth-bondfetch"
+description = "The init container that restores a Bluetooth adapter's bonds from its Secret before bluetoothd starts."
 file = "bondfetch/Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 
 [[outputs.images]]
 name = "bluetoothd"
+description = "BlueZ's bluetoothd, dbus-daemon, and btmon as static programs, with the entrypoints that bluetooth-operator's pod runs."
 file = "bluetoothd/Dockerfile"
 # userland is the BR2_EXTERNAL tree whose buildroot build makes the
 # image's static daemons, and manifest is toolchains/manifest, for
@@ -73,5 +76,6 @@ cache-mount = true
 # built for linux/amd64 only.
 [[outputs.images]]
 name = "bluetooth-operator-cli"
+description = "kubectl-liken-bluetooth, the kubectl plugin that the liken toolkit pulls from this image."
 file = "Dockerfile.cli"
 contexts = { kubernetes = "kubernetes", notices = "notices" }

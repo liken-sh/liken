@@ -78,6 +78,7 @@ group "default" {
 }
 {% range .Targets %}
 target "{% .Name %}" {
+  description = {% hcl .Description %}
   context    = "{% .Context %}"
   dockerfile = "{% .Dockerfile %}"{% if .Target %}
   target     = "{% .Target %}"{% end %}

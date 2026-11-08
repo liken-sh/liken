@@ -124,12 +124,15 @@ make build
 deploy = "deploy"
 [[outputs.images]]
 name = "app"
+description = "The app image."
 smoke = "app/smoke/app.sh"
 [[outputs.images]]
 name = "app-browser"
+description = "The app-browser image."
 contexts = { brand = "brand", media = "media" }
 [[outputs.images]]
 name = "app-cli"
+description = "The app-cli image."
 file = "Dockerfile.cli"
 platforms = ["linux/amd64", "linux/arm64"]
 `,

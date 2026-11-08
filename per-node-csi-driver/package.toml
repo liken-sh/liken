@@ -46,6 +46,7 @@ deploy = "deploy"
 # build context.
 [[outputs.images]]
 name = "per-node-csi-driver"
+description = "per-node-csi-driver, which gives a pod a directory on the node it runs on."
 file = "Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 smoke = "per-node-csi-driver/smoke/per-node-csi-driver.sh"

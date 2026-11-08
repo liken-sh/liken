@@ -7,11 +7,11 @@ import (
 
 func TestTheBakeFileBuildsEachConsumerOnTheBaseInTheTree(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"base/Dockerfile":   "FROM debian@sha256:aaa AS closure\nFROM scratch\nCOPY --from=closure /out /\n",
 		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\"]\n" +
-			"[[outputs.images]]\nname = \"app\"\ntarget = \"app\"\naliases = [\"app-sidecar\"]\ncontexts = { brand = \"brand\" }\n" +
-			"[[outputs.images]]\nname = \"app-browser\"\ncontext = \"browser\"\nfile = \"browser/Dockerfile\"\nplatforms = [\"linux/amd64\", \"linux/arm64\"]\n",
+			"[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\ntarget = \"app\"\naliases = [\"app-sidecar\"]\ncontexts = { brand = \"brand\" }\n" +
+			"[[outputs.images]]\nname = \"app-browser\"\ndescription = \"The app-browser image.\"\ncontext = \"browser\"\nfile = \"browser/Dockerfile\"\nplatforms = [\"linux/amd64\", \"linux/arm64\"]\n",
 		"app/Dockerfile":         "FROM golang AS build\nFROM base AS app\nCOPY --from=brand fonts /f\n",
 		"app/browser/Dockerfile": "FROM scratch\n",
 	})
@@ -27,6 +27,7 @@ func TestTheBakeFileBuildsEachConsumerOnTheBaseInTheTree(t *testing.T) {
 	for _, want := range []string{
 		"targets = [\n    \"base\",\n    \"app\",\n    \"app-browser\",\n  ]",
 		`target "base" {
+  description = "The base image."
   context    = "base"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64"]
@@ -45,6 +46,7 @@ func TestTheBakeFileBuildsEachConsumerOnTheBaseInTheTree(t *testing.T) {
   cache-to   = CACHE_WRITE == "app" ? ["type=registry,ref=ghcr.io/liken-sh/app:buildcache,mode=max,ignore-error=true"] : []
 }`,
 		`target "app" {
+  description = "The app image."
   context    = "app"
   dockerfile = "Dockerfile"
   target     = "app"
@@ -61,6 +63,7 @@ func TestTheBakeFileBuildsEachConsumerOnTheBaseInTheTree(t *testing.T) {
   default = ""
 }`,
 		`target "app-browser" {
+  description = "The app-browser image."
   context    = "app/browser"
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64", "linux/arm64"]
@@ -77,9 +80,9 @@ func TestTheBakeFileBuildsEachConsumerOnTheBaseInTheTree(t *testing.T) {
 // can vouch for.
 func TestTheBakeFileBuildsATrackedBaseFromTheTreeAlways(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"lib/package.toml": "[package]\nname = \"lib\"\n[[outputs.images]]\nname = \"lib\"\n",
+		"lib/package.toml": "[package]\nname = \"lib\"\n[[outputs.images]]\nname = \"lib\"\ndescription = \"The lib image.\"\n",
 		"lib/Dockerfile":   "FROM scratch\n",
-		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"lib\"]\n[[outputs.images]]\nname = \"app\"\n",
+		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"lib\"]\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 		"app/Dockerfile":   "FROM lib\n",
 	})
 	components, err := LoadComponents(root)
@@ -100,9 +103,9 @@ func TestTheBakeFileBuildsATrackedBaseFromTheTreeAlways(t *testing.T) {
 // recipe above it.
 func TestASettingOfTheRecipeNamesAPublishedBaseByItsTarget(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"base-image\"\n",
+		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"base-image\"\ndescription = \"The base-image image.\"\n",
 		"base/Dockerfile":   "FROM scratch\n",
-		"app/package.toml":  "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\"]\n[[outputs.images]]\nname = \"app\"\n",
+		"app/package.toml":  "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\"]\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 		"app/Dockerfile":    "FROM base-image\n",
 	})
 	components, err := LoadComponents(root)
@@ -127,7 +130,7 @@ func TestASettingOfTheRecipeNamesAPublishedBaseByItsTarget(t *testing.T) {
 }
 
 func TestTheBakeFileNeedsEachDockerfile(t *testing.T) {
-	root := writeTree(t, map[string]string{"app/package.toml": "[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\n"})
+	root := writeTree(t, map[string]string{"app/package.toml": "[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n"})
 	components, err := LoadComponents(root)
 	if err != nil {
 		t.Fatal(err)
@@ -140,20 +143,20 @@ func TestTheBakeFileNeedsEachDockerfile(t *testing.T) {
 func versionsTree(t *testing.T, app string) string {
 	t.Helper()
 	return writeTree(t, map[string]string{
-		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"base/Dockerfile":    "FROM scratch\n",
-		"loose/package.toml": "[package]\nname = \"loose\"\n[[outputs.images]]\nname = \"loose\"\n",
+		"loose/package.toml": "[package]\nname = \"loose\"\n[[outputs.images]]\nname = \"loose\"\ndescription = \"The loose image.\"\n",
 		"loose/Dockerfile":   "FROM scratch\n",
 		"app/package.toml":   app,
 		"app/Dockerfile":     "FROM debian AS closure\nARG SNAPSHOT\n",
-		"other/package.toml": "[package]\nname = \"other\"\nversion = \"20261001\"\nrevision = 1\n[[outputs.images]]\nname = \"other\"\n",
+		"other/package.toml": "[package]\nname = \"other\"\nversion = \"20261001\"\nrevision = 1\n[[outputs.images]]\nname = \"other\"\ndescription = \"The other image.\"\n",
 		"other/Dockerfile":   "FROM scratch\n",
 	})
 }
 
 func TestTheBakeFilePassesAPinnedDependencysVersionAsABuildArgument(t *testing.T) {
 	root := versionsTree(t, "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\"]\n"+
-		"[[outputs.images]]\nname = \"app\"\nversions = { SNAPSHOT = \"base\" }\n")
+		"[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\nversions = { SNAPSHOT = \"base\" }\n")
 	components, err := LoadComponents(root)
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +180,7 @@ func TestTheBakeFileRefusesAVersionArgument(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := versionsTree(t, "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\", \"loose\"]\n"+
-				"[[outputs.images]]\nname = \"app\"\nversions = "+versions+"\n")
+				"[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\nversions = "+versions+"\n")
 			components, err := LoadComponents(root)
 			if err != nil {
 				t.Fatal(err)
@@ -208,7 +211,7 @@ func toolchainTree(t *testing.T, files map[string]string) string {
 
 func TestTheBakeFileResolvesAToolchainImageToItsDigest(t *testing.T) {
 	root := toolchainTree(t, map[string]string{
-		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\ncontexts = { brand = \"brand\" }\n",
+		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\ncontexts = { brand = \"brand\" }\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -226,7 +229,7 @@ func TestTheBakeFileResolvesAToolchainImageToItsDigest(t *testing.T) {
 
 func TestTheBakeFileGivesOverlaysEveryToolchainImage(t *testing.T) {
 	root := toolchainTree(t, map[string]string{
-		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\n",
+		"app/package.toml": "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -253,20 +256,20 @@ func TestTheBakeFileRefusesAToolchainImage(t *testing.T) {
 		wants string
 	}{
 		"with no dependency on toolchains": {map[string]string{
-			"app/package.toml": "[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\n",
+			"app/package.toml": "[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 		}, "app does not depend on toolchains"},
 		"with no digest": {map[string]string{
 			"toolchains/images.toml": "[build]\ngolang = \"golang:1.27.3-trixie\"\n",
-			"app/package.toml":       "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\n",
+			"app/package.toml":       "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 		}, "golang names no digest"},
 		"with the name of an image of the repository": {map[string]string{
-			"app/package.toml":    "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\n",
-			"golang/package.toml": "[package]\nname = \"golang\"\n[[outputs.images]]\nname = \"golang\"\n",
+			"app/package.toml":    "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
+			"golang/package.toml": "[package]\nname = \"golang\"\n[[outputs.images]]\nname = \"golang\"\ndescription = \"The golang image.\"\n",
 			"golang/Dockerfile":   "FROM scratch\n",
 		}, "golang is both an image of the component golang and an entry of toolchains/images.toml"},
 		"with an unknown table": {map[string]string{
 			"toolchains/images.toml": toolchainImages + "[other]\nx = \"y\"\n",
-			"app/package.toml":       "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\n",
+			"app/package.toml":       "[package]\nname = \"app\"\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 		}, "unknown keys: other"},
 	}
 	for name, c := range cases {

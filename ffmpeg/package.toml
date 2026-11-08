@@ -26,5 +26,6 @@ components = ["toolchains", "vaapi", "vulkan"]
 
 [[outputs.images]]
 name = "ffmpeg"
+description = "Debian's ffmpeg and ffprobe on the vaapi image, with every library they load."
 contexts = { builder = "vulkan" }
 smoke = "ffmpeg/smoke/ffmpeg.sh"

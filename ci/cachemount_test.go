@@ -8,7 +8,7 @@ import (
 
 func cacheMountTree(t *testing.T, dockerfile string) string {
 	return writeTree(t, map[string]string{
-		"app/package.toml": "[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\ncontexts = { brand = \"brand\" }\ncache-mount = true\n",
+		"app/package.toml": "[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\ncontexts = { brand = \"brand\" }\ncache-mount = true\n",
 		"app/Dockerfile":   dockerfile,
 	})
 }

@@ -50,6 +50,7 @@ skip = ["gofmt"]
 deploy = "deploy"
 [[outputs.images]]
 name = "app"
+description = "The app image."
 `,
 		"app/main.go": "package main\n",
 	})

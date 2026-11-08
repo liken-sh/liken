@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -105,6 +107,21 @@ func (g Git) HasTag(tag string) bool {
 // Commit is the full sha of a revision.
 func (g Git) Commit(rev string) (string, error) {
 	return g.run("rev-parse", rev+"^{commit}")
+}
+
+// CommitTime is the committer time of a revision. A rebase or a merge
+// sets it, so it is the time the commit took its place on the branch,
+// and every checkout of the commit reads the same value.
+func (g Git) CommitTime(rev string) (time.Time, error) {
+	out, err := g.run("show", "-s", "--format=%ct", rev+"^{commit}")
+	if err != nil {
+		return time.Time{}, err
+	}
+	seconds, err := strconv.ParseInt(out, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("the committer time of %s: %w", rev, err)
+	}
+	return time.Unix(seconds, 0).UTC(), nil
 }
 
 // Describe names the commit by the newest release tag before it, the

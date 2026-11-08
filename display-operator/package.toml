@@ -44,12 +44,14 @@ deploy = "deploy"
 # replaces it with ../kubernetes.
 [[outputs.images]]
 name = "display-operator"
+description = "display-operator on the weston image, for the DaemonSet that runs the compositor on each machine with a monitor."
 file = "Dockerfile"
 target = "display-operator"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 
 [[outputs.images]]
 name = "display-capture"
+description = "display-operator's program on the ffmpeg image, for the container that captures a Display's screenshots, clips, and streams."
 file = "Dockerfile"
 target = "display-capture"
 smoke = "display-operator/smoke/display-capture.sh"
@@ -57,6 +59,7 @@ contexts = { kubernetes = "kubernetes", notices = "notices" }
 
 [[outputs.images]]
 name = "display-api"
+description = "display-operator's program alone, for the display-api Deployment that serves the captures over HTTP."
 file = "Dockerfile"
 target = "display-api"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
@@ -66,5 +69,6 @@ contexts = { kubernetes = "kubernetes", notices = "notices" }
 # built for linux/amd64 only.
 [[outputs.images]]
 name = "display-operator-cli"
+description = "kubectl-liken-display, the kubectl plugin that the liken toolkit pulls from this image."
 file = "Dockerfile.cli"
 contexts = { kubernetes = "kubernetes", notices = "notices" }

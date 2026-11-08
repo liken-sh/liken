@@ -83,6 +83,20 @@ build is signed at `main`, and a release at its tag. Pin the digest
 that the first line prints in your manifests, so that a later push to
 the tag cannot change what you deploy.
 
+The image's labels and annotations say what it is: its name, a one-line
+description, its version, the commit it was built from, the time of
+that commit, and the address of its manual. The signature covers them,
+because the index that the digest names holds the annotations and names
+the image's config, which holds the labels. Read them through the
+digest that the first line prints:
+
+    docker buildx imagetools inspect ghcr.io/liken-sh/bluetoothd@sha256:abbc9736... --format '{{ json .Image.Config.Labels }}'
+    docker buildx imagetools inspect --raw ghcr.io/liken-sh/bluetoothd@sha256:abbc9736... | jq .annotations
+
+`org.opencontainers.image.revision` is the commit, and
+`org.opencontainers.image.licenses` is the license of `liken`'s own
+code in the image. The SBOM names the license of every other package.
+
 ## 3. Read an SBOM
 
 [`liken sbom`](https://liken.sh/docs/reference/cli/#liken-sbom) checks the signature

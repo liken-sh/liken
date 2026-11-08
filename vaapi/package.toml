@@ -28,4 +28,5 @@ components = ["toolchains", "vulkan"]
 # scripts that every base on Debian uses.
 [[outputs.images]]
 name = "vaapi"
+description = "The VA-API loader, Intel's media driver, and Mesa's VA driver on the vulkan image, for programs that decode video on the GPU."
 contexts = { builder = "vulkan" }

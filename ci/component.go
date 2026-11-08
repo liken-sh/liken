@@ -148,6 +148,13 @@ type Outputs struct {
 // An Image is one image on ghcr.io/liken-sh.
 type Image struct {
 	Name string `toml:"name"`
+	// Description is one line that says what the image is. The publish
+	// writes it into org.opencontainers.image.description, as a label
+	// and as an annotation of the index and the manifest, and ghcr.io
+	// shows it on the package page. It is plain text, so it holds no
+	// Markdown. An alias shares it, because the alias pushes the same
+	// digest.
+	Description string `toml:"description"`
 	// Context and File are relative to the component. File is
 	// relative to the component, not to the context.
 	Context string `toml:"context"`
@@ -367,6 +374,9 @@ func (c *Component) validate(path string) error {
 	}
 	images := map[string]bool{}
 	for _, image := range c.Outputs.Images {
+		if err := validateImage(path, image); err != nil {
+			return err
+		}
 		for _, name := range append([]string{image.Name}, image.Aliases...) {
 			if images[name] {
 				return fmt.Errorf("%s: two images are named %q", path, name)

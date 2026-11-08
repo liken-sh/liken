@@ -13,7 +13,7 @@ func graphFixture(t *testing.T) map[string]*Component {
 	t.Helper()
 	root := writeTree(t, map[string]string{
 		"brand/package.toml":               "[package]\nname = \"brand\"\n",
-		"base/package.toml":                "[package]\nname = \"base\"\n[outputs]\nexclude = [\"monitoring/\"]\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml":                "[package]\nname = \"base\"\n[outputs]\nexclude = [\"monitoring/\"]\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"base/.dockerignore":               "monitoring/\n",
 		"base/monitoring/podmonitor.yaml":  "",
 		"app/package.toml":                 "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\"]\n[docs]\nprefix = \"app\"\n[outputs]\ndeploy = \"deploy\"\n",

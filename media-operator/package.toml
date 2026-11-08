@@ -69,12 +69,14 @@ deploy = "deploy"
 # for the cargo-auditable that toolchains/cargo-auditable/fetch.sh pins.
 [[outputs.images]]
 name = "media-operator"
+description = "media-operator, and the pod build of the same program that each sidecar runs."
 file = "Dockerfile"
 aliases = ["media-operator-sidecar"]
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 
 [[outputs.images]]
 name = "media-operator-player"
+description = "mpv, the brand's fonts, and media-operator's player shim, for the pod that plays a film on a Player's screen."
 file = "Dockerfile.player"
 contexts = { brand = "brand", builder = "vulkan", kubernetes = "kubernetes", notices = "notices" }
 versions = { SNAPSHOT = "vulkan" }
@@ -82,6 +84,7 @@ smoke = "media-operator/smoke/media-operator-player.sh"
 
 [[outputs.images]]
 name = "media-operator-idle"
+description = "The idle screen that a Player shows while nothing plays, on the vulkan image."
 file = "Dockerfile.screen"
 target = "idle"
 contexts = { brand = "brand", builder = "vulkan", media-screen = "media-screen", notices = "notices", toolchains = "toolchains" }
@@ -90,6 +93,7 @@ smoke = "media-operator/smoke/media-operator-idle.sh"
 
 [[outputs.images]]
 name = "media-operator-display"
+description = "The display that media-operator draws over a playing film, with the scrubber, the clock, the track menus, and what plays next, on the vulkan image."
 file = "Dockerfile.screen"
 target = "display"
 contexts = { brand = "brand", builder = "vulkan", media-screen = "media-screen", notices = "notices", toolchains = "toolchains" }
@@ -98,6 +102,7 @@ smoke = "media-operator/smoke/media-operator-display.sh"
 
 [[outputs.images]]
 name = "media-operator-api"
+description = "media-operator's HTTP API on the ffmpeg image, which captures a Player's screen and sound."
 file = "Dockerfile.api"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 smoke = "media-operator/smoke/media-operator-api.sh"
@@ -107,6 +112,7 @@ smoke = "media-operator/smoke/media-operator-api.sh"
 # capabilities package of this module.
 [[outputs.images]]
 name = "media-operator-capabilities"
+description = "The agent that asks each render node's driver through libva what it decodes, encodes, and scales, on the vaapi image."
 file = "Dockerfile.capabilities"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 smoke = "media-operator/smoke/media-operator-capabilities.sh"
@@ -116,5 +122,6 @@ smoke = "media-operator/smoke/media-operator-capabilities.sh"
 # built for linux/amd64 only.
 [[outputs.images]]
 name = "media-operator-cli"
+description = "kubectl-liken-media, the kubectl plugin that the liken toolkit pulls from this image."
 file = "Dockerfile.cli"
 contexts = { kubernetes = "kubernetes", notices = "notices" }

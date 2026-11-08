@@ -57,6 +57,7 @@ var templates = template.Must(template.New("").
 			return trivyUpload{Image: image, Present: present, Dry: dry}
 		},
 		"join":  strings.Join,
+		"hcl":   hclString,
 		"lines": func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
 		"goCache": func(mod, sum, family string, build bool) goCache {
 			return goCache{Mod: mod, Keys: []string{sum}, Family: family, Build: build, SavesModules: !build}

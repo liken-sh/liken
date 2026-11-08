@@ -12,11 +12,11 @@ import (
 func pinnedFixture(t *testing.T) *repo {
 	t.Helper()
 	r := newRepo(t, map[string]string{
-		"tool/package.toml":     "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"tool\"\n",
+		"tool/package.toml":     "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"tool\"\ndescription = \"The tool image.\"\n",
 		"tool/Dockerfile":       "FROM debian@sha256:aaa\n",
-		"base/package.toml":     "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml":     "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"base/Dockerfile":       "FROM tool\n",
-		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[[outputs.images]]\nname = \"operator\"\n",
+		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[[outputs.images]]\nname = \"operator\"\ndescription = \"The operator image.\"\n",
 		"operator/Dockerfile":   "FROM base\n",
 	})
 	r.run("tag", "2026.09.28-001")
@@ -86,13 +86,13 @@ func TestAPublishedPinnedTagRunsItsJobsWhenItsPathsChange(t *testing.T) {
 // image runs nothing.
 func TestAPublishedPinnedImageIsPulledAndCheckedNeverBuilt(t *testing.T) {
 	r := newRepo(t, map[string]string{
-		"tool/package.toml": "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"tool\"\n",
+		"tool/package.toml": "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"tool\"\ndescription = \"The tool image.\"\n",
 		"tool/Dockerfile":   "FROM debian@sha256:aaa\n",
 		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n" +
-			"[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n[[outputs.images]]\nname = \"base\"\nsmoke = \"base/smoke/base.sh\"\n",
+			"[[jobs]]\nname = \"prek\"\ntoolchain = \"prek\"\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\nsmoke = \"base/smoke/base.sh\"\n",
 		"base/Dockerfile":       "FROM tool\n",
 		"base/smoke/base.sh":    "true\n",
-		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[[outputs.images]]\nname = \"operator\"\n",
+		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[[outputs.images]]\nname = \"operator\"\ndescription = \"The operator image.\"\n",
 		"operator/Dockerfile":   "FROM base\n",
 	})
 	r.run("tag", "2026.09.28-001")
@@ -161,9 +161,9 @@ func TestARecipeThatChangedWithNoNewRevisionFailsThePlan(t *testing.T) {
 
 func TestTheRecordSaysWhatHappenedToEachPinnedTag(t *testing.T) {
 	r := pinnedFixture(t)
-	r.write("app/package.toml", "[package]\nname = \"app\"\nversion = \"20260928\"\nrevision = 4\n[[outputs.images]]\nname = \"app\"\n")
+	r.write("app/package.toml", "[package]\nname = \"app\"\nversion = \"20260928\"\nrevision = 4\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n")
 	r.write("app/Dockerfile", "FROM scratch\n")
-	r.write("new/package.toml", "[package]\nname = \"new\"\nversion = \"20261001\"\nrevision = 1\n[[outputs.images]]\nname = \"new\"\n")
+	r.write("new/package.toml", "[package]\nname = \"new\"\nversion = \"20261001\"\nrevision = 1\n[[outputs.images]]\nname = \"new\"\ndescription = \"The new image.\"\n")
 	r.write("new/Dockerfile", "FROM scratch\n")
 	r.commit("add two pinned images")
 	p := r.pinnedPlanner(nil, nil)
@@ -200,8 +200,8 @@ func TestTheRecordSaysWhatHappenedToEachPinnedTag(t *testing.T) {
 
 func TestThePinnedTagAtAnEarlierReleaseIsReadFromItsCommit(t *testing.T) {
 	r := pinnedFixture(t)
-	r.write("tool/package.toml", "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"tool\"\n")
-	r.write("app/package.toml", "[package]\nname = \"app\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"app\"\n")
+	r.write("tool/package.toml", "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"tool\"\ndescription = \"The tool image.\"\n")
+	r.write("app/package.toml", "[package]\nname = \"app\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n")
 	r.write("app/Dockerfile", "FROM scratch\n")
 	r.commit("raise the tool and add an app")
 	components, err := LoadComponents(r.git.Dir)

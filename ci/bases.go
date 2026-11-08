@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -182,6 +184,29 @@ func overrideText(bases []PublishedBase) string {
 		fmt.Fprintf(&b, "\nvariable %q {\n  default = %q\n}\n", publishedVariable(base.Image), base.Reference)
 	}
 	return b.String()
+}
+
+// overrideVariable matches one variable that overrideText writes, and
+// names it and its reference.
+var overrideVariable = regexp.MustCompile(`(?m)^variable "([A-Z0-9_]+)" \{\n  default = "([^"]*)"\n\}$`)
+
+// readOverride reads back the variables of the override file at path:
+// the published reference that each pulled base's variable names. A
+// missing file is an empty map, because then every base builds from
+// the tree.
+func readOverride(path string) (map[string]string, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	published := map[string]string{}
+	for _, m := range overrideVariable.FindAllStringSubmatch(string(data), -1) {
+		published[m[1]] = m[2]
+	}
+	return published, nil
 }
 
 func basesSummary(bases []PublishedBase) string {

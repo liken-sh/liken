@@ -17,11 +17,11 @@ func depsFixture(t *testing.T, operatorDepends string) DepsChecker {
 	t.Helper()
 	root := writeTree(t, map[string]string{
 		"brand/package.toml": "[package]\nname = \"brand\"\n",
-		"base/package.toml":  "[package]\nname = \"base\"\n[[outputs.images]]\nname = \"base-image\"\n",
+		"base/package.toml":  "[package]\nname = \"base\"\n[[outputs.images]]\nname = \"base-image\"\ndescription = \"The base-image image.\"\n",
 		"base/Dockerfile":    "FROM scratch\n",
 		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [" + operatorDepends + "]\n" +
-			"[[outputs.images]]\nname = \"operator\"\ncontexts = { brand = \"brand\" }\n" +
-			"[[outputs.images]]\nname = \"operator-sidecar\"\ncontexts = { brand = \"brand\" }\n",
+			"[[outputs.images]]\nname = \"operator\"\ndescription = \"The operator image.\"\ncontexts = { brand = \"brand\" }\n" +
+			"[[outputs.images]]\nname = \"operator-sidecar\"\ndescription = \"The operator-sidecar image.\"\ncontexts = { brand = \"brand\" }\n",
 		"operator/go.mod":          "module x\n",
 		"operator/docs/go.mod":     "module x/docs\n",
 		"operator/Cargo.lock":      "",

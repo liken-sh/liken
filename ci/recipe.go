@@ -21,10 +21,16 @@ import (
 const recipeLabel = "sh.liken.recipe"
 
 // recipeFormat names the way Recipe and the bake file turn a
-// component into a build. A change to either one that can change what
-// a build makes, such as a new default in the bake template, changes
-// this value, so every pinned component needs a new revision.
-var recipeFormat = "1"
+// component into a build, and the labels that the publish writes on a
+// pinned image. A change to either one that can change what a build
+// makes, such as a new default in the bake template, changes this
+// value, so every pinned component needs a new revision. A change to
+// the labels of a pinned image changes it too: a published tag never
+// changes, so without a new revision a tag pushed by the old code
+// keeps the old labels, and the plan reads its recipe as current.
+// pinnedLabelsOfFormat in imagemeta_test.go holds the labels of each
+// format, and its test fails on a change to them that keeps the value.
+var recipeFormat = "2"
 
 // Recipe hashes everything a pinned component's images are built from:
 // its package.toml, each Dockerfile, every file that Docker sends in

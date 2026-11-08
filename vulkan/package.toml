@@ -27,3 +27,4 @@ components = ["toolchains"]
 
 [[outputs.images]]
 name = "vulkan"
+description = "The Vulkan loader, the Intel and AMD Vulkan drivers, and the Wayland client libraries, on scratch."

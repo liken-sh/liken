@@ -12,11 +12,11 @@ import (
 // on, and a pinned component, lone, that no image builds on.
 func baseTree(t *testing.T) string {
 	return writeTree(t, map[string]string{
-		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"base/Dockerfile":   "FROM scratch\n",
-		"lone/package.toml": "[package]\nname = \"lone\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"lone\"\n",
+		"lone/package.toml": "[package]\nname = \"lone\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"lone\"\ndescription = \"The lone image.\"\n",
 		"lone/Dockerfile":   "FROM scratch\n",
-		"app/package.toml":  "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\"]\n[[outputs.images]]\nname = \"app\"\n",
+		"app/package.toml":  "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\"]\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 		"app/Dockerfile":    "FROM base\n",
 	})
 }

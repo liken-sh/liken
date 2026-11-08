@@ -499,6 +499,22 @@ docker buildx imagetools inspect ghcr.io/liken-sh/<image>@<digest> --format '{{ 
 docker buildx imagetools inspect ghcr.io/liken-sh/<image>@<digest> --format '{{ json .Provenance }}'
 ```
 
+An image says what it is through the keys of the OCI image
+specification, so a person who reads ghcr.io or `docker inspect`
+learns its name, description, version, commit, and manual.
+`ci publish` writes those keys, and the `sh.liken.*` keys of a pinned
+image, at publish time from the image's `package.toml` and the
+commit: each one as a label of the config and as an annotation of
+the index and each manifest. Every `[[outputs.images]]` entry states
+a `description` of one line. No Dockerfile writes a `LABEL` or a
+`MAINTAINER`, so a fork's build claims nothing, and
+`cd ci && go run . pins -root ..` fails on one. A label of a base
+passes through `FROM`, so an image writes each label of the
+repository images under it, and a key it does not own reads `""`.
+The publish reads the pushed labels back and fails before it signs an
+image whose labels differ. The `releases` skill holds the keys and
+their values.
+
 An OS release carries its SBOM, so a person or a scanner can read
 what a release ships without the tree it was built from. The SBOM is
 `sbom.cdx.json`, a CycloneDX document, beside the release's other

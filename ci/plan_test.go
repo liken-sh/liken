@@ -85,8 +85,8 @@ func (r *repo) planner(published map[string][]string) Planner {
 func planFixture(t *testing.T) *repo {
 	r := newRepo(t, map[string]string{
 		"brand/package.toml":    "[package]\nname = \"brand\"\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n",
-		"base/package.toml":     "[package]\nname = \"base\"\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n[[outputs.images]]\nname = \"base\"\n",
-		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[docs]\nprefix = \"operator\"\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\n",
+		"base/package.toml":     "[package]\nname = \"base\"\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
+		"operator/package.toml": "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[docs]\nprefix = \"operator\"\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\ndescription = \"The operator image.\"\n",
 		"liken/package.toml":    "[package]\nname = \"liken\"\n[depends]\ncomponents = [\"brand\"]\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"make test\"\n[outputs]\nchannel = true\n",
 		"liken/go.mod":          "module example.com/liken\n\nreplace example.com/brand => ../brand\n",
 		"operator/main.go":      "package main\n",

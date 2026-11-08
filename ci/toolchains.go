@@ -108,3 +108,20 @@ func parseImageRef(s string) imageReference {
 	r.Name = s
 	return r
 }
+
+// qualifiedName gives an image name with the registry that Docker
+// reads it from: a name whose first part is no host gets docker.io/,
+// and a name of one part gets library/ too, so debian becomes
+// docker.io/library/debian. The OCI key base.name asks for the fully
+// qualified name, because a short name means another registry to a
+// tool that resolves it some other way.
+func qualifiedName(name string) string {
+	first, _, nested := strings.Cut(name, "/")
+	if nested && (strings.ContainsAny(first, ".:") || first == "localhost") {
+		return name
+	}
+	if !nested {
+		return "docker.io/library/" + name
+	}
+	return "docker.io/" + name
+}

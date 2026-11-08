@@ -74,17 +74,20 @@ deploy = "deploy"
 # toolchains/cargo-auditable/fetch.sh pins.
 [[outputs.images]]
 name = "library-operator"
+description = "library-operator, which keeps a catalog of films and series and puts a media browser on every screen."
 file = "Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 
 [[outputs.images]]
 name = "library-operator-ffmpeg"
+description = "library-operator's pod program on the ffmpeg image, for the Jobs that probe a media file and make its trickplay images."
 file = "Dockerfile.ffmpeg"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 smoke = "library-operator/smoke/library-operator-ffmpeg.sh"
 
 [[outputs.images]]
 name = "library-operator-media-browser"
+description = "The media browser, which shows a namespace's catalog on a Player's screen and starts playback, on the vulkan image."
 context = "media-browser"
 file = "media-browser/Dockerfile"
 contexts = { brand = "brand", media-screen = "media-screen", notices = "notices", toolchains = "toolchains" }
@@ -98,12 +101,14 @@ smoke = "library-operator/smoke/library-operator-media-browser.sh"
 # the image's SBOM record of OpenVINO and the models.
 [[outputs.images]]
 name = "library-operator-appearances"
+description = "The appearances tool, OpenVINO, and two face models on the ffmpeg image, for the Job that finds credited people in keyframes."
 file = "Dockerfile.appearances"
 contexts = { kubernetes = "kubernetes", appearances = "library-operator/appearances", notices = "notices", toolchains = "toolchains", manifest = "toolchains/manifest" }
 smoke = "library-operator/smoke/library-operator-appearances.sh"
 
 [[outputs.images]]
 name = "library-operator-corrosion"
+description = "Corrosion, from liken's fork, which replicates the catalog and the progress store to each scanner and media browser."
 context = "corrosion"
 file = "corrosion/Dockerfile"
 smoke = "library-operator/smoke/library-operator-corrosion.sh"
@@ -113,5 +118,6 @@ smoke = "library-operator/smoke/library-operator-corrosion.sh"
 # built for linux/amd64 only.
 [[outputs.images]]
 name = "library-operator-cli"
+description = "kubectl-liken-library, the kubectl plugin that the liken toolkit pulls from this image."
 file = "Dockerfile.cli"
 contexts = { kubernetes = "kubernetes", notices = "notices" }

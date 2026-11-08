@@ -48,6 +48,7 @@ deploy = "deploy"
 # build context.
 [[outputs.images]]
 name = "git-csi-driver"
+description = "git-csi-driver, which mounts a git repository as a Kubernetes volume, with the git and ssh that it runs."
 file = "Dockerfile"
 contexts = { builder = "vulkan", kubernetes = "kubernetes", notices = "notices" }
 versions = { SNAPSHOT = "vulkan" }

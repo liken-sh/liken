@@ -53,6 +53,7 @@ deploy = "deploy"
 # license files of the modules the binary links.
 [[outputs.images]]
 name = "firmware-operator"
+description = "firmware-operator, which uploads firmware to the USB devices that hold none, finds firmware updates, and applies the ones you approve."
 file = "Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 
@@ -64,6 +65,7 @@ contexts = { kubernetes = "kubernetes", notices = "notices" }
 # snapshot date.
 [[outputs.images]]
 name = "firmware-operator-scan"
+description = "fwupd and the scan program that firmware-operator runs on a machine to find, rehearse, and apply firmware updates."
 file = "scan/Dockerfile"
 contexts = { builder = "vulkan", kubernetes = "kubernetes", notices = "notices" }
 versions = { SNAPSHOT = "vulkan" }

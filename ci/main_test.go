@@ -50,7 +50,7 @@ type world struct {
 func newWorld(t *testing.T, fake *fakeRegistry) *world {
 	t.Helper()
 	registry := fake.serve(t)
-	w := &world{env: map[string]string{}, out: &bytes.Buffer{}, err: &bytes.Buffer{}, recorded: &recorder{}, signed: map[string]bool{}}
+	w := &world{env: map[string]string{}, out: &bytes.Buffer{}, err: &bytes.Buffer{}, recorded: &recorder{registry: fake}, signed: map[string]bool{}}
 	w.World = World{
 		Published: Published{Registry: registry, Channel: channel(t, fixtureVersions), Client: http.DefaultClient},
 		Registry: func(token string) Registry {

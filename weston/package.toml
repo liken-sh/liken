@@ -33,5 +33,6 @@ components = ["toolchains", "vulkan"]
 
 [[outputs.images]]
 name = "weston"
+description = "The Weston compositor on the vulkan image, with liken's hotplug shim and its ivi-shell layout controller."
 contexts = { builder = "vulkan", manifest = "toolchains/manifest" }
 smoke = "weston/smoke/weston.sh"

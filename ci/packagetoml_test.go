@@ -9,7 +9,7 @@ import (
 // excluded paths as given, so a test edits one part and keeps the rest.
 func baseConfig(run, exclude string) string {
 	return "[package]\nname = \"base\"\n[[jobs]]\nname = \"check\"\ntoolchain = \"go\"\nrun = \"" + run + "\"\n" +
-		"[outputs]\nexclude = [" + exclude + "]\n[[outputs.images]]\nname = \"base\"\n"
+		"[outputs]\nexclude = [" + exclude + "]\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n"
 }
 
 // A release decision for each component, for the commits after the fixture's

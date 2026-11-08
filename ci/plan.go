@@ -58,9 +58,12 @@ const (
 	publishDry = "dry"
 )
 
-// publishCode is the file that holds the code of every component's
-// publish, other than the OS's.
-const publishCode = "ci/publish.go"
+// publishCode are the files that hold the code of every component's
+// publish, other than the OS's: the publisher, the labels and the
+// annotations it writes on each image, and the attestations and the
+// signature of each image it pushes. A dry run runs each of them but
+// the push and the signature.
+var publishCode = []string{"ci/publish.go", "ci/imagemeta.go", "ci/sign.go"}
 
 // A Decision is what the run does with one component.
 type Decision struct {
@@ -349,8 +352,10 @@ func pullPublished(images []ImageRun) []ImageRun {
 // sees a version of the shape it sees on main.
 func (p Planner) dryRun(c *Component, d *Decision, diff Diff, all bool, head string) error {
 	changed := diff.Publishes[c.Name()]
-	if slices.Contains(diff.Files, publishCode) && !c.Outputs.Channel {
-		changed = publishCode
+	for _, file := range publishCode {
+		if slices.Contains(diff.Files, file) && !c.Outputs.Channel {
+			changed = file
+		}
 	}
 	if all {
 		changed = "every job runs"

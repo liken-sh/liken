@@ -15,7 +15,7 @@ func selectionFixture(t *testing.T) (*repo, string) {
 	r := newRepo(t, map[string]string{
 		"brand/package.toml":      "[package]\nname = \"brand\"\n",
 		"brand/layouts/page.html": "<html>\n",
-		"base/package.toml":       "[package]\nname = \"base\"\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml":       "[package]\nname = \"base\"\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"base/Dockerfile":         "FROM scratch\nCOPY assets /assets\n",
 		"base/assets/logo.svg":    "<svg/>\n",
 		"operator/package.toml": `[package]
@@ -37,8 +37,10 @@ run = "make test-docs"
 deploy = "deploy"
 [[outputs.images]]
 name = "operator"
+description = "The operator image."
 [[outputs.images]]
 name = "operator-ui"
+description = "The operator-ui image."
 context = "ui"
 file = "ui/Dockerfile"
 contexts = { assets = "base/assets" }

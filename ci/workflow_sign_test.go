@@ -10,7 +10,7 @@ import (
 func signFixture(t *testing.T) map[string][]byte {
 	t.Helper()
 	root := writeTree(t, map[string]string{
-		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"app/package.toml":   "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n",
 		"os/package.toml":    "[package]\nname = \"os\"\n[outputs]\nchannel = true\n",
 		"liken/flux/VERSION": testFlux + "\n",

@@ -14,13 +14,13 @@ import (
 func recipeFixture(t *testing.T) string {
 	t.Helper()
 	return writeTree(t, map[string]string{
-		"tool/package.toml":        "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"tool\"\ncontext = \"image\"\nfile = \"image/Dockerfile\"\n",
+		"tool/package.toml":        "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"tool\"\ndescription = \"The tool image.\"\ncontext = \"image\"\nfile = \"image/Dockerfile\"\n",
 		"tool/image/Dockerfile":    "FROM debian@sha256:aaa\n",
 		"tool/image/closure.sh":    "collect\n",
 		"tool/other.sh":            "other\n",
 		"tool/image/.dockerignore": "",
 		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n" +
-			"[[outputs.images]]\nname = \"base\"\ncontexts = { closure = \"tool/image\" }\n",
+			"[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\ncontexts = { closure = \"tool/image\" }\n",
 		"base/Dockerfile":      "FROM debian@sha256:aaa AS build\nCOPY --from=closure closure.sh /\nFROM tool\n",
 		"base/base-closure.sh": "seeds\n",
 		"base/.dockerignore":   "README.md\nsmoke/\n",
@@ -75,7 +75,7 @@ func TestTheRecipeCoversWhatTheImageIsBuiltFrom(t *testing.T) {
 		}, true},
 		{"a file of a named context outside its owner's image context", func(root string) error {
 			manifest := "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n" +
-				"[[outputs.images]]\nname = \"base\"\ncontexts = { closure = \"tool\" }\n"
+				"[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\ncontexts = { closure = \"tool\" }\n"
 			if err := os.WriteFile(filepath.Join(root, "base/package.toml"), []byte(manifest), 0o644); err != nil {
 				return err
 			}
@@ -90,7 +90,7 @@ func TestTheRecipeCoversWhatTheImageIsBuiltFrom(t *testing.T) {
 		}, true},
 		{"a named context below a dependency's build context", func(root string) error {
 			manifest := "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n" +
-				"[[outputs.images]]\nname = \"base\"\ncontexts = { closure = \"tool/image/sub\" }\n"
+				"[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\ncontexts = { closure = \"tool/image/sub\" }\n"
 			if err := write("base/package.toml", manifest)(root); err != nil {
 				return err
 			}
@@ -126,9 +126,9 @@ func TestTheRecipeCoversWhatTheImageIsBuiltFrom(t *testing.T) {
 			return nil
 		}, true},
 		{"package.toml", write("base/package.toml", "# a comment\n[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n"+
-			"[[outputs.images]]\nname = \"base\"\ncontexts = { closure = \"tool/image\" }\n"), true},
+			"[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\ncontexts = { closure = \"tool/image\" }\n"), true},
 		{"the digest of a FROM", write("base/Dockerfile", "FROM debian@sha256:bbb AS build\nCOPY --from=closure closure.sh /\nFROM tool\n"), true},
-		{"a dependency's revision", write("tool/package.toml", "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"tool\"\ncontext = \"image\"\nfile = \"image/Dockerfile\"\n"), true},
+		{"a dependency's revision", write("tool/package.toml", "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 2\n[[outputs.images]]\nname = \"tool\"\ndescription = \"The tool image.\"\ncontext = \"image\"\nfile = \"image/Dockerfile\"\n"), true},
 		{"a file the context leaves out", write("base/README.md", "why, at length\n"), false},
 		{"the smoke check", write("base/smoke/base.sh", "check more\n"), false},
 		{"a dependency's own file", write("tool/image/closure.sh", "collect more\n"), false},
@@ -160,7 +160,7 @@ func TestARecipeRefusesWhatItCannotPin(t *testing.T) {
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			root := recipeFixture(t)
-			other := "[package]\nname = \"other\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"other\"\n"
+			other := "[package]\nname = \"other\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"other\"\ndescription = \"The other image.\"\n"
 			for file, text := range map[string]string{"base/Dockerfile": c.dockerfile, "other/package.toml": other, "other/Dockerfile": "FROM scratch\n"} {
 				if err := os.MkdirAll(filepath.Dir(filepath.Join(root, file)), 0o755); err != nil {
 					t.Fatal(err)
@@ -192,7 +192,7 @@ func TestTheRecipeCoversTheDigestOfEachToolchainImageItReads(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			root := toolchainTree(t, map[string]string{
-				"app/package.toml": "[package]\nname = \"app\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\n",
+				"app/package.toml": "[package]\nname = \"app\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"toolchains\"]\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 			})
 			before := recipeOf(t, root, "app")
 			if err := os.WriteFile(filepath.Join(root, "toolchains/images.toml"), []byte(c.images), 0o644); err != nil {

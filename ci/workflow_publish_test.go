@@ -10,7 +10,7 @@ import (
 
 func TestAPinnedImageJobLogsInOnEveryBranch(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -34,7 +34,7 @@ func TestAPinnedImageJobLogsInOnEveryBranch(t *testing.T) {
 // closure, so it never publishes on a dependency that failed.
 func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"lib/package.toml":   "[package]\nname = \"lib\"\n",
 		"app/package.toml":   "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\", \"lib\"]\n[outputs]\ndeploy = \"deploy\"\n",
 		"top/package.toml":   "[package]\nname = \"top\"\n[depends]\ncomponents = [\"app\"]\n[outputs]\ndeploy = \"deploy\"\n",
@@ -83,7 +83,7 @@ func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 // nothing.
 func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"app/package.toml":   "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"app\"\n",
+		"app/package.toml":   "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 		"os/package.toml":    "[package]\nname = \"os\"\n[[jobs]]\nname = \"build\"\ntoolchain = \"os\"\nrun = \"make all\"\n[outputs]\nchannel = true\n",
 		"liken/flux/VERSION": testFlux + "\n",
 	})
@@ -131,9 +131,9 @@ func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 
 func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"operator/package.toml": "[package]\nname = \"operator\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\n",
+		"operator/package.toml": "[package]\nname = \"operator\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\ndescription = \"The operator image.\"\n",
 		"crd/package.toml":      "[package]\nname = \"crd\"\n[outputs]\ndeploy = \"deploy\"\n",
-		"base/package.toml":     "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml":     "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"liken/flux/VERSION":    testFlux + "\n",
 	})
 	components, err := LoadComponents(root)
@@ -169,7 +169,7 @@ func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
 func trivyFixture(t *testing.T) map[string][]byte {
 	t.Helper()
 	root := writeTree(t, map[string]string{
-		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n[[outputs.images]]\nname = \"base-dev\"\n",
+		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n[[outputs.images]]\nname = \"base-dev\"\ndescription = \"The base-dev image.\"\n",
 		"app/package.toml":   "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n",
 		"liken/flux/VERSION": testFlux + "\n",
 	})
@@ -327,7 +327,7 @@ func TestOnlyAComponentThatUploadsIsGrantedSecurityEvents(t *testing.T) {
 // every build of the run uses the same published bases.
 func TestEveryBuildReadsTheBasesThatThePlanJobChecked(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ncache-mount = true\n",
+		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\ncache-mount = true\n",
 		"base/Dockerfile":   "FROM scratch AS cache-seed\nFROM scratch AS cache-export\nFROM scratch\n",
 	})
 	components, err := LoadComponents(root)

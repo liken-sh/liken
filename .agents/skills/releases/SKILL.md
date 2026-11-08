@@ -152,7 +152,10 @@ like a release version. The version of a base is the date of the
 snapshot it installs from. Each image also carries a label
 `sh.liken.upstream.<name>` for each entry of `[package.upstream]` in
 its `package.toml`, such as `sh.liken.upstream.indi`, so the registry
-shows which upstream release a dated tag holds.
+shows which upstream release a dated tag holds. A label of a base
+passes into every image built `FROM` it, so an image built on a pinned
+base writes each of the base's `sh.liken.*` labels with an empty
+value, as "What an image says about itself" gives.
 
 A pinned component publishes when its tag is not on ghcr yet: on the
 first push to `main` or the first release tag that carries the new
@@ -203,12 +206,97 @@ builds every base from the tree.
   every image of the component. The artifact's `kustomization.yaml`
   names the component's images at the same version, so a cluster that
   follows the artifact moves the manifests and the images in one step.
+  `flux push artifact` writes the source and the revision, in the form
+  `<version>@sha1:<commit>`, and the publish adds the artifact's
+  `title`, `description`, `version`, `created`, `licenses`,
+  `documentation`, `url`, and `vendor` as annotations. `created` is
+  the committer time of the commit, not the time of the push.
 * The OS goes to the channel at `https://releases.liken.sh`, through
   `liken/releases/publish.sh`, with its SBOM and a signature bundle
   beside each file.
 
 A published version never changes. A rerun of a failed tag pushes only
 what the failed run did not.
+
+## What an image says about itself
+
+`ci publish` writes the keys of the OCI image specification and the
+`sh.liken.*` keys onto each image when it pushes it, through `--set`
+arguments to `docker buildx bake`, from the image's `package.toml`
+and the commit. No Dockerfile writes a `LABEL` or a `MAINTAINER`, and
+`ci pins` fails on one, so a build of a Dockerfile in a fork carries
+no key that says the image is `liken`'s. Each OCI key goes in three
+places: a label of the image's config, an annotation of the image
+index, and an annotation of each platform's image manifest. ghcr.io
+shows the description, the source, and the license on the package
+page from the index's annotations, and `docker inspect` reads the
+config. The attestation manifests carry no annotation.
+
+| Key | Value | Where |
+| --- | --- | --- |
+| `org.opencontainers.image.title` | the image's name | config, index, manifest |
+| `org.opencontainers.image.description` | `description` of the image's `[[outputs.images]]` entry | config, index, manifest |
+| `org.opencontainers.image.version` | the release or development version, or a pinned image's `<version>-<revision>` | config, index, manifest |
+| `org.opencontainers.image.revision` | the full sha of the commit | config, index, manifest |
+| `org.opencontainers.image.created` | the committer time of the commit | config, index, manifest |
+| `org.opencontainers.image.source` | `https://github.com/liken-sh/liken` | config, index, manifest |
+| `org.opencontainers.image.url` | `https://liken.sh/` | config, index, manifest |
+| `org.opencontainers.image.documentation` | the component's manual, `https://liken.sh/<prefix>/`, or its directory in the repository at the commit when it has no manual | config, index, manifest |
+| `org.opencontainers.image.vendor` | `liken` | config, index, manifest |
+| `org.opencontainers.image.licenses` | the `license` of a tracked component's `package.toml`; a pinned image writes none | config, index, manifest |
+| `org.opencontainers.image.base.name` | the image the build starts from: a pulled pinned base by its tag, or an outside image of `toolchains/images.toml` by its fully qualified name | index, manifest |
+| `org.opencontainers.image.base.digest` | the digest of that image's index | index, manifest |
+| `sh.liken.recipe` | a pinned image's recipe | config |
+| `sh.liken.upstream.<name>` | each entry of a pinned component's `[package.upstream]` | config |
+
+The build takes the same committer time as `SOURCE_DATE_EPOCH`, so
+the `created` field of the config and of each history entry that the
+build adds is the commit's time too, and a run again at the commit
+writes the same value. The provenance attestation still records when
+the build ran.
+
+`licenses` names the license of `liken`'s own code in the image. A
+tracked image can hold programs of other projects as well, such as
+the GPL programs of a base, and a pinned image holds only the
+packages of other projects, so it writes no `licenses` key. The
+image's SBOM names the license of each package.
+
+The base keys are annotations alone, because an annotation does not
+pass through `FROM`. An image on `scratch`, and an image whose run
+built its pinned base from the tree, write no base key: scratch is no
+image, and a base built from the tree was never published.
+
+A label of the image that a Dockerfile builds `FROM` passes into the
+new config, and Docker cannot delete it. So the publish walks the
+image's `FROM` chain through the tree, and the image writes each label
+key that an image of the repository in the chain writes. A key that
+the image does not own takes the value `""`. `media-operator-player`,
+on `mpv`, writes `sh.liken.recipe` and each `sh.liken.upstream.<name>`
+of `mpv`, `ffmpeg`, `vaapi`, and `vulkan` as `""`, and `mpv` writes
+the upstream keys of the bases under it as `""`.
+
+After the push and before the signature, the publish reads the
+labels of the pushed config back from ghcr.io and fails when they
+differ from the labels it wrote, in any key or value. A label that an
+outside base starts to carry after a bump of `toolchains/images.toml`
+fails there, so it never reaches a signed image. A run again checks
+the published image the same way before it signs it. `:latest` is a
+copy of the version's index, so it names the same digest and carries
+the same keys.
+
+To read each level through a digest that `cosign verify` checked:
+
+```sh
+docker buildx imagetools inspect "$image@$digest" --format '{{ json .Image.Config.Labels }}'
+docker buildx imagetools inspect --raw "$image@$digest" | jq .annotations
+```
+
+A pinned image's label set is part of its recipe format. A published
+tag never changes, so a change to the labels that the publish writes
+on a pinned image raises `recipeFormat` in `ci/recipe.go`, and every
+pinned component then needs a new revision. `pinnedLabelsOfFormat` in
+`ci/imagemeta_test.go` holds the labels of each format, and its test
+fails on a change to them that keeps the format.
 
 ## Image attestations and signatures
 
@@ -297,7 +385,10 @@ To require one component, put its workflow in the identity, as in
 `component-git-csi-driver\.yaml`. The SBOM and the provenance carry no
 signature of their own. The index names each of them by its digest,
 so they are the ones that the signature covers when they are read
-through the digest that `cosign verify` checked.
+through the digest that `cosign verify` checked. The same holds for
+the labels and the annotations: the annotations of the index are in
+the bytes that the digest names, the index names each image manifest
+by its digest, and each manifest names its config by its digest.
 
 ## Pin a component
 

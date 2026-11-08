@@ -44,5 +44,6 @@ deploy = "deploy"
 # build context.
 [[outputs.images]]
 name = "equipment-operator"
+description = "equipment-operator, which controls a TV over HDMI-CEC and an A/V receiver over the network."
 file = "Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices" }

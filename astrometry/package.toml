@@ -30,5 +30,6 @@ components = ["toolchains", "vulkan"]
 
 [[outputs.images]]
 name = "astrometry"
+description = "The astrometry.net solver and SourceExtractor, with every library they load, for the plate solving of astrophotography-operator."
 contexts = { builder = "vulkan" }
 smoke = "astrometry/smoke/astrometry.sh"

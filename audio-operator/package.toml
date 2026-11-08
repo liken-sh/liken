@@ -47,6 +47,7 @@ deploy = "deploy"
 # ../kubernetes.
 [[outputs.images]]
 name = "audio-operator"
+description = "audio-operator and the PipeWire and WirePlumber daemons that its pod runs to play and record sound on a machine."
 file = "Dockerfile"
 smoke = "audio-operator/smoke/audio-operator.sh"
 contexts = { builder = "vulkan", kubernetes = "kubernetes", notices = "notices" }
@@ -57,5 +58,6 @@ versions = { SNAPSHOT = "vulkan" }
 # built for linux/amd64 only.
 [[outputs.images]]
 name = "audio-operator-cli"
+description = "kubectl-liken-audio, the kubectl plugin that the liken toolkit pulls from this image."
 file = "Dockerfile.cli"
 contexts = { kubernetes = "kubernetes", notices = "notices" }

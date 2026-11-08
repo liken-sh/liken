@@ -7,7 +7,7 @@ import (
 
 func TestADeployArtifactWithAReleaseNamesTheVersions(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"operator/package.toml": "[package]\nname = \"operator\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\n",
+		"operator/package.toml": "[package]\nname = \"operator\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\ndescription = \"The operator image.\"\n",
 		"crd/package.toml":      "[package]\nname = \"crd\"\n[outputs]\ndeploy = \"deploy\"\n",
 	})
 	components, err := LoadComponents(root)

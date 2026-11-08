@@ -28,5 +28,6 @@ components = ["ffmpeg", "toolchains", "vulkan"]
 
 [[outputs.images]]
 name = "mpv"
+description = "mpv on the ffmpeg image, with every library and data file it opens by name."
 contexts = { builder = "vulkan" }
 smoke = "mpv/smoke/mpv.sh"

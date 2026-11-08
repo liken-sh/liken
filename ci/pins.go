@@ -39,6 +39,9 @@ import (
 //     from images.toml with image_of, for the same reason;
 //   - each Dockerfile builds Rust with `cargo auditable build`, so each
 //     binary records its crates for the SBOM, as unauditedBuilds says;
+//   - no Dockerfile writes a LABEL or a MAINTAINER, because ci publish
+//     writes every key of an image from its package.toml, as
+//     labelInstructions says;
 //   - each Dockerfile builds and ships a Go program in the one form
 //     that goImageFindings says, at /<name> with its build info kept;
 //   - each copy of a Wayland protocol that liken defines, such as
@@ -121,6 +124,7 @@ func checkPins(root string) ([]string, error) {
 		if isDockerfile(path.Base(file)) {
 			findings = append(findings, outsideImages(file, string(data))...)
 			findings = append(findings, unauditedBuilds(file, string(data))...)
+			findings = append(findings, labelInstructions(file, string(data))...)
 			findings = append(findings, goImageFindings(file, string(data))...)
 			if pin := dockerfileBuildroot(string(data)); pin != "" {
 				buildroots.add("buildroot", pin, file)

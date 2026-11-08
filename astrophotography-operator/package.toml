@@ -55,6 +55,7 @@ deploy = "deploy"
 # license files of the modules the binary links.
 [[outputs.images]]
 name = "astrophotography-operator"
+description = "astrophotography-operator, which takes the pictures you ask for on a telescope that observatory-operator runs."
 file = "Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices", observatory = "observatory-operator" }
 
@@ -64,6 +65,7 @@ contexts = { kubernetes = "kubernetes", notices = "notices", observatory = "obse
 # servers.
 [[outputs.images]]
 name = "astrophotography-operator-worker"
+description = "astrophotography-operator's program on the astrometry image, for the solver pods and the workers that extract stars from each frame."
 file = "Dockerfile.worker"
 contexts = { kubernetes = "kubernetes", notices = "notices", observatory = "observatory-operator" }
 smoke = "astrophotography-operator/smoke/astrophotography-operator-worker.sh"

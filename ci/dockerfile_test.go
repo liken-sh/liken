@@ -169,3 +169,26 @@ func TestEachStageThatRunsAptPointsItAtTheSnapshotFirst(t *testing.T) {
 		})
 	}
 }
+
+// The image that a target starts from is the FROM of its stage, or of
+// the earlier stage that its stage starts from, through the file. Each
+// label of that image passes into the target's config.
+func TestFromImageFollowsTheStagesToAnImage(t *testing.T) {
+	cases := []struct {
+		name, text, target, want string
+	}{
+		{"the last stage", "FROM golang AS build\nFROM mpv\nCOPY --from=build /x /x\n", "", "mpv"},
+		{"a named target", "FROM weston AS display-operator\nFROM scratch AS display-api\n", "display-operator", "weston"},
+		{"two stages to scratch", "FROM scratch AS one\nFROM one AS two\nFROM two\n", "", "scratch"},
+		{"a platform flag", "FROM --platform=$BUILDPLATFORM golang AS build\nFROM build\n", "", "golang"},
+		{"a stage by its number", "FROM vulkan\nFROM 0\n", "", "vulkan"},
+		{"a stage that copies from another", "FROM vaapi AS base\nFROM golang AS build\nFROM base\nCOPY --from=build /x /x\n", "", "vaapi"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := parseDockerfile(c.text).FromImage(c.target); got != c.want {
+				t.Errorf("FromImage(%q) = %q, want %q", c.target, got, c.want)
+			}
+		})
+	}
+}

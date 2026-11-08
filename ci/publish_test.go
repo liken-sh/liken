@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // recorder is a Runner that records each command and runs nothing.
@@ -18,9 +20,27 @@ import (
 // writes, with the digest that fakeDigest gives the target, which is
 // the bake's last argument. The file's path is a new temporary path
 // in each publish, so the recorded command names it <metadata>.
-type recorder struct{ commands []string }
+//
+// When registry is set, a bake with --push puts the image into it
+// under each tag, with the labels that the --set arguments give and
+// the labels in inherited, the way an outside base passes its labels
+// into the image. A flux push of an artifact adds its tag.
+type recorder struct {
+	commands  []string
+	registry  *fakeRegistry
+	inherited map[string]string
+}
 
 func (r *recorder) run(dir, name string, args ...string) error {
+	if name == "flux" && len(args) > 2 && args[0] == "push" && r.registry != nil {
+		pkg, tag, _ := strings.Cut(strings.TrimPrefix(args[2], "oci://ghcr.io/liken-sh/"), ":")
+		r.registry.mu.Lock()
+		if r.registry.tags == nil {
+			r.registry.tags = map[string][]string{}
+		}
+		r.registry.tags[pkg] = append(r.registry.tags[pkg], tag)
+		r.registry.mu.Unlock()
+	}
 	i := slices.Index(args, "--metadata-file")
 	if i < 0 {
 		r.commands = append(r.commands, name+" "+strings.Join(args, " "))
@@ -35,7 +55,85 @@ func (r *recorder) run(dir, name string, args ...string) error {
 	if err != nil {
 		return err
 	}
+	if slices.Contains(args, "--push") && r.registry != nil {
+		labels := maps.Clone(r.inherited)
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		var references []string
+		for j, arg := range args {
+			if arg != "--set" || j+1 == len(args) {
+				continue
+			}
+			if label, ok := strings.CutPrefix(args[j+1], target+".labels."); ok {
+				key, value, _ := strings.Cut(label, "=")
+				labels[key] = value
+			}
+			if reference, ok := strings.CutPrefix(args[j+1], target+".tags=ghcr.io/liken-sh/"); ok {
+				references = append(references, reference)
+			}
+		}
+		for _, reference := range references {
+			pkg, tag, _ := strings.Cut(reference, ":")
+			r.registry.push(pkg, tag, fakeDigest(target), labels)
+		}
+	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+// fixtureCommit and fixtureCreated are the commit of the publish
+// fixtures and its committer time.
+const fixtureCommit = "0123456789abcdef0123456789abcdef01234567"
+
+var fixtureCreated = time.Date(2026, 10, 2, 9, 30, 0, 0, time.UTC)
+
+// seedPublished puts each tag into the fixture's registry as an earlier
+// run of the publish at the same commit left it: an image at each tag
+// with the labels that the publish writes there, and a deploy artifact
+// as its tag alone.
+func seedPublished(t *testing.T, p Publisher, fake *fakeRegistry, tags map[string][]string) {
+	t.Helper()
+	images := map[string]bool{}
+	for _, c := range sortedComponents(p.Components) {
+		for _, image := range c.Outputs.Images {
+			images[image.Name] = true
+			for _, version := range tags[image.Name] {
+				recipe := ""
+				if c.Pinned() {
+					var err error
+					if recipe, err = Recipe(p.Root, p.Components, c); err != nil {
+						t.Fatal(err)
+					}
+				}
+				m, err := p.metadata(c, image, version, recipe)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fake.push(image.Name, version, fakeDigest(image.Name), m.Labels)
+			}
+		}
+	}
+	for pkg, list := range tags {
+		if !images[pkg] {
+			fake.tags[pkg] = append(fake.tags[pkg], list...)
+		}
+	}
+}
+
+// fixturePublisher gives a publisher of the tree at root, with a
+// recorder that pushes into a fake registry, and the tags already
+// published there.
+func fixturePublisher(t *testing.T, root string, tags map[string][]string) (Publisher, *recorder, map[string]*Component) {
+	t.Helper()
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeRegistry{tags: map[string][]string{}}
+	rec := &recorder{registry: fake}
+	p := Publisher{Root: root, Registry: fake.serve(t), Run: rec.run, Commit: fixtureCommit, Created: fixtureCreated, Components: components, DockerConfig: fixtureDockerConfig}
+	seedPublished(t, p, fake, tags)
+	return p, rec, components
 }
 
 // fixtureDockerConfig is the Docker configuration directory of the
@@ -64,15 +162,20 @@ func publishFixture(t *testing.T, tags map[string][]string) (Publisher, *recorde
 	root := writeTree(t, map[string]string{
 		"operator/package.toml": `[package]
 name = "operator"
+license = "MIT"
+[docs]
+prefix = "operator"
 [outputs]
 deploy = "deploy"
 [[outputs.images]]
 name = "operator"
+description = "The operator image."
 target = "operator"
 aliases = ["operator-sidecar"]
 contexts = { brand = "brand" }
 [[outputs.images]]
 name = "operator-cli"
+description = "The operator-cli image."
 file = "Dockerfile.cli"
 platforms = ["linux/amd64", "linux/arm64"]
 `,
@@ -81,26 +184,47 @@ images:
   - name: ghcr.io/liken-sh/operator
     newTag: latest
 `,
-		"toolchains/images.toml": fixtureImages,
+		"operator/Dockerfile":     "FROM scratch AS operator\n",
+		"operator/Dockerfile.cli": "FROM scratch\n",
+		"toolchains/images.toml":  fixtureImages,
 	})
-	components, err := LoadComponents(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec := &recorder{}
-	registry := (&fakeRegistry{tags: tags}).serve(t)
-	return Publisher{Root: root, Registry: registry, Run: rec.run, Commit: "0123456789abcdef0123456789abcdef01234567", DockerConfig: fixtureDockerConfig}, rec, components["operator"]
+	p, rec, components := fixturePublisher(t, root, tags)
+	return p, rec, components["operator"]
 }
 
+// metadataArgs gives the --set arguments that write each key=value as
+// a label and as an annotation of the index and the manifest, in the
+// order given, which is the sorted order of the keys.
+func metadataArgs(target string, keyValues ...string) string {
+	var labels, annotations string
+	for _, kv := range keyValues {
+		labels += " --set " + target + ".labels." + kv
+		annotations += " --set " + target + ".annotations=index,manifest:" + kv
+	}
+	return labels + annotations
+}
+
+// The publish writes every OCI key onto each image, as a label of its
+// config and as an annotation of its index and its manifest, and the
+// build takes the commit's time as SOURCE_DATE_EPOCH.
 func TestAReleasePushesEveryImageThenTheDeployArtifactThenLatest(t *testing.T) {
 	p, rec, c := publishFixture(t, map[string][]string{"operator": {"2026.09.27-001"}})
 	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
 		t.Fatal(err)
 	}
 	labels := func(target string) string {
-		return " --set " + target + ".labels.org.opencontainers.image.revision=0123456789abcdef0123456789abcdef01234567" +
-			" --set " + target + ".labels.org.opencontainers.image.source=https://github.com/liken-sh/liken" +
-			" --set " + target + ".labels.org.opencontainers.image.version=2026.10.02-001"
+		return " --set " + target + ".args.SOURCE_DATE_EPOCH=1790933400" + metadataArgs(target,
+			"org.opencontainers.image.created=2026-10-02T09:30:00Z",
+			"org.opencontainers.image.description=The "+target+" image.",
+			"org.opencontainers.image.documentation=https://liken.sh/operator/",
+			"org.opencontainers.image.licenses=MIT",
+			"org.opencontainers.image.revision=0123456789abcdef0123456789abcdef01234567",
+			"org.opencontainers.image.source=https://github.com/liken-sh/liken",
+			"org.opencontainers.image.title="+target,
+			"org.opencontainers.image.url=https://liken.sh/",
+			"org.opencontainers.image.vendor=liken",
+			"org.opencontainers.image.version=2026.10.02-001",
+		)
 	}
 	attest := func(target string) string {
 		return " --set " + target + ".attest=type=sbom,generator=" + fixtureScanner + " --set " + target + ".attest=type=provenance,mode=max --metadata-file <metadata> " + target
@@ -122,9 +246,66 @@ func TestAReleasePushesEveryImageThenTheDeployArtifactThenLatest(t *testing.T) {
 	}
 	rest := rec.commands[len(want):]
 	if len(rest) != 2 || !strings.HasPrefix(rest[0], "flux push artifact oci://ghcr.io/liken-sh/operator-deploy:2026.10.02-001 --path ") ||
-		!strings.HasSuffix(rest[0], "--source https://github.com/liken-sh/liken --revision 2026.10.02-001@sha1:0123456789abcdef0123456789abcdef01234567") ||
 		rest[1] != "flux tag artifact oci://ghcr.io/liken-sh/operator-deploy:2026.10.02-001 --tag latest" {
 		t.Errorf("the deploy commands:\n%s", strings.Join(rest, "\n"))
+	}
+}
+
+// The deploy artifact names its commit and carries the commit's time as
+// created, in place of the time of the push that flux writes on its
+// own, and the same OCI keys that describe an image.
+func TestTheDeployArtifactCarriesTheCommitTime(t *testing.T) {
+	p, rec, c := publishFixture(t, nil)
+	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
+		t.Fatal(err)
+	}
+	var push string
+	for _, command := range rec.commands {
+		if strings.HasPrefix(command, "flux push artifact ") {
+			push = command
+		}
+	}
+	want := " --source https://github.com/liken-sh/liken --revision 2026.10.02-001@sha1:0123456789abcdef0123456789abcdef01234567" +
+		" --annotations org.opencontainers.image.created=2026-10-02T09:30:00Z" +
+		" --annotations org.opencontainers.image.description=The Kubernetes manifests of operator, which name its images at the same version." +
+		" --annotations org.opencontainers.image.documentation=https://liken.sh/operator/" +
+		" --annotations org.opencontainers.image.licenses=MIT" +
+		" --annotations org.opencontainers.image.title=operator-deploy" +
+		" --annotations org.opencontainers.image.url=https://liken.sh/" +
+		" --annotations org.opencontainers.image.vendor=liken" +
+		" --annotations org.opencontainers.image.version=2026.10.02-001"
+	if !strings.HasSuffix(push, want) {
+		t.Errorf("the push of the deploy artifact:\n%s\nwant it to end with:\n%s", push, want)
+	}
+}
+
+// The publish reads the labels of each pushed image back before it
+// signs it. A label that the publish did not write, such as one that an
+// outside base starts to carry, fails the publish, and the image is
+// never signed.
+func TestAPushWhoseLabelsDifferIsNeverSigned(t *testing.T) {
+	p, rec, c := publishFixture(t, nil)
+	rec.inherited = map[string]string{"maintainer": "a person"}
+	err := p.Publish(c, "2026.10.02-001", publishRelease)
+	if err == nil || !strings.Contains(err.Error(), `maintainer="a person", which the publish did not write`) {
+		t.Fatalf("got %v, want the label that the publish did not write", err)
+	}
+	if signs := signCommands(rec.commands); len(signs) > 0 {
+		t.Errorf("signed:\n%s", strings.Join(signs, "\n"))
+	}
+}
+
+// A run again of a publish checks the labels of the image that the
+// failed run pushed before it signs it, the same as the push does.
+func TestARunAgainChecksThePublishedLabelsBeforeItSigns(t *testing.T) {
+	p, rec, c := publishFixture(t, nil)
+	rec.registry.push("operator", "2026.10.02-001", fakeDigest("operator"), map[string]string{"org.opencontainers.image.version": "2026.10.02-001"})
+	err := p.Publish(c, "2026.10.02-001", publishRelease)
+	if err == nil || !strings.Contains(err.Error(), "the pushed ghcr.io/liken-sh/operator:2026.10.02-001 holds labels that differ") {
+		t.Fatalf("got %v, want the labels that differ", err)
+	}
+	if signs := signCommands(rec.commands); len(signs) > 0 {
+		t.Errorf("signed:\n%s", strings.Join(signs, "\n"))
 	}
 }
 
@@ -192,8 +373,8 @@ func (f *failingTrivy) run(dir, name string, args ...string) error {
 // A scan reports and does not gate: a scan that fails leaves the
 // publish to push every image and the deploy artifact.
 func TestAScanThatFailsDoesNotStopThePublish(t *testing.T) {
-	p, _, c := publishFixture(t, nil)
-	runner := &failingTrivy{}
+	p, rec, c := publishFixture(t, nil)
+	runner := &failingTrivy{recorder{registry: rec.registry}}
 	p.Run, p.SARIF = runner.run, t.TempDir()
 	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
 		t.Fatal(err)
@@ -307,19 +488,13 @@ images:
 func pinnedPublishFixture(t *testing.T, tags map[string][]string) (Publisher, *recorder, map[string]*Component) {
 	t.Helper()
 	root := writeTree(t, map[string]string{
-		"tool/package.toml":      "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 3\n[[outputs.images]]\nname = \"tool\"\n",
+		"tool/package.toml":      "[package]\nname = \"tool\"\nversion = \"20260928\"\nrevision = 3\n[[outputs.images]]\nname = \"tool\"\ndescription = \"The tool image.\"\n",
 		"tool/Dockerfile":        "FROM debian@sha256:abc\n",
-		"base/package.toml":      "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml":      "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[depends]\ncomponents = [\"tool\"]\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"base/Dockerfile":        "FROM tool\n",
 		"toolchains/images.toml": fixtureImages,
 	})
-	components, err := LoadComponents(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec := &recorder{}
-	registry := (&fakeRegistry{tags: tags}).serve(t)
-	return Publisher{Root: root, Registry: registry, Run: rec.run, Commit: "0123456789abcdef0123456789abcdef01234567", Components: components, DockerConfig: fixtureDockerConfig}, rec, components
+	return fixturePublisher(t, root, tags)
 }
 
 func TestAPinnedComponentPushesItsTagWithItsRecipeThenMovesLatest(t *testing.T) {
@@ -331,11 +506,24 @@ func TestAPinnedComponentPushesItsTagWithItsRecipeThenMovesLatest(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "docker buildx bake --file docker-bake.hcl --push" +
-		" --set base.labels.org.opencontainers.image.revision=0123456789abcdef0123456789abcdef01234567" +
-		" --set base.labels.org.opencontainers.image.source=https://github.com/liken-sh/liken" +
-		" --set base.labels.org.opencontainers.image.version=20260928-1" +
-		" --set base.labels.sh.liken.recipe=" + recipe +
+	oci := []string{
+		"org.opencontainers.image.created=2026-10-02T09:30:00Z",
+		"org.opencontainers.image.description=The base image.",
+		"org.opencontainers.image.documentation=https://github.com/liken-sh/liken/tree/0123456789abcdef0123456789abcdef01234567/base",
+		"org.opencontainers.image.revision=0123456789abcdef0123456789abcdef01234567",
+		"org.opencontainers.image.source=https://github.com/liken-sh/liken",
+		"org.opencontainers.image.title=base",
+		"org.opencontainers.image.url=https://liken.sh/",
+		"org.opencontainers.image.vendor=liken",
+		"org.opencontainers.image.version=20260928-1",
+	}
+	var labels, annotations string
+	for _, kv := range oci {
+		labels += " --set base.labels." + kv
+		annotations += " --set base.annotations=index,manifest:" + kv
+	}
+	want := "docker buildx bake --file docker-bake.hcl --push --set base.args.SOURCE_DATE_EPOCH=1790933400" +
+		labels + " --set base.labels.sh.liken.recipe=" + recipe + annotations +
 		" --set base.tags=ghcr.io/liken-sh/base:20260928-1" +
 		" --set base.attest=type=sbom,generator=" + fixtureScanner + " --set base.attest=type=provenance,mode=max --metadata-file <metadata> base"
 	sign := signCommand("ghcr.io/liken-sh/base@" + fakeDigest("base"))
@@ -351,16 +539,11 @@ func TestAPinnedComponentPushesItsTagWithItsRecipeThenMovesLatest(t *testing.T) 
 func TestAPinnedImageCarriesItsUpstreamVersionsAsLabels(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20261004\"\nrevision = 1\n" +
-			"[package.upstream]\nindi = \"2.2.5\"\nphd2 = \"2.6.14\"\n[[outputs.images]]\nname = \"base\"\n",
+			"[package.upstream]\nindi = \"2.2.5\"\nphd2 = \"2.6.14\"\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"base/Dockerfile":        "FROM debian@sha256:abc\n",
 		"toolchains/images.toml": fixtureImages,
 	})
-	components, err := LoadComponents(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec := &recorder{}
-	p := Publisher{Root: root, Registry: (&fakeRegistry{}).serve(t), Run: rec.run, Commit: "0123456789abcdef0123456789abcdef01234567", Components: components, DockerConfig: fixtureDockerConfig}
+	p, rec, components := fixturePublisher(t, root, nil)
 	if err := p.Publish(components["base"], "20261004-1", publishDev); err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +587,9 @@ func TestAPinnedComponentPublishesOnlyItsOwnTag(t *testing.T) {
 
 // A dry run builds each image the way a publish would, with the same
 // tags and labels, and stamps the deploy artifact, but it pushes
-// nothing and moves no tag, even for a version that is published.
+// nothing and moves no tag, even for a version that is published. It
+// exports each image into the builder, so the exporter writes the
+// index and its annotations, and refuses one that a push would refuse.
 func TestADryRunBuildsWhatAPublishWouldAndPushesNothing(t *testing.T) {
 	p, rec, c := publishFixture(t, map[string][]string{"operator": {"2026.10.02-001-dev-017-abcdef01"}})
 	if err := p.Publish(c, "2026.10.02-001-dev-017-abcdef01", publishDry); err != nil {
@@ -415,7 +600,7 @@ func TestADryRunBuildsWhatAPublishWouldAndPushesNothing(t *testing.T) {
 	}
 	for i, target := range []string{"operator", "operator-cli"} {
 		command := rec.commands[i]
-		if !strings.HasPrefix(command, "docker buildx bake --file docker-bake.hcl --set "+target+".args.VERSION=2026.10.02-001-dev-017-abcdef01") ||
+		if !strings.HasPrefix(command, "docker buildx bake --file docker-bake.hcl --set "+target+".output=type=image,push=false --set "+target+".args.VERSION=2026.10.02-001-dev-017-abcdef01") ||
 			!strings.HasSuffix(command, " "+target) || strings.Contains(command, "--push") {
 			t.Errorf("the build of %s: %s", target, command)
 		}

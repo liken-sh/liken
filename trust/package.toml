@@ -28,5 +28,6 @@ toolchain = "prek"
 
 [[outputs.images]]
 name = "trust"
+description = "Mozilla's CA bundle, in the form curl publishes it, at the path where OpenSSL, GnuTLS, libcurl, and Go read it."
 contexts = { manifest = "toolchains/manifest" }
 smoke = "trust/smoke/trust.sh"

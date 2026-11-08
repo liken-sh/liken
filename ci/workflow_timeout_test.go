@@ -14,10 +14,10 @@ func TestABuildThatNeedsMoreTimeRaisesItsJobs(t *testing.T) {
 		component, toml, images, publish string
 	}{
 		"the defaults": {"app",
-			"[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\n",
+			"[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 			"    timeout-minutes: 45\n", "    timeout-minutes: 30\n"},
 		"an image that names a timeout": {"app",
-			"[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\n[[outputs.images]]\nname = \"daemons\"\ntimeout = 100\n",
+			"[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n[[outputs.images]]\nname = \"daemons\"\ndescription = \"The daemons image.\"\ntimeout = 100\n",
 			"    timeout-minutes: 100\n", "    timeout-minutes: 100\n"},
 		"a channel that names a timeout": {"os",
 			"[package]\nname = \"os\"\n[outputs]\nchannel = true\ntimeout = 90\n",

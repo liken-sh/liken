@@ -66,6 +66,7 @@ deploy = "deploy"
 # license files of the modules the binary links.
 [[outputs.images]]
 name = "observatory-operator"
+description = "observatory-operator, which runs an observatory's mount, cameras, and other INDI equipment on the cluster."
 file = "Dockerfile"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 
@@ -74,5 +75,6 @@ contexts = { kubernetes = "kubernetes", notices = "notices" }
 # built for linux/amd64 only.
 [[outputs.images]]
 name = "observatory-operator-cli"
+description = "kubectl-liken-observatory, the kubectl plugin that the liken toolkit pulls from this image."
 file = "Dockerfile.cli"
 contexts = { kubernetes = "kubernetes", notices = "notices" }

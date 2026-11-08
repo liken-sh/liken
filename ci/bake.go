@@ -36,6 +36,9 @@ type bakeArg struct{ Name, Value string }
 
 type bakeTarget struct {
 	Name, Context, Dockerfile, Target, Version string
+	// Description is the image's description, which `docker buildx bake
+	// --list=targets` prints. No build reads it, so settings leaves it out.
+	Description string
 	// Tag is a pinned image's own tag, <version>-<revision>, which also
 	// names its branch cache.
 	Tag       string
@@ -167,13 +170,14 @@ func newBakeTarget(root string, c *Component, image Image, producer map[string]s
 	}
 	maps.Copy(contexts, tools)
 	t := bakeTarget{
-		Name:       image.Name,
-		Context:    context,
-		Dockerfile: filepath.ToSlash(dockerfile),
-		Target:     image.Target,
-		Pinned:     c.Pinned(),
-		Version:    c.Package.Version,
-		Platforms:  image.Platforms,
+		Name:        image.Name,
+		Description: image.Description,
+		Context:     context,
+		Dockerfile:  filepath.ToSlash(dockerfile),
+		Target:      image.Target,
+		Pinned:      c.Pinned(),
+		Version:     c.Package.Version,
+		Platforms:   image.Platforms,
 	}
 	if len(t.Platforms) == 0 {
 		t.Platforms = defaultPlatforms
@@ -225,6 +229,14 @@ func versionArgs(c *Component, image Image, components map[string]*Component) ([
 		args = append(args, bakeArg{name, other.Package.Version})
 	}
 	return args, nil
+}
+
+// hclString quotes plain text as an HCL string. HCL reads a backslash
+// and a quote as an escape and the end of the string, and reads ${ and
+// %{ as the start of an interpolation and of a directive, so each one
+// is escaped.
+func hclString(text string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "${", "$${", "%{", "%%{").Replace(text) + `"`
 }
 
 // settings lists what the target's build reads from the bake file,

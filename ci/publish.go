@@ -3,13 +3,14 @@ package main
 import (
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -41,8 +42,14 @@ type Publisher struct {
 	Run      Runner
 	// Commit is the full sha that the outputs are built from.
 	Commit string
+	// Created is the committer time of Commit. Each output carries it as
+	// org.opencontainers.image.created, and each image build takes it as
+	// SOURCE_DATE_EPOCH, so the config's created field is the time of the
+	// commit and not the time of the build.
+	Created time.Time
 	// Components is every component, because a pinned component's
-	// recipe covers the tags of its dependencies.
+	// recipe covers the tags of its dependencies, and an image writes
+	// the labels of the images it builds on.
 	Components map[string]*Component
 	// SARIF is the directory where the Trivy scan of each pushed image
 	// is written, or "" for no scan. See scan.
@@ -105,7 +112,7 @@ func (p Publisher) Publish(c *Component, version, mode string) error {
 		return fmt.Errorf("%s publishes to the release channel through its own workflow", c.Name())
 	}
 	for _, image := range c.Outputs.Images {
-		if err := p.image(c, image, version, mode, nil); err != nil {
+		if err := p.image(c, image, version, mode, ""); err != nil {
 			return err
 		}
 	}
@@ -126,21 +133,13 @@ func (p Publisher) pinned(c *Component, version, mode string) error {
 	if err != nil {
 		return err
 	}
-	labels := map[string]string{recipeLabel: recipe}
-	for name, upstream := range c.Package.Upstream {
-		labels[upstreamLabel+name] = upstream
-	}
 	for _, image := range c.Outputs.Images {
-		if err := p.image(c, image, version, mode, labels); err != nil {
+		if err := p.image(c, image, version, mode, recipe); err != nil {
 			return err
 		}
 	}
 	return nil
 }
-
-// upstreamLabel prefixes the label that holds one upstream version of a
-// pinned image, from [package.upstream] in its package.toml.
-const upstreamLabel = "sh.liken.upstream."
 
 func ref(name, tag string) string { return "ghcr.io/liken-sh/" + name + ":" + tag }
 
@@ -160,12 +159,24 @@ func digestRef(name, digest string) string { return "ghcr.io/liken-sh/" + name +
 // finds the version published, and signs it by its tag, which cosign
 // resolves to the digest. A published version tag never moves, so the
 // tag names the bytes that the failed run pushed.
-func (p Publisher) image(c *Component, image Image, version, mode string, labels map[string]string) error {
+//
+// Between the push and the signature, the publish reads the labels of
+// the pushed image back from the registry, as checkLabels says, and
+// the run again checks the published image the same way.
+//
+// A dry run exports the image into the builder and pushes nothing. The
+// exporter is what writes the index and its annotations, so the dry
+// run fails on an annotation that a push would fail on.
+func (p Publisher) image(c *Component, image Image, version, mode, recipe string) error {
 	tools, err := readPublishTools(p.Root)
 	if err != nil {
 		return err
 	}
 	tags, err := p.Registry.Tags(image.Name)
+	if err != nil {
+		return err
+	}
+	metadata, err := p.metadata(c, image, version, recipe)
 	if err != nil {
 		return err
 	}
@@ -177,6 +188,9 @@ func (p Publisher) image(c *Component, image Image, version, mode string, labels
 	}
 	if slices.Contains(tags, version) && !dry {
 		fmt.Printf("%s is already published; a published version never changes\n", ref(image.Name, version))
+		if err := p.checkLabels(image, version, metadata.Labels); err != nil {
+			return err
+		}
 		var references []string
 		for _, name := range names {
 			references = append(references, ref(name, version))
@@ -194,39 +208,37 @@ func (p Publisher) image(c *Component, image Image, version, mode string, labels
 		if _, err := os.Stat(filepath.Join(p.Root, overrideFile)); err == nil {
 			args = append(args, "--file", overrideFile)
 		}
-		if !dry {
+		if dry {
+			args = append(args, set("output", "type=image,push=false")...)
+		} else {
 			args = append(args, "--push")
 		}
 		if !c.Pinned() {
 			args = append(args, set("args.VERSION", version)...)
 		}
-		all := map[string]string{
-			"org.opencontainers.image.source":   source,
-			"org.opencontainers.image.revision": p.Commit,
-			"org.opencontainers.image.version":  version,
-		}
-		maps.Copy(all, labels)
-		for _, key := range sortedKeys(all) {
-			args = append(args, set("labels."+key, all[key])...)
-		}
+		args = append(args, set("args.SOURCE_DATE_EPOCH", strconv.FormatInt(p.Created.Unix(), 10))...)
+		args = append(args, metadata.bakeArgs(target)...)
 		for _, name := range names {
 			args = append(args, set("tags", ref(name, version))...)
 		}
-		metadata, err := os.CreateTemp("", image.Name+"-metadata-*.json")
+		metadataFile, err := os.CreateTemp("", image.Name+"-metadata-*.json")
 		if err != nil {
 			return err
 		}
-		metadata.Close()
-		defer os.Remove(metadata.Name())
+		metadataFile.Close()
+		defer os.Remove(metadataFile.Name())
 		args = append(args, tools.attestArgs(target)...)
-		args = append(args, "--metadata-file", metadata.Name(), target)
+		args = append(args, "--metadata-file", metadataFile.Name(), target)
 		if err := p.Run(p.Root, "docker", args...); err != nil {
 			return fmt.Errorf("pushing %s: %w", ref(image.Name, version), err)
 		}
 		if !dry {
-			digest, err := pushedDigest(metadata.Name(), target)
+			digest, err := pushedDigest(metadataFile.Name(), target)
 			if err != nil {
 				return fmt.Errorf("pushing %s: %w", ref(image.Name, version), err)
+			}
+			if err := p.checkLabels(image, digest, metadata.Labels); err != nil {
+				return err
 			}
 			var references []string
 			for _, name := range names {
@@ -283,14 +295,20 @@ func (p Publisher) deploy(c *Component, version, mode string) error {
 		if err := StampImages(dir, c, version); err != nil {
 			return err
 		}
+		args := []string{"push", "artifact", artifact,
+			"--path", dir,
+			"--source", source,
+			"--revision", version + "@sha1:" + p.Commit}
+		annotations, err := p.deployAnnotations(c, version)
+		if err != nil {
+			return err
+		}
+		args = append(args, annotations...)
 		if mode == publishDry {
 			fmt.Printf("a publish would push %s from %s\n", artifact, dir)
 			return nil
 		}
-		if err := p.Run(p.Root, "flux", "push", "artifact", artifact,
-			"--path", dir,
-			"--source", source,
-			"--revision", version+"@sha1:"+p.Commit); err != nil {
+		if err := p.Run(p.Root, "flux", args...); err != nil {
 			return fmt.Errorf("pushing %s: %w", artifact, err)
 		}
 	}

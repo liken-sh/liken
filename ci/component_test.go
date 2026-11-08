@@ -52,6 +52,7 @@ run = "make test"
 deploy = "deploy"
 [[outputs.images]]
 name = "app"
+description = "The app image."
 aliases = ["app-sidecar"]
 `,
 		"app/testdata/package.toml": `not toml at all`,
@@ -85,7 +86,7 @@ func TestAnotherCheckoutInsideTheTreeHoldsNoComponent(t *testing.T) {
 }
 
 // pinnedImage is the outputs table of a pinned component with one image.
-const pinnedImage = "[[outputs.images]]\nname = \"a\"\n"
+const pinnedImage = "[[outputs.images]]\nname = \"a\"\ndescription = \"The a image.\"\n"
 
 func TestAPinnedComponentPublishesUnderItsVersionAndRevision(t *testing.T) {
 	root := writeTree(t, map[string]string{
@@ -148,7 +149,7 @@ func TestAPackageTomlIsRefused(t *testing.T) {
 		"two jobs of one name": {"[package]\nname = \"a\"\n[[jobs]]\nname = \"x\"\ntoolchain = \"go\"\nrun = \"m\"\n[[jobs]]\nname = \"x\"\ntoolchain = \"go\"\nrun = \"m\"\n",
 			"two jobs are named"},
 		"a job named images": {"[package]\nname = \"a\"\n[[jobs]]\nname = \"images\"\ntoolchain = \"go\"\nrun = \"m\"\n", "belong to the outputs"},
-		"two images of one name": {"[package]\nname = \"a\"\n[[outputs.images]]\nname = \"a\"\n[[outputs.images]]\nname = \"b\"\naliases = [\"a\"]\n",
+		"two images of one name": {"[package]\nname = \"a\"\n[[outputs.images]]\nname = \"a\"\ndescription = \"The a image.\"\n[[outputs.images]]\nname = \"b\"\ndescription = \"The b image.\"\naliases = [\"a\"]\n",
 			"two images are named"},
 		"an excluded path that does not exist": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"monitoring/\"]\n",
 			"the excluded path \"monitoring/\" does not exist"},
@@ -168,9 +169,9 @@ func TestAPackageTomlIsRefused(t *testing.T) {
 			"the deploy artifact holds"},
 		"an excluded directory that holds the deploy directory": {"[package]\nname = \"a\"\n[outputs]\ndeploy = \"deploy/base\"\nexclude = [\"deploy/\"]\n",
 			"the deploy artifact holds"},
-		"an excluded path that an image's build context sends": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"cmd/\"]\n[[outputs.images]]\nname = \"a\"\n",
+		"an excluded path that an image's build context sends": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"cmd/\"]\n[[outputs.images]]\nname = \"a\"\ndescription = \"The a image.\"\n",
 			"the image a receives"},
-		"an excluded path that a named build context sends": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"cmd/main.go\"]\n[[outputs.images]]\nname = \"a\"\ncontext = \"deploy\"\ncontexts = { src = \"a/cmd\" }\n",
+		"an excluded path that a named build context sends": {"[package]\nname = \"a\"\n[outputs]\nexclude = [\"cmd/main.go\"]\n[[outputs.images]]\nname = \"a\"\ndescription = \"The a image.\"\ncontext = \"deploy\"\ncontexts = { src = \"a/cmd\" }\n",
 			"the image a receives"},
 		"a missing dependency": {"[package]\nname = \"a\"\n[depends]\ncomponents = [\"z\"]\n", "which is not a component"},
 	}

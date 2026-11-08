@@ -221,7 +221,13 @@ func TestAChangeToThePublishCodeRunsADryRunOfThePublish(t *testing.T) {
 			r.write(".github/workflows/ci.yaml", rootWorkflow(everyCall, "ubuntu")+"  operator-publish:\n    uses: ./.github/workflows/component-operator.yaml\n    with:\n      stage: other\n")
 		}, []string{"operator"}},
 		{"the publisher in ci, for every component that publishes through it", func(r *repo) {
-			r.write(publishCode, "package main // changed\n")
+			r.write("ci/publish.go", "package main // changed\n")
+		}, []string{"base", "operator"}},
+		{"the labels and annotations that the publisher writes", func(r *repo) {
+			r.write("ci/imagemeta.go", "package main // changed\n")
+		}, []string{"base", "operator"}},
+		{"the attestations and the signature of each pushed image", func(r *repo) {
+			r.write("ci/sign.go", "package main // changed\n")
 		}, []string{"base", "operator"}},
 		{"another file of ci", func(r *repo) {
 			r.write("ci/plan.go", "package main // changed\n")
@@ -233,8 +239,9 @@ func TestAChangeToThePublishCodeRunsADryRunOfThePublish(t *testing.T) {
 			r.write(".github/workflows/component-operator.yaml", operatorWorkflow("ubuntu", "ubuntu"))
 			r.write(".github/workflows/ci.yaml", rootWorkflow(everyCall, "ubuntu")+"  operator-publish:\n    uses: ./.github/workflows/component-operator.yaml\n    with:\n      stage: publish\n")
 			r.write("ci/package.toml", "[package]\nname = \"ci\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\n")
-			r.write(publishCode, "package main\n")
-			r.write("ci/plan.go", "package main\n")
+			for _, file := range append(publishCode, "ci/plan.go") {
+				r.write(file, "package main\n")
+			}
 			before := r.commit("the publish code")
 			c.edit(r)
 			r.commit("the change")
@@ -262,7 +269,7 @@ func TestARunThatPublishesRunsNoDryRun(t *testing.T) {
 	r := planFixture(t)
 	before := r.run("rev-parse", "HEAD")
 	r.write("operator/main.go", "package main // changed\n")
-	r.write(publishCode, "package main // changed\n")
+	r.write("ci/publish.go", "package main // changed\n")
 	r.commit("change the operator and the publisher")
 	decisions, err := r.planner(fixturePublished).Plan(Event{Name: "push", Ref: "refs/heads/main", Before: before, Head: "HEAD", Publishing: true})
 	if err != nil {

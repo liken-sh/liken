@@ -17,9 +17,9 @@ func rescanFixture(t *testing.T) *repo {
 		"ci/trivy.go":             "package main\n",
 		"ci/templates/trivy.tmpl": "{% define \"trivy-setup\" %}{% end %}\n",
 		"ci/publish.go":           "package main\n",
-		"base/package.toml":       "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml":       "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"base/Dockerfile":         "FROM debian@sha256:aaa\n",
-		"operator/package.toml":   "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\n[[outputs.images]]\nname = \"operator-cli\"\n",
+		"operator/package.toml":   "[package]\nname = \"operator\"\n[depends]\ncomponents = [\"base\"]\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\ndescription = \"The operator image.\"\n[[outputs.images]]\nname = \"operator-cli\"\ndescription = \"The operator-cli image.\"\n",
 		"operator/Dockerfile":     "FROM base\n",
 		"operator/main.go":        "package main\n",
 	})
@@ -186,7 +186,7 @@ func TestTheNewestPublishedVersionIsAReleaseOrADevelopmentBuild(t *testing.T) {
 // a publish of no image, and the OS's publish scan nothing.
 func TestTheDatabaseDownloadsWhenTheRunScansAnImage(t *testing.T) {
 	components, err := LoadComponents(writeTree(t, map[string]string{
-		"base/package.toml":  "[package]\nname = \"base\"\n[[outputs.images]]\nname = \"base\"\n",
+		"base/package.toml":  "[package]\nname = \"base\"\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
 		"app/package.toml":   "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n",
 		"liken/package.toml": "[package]\nname = \"liken\"\n[outputs]\nchannel = true\n",
 	}))

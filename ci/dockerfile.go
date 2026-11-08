@@ -221,6 +221,36 @@ func (d Dockerfile) Reachable(target string) []string {
 	return names
 }
 
+// FromImage names the image that the target stage starts from: the
+// FROM of the stage, or of the earlier stage that it names, through
+// the file, until the name is not a stage. An empty target is the last
+// stage. The config of that image, with its labels, is where the
+// target's config starts, and Docker cannot delete a label it passes
+// down. A file with no stage starts from nothing, and the name is "".
+func (d Dockerfile) FromImage(target string) string {
+	byName := map[string]int{}
+	for i, stage := range d.Stages {
+		if stage.Name != "" {
+			byName[stage.Name] = i
+		}
+	}
+	i := len(d.Stages) - 1
+	if j, ok := byName[target]; ok {
+		i = j
+	}
+	for i >= 0 {
+		from := d.Stages[i].From
+		if j, ok := byName[from]; ok && j < i {
+			i = j
+		} else if j, err := strconv.Atoi(from); err == nil && j >= 0 && j < i {
+			i = j
+		} else {
+			return from
+		}
+	}
+	return ""
+}
+
 // withoutFlags drops the leading --flag=value fields of an
 // instruction, such as FROM --platform=$BUILDPLATFORM.
 func withoutFlags(fields []string) []string {

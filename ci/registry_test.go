@@ -27,6 +27,29 @@ type fakeRegistry struct {
 	cancelled []string
 }
 
+// push puts an image into the registry the way buildx pushes one with
+// its attestations: an index under the tag and under its digest, one
+// linux/amd64 image, an attestation manifest of the platform
+// unknown/unknown, and a config with the labels.
+func (f *fakeRegistry) push(pkg, tag, digest string, labels map[string]string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.manifests == nil {
+		f.manifests, f.blobs = map[string]string{}, map[string]string{}
+	}
+	if f.tags == nil {
+		f.tags = map[string][]string{}
+	}
+	config, _ := json.Marshal(map[string]any{"config": map[string]any{"Labels": labels}})
+	manifest := fmt.Sprintf(`{"config": {"digest": %q}}`, sha256Of(string(config)))
+	index := fmt.Sprintf(`{"manifests": [{"digest": %q, "platform": {"os": "linux", "architecture": "amd64"}}, {"digest": "sha256:attestation", "platform": {"os": "unknown", "architecture": "unknown"}}]}`, sha256Of(manifest))
+	f.blobs[sha256Of(string(config))] = string(config)
+	f.manifests[pkg+"/"+sha256Of(manifest)] = manifest
+	f.manifests[pkg+"/"+digest] = index
+	f.manifests[pkg+"/"+tag] = index
+	f.tags[pkg] = append(f.tags[pkg], tag)
+}
+
 func (f *fakeRegistry) serve(t *testing.T) Registry {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
