@@ -446,7 +446,13 @@ impl Movie {
             if face.contributor.is_empty() {
                 return Step::Stay;
             }
-            return match person::Person::open(&self.library, &face.contributor, source) {
+            let via = (self.library.clone(), self.id.clone());
+            return match person::Person::open_from(
+                &self.library,
+                &face.contributor,
+                Some(&via),
+                source,
+            ) {
                 Some(page) => Step::Open(Screen::Person(Box::new(page))),
                 None => Step::Stay,
             };

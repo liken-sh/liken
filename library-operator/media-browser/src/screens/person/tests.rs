@@ -1,208 +1,60 @@
-// The person's page over an invented catalog: the words it builds
-// out of an entry, the wall of works it reads, and what a select on one
-// of them opens.
+// The person's page over an invented catalog: the words it builds out of
+// an entry, the credits it reads in release order, what the people at the
+// screen have seen of them, and what a press on them does.
+
+// Invented careers for the tests that need no catalog.
+pub mod careers;
+// The page in motion: the glides a press starts and where the outline
+// goes.
+mod motion;
+// The invented catalog the page reads.
+mod people;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use self::people::{LIBRARY, PATH, People, id};
 use super::*;
 use crate::art::Image;
-use crate::catalog::Person as Entry;
-use crate::catalog::{
-    Answer, Change, Credits, Episode, FileFacts, Franchise, GenreEntry, LibraryEntry, Membership,
-    MovieDetails, MovieSet, PlayItem, Selection, SeriesDetails, Slot,
-};
-use crate::harness::Waker;
+use crate::screens::person::credit::Seen;
+use crate::screens::person::walk::Rest;
 use crate::screens::{Screen, Step};
-use crate::views::Card;
 
-const LIBRARY: &str = "screening/films";
-const PATH: &str = ".contributors/A Player";
+// The year every test reads "now" at.
+const NOW: i64 = 2026;
 
-// A catalog of one person credited in two movies and one series,
-// so a wall holds both kinds and a select opens each.
-#[derive(Default)]
-struct People {
-    // Whether the person's entry holds a biography file.
-    biography: bool,
-    // Whether the person's entry left the store, which is what a
-    // re-read finds after the scanner dropped them.
-    gone: bool,
-    // How many works the person is credited in.
-    works: usize,
-    // Whether the person is credited as an actor alone, so every work's
-    // parts line holds one `as` run and no role word.
-    acting: bool,
-    // Whether the person is credited as a director alone, so the credit
-    // leaves no part behind on any card.
-    directing: bool,
-    // Whether every work carries a title too long for a cell's band.
-    wordy: bool,
-    // Whether the scanner has credited the person in one more work, released
-    // after every other, so the store answers it first.
-    newer: bool,
-}
-
-impl People {
-    fn work(&self, number: usize) -> Slot {
-        let series = number == 3;
-        Slot {
-            library: LIBRARY.to_string(),
-            kind: match series {
-                true => "series".into(),
-                false => "movies".into(),
-            },
-            id: format!("title:{number}"),
-            title: match self.wordy {
-                true => "W".repeat(60),
-                false => format!("Title {number}"),
-            },
-            released: format!("{}-05-02", 2000 - number),
-            art: format!("{number}.jpg"),
-            parts: match (self.acting, self.directing) {
-                (true, _) => "as The Part".into(),
-                (_, true) => "Director".into(),
-                _ => "Director, as The Part".into(),
-            },
-            ..Slot::default()
-        }
-    }
-}
-
-impl Source for People {
-    fn franchises(&mut self) -> Vec<crate::catalog::FranchiseEntry> {
-        Vec::new()
-    }
-
-    fn franchises_of(&mut self, _library: &str, _id: &str) -> Vec<Membership> {
-        Vec::new()
-    }
-
-    fn franchise(&mut self, _library: &str, _id: &str) -> Option<Franchise> {
-        None
-    }
-
-    fn libraries(&mut self) -> Vec<LibraryEntry> {
-        Vec::new()
-    }
-
-    fn genres(&mut self) -> Vec<GenreEntry> {
-        Vec::new()
-    }
-
-    fn wall(&mut self, query: &Query) -> Answer {
-        let Query::Person { path, .. } = query else {
-            return Answer::default();
-        };
-        if path != PATH || self.gone {
-            return Answer::default();
-        }
-        Answer {
-            name: "A Player".into(),
-            slots: self
-                .newer
-                .then(|| Slot {
-                    id: "title:newer".into(),
-                    released: "2010-05-02".into(),
-                    ..self.work(0)
-                })
-                .into_iter()
-                .chain((1..=self.works).map(|number| self.work(number)))
-                .collect(),
-        }
-    }
-
-    fn movie(&mut self, _library: &str, id: &str) -> Option<MovieDetails> {
-        (id == "title:1" || id == "title:2").then(|| MovieDetails {
-            title: format!("Film {id}"),
-            backdrop: format!("{id}.backdrop.jpg"),
-            ..MovieDetails::default()
-        })
-    }
-
-    fn series(&mut self, _library: &str, id: &str) -> Option<SeriesDetails> {
-        (id == "title:3").then(|| SeriesDetails {
-            title: "The Serial".into(),
-            backdrop: "serial.backdrop.jpg".into(),
-            ..SeriesDetails::default()
-        })
-    }
-
-    fn episodes(&mut self, _library: &str, _series: &str) -> Vec<Episode> {
-        Vec::new()
-    }
-
-    fn set(&mut self, _library: &str, _id: &str) -> Option<MovieSet> {
-        None
-    }
-
-    fn play(&mut self, _library: &str, _selection: &Selection) -> Vec<PlayItem> {
-        Vec::new()
-    }
-
-    fn credits(&mut self, _library: &str, _id: &str) -> Credits {
-        Credits::default()
-    }
-
-    fn person(&mut self, library: &str, path: &str) -> Option<Entry> {
-        if path != PATH || self.gone {
-            return None;
-        }
-        Some(Entry {
-            library: library.to_string(),
-            path: path.to_string(),
-            name: "A Player".into(),
-            born: "1956-01-02".into(),
-            died: "2019-11-30".into(),
-            biography: self.biography,
-            headshot: true,
-            biography_library: match self.biography {
-                true => library.to_string(),
-                false => String::new(),
-            },
-            biography_path: path.to_string(),
-            headshot_library: library.to_string(),
-            headshot_path: path.to_string(),
-        })
-    }
-
-    fn files(&mut self, _library: &str, _item: &str) -> Vec<FileFacts> {
-        Vec::new()
-    }
-
-    fn pool(&mut self) -> Vec<crate::catalog::pool::Candidate> {
-        Vec::new()
-    }
-
-    fn changed(&mut self) -> Change {
-        Change::None
-    }
-
-    fn wake_by(&mut self, _wake: Waker) {}
-}
-
-fn page(people: People) -> (Person, People) {
+pub(super) fn opened(people: People) -> (Person, People) {
     let mut source = people;
-    let page = Person::open(LIBRARY, PATH, &mut source).expect("the library holds this person");
+    let page =
+        Person::read(LIBRARY, PATH, NOW, &mut source).expect("the library holds this person");
     (page, source)
 }
 
-fn credited(works: usize) -> (Person, People) {
-    page(People {
+pub(super) fn credited(works: usize) -> (Person, People) {
+    opened(People {
         works,
+        born: "1956-01-02",
         ..People::default()
     })
 }
 
+// The ids of the page's credits, in the row's order.
+fn ids(page: &Person) -> Vec<&str> {
+    page.credits
+        .iter()
+        .map(|credit| credit.item.id.as_str())
+        .collect()
+}
+
 #[test]
-fn a_page_carries_the_name_the_dates_and_the_files() {
+fn a_page_carries_the_name_the_facts_and_the_files() {
     let (page, _) = credited(3);
     assert_eq!(page.name, "A Player");
     assert_eq!(page.dates, "1956 to 2019");
+    assert_eq!(page.facts, "1956 to 2019 · 3 credits from 1997 to 1999");
     assert_eq!(page.headshot, ".contributors/A Player/headshot.jpg");
     assert_eq!(page.headshot_library, LIBRARY);
     assert_eq!(page.biography_path, "");
-    assert_eq!(page.works.focus, 0);
 }
 
 #[test]
@@ -220,88 +72,92 @@ fn the_dates_read_as_the_entry_holds_them() {
 }
 
 #[test]
-fn a_work_carries_its_title_and_its_parts() {
-    let (page, _) = credited(3);
-    let works = &page.works.items;
-    assert_eq!(works.len(), 3);
-    assert_eq!(works[0].caption(), "Title 1");
-    assert_eq!(works[0].line_fitting(80), "Title 1 · 1999");
-    assert_eq!(works[0].under(), "Director, as The Part · 1999");
-    assert_eq!(works[0].art(), "1.jpg");
-    assert_eq!(works[0].name(), "Title 1");
-    assert_eq!(works[0].library(), LIBRARY);
-    assert_eq!(page.works.heading(), "A Player");
+fn the_credits_run_oldest_first_with_the_undated_last() {
+    let (page, _) = opened(People {
+        works: 3,
+        undated: true,
+        ..People::default()
+    });
+    assert_eq!(
+        ids(&page),
+        ["title:3", "title:2", "title:1", "title:undated"]
+    );
+    assert_eq!(page.credits[0].year, Some(1997));
+    assert_eq!(page.credits[3].year, None);
+    assert_eq!(
+        page.facts,
+        "died 2019 · 3 credits from 1997 to 1999, and 1 undated"
+    );
 }
 
 #[test]
-fn a_work_of_an_actor_alone_leads_with_the_character() {
-    let (page, _) = page(People {
-        works: 3,
+fn a_card_names_the_part_and_the_age_at_the_release() {
+    let (page, _) = credited(3);
+    let card = &page.credits[2].item;
+    assert_eq!(card.caption, "Director, The Part");
+    assert_eq!(card.under, "1999 · age 43");
+    assert_eq!(card.name, "Title 1");
+    assert!(!card.tagline);
+
+    let (acting, _) = opened(People {
+        works: 1,
         acting: true,
         ..People::default()
     });
-    let works = &page.works.items;
-    assert_eq!(works[0].caption(), "The Part");
-    assert_eq!(works[0].under(), "Title 1 · 1999");
-    assert_eq!(works[0].name(), "Title 1");
+    assert_eq!(acting.credits[0].item.caption, "The Part");
+    assert_eq!(acting.credits[0].item.under, "1999");
 }
 
 #[test]
-fn a_work_the_credit_leaves_no_part_on_reads_its_kind_and_its_year() {
-    let (page, _) = page(People {
+fn a_birth_after_a_credit_takes_every_age_off_the_cards() {
+    let (page, _) = opened(People {
         works: 3,
-        directing: true,
+        born: "1998-01-01",
         ..People::default()
     });
-    let works = &page.works.items;
-    assert_eq!(works[0].caption(), "Title 1");
-    assert_eq!(works[0].under(), "Film · 1999");
-    assert_eq!(works[2].caption(), "Title 3");
-    assert_eq!(works[2].under(), "Series · 1997");
+    let lines: Vec<&str> = page
+        .credits
+        .iter()
+        .map(|credit| credit.item.under.as_str())
+        .collect();
+    assert_eq!(lines, ["1997", "1998", "1999"]);
 }
 
 #[test]
-fn a_wall_of_works_cuts_both_lines_of_every_card_at_the_read() {
-    let (page, _) = page(People {
-        works: 3,
-        wordy: true,
-        ..People::default()
-    });
-    let band = crate::views::wall::band(crate::views::wall::COLUMNS);
-    let card = &page.works.items[0];
-    assert!(card.fitted().ends_with('\u{2026}'));
-    assert!(card.fitted().chars().count() < card.caption().chars().count());
-    assert!(crate::views::text::measured(card.fitted(), crate::look::CAPTION) <= band);
-    assert!(crate::views::text::measured(card.under_fitted(), crate::look::FACE) <= band);
+fn a_short_career_draws_no_axis_and_a_longer_one_does() {
+    assert!(credited(4).0.axis.is_none());
+    let (page, _) = credited(6);
+    let axis = page.axis.expect("six credits over five years");
+    assert_eq!((axis.start, axis.end), (1991, 2000));
 }
 
 #[test]
-fn the_arrows_move_across_the_wall_of_works() {
+fn the_arrows_move_along_the_row_of_a_page_with_no_axis() {
     let (mut page, mut source) = credited(3);
-    page.key("right", &mut source);
-    assert_eq!(page.works.focus, 1);
-    page.key("down", &mut source);
-    assert_eq!(page.works.focus, 1);
-    page.key("right", &mut source);
-    page.key("right", &mut source);
-    assert_eq!(page.works.focus, 2);
-    page.key("left", &mut source);
-    assert_eq!(page.works.focus, 1);
+    assert_eq!(page.walk.focus, Focus::Poster(2));
+    assert!(matches!(page.key("up", &mut source), Step::Still));
+    assert!(matches!(page.key("right", &mut source), Step::Still));
+    assert!(matches!(page.key("left", &mut source), Step::Stay));
+    assert_eq!(page.walk.focus, Focus::Poster(1));
 }
 
 #[test]
-fn a_select_opens_the_movie_the_slot_names() {
+fn up_from_a_poster_reaches_the_axis_and_up_again_the_strip() {
+    let (mut page, mut source) = credited(6);
+    assert!(matches!(page.key("up", &mut source), Step::Stay));
+    assert_eq!(page.walk.focus, Focus::Axis(5));
+    assert!(matches!(page.key("up", &mut source), Step::Still));
+}
+
+#[test]
+fn a_select_opens_the_movie_or_the_series_the_credit_names() {
     let (mut page, mut source) = credited(3);
     let Step::Open(Screen::Movie(opened)) = page.key("enter", &mut source) else {
         panic!("a select on a movie opens its page");
     };
     assert_eq!(opened.id, "title:1");
-}
 
-#[test]
-fn a_select_opens_the_series_the_slot_names() {
-    let (mut page, mut source) = credited(3);
-    page.works.focus = 2;
+    page.walk.focus = Focus::Poster(0);
     let Step::Open(Screen::Series(opened)) = page.key("enter", &mut source) else {
         panic!("a select on a series opens its page");
     };
@@ -311,10 +167,22 @@ fn a_select_opens_the_series_the_slot_names() {
 #[test]
 fn a_page_with_no_works_opens_nothing() {
     let (mut page, mut source) = credited(0);
-    assert!(page.works.items.is_empty());
-    assert!(matches!(page.key("enter", &mut source), Step::Stay));
-    assert!(matches!(page.key("right", &mut source), Step::Stay));
-    assert_eq!(page.works.focus, 0);
+    assert!(page.credits.is_empty());
+    assert!(matches!(page.key("enter", &mut source), Step::Still));
+    assert!(matches!(page.key("right", &mut source), Step::Still));
+    assert_eq!(page.resting(&mut source), None);
+}
+
+#[test]
+fn a_page_opened_from_a_title_lands_on_its_credit() {
+    let mut source = People {
+        works: 6,
+        ..People::default()
+    };
+    let via = (LIBRARY.to_string(), id(4));
+    let page = Person::open_from(LIBRARY, PATH, Some(&via), &mut source).expect("a page");
+    assert_eq!(page.walk.focus, Focus::Poster(2));
+    assert_eq!(page.walk.rest, Rest::Centered(2));
 }
 
 #[test]
@@ -327,24 +195,24 @@ fn the_focused_work_names_the_backdrop_the_store_decodes_next() {
 }
 
 #[test]
-fn a_reread_that_shortens_the_wall_clamps_the_focus() {
+fn a_reread_that_shortens_the_row_clamps_the_focus() {
     let (mut page, mut source) = credited(3);
-    page.works.focus = 2;
     source.works = 1;
     page.reread(&mut source);
-    assert_eq!(page.works.items.len(), 1);
-    assert_eq!(page.works.focus, 0);
+    assert_eq!(ids(&page), ["title:1"]);
+    assert_eq!(page.walk.focus, Focus::Poster(0));
 }
 
 // A work the scanner adds ahead of the focused one moves that work one
-// slot along, and focus goes with the work, not with the slot.
+// place along, and focus goes with the work, not with the place.
 #[test]
-fn a_reread_that_adds_an_earlier_slot_keeps_focus_on_the_same_work() {
+fn a_reread_that_adds_an_earlier_credit_keeps_focus_on_the_same_work() {
     let (mut page, mut source) = credited(3);
-    page.works.focus = 1;
-    source.newer = true;
+    page.walk.focus = Focus::Poster(1);
+    source.older = true;
     page.reread(&mut source);
-    assert_eq!(page.works.items[page.works.focus].id, "title:2");
+    assert_eq!(ids(&page)[0], "title:older");
+    assert_eq!(page.walk.focus, Focus::Poster(2));
 }
 
 #[test]
@@ -352,7 +220,50 @@ fn a_reread_of_a_person_that_left_the_store_keeps_the_page() {
     let (mut page, mut source) = credited(3);
     source.gone = true;
     page.reread(&mut source);
-    assert_eq!(page.works.items.len(), 3);
+    assert_eq!(page.credits.len(), 3);
+}
+
+fn audience(names: &[&str]) -> Vec<String> {
+    names.iter().map(|name| name.to_string()).collect()
+}
+
+// Title 1 is a film both people finished, title 2 a film one of them
+// finished, and title 3 the series, whose every episode both finished.
+#[test]
+fn each_credit_is_seen_by_nobody_by_some_or_by_everyone() {
+    let (mut page, mut source) = opened(People {
+        works: 3,
+        finished: vec![
+            ("first", 1),
+            ("second", 1),
+            ("first", 2),
+            ("first", 3),
+            ("second", 3),
+        ],
+        ..People::default()
+    });
+    page.read_progress(&mut source, &audience(&["first", "second"]), &[]);
+    let seen: Vec<Seen> = page.credits.iter().map(|credit| credit.seen).collect();
+    assert_eq!(seen, [Seen::Everyone, Seen::Some, Seen::Everyone]);
+    assert_eq!(
+        page.facts,
+        "died 2019 · 3 credits from 1997 to 1999 · you've seen 2"
+    );
+    assert_eq!(page.credits[2].item.reached.share, Some(1.0));
+    assert_eq!(page.credits[0].item.reached.share, None);
+
+    page.read_progress(&mut source, &[], &[]);
+    let seen: Vec<Seen> = page.credits.iter().map(|credit| credit.seen).collect();
+    assert_eq!(seen, [Seen::Nobody; 3]);
+    assert_eq!(page.facts, "died 2019 · 3 credits from 1997 to 1999");
+}
+
+#[test]
+fn the_page_draws_the_progress_of_every_work_it_credits() {
+    let (page, _) = credited(3);
+    assert!(page.draws_progress_of(LIBRARY, "title:3"));
+    assert!(page.draws_progress_of(LIBRARY, "title:1"));
+    assert!(!page.draws_progress_of(LIBRARY, "title:9"));
 }
 
 // A store over one volume, so a test reads the biography the way
@@ -382,7 +293,7 @@ fn the_biography_arrives_from_the_file_beside_the_entry() {
     std::fs::create_dir_all(&entry).expect("the entry's directory");
     std::fs::write(entry.join("biography.txt"), "One line of a life.").expect("the file");
 
-    let (mut page, _) = page(People {
+    let (mut page, _) = opened(People {
         biography: true,
         works: 1,
         ..People::default()

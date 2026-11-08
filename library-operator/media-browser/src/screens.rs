@@ -238,7 +238,7 @@ impl Screen {
                     || screen.franchises.draws(library, item)
             }
             Self::Wall(screen) => reached::draws(&screen.slots.items, library, item),
-            Self::Person(screen) => reached::draws(&screen.works.items, library, item),
+            Self::Person(screen) => screen.draws_progress_of(library, item),
             Self::Franchise(screen) => screen.holds(library, item),
             Self::Home(_) => false,
         }
@@ -273,7 +273,7 @@ impl Screen {
             }
             Self::Wall(screen) => screen.read_progress(source, people, viewers),
             Self::Franchise(screen) => franchise::progress::read(screen, source, people, viewers),
-            Self::Person(screen) => reached::read(&mut screen.works.items, source, people, viewers),
+            Self::Person(screen) => screen.read_progress(source, people, viewers),
             Self::Home(_) => {}
         }
     }
@@ -314,7 +314,7 @@ impl Screen {
             Self::Wall(screen) => screen.view(store, faces, held, at),
             Self::Movie(screen) => screen.view(store, faces, curtain, held, at),
             Self::Series(screen) => screen.view(store, faces, curtain, held, at),
-            Self::Person(screen) => screen.view(store, faces, at),
+            Self::Person(screen) => screen.view(store, faces, held, at),
             Self::Franchise(screen) => screen.view(store, faces, at),
         }
     }

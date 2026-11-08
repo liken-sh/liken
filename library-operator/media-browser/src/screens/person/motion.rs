@@ -1,100 +1,121 @@
-// A person's page in motion. The wall of works scrolls down to keep the
-// focused work in view, and the scroll eases from where it is drawn to
-// where a press puts it. The browser's focus outline travels to the work
-// at the place the scroll comes to rest, so the row and the outline land
-// together. The head over the wall never moves.
+// A person's page in motion. A press can move four things: the browser's
+// focus outline, the row of posters, the bright part of the axis line,
+// and the label over the focused year. Each eases from where it is drawn
+// to where the press put it, on the same length and the press's pace, so
+// one press is one motion. Every place here is computed from the rest the
+// press put the row at, never from the scroll as drawn, so the outline,
+// the bright part, and the label land where the row lands. The bright
+// part would otherwise jump a year each time a poster crossed the edge of
+// the row, because posters are evenly spaced and years are not.
 
 use iced_winit::core::Rectangle;
 
-use super::Person;
-use super::page::{LINES, region};
+use super::page::{line, region};
+use super::walk::Focus;
+use super::{Person, row};
 use crate::look;
-use crate::screens::Item;
-use crate::views::{self, wall};
+use crate::views;
 
 impl Person {
-    /// The wall of works at these bounds, scrolled as this second draws
-    /// it.
-    pub(super) fn drawn(&self, bounds: Rectangle, at: f64) -> wall::Grid<'_, Item> {
-        let grid = self.works.grid(region(bounds), LINES);
-        wall::Grid {
-            offset: self.scroll.toward(grid.offset, at),
-            ..grid
-        }
+    // The region of the row, which depends on whether the page draws an
+    // axis over it.
+    fn region(&self, bounds: Rectangle) -> Rectangle {
+        region(bounds, self.axis.is_some())
     }
 
-    /// The rectangle the focus outline goes to on this page at these
-    /// bounds: around the focused work, at the place the wall's scroll
-    /// comes to rest. Nothing on a page with no works.
-    pub fn marked(&self, bounds: Rectangle) -> Option<Rectangle> {
-        wall::focused(&self.works.grid(region(bounds), LINES)).map(views::marked)
+    // How far the row scrolls to come to rest.
+    fn settled_row(&self, bounds: Rectangle) -> f32 {
+        row::offset(self.walk.rest, self.credits.len(), self.region(bounds))
     }
 
-    /// Follow the place the wall of works scrolls to at these bounds: ease
-    /// there on the pace of a press, or snap there where nothing pressed.
-    /// The answer is the second the scroll comes to rest.
-    pub fn follow(&mut self, bounds: Rectangle, at: f64, pace: Option<f64>) -> f64 {
-        let settled = self.works.grid(region(bounds), LINES).offset;
-        self.scroll.follow(settled, at, pace, look::SCROLL)
+    // The two ends of the bright part of the line at rest: the years of
+    // the dated credits the row shows whole. Nothing where it shows none.
+    fn settled_window(&self, bounds: Rectangle) -> Option<(f32, f32)> {
+        let axis = self.axis.as_ref()?;
+        let region = self.region(bounds);
+        let shown = row::shown(region, self.credits.len(), self.settled_row(bounds));
+        let years = self.credits[shown].iter().filter_map(|credit| credit.year);
+        let (first, last) = years.fold(None, |span: Option<(i64, i64)>, year| {
+            Some(span.map_or((year, year), |(first, last)| {
+                (first.min(year), last.max(year))
+            }))
+        })?;
+        Some(axis.window(line(bounds), (first, last)))
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::catalog::{Query, Sort};
-    use crate::sample::{Catalog, people};
-    use crate::screens::slots::Slots;
-
-    const FRAME: Rectangle = Rectangle {
-        x: 0.0,
-        y: 0.0,
-        width: 1920.0,
-        height: 1080.0,
-    };
-
-    // A person's page over a wall long enough to scroll, at rest with
-    // focus on its fourth row, ready for a press down. The sample credits
-    // nobody in more than one row of works, so the wall is the sample's
-    // features: the page draws and scrolls any slots the same way.
-    fn on_the_fourth_row() -> Person {
-        let mut page = Person::open("sample/features", people::PROLIFIC, &mut Catalog)
-            .expect("the sample holds the person");
-        let query = Query::Library {
-            library: "sample/features".into(),
-            sort: Sort::Title,
+    // The middle of the focused year, which the label centers on, and
+    // nothing while a poster holds focus.
+    fn settled_label(&self, bounds: Rectangle) -> Option<f32> {
+        let (Focus::Axis(year), Some(axis)) = (self.walk.focus, self.axis.as_ref()) else {
+            return None;
         };
-        page.works = Slots::open(query, &mut Catalog);
-        page.works.focus = 3 * wall::COLUMNS;
-        page.follow(FRAME, 0.0, None);
-        page
+        Some(axis.column(line(bounds), year).center_x())
     }
 
-    #[test]
-    fn a_press_down_eases_the_wall_of_works_to_the_next_row() {
-        let mut page = on_the_fourth_row();
-        let from = page.drawn(FRAME, 0.0).offset;
-        page.key("down", &mut Catalog);
-        let to = page.works.grid(region(FRAME), LINES).offset;
-        assert!(to > from, "{from} {to}");
-
-        assert_eq!(page.follow(FRAME, 1.0, Some(1.0)), 1.0 + look::SCROLL);
-
-        let half = page.drawn(FRAME, 1.0 + look::SCROLL / 2.0).offset;
-        assert!(from < half && half < to, "{half}");
-        assert_eq!(page.drawn(FRAME, 1.0 + look::SCROLL).offset, to);
+    /// How far the row has scrolled as this second draws it.
+    pub(super) fn row_at(&self, bounds: Rectangle, at: f64) -> f32 {
+        self.row.toward(self.settled_row(bounds), at)
     }
 
-    #[test]
-    fn the_outline_goes_to_the_focused_work_where_the_wall_comes_to_rest() {
-        let mut page = on_the_fourth_row();
-        page.key("down", &mut Catalog);
-        page.follow(FRAME, 1.0, Some(1.0));
+    /// The bright part of the line as this second draws it.
+    pub(super) fn window_at(&self, bounds: Rectangle, at: f64) -> Option<(f32, f32)> {
+        let (left, right) = self.settled_window(bounds)?;
+        Some((
+            self.window.0.toward(left, at),
+            self.window.1.toward(right, at),
+        ))
+    }
 
-        // The wall is still on its way, and the outline already goes to
-        // the work's place at the end of the scroll.
-        let at = |second: f64| wall::focused(&page.drawn(FRAME, second)).map(views::marked);
-        assert_ne!(page.marked(FRAME), at(1.0));
-        assert_eq!(page.marked(FRAME), at(1.0 + look::SCROLL));
+    /// The words over the focused year and the `x` of their center as this
+    /// second draws them, and nothing while a poster holds focus. The
+    /// words change at the press, and their place glides.
+    pub(super) fn label_at(&self, bounds: Rectangle, at: f64) -> Option<(String, f32)> {
+        let middle = self.settled_label(bounds)?;
+        let (Focus::Axis(year), Some(axis)) = (self.walk.focus, self.axis.as_ref()) else {
+            return None;
+        };
+        Some((axis.label(year), self.label.toward(middle, at)))
+    }
+
+    /// The rectangle the focus outline goes to at these bounds: around the
+    /// focused year's column on the axis, or around the focused poster at
+    /// the place the row comes to rest. Nothing on a page with no credits.
+    pub fn marked(&self, bounds: Rectangle) -> Option<Rectangle> {
+        let around = match (self.walk.focus, self.axis.as_ref()) {
+            (Focus::Axis(year), Some(axis)) => axis.column(line(bounds), year),
+            (Focus::Poster(index), _) if index < self.credits.len() => {
+                row::slot(self.region(bounds), index, self.settled_row(bounds))
+            }
+            _ => return None,
+        };
+        Some(views::marked(around))
+    }
+
+    /// Follow the places the row, the bright part, and the label go to at
+    /// these bounds: ease there on the pace of a press, or snap there
+    /// where nothing pressed. The answer is the second the last of them
+    /// comes to rest.
+    pub fn follow(&mut self, bounds: Rectangle, at: f64, pace: Option<f64>) -> f64 {
+        let length = look::GLIDE;
+        let mut rests = self.row.follow(self.settled_row(bounds), at, pace, length);
+        if let Some((left, right)) = self.settled_window(bounds) {
+            rests = rests.max(self.window.0.follow(left, at, pace, length));
+            rests = rests.max(self.window.1.follow(right, at, pace, length));
+        }
+        // While a poster holds focus, the label waits, at rest, over the
+        // poster's year, so up from the poster shows it there and moves
+        // nothing but the outline.
+        let line = line(bounds);
+        let label = match (self.walk.focus, self.axis.as_ref()) {
+            (Focus::Axis(year), Some(axis)) => Some((axis.column(line, year).center_x(), pace)),
+            (Focus::Poster(index), Some(axis)) => axis
+                .year_of(index)
+                .map(|year| (axis.column(line, year).center_x(), None)),
+            _ => None,
+        };
+        if let Some((middle, pace)) = label {
+            rests = rests.max(self.label.follow(middle, at, pace, length));
+        }
+        rests
     }
 }

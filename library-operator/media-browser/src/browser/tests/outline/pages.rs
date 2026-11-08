@@ -99,7 +99,10 @@ fn a_press_right_on_a_persons_page_moves_the_outline_to_the_next_work() {
     let from = drawn_at(&mut browser, PRESS);
     press(&mut browser, "right", PRESS);
     let to = resting(&browser);
-    assert_eq!(showing_person(&browser).works.focus, 1);
+    assert_eq!(
+        showing_person(&browser).walk.focus,
+        crate::screens::person::Focus::Poster(1)
+    );
 
     let part = drawn_at(&mut browser, PRESS + look::GLIDE / 2.0);
     assert!(

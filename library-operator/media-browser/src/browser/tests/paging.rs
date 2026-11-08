@@ -86,7 +86,7 @@ fn a_walk_from_a_title_to_a_person_and_back_climbs_the_stack_it_built() {
 
         browser.key("enter");
         assert_eq!(showing_person(&browser).name, "A Player");
-        assert_eq!(showing_person(&browser).works.items.len(), 3);
+        assert_eq!(showing_person(&browser).credits.len(), 3);
 
         browser.key("right");
         browser.key("enter");
@@ -94,7 +94,10 @@ fn a_walk_from_a_title_to_a_person_and_back_climbs_the_stack_it_built() {
         assert_eq!(browser.stack.len(), 4);
 
         browser.key("escape");
-        assert_eq!(showing_person(&browser).works.focus, 1);
+        assert_eq!(
+            showing_person(&browser).walk.focus,
+            crate::screens::person::Focus::Poster(1)
+        );
         browser.key("escape");
         assert_eq!(showing_page(&browser).id, "movies:1");
         browser.key("escape");

@@ -538,7 +538,7 @@ fn see_all_on_a_persons_strip_opens_their_page() {
     let page = showing_person(&browser);
     assert_eq!(page.name, PLAYER);
     assert_eq!(page.path, ENTRY);
-    assert_eq!(page.works.items.len(), MORE_THAN_SHOWN);
+    assert_eq!(page.credits.len(), MORE_THAN_SHOWN);
 }
 
 #[test]

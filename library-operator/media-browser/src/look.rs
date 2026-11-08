@@ -255,6 +255,55 @@ fn mixed(from: Color, to: Color, share: f32) -> Color {
     }
 }
 
+// The career axis of a person's page draws in two inks, the bright one and
+// the muted one, each at an opacity that ranks one mark against another:
+// the credits stand out from the line, and the line from what came after
+// the death.
+
+/// The axis line, which the credits stand on.
+pub fn axis_line() -> Color {
+    Color { a: 0.45, ..muted() }
+}
+
+/// The axis line after a death inside the span, dimmer than the line of
+/// the life.
+pub fn axis_after_death() -> Color {
+    Color { a: 0.2, ..muted() }
+}
+
+/// A decade tick of the axis.
+pub fn axis_tick() -> Color {
+    Color { a: 0.6, ..muted() }
+}
+
+/// The tick of a death inside the span, brighter than a decade's, because
+/// it marks an event and not a date.
+pub fn death_tick() -> Color {
+    Color { a: 0.8, ..muted() }
+}
+
+/// The part of the axis line under the years the row of posters shows.
+pub fn axis_window() -> Color {
+    Color { a: 0.6, ..text() }
+}
+
+/// The bar of a series that still runs.
+pub fn axis_run() -> Color {
+    Color { a: 0.6, ..muted() }
+}
+
+/// The frame of a year's bar, which shows a year nobody has seen.
+pub fn bar_frame() -> Color {
+    Color { a: 0.7, ..muted() }
+}
+
+/// The part of a year's bar for the credits that some of the people at
+/// the screen have seen, under the bright ink that marks what everyone
+/// has seen.
+pub fn seen_by_some() -> Color {
+    Color { a: 0.4, ..text() }
+}
+
 /// How far into a length of time this many seconds is, from 0 to 1.
 /// Every motion of the look runs on a share of its own length, so the
 /// frame it draws is a function of the clock and never of the frame
