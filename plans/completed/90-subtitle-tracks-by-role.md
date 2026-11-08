@@ -1,9 +1,14 @@
 # 90, Subtitle tracks by role
 
 Proposed and built on 2026-11-08. The tests of both operators pass.
-No drill has run yet: a play on a home cluster's Players of the files
-that the survey below names, with `subtitles: on` and `sdh: prefer`,
-and a play with `subtitles: auto` of a file with a forced track.
+A drill on the testbed's `lab-portable` Player ran on 2026-11-08 with
+`media-operator` 2026.11.08-002, `subtitles: on`, and `sdh: prefer`.
+On a Play of two episodes, the sidecar chose the 1,382-event track of
+Hawkeye S01E06 over its 22-event default track and its empty track,
+from the counts on the item. On the second item, through mpv's
+`file-loaded` event and with no counts, it chose the SDH track of
+Pluribus S01E02 over its forced default track. No drill has run of
+`subtitles: auto`.
 
 ## The problem
 
