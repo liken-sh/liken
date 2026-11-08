@@ -380,6 +380,71 @@ fn a_select_on_a_headshot_draws_the_persons_page() {
     drawn(&frames.join("002.60.png"), &run);
 }
 
+// A person of one of the sample's invented careers, found by a word of
+// their name, with two people at the screen so the axis draws every seen
+// state. `keys` are the presses after the page opens, from 2.6 seconds on.
+fn career(name: &str, word: &str, keys: &str) {
+    let dir = workspace(name);
+    let frames = dir.join("frames");
+    let typed: Vec<String> = word
+        .chars()
+        .enumerate()
+        .map(|(at, letter)| format!("{:.1}:{letter}", 0.5 + at as f64 / 10.0))
+        .collect();
+    let script = format!(
+        "{},1.4:down,1.5:down,1.6:down,1.7:down,1.8:down,2.2:enter{keys}",
+        typed.join(",")
+    );
+
+    let run = headless(
+        &dir,
+        &[
+            "--script",
+            &script,
+            "--audience",
+            "Ada,Ben",
+            "--capture",
+            &text(&frames),
+            "--capture-at",
+            "4.0",
+            "--size",
+            "1920x1080",
+            "--quit-after",
+            "25",
+        ],
+    );
+
+    assert_eq!(run.exit, "0", "{}", run.log);
+    drawn(&frames.join("004.00.png"), &run);
+}
+
+// A long career draws the axis in dots, from the birth, with a running
+// series, and the label over the year that holds focus.
+#[test]
+fn a_long_career_draws_its_axis_with_a_year_in_focus() {
+    career("long-career", "long", ",2.6:left,2.8:up,3.0:left,3.2:left");
+}
+
+// A busy career draws the axis in bars.
+#[test]
+fn a_busy_career_draws_its_axis_in_bars() {
+    career("busy-career", "busy", ",2.6:up,2.8:left");
+}
+
+// A short life draws the line faded in, the death's mark inside the span,
+// and the dimmer line after it.
+#[test]
+fn a_short_life_draws_its_death_on_the_axis() {
+    career("short-life", "life", ",2.6:left");
+}
+
+// A playwright filmed long after the death draws the death at the faded
+// end of the line.
+#[test]
+fn a_late_playwright_draws_the_death_before_the_axis() {
+    career("playwright", "playwr", ",2.6:left");
+}
+
 // A select on Play enters the loading state. Nothing answers the
 // request here, so the state holds: the frame draws the backdrop whole,
 // the logo at the centre of it, and the mark under the logo.
