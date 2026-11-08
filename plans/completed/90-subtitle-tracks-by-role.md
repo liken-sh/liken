@@ -121,6 +121,12 @@ headers of a video and at most 8 MiB of a subtitle file.
 * **A count of the packets.** ffprobe's `-count_packets` reads the
   whole video over the network. A file without statistics tags falls
   back to its flags and title.
+* **A language read from the title of an untagged track.** One video
+  in the survey titled its untagged tracks "English", "English(SDH)",
+  and "Spanish". Reading the names from the display tables of
+  `golang.org/x/text/language/display` made the `media-operator`
+  binary 2.3 MB larger, from 30.9 MB to 33.3 MB on 2026-11-08, and the
+  untagged fallback already chose that video's English SDH track.
 * **Subtitle downloads in `library-operator`.** Bazarr already writes
   the external files. Choosing among the tracks a file has is a
   separate problem from finding more.

@@ -348,6 +348,16 @@ func TestChooseSubtitle(t *testing.T) {
 			"eng", english(subtitlesOn, ""), 2,
 		},
 		{
+			"on reads an SDH marker from an untagged title",
+			surveyFile{tracks: []mpvTrack{embedded(1, "", "English."), embedded(2, "", "English(SDH)"), embedded(3, "", "Spanish")}},
+			"eng", english(subtitlesOn, sdhPrefer), 2,
+		},
+		{
+			"on keeps a tagged track's own language over a language in its title",
+			surveyFile{tracks: []mpvTrack{embedded(1, "ger", "English"), embedded(2, "eng", "")}},
+			"eng", english(subtitlesOn, ""), 2,
+		},
+		{
 			"auto takes no untagged track under audio in the first language",
 			surveyFile{tracks: []mpvTrack{embedded(1, "", "")}},
 			"eng", english(subtitlesAuto, ""), 0,
