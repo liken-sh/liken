@@ -141,6 +141,12 @@ func (e *enricher) writeProbeRows(ctx context.Context, result *walkResult) error
 	if _, err := e.catalog.UpdateFileStreams(ctx, probed); err != nil {
 		return err
 	}
+	// The stream rows are the probe's too. Without this write, a probed
+	// file's streams, with their languages, flags, and event counts, reach
+	// the catalog only at the next walk, up to the walk's schedule later.
+	if _, err := e.catalog.UpsertStreams(ctx, result.streams); err != nil {
+		return err
+	}
 	var movies, episodes []itemUpdate
 	for _, row := range result.movies {
 		movies = append(movies, itemUpdate{Library: row.Library, Id: row.Id, Values: []any{row.Duration}})

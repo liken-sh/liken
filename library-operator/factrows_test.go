@@ -129,6 +129,24 @@ func TestTheProbeWritesTheStreamColumnsOfTheFile(t *testing.T) {
 	})
 }
 
+func TestTheProbeWritesTheStreamRowsOfTheFile(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		root := t.TempDir()
+		seedProbeGap(t, catalog, root, "The Long Survey (1982)", "The Long Survey (1982).mkv")
+		work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+
+		if err := work.probeGap(t.Context(), answeringProbe(ffprobeOfOneFile)); err != nil {
+			t.Fatal(err)
+		}
+
+		rows := catalogLines(t, catalog, `SELECT ordinal || '|' || kind || '|' || codec FROM streams WHERE library = ? ORDER BY ordinal`)
+		if len(rows) == 0 || rows[0] != "0|video|h264" {
+			t.Errorf("streams = %v, want the streams the probe read, with no walk after it", rows)
+		}
+	})
+}
+
 func TestAnArtFactWritesTheImagesRowAndTheItemsArt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		catalog, _ := newSQLiteCatalog(t)
