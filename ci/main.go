@@ -214,14 +214,19 @@ func pins(root string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	builders, err := checkBuildKit(root)
+	if err != nil {
+		return err
+	}
+	actions = append(actions, builders...)
 	for _, f := range slices.Concat(drift, fetches, manifests, actions) {
 		fmt.Fprintln(stdout, f)
 	}
 	if len(drift) > 0 || len(fetches) > 0 || len(manifests) > 0 || len(actions) > 0 {
-		return fmt.Errorf("%d pins drift, %d downloads break a rule in AGENTS.md, %d manifests disagree with their pins, and %d actions run code that no commit named",
+		return fmt.Errorf("%d pins drift, %d downloads break a rule in AGENTS.md, %d manifests disagree with their pins, and %d actions or builders run code that no commit named",
 			len(drift), len(fetches), len(manifests), len(actions))
 	}
-	fmt.Fprintln(stdout, "every shared pin names one version, every download follows the rules in AGENTS.md, every pin that ships has a manifest that agrees with it, and every action is pinned by commit")
+	fmt.Fprintln(stdout, "every shared pin names one version, every download follows the rules in AGENTS.md, every pin that ships has a manifest that agrees with it, and every action and builder is pinned by commit")
 	return nil
 }
 

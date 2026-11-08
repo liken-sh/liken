@@ -309,11 +309,19 @@ func componentData(root string, c *Component) (map[string]any, error) {
 		publishTimeout = max(publishTimeout, image.Timeout)
 	}
 	publishTimeout = max(publishTimeout, c.Outputs.Timeout)
+	var buildkit string
+	if len(images) > 0 {
+		var err error
+		if buildkit, err = readBuildKit(root); err != nil {
+			return nil, fmt.Errorf("%s builds images: %w", c.Name(), err)
+		}
+	}
 	return map[string]any{
 		"Name":           c.Name(),
 		"Dir":            c.Dir,
 		"Jobs":           jobs,
 		"Images":         images,
+		"BuildKit":       buildkit,
 		"ImageTimeout":   imageTimeout,
 		"Publishes":      c.HasOutputs(),
 		"Channel":        c.Outputs.Channel,

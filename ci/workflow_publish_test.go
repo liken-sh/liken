@@ -10,7 +10,8 @@ import (
 
 func TestAPinnedImageJobLogsInOnEveryBranch(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
+		"base/package.toml":      "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
+		"toolchains/images.toml": fixtureBuildKitImages,
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -34,11 +35,12 @@ func TestAPinnedImageJobLogsInOnEveryBranch(t *testing.T) {
 // closure, so it never publishes on a dependency that failed.
 func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
-		"lib/package.toml":   "[package]\nname = \"lib\"\n",
-		"app/package.toml":   "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\", \"lib\"]\n[outputs]\ndeploy = \"deploy\"\n",
-		"top/package.toml":   "[package]\nname = \"top\"\n[depends]\ncomponents = [\"app\"]\n[outputs]\ndeploy = \"deploy\"\n",
-		"liken/flux/VERSION": testFlux + "\n",
+		"base/package.toml":      "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
+		"lib/package.toml":       "[package]\nname = \"lib\"\n",
+		"app/package.toml":       "[package]\nname = \"app\"\n[depends]\ncomponents = [\"base\", \"lib\"]\n[outputs]\ndeploy = \"deploy\"\n",
+		"top/package.toml":       "[package]\nname = \"top\"\n[depends]\ncomponents = [\"app\"]\n[outputs]\ndeploy = \"deploy\"\n",
+		"liken/flux/VERSION":     testFlux + "\n",
+		"toolchains/images.toml": fixtureBuildKitImages,
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -83,9 +85,10 @@ func TestTheChecksWaitForTheBasesAndThePublishWaitsForTheClosure(t *testing.T) {
 // nothing.
 func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"app/package.toml":   "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
-		"os/package.toml":    "[package]\nname = \"os\"\n[[jobs]]\nname = \"build\"\ntoolchain = \"os\"\nrun = \"make all\"\n[outputs]\nchannel = true\n",
-		"liken/flux/VERSION": testFlux + "\n",
+		"app/package.toml":       "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
+		"os/package.toml":        "[package]\nname = \"os\"\n[[jobs]]\nname = \"build\"\ntoolchain = \"os\"\nrun = \"make all\"\n[outputs]\nchannel = true\n",
+		"liken/flux/VERSION":     testFlux + "\n",
+		"toolchains/images.toml": fixtureBuildKitImages,
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -131,10 +134,11 @@ func TestTheCheckStageRunsADryRunOfThePublish(t *testing.T) {
 
 func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"operator/package.toml": "[package]\nname = \"operator\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\ndescription = \"The operator image.\"\n",
-		"crd/package.toml":      "[package]\nname = \"crd\"\n[outputs]\ndeploy = \"deploy\"\n",
-		"base/package.toml":     "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
-		"liken/flux/VERSION":    testFlux + "\n",
+		"operator/package.toml":  "[package]\nname = \"operator\"\n[outputs]\ndeploy = \"deploy\"\n[[outputs.images]]\nname = \"operator\"\ndescription = \"The operator image.\"\n",
+		"crd/package.toml":       "[package]\nname = \"crd\"\n[outputs]\ndeploy = \"deploy\"\n",
+		"base/package.toml":      "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n",
+		"liken/flux/VERSION":     testFlux + "\n",
+		"toolchains/images.toml": fixtureBuildKitImages,
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -169,9 +173,10 @@ func TestThePublishJobSetsUpOnlyWhatTheOutputsNeed(t *testing.T) {
 func trivyFixture(t *testing.T) map[string][]byte {
 	t.Helper()
 	root := writeTree(t, map[string]string{
-		"base/package.toml":  "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n[[outputs.images]]\nname = \"base-dev\"\ndescription = \"The base-dev image.\"\n",
-		"app/package.toml":   "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n",
-		"liken/flux/VERSION": testFlux + "\n",
+		"base/package.toml":      "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\n[[outputs.images]]\nname = \"base-dev\"\ndescription = \"The base-dev image.\"\n",
+		"app/package.toml":       "[package]\nname = \"app\"\n[outputs]\ndeploy = \"deploy\"\n",
+		"liken/flux/VERSION":     testFlux + "\n",
+		"toolchains/images.toml": fixtureBuildKitImages,
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -327,8 +332,9 @@ func TestOnlyAComponentThatUploadsIsGrantedSecurityEvents(t *testing.T) {
 // every build of the run uses the same published bases.
 func TestEveryBuildReadsTheBasesThatThePlanJobChecked(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"base/package.toml": "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\ncache-mount = true\n",
-		"base/Dockerfile":   "FROM scratch AS cache-seed\nFROM scratch AS cache-export\nFROM scratch\n",
+		"base/package.toml":      "[package]\nname = \"base\"\nversion = \"20260928\"\nrevision = 1\n[[outputs.images]]\nname = \"base\"\ndescription = \"The base image.\"\ncache-mount = true\n",
+		"base/Dockerfile":        "FROM scratch AS cache-seed\nFROM scratch AS cache-export\nFROM scratch\n",
+		"toolchains/images.toml": fixtureBuildKitImages,
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
@@ -347,7 +353,7 @@ func TestEveryBuildReadsTheBasesThatThePlanJobChecked(t *testing.T) {
 		{"ci.yaml", ci, "      images: ${{ toJSON(fromJSON(needs.plan.outputs.components)['base'].images) }}\n      bases: ${{ needs.plan.outputs.bases }}\n"},
 		{"ci.yaml", ci, "      images: '[]'\n      bases: ${{ needs.plan.outputs.bases }}\n"},
 		{"component-base.yaml", component, "      - uses: " + pinnedText("actions/checkout") + "\n\n      # The plan job checked the published image of each pinned base,\n"},
-		{"component-base.yaml", component, write + "\n      - uses: " + pinnedText("docker/setup-buildx-action")},
+		{"component-base.yaml", component, write + "\n      # The builder runs the BuildKit image that toolchains/images.toml\n"},
 		{"component-base.yaml", component, write + "\n      # Each image builds again"},
 		{"component-base.yaml", component, "files: |\n            docker-bake.hcl\n            docker-bake.override.hcl\n"},
 		{"component-base.yaml", component, `docker buildx bake -f docker-bake.hcl -f docker-bake.override.hcl "${{ matrix.image }}-cache-seed"`},

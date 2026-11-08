@@ -14,7 +14,8 @@ import (
 func everyJobFixture(t *testing.T) (string, map[string]*Component) {
 	t.Helper()
 	root := writeTree(t, map[string]string{
-		"liken/flux/VERSION": testFlux + "\n",
+		"liken/flux/VERSION":     testFlux + "\n",
+		"toolchains/images.toml": fixtureBuildKitImages,
 		"os/package.toml": `[package]
 name = "os"
 [[jobs]]

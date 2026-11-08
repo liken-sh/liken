@@ -41,6 +41,15 @@ cosign = "ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c27
 # that writes each SBOM would change with no change to the tree.
 # ci/sign.go reads this line.
 buildkit-syft-scanner = "docker/buildkit-syft-scanner:1.12.1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315"
+# The BuildKit daemon that builds every image in CI. No Dockerfile
+# builds from it. Each CI job that builds images creates a builder
+# with docker/setup-buildx-action, which runs BuildKit in a container.
+# Without this line, the action and buildx pull
+# moby/buildkit:buildx-stable-1, a tag that moves to each new BuildKit
+# release, so the daemon that builds each published image would change
+# with no change to the tree. ci/buildkit.go reads this line and writes
+# it into the driver-opts of each generated setup-buildx-action step.
+buildkit = "moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe"
 # The SBOM generator that the OS release runs over its root
 # filesystem, its image archives, its toolkit, and the programs inside
 # k3s. No Dockerfile builds from it. liken/releases/Makefile runs it

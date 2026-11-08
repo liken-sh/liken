@@ -361,6 +361,10 @@ revision, and the cascade in step 5 applies. No Dockerfile names
 trivy` run it with docker to verify upstream signatures, and the
 publish job of every component signs each image it pushes with it. So
 a move of `cosign` needs no revision, and a flux bump needs docker.
+No Dockerfile names `buildkit` either: `ci/` writes it into the
+`driver-opts` of each `docker/setup-buildx-action` step, so CI's
+builders run that BuildKit daemon. A move of `buildkit` needs no
+revision, and `make workflows` writes it into the workflows.
 `toolchains/latest.sh --bump cosign` verifies the new image with the
 pinned cosign before it writes the line, and stops unless sigstore's
 release build signed it. Run `make workflows`

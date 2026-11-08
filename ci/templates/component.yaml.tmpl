@@ -244,7 +244,7 @@ jobs:{% range .Jobs %}
     steps:
       - uses: {% action "actions/checkout" %}
 
-{% template "bases" %}      - uses: {% action "docker/setup-buildx-action" %}
+{% template "bases" %}{% template "buildx" . %}
 
       # A pinned base writes its branch cache on every branch, so its job
       # logs in on every branch too.
@@ -406,7 +406,7 @@ jobs:{% range .Jobs %}
         run: releases/publish.sh "${{ inputs.version }}"{% template "os-go-save" %}{% template "userland-ccache-save" %}{% else %}
 {% template "go-restore" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}{% if .Images %}
 
-      - uses: {% action "docker/setup-buildx-action" %}{% end %}
+{% template "buildx" . %}{% end %}
 
       # A dry run pushes nothing, so it needs no login.
       - if: ${{ !inputs.dryrun }}
@@ -465,3 +465,11 @@ jobs:{% range .Jobs %}
         run: printf '%s\n' "$BASES" > docker-bake.override.hcl
 
 {% end %}
+{% define "buildx" %}      # The builder runs the BuildKit image that toolchains/images.toml
+      # pins by its digest. With no image, buildx starts BuildKit's
+      # default image, whose tag moves to each new BuildKit release, so
+      # the daemon that builds every image would change with no commit.
+      # ci/buildkit.go gives the check.
+      - uses: {% action "docker/setup-buildx-action" %}
+        with:
+          driver-opts: image={% .BuildKit %}{% end %}

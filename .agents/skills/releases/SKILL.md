@@ -310,7 +310,12 @@ attestations in the image's index on ghcr.io, as a manifest of the
 platform `unknown/unknown` beside the image's own manifest. The SBOM
 comes from buildx's syft scanner, which `toolchains/images.toml` pins
 as `buildkit-syft-scanner`, so the program that writes each SBOM
-changes only with a commit. `ci/sign.go` sets both attestations on the
+changes only with a commit. The BuildKit daemon that builds each
+image is pinned the same way, as `buildkit`: each generated
+`docker/setup-buildx-action` step names its digest in `driver-opts`,
+because with no image the action and buildx start BuildKit's default
+image, whose tag moves to each BuildKit release. `cd ci && go run . pins -root ..` fails a step that names
+no image or another one. `ci/sign.go` sets both attestations on the
 one target that the publish pushes, so a base that the build needs as
 a context carries none. The bake file carries none either, because the
 images job and a workstation load the image into Docker.

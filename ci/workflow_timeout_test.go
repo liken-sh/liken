@@ -25,7 +25,7 @@ func TestABuildThatNeedsMoreTimeRaisesItsJobs(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			root := writeTree(t, map[string]string{c.component + "/package.toml": c.toml})
+			root := writeTree(t, map[string]string{c.component + "/package.toml": c.toml, "toolchains/images.toml": fixtureBuildKitImages})
 			components, err := LoadComponents(root)
 			if err != nil {
 				t.Fatal(err)

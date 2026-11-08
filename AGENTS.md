@@ -478,7 +478,9 @@ a pinned component's tag, carries an SBOM and the provenance of its
 build, so a person who pulls it can read what it holds and how it was
 built. buildx writes both as attestations into the image's index on
 ghcr.io, with the syft scanner that `toolchains/images.toml` pins.
-Then cosign, pinned in the same file, signs the digest of that index
+CI's builders run the BuildKit daemon that the same file pins as
+`buildkit`, because buildx's default image is a tag that moves to
+each BuildKit release. Then cosign, pinned in the same file, signs the digest of that index
 keyless, as the component's workflow at `refs/heads/main` or at the
 release tag. The signature is in the same ghcr.io repository, and
 Rekor records it. syft lists what a program or a package database

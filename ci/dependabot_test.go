@@ -131,6 +131,8 @@ func TestGenerateCheckFailsForAModuleThatDependabotDoesNotList(t *testing.T) {
 	os.MkdirAll(filepath.Join(r.git.Dir, ".github/workflows"), 0o755)
 	os.MkdirAll(filepath.Join(r.git.Dir, "liken/flux"), 0o755)
 	os.WriteFile(filepath.Join(r.git.Dir, fluxVersionFile), []byte(testFlux+"\n"), 0o644)
+	os.MkdirAll(filepath.Join(r.git.Dir, "toolchains"), 0o755)
+	os.WriteFile(filepath.Join(r.git.Dir, imagesFile), []byte(fixtureBuildKitImages), 0o644)
 	w := newWorld(t, &fakeRegistry{})
 	if err := w.run([]string{"generate", "-root", r.git.Dir}); err != nil {
 		t.Fatal(err)

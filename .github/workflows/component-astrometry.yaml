@@ -181,7 +181,14 @@ jobs:
           BASES: ${{ inputs.bases }}
         run: printf '%s\n' "$BASES" > docker-bake.override.hcl
 
+      # The builder runs the BuildKit image that toolchains/images.toml
+      # pins by its digest. With no image, buildx starts BuildKit's
+      # default image, whose tag moves to each new BuildKit release, so
+      # the daemon that builds every image would change with no commit.
+      # ci/buildkit.go gives the check.
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
 
       # A pinned base writes its branch cache on every branch, so its job
       # logs in on every branch too.
@@ -354,7 +361,14 @@ jobs:
           key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}
           restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
 
+      # The builder runs the BuildKit image that toolchains/images.toml
+      # pins by its digest. With no image, buildx starts BuildKit's
+      # default image, whose tag moves to each new BuildKit release, so
+      # the daemon that builds every image would change with no commit.
+      # ci/buildkit.go gives the check.
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
 
       # A dry run pushes nothing, so it needs no login.
       - if: ${{ !inputs.dryrun }}

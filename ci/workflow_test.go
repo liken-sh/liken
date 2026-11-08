@@ -14,7 +14,7 @@ import (
 // publish job of a component with a deploy artifact reads.
 func fluxTree(t *testing.T) string {
 	t.Helper()
-	return writeTree(t, map[string]string{"liken/flux/VERSION": testFlux + "\n"})
+	return writeTree(t, map[string]string{"liken/flux/VERSION": testFlux + "\n", "toolchains/images.toml": fixtureBuildKitImages})
 }
 
 func TestTheWorkflowsAreWrittenAndChecked(t *testing.T) {
@@ -104,6 +104,7 @@ func TestTheRootWorkflowCallsEachComponentAfterItsDependencies(t *testing.T) {
 
 func TestAComponentWorkflowHasItsJobsItsImagesAndItsPublish(t *testing.T) {
 	root := writeTree(t, map[string]string{
+		"toolchains/images.toml": fixtureBuildKitImages,
 		"app/package.toml": `[package]
 name = "app"
 [[jobs]]
