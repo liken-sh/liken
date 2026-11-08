@@ -732,7 +732,10 @@ and writers. Before a fact writes again, it hashes the group as it is
 now and compares that hash with the one it recorded after its last
 write. If the hashes differ, another writer changed that group. The
 fact records a fight and does not write the group. `status.fights`
-counts the fights.
+counts the fights. A group that has no element left is not a fight:
+no writer holds it, so the fact writes it again. Radarr deletes
+`movie.nfo` when it upgrades a movie's file, and this rule lets each
+fact fill the new file.
 
 An art file that already exists is never replaced. The fact records it
 as answered and downloads nothing. The one exception is an episode's
