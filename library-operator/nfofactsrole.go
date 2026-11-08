@@ -346,7 +346,11 @@ func groupNeedsWrite(fact string, document []byte, merged factAnswer) bool {
 
 // The fight check compares the group on disk with the hash the ledger holds.
 // A fact with no entry in its ledger has written nothing yet, so whatever the
-// .nfo file holds is another writer's, and this fact rewrites the group.
+// .nfo file holds is another writer's, and this fact rewrites the group. A
+// group with no element left is held by no writer, so the fact writes it
+// again. Radarr deletes movie.nfo when it upgrades a title's video, and the
+// file that the next writer starts from holds no group at all; without this,
+// every fact that had written into the deleted file would stop there for good.
 func (e *enricher) groupHeldByAnother(folder, fact string, group elementGroup, document []byte) (bool, error) {
 	ledger, err := readLikenLedger(folder, fact)
 	if err != nil {
@@ -360,7 +364,7 @@ func (e *enricher) groupHeldByAnother(folder, fact string, group elementGroup, d
 	if err != nil {
 		return false, err
 	}
-	return hash != held.Wrote, nil
+	return hash != "" && hash != held.Wrote, nil
 }
 
 // The item entry and the attempt are one write of one file, as the identity
