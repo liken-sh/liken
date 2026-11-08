@@ -38,6 +38,9 @@ struct People {
     directing: bool,
     // Whether every work carries a title too long for a cell's band.
     wordy: bool,
+    // Whether the scanner has credited the person in one more work, released
+    // after every other, so the store answers it first.
+    newer: bool,
 }
 
 impl People {
@@ -96,7 +99,16 @@ impl Source for People {
         }
         Answer {
             name: "A Player".into(),
-            slots: (1..=self.works).map(|number| self.work(number)).collect(),
+            slots: self
+                .newer
+                .then(|| Slot {
+                    id: "title:newer".into(),
+                    released: "2010-05-02".into(),
+                    ..self.work(0)
+                })
+                .into_iter()
+                .chain((1..=self.works).map(|number| self.work(number)))
+                .collect(),
         }
     }
 
@@ -322,6 +334,17 @@ fn a_reread_that_shortens_the_wall_clamps_the_focus() {
     page.reread(&mut source);
     assert_eq!(page.works.items.len(), 1);
     assert_eq!(page.works.focus, 0);
+}
+
+// A work the scanner adds ahead of the focused one moves that work one
+// slot along, and focus goes with the work, not with the slot.
+#[test]
+fn a_reread_that_adds_an_earlier_slot_keeps_focus_on_the_same_work() {
+    let (mut page, mut source) = credited(3);
+    page.works.focus = 1;
+    source.newer = true;
+    page.reread(&mut source);
+    assert_eq!(page.works.items[page.works.focus].id, "title:2");
 }
 
 #[test]

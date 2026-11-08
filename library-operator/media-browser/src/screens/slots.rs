@@ -48,9 +48,12 @@ impl Slots {
         slots
     }
 
-    /// Read the answer again and keep focus in range, because a change can
-    /// remove the focused slot.
+    /// Read the answer again and keep focus on the work it was on. A
+    /// change can add a slot ahead of the focused one, which moves that work
+    /// along, or remove the focused slot, which leaves focus at the same
+    /// place inside what the answer still holds.
     pub fn reread(&mut self, source: &mut dyn Source) {
+        let held = self.held();
         let mut answer = source.wall(&self.query);
         credits::credit(&self.query, &mut answer.slots);
         self.name = answer.name;
@@ -60,7 +63,34 @@ impl Slots {
             .map(|slot| Item::of(&self.query, slot))
             .collect();
         self.cut = 0..0;
-        self.focus = self.focus.min(self.items.len().saturating_sub(1));
+        self.hold(held.as_ref(), self.focus);
+    }
+
+    /// Ask a new query, with focus on its first slot. The items of the
+    /// last query answer a different question, so the next read holds no
+    /// work from them.
+    pub fn requery(&mut self, query: Query) {
+        self.query = query;
+        self.items.clear();
+        self.focus = 0;
+    }
+
+    /// The library and the id of the focused work, which a later read
+    /// finds again by.
+    pub fn held(&self) -> Option<(String, String)> {
+        let item = self.items.get(self.focus)?;
+        Some((item.library.clone(), item.id.clone()))
+    }
+
+    /// Put focus on the work `held` names, or at `place` inside the items
+    /// where the answer no longer holds that work.
+    pub fn hold(&mut self, held: Option<&(String, String)>, place: usize) {
+        let found = held.and_then(|(library, id)| {
+            self.items
+                .iter()
+                .position(|item| &item.library == library && &item.id == id)
+        });
+        self.focus = found.unwrap_or(place.min(self.items.len().saturating_sub(1)));
         self.stand(self.focus);
     }
 

@@ -96,16 +96,17 @@ impl Person {
     }
 
     /// Read the page again, because the scanner can write the
-    /// entry or its credits while the page is open. Focus stays where it
-    /// was, inside what the read answered.
+    /// entry or its credits while the page is open. Focus stays on the
+    /// work it was on, or at the same place where that work is gone.
     pub fn reread(&mut self, source: &mut dyn Source) {
         let Some(fresh) = Self::open(&self.library, &self.path, source) else {
             return;
         };
+        let held = self.works.held();
         let focus = self.works.focus;
         let scroll = self.scroll;
         *self = fresh;
-        self.works.focus = focus.min(self.works.items.len().saturating_sub(1));
+        self.works.hold(held.as_ref(), focus);
         self.scroll = scroll;
     }
 

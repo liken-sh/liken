@@ -253,8 +253,7 @@ impl Wall {
     // answers the new order, the heading counts it again, and the bars
     // are the new order's own.
     fn resort(&mut self, source: &mut dyn Source) {
-        self.slots.query = self.slots.query.resorted();
-        self.slots.focus = 0;
+        self.slots.requery(self.slots.query.resorted());
         self.reread(source);
     }
 

@@ -126,10 +126,9 @@ impl Wall {
         let Some(search) = &self.search else {
             return;
         };
-        self.slots.query = Query::Search {
+        self.slots.requery(Query::Search {
             text: search.field.text().to_string(),
-        };
-        self.slots.focus = 0;
+        });
         self.reread(source);
     }
 
