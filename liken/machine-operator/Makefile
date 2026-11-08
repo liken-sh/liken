@@ -40,7 +40,10 @@ CA_BUNDLE := ../../trust/dist/$(strip $(file <../../trust/VERSION))/cacert.pem
 PCI_IDS := ../hwdata/dist/$(strip $(file <../hwdata/VERSION))/pci.ids
 
 $(DIST)/liken-machine-operator-image.tar: $(DIST)/liken-machine-operator ../image/oci.sh $(CA_BUNDLE) $(PCI_IDS)
-	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) CA_BUNDLE=$(CA_BUNDLE) PCI_IDS=$(PCI_IDS) ../image/oci.sh liken-machine-operator liken.sh/machine-operator
+	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) CA_BUNDLE=$(CA_BUNDLE) PCI_IDS=$(PCI_IDS) \
+		IMAGE_DESCRIPTION='liken-machine-operator, which applies the Machine resource of each machine to the machine and reports its status.' \
+		IMAGE_LICENSES=MIT \
+		../image/oci.sh liken-machine-operator liken.sh/machine-operator
 
 .PHONY: all clean
 

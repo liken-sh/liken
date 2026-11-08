@@ -24,7 +24,10 @@ $(DIST)/liken-logs: ../go.mod ../go.sum $(wildcard *.go) \
 		-o $(DIST)/liken-logs .
 
 $(DIST)/liken-logs-image.tar: $(DIST)/liken-logs ../image/oci.sh
-	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) ../image/oci.sh liken-logs liken.sh/logs
+	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) \
+		IMAGE_DESCRIPTION='liken-logs, the relays that carry the log streams of a machine into the cluster.' \
+		IMAGE_LICENSES=MIT \
+		../image/oci.sh liken-logs liken.sh/logs
 
 .PHONY: all clean
 

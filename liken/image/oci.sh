@@ -35,7 +35,10 @@
 #
 # DIST names the directory that holds <binary> and receives
 # <binary>-image.tar. LIKEN_VERSION is the version to stamp into the
-# image's name.
+# image's name. IMAGE_DESCRIPTION is one line that says what the image
+# is, and IMAGE_LICENSES is the SPDX expression of the licenses of the
+# program that the image runs. The OS release's SBOM names the license
+# of every other file, such as the CA bundle.
 
 set -euo pipefail
 
@@ -43,6 +46,19 @@ binary="${1:?usage: oci.sh <binary> <image>}"
 image="${2:?usage: oci.sh <binary> <image>}"
 version="${LIKEN_VERSION:?LIKEN_VERSION must be set; the Makefiles pass it via version.mk}"
 dist="${DIST:?DIST must name the directory holding $binary}"
+description="${IMAGE_DESCRIPTION:?IMAGE_DESCRIPTION must say what the image is}"
+licenses="${IMAGE_LICENSES:?IMAGE_LICENSES must name the licenses of the program that the image runs}"
+
+# The two values go into JSON as they are written, so a quote or a
+# backslash in one would end its string early.
+for value in "$description" "$licenses"; do
+    case "$value" in
+    *'"'* | *\\*)
+        echo "oci.sh: \"$value\" holds a quote or a backslash, which the image's JSON cannot hold as written" >&2
+        exit 1
+        ;;
+    esac
+done
 
 layout="$dist/oci"
 blobs="$layout/blobs/sha256"
@@ -99,6 +115,28 @@ tar --create --file "$dist/layer.tar" \
 layer_size="$(stat -c%s "$dist/layer.tar")"
 layer_digest="$(add_blob "$dist/layer.tar")"
 
+# These are the keys of the OCI image specification that say what the
+# image is, the same keys that ci publish writes on each image on
+# ghcr.io. The config holds them as labels, and the manifest holds them
+# as annotations.
+# There is no created key: the config's created field is the epoch on
+# purpose, so a rebuild of the same binary at the same version makes
+# the same bytes, and no commit is in the build's inputs, so there is
+# no revision key either. The release that carries the image names its
+# commit.
+oci_keys="$(
+    cat <<EOF
+    "org.opencontainers.image.title": "${image#liken.sh/}",
+    "org.opencontainers.image.description": "$description",
+    "org.opencontainers.image.version": "$version",
+    "org.opencontainers.image.licenses": "$licenses",
+    "org.opencontainers.image.source": "https://github.com/liken-sh/liken",
+    "org.opencontainers.image.url": "https://liken.sh/",
+    "org.opencontainers.image.documentation": "https://liken.sh/docs/",
+    "org.opencontainers.image.vendor": "liken"
+EOF
+)"
+
 # This writes the config: the runtime half of the image. diff_ids are
 # digests of the uncompressed layer tars. This image's layer is
 # stored uncompressed, so the same digest appears in both the
@@ -112,7 +150,10 @@ cat >"$dist/config.json" <<EOF
   "architecture": "amd64",
   "os": "linux",
   "config": {
-    "Entrypoint": ["/$binary"]
+    "Entrypoint": ["/$binary"],
+    "Labels": {
+$oci_keys
+    }
   },
   "rootfs": {
     "type": "layers",
@@ -140,7 +181,10 @@ cat >"$dist/manifest.json" <<EOF
       "digest": "sha256:$layer_digest",
       "size": $layer_size
     }
-  ]
+  ],
+  "annotations": {
+$oci_keys
+  }
 }
 EOF
 manifest_size="$(stat -c%s "$dist/manifest.json")"

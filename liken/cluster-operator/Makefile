@@ -41,7 +41,10 @@ $(DIST)/liken-cluster-operator: ../go.mod ../go.sum $(wildcard *.go) \
 CA_BUNDLE := ../../trust/dist/$(strip $(file <../../trust/VERSION))/cacert.pem
 
 $(DIST)/liken-cluster-operator-image.tar: $(DIST)/liken-cluster-operator ../image/oci.sh $(CA_BUNDLE)
-	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) CA_BUNDLE=$(CA_BUNDLE) ../image/oci.sh liken-cluster-operator liken.sh/cluster-operator
+	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) CA_BUNDLE=$(CA_BUNDLE) \
+		IMAGE_DESCRIPTION='liken-cluster-operator, which marks the machines that stopped reporting as Lost, writes the status of the Cluster, and gives each machine its turn to reboot.' \
+		IMAGE_LICENSES=MIT \
+		../image/oci.sh liken-cluster-operator liken.sh/cluster-operator
 
 .PHONY: all clean
 

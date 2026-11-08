@@ -186,11 +186,25 @@ save() {
     # A push that fails leaves the next build to compile the userland
     # again. It does not fail this build, which has its programs. The
     # source annotation links a new package on ghcr.io to this
-    # repository, so the repository's workflows can write to it.
+    # repository, so the repository's workflows can write to it. The
+    # other annotations are the OCI keys that ci publish writes on each
+    # image. created is the committer time of the commit, which oras
+    # would otherwise set to the time of the push. The artifact holds
+    # GPL and LGPL programs, so it names no license of its own, and
+    # buildroot's SBOM in dist/ names the license of each program.
+    local revision created
+    revision="$(git -C "$here" rev-parse HEAD)"
+    created="$(date -u -d "@$(git -C "$here" log -1 --format=%ct)" +%Y-%m-%dT%H:%M:%SZ)"
     if run_oras "$work" true push --plain-http="$plain_http" \
         --artifact-type application/vnd.liken.userland.v1 \
         --annotation org.opencontainers.image.source=https://github.com/liken-sh/liken \
         --annotation org.opencontainers.image.description="The static programs of the liken OS, built by liken/userland/build.sh" \
+        --annotation org.opencontainers.image.title=userland \
+        --annotation org.opencontainers.image.revision="$revision" \
+        --annotation org.opencontainers.image.created="$created" \
+        --annotation org.opencontainers.image.vendor=liken \
+        --annotation org.opencontainers.image.url=https://liken.sh/ \
+        --annotation org.opencontainers.image.documentation="https://github.com/liken-sh/liken/tree/$revision/liken/userland" \
         "$repository:$key" \
         userland.tar.gz:application/vnd.liken.userland.dist.v1.tar+gzip; then
         echo "pushed the userland as $repository:$key"
