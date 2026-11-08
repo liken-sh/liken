@@ -64,8 +64,14 @@ title, the name of its file, and its event count:
 first full or SDH track in the order of `subtitleLanguages`. When
 none exists, it takes the forced track in the language of the audio
 that plays, if that language is one of `audioLanguages`. After that,
-it takes a commentary track in the order of `subtitleLanguages`,
-because commentary text follows the commentary audio and not the film.
+it takes a forced track in a language of `subtitleLanguages` under
+audio in another language, then a full or SDH track that names no
+language, and then a commentary track in the order of
+`subtitleLanguages`, because commentary text follows the commentary
+audio and not the film. A dry run of the rule over the catalog in the
+survey found 50 videos that would show no subtitles without the two
+middle steps: tracks with no language tag, and an English track
+flagged forced under Korean audio.
 With `subtitles: auto`, when the audio is the first choice, it takes
 only that forced track, or none, and otherwise it takes a track as
 `on` does. An empty track is never a choice. With no

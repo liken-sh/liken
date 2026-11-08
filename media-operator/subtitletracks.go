@@ -331,12 +331,29 @@ func chooseSubtitle(tracks []subtitleTrack, audioLanguage string, prefs subtitle
 	}) {
 		return subtitleChoice{track: forced, reason: "no full or SDH track is in a subtitle language, and it is the forced track of the audio"}
 	}
+	// A forced track in a language the household reads, under audio in
+	// another language, translates less than the film needs. It still
+	// shows some of the film's text, and a track flagged forced is often
+	// the full translation of a foreign show with a wrong flag.
+	for _, wanted := range reading {
+		if pick := bestTrack(tracks, wanted, readerRank(""), roleForced); pick != nil {
+			return subtitleChoice{track: pick, reason: "no full or SDH track is in a subtitle language, and it is the forced track in " + wanted}
+		}
+	}
+	// A track that names no language is usually in the language of the
+	// release: a file that a person named after the video alone, or a
+	// track whose muxer wrote no tag. It is a better choice than none, and
+	// a commentary track in a known language follows the commentary audio
+	// and not the film.
+	if pick := untaggedTrack(tracks, readerRank(prefs.SDH)); pick != nil {
+		return subtitleChoice{track: pick, reason: "no track is in a subtitle language, and it is a full or SDH track that names no language"}
+	}
 	for _, wanted := range reading {
 		if pick := bestTrack(tracks, wanted, readerRank(""), roleCommentary); pick != nil {
 			return subtitleChoice{track: pick, reason: "no other track is in a subtitle language, and it is the commentary in " + wanted}
 		}
 	}
-	return subtitleChoice{reason: "no track is in a subtitle language, and no forced track belongs to the audio"}
+	return subtitleChoice{reason: "no track is in a subtitle language or names no language"}
 }
 
 // forcedTrackOf is the forced track in the language of the audio, or nil.
@@ -361,9 +378,22 @@ func readerRank(sdh string) func(role string) int {
 // bestTrack is the first track in the language with one of the roles: by
 // the rank of its role, then the default flag, then track order.
 func bestTrack(tracks []subtitleTrack, wanted string, rank func(string) int, roles ...string) *mpvTrack {
+	return bestOf(tracks, func(language string) bool { return sameLanguage(language, wanted) }, rank, roles)
+}
+
+// untaggedTrack is the first full or SDH track that names no language, by
+// the same order as bestTrack.
+func untaggedTrack(tracks []subtitleTrack, rank func(string) int) *mpvTrack {
+	return bestOf(tracks, func(language string) bool { return language == "" }, rank, []string{roleFull, roleSDH})
+}
+
+// bestOf is the first track whose language matches and whose role is one of
+// the roles: by the rank of its role, then the default flag, then track
+// order.
+func bestOf(tracks []subtitleTrack, matches func(string) bool, rank func(string) int, roles []string) *mpvTrack {
 	var candidates []subtitleTrack
 	for _, one := range tracks {
-		if slices.Contains(roles, one.role) && sameLanguage(one.language, wanted) {
+		if slices.Contains(roles, one.role) && matches(one.language) {
 			candidates = append(candidates, one)
 		}
 	}

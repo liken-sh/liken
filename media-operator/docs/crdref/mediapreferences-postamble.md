@@ -63,9 +63,14 @@ with no `sdh` the two roles rank the same. Then the default flag
 ranks first, and then the order of the tracks in the file. When no
 such track exists, the sidecar takes the `forced` track in the
 language of the audio that plays, if that language is in
-`audioLanguages`. A `commentary` track is the last choice, and an
-`empty` track is never a choice. When nothing matches, no subtitles
-show.
+`audioLanguages`. After that, it takes a `forced` track in a reading
+language under audio in another language, because such a track is
+often a full translation with a wrong flag. Then it takes a `full` or
+`sdh` track that names no language, such as `Movie.srt` beside
+`Movie.mkv`, because such a track is usually in the language of the
+release. A `commentary` track in a reading language is the last
+choice, and an `empty` track is never a choice. When nothing matches,
+no subtitles show.
 
 With `subtitles: auto`, audio in the first language of
 `audioLanguages` shows only its `forced` track, or nothing. Audio in

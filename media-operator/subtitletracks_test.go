@@ -318,9 +318,44 @@ func TestChooseSubtitle(t *testing.T) {
 			"jpn", english(subtitlesOn, ""), 0,
 		},
 		{
-			"on takes a commentary track only when nothing else is in the language",
+			"on takes a forced track in a subtitle language under other audio before a commentary track",
 			surveyFile{tracks: []mpvTrack{embedded(1, "eng", "Commentary"), embedded(2, "eng", "Forced", "forced")}},
+			"jpn", english(subtitlesOn, ""), 2,
+		},
+		{
+			"on takes a commentary track only when nothing else is in the language",
+			surveyFile{tracks: []mpvTrack{embedded(1, "eng", "Commentary"), embedded(2, "fre", "")}},
 			"jpn", english(subtitlesOn, ""), 1,
+		},
+		{
+			"on takes the only English track under Korean audio although it is flagged forced",
+			surveyFile{tracks: []mpvTrack{embedded(1, "eng", "English", "forced")}},
+			"kor", english(subtitlesOn, ""), 1,
+		},
+		{
+			"on takes an untagged track when no track is in a subtitle language",
+			surveyFile{tracks: []mpvTrack{embedded(1, "ger", ""), embedded(2, "", "")}},
+			"eng", english(subtitlesOn, ""), 2,
+		},
+		{
+			"on takes an untagged file with the video's exact name",
+			surveyFile{tracks: []mpvTrack{external(1, "Movie (2024).srt", "")}},
+			"eng", english(subtitlesOn, ""), 1,
+		},
+		{
+			"on takes a tagged commentary track after an untagged full track",
+			surveyFile{tracks: []mpvTrack{embedded(1, "eng", "Commentary"), embedded(2, "", "")}},
+			"eng", english(subtitlesOn, ""), 2,
+		},
+		{
+			"auto takes no untagged track under audio in the first language",
+			surveyFile{tracks: []mpvTrack{embedded(1, "", "")}},
+			"eng", english(subtitlesAuto, ""), 0,
+		},
+		{
+			"auto takes an untagged track under other audio",
+			surveyFile{tracks: []mpvTrack{embedded(1, "", "")}},
+			"jpn", english(subtitlesAuto, ""), 1,
 		},
 		{
 			"on takes the forced track of the audio before a commentary track",
