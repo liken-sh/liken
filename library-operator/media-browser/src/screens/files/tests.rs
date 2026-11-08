@@ -142,7 +142,7 @@ fn every_encoding_takes_a_block_named_for_its_quality() {
         .map(|block| {
             (
                 block.name.as_str(),
-                block.size.as_str(),
+                block.aside.as_str(),
                 block.picture.as_str(),
             )
         })
@@ -266,6 +266,7 @@ fn a_file_the_probe_has_not_read_shows_what_the_scanner_read() {
         width: 1_280,
         height: 720,
         video_codec: "x264".into(),
+        container: "mkv".into(),
         ..video_file("Film/Film.mkv", 700_000_000)
     };
     let files = Files::of(&[(bare, Tracks::default())], None, &Preferences::default());
@@ -274,9 +275,9 @@ fn a_file_the_probe_has_not_read_shows_what_the_scanner_read() {
         (
             block.name.as_str(),
             block.picture.as_str(),
-            block.size.as_str()
+            block.aside.as_str()
         ),
-        ("720p", "1280\u{d7}720 \u{b7} x264", "700 MB")
+        ("720p", "1280\u{d7}720 \u{b7} x264", "MKV \u{b7} 700 MB")
     );
     assert!(block.groups.is_empty());
 }

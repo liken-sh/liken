@@ -60,7 +60,9 @@ pub struct Group {
 pub struct Block {
     /// A short name for the encoding, such as `4K` or `Bluray-1080p`.
     pub name: String,
-    pub size: String,
+    /// The container and the size, as in `MKV · 14.3 GB`, drawn faint at
+    /// the right of the name.
+    pub aside: String,
     /// The frame, the codec, the dynamic range, and the frame rate.
     pub picture: String,
     pub groups: Vec<Group>,
@@ -192,7 +194,7 @@ fn block(file: &FileFacts, tracks: &Tracks, preferences: Option<&Preferences>) -
         .collect();
     Block {
         name: labels::short_name(file, video),
-        size: foot::size(file.size_bytes),
+        aside: facts::joined(&[&file.container.to_uppercase(), &foot::size(file.size_bytes)]),
         picture: labels::picture(file, video),
         groups,
         plays: preferences.is_some(),

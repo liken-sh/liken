@@ -234,9 +234,9 @@ section shows each video file of the film, so you can see which copy a
 play takes and what it plays with. A film with two copies, such as a
 4K remux and a 1080p encode, shows them side by side. Each file shows a
 short name, its quality tag from the file name, such as `Bluray-1080p`,
-or its resolution, such as `4K`, and its size. Under the name are the
-frame, the codec, the dynamic range, and the frame rate, then a row for
-each sound track and each subtitle track. A subtitle row counts the
+or its resolution, such as `4K`, its container, and its size, as in
+`MKV · 14.3 GB`. Under the name are the frame, the codec, the dynamic
+range, and the frame rate, then a row for each sound track and each subtitle track. A subtitle row counts the
 track's lines and names its role: `SDH`, `forced`, or `commentary`. The
 subtitle files beside the video that mpv loads are rows too, and a track
 with no lines is left out.

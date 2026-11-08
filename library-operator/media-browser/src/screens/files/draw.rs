@@ -72,7 +72,7 @@ fn draw_block(frame: &mut canvas::Frame<Renderer>, block: &Block, at: Point, wid
     // The size sits on the name's baseline, at the right edge.
     right_aligned(
         frame,
-        &block.size,
+        &block.aside,
         right,
         y + (NAME - SMALL),
         regular(SMALL),
