@@ -24,7 +24,8 @@ use iced_winit::core::{Element, Rectangle, Theme};
 
 use super::franchise::strips::{self, Move, Place, Strips};
 use super::{
-    InFranchise, Item, Screen, Step, TitleMark, facts, foot, franchise, person, stripes, upnext,
+    InFranchise, Item, Screen, Step, TitleMark, facts, files, foot, franchise, person, stripes,
+    upnext,
 };
 use crate::art::Art;
 use crate::audience::Viewer;
@@ -139,8 +140,11 @@ pub struct Movie {
     pub plot: String,
     /// The credited people, as the stripes at the end of the page.
     pub stripes: stripes::Stripes,
-    /// The studios and the files, as the block after the last stripe.
+    /// The studios, as the line after the last stripe.
     pub foot: foot::Foot,
+    /// Every video file of the movie with its tracks, as the section under
+    /// the studios.
+    pub files: files::Files,
     /// The set the movie belongs to, or nothing where it belongs to none.
     pub set: Option<Set>,
     /// The franchises the movie belongs to, one strip each, under the set
@@ -185,7 +189,10 @@ impl Movie {
             tagline: details.tagline.clone(),
             plot: details.plot.clone(),
             stripes: stripes::Stripes::of(source.credits(library, id)),
-            foot: foot::Foot::of(&details.studios, &source.files(library, id)),
+            // The files section states each file in full, so the foot
+            // carries the studios alone.
+            foot: foot::Foot::of(&details.studios, &[]),
+            files: files_of(library, id, source),
             set,
             franchises: Strips::of(library, id, source),
             via: None,
@@ -638,6 +645,30 @@ pub(crate) fn franchise_press(
         Some(screen) => Step::Replace(screen),
         None => Step::Stay,
     }
+}
+
+// The files section of one movie. The file it marks as the one a play
+// takes is the file the play request's own read resolves to, so the page and
+// the play cannot disagree. That read takes the first primary video file by
+// path, whatever the `Player`, so only the tracks in it follow the
+// `Player`'s preferences.
+fn files_of(library: &str, id: &str, source: &mut dyn Source) -> files::Files {
+    let videos: Vec<_> = source
+        .files(library, id)
+        .into_iter()
+        .filter(|file| file.kind == "video" && file.role == "primary")
+        .map(|file| {
+            let tracks = source.tracks(library, &file.path);
+            (file, tracks)
+        })
+        .collect();
+    let film = Selection::Movie { id: id.to_string() };
+    let playing = source
+        .play(library, &film)
+        .into_iter()
+        .next()
+        .map(|item| item.path);
+    files::Files::of(&videos, playing.as_deref(), &source.preferences())
 }
 
 fn set_of(library: &str, id: &str, details: &MovieDetails, source: &mut dyn Source) -> Option<Set> {

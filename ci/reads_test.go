@@ -173,3 +173,55 @@ func TestTheOSBuildReadsEveryFileButTheManual(t *testing.T) {
 		})
 	}
 }
+
+// sharedCasesFixture is a repository with a rule component whose tests
+// read a file of cases, and a screen component whose Rust job reads the
+// same file by name, although neither depends on the other.
+func sharedCasesFixture(t *testing.T, reads string) (*repo, string) {
+	t.Helper()
+	r := newRepo(t, map[string]string{
+		"rule/package.toml":        "[package]\nname = \"rule\"\n[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test-go\"\n",
+		"rule/rule.go":             "package rule\n",
+		"rule/testdata/cases.json": "[]\n",
+		"screen/package.toml":      "[package]\nname = \"screen\"\n[[jobs]]\nname = \"rust\"\ntoolchain = \"rust\"\nrun = \"make test\"\nreads = [\"" + reads + "\"]\n[outputs]\ndeploy = \"deploy\"\n",
+		"screen/deploy/a.yaml":     "kind: ConfigMap\n",
+	})
+	return r, r.run("rev-parse", "HEAD")
+}
+
+// A file that a job names in reads runs that job, and the component's own
+// jobs, and it releases neither component that reads it from outside,
+// because no output is built from it.
+func TestAFileAJobReadsByNameRunsThatJob(t *testing.T) {
+	r, before := sharedCasesFixture(t, "rule/testdata/cases.json")
+	r.write("rule/testdata/cases.json", "[1]\n")
+	r.commit("the change")
+	decisions := planGate(t, r, nil, Event{Name: "push", Ref: "refs/heads/topic", Before: before, Head: "HEAD"})
+	got := []any{decisions["screen"].Jobs, decisions["screen"].Changed, decisions["rule"].Jobs}
+	want := []any{[]string{"rust"}, false, []string{"go"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// A file of the job's own component runs the job already, and a path that
+// names no file would never run it, so the loader refuses both.
+func TestAJobReadsOnlyAFileOfAnotherComponent(t *testing.T) {
+	cases := []struct {
+		name  string
+		reads string
+	}{
+		{"a file of its own component", "screen/deploy/a.yaml"},
+		{"a file that does not exist", "rule/testdata/missing.json"},
+		{"a directory", "rule/testdata"},
+		{"a path outside every component", "README.md"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r, _ := sharedCasesFixture(t, c.reads)
+			if _, err := LoadComponents(r.git.Dir); err == nil {
+				t.Errorf("LoadComponents accepted reads = %q", c.reads)
+			}
+		})
+	}
+}

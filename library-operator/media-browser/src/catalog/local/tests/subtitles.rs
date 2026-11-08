@@ -149,3 +149,50 @@ fn an_episode_carries_the_subtitle_tracks_of_its_own_file() {
         vec![stream(2, Some(300)), file("S01E2.en.srt", Some(411))]
     );
 }
+
+// A movie's page reads every stream of a file with the columns it shows,
+// and the subtitle files mpv loads beside it, the same ones a play carries.
+#[test]
+fn a_file_carries_every_stream_and_the_subtitle_files_beside_it() {
+    let dir = TempDir::new().unwrap();
+    let path = lantern(&dir);
+    Connection::open(&path)
+        .unwrap()
+        .execute(
+            "INSERT INTO streams (library, path, ordinal, kind, codec, profile, width, height, \
+                depth, frame_rate, color_transfer, dolby_vision, channels, layout, language, \
+                title, is_default, forced, events) \
+             VALUES ('default/films', ?, 0, 'video', 'hevc', 'Main 10', 3840, 1606, 10, \
+                '24000/1001', 'smpte2084', 1, 0, '', '', '', 1, 0, NULL)",
+            [FILM],
+        )
+        .unwrap();
+    insert_stream(&path, 1, "subtitle", Some(31));
+    insert_subtitle_file(&path, "The Lantern/The Lantern.en.srt", Some(1_200));
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let tracks = source.tracks("default/films", FILM);
+    assert_eq!(
+        tracks.streams[0],
+        crate::catalog::stream::Stream {
+            ordinal: 0,
+            kind: "video".into(),
+            codec: "hevc".into(),
+            profile: "Main 10".into(),
+            width: 3_840,
+            height: 1_606,
+            depth: 10,
+            frame_rate: "24000/1001".into(),
+            color_transfer: "smpte2084".into(),
+            dolby_vision: true,
+            default: true,
+            ..crate::catalog::stream::Stream::default()
+        }
+    );
+    assert_eq!(tracks.streams[1].events, Some(31));
+    assert_eq!(tracks.beside, vec![file("The Lantern.en.srt", Some(1_200))]);
+    assert_eq!(
+        source.tracks("default/films", "Nothing/Nothing.mkv"),
+        crate::catalog::stream::Tracks::default()
+    );
+}

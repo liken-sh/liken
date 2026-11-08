@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::audience;
+use crate::tracks::{self, Preferences};
 
 /// The seconds the browser waits for a window before it exits. An unset
 /// or non-positive value leaves the watchdog off, so a run outside a pod never
@@ -141,6 +142,10 @@ pub struct Options {
     /// The metrics listener's address, from [`METRICS_ADDRESS`]. `None`
     /// serves no metrics.
     pub metrics_address: Option<SocketAddr>,
+    /// The `Player`'s language preferences, from
+    /// [`tracks::preferences::VARIABLE`]. A run that misses them marks no
+    /// subtitle track on a movie's page.
+    pub preferences: Preferences,
 }
 
 impl Default for Options {
@@ -169,6 +174,7 @@ impl Default for Options {
             audience_topic: String::new(),
             plays_topic: String::new(),
             metrics_address: None,
+            preferences: Preferences::default(),
         }
     }
 }
@@ -266,8 +272,9 @@ impl Options {
 
 impl Options {
     /// Read what the container was told. A pod cannot discover the
-    /// grace the operator set or the three topics this operator names, so
-    /// all four arrive in the environment and none is a flag. The bus
+    /// grace the operator set, the three topics this operator names, or the
+    /// `Player`'s resolved preferences, so all of them arrive in the
+    /// environment and none is a flag. The bus
     /// wiring arrives the same way and `media-screen` reads it, so none
     /// of it is here.
     pub fn from_environment(&mut self) {
@@ -283,6 +290,8 @@ impl Options {
         self.audience_topic = value(AUDIENCE_TOPIC).unwrap_or_default();
         self.plays_topic = value(PLAYS_TOPIC).unwrap_or_default();
         self.metrics_address = metrics_address(&value(METRICS_ADDRESS).unwrap_or_default());
+        self.preferences =
+            Preferences::parse(&value(tracks::preferences::VARIABLE).unwrap_or_default());
     }
 }
 

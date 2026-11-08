@@ -8,6 +8,7 @@
 pub mod audience;
 pub mod credits;
 pub mod facts;
+pub mod files;
 pub mod foot;
 pub mod franchise;
 pub mod home;

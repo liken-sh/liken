@@ -103,9 +103,10 @@ type operator struct {
 	ffmpegImage string
 	// The image the appearances worker runs on.
 	appearancesImage string
-	// The household wall-clock zone the pass read last, which every screen
-	// pod it stands carries as TZ. Empty where the cluster states none.
-	timeZone string
+	// The household defaults the pass read last, or nil where the cluster
+	// states none. Every screen pod the pass stands carries the zone as TZ,
+	// and the language preferences resolved under its Player's own.
+	household *MediaPreferencesSpec
 	// The household languages the pass read last. Every enricher the pass stands
 	// ranks a provider's answers by them.
 	languages []string
@@ -350,7 +351,7 @@ func (o *operator) pass() {
 		fmt.Fprintf(os.Stderr, "reading the media preferences: %v\n", err)
 		preferences = &MediaPreferencesList{}
 	}
-	o.timeZone = householdZone(preferences)
+	o.household = householdSpec(preferences)
 	// The languages come off the same list, so one read per pass answers both
 	// fields.
 	o.languages = householdLanguages(preferences)

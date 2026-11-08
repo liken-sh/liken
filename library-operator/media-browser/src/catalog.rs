@@ -54,6 +54,10 @@ pub mod mark;
 // which a play request carries to the display.
 pub mod subtitle;
 
+// The streams of one video file and the subtitle files beside it, which
+// a movie's page shows and chooses a play's tracks from.
+pub mod stream;
+
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
 pub use identity::Identity;
 pub use mark::Mark;
@@ -327,6 +331,8 @@ pub struct CreditSlot {
 /// how it is encoded, and how large it is.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileFacts {
+    /// The file's path relative to the library root.
+    pub path: String,
     /// Which one of its kind the file is, such as `primary`.
     pub role: String,
     /// The file's category, such as `video` or `subtitle`.
@@ -554,6 +560,19 @@ pub trait Source {
     /// Every file of one item, in path order, as the foot of a page reads
     /// them.
     fn files(&mut self, library: &str, item: &str) -> Vec<FileFacts>;
+
+    /// The streams of one video file and the subtitle files mpv loads
+    /// beside it. A source that records no streams answers none.
+    fn tracks(&mut self, _library: &str, _path: &str) -> stream::Tracks {
+        stream::Tracks::default()
+    }
+
+    /// The language preferences of the `Player` this browser runs for. A
+    /// source that knows of no `Player` answers none, and a page then marks
+    /// no subtitle track.
+    fn preferences(&self) -> crate::tracks::Preferences {
+        crate::tracks::Preferences::default()
+    }
 
     /// One person by the library and the directory that name them,
     /// or nothing where that library holds no such entry.

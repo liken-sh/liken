@@ -1,8 +1,10 @@
 // The foot of a title's page: the studios, and one line for every video
-// file the title holds. Every function here is pure over the rows, so the
-// two pages share one model and the tests need no window.
+// file the title holds. A series page draws both. A movie's page draws the
+// studios alone, and its files section shows each file in full. Every
+// function here is pure over the rows, so the tests need no window.
 
 use crate::catalog::FileFacts;
+use crate::language;
 use crate::look;
 use crate::screens::facts;
 use crate::views::text;
@@ -136,9 +138,10 @@ fn frame(file: &FileFacts) -> String {
     }
 }
 
-// One file's size, in the units a person reads a film's size in, and
-// nothing where the scanner read none.
-fn size(bytes: i64) -> String {
+/// One file's size, in the units a person reads a film's size in, and
+/// nothing where the scanner read none. The files section of a movie's page
+/// states each file's size the same way.
+pub(crate) fn size(bytes: i64) -> String {
     const GB: f64 = 1_000_000_000.0;
     const MB: f64 = 1_000_000.0;
     if bytes <= 0 {
@@ -159,7 +162,7 @@ fn subtitles(files: &[FileFacts]) -> String {
         if file.kind != SUBTITLE || file.language.is_empty() {
             continue;
         }
-        let language = named_language(&file.language);
+        let language = language::name(&file.language);
         if !named.contains(&language) {
             named.push(language);
         }
@@ -168,58 +171,6 @@ fn subtitles(files: &[FileFacts]) -> String {
         true => String::new(),
         false => format!("{SUBTITLES}{}", named.join(", ")),
     }
-}
-
-// The English name of a language tag. A tag this table does not name
-// draws as the file itself carries it, because a tag a person can read
-// is better than nothing at all.
-fn named_language(tag: &str) -> &str {
-    const NAMES: [(&str, &str); 40] = [
-        ("ar", "Arabic"),
-        ("ara", "Arabic"),
-        ("cs", "Czech"),
-        ("ces", "Czech"),
-        ("cze", "Czech"),
-        ("da", "Danish"),
-        ("dan", "Danish"),
-        ("de", "German"),
-        ("deu", "German"),
-        ("ger", "German"),
-        ("el", "Greek"),
-        ("en", "English"),
-        ("eng", "English"),
-        ("es", "Spanish"),
-        ("spa", "Spanish"),
-        ("fi", "Finnish"),
-        ("fin", "Finnish"),
-        ("fr", "French"),
-        ("fra", "French"),
-        ("fre", "French"),
-        ("he", "Hebrew"),
-        ("hi", "Hindi"),
-        ("hu", "Hungarian"),
-        ("it", "Italian"),
-        ("ita", "Italian"),
-        ("ja", "Japanese"),
-        ("jpn", "Japanese"),
-        ("ko", "Korean"),
-        ("kor", "Korean"),
-        ("nl", "Dutch"),
-        ("nld", "Dutch"),
-        ("no", "Norwegian"),
-        ("pl", "Polish"),
-        ("pt", "Portuguese"),
-        ("por", "Portuguese"),
-        ("ru", "Russian"),
-        ("rus", "Russian"),
-        ("sv", "Swedish"),
-        ("tr", "Turkish"),
-        ("zh", "Chinese"),
-    ];
-    NAMES
-        .iter()
-        .find(|(code, _)| *code == tag)
-        .map_or(tag, |(_, name)| *name)
 }
 
 #[cfg(test)]
@@ -236,7 +187,7 @@ mod tests {
             width: 1_920,
             height: 804,
             size_bytes: 4_200_000_000,
-            language: String::new(),
+            ..FileFacts::default()
         }
     }
 

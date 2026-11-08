@@ -38,6 +38,13 @@ pub fn accent() -> Color {
     palette::dark().link
 }
 
+/// The thin line under a block's heading and between the groups of a
+/// table, the dark scheme's `--rule`, the color a page draws a table's
+/// borders in.
+pub fn rule() -> Color {
+    palette::dark().rule
+}
+
 /// The track the volume row's fill runs over: the light scheme's `--link`,
 /// the darkest green of the family, so the fill over it reads at a glance.
 pub fn track() -> Color {
@@ -288,6 +295,7 @@ mod tests {
         assert_eq!(muted(), palette::dark().ink_muted);
         assert_eq!(accent(), palette::dark().link);
         assert_eq!(slot(), palette::dark().page);
+        assert_eq!(rule(), palette::dark().rule);
     }
 
     #[test]

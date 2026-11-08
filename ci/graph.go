@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -72,6 +73,27 @@ func (c *Component) isNotOutput(rest string) bool {
 // within is true when the path a is b or a path under b.
 func within(a, b string) bool {
 	return a == b || strings.HasPrefix(a, b+"/")
+}
+
+// validateReads refuses a file that a job reads by name unless it is a
+// file of another component. A file of the job's own component runs the
+// job already, and a path that names nothing would never run it.
+func validateReads(root string, components map[string]*Component) error {
+	for _, c := range sortedComponents(components) {
+		for _, job := range c.Jobs {
+			for _, file := range job.Reads {
+				owner := ownerOf(components, file)
+				if owner == "" || owner == c.Name() || path.Clean(file) != file {
+					return fmt.Errorf("%s: job %q reads %q, which is not a file of another component", c.Name(), job.Name, file)
+				}
+				info, err := os.Stat(filepath.Join(root, file))
+				if err != nil || info.IsDir() {
+					return fmt.Errorf("%s: job %q reads %q, which is not a file", c.Name(), job.Name, file)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // validateExcluded refuses an excluded path that an image receives. A
@@ -193,6 +215,7 @@ func ReleaseChanged(components map[string]*Component, name string, d Diff) (bool
 //
 //   - its part of a generated workflow;
 //   - any file in its own directory, except its plans;
+//   - a file of another component that one of its jobs names in reads;
 //   - a file that an output of a component in its closure is built
 //     from, because a component reads its dependencies only through
 //     their builds;
@@ -209,6 +232,11 @@ func CheckChanged(components map[string]*Component, name string, d Diff) (bool, 
 	for _, file := range d.Files {
 		if strings.HasPrefix(file, c.Dir+"/") && !strings.HasPrefix(file, c.Dir+"/"+plansDir) {
 			return true, file
+		}
+		for _, job := range c.Jobs {
+			if slices.Contains(job.Reads, file) {
+				return true, file
+			}
 		}
 	}
 	for _, n := range Closure(components, name) {

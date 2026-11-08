@@ -114,7 +114,8 @@ fn run(options: Options, wiring: &Wiring) -> Result<(), String> {
     // A run with no update stream reads the file alone, and a title
     // that lands after it opens waits for the next re-read.
     let updates = options.updates.clone().unwrap_or_default();
-    let mut source = LocalCatalog::new(catalog, &updates);
+    let mut source =
+        LocalCatalog::new(catalog, &updates).with_preferences(options.preferences.clone());
     if let Some(progress_file) = options.progress.clone() {
         let stream = options.progress_updates.clone().unwrap_or_default();
         source = source.with_progress(progress_file, &stream);

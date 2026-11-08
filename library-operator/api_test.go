@@ -328,6 +328,16 @@ func TestPlayerIdleStatusWithoutABusReadsNone(t *testing.T) {
 	}
 }
 
+// zoneOf is the zone of the household defaults the list holds, and empty
+// where it holds none.
+func zoneOf(list *MediaPreferencesList) string {
+	spec := householdSpec(list)
+	if spec == nil {
+		return ""
+	}
+	return spec.TimeZone
+}
+
 // The household zone is the default MediaPreferences' own, and nothing
 // where the cluster holds none or holds one under another name.
 func TestTheHouseholdZoneIsTheDefaultPreferencesOwn(t *testing.T) {
@@ -347,7 +357,7 @@ func TestTheHouseholdZoneIsTheDefaultPreferencesOwn(t *testing.T) {
 		}}}, ""},
 	}
 	for _, c := range cases {
-		if got := householdZone(&c.list); got != c.want {
+		if got := zoneOf(&c.list); got != c.want {
 			t.Errorf("%s: zone = %q, want %q", c.name, got, c.want)
 		}
 	}

@@ -17,7 +17,7 @@ pub fn files(
     library: &str,
     item: &str,
 ) -> rusqlite::Result<Vec<FileFacts>> {
-    let sql = "SELECT files.role, files.type, files.container, files.video_codec, \
+    let sql = "SELECT files.path, files.role, files.type, files.container, files.video_codec, \
                       files.audio_codec, files.width, files.height, files.size_bytes, \
                       files.language \
                FROM files \
@@ -28,15 +28,16 @@ pub fn files(
                ORDER BY files.path";
     collect(connection, sql, &[&library, &item], |row| {
         Ok(FileFacts {
-            role: row.get(0)?,
-            kind: row.get(1)?,
-            container: row.get(2)?,
-            video_codec: row.get(3)?,
-            audio_codec: row.get(4)?,
-            width: row.get(5)?,
-            height: row.get(6)?,
-            size_bytes: row.get(7)?,
-            language: row.get(8)?,
+            path: row.get(0)?,
+            role: row.get(1)?,
+            kind: row.get(2)?,
+            container: row.get(3)?,
+            video_codec: row.get(4)?,
+            audio_codec: row.get(5)?,
+            width: row.get(6)?,
+            height: row.get(7)?,
+            size_bytes: row.get(8)?,
+            language: row.get(9)?,
         })
     })
 }

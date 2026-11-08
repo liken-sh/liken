@@ -449,14 +449,26 @@ type LibraryVolume struct {
 }
 
 // A Player is media-operator's unit of equipment. This operator reads
-// one for its status.idle alone: the block media-operator publishes for the controller it
-// delegated the idle screen to. Nothing here is written back, so the type
-// carries no spec.
+// its status.idle, the block media-operator publishes for the controller it
+// delegated the idle screen to, and the language preferences of its spec,
+// which the browser marks the tracks of a film by. Nothing here is written
+// back.
 type Player struct {
 	APIVersion string       `json:"apiVersion,omitempty"`
 	Kind       string       `json:"kind,omitempty"`
 	Metadata   ObjectMeta   `json:"metadata"`
+	Spec       PlayerSpec   `json:"spec"`
 	Status     PlayerStatus `json:"status"`
+}
+
+// The four preference fields of a Player's spec, media-operator's own
+// names. A nil list, or an empty Subtitles or SDH, is a field this Player
+// does not state, and the household's MediaPreferences answers it.
+type PlayerSpec struct {
+	AudioLanguages    []string `json:"audioLanguages,omitempty"`
+	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
+	Subtitles         string   `json:"subtitles,omitempty"`
+	SDH               string   `json:"sdh,omitempty"`
 }
 
 // The idle block the Player carries, and an empty one for a Player that
@@ -486,9 +498,8 @@ type PlayerList struct {
 // and this operator reads the singleton by this name.
 const mediaPreferencesName = "default"
 
-// The household defaults media-operator owns, read here for one field:
-// the wall-clock zone every screen shows. Nothing is written back, so
-// the type carries that field alone.
+// The household defaults media-operator owns, read here for the fields
+// below. Nothing is written back, so the type carries those fields alone.
 type MediaPreferences struct {
 	APIVersion string               `json:"apiVersion,omitempty"`
 	Kind       string               `json:"kind,omitempty"`
@@ -496,8 +507,9 @@ type MediaPreferences struct {
 	Spec       MediaPreferencesSpec `json:"spec"`
 }
 
-// The three fields of the household defaults this operator reads: the zone,
-// the audio languages, and the subtitle languages.
+// The fields of the household defaults this operator reads: the zone, the
+// audio languages, the subtitle languages, and the two subtitle modes that
+// the browser marks a film's subtitle track by.
 type MediaPreferencesSpec struct {
 	// The household wall-clock zone, an IANA name like America/New_York.
 	// The browser pod reads it as TZ, so its clock and its day's draw
@@ -512,6 +524,13 @@ type MediaPreferencesSpec struct {
 	// first. The mark estimates read the subtitle file of the first one a
 	// video has.
 	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
+
+	// Whether a play shows subtitles: on, auto, or off. sdh is prefer or
+	// avoid, and ranks the SDH tracks of a language over its full tracks
+	// or under them. media-operator's command sidecar chooses the track by
+	// both, and the browser marks the track it will choose.
+	Subtitles string `json:"subtitles,omitempty"`
+	SDH       string `json:"sdh,omitempty"`
 }
 
 // Every MediaPreferences the watch holds, which the pass reads.
@@ -533,14 +552,13 @@ func householdPreferences(list *MediaPreferencesList) *MediaPreferences {
 	return nil
 }
 
-// The household zone the list holds: the default MediaPreferences' own,
-// or nothing where the cluster states none. A pod with no TZ reads UTC,
-// the way media-operator's own pods do.
-func householdZone(list *MediaPreferencesList) string {
+// The household defaults the list holds, or nothing where the cluster
+// states none.
+func householdSpec(list *MediaPreferencesList) *MediaPreferencesSpec {
 	if preferences := householdPreferences(list); preferences != nil {
-		return preferences.Spec.TimeZone
+		return &preferences.Spec
 	}
-	return ""
+	return nil
 }
 
 // The languages the household states, most preferred first, or none where the

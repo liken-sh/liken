@@ -96,6 +96,12 @@ type Job struct {
 	// Skip names the hooks that a prek job leaves out, because another
 	// job of the component runs the same command.
 	Skip []string `toml:"skip"`
+	// Reads names files of other components, relative to the root of
+	// the repository, that the job reads although its toolchain does not
+	// find them, such as a file of test cases that two components'
+	// tests share. A change to one runs the job. It does not release the
+	// component, because no output is built from it.
+	Reads []string `toml:"reads"`
 	// Shards splits a job whose tests take more processor time than
 	// one runner gives in a few minutes. The workflow runs ShardRun in
 	// Shards jobs at once, with SHARD set to the number of each, from
@@ -285,6 +291,9 @@ func LoadComponents(root string) (map[string]*Component, error) {
 	}
 	for _, c := range components {
 		c.Jobs = append(c.Jobs, codeqlJobs(c, owned[c.Name()])...)
+	}
+	if err := validateReads(root, components); err != nil {
+		return nil, err
 	}
 	return components, validateExcluded(root, components)
 }

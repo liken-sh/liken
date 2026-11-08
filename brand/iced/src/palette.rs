@@ -1,6 +1,7 @@
-//! Four of the six color tokens of `liken.css`, in both of its schemes. The
-//! other two, `--panel` and `--rule`, are the fill behind a code block and the
-//! border of a table, which a page has and a canvas does not.
+//! Five of the color tokens of `liken.css`, in both of its schemes. The others,
+//! such as `--panel`, the fill behind a code block, color parts of a page that
+//! a canvas does not have. `--rule` is the border of a table on a page, and a
+//! display draws it under a heading or between the groups of a table.
 //!
 //! `liken.css` is the original. Its `:root` block holds the light scheme, and
 //! the block under the `prefers-color-scheme: dark` query holds the dark one. A
@@ -31,6 +32,8 @@ pub struct Palette {
     /// and the palest on a dark one, so the accent is one color family in both
     /// schemes.
     pub link: Color,
+    /// `--rule`, the color of a thin line that divides a table.
+    pub rule: Color,
 }
 
 static LIGHT: LazyLock<Palette> = LazyLock::new(|| Palette::read(&root_block(&stripped(), 0)));
@@ -62,6 +65,7 @@ impl Palette {
             ink_muted: token(block, "--ink-muted"),
             page: token(block, "--page"),
             link: token(block, "--link"),
+            rule: token(block, "--rule"),
         }
     }
 }

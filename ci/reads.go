@@ -57,6 +57,11 @@ import (
 // it comes from, and a C, C++, or Python one reads no dependency. A
 // pinned dependency is a base image, and only images build on it.
 //
+// A job also reads each file of another component that it names in
+// reads in its package.toml, such as a file of test cases that a Go test
+// and a Rust test share. No toolchain finds such a file through a
+// dependency, so the job names it.
+//
 // A go.mod or a Cargo.toml that cannot be read makes the job read every
 // dependency, so the job runs and fails there.
 
@@ -130,6 +135,9 @@ func (s selector) jobDeps(c *Component, job Job) map[string]bool {
 // jobReads is true when the job reads the changed file. deps is what
 // jobDeps returns for the job.
 func (s selector) jobReads(c *Component, job Job, deps map[string]bool, file string) bool {
+	if slices.Contains(job.Reads, file) {
+		return true
+	}
 	owner := s.components[ownerOf(s.components, file)]
 	if owner == nil {
 		return false

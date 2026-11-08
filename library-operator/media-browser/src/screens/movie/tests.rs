@@ -356,18 +356,55 @@ fn a_page_carries_the_scores_its_body_holds_and_leaves_tmdb_off() {
 }
 
 #[test]
-fn the_foot_names_the_studios_and_the_files_the_movie_holds() {
+fn the_foot_names_the_studios_and_the_files_section_each_video_file() {
     let (page, _) = page(Films::default());
     let rows: Vec<String> = page
         .foot
         .rows()
         .map(|row| row.content.to_string())
         .collect();
+    assert_eq!(rows, ["A Studio, Another Studio"]);
+    let blocks: Vec<(&str, &str)> = page
+        .files
+        .blocks
+        .iter()
+        .map(|block| (block.name.as_str(), block.picture.as_str()))
+        .collect();
+    assert_eq!(blocks, [("1080p", "1920×804 · x265")]);
+}
+
+// The page marks the file the play request's own read resolves to, and in
+// it the tracks the `Player`'s preferences take. The sample's movies hold
+// two encodings, and the sample's household reads English and prefers SDH.
+#[test]
+fn the_page_marks_the_file_and_the_tracks_a_play_takes() {
+    let mut source = crate::sample::Catalog;
+    let page = Movie::open("sample/features", "movie:sample:0001", &mut source)
+        .expect("the sample holds this movie");
+    let marked: Vec<(bool, Vec<Vec<bool>>)> = page
+        .files
+        .blocks
+        .iter()
+        .map(|block| {
+            let rows = block
+                .groups
+                .iter()
+                .map(|group| group.rows.iter().map(|row| row.plays).collect())
+                .collect();
+            (block.plays, rows)
+        })
+        .collect();
     assert_eq!(
-        rows,
+        marked,
         [
-            "A Studio, Another Studio",
-            "1920×804 · x265 · AC3 · 4.2 GB · Subtitles: English",
+            (
+                true,
+                vec![vec![true, false], vec![false, false, false, true]]
+            ),
+            (
+                false,
+                vec![vec![false, false, false], vec![false, false, false, false]]
+            ),
         ]
     );
 }

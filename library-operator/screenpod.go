@@ -175,7 +175,7 @@ func playerOwner(player *Player) OwnerReference {
 // settings alone, so two passes over an unchanged namespace build the same
 // pod, which is what makes the template hash mean anything. The Libraries are
 // read in name order for the same reason.
-func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatalog, browserImage, corrosionImage, topicBase, timeZone string) *Pod {
+func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatalog, browserImage, corrosionImage, topicBase string, household *MediaPreferencesSpec) *Pod {
 	grace := int64(screenGracePeriod)
 	// The browser holds no Kubernetes credential. It reads the catalog
 	// from the agent beside it, and nothing in the pod speaks to the API
@@ -238,7 +238,7 @@ func buildScreenPod(player *Player, libraries []Library, catalog *NamespaceCatal
 				screenProgressSidecar(corrosionImage),
 			},
 			Containers: []Container{
-				browserSidecar(player, shown, catalog, browserImage, topicBase, timeZone),
+				browserSidecar(player, shown, catalog, browserImage, topicBase, household),
 			},
 			Volumes: volumes,
 			// The display claim media-operator stood for this Player.
@@ -320,7 +320,7 @@ func screenProgressSidecar(image string) Container {
 // alone, because it holds no API credential to look one up with. Each library
 // claim is mounted read-only, so the browser cannot write to a media volume
 // whatever it does.
-func browserSidecar(player *Player, libraries []Library, catalog *NamespaceCatalog, image, topicBase, timeZone string) Container {
+func browserSidecar(player *Player, libraries []Library, catalog *NamespaceCatalog, image, topicBase string, household *MediaPreferencesSpec) Container {
 	args := []string{
 		"--catalog", path.Join(catalogStatePath, catalogStateFile),
 		"--updates", defaultCatalogAPI,
@@ -379,8 +379,11 @@ func browserSidecar(player *Player, libraries []Library, catalog *NamespaceCatal
 	// when the household stated a zone, so an unset zone leaves the pod
 	// on UTC, the way media-operator's own pods do. The template hash
 	// rolls the pod when the zone changes.
-	if timeZone != "" {
-		environment = append(environment, EnvVar{Name: timeZoneVariable, Value: timeZone})
+	if household != nil && household.TimeZone != "" {
+		environment = append(environment, EnvVar{Name: timeZoneVariable, Value: household.TimeZone})
+	}
+	if preferences := screenPreferences(player, household); preferences != "" {
+		environment = append(environment, EnvVar{Name: mediaPreferencesVariable, Value: preferences})
 	}
 	// A Player whose status names a bus gets the wiring, and its browser
 	// takes the room's remotes. A Player under an older media-operator
@@ -550,7 +553,7 @@ func (o *operator) reconcileScreens(ctx context.Context, namespace string, catal
 				continue
 			}
 		}
-		desired := buildScreenPod(player, inNamespace, catalog, o.browserImage, o.corrosionImage, o.topicBase, o.timeZone)
+		desired := buildScreenPod(player, inNamespace, catalog, o.browserImage, o.corrosionImage, o.topicBase, o.household)
 		if _, err := o.standPod(ctx, desired); err != nil {
 			fmt.Fprintf(os.Stderr, "standing the screen of %s/%s: %v\n", namespace, name, err)
 		}

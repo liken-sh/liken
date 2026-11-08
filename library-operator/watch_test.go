@@ -115,7 +115,7 @@ func TestEachWatchAnswersThePassWithItsCollection(t *testing.T) {
 		}},
 		{name: "media preferences", want: "Europe/Lisbon", read: func(_ context.Context, watched *watches) (string, error) {
 			list, err := watched.readMediaPreferences()
-			return householdZone(list), err
+			return zoneOf(list), err
 		}},
 		{name: "metadata providers", want: "house/tmdb", read: func(ctx context.Context, watched *watches) (string, error) {
 			list, err := watched.readMetadataProviders(ctx)

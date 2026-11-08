@@ -1,0 +1,213 @@
+{
+  "about": [
+    "The cases of the subtitle rule of plan 90, which two programs apply.",
+    "media-operator's command sidecar chooses the track that mpv shows,",
+    "and library-operator's media browser marks that track on a movie's",
+    "page. subtitletracks_test.go in media-operator and rule.rs in",
+    "library-operator/media-browser both read this file, so a change to",
+    "either rule fails a test until the two agree.",
+    "",
+    "A track is one entry of mpv's track-list. An embedded track gives",
+    "its language tag, its title, and its flags. An external track gives",
+    "the name of its file beside a video named Movie (2024).mkv, and the",
+    "language and flags that mpv reads from that name. events is the",
+    "event count that library-operator records, and an absent count is",
+    "not a count of zero. Each track's mpv id is its position in the list,",
+    "from 1.",
+    "",
+    "The files are from a survey of a home cluster's catalog, reduced to",
+    "the English tracks' flags, titles, and event counts. A case names",
+    "one of them, or lists its own tracks.",
+    "",
+    "want in a choose case is the mpv id of the chosen track, 0 for no",
+    "subtitles, and -1 for a case in which the rule sets nothing and",
+    "mpv's own choice stands."
+  ],
+  "files": {
+    "pluribus": [
+      {"lang": "eng", "title": "Forced", "flags": ["forced", "default"], "events": 4},
+      {"lang": "eng", "events": 569},
+      {"lang": "eng", "title": "SDH", "events": 708}
+    ],
+    "falcon": [
+      {"lang": "eng", "title": "Forced foreign language only", "flags": ["forced", "default"], "events": 14},
+      {"lang": "eng", "title": "English SDH", "events": 622}
+    ],
+    "swarm": [
+      {"lang": "eng", "title": "English Force", "flags": ["forced", "default"], "events": 53},
+      {"lang": "eng", "title": "English", "events": 382}
+    ],
+    "hawkeye": [
+      {"lang": "eng", "flags": ["default"], "events": 22},
+      {"lang": "eng", "events": 0},
+      {"lang": "eng", "events": 1382}
+    ],
+    "genV": [
+      {"lang": "eng", "flags": ["default"], "events": 1288},
+      {"lang": "eng", "events": 0},
+      {"lang": "eng", "events": 1400}
+    ],
+    "horrorStory": [
+      {"lang": "eng", "flags": ["default"], "events": 884},
+      {"lang": "eng", "events": 1058}
+    ],
+    "germanForced": [
+      {"lang": "ger", "title": "Forced", "flags": ["default"]},
+      {"lang": "eng", "title": "English"}
+    ],
+    "bazarr": [
+      {"file": "Movie (2024).en.srt", "lang": "en", "events": 1210},
+      {"file": "Movie (2024).en.hi.srt", "lang": "en", "flags": ["hi"], "events": 1302},
+      {"file": "Movie (2024).eng.forced.srt", "lang": "eng", "flags": ["forced"], "events": 31},
+      {"file": "Movie (2024).eng.0.srt", "events": 1188}
+    ]
+  },
+  "classify": [
+    {"name": "a forced flag, an untitled track, and an SDH title", "file": "pluribus", "roles": ["forced", "full", "sdh"]},
+    {"name": "a forced flag and an SDH title", "file": "falcon", "roles": ["forced", "sdh"]},
+    {"name": "a title with forc in it", "file": "swarm", "roles": ["forced", "full"]},
+    {"name": "a default track with a fifth of the events, and an empty track", "file": "hawkeye", "roles": ["forced", "empty", "full"]},
+    {"name": "a default track with most of the events", "file": "genV", "roles": ["full", "empty", "full"]},
+    {"name": "two full tracks", "file": "horrorStory", "roles": ["full", "full"]},
+    {"name": "a forced title in another language", "file": "germanForced", "roles": ["forced", "full"]},
+    {"name": "external files named the way Bazarr names them", "file": "bazarr", "roles": ["full", "sdh", "forced", "full"]},
+    {
+      "name": "a short track with no count beside it keeps its role",
+      "tracks": [
+        {"lang": "eng", "flags": ["default"], "events": 22},
+        {"lang": "eng"},
+        {"lang": "eng"}
+      ],
+      "roles": ["full", "full", "full"]
+    },
+    {
+      "name": "a title with commentary in it",
+      "tracks": [{"lang": "eng", "title": "Director's Commentary"}, {"lang": "eng"}],
+      "roles": ["commentary", "full"]
+    },
+    {
+      "name": "a hearing-impaired flag and a CC title",
+      "tracks": [{"lang": "eng", "flags": ["hi"]}, {"lang": "eng", "title": "English (CC)"}],
+      "roles": ["sdh", "sdh"]
+    },
+    {
+      "name": "a file name segment that reads sdh, with a number after it",
+      "tracks": [{"file": "Movie (2024).eng.sdh.1.srt"}],
+      "roles": ["sdh"]
+    }
+  ],
+  "fileNames": [
+    {"name": "Movie.en.srt", "language": "en"},
+    {"name": "Movie.en.hi.srt", "language": "en", "sdh": true},
+    {"name": "Movie.eng.forced.srt", "language": "en", "forced": true},
+    {"name": "Movie.eng.0.srt", "language": "en"},
+    {"name": "Movie.eng.sdh.1.srt", "language": "en", "sdh": true},
+    {"name": "Movie.pt-BR.cc.srt", "language": "pt", "sdh": true},
+    {"name": "Movie.srt", "language": ""},
+    {"name": "Movie.2.srt", "language": ""}
+  ],
+  "sameLanguage": [
+    {"a": "en", "b": "eng", "same": true},
+    {"a": "en", "b": "en-US", "same": true},
+    {"a": "eng", "b": "en-GB", "same": true},
+    {"a": "de", "b": "ger", "same": true},
+    {"a": "de", "b": "deu", "same": true},
+    {"a": "fre", "b": "fra", "same": true},
+    {"a": "en", "b": "de", "same": false},
+    {"a": "", "b": "", "same": false},
+    {"a": "und", "b": "und", "same": false}
+  ],
+  "choose": [
+    {"name": "on takes the first full or SDH track, not the forced default", "file": "pluribus", "audio": "eng",
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "on with sdh prefer takes the SDH track", "file": "pluribus", "audio": "eng",
+     "prefs": {"subtitles": "on", "sdh": "prefer", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 3},
+    {"name": "on with sdh avoid takes the full track", "file": "pluribus", "audio": "eng",
+     "prefs": {"subtitles": "on", "sdh": "avoid", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "on takes an SDH track over a forced default", "file": "falcon", "audio": "eng",
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "on with sdh avoid still takes the SDH track when it is the only one", "file": "falcon", "audio": "eng",
+     "prefs": {"subtitles": "on", "sdh": "avoid", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "on takes the full track over a title with forc in it", "file": "swarm", "audio": "eng",
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "on takes the long track over a short default and an empty one", "file": "hawkeye", "audio": "eng",
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 3},
+    {"name": "on takes the default of two full tracks", "file": "genV", "audio": "eng",
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 1},
+    {"name": "on takes the default of two full tracks with no empty one", "file": "horrorStory", "audio": "eng",
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 1},
+    {"name": "on never takes a forced track in another language", "file": "germanForced", "audio": "eng",
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "on takes the first external file in track order", "file": "bazarr", "audio": "eng",
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 1},
+    {"name": "on with sdh prefer takes the hi file", "file": "bazarr", "audio": "eng",
+     "prefs": {"subtitles": "on", "sdh": "prefer", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "auto under audio in the first language takes its forced track", "file": "pluribus", "audio": "eng",
+     "prefs": {"subtitles": "auto", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 1},
+    {"name": "auto under audio in the first language takes the short default", "file": "hawkeye", "audio": "eng",
+     "prefs": {"subtitles": "auto", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 1},
+    {"name": "auto under audio in the first language takes no full track", "file": "horrorStory", "audio": "eng",
+     "prefs": {"subtitles": "auto", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 0},
+    {"name": "auto never takes a forced track in another language", "file": "germanForced", "audio": "eng",
+     "prefs": {"subtitles": "auto", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 0},
+    {"name": "auto under other audio takes a track as on does", "file": "pluribus", "audio": "jpn",
+     "prefs": {"subtitles": "auto", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "auto reads en-US and eng as the same language", "file": "pluribus", "audio": "eng",
+     "prefs": {"subtitles": "auto", "audioLanguages": ["en-US"], "subtitleLanguages": ["en"]}, "want": 1},
+    {"name": "on falls back to the forced track of the audio", "audio": "eng",
+     "tracks": [{"lang": "eng", "title": "Forced", "flags": ["forced"]}, {"lang": "fre"}],
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 1},
+    {"name": "on takes no forced track of audio in a language the household does not hear", "audio": "jpn",
+     "tracks": [{"lang": "jpn", "title": "Forced", "flags": ["forced"]}],
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 0},
+    {"name": "on takes a forced track in a subtitle language under other audio before a commentary track", "audio": "jpn",
+     "tracks": [{"lang": "eng", "title": "Commentary"}, {"lang": "eng", "title": "Forced", "flags": ["forced"]}],
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "on takes a commentary track only when nothing else is in the language", "audio": "jpn",
+     "tracks": [{"lang": "eng", "title": "Commentary"}, {"lang": "fre"}],
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 1},
+    {"name": "on takes the only English track under Korean audio although it is flagged forced", "audio": "kor",
+     "tracks": [{"lang": "eng", "title": "English", "flags": ["forced"]}],
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 1},
+    {"name": "on takes an untagged track when no track is in a subtitle language", "audio": "eng",
+     "tracks": [{"lang": "ger"}, {}],
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "on takes an untagged file with the video's exact name", "audio": "eng",
+     "tracks": [{"file": "Movie (2024).srt"}],
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 1},
+    {"name": "on takes a tagged commentary track after an untagged full track", "audio": "eng",
+     "tracks": [{"lang": "eng", "title": "Commentary"}, {}],
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "on reads an SDH marker from an untagged title", "audio": "eng",
+     "tracks": [{"title": "English."}, {"title": "English(SDH)"}, {"title": "Spanish"}],
+     "prefs": {"subtitles": "on", "sdh": "prefer", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "on keeps a tagged track's own language over a language in its title", "audio": "eng",
+     "tracks": [{"lang": "ger", "title": "English"}, {"lang": "eng"}],
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "auto takes no untagged track under audio in the first language", "audio": "eng",
+     "tracks": [{}],
+     "prefs": {"subtitles": "auto", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 0},
+    {"name": "auto takes an untagged track under other audio", "audio": "jpn",
+     "tracks": [{}],
+     "prefs": {"subtitles": "auto", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 1},
+    {"name": "on takes the forced track of the audio before a commentary track", "audio": "eng",
+     "tracks": [{"lang": "eng", "title": "Commentary"}, {"lang": "eng", "title": "Forced", "flags": ["forced"]}],
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 2},
+    {"name": "on takes a full track in the second language before a commentary track in the first", "audio": "jpn",
+     "tracks": [{"lang": "eng", "title": "Commentary"}, {"lang": "spa"}],
+     "prefs": {"subtitles": "on", "subtitleLanguages": ["en", "es"]}, "want": 2},
+    {"name": "on with no subtitle languages reads the audio languages", "file": "pluribus", "audio": "jpn",
+     "prefs": {"subtitles": "on", "sdh": "prefer", "audioLanguages": ["en"]}, "want": 3},
+    {"name": "auto with no subtitle languages reads the audio languages under other audio", "file": "pluribus", "audio": "jpn",
+     "prefs": {"subtitles": "auto", "audioLanguages": ["en"]}, "want": 2},
+    {"name": "auto with no subtitle languages still takes the forced track of the first audio language", "file": "pluribus", "audio": "eng",
+     "prefs": {"subtitles": "auto", "audioLanguages": ["en"]}, "want": 1},
+    {"name": "on with neither list keeps mpv's choice", "file": "pluribus", "audio": "eng",
+     "prefs": {"subtitles": "on"}, "want": -1},
+    {"name": "auto with neither list keeps mpv's choice", "file": "pluribus", "audio": "eng",
+     "prefs": {"subtitles": "auto"}, "want": -1},
+    {"name": "on never takes an empty track", "audio": "jpn",
+     "tracks": [{"lang": "eng", "events": 0}],
+     "prefs": {"subtitles": "on", "audioLanguages": ["en"], "subtitleLanguages": ["en"]}, "want": 0}
+  ]
+}

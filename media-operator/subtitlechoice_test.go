@@ -76,18 +76,18 @@ func presentationWith(t *testing.T, file surveyFile) string {
 // the long track wins.
 func TestEachLoadedFileGetsTheSubtitleTrackOfItsOwnCounts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mpv, lines := subtitleMPV(t, english(subtitlesOn, ""), emptyPresentation, presentationWith(t, hawkeye))
+		mpv, lines := subtitleMPV(t, english(subtitlesOn, ""), emptyPresentation, presentationWith(t, survey(t, "hawkeye")))
 		// The sidecar reads mpv's position when it connects, and mpv has no
 		// file open yet.
 		answerQuery(t, mpv, lines, "playlist-pos", -1)
 		mustNoLine(t, lines)
 
 		writeEvent(t, mpv, `{"event":"file-loaded"}`)
-		loadedFile(t, mpv, lines, 0, hawkeye)
+		loadedFile(t, mpv, lines, 0, survey(t, "hawkeye"))
 		mustSetSid(t, mpv, lines, 1)
 
 		writeEvent(t, mpv, `{"event":"file-loaded"}`)
-		loadedFile(t, mpv, lines, 1, hawkeye)
+		loadedFile(t, mpv, lines, 1, survey(t, "hawkeye"))
 		mustSetSid(t, mpv, lines, 3)
 	})
 }
@@ -98,9 +98,9 @@ func TestEachLoadedFileGetsTheSubtitleTrackOfItsOwnCounts(t *testing.T) {
 func TestAFileOpenWhenTheSidecarConnectsGetsItsSubtitleTrack(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		log := &logBuffer{}
-		mpv, lines := subtitleMPVLogging(t, log, english(subtitlesOn, ""), presentationWith(t, pluribus))
+		mpv, lines := subtitleMPVLogging(t, log, english(subtitlesOn, ""), presentationWith(t, survey(t, "pluribus")))
 
-		loadedFile(t, mpv, lines, 0, pluribus)
+		loadedFile(t, mpv, lines, 0, survey(t, "pluribus"))
 		mustSetSid(t, mpv, lines, 2)
 		synctest.Wait()
 
@@ -116,9 +116,9 @@ func TestAFileOpenWhenTheSidecarConnectsGetsItsSubtitleTrack(t *testing.T) {
 // subtitles, so the sidecar sets sid to no.
 func TestAFileWithNoTrackToShowGetsNoSubtitles(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mpv, lines := subtitleMPV(t, english(subtitlesAuto, ""), presentationWith(t, horrorStory))
+		mpv, lines := subtitleMPV(t, english(subtitlesAuto, ""), presentationWith(t, survey(t, "horrorStory")))
 
-		loadedFile(t, mpv, lines, 0, horrorStory)
+		loadedFile(t, mpv, lines, 0, survey(t, "horrorStory"))
 		mustSetSid(t, mpv, lines, "no")
 	})
 }
@@ -127,8 +127,8 @@ func TestAFileWithNoTrackToShowGetsNoSubtitles(t *testing.T) {
 // selects by hand stays until the next file.
 func TestATrackAPersonSelectsStays(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		mpv, lines := subtitleMPV(t, english(subtitlesOn, ""), presentationWith(t, pluribus))
-		loadedFile(t, mpv, lines, 0, pluribus)
+		mpv, lines := subtitleMPV(t, english(subtitlesOn, ""), presentationWith(t, survey(t, "pluribus")))
+		loadedFile(t, mpv, lines, 0, survey(t, "pluribus"))
 		mustSetSid(t, mpv, lines, 2)
 
 		writeEvent(t, mpv, `{"event":"property-change","id":6,"name":"current-tracks/sub/lang","data":"ger"}`)
@@ -141,9 +141,9 @@ func TestATrackAPersonSelectsStays(t *testing.T) {
 func TestNoLanguageKeepsMpvsChoice(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		log := &logBuffer{}
-		mpv, lines := subtitleMPVLogging(t, log, subtitlePreferences{Subtitles: subtitlesOn}, presentationWith(t, pluribus))
+		mpv, lines := subtitleMPVLogging(t, log, subtitlePreferences{Subtitles: subtitlesOn}, presentationWith(t, survey(t, "pluribus")))
 
-		loadedFile(t, mpv, lines, 0, pluribus)
+		loadedFile(t, mpv, lines, 0, survey(t, "pluribus"))
 		mustNoLine(t, lines)
 
 		mustMatchAll(t, log.lines(), []string{

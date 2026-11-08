@@ -295,7 +295,10 @@ fn a_select_on_a_sample_movie_resolves_its_invented_file() {
         },
     );
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].path, "Specimen 0001/Specimen 0001.mkv");
+    assert_eq!(
+        items[0].path,
+        "Specimen 0001/Specimen 0001 [Bluray-1080p].mkv"
+    );
     assert_eq!(items[0].slug, "specimen-0001");
     assert_eq!(items[0].presentation.title, "Specimen 0001");
     assert_eq!(

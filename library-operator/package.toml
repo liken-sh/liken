@@ -38,6 +38,10 @@ timeout = 45
 env = { CARGO_INCREMENTAL = "0", WLR_RENDERER = "pixman" }
 apt = ["cage", "wlr-randr", "mesa-vulkan-drivers", "libvulkan1", "libwayland-client0", "libxkbcommon0"]
 coverage = ["coverage-media-browser.xml"]
+# The browser marks the subtitle track a play will show with the rule
+# that media-operator's command sidecar applies. Both programs' tests read
+# the rule's cases from this one file, so a change to it runs both.
+reads = ["media-operator/testdata/subtitle-rule.json"]
 
 # `appearances`, the tool that finds the credited people on screen. Its
 # unit tests load no model, so the job needs no OpenVINO and no GPU.

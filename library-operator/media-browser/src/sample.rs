@@ -5,18 +5,23 @@
 use crate::art::{Art, Image};
 use crate::catalog::franchise;
 use crate::catalog::recency::{self, Candidate};
+use crate::catalog::stream::Tracks;
 use crate::catalog::{
     Answer, Change, Credit, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry,
     LibraryEntry, Membership, MovieDetails, MovieSet, Person, PlayItem, Presentation, Query,
     Selection, SeriesDetails, Slot, Sort, Source, TILES, Title, library_name, pool,
 };
 use crate::harness::Waker;
+use crate::tracks::Preferences;
 
 // The invented people of the sample catalog.
 pub mod people;
 
 // The invented genres and the invented pool the day's draw reads.
 mod draw;
+
+// The invented files of a movie and the streams in each.
+mod files;
 
 // The invented franchises: the two orders the strip and the franchise
 // page draw.
@@ -269,34 +274,23 @@ impl Source for Catalog {
         people::credits(id)
     }
 
-    // The invented files of one title: the video the page draws a line
-    // for, and two subtitle files beside it.
+    // The invented files of one title. See `files.rs`. An episode's files
+    // take the movie of the same number's names, which no page shows.
     fn files(&mut self, _library: &str, item: &str) -> Vec<FileFacts> {
         let number = trailing(item);
         if number == 0 {
             return Vec::new();
         }
-        let mut files = vec![FileFacts {
-            role: "primary".into(),
-            kind: "video".into(),
-            container: "mkv".into(),
-            video_codec: "x265".into(),
-            audio_codec: "AC3".into(),
-            width: 1_920,
-            height: 804,
-            size_bytes: 4_200_000_000 + number * 1_000_000,
-            language: String::new(),
-        }];
-        for language in ["en", "fr"] {
-            files.push(FileFacts {
-                role: "subtitle".into(),
-                kind: "subtitle".into(),
-                container: "srt".into(),
-                language: language.into(),
-                ..FileFacts::default()
-            });
-        }
-        files
+        files::files(&movie(number).title, number)
+    }
+
+    fn tracks(&mut self, _library: &str, path: &str) -> Tracks {
+        let title = path.split('/').next().unwrap_or_default();
+        files::tracks(title, path)
+    }
+
+    fn preferences(&self) -> Preferences {
+        files::preferences()
     }
 
     fn person(&mut self, library: &str, path: &str) -> Option<Person> {
@@ -319,7 +313,7 @@ impl Source for Catalog {
         }
         let title = movie(number);
         vec![PlayItem {
-            path: format!("{}/{}.mkv", title.title, title.title),
+            path: files::played(&title.title),
             slug: format!("specimen-{number:04}"),
             presentation: Presentation {
                 kind: "video".into(),

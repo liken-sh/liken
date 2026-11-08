@@ -66,6 +66,17 @@ only as "a character":
 When the default `MediaPreferences` states `spec.timeZone`, the
 browser draws its clock in that zone. Otherwise it runs on UTC.
 
+The operator also gives the browser the `Player`'s language
+preferences: `audioLanguages`, `subtitleLanguages`, `subtitles`, and
+`sdh`, each from the `Player` where the `Player` states it and from the
+default `MediaPreferences` where it does not. That is the order in which
+`media-operator` resolves them for a `Play`. The browser reads them from
+the variable `LIBRARY_MEDIA_PREFERENCES` and marks the tracks a play
+takes on a movie's page (section 5). A change to them replaces the pod.
+
+    kubectl -n media get pod living-room-media-browser \
+      -o jsonpath='{.spec.containers[?(@.name=="browser")].env[?(@.name=="LIBRARY_MEDIA_PREFERENCES")].value}'
+
 ## 3. How presses reach it
 
 The `Player`'s `status.idle.bus` names the bus topics for the
@@ -218,6 +229,32 @@ playback row puts focus on the first mark, left and right move between
 the marks, and up returns to the playback row. Down from the marks
 moves on to the set strip, the franchise strips, or the cast. While a
 mark has focus, the bar is twice as tall and the status is brighter.
+
+The end of a movie's page names the studios, and then the Files
+section shows each video file of the film, so you can see which copy a
+play takes and what it plays with. A film with two copies, such as a
+4K remux and a 1080p encode, shows them side by side. Each file shows a
+short name, its quality tag from the file name, such as `Bluray-1080p`,
+or its resolution, such as `4K`, and its size. Under the name are the
+frame, the codec, the dynamic range, and the frame rate, then a row for
+each sound track and each subtitle track. A subtitle row counts the
+track's lines and names its role: `SDH`, `forced`, or `commentary`. The
+subtitle files beside the video that mpv loads are rows too, and a track
+with no lines is left out.
+
+A dot marks the file a play takes, and in it the sound track and the
+subtitle track the play takes. The file is the first video file of the
+film by path, the same one the play request names. The sound track is
+the first in the order of the `Player`'s `audioLanguages`, by the
+default flag among tracks of one language. The subtitle track is the
+one `media-operator` chooses by role, under `subtitles: on` or `auto`,
+as
+[How the subtitle track is chosen](https://liken.sh/media/docs/reference/mediapreferences/#how-the-subtitle-track-is-chosen)
+describes.
+With `subtitles: off`, or with no mode stated, no subtitle row has a dot.
+A `Play` that states its own preferences can take other tracks than the
+page marks, because the page reads the `Player`'s preferences before any
+`Play` exists.
 
 A series' page shows its seasons as a wall of episode stills. Enter on
 a still opens the episode's own row in the header, level with the

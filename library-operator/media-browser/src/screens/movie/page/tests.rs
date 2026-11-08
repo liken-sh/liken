@@ -2,11 +2,13 @@
 // page has scrolled to hold the block that has focus.
 
 use super::*;
+use crate::catalog::stream::{Stream, Tracks};
 use crate::catalog::{CreditSlot, Credits, FileFacts, Progress};
-use crate::screens::foot;
 use crate::screens::movie::Set;
 use crate::screens::stripes::Stripes;
 use crate::screens::{Item, facts};
+use crate::screens::{files, foot};
+use crate::tracks::Preferences;
 
 const WIDTH: f32 = 1920.0;
 const HEIGHT: f32 = 1080.0;
@@ -63,18 +65,30 @@ fn crowded(focus: Focus) -> Movie {
         tagline: "One line of it, and a few more words after that.".into(),
         plot: "word ".repeat(120),
         stripes: stripes(),
-        foot: foot::Foot::of(
-            &["A Studio".to_string()],
-            &[FileFacts {
-                role: "primary".into(),
-                kind: "video".into(),
-                video_codec: "x265".into(),
-                audio_codec: "AC3".into(),
-                width: 1_920,
-                height: 804,
-                size_bytes: 4_200_000_000,
-                ..FileFacts::default()
-            }],
+        foot: foot::Foot::of(&["A Studio".to_string()], &[]),
+        files: files::Files::of(
+            &[(
+                FileFacts {
+                    path: "One/One.mkv".into(),
+                    role: "primary".into(),
+                    kind: "video".into(),
+                    width: 1_920,
+                    height: 804,
+                    size_bytes: 4_200_000_000,
+                    ..FileFacts::default()
+                },
+                Tracks {
+                    streams: vec![Stream {
+                        kind: "audio".into(),
+                        codec: "ac3".into(),
+                        language: "eng".into(),
+                        ..Stream::default()
+                    }],
+                    beside: Vec::new(),
+                },
+            )],
+            Some("One/One.mkv"),
+            &Preferences::default(),
         ),
         progress: None,
         via: None,
@@ -225,9 +239,11 @@ fn a_movie_that_credits_nobody_and_holds_no_file_ends_at_its_strip() {
     let mut movie = crowded(Focus::Buttons(0));
     movie.stripes = Stripes::default();
     movie.foot = foot::Foot::default();
+    movie.files = files::Files::default();
     let blocks = blocks(&movie);
     assert!(blocks.stripes.is_empty());
     assert_eq!(blocks.foot.height, 0.0);
+    assert_eq!(blocks.files.height, 0.0);
     assert_eq!(
         blocks.content,
         blocks.strip.expect("the crowded page holds a set").bottom()
@@ -244,6 +260,22 @@ fn the_foot_follows_the_last_stripe_and_keeps_the_page_s_foot_margin() {
         blocks.foot.height,
         movie.foot.height(screen::region(FRAME).width)
     );
+}
+
+#[test]
+fn the_files_section_follows_the_studios_and_ends_the_page() {
+    let movie = crowded(Focus::Buttons(0));
+    let blocks = blocks(&movie);
+    assert_eq!(blocks.files.top, blocks.foot.bottom() + GAP + FILES_LEAD);
+    assert_eq!(blocks.files.height, movie.files.height());
+    assert_eq!(blocks.content, blocks.files.bottom() + FOOT);
+}
+
+#[test]
+fn a_movie_with_studios_and_no_file_ends_at_its_studios() {
+    let mut movie = crowded(Focus::Buttons(0));
+    movie.files = files::Files::default();
+    let blocks = blocks(&movie);
     assert_eq!(blocks.content, blocks.foot.bottom() + FOOT);
 }
 

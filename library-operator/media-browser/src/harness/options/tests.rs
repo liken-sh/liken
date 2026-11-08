@@ -216,6 +216,16 @@ fn this_operator_names_all_three_of_its_topics() {
 }
 
 #[test]
+fn the_operator_names_the_player_s_preferences() {
+    let options = environment(&[(
+        crate::tracks::preferences::VARIABLE,
+        r#"{"subtitleLanguages":["en"],"subtitles":"on"}"#,
+    )]);
+    assert_eq!(options.preferences.subtitle_languages, ["en"]);
+    assert!(options.preferences.chooses_subtitles());
+}
+
+#[test]
 fn the_operator_arms_the_watchdog() {
     let options = environment(&[(WINDOW_GRACE, "15")]);
     assert_eq!(options.window_grace, Some(Duration::from_secs(15)));

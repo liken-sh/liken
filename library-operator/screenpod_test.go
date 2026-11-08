@@ -52,7 +52,7 @@ func houseLibraries() []Library {
 
 func testScreenPod(player *Player, libraries []Library) *Pod {
 	return buildScreenPod(player, libraries, testNamespaceCatalog(),
-		testBrowserImage, testCorrosionImage, defaultTopicBase, "")
+		testBrowserImage, testCorrosionImage, defaultTopicBase, nil)
 }
 
 // The pod's name, namespace, owner, and marks are what tie it to the
@@ -223,7 +223,7 @@ func TestScreenPodArtCacheIsAClaimUnderACatalog(t *testing.T) {
 	for _, one := range cases {
 		t.Run(one.name, func(t *testing.T) {
 			pod := buildScreenPod(denScreen(), houseLibraries(), one.catalog,
-				testBrowserImage, testCorrosionImage, defaultTopicBase, "")
+				testBrowserImage, testCorrosionImage, defaultTopicBase, nil)
 
 			got := serializedVolume(t, artCacheVolume(t, pod.Spec.Volumes))
 			if got != one.want {
@@ -254,7 +254,7 @@ func TestScreenPodTellsTheBrowserTheCacheBudget(t *testing.T) {
 			catalog := testNamespaceCatalog()
 			catalog.Spec.Screens.ArtCache.Size = one.size
 			pod := buildScreenPod(denScreen(), nil, catalog,
-				testBrowserImage, testCorrosionImage, defaultTopicBase, "")
+				testBrowserImage, testCorrosionImage, defaultTopicBase, nil)
 
 			args := strings.Join(pod.Spec.Containers[0].Args, " ")
 			if one.want == "" {
@@ -274,7 +274,7 @@ func TestScreenPodTellsTheBrowserTheCacheBudget(t *testing.T) {
 // so the browser keeps its own default.
 func TestScreenPodOnTheEmptyDirTellsTheBrowserNoBudget(t *testing.T) {
 	pod := buildScreenPod(denScreen(), nil, nil,
-		testBrowserImage, testCorrosionImage, defaultTopicBase, "")
+		testBrowserImage, testCorrosionImage, defaultTopicBase, nil)
 
 	if args := strings.Join(pod.Spec.Containers[0].Args, " "); strings.Contains(args, "--cache-budget") {
 		t.Errorf("args = %q, want no budget on an emptyDir", args)
@@ -953,7 +953,7 @@ func TestPassStampsTheHouseholdZoneOnTheScreen(t *testing.T) {
 // none leaves the variable out, and the pod reads UTC.
 func TestScreenPodCarriesTheHouseholdZoneAsTZ(t *testing.T) {
 	pod := buildScreenPod(denScreen(), houseLibraries(), testNamespaceCatalog(),
-		testBrowserImage, testCorrosionImage, defaultTopicBase, "America/New_York")
+		testBrowserImage, testCorrosionImage, defaultTopicBase, &MediaPreferencesSpec{TimeZone: "America/New_York"})
 	environment := map[string]string{}
 	for _, variable := range pod.Spec.Containers[0].Env {
 		environment[variable.Name] = variable.Value

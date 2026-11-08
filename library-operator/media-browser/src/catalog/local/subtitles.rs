@@ -43,7 +43,11 @@ pub fn subtitles(
 // read is a range of the primary key, every path under the folder, and the
 // files of a deeper folder are left out after it, because mpv reads only the
 // video's own folder.
-fn beside(connection: &Connection, library: &str, path: &str) -> rusqlite::Result<Vec<Subtitle>> {
+pub(super) fn beside(
+    connection: &Connection,
+    library: &str,
+    path: &str,
+) -> rusqlite::Result<Vec<Subtitle>> {
     let (folder, video) = match path.rsplit_once('/') {
         Some((folder, video)) => (format!("{folder}/"), video),
         None => (String::new(), path),

@@ -17,12 +17,13 @@ fn hex(color: iced_widget::core::Color) -> String {
     )
 }
 
-fn tokens(palette: &Palette) -> [String; 4] {
+fn tokens(palette: &Palette) -> [String; 5] {
     [
         hex(palette.ink),
         hex(palette.ink_muted),
         hex(palette.page),
         hex(palette.link),
+        hex(palette.rule),
     ]
 }
 
@@ -30,7 +31,7 @@ fn tokens(palette: &Palette) -> [String; 4] {
 fn the_light_scheme_is_the_root_block() {
     assert_eq!(
         tokens(palette::light()),
-        ["#1a1a1a", "#555555", "#ffffff", "#4a5d3a"]
+        ["#1a1a1a", "#555555", "#ffffff", "#4a5d3a", "#cccccc"]
     );
 }
 
@@ -38,7 +39,7 @@ fn the_light_scheme_is_the_root_block() {
 fn the_dark_scheme_is_the_block_under_the_query() {
     assert_eq!(
         tokens(palette::dark()),
-        ["#e8e8e8", "#a0a6ad", "#16181c", "#b4c49a"]
+        ["#e8e8e8", "#a0a6ad", "#16181c", "#b4c49a", "#333940"]
     );
 }
 

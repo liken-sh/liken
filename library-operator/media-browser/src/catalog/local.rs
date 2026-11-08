@@ -13,6 +13,7 @@ use rusqlite::{Connection, OpenFlags, Row};
 use crate::catalog::franchise;
 use crate::catalog::pool::Candidate;
 use crate::catalog::recency::DRAWN;
+use crate::catalog::stream::Tracks;
 use crate::catalog::{
     Answer, Change, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, Identity,
     LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Progress, Query,
@@ -20,6 +21,7 @@ use crate::catalog::{
     library_name, recency,
 };
 use crate::harness::Waker;
+use crate::tracks::Preferences;
 
 mod details;
 mod files;
@@ -35,6 +37,7 @@ mod recent;
 mod search;
 mod seen;
 mod series;
+mod streams;
 mod subtitles;
 mod touched;
 mod updates;
@@ -58,6 +61,9 @@ pub struct LocalCatalog {
     streams: bool,
     // The last answer of the progress read. See `seen.rs`.
     kept: Option<seen::Kept>,
+    // The language preferences of the `Player` this browser runs for,
+    // which library-operator writes into the environment.
+    preferences: Preferences,
 }
 
 type PersonEntries = Arc<Vec<(String, String)>>;
@@ -96,7 +102,15 @@ impl LocalCatalog {
             page_reads: None,
             streams: true,
             kept: None,
+            preferences: Preferences::default(),
         }
+    }
+
+    /// The same source with the `Player`'s language preferences, which a
+    /// movie's page marks the tracks of a play by.
+    pub fn with_preferences(mut self, preferences: Preferences) -> Self {
+        self.preferences = preferences;
+        self
     }
 
     /// The same source with the progress store beside the catalog.
@@ -555,6 +569,18 @@ impl Source for LocalCatalog {
         self.read(|connection| files::files(connection, library, item))
     }
 
+    fn tracks(&mut self, library: &str, path: &str) -> Tracks {
+        self.read(|connection| {
+            streams::tracks(connection, library, path).map(|tracks| vec![tracks])
+        })
+        .pop()
+        .unwrap_or_default()
+    }
+
+    fn preferences(&self) -> Preferences {
+        self.preferences.clone()
+    }
+
     fn person(&mut self, library: &str, path: &str) -> Option<Person> {
         let person = self
             .read(|connection| people::local_person(connection, library, path))
@@ -629,8 +655,8 @@ impl Source for LocalCatalog {
 
     // The second source over the same file: its own read-only connection,
     // opened on its first read, and no claim on the streams.
-    // It attaches the same progress store, so a read off the reader thread
-    // answers what the first source answers.
+    // It attaches the same progress store and carries the same preferences,
+    // so a read off the reader thread answers what the first source answers.
     fn reader(&mut self) -> Option<Box<dyn Source + Send>> {
         Some(Box::new(Self {
             database: self.database.clone(),
@@ -641,6 +667,7 @@ impl Source for LocalCatalog {
             page_reads: None,
             streams: false,
             kept: None,
+            preferences: self.preferences.clone(),
         }))
     }
 }

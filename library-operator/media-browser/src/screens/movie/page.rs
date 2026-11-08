@@ -56,6 +56,10 @@ const FOOT: f32 = 36.0;
 // between two blocks, so each stands clear of the block over it.
 const STRIPE_LEAD: f32 = 16.0;
 
+// The extra space over the files section, so its heading starts a part of
+// the page of its own under the studios.
+const FILES_LEAD: f32 = 40.0;
+
 /// The box the movie's logo draws in at these bounds, scroll included,
 /// which is where the loading state starts the logo's move.
 pub fn head(movie: &Movie, bounds: Rectangle) -> Rectangle {
@@ -293,6 +297,13 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             row.at(scroll).faced(self.faces).draw(&mut frame, store);
         }
 
+        super::super::files::draw(
+            &mut frame,
+            &movie.files,
+            Point::new(region.x, blocks.files.top - offset),
+            region.width,
+        );
+
         let mut at = Point::new(region.x, blocks.foot.top - offset);
         let width = region.width;
         for row in movie.foot.rows() {
@@ -356,6 +367,7 @@ pub(super) struct Blocks {
     franchises: Vec<Block>,
     stripes: Vec<Block>,
     foot: Block,
+    files: Block,
     content: f32,
 }
 
@@ -411,15 +423,17 @@ impl Blocks {
             .collect();
 
         let foot = place(STRIPE_LEAD, movie.foot.height(region.width));
+        let files = place(FILES_LEAD, movie.files.height());
         let last = stripes
             .last()
             .or(franchises.last())
             .copied()
             .or(strip)
             .unwrap_or(buttons);
-        let content = match foot.height > 0.0 {
-            true => foot.bottom() + FOOT,
-            false => match stripes.is_empty() && franchises.is_empty() {
+        let end = [files, foot].into_iter().find(|block| block.height > 0.0);
+        let content = match end {
+            Some(block) => block.bottom() + FOOT,
+            None => match stripes.is_empty() && franchises.is_empty() {
                 true => last.bottom(),
                 false => last.bottom() + FOOT,
             },
@@ -435,6 +449,7 @@ impl Blocks {
             franchises,
             stripes,
             foot,
+            files,
             content,
         }
     }

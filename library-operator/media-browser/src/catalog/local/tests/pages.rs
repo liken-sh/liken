@@ -142,11 +142,13 @@ fn a_title_reads_the_files_it_holds_with_their_technical_columns() {
         files,
         [
             FileFacts {
+                path: "Film one/film.en.srt".into(),
                 role: "subtitle".into(),
                 kind: "subtitle".into(),
                 ..FileFacts::default()
             },
             FileFacts {
+                path: "Film one/film.mkv".into(),
                 role: "primary".into(),
                 kind: "video".into(),
                 container: "mkv".into(),
@@ -155,7 +157,7 @@ fn a_title_reads_the_files_it_holds_with_their_technical_columns() {
                 width: 1_920,
                 height: 804,
                 size_bytes: 4_200_000_000,
-                language: String::new(),
+                ..FileFacts::default()
             },
         ]
     );
