@@ -64,7 +64,10 @@ fn build() -> Index {
         builder.add(named(slot, Kind::Collection, Where::Title));
     }
 
-    for (path, name) in contributors() {
+    let careers = super::careers::ALL
+        .iter()
+        .map(|name| (format!(".contributors/{name}"), name.to_string()));
+    for (path, name) in contributors().into_iter().chain(careers) {
         builder.person(Person {
             library: FEATURES.into(),
             path,

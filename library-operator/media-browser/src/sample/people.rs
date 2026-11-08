@@ -1,7 +1,7 @@
 // The invented people of the sample catalog: the stripes of a title, one
 // person's page, and the wall of what they are credited in.
 
-use super::{movie, trailing};
+use super::{careers, movie, trailing};
 use crate::catalog::{CreditSlot, Credits, Person, Slot};
 
 // The directory every invented person's entry sits under, the way a
@@ -47,15 +47,21 @@ pub fn credits(id: &str) -> Credits {
     }
 }
 
-// Every invented person has an entry, both files, and the same dates.
+// Every invented person has an entry and both files. The people of the
+// invented careers carry their own dates, and everyone else the same
+// ones.
 pub fn person(library: &str, path: &str) -> Option<Person> {
     let name = path.strip_prefix(CONTRIBUTORS)?;
+    let (born, died) = match careers::career(path) {
+        Some(career) => careers::lived(career),
+        None => ("1950-01-02", ""),
+    };
     Some(Person {
         library: library.to_string(),
         path: path.to_string(),
         name: name.to_string(),
-        born: "1950-01-02".into(),
-        died: String::new(),
+        born: born.into(),
+        died: died.into(),
         biography: true,
         headshot: true,
         biography_library: library.to_string(),
@@ -71,10 +77,14 @@ pub fn person(library: &str, path: &str) -> Option<Person> {
 /// has one person over the floor.
 /// The slots carry the duration and the rating, as the local catalog's works
 /// read does, so a card under a one-role heading draws the facts line
-/// every other strip draws.
+/// every other strip draws. A person of an invented career holds that
+/// career instead.
 pub fn works(library: &str, path: &str) -> Vec<Slot> {
     if !path.starts_with(CONTRIBUTORS) {
         return Vec::new();
+    }
+    if let Some(career) = careers::career(path) {
+        return careers::works(career);
     }
     let (count, parts) = match path == PROLIFIC {
         true => (PROLIFIC_WORKS, "Writer"),

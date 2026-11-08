@@ -17,6 +17,9 @@ use crate::tracks::Preferences;
 // The invented people of the sample catalog.
 pub mod people;
 
+// The invented careers, one for each state of a person's page.
+pub mod careers;
+
 // The invented genres and the invented pool the day's draw reads.
 mod draw;
 
@@ -295,6 +298,16 @@ impl Source for Catalog {
 
     fn person(&mut self, library: &str, path: &str) -> Option<Person> {
         people::person(library, path)
+    }
+
+    // The films of the invented careers are the only works the sample
+    // states a reach for, so a person's page draws every seen state on a
+    // run with no catalog and every other poster draws none.
+    fn film_reach(
+        &mut self,
+        people: &[String],
+    ) -> std::collections::HashMap<crate::catalog::Work, crate::catalog::Reach> {
+        careers::reach(people)
     }
 
     // The invented main file of one movie, so a select on Play enters
