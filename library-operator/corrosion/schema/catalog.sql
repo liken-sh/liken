@@ -251,6 +251,11 @@ CREATE TABLE files (
     intro_chapter_start_ms INTEGER NOT NULL DEFAULT 0,
     intro_chapter_end_ms INTEGER NOT NULL DEFAULT 0,
     dialogue TEXT NOT NULL DEFAULT '',
+    -- On a text subtitle file, events is how many timed cues the file
+    -- holds, from the probe ledger. It is null on every other file and on a
+    -- subtitle file the probe has not counted, because no count is not a
+    -- count of zero. The streams table holds the count of an embedded track.
+    events INTEGER,
     PRIMARY KEY (library, path)
 );
 
@@ -269,6 +274,14 @@ CREATE INDEX files_library_arrived ON files (library, arrived);
 -- their defaults. codec and profile are ffprobe's own names. depth is bits
 -- per sample. The three color columns and dolby_vision are the raw facts a
 -- reader derives HDR from; the table stores no hdr column of its own.
+--
+-- events is how many events a subtitle stream holds, from the
+-- NUMBER_OF_FRAMES statistics tag that mkvmerge writes into the header.
+-- media-operator reads it to tell a forced track from a full one. It is
+-- null on every other kind and on a subtitle stream with no such tag, and
+-- the column takes a null because a track with no count is unknown, not
+-- empty. The columns after present came later, and Corrosion adds a column
+-- to a table that exists at its end, so a new column always goes last here.
 --
 -- Every read of a file's streams leads with the library and the path, which
 -- the primary key covers, so the table carries no index of its own.
@@ -296,6 +309,7 @@ CREATE TABLE streams (
     is_default INTEGER NOT NULL DEFAULT 0,
     forced INTEGER NOT NULL DEFAULT 0,
     present INTEGER NOT NULL DEFAULT 1,
+    events INTEGER,
     PRIMARY KEY (library, path, ordinal)
 );
 

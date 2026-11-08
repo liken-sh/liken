@@ -19,6 +19,7 @@ missing default is not an error, and resolution skips the tier.
       audioLanguages: [ja, en]
       subtitleLanguages: [en]
       subtitles: auto
+      sdh: prefer
       timeZone: America/New_York
       idle:
         fadeAfterSeconds: 600

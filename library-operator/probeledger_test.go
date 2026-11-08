@@ -28,6 +28,7 @@ func TestTheRecordHoldsEveryStreamOfAFileFFprobeOpened(t *testing.T) {
 			want: probedFile{
 				Duration: 8673.123,
 				Bitrate:  6200321,
+				Counted:  true,
 				Streams: []probedStream{
 					{
 						Kind: fileTypeVideo, Codec: "h264", Profile: "High",
@@ -40,7 +41,7 @@ func TestTheRecordHoldsEveryStreamOfAFileFFprobeOpened(t *testing.T) {
 						SampleRate: 48000, Bitrate: 448000, Language: "eng",
 						Title: "Surround AC3 5.1", Default: true,
 					},
-					{Kind: fileTypeSubtitle, Codec: "subrip", Bitrate: 31, Language: "eng", Title: "English"},
+					{Kind: fileTypeSubtitle, Codec: "subrip", Bitrate: 31, Language: "eng", Title: "English", Events: count(1042)},
 				},
 			},
 		},
@@ -50,6 +51,7 @@ func TestTheRecordHoldsEveryStreamOfAFileFFprobeOpened(t *testing.T) {
 			want: probedFile{
 				Duration: 8462.752,
 				Bitrate:  19535025,
+				Counted:  true,
 				Streams: []probedStream{
 					{
 						Kind: fileTypeVideo, Codec: "hevc", Profile: "Main 10",
@@ -62,8 +64,8 @@ func TestTheRecordHoldsEveryStreamOfAFileFFprobeOpened(t *testing.T) {
 						Channels: 6, Layout: "5.1(side)", SampleRate: 48000, Bitrate: 768000,
 						Language: "eng", Default: true,
 					},
-					{Kind: fileTypeSubtitle, Codec: "subrip", Bitrate: 86, Language: "eng", Title: "English [SDH]"},
-					{Kind: fileTypeSubtitle, Codec: "subrip", Bitrate: 115, Language: "ara", Title: "Arabic"},
+					{Kind: fileTypeSubtitle, Codec: "subrip", Bitrate: 86, Language: "eng", Title: "English [SDH]", Events: count(2340)},
+					{Kind: fileTypeSubtitle, Codec: "subrip", Bitrate: 115, Language: "ara", Title: "Arabic", Events: count(2016)},
 				},
 			},
 		},
@@ -73,6 +75,7 @@ func TestTheRecordHoldsEveryStreamOfAFileFFprobeOpened(t *testing.T) {
 			want: probedFile{
 				Duration: 178.7882,
 				Bitrate:  323145,
+				Counted:  true,
 				Streams: []probedStream{
 					{
 						Kind: fileTypeAudio, Codec: "mp3", Channels: 2, Layout: "stereo",

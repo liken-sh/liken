@@ -61,6 +61,12 @@ func (l *probeLedgers) of(dir string) (folderProbes, error) {
 // zero, which opens the probe gap whatever the modified time says, and the
 // length is zero until the probe measures the new file, which holds the
 // phases that need the length until then.
+//
+// A record that holds a subtitle track and predates the event counts fills
+// every column and stream row as a current record does, because what it holds
+// is still true of the file. Its probed column is zero, which opens the probe
+// gap, and settleFacts drops its found attempt, so the next probe run reads
+// the file's headers again and records the counts.
 func (p folderProbes) fill(row *fileRow, entry, absolute string, identities fileIdentities) []streamRow {
 	record, held := p[entry]
 	if !held {
@@ -80,6 +86,9 @@ func (p folderProbes) fill(row *fileRow, entry, absolute string, identities file
 	if record.Modified != row.Modified {
 		return nil
 	}
+	if identity.uncounted {
+		row.Probed = 0
+	}
 	row.Bitrate = record.Bitrate
 	row.DurationMs = probeMilliseconds(record.Duration)
 	video := record.first(fileTypeVideo)
@@ -91,6 +100,7 @@ func (p folderProbes) fill(row *fileRow, entry, absolute string, identities file
 	if record.Dialogue != nil {
 		row.Dialogue = record.Dialogue.column()
 	}
+	row.Events = record.Events
 	rows := make([]streamRow, len(record.Streams))
 	for ordinal, stream := range record.Streams {
 		rows[ordinal] = stream.row(row.Library, row.Path, ordinal)
@@ -135,6 +145,7 @@ func (s probedStream) row(library, path string, ordinal int) streamRow {
 		Default:        s.Default,
 		Forced:         s.Forced,
 		Present:        true,
+		Events:         s.Events,
 	}
 }
 

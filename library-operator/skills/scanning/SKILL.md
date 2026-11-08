@@ -126,8 +126,9 @@ no element for: one YAML file per fact, named for the fact. `identity.yaml`
 holds the provider ids, or the candidates left for a person to choose
 from. `arrival.yaml` holds when each video file was first seen.
 `probe.yaml` holds what the probe read of each file, its size included:
-a video's streams and chapters, and the stretches with no dialogue in a
-text subtitle file.
+a video's streams and chapters with the event count of each subtitle
+stream, and the count of timed cues and the stretches with no dialogue
+in a text subtitle file.
 Every other `<fact>.yaml` holds what that fact wrote, which provider
 answered, and its attempts. One file per writer lets the phases of a `Job` run at
 once on a network mount with no locks. The scan reads these files and

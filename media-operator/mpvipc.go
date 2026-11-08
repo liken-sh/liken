@@ -67,11 +67,14 @@ var observedProperties = []string{
 
 // propertyChangeEvent carries an observed property's new value.
 // clientMessageEvent carries a script-message any client broadcast, which is
-// how the display reaches the command sidecar. mpv sends many other
-// events through the same socket, and readEvents drops them.
+// how the display reaches the command sidecar. fileLoadedEvent says that mpv
+// has opened a file and selected its tracks, which is when the sidecar
+// chooses the subtitle track. mpv sends many other events through the same
+// socket, and readEvents drops them.
 const (
 	propertyChangeEvent = "property-change"
 	clientMessageEvent  = "client-message"
+	fileLoadedEvent     = "file-loaded"
 )
 
 // mpvCommand is the shape mpv accepts: an array of the command name
@@ -160,14 +163,18 @@ func observeProperties(writer io.Writer, names []string) error {
 // the four observed properties produce.
 const maxEventLine = 1 << 20
 
-// readEvents delivers the observed property changes, the client messages, and
-// the answers to commands that carried a request id, and drops everything
-// else: the answers with no id, other events, and any line that does not
-// decode. mpv's protocol grows new events, and one the supervisor cannot read
-// is no reason to stop reporting the ones it can. It ends when the socket
-// closes, which is how mpv says the run is over. A nil replies channel drops
-// the answers too.
-func readEvents(ctx context.Context, reader io.Reader, changes chan<- propertyChange, messages chan<- clientMessage, replies chan<- mpvReply) error {
+// readEvents delivers the observed property changes, the client messages, the
+// file-loaded events, and the answers to commands that carried a request id,
+// and drops everything else: the answers with no id, other events, and any
+// line that does not decode. mpv's protocol grows new events, and one the
+// supervisor cannot read is no reason to stop reporting the ones it can. It
+// ends when the socket closes, which is how mpv says the run is over. A nil
+// replies channel drops the answers too, and a nil loads channel drops the
+// file-loaded events.
+func readEvents(
+	ctx context.Context, reader io.Reader, changes chan<- propertyChange,
+	messages chan<- clientMessage, replies chan<- mpvReply, loads chan<- struct{},
+) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), maxEventLine)
 	for scanner.Scan() {
@@ -181,7 +188,7 @@ func readEvents(ctx context.Context, reader io.Reader, changes chan<- propertyCh
 				continue
 			}
 			select {
-			case replies <- mpvReply{ID: message.RequestID, Error: message.Error}:
+			case replies <- mpvReply{ID: message.RequestID, Error: message.Error, Data: replyData(message.Data)}:
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -194,6 +201,15 @@ func readEvents(ctx context.Context, reader io.Reader, changes chan<- propertyCh
 			case <-ctx.Done():
 				return ctx.Err()
 			}
+		case fileLoadedEvent:
+			if loads == nil {
+				continue
+			}
+			select {
+			case loads <- struct{}{}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		case clientMessageEvent:
 			select {
 			case messages <- clientMessage{Args: message.Args}:
@@ -203,4 +219,14 @@ func readEvents(ctx context.Context, reader io.Reader, changes chan<- propertyCh
 		}
 	}
 	return scanner.Err()
+}
+
+// replyData keeps an answer's data as JSON text, so a reply stays a value
+// that compares. A null or absent datum is empty, because mpv writes null
+// for an answer that carries no value.
+func replyData(data json.RawMessage) string {
+	if string(data) == "null" {
+		return ""
+	}
+	return string(data)
 }

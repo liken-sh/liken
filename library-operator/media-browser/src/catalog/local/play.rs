@@ -5,7 +5,7 @@
 
 use rusqlite::Connection;
 
-use super::{collect, item};
+use super::{collect, item, subtitles};
 use crate::catalog::{Mark, PlayItem, Presentation, art};
 
 // The join from an item to one of its video files. A title with a
@@ -68,9 +68,10 @@ fn spans_file(path: &str) -> String {
 }
 
 // A play list with the marks of each item's main file, so the display can
-// skip an intro and place the credits, and with the spans of a file the
+// skip an intro and place the credits, with the spans of a file the
 // appearances fact found faces in, so the display can show who is on
-// screen when the film pauses.
+// screen when the film pauses, and with the file's subtitle tracks and
+// their event counts, so the display can choose a track by its role.
 fn marked(
     connection: &Connection,
     library: &str,
@@ -82,6 +83,7 @@ fn marked(
             item.presentation.contributors = ".contributors".into();
         }
         item.presentation.marks = marks(connection, library, &item.path)?;
+        item.presentation.subtitles = subtitles::subtitles(connection, library, &item.path)?;
     }
     Ok(items)
 }

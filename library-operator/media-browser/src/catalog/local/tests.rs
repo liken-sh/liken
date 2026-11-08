@@ -13,6 +13,7 @@ mod recent_queries;
 mod search;
 mod series;
 mod sorts;
+mod subtitles;
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -245,6 +245,7 @@ func TestDerivePlayStatusReportsPreferencesAndChosenTracks(t *testing.T) {
 		AudioLanguages:    []string{"de"},
 		SubtitleLanguages: []string{"en"},
 		Subtitles:         subtitlesAuto,
+		SDH:               sdhAvoid,
 	}
 	report := &playReport{Item: 1, Position: "0:01:00", AudioLanguage: "eng", SubtitleLanguage: "eng"}
 
@@ -252,7 +253,8 @@ func TestDerivePlayStatusReportsPreferencesAndChosenTracks(t *testing.T) {
 
 	if !reflect.DeepEqual(got.AudioLanguages, []string{"de"}) ||
 		!reflect.DeepEqual(got.SubtitleLanguages, []string{"en"}) ||
-		got.Subtitles != subtitlesAuto {
+		got.Subtitles != subtitlesAuto ||
+		got.SDH != sdhAvoid {
 		t.Errorf("resolved preferences = %+v", got)
 	}
 	// The viewer asked for de audio, and the status shows it fell to eng, so the

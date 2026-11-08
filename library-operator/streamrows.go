@@ -39,6 +39,9 @@ type streamRow struct {
 	Default    bool
 	Forced     bool
 	Present    bool
+	// The events a subtitle stream holds, and nil where the probe read no
+	// count, which differs from a count of zero.
+	Events *int64
 }
 
 // streamKey names one row of the streams table within one library.
@@ -73,8 +76,8 @@ func (c *Catalog) UpsertStreams(ctx context.Context, rows []streamRow) (int, err
 		statements = append(statements, statement{
 			sql: `INSERT INTO streams (library, path, ordinal, kind, codec, profile, width, height, depth, ` +
 				`frame_rate, color_primaries, color_transfer, color_space, dolby_vision, channels, layout, ` +
-				`sample_rate, bitrate, language, title, is_default, forced, present) ` +
-				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+				`sample_rate, bitrate, language, title, is_default, forced, present, events) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
 				`ON CONFLICT (library, path, ordinal) DO UPDATE SET ` +
 				`kind = excluded.kind, codec = excluded.codec, profile = excluded.profile, ` +
 				`width = excluded.width, height = excluded.height, depth = excluded.depth, ` +
@@ -83,11 +86,11 @@ func (c *Catalog) UpsertStreams(ctx context.Context, rows []streamRow) (int, err
 				`dolby_vision = excluded.dolby_vision, channels = excluded.channels, layout = excluded.layout, ` +
 				`sample_rate = excluded.sample_rate, bitrate = excluded.bitrate, language = excluded.language, ` +
 				`title = excluded.title, is_default = excluded.is_default, forced = excluded.forced, ` +
-				`present = excluded.present`,
+				`present = excluded.present, events = excluded.events`,
 			params: []any{row.Library, row.Path, row.Ordinal, row.Kind, row.Codec, row.Profile,
 				row.Width, row.Height, row.Depth, row.FrameRate, row.ColorPrimaries, row.ColorTransfer,
 				row.ColorSpace, flag(row.DolbyVision), row.Channels, row.Layout, row.SampleRate,
-				row.Bitrate, row.Language, row.Title, flag(row.Default), flag(row.Forced), flag(row.Present)},
+				row.Bitrate, row.Language, row.Title, flag(row.Default), flag(row.Forced), flag(row.Present), row.Events},
 		})
 	}
 	return c.apply(ctx, statements)

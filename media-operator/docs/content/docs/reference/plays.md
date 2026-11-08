@@ -81,6 +81,7 @@ What to play and where. The spec is immutable: a different film or a different p
 | <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Play override of the audio language order. Omit it to use the Player's. |
 | <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | A per-Play override of the subtitle language order. Omit it to use the Player's. |
 | <span id="spec--subtitles"></span>`subtitles` | string | no | A per-Play override of when subtitles show. Omit it to use the Player's. One of: `on`, `off`, `auto`. |
+| <span id="spec--sdh"></span>`sdh` | string | no | A per-Play override of whether an SDH track ranks ahead of a full track in the same language. Omit it to use the Player's. One of: `prefer`, `avoid`. |
 
 ### spec.items[]
 
@@ -115,6 +116,7 @@ How the item should look, for the fields the display cannot read from the file. 
 | <span id="specitemspresentation--appearances"></span>`appearances` | string | no | The URI of the item's spans file, claim://, nfs:// or https://, resolved the way the media URI is. library-operator writes it as X.spans.json in .liken/appearances/ beside the video. When the film pauses, the display shows the credited people on screen at the playhead. |
 | <span id="specitemspresentation--contributors"></span>`contributors` | string | no | The URI of the library's .contributors directory, claim://, nfs:// or https://, resolved the way the media URI is. The spans file names each portrait by its path under it. |
 | <span id="specitemspresentation--marks"></span>`marks` | [\[\]object](#specitemspresentationmarks) | no | The spans in the file where the intro, the recap, the credits, the scene after the credits, and the preview are. A database can give several candidate spans for one kind, and the list carries every one. The display merges the candidates that overlap into one span, from the median start and the median end. It offers a skip control while the playhead is inside an intro or a recap. With the OSD down, the control shows focused, and select skips. The credits count when they start in the second half of the item. A scene after them is a post-credits span, or the gap between two credits spans. Inside the credits before a scene, the display offers a skip to the scene, and select takes it only while the OSD is up. The up-next card rises at the start of the credits, or, when a scene follows them, at the later of the start of the last credits span and the end of the last scene. A card after a scene never rises later than it would with no marks. An item with no marks plays with no skip control, and its card rises by the time that remains, as the next field describes. |
+| <span id="specitemspresentation--subtitles"></span>`subtitles` | [\[\]object](#specitemspresentationsubtitles) | no | How many subtitle events each subtitle track of the item holds, the one fact about a track that mpv cannot read. library-operator writes it from its probe. When mpv loads the item, the command sidecar gives each track a role, empty, forced, commentary, sdh, or full, from its flags, its title, its file name, and this count, and chooses the track to show by role. A track with no events is empty. A track with fewer events than a fifth of the largest track in its language is forced, even with no flag or title that says so. A track with no entry here takes its role from the other three. |
 
 #### spec.items[].presentation.marks[]
 
@@ -126,6 +128,16 @@ The spans in the file where the intro, the recap, the credits, the scene after t
 | <span id="specitemspresentationmarks--start"></span>`start` | number | no | Where the span starts, in seconds from the start of the file. Omit it for a span that starts with the file. |
 | <span id="specitemspresentationmarks--end"></span>`end` | number | no | Where the span ends, in seconds from the start of the file. Omit it for a span that ends with the file. |
 | <span id="specitemspresentationmarks--source"></span>`source` | string | no | The database the span came from, such as theintrodb. The display does not read it. |
+
+#### spec.items[].presentation.subtitles[]
+
+The count of one track. Exactly one of stream and file names the track.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="specitemspresentationsubtitles--stream"></span>`stream` | integer | no | The index of an embedded track in its container: the index ffprobe gives the stream, and mpv's ff-index. |
+| <span id="specitemspresentationsubtitles--file"></span>`file` | string | no | The base name of an external subtitle file beside the media, such as Movie.en.hi.srt. The operator passes it as written and does not resolve it. |
+| <span id="specitemspresentationsubtitles--events"></span>`events` | integer | no | How many subtitle events the track holds. Omit it when the count is not known, which differs from 0. |
 
 ### spec.next
 
@@ -158,6 +170,7 @@ What the playback pod reports, written only by the media operator. The playback 
 | <span id="status--audiolanguages"></span>`audioLanguages` | []string | no | The audio language order this run applied, after the operator combined the Play, the Player, and MediaPreferences. |
 | <span id="status--subtitlelanguages"></span>`subtitleLanguages` | []string | no | The resolved subtitle language order this run applied. |
 | <span id="status--subtitles"></span>`subtitles` | string | no | The resolved subtitle setting this run applied, one of on, off, or auto. |
+| <span id="status--sdh"></span>`sdh` | string | no | The resolved SDH preference this run applied, prefer or avoid. Empty when no tier states one. |
 | <span id="status--audiolanguage"></span>`audioLanguage` | string | no | The language of the audio track mpv chose, so you can see when a code matched no track. The value is the track's own tag as the file contains it, for Matroska the three-letter ISO 639-2 code, whatever form the preference used. |
 | <span id="status--subtitlelanguage"></span>`subtitleLanguage` | string | no | The language of the subtitle track mpv chose; empty when none plays. The value is the track's own tag as the file contains it, the way audioLanguage reports its track. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The run's conditions. There is one, DisplayAlive, and it reports the playback pod's display container, the native sidecar that draws the on-screen display. It is True with reason Running while the container runs, at any restart count, and False with reason Restarting only while the container is down after an exit the kubelet recorded. The message states the restart count with the reason and exit code of the last termination, and a display that has never restarted has no message. More than two restarts in one run set the phase to Finished with the same message, and the run retires the way a finished film does. The condition is absent while the pod reports no display container or the container has not started yet. lastTransitionTime moves only when the status does. |

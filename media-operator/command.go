@@ -127,6 +127,15 @@ type commander struct {
 	requestSeq int
 	requests   map[int]*mpvRequest
 
+	// The reads that wait for mpv's answer, keyed by request id, under
+	// mpvMutex like the requests. Each read takes its answer on its own
+	// channel.
+	queries map[int]chan mpvReply
+
+	// The resolved preferences that the subtitle rule reads, or nil for a
+	// pod whose mode chooses no track (subtitlechoice.go).
+	subtitles *subtitlePreferences
+
 	// Where the sidecar writes one line per operation a person caused. It
 	// is a field so a test reads what the pod would print.
 	log io.Writer
@@ -217,6 +226,7 @@ func runCommand() {
 		commandsTopic:     playCommandsTopic(base, namespace, name),
 		volumeTopic:       os.Getenv(playerVolumeTopicVariable),
 		presentations:     parsePresentations(os.Getenv(presentationsVariable)),
+		subtitles:         parseSubtitlePreferences(os.Getenv(subtitlePreferencesVariable)),
 		next:              parseNext(os.Getenv(nextVariable)),
 		grace:             exitGrace,
 		playerName:        os.Getenv(playerNameVariable),
@@ -477,22 +487,27 @@ func (c *commander) drive(ctx context.Context, conn net.Conn, send reportSender)
 	changes := make(chan propertyChange, 16)
 	messages := make(chan clientMessage, 16)
 	replies := make(chan mpvReply, 16)
+	loads := make(chan struct{}, 4)
 	reading := make(chan struct{})
 	go func() {
 		defer close(reading)
 		defer close(changes)
 		defer close(messages)
 		defer close(replies)
-		if err := readEvents(ctx, conn, changes, messages, replies); err != nil && ctx.Err() == nil {
+		defer close(loads)
+		if err := readEvents(ctx, conn, changes, messages, replies, loads); err != nil && ctx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "command: mpv's socket: %v\n", err)
 		}
 	}()
 
 	// The message goroutine answers the display's exit press and its block
 	// requests off the same socket the reporter reads. It ends when the
-	// socket closes and the reader closes the messages channel.
+	// socket closes and the reader closes the messages channel. The load
+	// goroutine waits on mpv's answers to its reads, which the replies
+	// goroutine hands it, so the two run apart from the reader.
 	go c.serveMessages(messages)
 	go c.serveReplies(replies)
+	go c.serveLoads(loads)
 
 	runReporter(ctx, changes, send, c.present, c.metrics, c.log)
 	<-reading
@@ -557,6 +572,7 @@ func (c *commander) detach() {
 	c.mpvMutex.Lock()
 	c.mpv = nil
 	c.abandonRequests()
+	c.abandonQueries()
 	c.mpvMutex.Unlock()
 }
 

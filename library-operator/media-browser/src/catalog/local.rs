@@ -35,6 +35,7 @@ mod recent;
 mod search;
 mod seen;
 mod series;
+mod subtitles;
 mod touched;
 mod updates;
 

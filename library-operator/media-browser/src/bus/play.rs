@@ -6,7 +6,7 @@
 use serde_json::{Map, Value};
 
 use super::next;
-use crate::catalog::{Identity, Mark, PlayItem, Presentation};
+use crate::catalog::{Identity, Mark, PlayItem, Presentation, Subtitle, Track};
 use crate::screens::upnext::Next;
 
 /// The request as bytes. `library` is the catalog's library column,
@@ -128,6 +128,26 @@ fn presentation(presentation: &Presentation) -> Value {
             "marks".into(),
             Value::Array(presentation.marks.iter().map(mark).collect()),
         );
+    }
+    if !presentation.subtitles.is_empty() {
+        object.insert(
+            "subtitles".into(),
+            Value::Array(presentation.subtitles.iter().map(subtitle).collect()),
+        );
+    }
+    Value::Object(object)
+}
+
+// One subtitle track, in media-operator's own field names: `stream` or
+// `file`, and `events` only where the probe read a count.
+fn subtitle(subtitle: &Subtitle) -> Value {
+    let mut object = Map::new();
+    match &subtitle.track {
+        Track::Stream(index) => object.insert("stream".into(), Value::from(*index)),
+        Track::File(name) => object.insert("file".into(), Value::from(name.as_str())),
+    };
+    if let Some(events) = subtitle.events {
+        object.insert("events".into(), Value::from(events));
     }
     Value::Object(object)
 }
@@ -303,6 +323,41 @@ mod tests {
                 {"kind": "intro", "end": 107.0, "source": "theintrodb"},
                 {"kind": "intro", "start": 7.007, "end": 106.482, "source": "theintrodb"},
                 {"kind": "credits", "start": 3253.0},
+            ])
+        );
+    }
+
+    /// Each subtitle track travels by its stream index or its file name,
+    /// with a count of zero sent as zero and no count left out.
+    #[test]
+    fn a_request_carries_every_subtitle_track_of_the_file() {
+        let mut item = movie();
+        item.presentation.subtitles = vec![
+            Subtitle {
+                track: Track::Stream(3),
+                events: Some(22),
+            },
+            Subtitle {
+                track: Track::Stream(4),
+                events: Some(0),
+            },
+            Subtitle {
+                track: Track::File("Some Film (1999).en.hi.srt".into()),
+                events: Some(1054),
+            },
+            Subtitle {
+                track: Track::Stream(5),
+                events: None,
+            },
+        ];
+
+        assert_eq!(
+            decoded("default/films", &[item])["items"][0]["presentation"]["subtitles"],
+            serde_json::json!([
+                {"stream": 3, "events": 22},
+                {"stream": 4, "events": 0},
+                {"file": "Some Film (1999).en.hi.srt", "events": 1054},
+                {"stream": 5},
             ])
         );
     }

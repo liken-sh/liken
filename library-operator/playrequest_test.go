@@ -105,6 +105,28 @@ func TestAPlayRequestCreatesAPlayOnThePlayerThatAsked(t *testing.T) {
 	}
 }
 
+// The subtitle tracks travel through the request unread. A file is a base name
+// and not a path, so it reaches the Play as the browser sent it, and a count
+// of zero stays zero while an absent count stays absent.
+func TestTheSubtitleTracksTravelThroughTheRequest(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	subtitles := `[{"stream":0,"events":0},{"stream":3,"events":22},` +
+		`{"file":"Some Film (1999).en.hi.srt","events":1054},{"stream":5}]`
+	payload := `{"library":"` + testLibraryKey + `","items":[{"path":"` + testFilmPath + `",` +
+		`"presentation":{"type":"video","subtitles":` + subtitles + `}}]}`
+	publishPlay(operator, []byte(payload))
+
+	operator.pass()
+
+	written, err := json.Marshal(cluster.heldPlays()[0].Spec.Items[0].Presentation.Subtitles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != subtitles {
+		t.Errorf("subtitles = %s, want %s", written, subtitles)
+	}
+}
+
 func TestAPlayCarriesThePresentationTheBrowserResolved(t *testing.T) {
 	operator, cluster := playingHouse(t)
 	publishPlay(operator, filmRequest(film(testFilmPath)))

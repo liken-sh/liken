@@ -15,19 +15,23 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
+	"time"
 )
 
 // mpvAnswerSuccess is the error word mpv writes for a command it ran.
 const mpvAnswerSuccess = "success"
 
 // mpvReply is one answer mpv wrote to a command that carried a request
-// id.
+// id. Data is the JSON text of the value a get_property answer carries.
 type mpvReply struct {
 	ID    int
 	Error string
+	Data  string
 }
 
 // mpvRequest is one line that waits for mpv's answers. A line can cover
@@ -85,6 +89,14 @@ func (c *commander) request(line string, commands ...[]any) {
 // not give, or one it already answered, is dropped.
 func (c *commander) answer(reply mpvReply) {
 	c.mpvMutex.Lock()
+	// A read waits for its answer itself, so its answer is handed back and
+	// writes no line here.
+	if query, reading := c.queries[reply.ID]; reading {
+		delete(c.queries, reply.ID)
+		c.mpvMutex.Unlock()
+		query <- reply
+		return
+	}
 	entry, waiting := c.requests[reply.ID]
 	if !waiting {
 		c.mpvMutex.Unlock()
@@ -125,6 +137,61 @@ func (c *commander) abandonRequests() {
 		}
 	}
 	c.requests = nil
+}
+
+// abandonQueries tells every read still waiting when the socket closes that
+// no answer will come. The caller holds mpvMutex.
+func (c *commander) abandonQueries() {
+	for id, query := range c.queries {
+		close(query)
+		delete(c.queries, id)
+	}
+}
+
+// mpvQueryTimeout bounds the wait for mpv's answer to a read. mpv answers a
+// get_property from memory in well under a second, so a read that waits
+// longer is a socket that has stopped, and the read gives up.
+const mpvQueryTimeout = 5 * time.Second
+
+// query reads one property from mpv and returns its value as JSON text. The
+// answer arrives on the reader goroutine, so the caller runs on a goroutine
+// of its own. An error holds mpv's own error word.
+func (c *commander) query(property string) (string, error) {
+	c.mpvMutex.Lock()
+	if c.mpv == nil {
+		c.mpvMutex.Unlock()
+		return "", errors.New("mpv's socket is not open")
+	}
+	c.requestSeq++
+	id := c.requestSeq
+	answer := make(chan mpvReply, 1)
+	if c.queries == nil {
+		c.queries = map[int]chan mpvReply{}
+	}
+	c.queries[id] = answer
+	err := sendRequest(c.mpv, id, []any{"get_property", property})
+	if err != nil {
+		delete(c.queries, id)
+	}
+	c.mpvMutex.Unlock()
+	if err != nil {
+		return "", err
+	}
+	select {
+	case reply, answered := <-answer:
+		switch {
+		case !answered:
+			return "", errors.New("mpv closed its socket before it answered")
+		case reply.Error != mpvAnswerSuccess:
+			return "", fmt.Errorf("mpv answered %s", reply.Error)
+		}
+		return reply.Data, nil
+	case <-time.After(mpvQueryTimeout):
+		c.mpvMutex.Lock()
+		delete(c.queries, id)
+		c.mpvMutex.Unlock()
+		return "", fmt.Errorf("mpv did not answer in %s", mpvQueryTimeout)
+	}
 }
 
 // sendRequest writes one command with the request id mpv answers under.

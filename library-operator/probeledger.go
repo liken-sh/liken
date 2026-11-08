@@ -38,6 +38,14 @@ type probedFile struct {
 	// The stretches with no dialogue in a text subtitle file, which the
 	// probe reads in place of ffprobe's answer. A video's record holds none.
 	Dialogue *subtitleDialogue `yaml:"dialogue,omitempty"`
+	// How many timed cues a text subtitle file holds. A video's record
+	// holds none, because each of its subtitle streams carries its own.
+	Events *int64 `yaml:"events,omitempty"`
+	// Counted is true on every record that a probe which reads subtitle
+	// event counts wrote. A record without it predates the counts, so an
+	// absent count in it says nothing about the track, and the walk opens
+	// the probe gap again for a record that holds a subtitle track.
+	Counted bool `yaml:"counted,omitempty"`
 	// The change time of the file when a probe found it at a size the record
 	// before it did not hold, which is when a new file took this path. An
 	// attempt of a file fact made before it, and a thumbnail or a tile
@@ -67,6 +75,12 @@ type probedStream struct {
 	Title       string      `yaml:"title,omitempty"`
 	Default     bool        `yaml:"default,omitempty"`
 	Forced      bool        `yaml:"forced,omitempty"`
+	// How many events a subtitle stream holds, from mkvmerge's statistics
+	// tag. media-operator reads the count to tell a forced track from a full
+	// one when the flags and the title do not. It is absent where the file
+	// carries no such tag, and an absent count is not a count of zero: a
+	// track of zero events is empty, and a track with no count is unknown.
+	Events *int64 `yaml:"events,omitempty"`
 }
 
 // The three color facts of a video stream. HDR is not one field in ffprobe:
@@ -142,13 +156,17 @@ type ffprobeSideData struct {
 }
 
 // A Matroska file states a stream's bit rate in a BPS tag, because its
-// stream headers carry none. The English-suffixed form is what some muxers
-// write.
+// stream headers carry none. mkvmerge writes the BPS tag and the
+// NUMBER_OF_FRAMES tag together as the track's statistics, in the header,
+// so ffprobe reads both without reading the video. The English-suffixed
+// forms are what older mkvmerge releases write.
 type ffprobeTags struct {
-	Language   string `json:"language"`
-	Title      string `json:"title"`
-	BPS        string `json:"BPS"`
-	BPSEnglish string `json:"BPS-eng"`
+	Language              string `json:"language"`
+	Title                 string `json:"title"`
+	BPS                   string `json:"BPS"`
+	BPSEnglish            string `json:"BPS-eng"`
+	NumberOfFrames        string `json:"NUMBER_OF_FRAMES"`
+	NumberOfFramesEnglish string `json:"NUMBER_OF_FRAMES-eng"`
 }
 
 // The whole answer as one record. The caller fills the file's own facts:
@@ -157,6 +175,7 @@ func (a ffprobeAnswer) probedFile() probedFile {
 	record := probedFile{
 		Duration: probeFloat(a.Format.Duration),
 		Bitrate:  probeInt(a.Format.BitRate),
+		Counted:  true,
 	}
 	for _, stream := range a.Streams {
 		record.Streams = append(record.Streams, stream.probed())
@@ -202,6 +221,9 @@ func (s ffprobeStream) probed() probedStream {
 		Title:      s.Tags.Title,
 		Default:    s.Disposition.Default == 1,
 		Forced:     s.Disposition.Forced == 1,
+	}
+	if kind == fileTypeSubtitle {
+		stream.Events = s.events()
 	}
 	if kind == fileTypeVideo {
 		stream.FrameRate = s.frameRate()
@@ -293,6 +315,21 @@ func probeInt(value string) int64 {
 		return 0
 	}
 	return number
+}
+
+// The events of a subtitle stream, from either spelling of the statistics
+// tag. A missing tag and a value that is not a count give no count, never
+// zero, because zero is the count of an empty track.
+func (s ffprobeStream) events() *int64 {
+	value := s.Tags.NumberOfFrames
+	if value == "" {
+		value = s.Tags.NumberOfFramesEnglish
+	}
+	number, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil || number < 0 {
+		return nil
+	}
+	return &number
 }
 
 // probeSmallInt reads a number that the record keeps as an int, such as a

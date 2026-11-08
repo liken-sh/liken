@@ -31,6 +31,7 @@ func derivePlayStatus(play *Play, player *Player, buildErr error, pod *Pod, late
 	status.AudioLanguages = prefs.AudioLanguages
 	status.SubtitleLanguages = prefs.SubtitleLanguages
 	status.Subtitles = prefs.Subtitles
+	status.SDH = prefs.SDH
 	return status
 }
 

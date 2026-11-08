@@ -309,11 +309,12 @@ type PlayerSpec struct {
 	Remotes []PlayerRemote `json:"remotes,omitempty"`
 
 	// The per-Player override of the audio and subtitle language preferences.
-	// A nil list, or an empty Subtitles, means this Player states nothing, so
-	// resolution reads the default MediaPreferences instead.
+	// A nil list, or an empty Subtitles or SDH, means this Player states
+	// nothing, so resolution reads the default MediaPreferences instead.
 	AudioLanguages    []string `json:"audioLanguages,omitempty"`
 	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
 	Subtitles         string   `json:"subtitles,omitempty"`
+	SDH               string   `json:"sdh,omitempty"`
 
 	// Idle is this unit's idle screen policy. Resolution reads it field
 	// by field over the default MediaPreferences, so a Player states
@@ -443,11 +444,12 @@ type PlaySpec struct {
 	TTLSecondsAfterFinished *int64 `json:"ttlSecondsAfterFinished,omitempty"`
 
 	// The per-Play override of the language preferences, the most specific tier.
-	// A nil list, or an empty Subtitles, means this Play states nothing, so
-	// resolution reads the Player next.
+	// A nil list, or an empty Subtitles or SDH, means this Play states
+	// nothing, so resolution reads the Player next.
 	AudioLanguages    []string `json:"audioLanguages,omitempty"`
 	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
 	Subtitles         string   `json:"subtitles,omitempty"`
+	SDH               string   `json:"sdh,omitempty"`
 
 	// Next is the work that follows this run. The display offers it on the
 	// scrubber, and the program that wrote the Play starts it when a person
@@ -547,6 +549,27 @@ type Presentation struct {
 	// The operator passes them to the display unread, and the display
 	// merges the candidates and acts on the result, so one rule reads them.
 	Marks []PlayMark `json:"marks,omitempty"`
+
+	// What mpv cannot read about the item's subtitle tracks: how many
+	// subtitle events each one holds. A forced track that carries no flag
+	// and no title is marked only by its few events, and a track with no
+	// events shows nothing. The command sidecar joins each entry to a track
+	// of mpv's track-list when it chooses the track to show. The resolver
+	// passes the list through unchanged, because File is a base name and
+	// not a reference.
+	Subtitles []PlaySubtitle `json:"subtitles,omitempty"`
+}
+
+// PlaySubtitle is the count of one subtitle track. Exactly one of Stream and
+// File names the track. Stream is the index of an embedded track in its
+// container, the index ffprobe gives the stream and mpv gives as ff-index.
+// File is the base name of an external subtitle file beside the media. Events
+// is a pointer because an absent count is unknown, which differs from a
+// track with no events.
+type PlaySubtitle struct {
+	Stream *int   `json:"stream,omitempty"`
+	File   string `json:"file,omitempty"`
+	Events *int64 `json:"events,omitempty"`
 }
 
 // PlayMark is one candidate span of one kind. Start and End are pointers
@@ -594,6 +617,7 @@ type PlayStatus struct {
 	AudioLanguages    []string `json:"audioLanguages,omitempty"`
 	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
 	Subtitles         string   `json:"subtitles,omitempty"`
+	SDH               string   `json:"sdh,omitempty"`
 
 	// The language of the audio track and the subtitle track mpv selected, so a
 	// code that matched no track shows plainly.
@@ -695,6 +719,11 @@ type MediaPreferencesSpec struct {
 	AudioLanguages    []string `json:"audioLanguages,omitempty"`
 	SubtitleLanguages []string `json:"subtitleLanguages,omitempty"`
 	Subtitles         string   `json:"subtitles,omitempty"`
+
+	// Whether a track with sound descriptions ranks ahead of a full track
+	// in the same language, behind it, or the same: prefer, avoid, or
+	// empty for no preference. The Player and the Play override it.
+	SDH string `json:"sdh,omitempty"`
 
 	// The household wall-clock zone, an IANA name like America/New_York. One
 	// per cluster, with no per-Play or per-Player override. The player pod

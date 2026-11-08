@@ -29,10 +29,10 @@ func (c *Catalog) UpdateFileStreams(ctx context.Context, rows []fileRow) (int, e
 		statements = append(statements, statement{
 			sql: `UPDATE files SET video_codec = ?, audio_codec = ?, width = ?, height = ?, duration_ms = ?, ` +
 				`probed = ?, credits_chapter_ms = ?, intro_chapter_start_ms = ?, intro_chapter_end_ms = ?, ` +
-				`dialogue = ? WHERE library = ? AND path = ?`,
+				`dialogue = ?, events = ? WHERE library = ? AND path = ?`,
 			params: []any{row.VideoCodec, row.AudioCodec, row.Width, row.Height, row.DurationMs,
 				row.Probed, row.CreditsChapterMs, row.IntroChapterStartMs, row.IntroChapterEndMs,
-				row.Dialogue, row.Library, row.Path},
+				row.Dialogue, row.Events, row.Library, row.Path},
 		})
 	}
 	return c.apply(ctx, statements)

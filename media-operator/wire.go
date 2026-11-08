@@ -131,6 +131,11 @@ const (
 	// sets it on neither, and a pod that reads none offers nothing.
 	nextVariable = "MEDIA_NEXT"
 
+	// The resolved preferences that the command sidecar's subtitle rule
+	// reads, as JSON, only in the modes on and auto. A pod in any other
+	// mode carries none, and its sidecar chooses no subtitle track.
+	subtitlePreferencesVariable = "MEDIA_SUBTITLE_PREFERENCES"
+
 	// Carries a Play's trickplayInterval to the display. The tile width, the
 	// grid, and the tile height are on the sheets, so the display reads them.
 	// The interval is not on the sheets, so the Play declares it and the pod

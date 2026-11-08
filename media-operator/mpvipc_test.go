@@ -135,7 +135,7 @@ func TestReadEventsDeliversClientMessages(t *testing.T) {
 		`{"event":"client-message","args":["someone-elses-broadcast"]}`,
 	}
 	stream := strings.NewReader(strings.Join(lines, "\n") + "\n")
-	mustSucceed(t, readEvents(context.Background(), stream, changes, messages, nil))
+	mustSucceed(t, readEvents(context.Background(), stream, changes, messages, nil, nil))
 	close(changes)
 	close(messages)
 
@@ -160,7 +160,7 @@ func TestReadEventsDeliversTheAnswersToCommandsThatCarriedAnID(t *testing.T) {
 	messages := make(chan clientMessage, 4)
 	replies := make(chan mpvReply, 4)
 
-	mustSucceed(t, readEvents(context.Background(), stream, changes, messages, replies))
+	mustSucceed(t, readEvents(context.Background(), stream, changes, messages, replies, nil))
 	close(replies)
 
 	var got []mpvReply
@@ -171,6 +171,24 @@ func TestReadEventsDeliversTheAnswersToCommandsThatCarriedAnID(t *testing.T) {
 	mustMatch(t, len(changes), 1)
 }
 
+// The answer to a read carries its value as JSON text, and a file-loaded
+// event reaches the loads channel, which is when the sidecar chooses the
+// subtitle track.
+func TestReadEventsDeliversReadAnswersAndFileLoads(t *testing.T) {
+	stream := strings.NewReader(strings.Join([]string{
+		`{"request_id":4,"error":"success","data":[{"id":1,"type":"sub"}]}`,
+		`{"event":"file-loaded"}`,
+		`{"event":"playback-restart"}`,
+	}, "\n") + "\n")
+	replies := make(chan mpvReply, 4)
+	loads := make(chan struct{}, 4)
+
+	mustSucceed(t, readEvents(context.Background(), stream, nil, nil, replies, loads))
+
+	mustMatch(t, <-replies, mpvReply{ID: 4, Error: mpvAnswerSuccess, Data: `[{"id":1,"type":"sub"}]`})
+	mustMatch(t, len(loads), 1)
+}
+
 // collectChanges runs readEvents over a scripted stream and renders
 // each delivered change as name=data. The rendering makes a failure
 // message readable, where raw JSON diffs are not.
@@ -178,7 +196,7 @@ func collectChanges(t *testing.T, lines []string) []string {
 	t.Helper()
 	changes := make(chan propertyChange, 64)
 	messages := make(chan clientMessage, 64)
-	mustSucceed(t, readEvents(context.Background(), strings.NewReader(strings.Join(lines, "\n")+"\n"), changes, messages, nil))
+	mustSucceed(t, readEvents(context.Background(), strings.NewReader(strings.Join(lines, "\n")+"\n"), changes, messages, nil, nil))
 	close(changes)
 
 	var rendered []string

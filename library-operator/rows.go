@@ -196,7 +196,10 @@ type fileRow struct {
 	IntroChapterStartMs int64
 	IntroChapterEndMs   int64
 	Dialogue            string
-	Items               []string
+	// How many timed cues a text subtitle file holds, from the probe
+	// ledger, and nil where the probe has counted none.
+	Events *int64
+	Items  []string
 }
 
 // fileItemKey names one row of the link table: the file's path, and the id of

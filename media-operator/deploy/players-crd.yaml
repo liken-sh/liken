@@ -300,6 +300,13 @@ spec:
                   description: >-
                     A per-Player override of when subtitles show;
                     omit it to inherit the default MediaPreferences.
+                sdh:
+                  type: string
+                  enum: [prefer, avoid]
+                  description: >-
+                    A per-Player override of whether an SDH track ranks
+                    ahead of a full track in the same language; omit it
+                    to inherit the default MediaPreferences.
                 idle:
                   type: object
                   description: >-

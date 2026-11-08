@@ -72,7 +72,7 @@ func (r *walkResult) settleFacts() {
 			}
 			continue
 		}
-		if attempt.Result == attemptFound && !outputs.hold(attempt) {
+		if attempt.Result == attemptFound && (!outputs.hold(attempt) || uncountedProbe(attempt, identities)) {
 			r.reopened.missing++
 			continue
 		}
@@ -88,6 +88,15 @@ func (r *walkResult) settleFacts() {
 				replacedFile{path: path, recorded: identity.recorded, found: identity.found})
 		}
 	}
+}
+
+// Whether a found attempt is the probe's, at a record that predates the
+// subtitle event counts. The record is the probe's output, and it lacks a
+// fact the probe now writes, so the attempt reads as one whose output is
+// missing. An error stands for its own window, so a file that will not open
+// is not read on every run.
+func uncountedProbe(attempt attemptRow, identities fileIdentities) bool {
+	return attempt.Fact == factProbe && identities[attempt.Item].uncounted
 }
 
 func sortedPaths(identities fileIdentities) []string {

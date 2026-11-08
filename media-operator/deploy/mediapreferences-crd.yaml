@@ -81,8 +81,25 @@ spec:
                   type: string
                   enum: ["on", "off", "auto"]
                   description: >-
-                    When subtitles show; on always, off never, auto
-                    only when the audio that played is not the first choice.
+                    When subtitles show. With on, the command sidecar
+                    shows the first full or SDH track in the order of
+                    subtitleLanguages, or of audioLanguages when
+                    subtitleLanguages is empty, and when none exists, the forced
+                    track in the language of the audio, if that language
+                    is in audioLanguages. With auto, audio in the first
+                    of audioLanguages shows only its forced track, or
+                    nothing, and other audio shows a track as on does.
+                    With off, no subtitles show.
+                sdh:
+                  type: string
+                  enum: [prefer, avoid]
+                  description: >-
+                    Whether an SDH track, one with the descriptions of
+                    sounds for a viewer who is deaf or hard of hearing,
+                    ranks ahead of a full track in the same language
+                    (prefer) or behind it (avoid). Omit it, and the two
+                    rank the same, so the track with the default flag
+                    wins, and then the first in the file.
                 timeZone:
                   type: string
                   # An IANA zone name, for example America/New_York. The display

@@ -790,6 +790,22 @@ type PlayPresentation struct {
 	// merges the candidates and acts on the result, so the operator carries
 	// them unread.
 	Marks []PlayMark `json:"marks,omitempty"`
+	// Subtitles are the subtitle tracks of the item's file with the event
+	// count the probe read for each, which media-operator reads to choose a
+	// track by its role. The operator carries them unread.
+	Subtitles []PlaySubtitle `json:"subtitles,omitempty"`
+}
+
+// PlaySubtitle is one subtitle track of a file, in media-operator's own field
+// names. Stream is the container's index of an embedded track, the index
+// ffprobe reports and mpv calls ff-index, and File is the base name of a
+// subtitle file beside the video. One of the two is set. A pointer keeps
+// stream 0 apart from no stream. Events is how many events the track holds,
+// and absent where the probe read no count, which differs from zero.
+type PlaySubtitle struct {
+	Stream *int   `json:"stream,omitempty"`
+	File   string `json:"file,omitempty"`
+	Events *int64 `json:"events,omitempty"`
 }
 
 // PlayMark is one candidate span of one kind, in media-operator's own field

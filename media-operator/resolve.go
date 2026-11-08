@@ -294,6 +294,7 @@ type resolvedPreferences struct {
 	AudioLanguages    []string
 	SubtitleLanguages []string
 	Subtitles         string
+	SDH               string
 	// The resolved wall-clock zone, from the default tier alone.
 	TimeZone string
 }
@@ -303,21 +304,24 @@ type resolvedPreferences struct {
 // field no tier states resolves to nothing.
 func resolvePreferences(play *PlaySpec, player *PlayerSpec, defaults *MediaPreferencesSpec) resolvedPreferences {
 	var audio, subs [][]string
-	var mode []string
+	var mode, sdh []string
 	if play != nil {
 		audio = append(audio, play.AudioLanguages)
 		subs = append(subs, play.SubtitleLanguages)
 		mode = append(mode, play.Subtitles)
+		sdh = append(sdh, play.SDH)
 	}
 	if player != nil {
 		audio = append(audio, player.AudioLanguages)
 		subs = append(subs, player.SubtitleLanguages)
 		mode = append(mode, player.Subtitles)
+		sdh = append(sdh, player.SDH)
 	}
 	if defaults != nil {
 		audio = append(audio, defaults.AudioLanguages)
 		subs = append(subs, defaults.SubtitleLanguages)
 		mode = append(mode, defaults.Subtitles)
+		sdh = append(sdh, defaults.SDH)
 	}
 	// The timezone is a household setting, one per cluster, so it reads the
 	// default tier alone, not the Play or the Player.
@@ -329,6 +333,7 @@ func resolvePreferences(play *PlaySpec, player *PlayerSpec, defaults *MediaPrefe
 		AudioLanguages:    firstStatedList(audio),
 		SubtitleLanguages: firstStatedList(subs),
 		Subtitles:         firstStatedString(mode),
+		SDH:               firstStatedString(sdh),
 		TimeZone:          zone,
 	}
 }
@@ -444,8 +449,8 @@ func firstStatedSeconds(tiers []*int64, fallback int64) int64 {
 	return fallback
 }
 
-// firstStatedString returns the first value a tier states. Subtitles has no
-// empty enum value, so an empty string is unset.
+// firstStatedString returns the first value a tier states. Neither Subtitles
+// nor SDH has an empty enum value, so an empty string is unset.
 func firstStatedString(tiers []string) string {
 	for _, value := range tiers {
 		if value != "" {

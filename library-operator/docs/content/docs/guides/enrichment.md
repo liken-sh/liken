@@ -170,7 +170,8 @@ last report counted. The [scanning guide](/docs/guides/scanning/#when-a-scan-run
 says when each one starts.
 
 The phases are `probe`, which reads each video's streams and chapters
-and the cue times of each text subtitle file, `arrival`,
+and the cue times of each text subtitle file, and counts the events of
+each subtitle track, `arrival`,
 which records when a file was first seen, `identity`, which names each
 title, `nfo`, which fills the `.nfo` file, `art`, which downloads the
 images, `trailer`, which records where each title's trailers are,
@@ -965,6 +966,35 @@ reads the file in the first of the household's `subtitleLanguages` in
 track before a forced or a hearing-impaired one. A video probed before
 the probe read chapters has none recorded until it is probed again, so
 name `probe` in `spec.refresh` to read the chapters of a whole library.
+
+### Subtitle event counts
+
+`media-operator` chooses a subtitle track by its role, and a forced
+track often has no forced flag and no title that marks it. Its event
+count marks it, because a forced track translates only the lines in
+another language and holds far fewer events than the full track in the
+same language. mpv cannot read that
+count, so the probe records it and the browser sends it on each play
+request.
+
+For a subtitle stream inside a video, the count is the `NUMBER_OF_FRAMES`
+statistics tag that mkvmerge writes into the file's header, which
+`ffprobe` reads without reading the video. For a `.srt`, `.vtt`, `.ass`,
+or `.ssa` file, the count is every cue with a start and an end, songs
+and empty cues included, because the tag of an embedded track counts
+every event too. The counts are in the `events` column of the `streams`
+table for an embedded track, and of the `files` table for a subtitle
+file. A stream with no statistics tag has no count, and the column holds
+null, not 0, because a track of 0 events is an empty track and a track
+with no count is one the probe could not count.
+
+A record in `probe.yaml` that the probe wrote before it counted events
+has no `counted: true`. When such a record holds a subtitle track, the
+walk opens the probe gap for its file, and the next probe run reads the
+file's headers again and records the counts. A file with no subtitle
+track is not read again. A file that does not open records an error,
+which lasts its day as any other error does, so you do not need to set
+`spec.refresh` for the counts.
 
 ### Trailer files
 

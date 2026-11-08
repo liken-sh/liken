@@ -67,6 +67,7 @@ The devices that form the unit, each selected from what a hardware operator publ
 | <span id="spec--audiolanguages"></span>`audioLanguages` | []string | no | A per-Player override of the audio language order; omit it to inherit the default MediaPreferences. |
 | <span id="spec--subtitlelanguages"></span>`subtitleLanguages` | []string | no | A per-Player override of the subtitle language order; omit it to inherit the default MediaPreferences. |
 | <span id="spec--subtitles"></span>`subtitles` | string | no | A per-Player override of when subtitles show; omit it to inherit the default MediaPreferences. One of: `on`, `off`, `auto`. |
+| <span id="spec--sdh"></span>`sdh` | string | no | A per-Player override of whether an SDH track ranks ahead of a full track in the same language; omit it to inherit the default MediaPreferences. One of: `prefer`, `avoid`. |
 | <span id="spec--idle"></span>`idle` | [object](#specidle) | no | This unit's idle screen policy. Each field overrides the default MediaPreferences on its own. |
 | <span id="spec--power"></span>`power` | string | no | Whether the Player is on. Off turns its panel, TV, and receiver off and stops its Play, and a Play that starts sets On; omit it for On. One of: `On`, `Off`. |
 

@@ -50,11 +50,16 @@ pub mod identity;
 // which a play request carries to the display.
 pub mod mark;
 
+// The subtitle module: one subtitle track of a file and its event count,
+// which a play request carries to the display.
+pub mod subtitle;
+
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
 pub use identity::Identity;
 pub use mark::Mark;
 pub use progress::{Played, Progress, Reach, Resume, Seen, Touched, Work};
 pub use query::{Answer, Counts, Fold, GenreSort, InSeries, Order, Query, Slot, Sort};
+pub use subtitle::{Subtitle, Track};
 
 /// How many posters the tile of a library or a genre draws, as a 2x2.
 pub const TILES: usize = 4;
@@ -727,6 +732,9 @@ pub struct Presentation {
     /// Every span the catalog holds for the main file, in the order the
     /// marks ledger holds them.
     pub marks: Vec<Mark>,
+    /// The main file's embedded subtitle streams in container order, then
+    /// the text subtitle files beside it that mpv loads, in name order.
+    pub subtitles: Vec<Subtitle>,
 }
 
 #[cfg(test)]

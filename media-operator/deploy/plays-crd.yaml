@@ -308,6 +308,55 @@ spec:
                                   description: >-
                                     The database the span came from, such as
                                     theintrodb. The display does not read it.
+                          subtitles:
+                            type: array
+                            x-kubernetes-list-type: atomic
+                            description: >-
+                              How many subtitle events each subtitle track of
+                              the item holds, the one fact about a track that
+                              mpv cannot read. library-operator writes it from
+                              its probe. When mpv loads the item, the command
+                              sidecar gives each track a role, empty, forced,
+                              commentary, sdh, or full, from its flags, its
+                              title, its file name, and this count, and chooses
+                              the track to show by role. A track with no
+                              events is empty. A track with fewer events than
+                              a fifth of the largest track in its language is
+                              forced, even with no flag or title that says so.
+                              A track with no entry here takes its role from
+                              the other three.
+                            items:
+                              type: object
+                              description: >-
+                                The count of one track. Exactly one of
+                                stream and file names the track.
+                              oneOf:
+                                - required: [stream]
+                                - required: [file]
+                              properties:
+                                stream:
+                                  type: integer
+                                  minimum: 0
+                                  description: >-
+                                    The index of an embedded track in its
+                                    container: the index ffprobe gives the
+                                    stream, and mpv's ff-index.
+                                file:
+                                  type: string
+                                  minLength: 1
+                                  description: >-
+                                    The base name of an external subtitle
+                                    file beside the media, such as
+                                    Movie.en.hi.srt. The operator passes it
+                                    as written and does not resolve it.
+                                events:
+                                  type: integer
+                                  format: int64
+                                  minimum: 0
+                                  description: >-
+                                    How many subtitle events the track holds.
+                                    Omit it when the count is not known, which
+                                    differs from 0.
                 start:
                   type: string
                   description: >-
@@ -459,6 +508,13 @@ spec:
                   description: >-
                     A per-Play override of when subtitles show. Omit it to use
                     the Player's.
+                sdh:
+                  type: string
+                  enum: [prefer, avoid]
+                  description: >-
+                    A per-Play override of whether an SDH track ranks ahead
+                    of a full track in the same language. Omit it to use the
+                    Player's.
             status:
               type: object
               description: >-
@@ -553,6 +609,11 @@ spec:
                   description: >-
                     The resolved subtitle setting this run applied,
                     one of on, off, or auto.
+                sdh:
+                  type: string
+                  description: >-
+                    The resolved SDH preference this run applied, prefer
+                    or avoid. Empty when no tier states one.
                 audioLanguage:
                   type: string
                   description: >-

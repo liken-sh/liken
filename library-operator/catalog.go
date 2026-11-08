@@ -298,8 +298,8 @@ func (c *Catalog) UpsertFiles(ctx context.Context, rows []fileRow) (int, error) 
 		}
 		statements[i] = statement{
 			sql: `INSERT INTO files (library, path, container, video_codec, audio_codec, width, height, size_bytes, duration_ms, bitrate, probed, trickplay, present, type, role, language, modified, arrived, ` +
-				`credits_chapter_ms, intro_chapter_start_ms, intro_chapter_end_ms, dialogue) ` +
-				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+				`credits_chapter_ms, intro_chapter_start_ms, intro_chapter_end_ms, dialogue, events) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
 				`ON CONFLICT (library, path) DO UPDATE SET ` +
 				`container = excluded.container, video_codec = excluded.video_codec, ` +
 				`audio_codec = excluded.audio_codec, width = excluded.width, height = excluded.height, ` +
@@ -308,9 +308,9 @@ func (c *Catalog) UpsertFiles(ctx context.Context, rows []fileRow) (int, error) 
 				`trickplay = excluded.trickplay, present = excluded.present, ` +
 				`type = excluded.type, role = excluded.role, language = excluded.language, modified = excluded.modified, arrived = excluded.arrived, ` +
 				`credits_chapter_ms = excluded.credits_chapter_ms, intro_chapter_start_ms = excluded.intro_chapter_start_ms, ` +
-				`intro_chapter_end_ms = excluded.intro_chapter_end_ms, dialogue = excluded.dialogue`,
+				`intro_chapter_end_ms = excluded.intro_chapter_end_ms, dialogue = excluded.dialogue, events = excluded.events`,
 			params: []any{row.Library, row.Path, row.Container, row.VideoCodec, row.AudioCodec, row.Width, row.Height, row.SizeBytes, row.DurationMs, row.Bitrate, row.Probed, row.Trickplay, present, row.Type, row.Role, row.Language, row.Modified, row.Arrived,
-				row.CreditsChapterMs, row.IntroChapterStartMs, row.IntroChapterEndMs, row.Dialogue},
+				row.CreditsChapterMs, row.IntroChapterStartMs, row.IntroChapterEndMs, row.Dialogue, row.Events},
 		}
 	}
 	return c.apply(ctx, statements)

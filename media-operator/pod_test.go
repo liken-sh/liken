@@ -425,9 +425,12 @@ func TestMpvPreferenceOptions(t *testing.T) {
 			want:  []string{"--slang=en", "--subs-match-os-language=no"},
 		},
 		{
-			name:  "subtitles on shows them over matching audio",
+			name:  "subtitles on shows them over matching audio and takes no forced track first",
 			prefs: resolvedPreferences{Subtitles: subtitlesOn},
-			want:  []string{"--sub-visibility=yes", "--subs-with-matching-audio=yes", "--subs-match-os-language=no"},
+			want: []string{
+				"--sub-visibility=yes", "--subs-with-matching-audio=yes", "--subs-fallback-forced=no",
+				"--reset-on-next-file=sid", "--subs-match-os-language=no",
+			},
 		},
 		{
 			name:  "subtitles off loads no subtitle track",
@@ -435,9 +438,9 @@ func TestMpvPreferenceOptions(t *testing.T) {
 			want:  []string{"--sid=no", "--subs-match-os-language=no"},
 		},
 		{
-			name:  "subtitles auto shows them only over other-language audio",
+			name:  "subtitles auto shows only a forced track over audio in a subtitle language",
 			prefs: resolvedPreferences{Subtitles: subtitlesAuto},
-			want:  []string{"--subs-with-matching-audio=no", "--subs-match-os-language=no"},
+			want:  []string{"--subs-with-matching-audio=forced", "--reset-on-next-file=sid", "--subs-match-os-language=no"},
 		},
 		{
 			name: "every field together maps to every flag",
@@ -448,8 +451,8 @@ func TestMpvPreferenceOptions(t *testing.T) {
 			},
 			want: []string{
 				"--alang=ja", "--slang=en",
-				"--sub-visibility=yes", "--subs-with-matching-audio=yes",
-				"--subs-match-os-language=no",
+				"--sub-visibility=yes", "--subs-with-matching-audio=yes", "--subs-fallback-forced=no",
+				"--reset-on-next-file=sid", "--subs-match-os-language=no",
 			},
 		},
 		{
@@ -478,7 +481,7 @@ func TestBuildPodCarriesTheResolvedOptions(t *testing.T) {
 	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, prefs, "")
 
 	got := envValue(pod.Spec.Containers[0], playerOptionsVariable)
-	want := "--alang=en,ja\n--subs-with-matching-audio=no\n--subs-match-os-language=no"
+	want := "--alang=en,ja\n--subs-with-matching-audio=forced\n--reset-on-next-file=sid\n--subs-match-os-language=no"
 	if got != want {
 		t.Errorf("%s = %q, want %q", playerOptionsVariable, got, want)
 	}
@@ -490,6 +493,48 @@ func TestBuildPodWithNoPreferencesCarriesNoOptions(t *testing.T) {
 	pod := testPod(t)
 	if got := envValue(pod.Spec.Containers[0], playerOptionsVariable); got != "" {
 		t.Errorf("%s = %q, want none", playerOptionsVariable, got)
+	}
+}
+
+// The command sidecar chooses the subtitle track in the two modes that show
+// one, so it reads the resolved preferences in those modes and in no other.
+func TestTheCommandSidecarCarriesTheSubtitlePreferences(t *testing.T) {
+	cases := []struct {
+		name  string
+		prefs resolvedPreferences
+		want  string
+	}{
+		{
+			name: "on carries every field the rule reads",
+			prefs: resolvedPreferences{
+				AudioLanguages: []string{"en"}, SubtitleLanguages: []string{"en", "es"},
+				Subtitles: subtitlesOn, SDH: sdhPrefer, TimeZone: "America/New_York",
+			},
+			want: `{"subtitles":"on","sdh":"prefer","audioLanguages":["en"],"subtitleLanguages":["en","es"]}`,
+		},
+		{
+			name:  "auto carries the mode",
+			prefs: resolvedPreferences{Subtitles: subtitlesAuto},
+			want:  `{"subtitles":"auto"}`,
+		},
+		{
+			name:  "off leaves the choice to mpv's --sid=no",
+			prefs: resolvedPreferences{Subtitles: subtitlesOff, SubtitleLanguages: []string{"en"}},
+			want:  "",
+		},
+		{
+			name:  "no mode leaves the choice to mpv",
+			prefs: resolvedPreferences{SubtitleLanguages: []string{"en"}},
+			want:  "",
+		},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			play := testPlay()
+			pod := buildPod(play, buildClaim(play, testPlayer()), testResolution(t),
+				testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, one.prefs, "")
+			mustMatch(t, envValue(initContainer(t, pod, commandContainer), subtitlePreferencesVariable), one.want)
+		})
 	}
 }
 

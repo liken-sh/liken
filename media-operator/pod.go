@@ -176,7 +176,7 @@ func buildPod(
 	// the unit names, and the operator reads its events-topic list back
 	// off the pod to tell whether a Player reshaped this pod.
 	initContainers := []Container{
-		commandSidecar(play, claim, blocks, next, sidecarImage, busAddress, topicBase, remotes),
+		commandSidecar(play, claim, blocks, next, sidecarImage, busAddress, topicBase, remotes, prefs),
 	}
 	// The display container travels only for a unit that has a screen, and
 	// the claim answers that. An audio-only Player's pod would otherwise
@@ -215,6 +215,17 @@ func buildPod(
 // mpvPreferenceOptions maps the resolved preferences to mpv flags. It passes a
 // flag only for a field that resolved, and adds --subs-match-os-language=no
 // only when the feature is otherwise active.
+//
+// In on and auto, the command sidecar chooses the subtitle track when mpv
+// has loaded each file (subtitlechoice.go). The flags set the choice mpv
+// makes on its own, which shows until the sidecar acts and stays when the
+// sidecar cannot act. In on, --subs-fallback-forced=no stops mpv from
+// ranking a forced track in the audio's language above a full track in the
+// same language. A forced track with the default flag still wins, because
+// mpv ranks the default flag next, and only the sidecar corrects that. In
+// auto, --subs-with-matching-audio=forced lets mpv take a forced track
+// when the audio is in a subtitle language, where no refuses every track,
+// and that forced track is the one auto exists to show.
 func mpvPreferenceOptions(prefs resolvedPreferences) []string {
 	var options []string
 	if len(prefs.AudioLanguages) > 0 {
@@ -225,11 +236,18 @@ func mpvPreferenceOptions(prefs resolvedPreferences) []string {
 	}
 	switch prefs.Subtitles {
 	case subtitlesOn:
-		options = append(options, "--sub-visibility=yes", "--subs-with-matching-audio=yes")
+		options = append(options, "--sub-visibility=yes", "--subs-with-matching-audio=yes", "--subs-fallback-forced=no")
 	case subtitlesOff:
 		options = append(options, "--sid=no")
 	case subtitlesAuto:
-		options = append(options, "--subs-with-matching-audio=no")
+		options = append(options, "--subs-with-matching-audio=forced")
+	}
+	// mpv keeps a sid that the sidecar set into the next file with the same
+	// track layout. So a sidecar that fails on a later item would leave the
+	// earlier item's choice in place of mpv's own rule. The reset returns sid
+	// to its value from the command line at the start of each file.
+	if subtitlePreferencesValue(prefs) != "" {
+		options = append(options, "--reset-on-next-file=sid")
 	}
 	if len(options) == 0 {
 		return nil
@@ -246,6 +264,7 @@ func mpvPreferenceOptions(prefs resolvedPreferences) []string {
 func commandSidecar(
 	play *Play, claim *ResourceClaim, blocks, next string,
 	sidecarImage, busAddress, topicBase string, remotes []boundRemote,
+	prefs resolvedPreferences,
 ) Container {
 	env := []EnvVar{
 		{Name: playNamespaceVariable, Value: play.Metadata.Namespace},
@@ -261,6 +280,12 @@ func commandSidecar(
 	}
 	if next != "" {
 		env = append(env, EnvVar{Name: nextVariable, Value: next})
+	}
+	// The sidecar chooses the subtitle track only in the two modes that show
+	// one. In off, mpv's --sid=no is the whole choice, and with no mode mpv
+	// keeps its own rule, so those pods carry no preferences.
+	if choice := subtitlePreferencesValue(prefs); choice != "" {
+		env = append(env, EnvVar{Name: subtitlePreferencesVariable, Value: choice})
 	}
 	// The Player this Play runs on, which is the value a focus mark must
 	// hold for a controller's press to reach this film, and the two
@@ -353,6 +378,22 @@ func displaySidecar(
 	}
 	container.Resources.Claims = claimEntries(claim)
 	return container
+}
+
+// subtitlePreferencesValue encodes what the sidecar's subtitle rule reads, or
+// gives an empty string for a mode in which the sidecar chooses nothing.
+func subtitlePreferencesValue(prefs resolvedPreferences) string {
+	if prefs.Subtitles != subtitlesOn && prefs.Subtitles != subtitlesAuto {
+		return ""
+	}
+	// The value holds strings alone, and strings marshal unconditionally.
+	encoded, _ := json.Marshal(subtitlePreferences{
+		Subtitles:         prefs.Subtitles,
+		SDH:               prefs.SDH,
+		AudioLanguages:    prefs.AudioLanguages,
+		SubtitleLanguages: prefs.SubtitleLanguages,
+	})
+	return string(encoded)
 }
 
 // presentationBlocks bakes every item's block into one JSON array in

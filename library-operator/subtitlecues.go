@@ -44,9 +44,16 @@ func textSubtitleClause() string {
 	return `(` + strings.Join(terms, ` OR `) + `)`
 }
 
-// The subtitle file's record in the probe ledger: the file's own facts and
-// the dialogue the probe read from it. A file with no dialogue holds no
-// stretches, and its record still closes the probe gap.
+// The subtitle file's record in the probe ledger: the file's own facts, how
+// many timed cues it holds, and the dialogue the probe read from it. A file
+// with no dialogue holds no stretches, and its record still closes the probe
+// gap.
+//
+// The count is every timed cue, a song and an empty cue as well as a line,
+// because media-operator compares it with the NUMBER_OF_FRAMES tag of an
+// embedded track, which counts every block mkvmerge wrote. A count of spoken
+// lines alone would make an external track look smaller than an embedded copy
+// of the same text, and a short track reads as a forced one.
 func readSubtitleRecord(absolute string) (probedFile, error) {
 	file, err := os.Open(absolute)
 	if err != nil {
@@ -57,8 +64,10 @@ func readSubtitleRecord(absolute string) (probedFile, error) {
 	if err != nil {
 		return probedFile{}, fmt.Errorf("reading the subtitle file %s: %w", absolute, err)
 	}
-	record := probedFile{}
-	if dialogue, held := readSubtitleDialogue(absolute, data); held {
+	cues := readSubtitleCues(absolute, data)
+	events := int64(len(cues))
+	record := probedFile{Events: &events, Counted: true}
+	if dialogue, held := dialogueOf(spokenCues(cues)); held {
 		record.Dialogue = &dialogue
 	}
 	return record, nil
@@ -98,24 +107,44 @@ type subtitleDialogue struct {
 }
 
 // The dialogue a file holds, and false for a file with no line of dialogue.
-// The extension chooses the format.
 func readSubtitleDialogue(name string, data []byte) (subtitleDialogue, bool) {
-	text := strings.ReplaceAll(string(data), "\r\n", "\n")
-	var cues []timeSpan
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".ass", ".ssa":
-		cues = substationCues(text)
-	default:
-		cues = subripCues(text)
-	}
-	return dialogueOf(cues)
+	return dialogueOf(spokenCues(readSubtitleCues(name, data)))
 }
 
-// The dialogue cues of a SubRip or a WebVTT file. Both put the two times of a
+// One cue whose start and end both read, and whether its text is a line
+// someone speaks.
+type subtitleCue struct {
+	span   timeSpan
+	spoken bool
+}
+
+// Every timed cue of one file. The extension chooses the format.
+func readSubtitleCues(name string, data []byte) []subtitleCue {
+	text := strings.ReplaceAll(string(data), "\r\n", "\n")
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".ass", ".ssa":
+		return substationCues(text)
+	default:
+		return subripCues(text)
+	}
+}
+
+// The spans of the cues that are dialogue.
+func spokenCues(cues []subtitleCue) []timeSpan {
+	var spans []timeSpan
+	for _, cue := range cues {
+		if cue.spoken {
+			spans = append(spans, cue.span)
+		}
+	}
+	return spans
+}
+
+// The timed cues of a SubRip or a WebVTT file. Both put the two times of a
 // cue on one line around an arrow, and its text on the lines after it, up to
 // a blank line. A WebVTT cue line can carry settings after the end time.
-func subripCues(text string) []timeSpan {
-	var cues []timeSpan
+func subripCues(text string) []subtitleCue {
+	var cues []subtitleCue
 	lines := strings.Split(text, "\n")
 	for at := 0; at < len(lines); at++ {
 		left, right, timed := strings.Cut(lines[at], "-->")
@@ -129,18 +158,18 @@ func subripCues(text string) []timeSpan {
 			at++
 			words = append(words, lines[at])
 		}
-		if startRead && endRead && spoken(strings.Join(words, " ")) {
-			cues = append(cues, timeSpan{Start: start, End: end})
+		if startRead && endRead {
+			cues = append(cues, subtitleCue{span: timeSpan{Start: start, End: end}, spoken: spoken(strings.Join(words, " "))})
 		}
 	}
 	return cues
 }
 
-// The dialogue cues of an Advanced SubStation or a SubStation file: each
+// The timed cues of an Advanced SubStation or a SubStation file: each
 // Dialogue line of the events, whose second and third fields are the times
 // and whose tenth is the text, which can itself hold commas.
-func substationCues(text string) []timeSpan {
-	var cues []timeSpan
+func substationCues(text string) []subtitleCue {
+	var cues []subtitleCue
 	for line := range strings.SplitSeq(text, "\n") {
 		event, held := strings.CutPrefix(strings.TrimSpace(line), "Dialogue:")
 		if !held {
@@ -152,8 +181,8 @@ func substationCues(text string) []timeSpan {
 		}
 		start, startRead := cueTime(fields[1])
 		end, endRead := cueTime(fields[2])
-		if startRead && endRead && spoken(fields[9]) {
-			cues = append(cues, timeSpan{Start: start, End: end})
+		if startRead && endRead {
+			cues = append(cues, subtitleCue{span: timeSpan{Start: start, End: end}, spoken: spoken(fields[9])})
 		}
 	}
 	return cues

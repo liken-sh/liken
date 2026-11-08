@@ -686,16 +686,19 @@ func TestResolvePreferencesTierWins(t *testing.T) {
 		AudioLanguages:    []string{"play-a"},
 		SubtitleLanguages: []string{"play-s"},
 		Subtitles:         subtitlesOn,
+		SDH:               sdhPrefer,
 	}
 	player := &PlayerSpec{
 		AudioLanguages:    []string{"player-a"},
 		SubtitleLanguages: []string{"player-s"},
 		Subtitles:         subtitlesOff,
+		SDH:               sdhAvoid,
 	}
 	defaults := &MediaPreferencesSpec{
 		AudioLanguages:    []string{"default-a"},
 		SubtitleLanguages: []string{"default-s"},
 		Subtitles:         subtitlesAuto,
+		SDH:               sdhPrefer,
 	}
 
 	cases := []struct {
@@ -712,6 +715,7 @@ func TestResolvePreferencesTierWins(t *testing.T) {
 				AudioLanguages:    []string{"play-a"},
 				SubtitleLanguages: []string{"play-s"},
 				Subtitles:         subtitlesOn,
+				SDH:               sdhPrefer,
 			},
 		},
 		{
@@ -721,6 +725,7 @@ func TestResolvePreferencesTierWins(t *testing.T) {
 				AudioLanguages:    []string{"player-a"},
 				SubtitleLanguages: []string{"player-s"},
 				Subtitles:         subtitlesOff,
+				SDH:               sdhAvoid,
 			},
 		},
 		{
@@ -730,6 +735,7 @@ func TestResolvePreferencesTierWins(t *testing.T) {
 				AudioLanguages:    []string{"default-a"},
 				SubtitleLanguages: []string{"default-s"},
 				Subtitles:         subtitlesAuto,
+				SDH:               sdhPrefer,
 			},
 		},
 		{
