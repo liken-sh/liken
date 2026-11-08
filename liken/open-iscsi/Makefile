@@ -28,7 +28,6 @@ $(DIST)/iscsid $(DIST)/iscsiadm &: $(USERLAND_DIST)/sbin/iscsid $(USERLAND_DIST)
 $(DIST)/iscsid-image.tar: $(DIST)/iscsid ../image/oci.sh $(LIKEN_VERSION_STAMP)
 	DIST=$(abspath $(DIST)) LIKEN_VERSION=$(LIKEN_VERSION) \
 		IMAGE_DESCRIPTION='The iscsid of open-iscsi as a static program, for the DaemonSet of the iscsi feature.' \
-		IMAGE_LICENSES='GPL-2.0-or-later AND GPL-3.0-or-later AND LGPL-3.0-or-later AND LGPL-2.1-or-later' \
 		../image/oci.sh iscsid liken.sh/iscsid
 
 .PHONY: all clean

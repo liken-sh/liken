@@ -36,9 +36,13 @@
 # DIST names the directory that holds <binary> and receives
 # <binary>-image.tar. LIKEN_VERSION is the version to stamp into the
 # image's name. IMAGE_DESCRIPTION is one line that says what the image
-# is, and IMAGE_LICENSES is the SPDX expression of the licenses of the
-# program that the image runs. The OS release's SBOM names the license
-# of every other file, such as the CA bundle.
+# is. IMAGE_LICENSES is the SPDX expression of the licenses of the
+# program that the image runs, when that program is liken's own. A
+# program from another project, such as iscsid, links libraries under
+# several licenses, so its image writes no licenses key, the same as a
+# pinned image on ghcr.io, and the OS release's SBOM names the license
+# of each package. The SBOM also names the license of every other
+# file, such as the CA bundle.
 
 set -euo pipefail
 
@@ -47,7 +51,7 @@ image="${2:?usage: oci.sh <binary> <image>}"
 version="${LIKEN_VERSION:?LIKEN_VERSION must be set; the Makefiles pass it via version.mk}"
 dist="${DIST:?DIST must name the directory holding $binary}"
 description="${IMAGE_DESCRIPTION:?IMAGE_DESCRIPTION must say what the image is}"
-licenses="${IMAGE_LICENSES:?IMAGE_LICENSES must name the licenses of the program that the image runs}"
+licenses="${IMAGE_LICENSES-}"
 
 # The two values go into JSON as they are written, so a quote or a
 # backslash in one would end its string early.
@@ -124,13 +128,17 @@ layer_digest="$(add_blob "$dist/layer.tar")"
 # the same bytes, and no commit is in the build's inputs, so there is
 # no revision key either. The release that carries the image names its
 # commit.
+licenses_key=""
+if [ -n "$licenses" ]; then
+    licenses_key="    \"org.opencontainers.image.licenses\": \"$licenses\",
+"
+fi
 oci_keys="$(
     cat <<EOF
     "org.opencontainers.image.title": "${image#liken.sh/}",
     "org.opencontainers.image.description": "$description",
     "org.opencontainers.image.version": "$version",
-    "org.opencontainers.image.licenses": "$licenses",
-    "org.opencontainers.image.source": "https://github.com/liken-sh/liken",
+${licenses_key}    "org.opencontainers.image.source": "https://github.com/liken-sh/liken",
     "org.opencontainers.image.url": "https://liken.sh/",
     "org.opencontainers.image.documentation": "https://liken.sh/docs/",
     "org.opencontainers.image.vendor": "liken"
