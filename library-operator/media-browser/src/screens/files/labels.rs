@@ -43,12 +43,16 @@ fn class(width: i64) -> &'static str {
     }
 }
 
-// The first bracketed part of the file's name that names a source.
+// The first part of the file's name, inside brackets, that names a source.
+// A bracket can hold several parts split by commas, as in
+// `[2026, WEBDL-1080p]`, a naming scheme that puts the year beside the
+// quality, so each part is read on its own and the year is left out.
 fn quality(path: &str) -> Option<&str> {
     let name = path.rsplit('/').next().unwrap_or(path);
     name.split('[')
         .skip(1)
         .filter_map(|part| part.split_once(']').map(|(tag, _)| tag))
+        .flat_map(|tag| tag.split(',').map(str::trim))
         .find(|tag| {
             let lower = tag.to_lowercase();
             SOURCES.iter().any(|source| lower.contains(source))

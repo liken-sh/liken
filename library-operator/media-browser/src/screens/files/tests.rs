@@ -290,6 +290,13 @@ fn a_short_name_is_the_quality_tag_or_the_resolution_class() {
         ("Film.mkv", 1_280, "720p"),
         ("Film.mkv", 720, "SD"),
         ("Film [HDTV].mkv", 0, "HDTV"),
+        ("Film [2026, WEBDL-1080p].mkv", 1_920, "WEBDL-1080p"),
+        (
+            "Film [1999, Bluray-1080p Proper].mkv",
+            1_920,
+            "Bluray-1080p Proper",
+        ),
+        ("Film [2026, WEBDL].mkv", 3_840, "4K WEBDL"),
     ];
     for (path, width, name) in cases {
         let file = FileFacts {
