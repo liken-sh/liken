@@ -95,7 +95,7 @@ func TestEveryGeneratedBuilderRunsThePinnedBuildKit(t *testing.T) {
 
 func TestTheGeneratorRefusesImagesWithNoPinnedBuildKit(t *testing.T) {
 	root := writeTree(t, map[string]string{
-		"app/package.toml": "[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\n",
+		"app/package.toml": "[package]\nname = \"app\"\n[[outputs.images]]\nname = \"app\"\ndescription = \"The app image.\"\n",
 	})
 	components, err := LoadComponents(root)
 	if err != nil {
