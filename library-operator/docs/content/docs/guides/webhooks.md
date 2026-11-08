@@ -91,6 +91,17 @@ option on. Turn off their image writes, so that the art facts are the only
 writers of images, and turn off their import of extra files. The [Jellyfin guide](/docs/guides/jellyfin/#5-share-the-volume-with-jellyfin)
 lists the Jellyfin switches.
 
+Each file and directory that the operator writes into a title's folder
+takes the owner and group of that folder. So Radarr and Sonarr can
+change the operator's files the same way they change their own. When
+Radarr upgrades a movie's file, it deletes `movie.nfo` and writes it
+again, and a file that it may not write makes the import fail. After
+Radarr writes the file, each fact fills only the groups that the file
+no longer holds. The [enrichment guide](/docs/guides/enrichment/#the-write-rule)
+gives the rule. A run that may not change an owner, such as one on a
+share that maps root to another user, writes each file as its own
+user.
+
 ## By hand
 
     curl -X POST http://library-operator.liken-system.svc/webhook/media/movies

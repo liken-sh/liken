@@ -9,7 +9,8 @@ package main
 // the trickplay map, the move and the remove a merge of two
 // .contributors/ entries makes, the remove of the .liken directory at the
 // library root (rootliken.go), and the replace of a thumbnail or a tile
-// directory made from the file a path held before. The edit of one element
+// directory made from the file a path held before. Every name these doors
+// land takes the owner of its folder (volumeowner.go). The edit of one element
 // in an .nfo file is in xmledit.go, and the door for a file a writer reads,
 // changes, and writes back is in volumeupdate.go.
 
@@ -126,6 +127,7 @@ func (w *volumeWriter) stage(temporary string, data []byte) error {
 		_ = w.removeTemporary(temporary)
 		return err
 	}
+	adoptOwner(temporary, filepath.Dir(temporary))
 	return nil
 }
 
@@ -238,7 +240,7 @@ func (w *volumeWriter) stageTree(target string) (string, error) {
 	if err := w.removeTemporaryTree(staging); err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(staging, volumeDirectoryPerm); err != nil {
+	if err := w.makeDirectory(staging); err != nil {
 		return "", err
 	}
 	return staging, nil
@@ -259,6 +261,7 @@ func (w *volumeWriter) createTree(target string) (bool, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return false, err
 	}
+	adoptTreeOwner(staging, filepath.Dir(target))
 	if err := syncTree(staging); err != nil {
 		_ = w.removeTemporaryTree(staging)
 		return false, err
@@ -316,7 +319,7 @@ func (w *volumeWriter) removeTemporaryTree(path string) error {
 // A .liken directory does not exist until the first fact writes into it,
 // so the directory is created before the file lands in it.
 func (w *volumeWriter) writeInto(directory, name string, data []byte) error {
-	if err := os.MkdirAll(directory, volumeDirectoryPerm); err != nil {
+	if err := w.makeDirectory(directory); err != nil {
 		return err
 	}
 	return w.write(filepath.Join(directory, name), data)
@@ -325,7 +328,7 @@ func (w *volumeWriter) writeInto(directory, name string, data []byte) error {
 // The update door for a file in a directory that may not exist yet, as a
 // title's .liken directory is before its first ledger.
 func (w *volumeWriter) updateInto(directory, name string, change func([]byte) ([]byte, error)) ([]byte, error) {
-	if err := os.MkdirAll(directory, volumeDirectoryPerm); err != nil {
+	if err := w.makeDirectory(directory); err != nil {
 		return nil, err
 	}
 	return w.update(filepath.Join(directory, name), change)
@@ -335,7 +338,7 @@ func (w *volumeWriter) updateInto(directory, name string, change func([]byte) ([
 // person's own directory under .contributors/ is on its first write. It is
 // createOnce and never write, so a file another writer put there is kept.
 func (w *volumeWriter) createInto(directory, name string, data []byte) (bool, error) {
-	if err := os.MkdirAll(directory, volumeDirectoryPerm); err != nil {
+	if err := w.makeDirectory(directory); err != nil {
 		return false, err
 	}
 	return w.createOnce(filepath.Join(directory, name), data)
@@ -476,6 +479,7 @@ func (w *volumeWriter) replaceEarlierTree(target string, before int64) (bool, er
 	if !info.IsDir() || info.ModTime().Unix() >= before {
 		return false, w.removeTemporaryTree(staging)
 	}
+	adoptTreeOwner(staging, filepath.Dir(target))
 	if err := syncTree(staging); err != nil {
 		_ = w.removeTemporaryTree(staging)
 		return false, err

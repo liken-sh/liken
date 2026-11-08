@@ -50,9 +50,10 @@ func (w *volumeWriter) createOnceFrom(temporary, target string) (bool, error) {
 		return false, fmt.Errorf("refusing to land %s: it carries no %s mark",
 			temporary, likenTempMark)
 	}
-	if err := os.MkdirAll(filepath.Dir(target), volumeDirectoryPerm); err != nil {
+	if err := w.makeDirectory(filepath.Dir(target)); err != nil {
 		return false, err
 	}
+	adoptOwner(temporary, filepath.Dir(target))
 	if err := syncPath(temporary); err != nil {
 		return false, err
 	}
@@ -96,7 +97,11 @@ func copyOnceFrom(temporary, target string) (bool, error) {
 		file.Close()
 		return false, err
 	}
-	return true, file.Close()
+	if err := file.Close(); err != nil {
+		return false, err
+	}
+	adoptOwner(target, filepath.Dir(target))
+	return true, nil
 }
 
 // The one call that rewrites the container: no decode, the streams copied,
@@ -158,7 +163,7 @@ func (e *enricher) pullTrailerFile(ctx context.Context, source trailerSource,
 		return nil, attemptNothing
 	}
 	directory := filepath.Join(folder, trailersFolderName)
-	if err := os.MkdirAll(directory, volumeDirectoryPerm); err != nil {
+	if err := e.writer.makeDirectory(directory); err != nil {
 		e.logf("could not make %s: %v", e.named(directory), err)
 		return nil, attemptError
 	}
