@@ -1131,7 +1131,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
         // whatever screen is on the stack, so a page change under them
         // neither resets them nor covers them. The backing goes under the
         // strip where the screen draws art there.
-        let backing = self.top().strip_backing(self.clock);
+        let backing = self.top().strip_backing();
         if backing > 0.0 {
             layers.push(
                 canvas(views::clock::backing::Backing { level: backing })

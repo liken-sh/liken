@@ -179,7 +179,7 @@ fn the_focused_stripe_is_in_view_and_the_page_scrolls_to_reach_it() {
         let blocks = blocks(&movie);
         let offset = blocks.scroll(&movie, SHORT);
         let block = blocks.stripes[stripe];
-        assert!(block.top - offset >= 0.0, "{block:?} at {offset}");
+        assert!(block.top - offset >= VIEWPORT_TOP, "{block:?} at {offset}");
         assert!(block.bottom() - offset <= SHORT, "{block:?} at {offset}");
         offsets.push(offset);
     }
@@ -193,10 +193,58 @@ fn the_strip_and_the_first_stripe_are_in_view_while_the_strip_has_focus() {
     let blocks = blocks(&movie);
     let offset = blocks.scroll(&movie, SHORT);
     let strip = blocks.strip.expect("the crowded page holds a set");
-    assert!(strip.top - offset >= 0.0);
+    assert!(strip.top - offset >= VIEWPORT_TOP);
     assert!(strip.bottom() - offset <= SHORT);
     assert!(blocks.stripes[0].top - offset < SHORT);
     assert!(blocks.stripes[0].bottom() - offset > SHORT);
+}
+
+// A scrolled page shows its blocks from the line every wall's rows start
+// under, so no headshot or poster rests under the strip's clock.
+#[test]
+fn every_focused_row_rests_under_the_strip_at_any_height() {
+    for height in [HEIGHT, SHORT] {
+        for focus in [Focus::Strip(0), Focus::Stripe(0, 0), Focus::Stripe(1, 0)] {
+            let movie = crowded(focus);
+            let blocks = blocks(&movie);
+            let offset = blocks.scroll(&movie, height);
+            let block = match focus {
+                Focus::Stripe(stripe, _) => blocks.stripes[stripe],
+                _ => blocks.strip.expect("the crowded page holds a set"),
+            };
+            assert!(
+                block.top - offset >= VIEWPORT_TOP,
+                "{focus:?} at {height}: {block:?} at {offset}"
+            );
+        }
+    }
+}
+
+// At rest the page draws from the top of the frame, so the logo keeps
+// its place beside the clock. As the page scrolls, the top edge of what it
+// shows moves down with the scroll until it reaches the line under the
+// strip, and holds there.
+#[test]
+fn the_page_shows_from_the_top_at_rest_and_from_under_the_strip_once_scrolled() {
+    let cases = [
+        (0.0, 0.0),
+        (VIEWPORT_TOP / 2.0, VIEWPORT_TOP / 2.0),
+        (VIEWPORT_TOP, VIEWPORT_TOP),
+        (VIEWPORT_TOP * 4.0, VIEWPORT_TOP),
+    ];
+    for (offset, top) in cases {
+        let shown = shown(FRAME, offset);
+        assert_eq!((shown.x, shown.width), (0.0, WIDTH), "{offset}");
+        assert_eq!(shown.y, top, "{offset}");
+        assert_eq!(shown.y + shown.height, HEIGHT, "{offset}");
+    }
+}
+
+#[test]
+fn the_line_under_the_strip_clears_the_clock_by_a_wall_s_air() {
+    use crate::views::{band, clock};
+    assert_eq!(VIEWPORT_TOP, band::HEIGHT);
+    const { assert!(VIEWPORT_TOP > screen::MARGIN_Y + clock::BOX) };
 }
 
 #[test]
@@ -291,6 +339,35 @@ fn the_more_like_this_strip_follows_the_stripes_and_the_studios_follow_it() {
     assert!(like.bottom() - offset <= SHORT);
     let marked = movie.marked(area(0.0, 0.0, WIDTH, SHORT));
     assert!(marked.is_some_and(|around| around.y >= like.top - offset));
+}
+
+// More like this and the studios on the foot scroll like every other row,
+// so focus on either rests under the strip's line.
+#[test]
+fn focus_on_more_like_this_and_on_a_studio_rests_under_the_strip() {
+    for height in [HEIGHT, SHORT] {
+        for focus in [Focus::Like(0), Focus::Studio(0)] {
+            let mut movie = crowded(focus);
+            movie.set = None;
+            movie.like = crate::screens::movie::alike::Like::of(vec![crate::catalog::Alike {
+                slot: crate::catalog::Slot {
+                    library: "screening/films".into(),
+                    kind: "movies".into(),
+                    id: "two".into(),
+                    ..crate::catalog::Slot::default()
+                },
+                score: 3,
+                rating: 0.0,
+            }]);
+            let frame = area(0.0, 0.0, WIDTH, height);
+            let marked = movie.marked(frame).expect("the page marks the focus");
+            assert!(
+                marked.y >= VIEWPORT_TOP,
+                "{focus:?} at {height}: {marked:?}"
+            );
+            assert!(marked.y + marked.height <= height, "{focus:?} at {height}");
+        }
+    }
 }
 
 #[test]

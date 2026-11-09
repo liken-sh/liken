@@ -323,14 +323,13 @@ impl Screen {
     }
 
     /// The level of the backing the browser draws under its strip over
-    /// this screen at the second `at`, from 0 for none to 1 for its peak.
-    /// A title's page draws art under the strip, a backdrop at rest and
-    /// its own blocks once it scrolls. The home page and a wall draw a
+    /// this screen, from 0 for none to 1 for its peak. A title's page
+    /// draws its backdrop under the strip. The home page and a wall draw a
     /// black band there, a franchise page draws its own band, and a
     /// person's page draws nothing under the strip, so those take none.
-    pub fn strip_backing(&self, at: f64) -> f32 {
+    pub fn strip_backing(&self) -> f32 {
         match self {
-            Self::Movie(screen) => screen.strip_backing(at),
+            Self::Movie(screen) => screen.strip_backing(),
             Self::Series(screen) => screen.strip_backing(),
             Self::Home(_) | Self::Wall(_) | Self::Person(_) | Self::Franchise(_) => 0.0,
         }

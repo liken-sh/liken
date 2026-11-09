@@ -24,11 +24,11 @@ fn the_browser_backs_the_strip_over_a_movies_page_and_not_over_a_wall() {
     let mut browser = browser(3);
     browser.key("enter");
     let _ = showing_wall(&browser);
-    assert_eq!(browser.top().strip_backing(browser.clock), 0.0);
+    assert_eq!(browser.top().strip_backing(), 0.0);
 
     browser.key("enter");
     let _ = showing_page(&browser);
-    assert!(browser.top().strip_backing(browser.clock) > 0.0);
+    assert!(browser.top().strip_backing() > 0.0);
 }
 
 #[test]

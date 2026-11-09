@@ -21,7 +21,7 @@ impl Series {
     /// never scrolls, so the level is the one a page at rest takes over
     /// its backdrop.
     pub fn strip_backing(&self) -> f32 {
-        backing::level(!self.backdrop.is_empty(), 0.0)
+        backing::level(!self.backdrop.is_empty())
     }
 
     /// The rectangle the focus outline goes to on this page at these

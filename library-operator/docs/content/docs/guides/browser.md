@@ -136,9 +136,10 @@ loading screen covers a title's page, the outline is hidden.
 
 Up from the top of any wall puts focus on the strip, the row across
 the top that holds the clock and the search glass. On a title's page,
-a shade darkens the top of the frame under the strip: lightly over the
-backdrop, and fully once the page scrolls its text and faces up under
-the strip, so the clock and the glass draw over a darker ground. Right from the last
+a light shade darkens the backdrop under the strip, so the clock and
+the glass draw over a darker ground. A movie's page that scrolls down
+to its rows shows them only under the strip's line, so no poster or
+headshot passes under the clock. Right from the last
 column of a long wall puts focus on the rail. The rail is the bars at
 the right edge, and they jump through the wall by year, decade,
 letter, or season.

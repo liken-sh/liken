@@ -62,11 +62,12 @@ impl Movie {
         }
     }
 
-    /// The level of the backing under the browser's strip at this second:
-    /// part of its peak over the backdrop at rest, and all of it once the
-    /// page has scrolled its blocks up under the strip.
-    pub fn strip_backing(&self, at: f64) -> f32 {
-        backing::level(!self.backdrop.is_empty(), self.scroll.at(at))
+    /// The level of the backing under the browser's strip: the one a
+    /// page takes over its backdrop. The backdrop stands still while the
+    /// page scrolls, and the page shows no block under the strip, so the
+    /// scroll leaves the level as it is.
+    pub fn strip_backing(&self) -> f32 {
+        backing::level(!self.backdrop.is_empty())
     }
 
     /// Follow the places the page and every row scroll to at these

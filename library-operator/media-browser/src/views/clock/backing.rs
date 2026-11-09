@@ -1,14 +1,15 @@
 // The backing under the strip: a shade at the top of the frame, dark
 // from the top edge through the strip's line and clear a little lower.
 // The strip draws its glass and its clock as thin light strokes with no
-// plate of their own, so over a bright backdrop the glass disappears, and
-// on a page scrolled to its cast the clock draws over the faces. The
+// plate of their own, so over a bright backdrop the glass disappears. The
 // player's overlay draws the same kind of shade behind its header and
 // clock.
 //
-// A page that draws art under the strip asks for the backing through
-// `level`. The home page and a wall draw a black band under the strip and
-// ask for none. The backing is a layer of its own between the screen and
+// A title's page draws its backdrop under the strip and asks for the
+// backing through `level`. The backdrop stands still while the page
+// scrolls, and a scrolled page shows its rows only under the strip, so
+// the level is the same at rest and scrolled. The home page and a wall
+// draw a black band under the strip and ask for none. The backing is a layer of its own between the screen and
 // the strip, because inside one layer a ramp is an image, and the
 // renderer draws every image after every mesh, so a ramp in the strip's
 // layer would cover the glass.
@@ -36,33 +37,22 @@ pub const HOLD: f32 = 124.0;
 /// pixels.
 pub const CLEAR: f32 = 200.0;
 
-/// How far a page scrolls before the backing reaches its peak, in logical
-/// pixels. The shade comes in as the page's content moves up under the
-/// strip, so a page at rest keeps its look.
-pub const FADE_IN: f32 = 120.0;
-
-/// The backing's level on a page at rest that draws a backdrop under the
-/// strip, as a share of the peak. It is under the peak, because a page at
-/// rest draws its title under the backing too.
-pub const AT_REST: f32 = 0.5;
-
-// The level moves in steps of this share, so a scroll that fades the
-// backing in builds a few tiles of the ramp and not one for every frame.
-const STEPS: f32 = 16.0;
+/// The backing's level on a page that draws a backdrop under the strip,
+/// as a share of the peak. It is under the peak, because the page draws
+/// its title under the backing too.
+pub const OVER_BACKDROP: f32 = 0.5;
 
 // The points of the smoothstep from the hold to the clear end. The ramp
 // joins them with straight runs.
 const EASE_POINTS: usize = 8;
 
 /// The backing's level, from 0 for none to 1 for the peak, on a page that
-/// draws a backdrop under the strip or not, scrolled this far down.
-pub fn level(over_backdrop: bool, scrolled: f32) -> f32 {
-    let rest = match over_backdrop {
-        true => AT_REST,
+/// draws a backdrop under the strip or not.
+pub fn level(over_backdrop: bool) -> f32 {
+    match over_backdrop {
+        true => OVER_BACKDROP,
         false => 0.0,
-    };
-    let moved = look::eased((scrolled / FADE_IN).clamp(0.0, 1.0));
-    (rest.max(moved) * STEPS).round() / STEPS
+    }
 }
 
 /// The stops of the backing at this level, as shares of `CLEAR` from the
@@ -117,35 +107,10 @@ mod tests {
     use crate::views::screen;
 
     #[test]
-    fn a_page_at_rest_with_nothing_under_the_strip_draws_no_backing() {
-        assert_eq!(level(false, 0.0), 0.0);
-    }
-
-    #[test]
-    fn a_page_at_rest_over_a_backdrop_draws_the_backing_under_its_peak() {
-        assert_eq!(level(true, 0.0), AT_REST);
-    }
-
-    #[test]
-    fn the_backing_comes_in_as_the_page_scrolls_and_holds_its_peak_after() {
-        let cases = [
-            (0.0, 0.0),
-            (FADE_IN / 2.0, 0.5),
-            (FADE_IN, 1.0),
-            (FADE_IN * 4.0, 1.0),
-        ];
-        for (scrolled, want) in cases {
-            assert_eq!(level(false, scrolled), want, "{scrolled}");
-        }
-        assert_eq!(level(true, FADE_IN), 1.0);
-    }
-
-    #[test]
-    fn the_level_moves_in_steps_so_a_fade_builds_few_tiles() {
-        let levels: std::collections::BTreeSet<u32> = (0..=1200)
-            .map(|tenth| level(false, tenth as f32 / 10.0).to_bits())
-            .collect();
-        assert!(levels.len() <= STEPS as usize + 1, "{}", levels.len());
+    fn a_page_draws_the_backing_under_its_peak_over_a_backdrop_and_none_without_one() {
+        assert_eq!(level(true), OVER_BACKDROP);
+        const { assert!(OVER_BACKDROP < 1.0) };
+        assert_eq!(level(false), 0.0);
     }
 
     #[test]

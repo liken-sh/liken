@@ -45,18 +45,18 @@ fn settled(page: &Movie) -> Vec<f32> {
         .collect()
 }
 
+// The page shows no block under the strip once it scrolls, so the
+// backing stays at the level its backdrop asks for.
 #[test]
-fn the_strip_backs_itself_as_the_page_scrolls_to_its_cast() {
+fn the_strip_backs_the_backdrop_alike_at_rest_and_scrolled_to_the_cast() {
     use crate::views::clock::backing;
-    let mut page = on(Focus::Buttons(0));
-    page.backdrop = String::new();
-    assert_eq!(page.strip_backing(0.0), 0.0);
-    page.backdrop = "backdrop.jpg".into();
-    assert_eq!(page.strip_backing(0.0), backing::AT_REST);
-
-    let mut page = on(Focus::Stripe(0, 0));
-    page.backdrop = String::new();
-    assert_eq!(page.strip_backing(0.0), 1.0);
+    for focus in [Focus::Buttons(0), Focus::Stripe(0, 0)] {
+        let mut page = on(focus);
+        page.backdrop = String::new();
+        assert_eq!(page.strip_backing(), 0.0, "{focus:?}");
+        page.backdrop = "backdrop.jpg".into();
+        assert_eq!(page.strip_backing(), backing::OVER_BACKDROP, "{focus:?}");
+    }
 }
 
 #[test]

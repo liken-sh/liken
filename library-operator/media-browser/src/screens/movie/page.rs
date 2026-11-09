@@ -3,6 +3,13 @@
 // before anything draws, so a movie with no tagline, no set, or no credits
 // leaves no hole where they would have been. The measure gives every block
 // its place, and the focused block decides how far the stack has scrolled.
+//
+// The browser's strip draws the clock, the glass, and the people at the
+// top right of the frame with no plate under them. A row that scrolled up
+// under the strip would put the clock over a headshot, and no shade
+// under the strip is dark enough to hide a face and light enough to keep
+// the art. So a scrolled page shows its blocks only under the line
+// `VIEWPORT_TOP`, and a row leaves the view at that line.
 
 use crate::audience::faces::Faces;
 use std::cell::RefCell;
@@ -22,7 +29,7 @@ use crate::look;
 use crate::views::across::Across;
 use crate::views::stack::{self, Stack};
 use crate::views::{
-    area, buttons, card, curtain, header, people, ratings, screen, strip, text, watch as line,
+    area, band, buttons, card, curtain, header, people, ratings, screen, strip, text, watch as line,
 };
 
 // The share of the width the column of text takes. The column ends inside
@@ -57,6 +64,22 @@ const STRIPE_LEAD: f32 = 16.0;
 // The extra space over the files section, so its heading starts a part of
 // the page of its own under the studios.
 const FILES_LEAD: f32 = 40.0;
+
+/// The top of the part of the frame a scrolled page shows, in logical
+/// pixels: the line every wall's rows start under, which leaves the air of
+/// a wall between the foot of the clock's line and the first row. The
+/// scroll rests the focused block under it.
+pub const VIEWPORT_TOP: f32 = band::HEIGHT;
+
+/// The part of the frame the page shows at this scroll down. At rest it
+/// is the whole frame, so the logo draws on the top margin beside the
+/// clock. Its top edge moves down with the scroll until it reaches
+/// `VIEWPORT_TOP`, so the head leaves the view as the page scrolls, and
+/// it holds there, so no row draws under the strip.
+pub fn shown(bounds: Rectangle, offset: f32) -> Rectangle {
+    let top = offset.clamp(0.0, VIEWPORT_TOP).min(bounds.height);
+    area(bounds.x, bounds.y + top, bounds.width, bounds.height - top)
+}
 
 /// The box the movie's logo draws in at these bounds, scroll included,
 /// which is where the loading state starts the logo's move.
@@ -246,16 +269,31 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry<Renderer>> {
-        let movie = self.movie;
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        let store = &mut *self.store.borrow_mut();
+        let (blocks, offset) = self.movie.drawn(bounds, self.at);
+        frame.with_clip(shown(bounds, offset), |frame| {
+            self.blocks(frame, bounds, &blocks, offset);
+        });
+        vec![frame.into_geometry()]
+    }
+}
 
+impl<A: Art> Page<'_, A> {
+    // Every block of the page at this scroll down.
+    fn blocks(
+        &self,
+        frame: &mut canvas::Frame<Renderer>,
+        bounds: Rectangle,
+        blocks: &Blocks,
+        offset: f32,
+    ) {
+        let movie = self.movie;
+        let store = &mut *self.store.borrow_mut();
         let region = screen::region(bounds);
         let column = column(bounds);
-        let (blocks, offset) = movie.drawn(bounds, self.at);
 
         header::title(
-            &mut frame,
+            frame,
             store,
             &header::Title {
                 library: &movie.library,
@@ -289,13 +327,13 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 look::text(),
             ),
         ] {
-            text::line_in(&mut frame, content, block.at(offset), face, color, column);
+            text::line_in(frame, content, block.at(offset), face, color, column);
         }
 
-        ratings::draw(&mut frame, &movie.ratings, blocks.ratings.at(offset));
+        ratings::draw(frame, &movie.ratings, blocks.ratings.at(offset));
 
         text::block(
-            &mut frame,
+            frame,
             &movie.plot,
             blocks.plot.at(offset),
             look::PLOT,
@@ -311,10 +349,10 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
 
         let words = row::Button::drawn(&movie.buttons());
         let at = blocks.buttons.at(offset);
-        buttons::draw(&mut frame, &words, at);
+        buttons::draw(frame, &words, at);
         let names: Vec<&str> = words.iter().map(|(_, name)| *name).collect();
         buttons::draw_aside(
-            &mut frame,
+            frame,
             &names,
             at,
             &movie.ends(self.now),
@@ -328,7 +366,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             _ => None,
         };
         line::draw(
-            &mut frame,
+            frame,
             &status_line(movie, &status, &marks, marked),
             under(at),
             column,
@@ -336,28 +374,26 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
 
         // Each row draws at the scroll its own ease has reached at this
         // second, toward the place this frame's focus rests it at.
-        for (index, row) in rows(movie, &blocks, bounds, offset, focus)
+        for (index, row) in rows(movie, blocks, bounds, offset, focus)
             .into_iter()
             .enumerate()
         {
             let scroll = movie.rows.at(index, row.scrolled(), self.at);
-            row.at(scroll).faced(self.faces).draw(&mut frame, store);
+            row.at(scroll).faced(self.faces).draw(frame, store);
         }
 
         super::super::files::draw(
-            &mut frame,
+            frame,
             &movie.files,
             Point::new(region.x, blocks.files.top - offset),
             region.width,
         );
 
         movie.foot.draw(
-            &mut frame,
+            frame,
             Point::new(region.x, blocks.foot.top - offset),
             region.width,
         );
-
-        vec![frame.into_geometry()]
     }
 }
 
@@ -378,10 +414,6 @@ impl Block {
 
     fn bottom(&self) -> f32 {
         self.top + self.height
-    }
-
-    fn region(&self) -> Rectangle {
-        area(0.0, self.top, 0.0, self.height)
     }
 }
 
@@ -494,7 +526,8 @@ impl Blocks {
 
     // How far the page has scrolled: enough to hold the focused
     // block and the head of the block under it, so a person sees that
-    // there is more below.
+    // there is more below. The viewport the rule keeps them in starts at
+    // `VIEWPORT_TOP`, so the focused block never rests under the strip.
     fn scroll(&self, movie: &Movie, height: f32) -> f32 {
         let block = match movie.focus {
             Focus::Stripe(stripe, _) => self.stripes.get(stripe).copied(),
@@ -507,7 +540,13 @@ impl Blocks {
         .unwrap_or(self.buttons);
         let tail = (self.after(block) - block.bottom() + TRAIL * people::HEIGHT)
             .min(self.content - block.bottom());
-        stack::offset(block.region(), tail, self.content, height)
+        let under = area(0.0, block.top - VIEWPORT_TOP, 0.0, block.height);
+        stack::offset(
+            under,
+            tail,
+            self.content - VIEWPORT_TOP,
+            height - VIEWPORT_TOP,
+        )
     }
 
     // The top of the first block under this one, and the foot of

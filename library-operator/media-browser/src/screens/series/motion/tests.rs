@@ -39,7 +39,7 @@ fn the_strip_backs_itself_over_a_backdrop_and_the_wall_s_scroll_moves_nothing() 
     use crate::views::clock::backing;
     let mut page = on(Focus::Still(0));
     page.backdrop = "backdrop.jpg".into();
-    assert_eq!(page.strip_backing(), backing::AT_REST);
+    assert_eq!(page.strip_backing(), backing::OVER_BACKDROP);
     page.backdrop = String::new();
     assert_eq!(page.strip_backing(), 0.0);
 }
