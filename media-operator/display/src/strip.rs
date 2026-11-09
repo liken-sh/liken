@@ -9,10 +9,13 @@
 //! delay, "0 ms" included. A person who hears the sound late then reads the
 //! delay and reaches its adjuster from the strip, without opening a list of
 //! tracks first.
+//!
+//! While the strip has the focus, the focused stop's value reads brighter
+//! than the others and has a bar under it in the accent.
 
-use iced::Point;
+use iced::{Point, Rectangle, Size};
 
-use crate::canvas::{Anchor, Brush, Canvas, Line, clip};
+use crate::canvas::{Anchor, Brush, Canvas, Line, clip, measure};
 use crate::chooser;
 use crate::film::Film;
 use crate::focus::Action;
@@ -38,6 +41,13 @@ const STOP_GAP: f32 = 24.0;
 /// value changes width.
 const GROUP_PITCH: f32 = 430.0;
 const GROUP_INK: f32 = 260.0;
+
+/// The bar under the focused stop's value: its thickness, and the space
+/// between the value's line box and the bar. The bar is thick enough to read
+/// from a couch at 1080 rows, and it is a bar and not a box so that the mark
+/// stays as quiet as the row it marks.
+const MARK_H: f32 = 3.0;
+const MARK_GAP: f32 = 4.0;
 
 /// One control of the strip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -324,6 +334,37 @@ impl Strip {
         lines
     }
 
+    /// The bar under the focused stop's value, and none while the strip does
+    /// not have the focus. The focused value also reads brighter than the
+    /// others, but from a couch that difference alone does not show which of
+    /// five small values the focus is on, so the bar marks it in the accent.
+    ///
+    /// The bar is as wide as the value's text after the clip, so it ends
+    /// inside the value's member as the text does.
+    pub fn mark(
+        &self,
+        canvas: &Canvas,
+        presentation: &Presentation,
+        film: &Film,
+        focused: bool,
+    ) -> Option<Rectangle> {
+        if !focused {
+            return None;
+        }
+        let present = Self::present(presentation, film);
+        let here = *present.get(self.index.min(present.len().checked_sub(1)?))?;
+        Self::groups(canvas, &present, film)
+            .into_iter()
+            .flat_map(|group| group.cells)
+            .find(|cell| cell.control == here)
+            .map(|cell| {
+                Rectangle::new(
+                    Point::new(cell.x, Y_VAL + theme::type_scale::TINY / 2.0 + MARK_GAP),
+                    Size::new(measure(&cell.content, theme::type_scale::TINY), MARK_H),
+                )
+            })
+    }
+
     pub fn draw(
         &self,
         brush: &mut Brush<'_>,
@@ -332,6 +373,9 @@ impl Strip {
         focused: bool,
     ) {
         let canvas = brush.canvas();
+        if let Some(mark) = self.mark(&canvas, presentation, film, focused) {
+            brush.rect(mark, theme::color::focus());
+        }
         for line in self.lines(&canvas, presentation, film, focused) {
             brush.text(line);
         }
@@ -353,7 +397,7 @@ impl Strip {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::canvas::{ELLIPSIS, measure};
+    use crate::canvas::ELLIPSIS;
     use serde_json::json;
 
     fn film() -> Film {
@@ -662,6 +706,71 @@ mod tests {
 
         strip.press(Action::Select, &block("{}"), &film());
         assert_eq!(strip.capturing(), Some(Control::SubOffset));
+    }
+
+    /// The mark under each stop of the three groups: the presses to the right
+    /// that reach the stop, the left edge of its value, and the value.
+    const MARKS: [(usize, f32, &str); 5] = [
+        (0, 704.0, "ENG"),
+        (1, 904.0, "0 ms"),
+        (2, 1134.0, "off"),
+        (3, 1334.0, "0 ms"),
+        (4, 1564.0, "Main"),
+    ];
+
+    /// The focused stop has a bar under its value, as wide as the value's
+    /// text, 3 canvas pixels thick, and 4 under the value's line box. The
+    /// strip gives one mark at most, so no other stop has one.
+    #[test]
+    fn the_focused_stop_is_underlined() {
+        for (presses, x, content) in MARKS {
+            let mut strip = Strip::default();
+            for _ in 0..presses {
+                strip.press(Action::Right, &block("{}"), &angles());
+            }
+            assert_eq!(
+                strip.mark(&Canvas::default(), &block("{}"), &angles(), true),
+                Some(Rectangle::new(
+                    Point::new(x, 1034.0),
+                    Size::new(measure(content, theme::type_scale::TINY), 3.0),
+                )),
+                "the mark under {content:?} at {x}"
+            );
+        }
+    }
+
+    /// The mark under a clipped value is as wide as the text that draws, so
+    /// it ends where the ellipsis ends and stays inside the value's member.
+    #[test]
+    fn the_mark_under_a_clipped_value_ends_with_its_text() {
+        let strip = Strip::default();
+        let value = &row("{}", &rip(), Y_VAL)[0];
+        let mark = strip
+            .mark(&Canvas::default(), &block("{}"), &rip(), true)
+            .unwrap();
+        assert!(value.content.ends_with(ELLIPSIS));
+        assert_eq!(mark.width, measure(&value.content, value.size));
+        assert!(mark.width <= MEMBER_W - STOP_GAP);
+    }
+
+    /// A strip without the focus draws no mark, and a file with no strip has
+    /// none to draw.
+    #[test]
+    fn a_strip_without_the_focus_draws_no_mark() {
+        let strip = Strip::default();
+        assert_eq!(
+            strip.mark(&Canvas::default(), &block("{}"), &angles(), false),
+            None
+        );
+        assert_eq!(
+            strip.mark(
+                &Canvas::default(),
+                &block(r#"{"type":"music"}"#),
+                &angles(),
+                true
+            ),
+            None
+        );
     }
 
     /// A control the file lost drops the focus back onto the row.

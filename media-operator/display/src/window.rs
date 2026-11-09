@@ -677,12 +677,10 @@ impl Display {
         } else {
             Vec::new()
         };
-        let strip = self.strip.lines(
-            &canvas,
-            &self.presentation,
-            &self.film,
-            self.focus.focused_stop() == Some(Stop::Strip),
-        );
+        let on_strip = self.focus.focused_stop() == Some(Stop::Strip);
+        let strip = self
+            .strip
+            .lines(&canvas, &self.presentation, &self.film, on_strip);
         if bar.is_some() || !counter.is_empty() || !strip.is_empty() {
             // The bottom scrim backs the scrubber and the strip, drawn before
             // them so their text is on top. While the cast row shows, the
@@ -696,6 +694,12 @@ impl Display {
             }
             if let Some(bar) = bar.as_ref() {
                 self.scrubber.draw(brush, bar);
+            }
+            if let Some(mark) = self
+                .strip
+                .mark(&canvas, &self.presentation, &self.film, on_strip)
+            {
+                brush.rect(mark, theme::color::focus());
             }
             for line in counter.into_iter().chain(strip) {
                 brush.text(line);

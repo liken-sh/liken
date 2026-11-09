@@ -49,6 +49,12 @@ pub mod color {
         fill()
     }
 
+    /// The bar under the focused stop of the control strip, which takes the
+    /// accent.
+    pub fn focus() -> Color {
+        fill()
+    }
+
     /// The scrim and every shadow.
     pub const SHADOW: Color = Color::BLACK;
 }
