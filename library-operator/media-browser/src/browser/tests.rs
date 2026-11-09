@@ -679,7 +679,13 @@ impl Source for Fake {
             .map(|(work, progress)| {
                 let share = progress.played().fraction();
                 let people = audience.iter().map(|name| (name.clone(), share)).collect();
-                (work.clone(), Reach { people })
+                (
+                    work.clone(),
+                    Reach {
+                        people,
+                        ..Reach::default()
+                    },
+                )
             })
             .collect()
     }

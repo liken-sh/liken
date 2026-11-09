@@ -170,6 +170,7 @@ impl Source for People {
                         .filter(|person| self.finished(person, number))
                         .map(|person| (person.clone(), 1.0))
                         .collect(),
+                    ..Reach::default()
                 };
                 ((LIBRARY.to_string(), id(number)), reach)
             })

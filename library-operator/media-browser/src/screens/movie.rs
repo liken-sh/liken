@@ -33,7 +33,7 @@ use super::{
 use crate::art::Art;
 use crate::audience::Viewer;
 use crate::catalog::draw::Date;
-use crate::catalog::progress::thread;
+use crate::catalog::progress::{self, Finish, Reach, thread};
 use crate::catalog::{MovieDetails, MovieSet, Progress, Query, Selection, Slot, Source};
 use crate::clock::{self, Time};
 use crate::focus;
@@ -170,6 +170,13 @@ pub struct Movie {
     /// theirs names it. It decides the playback row, the bar under it,
     /// and the status and the marks on the line under the bar.
     pub progress: Option<Progress>,
+    /// How the audience finished the film, which the status line names,
+    /// and nothing where they have not.
+    pub finish: Option<Finish>,
+    /// Each person at the screen and where they stand in the film, which
+    /// the status line draws after the audience's status, and none while
+    /// one person or nobody watches.
+    pub people: Vec<(Viewer, String)>,
     /// Where focus is.
     pub focus: Focus,
     // How far the page has scrolled down, as it eases to the place that
@@ -217,6 +224,8 @@ impl Movie {
             like,
             via: None,
             progress: None,
+            finish: None,
+            people: Vec::new(),
             focus: Focus::Buttons(0),
             scroll: Glide::still(0.0),
             rows: Rows::default(),
@@ -232,6 +241,8 @@ impl Movie {
             return;
         };
         fresh.progress = self.progress.clone();
+        fresh.finish = self.finish;
+        fresh.people = std::mem::take(&mut self.people);
         fresh.via = self.via.clone();
         fresh.scroll = self.scroll;
         fresh.rows = std::mem::take(&mut self.rows);
@@ -248,6 +259,8 @@ impl Movie {
     // continue-watching row agree. A film with no play that names exactly
     // these people, or one they cleared to 0, carries no progress. A film
     // they finished carries its finished play, so the row offers the clear.
+    // Each person's words come from the answer the posters read their
+    // faces from, so the line and a poster of the film never disagree.
     pub fn read_progress(
         &mut self,
         source: &mut dyn Source,
@@ -263,8 +276,18 @@ impl Movie {
             like.order(&reach);
             reached::fill(&mut like.members, &reach, people, viewers);
         }
-        let plays: Vec<thread::Play> = source
-            .plays_of(&self.library, &self.id, people)
+        let film = reach.get(&(self.library.clone(), self.id.clone()));
+        self.people = match people.len() > 1 {
+            true => viewers
+                .iter()
+                .map(|viewer| (viewer.clone(), standing(film, &viewer.name)))
+                .collect(),
+            false => Vec::new(),
+        };
+        let resumes = source.plays_of(&self.library, &self.id, people);
+        let together: Vec<&Progress> = resumes.iter().map(|play| &play.progress).collect();
+        self.finish = progress::finish::finish(&progress::seen::since_clear(&together));
+        let plays: Vec<thread::Play> = resumes
             .into_iter()
             .map(|play| thread::Play {
                 leaf: 0,
@@ -303,7 +326,9 @@ impl Movie {
     pub fn status(&self) -> watch::Status {
         watch::status(
             self.progress.as_ref(),
+            self.finish,
             marked_duration(self.progress.as_ref(), self.duration),
+            self.people.len() > 1,
         )
     }
 
@@ -748,6 +773,20 @@ impl Head for Movie {
     fn head(&self, bounds: Rectangle) -> Rectangle {
         page::head(self, bounds)
     }
+}
+
+// Where one person stands in the film, from the store's answer for it:
+// watched, the share they reached, or not started.
+fn standing(film: Option<&Reach>, person: &str) -> String {
+    let share = film.and_then(|reach| {
+        reach
+            .people
+            .iter()
+            .find(|(name, _)| name == person)
+            .map(|(_, share)| *share)
+    });
+    let finished = film.and_then(|reach| reach.finish(person)).is_some();
+    watch::person(share, finished)
 }
 
 /// The duration a mark on one work states: the duration of the audience's

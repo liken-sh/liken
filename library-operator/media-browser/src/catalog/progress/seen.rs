@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use super::finish::{Finish, finish};
 use super::{Progress, Resume};
 
 // The kind word the store's reads give a film's plays.
@@ -143,6 +144,10 @@ pub struct Reach {
     /// audience's order, and their share. An empty audience has one entry
     /// with an empty name, for the plays that name nobody.
     pub people: Vec<(String, f32)>,
+    /// Each person of the audience who finished the film, in the
+    /// audience's order, and how they finished it, from the same plays as
+    /// their share.
+    pub finishes: Vec<(String, Finish)>,
 }
 
 impl Reach {
@@ -156,6 +161,14 @@ impl Reach {
             return None;
         }
         self.people.iter().map(|(_, share)| *share).reduce(f32::min)
+    }
+
+    /// How this person finished the film, and nothing where they have not.
+    pub fn finish(&self, person: &str) -> Option<Finish> {
+        self.finishes
+            .iter()
+            .find(|(name, _)| name == person)
+            .map(|(_, finish)| *finish)
     }
 
     /// The names of the people with a play of the film, in the audience's
@@ -193,19 +206,27 @@ pub fn films(seen: &[Seen], people: &[String]) -> HashMap<Work, Reach> {
     plays
         .into_iter()
         .map(|(work, held)| {
-            let people = audience
+            let standing: Vec<(&String, Vec<&Progress>)> = audience
                 .iter()
                 .zip(held)
-                .filter_map(|(person, plays)| Some((person.clone(), furthest(&plays)?)))
+                .map(|(person, plays)| (person, since_clear(&plays)))
                 .collect();
-            (work, Reach { people })
+            let people = standing
+                .iter()
+                .filter_map(|(person, plays)| Some(((*person).clone(), furthest(plays)?)))
+                .collect();
+            let finishes = standing
+                .iter()
+                .filter_map(|(person, plays)| Some(((*person).clone(), finish(plays)?)))
+                .collect();
+            (work, Reach { people, finishes })
         })
         .collect()
 }
 
-// The furthest share of one person's plays of a film after their latest
-// clear, and nothing where no play follows it.
-fn furthest(plays: &[&Progress]) -> Option<f32> {
+/// The plays recorded after the latest clear among these, the play at
+/// position 0 that a person sends to say they have not seen the work.
+pub fn since_clear<'a>(plays: &[&'a Progress]) -> Vec<&'a Progress> {
     let cleared = plays
         .iter()
         .filter(|play| play.position == 0)
@@ -213,9 +234,15 @@ fn furthest(plays: &[&Progress]) -> Option<f32> {
         .max();
     plays
         .iter()
+        .copied()
         .filter(|play| cleared.is_none_or(|at| play.recorded > at))
-        .map(|play| share(play))
-        .reduce(f32::max)
+        .collect()
+}
+
+// The furthest share of one person's plays of a film after their latest
+// clear, and nothing where no play follows it.
+fn furthest(plays: &[&Progress]) -> Option<f32> {
+    plays.iter().map(|play| share(play)).reduce(f32::max)
 }
 
 // The share of the film one play reached, and the whole film for a play

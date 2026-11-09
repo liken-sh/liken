@@ -1,6 +1,7 @@
 // The block under a playback row: a bar the width of the text column, and
-// under it the status line, which holds the status of the work and the
-// marks that change it. At rest the marks are quiet, a thin outline and
+// under it the status line, which holds the status of the work, a face for
+// each person at the screen with where that person stands, and the marks
+// that change it. At rest the marks are quiet, a thin outline and
 // muted words, so they read as bookkeeping beside the status and not as
 // more ways to play. A focused mark takes a playback button's fill and
 // full ink, and the browser's focus outline goes around it. While a mark
@@ -16,6 +17,8 @@ use iced_winit::core::{Color, Point, Rectangle};
 
 use super::icon::{self, Icon};
 use super::{area, clock, extent, label, progress, text};
+use crate::audience::Viewer;
+use crate::audience::faces::Faces;
 use crate::look;
 
 /// The space between the foot of the playback row and the top of the bar,
@@ -38,6 +41,16 @@ const SIZE: f32 = look::STATUS;
 // The space between the status and the first mark, and between two marks.
 const STATUS_GAP: f32 = 28.0;
 const MARK_GAP: f32 = 16.0;
+
+// The space between the status and a person's face, and between one
+// person's words and the next face, and the space between a face and its
+// words.
+const PERSON_GAP: f32 = 24.0;
+const FACE_GAP: f32 = 8.0;
+
+// The side of a face on the line: the circle the browser's strip draws a
+// person in.
+const FACE: f32 = clock::strip::CIRCLE;
 
 // The padding at both ends of a mark. The check before a finished status
 // stands a little closer to its word than a mark's icon does.
@@ -65,6 +78,10 @@ pub struct Line<'a> {
     /// Whether the work is finished, which draws a check before the
     /// status.
     pub finished: bool,
+    /// Each person at the screen and the words that say where they stand,
+    /// drawn after the status, and none while one person or nobody
+    /// watches, because then the status says it all.
+    pub people: &'a [(Viewer, String)],
     /// The marks, in order, each with its glyph and its words.
     pub marks: &'a [(Icon, &'static str)],
     /// The mark that holds focus, or nothing while focus is elsewhere.
@@ -114,6 +131,29 @@ pub fn status_width(status: &str, finished: bool) -> f32 {
     check + text::measured(status, SIZE)
 }
 
+/// The width the faces and the words of these people take after the
+/// status, the gap before each face included.
+pub fn people_width(people: &[(Viewer, String)]) -> f32 {
+    people
+        .iter()
+        .map(|(_, words)| PERSON_GAP + FACE + FACE_GAP + text::measured(words, SIZE))
+        .sum()
+}
+
+// The box of each person's face in a band that starts at `band`, after a
+// status this wide.
+fn faces(band: Rectangle, status: f32, people: &[(Viewer, String)]) -> Vec<Rectangle> {
+    let mut left = band.x + status;
+    people
+        .iter()
+        .map(|(_, words)| {
+            let face = area(left + PERSON_GAP, band.center_y() - FACE / 2.0, FACE, FACE);
+            left = face.x + FACE + FACE_GAP + text::measured(words, SIZE);
+            face
+        })
+        .collect()
+}
+
 /// The boxes of the marks, after a status this wide, in a band that
 /// starts at `band`. Each mark is as wide as its words.
 pub fn marks(band: Rectangle, status: f32, widths: &[f32]) -> Vec<Rectangle> {
@@ -143,12 +183,19 @@ fn shapes(line: &Line, band: Rectangle) -> Vec<Rectangle> {
         .iter()
         .map(|(_, words)| mark_width(words))
         .collect();
-    marks(band, status_width(line.status, line.finished), &widths)
+    let status = status_width(line.status, line.finished) + people_width(line.people);
+    marks(band, status, &widths)
 }
 
 /// Draw the line under a playback row whose foot is at `at`, with a bar
 /// this wide.
-pub fn draw(frame: &mut canvas::Frame<Renderer>, line: &Line, at: Point, width: f32) {
+pub fn draw(
+    frame: &mut canvas::Frame<Renderer>,
+    line: &Line,
+    at: Point,
+    width: f32,
+    people: &Faces,
+) {
     let held = line.focus.is_some();
     let track = bar(at, width, held);
     frame.fill_rectangle(track.position(), extent(track), track_color(held));
@@ -195,6 +242,20 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, line: &Line, at: Point, width: 
         }
     }
     frame.fill_text(status(words_at, ink));
+
+    let status = status_width(line.status, line.finished);
+    for ((viewer, words), face) in line.people.iter().zip(faces(band, status, line.people)) {
+        clock::strip::circle(frame, face, viewer, people);
+        frame.fill_text(label(
+            words,
+            Point::new(face.x + FACE + FACE_GAP, band.center_y()),
+            SIZE,
+            ink,
+            Alignment::Left,
+            Vertical::Center,
+            f32::INFINITY,
+        ));
+    }
 
     for (index, ((glyph, words), shape)) in line.marks.iter().zip(shapes(line, band)).enumerate() {
         let focused = line.focus == Some(index);
@@ -318,6 +379,7 @@ mod tests {
             share: 0.5,
             status: "Half watched",
             finished: false,
+            people: &[],
             marks: &marks,
             focus: Some(1),
             halo: false,
@@ -328,6 +390,47 @@ mod tests {
 
         line.focus = None;
         assert_eq!(focused(&line, AT), None);
+    }
+
+    fn viewer(name: &str) -> Viewer {
+        Viewer {
+            name: name.to_string(),
+            letter: name[..1].to_uppercase(),
+        }
+    }
+
+    #[test]
+    fn each_face_follows_the_status_and_the_marks_follow_the_last_person() {
+        let people = [
+            (viewer("first"), "68%".to_string()),
+            (viewer("second"), "not started".to_string()),
+        ];
+        let marks = [(Icon::Check, "Mark watched")];
+        let line = Line {
+            share: 0.0,
+            status: "Not started together",
+            finished: false,
+            people: &people,
+            marks: &marks,
+            focus: Some(0),
+            halo: false,
+        };
+        let status = status_width(line.status, false);
+        let band = band(AT);
+        let boxes = faces(band, status, &people);
+
+        assert_eq!(boxes[0].x, AT.x + status + PERSON_GAP);
+        assert_eq!(boxes[0].center_y(), band.center_y());
+        assert_eq!(
+            boxes[1].x,
+            boxes[0].x + FACE + FACE_GAP + text::measured("68%", SIZE) + PERSON_GAP
+        );
+        let after = boxes[1].x + FACE + FACE_GAP + text::measured("not started", SIZE);
+        assert_eq!(
+            focused(&line, AT).map(|mark| mark.x),
+            Some(after + STATUS_GAP)
+        );
+        assert_eq!(status + people_width(&people), after - AT.x);
     }
 
     #[test]

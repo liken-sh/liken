@@ -6,7 +6,8 @@
 
 use super::row;
 use crate::catalog::Progress;
-use crate::catalog::progress;
+use crate::catalog::progress::{self, Finish};
+use crate::clock;
 use crate::screens::TitleMark;
 use crate::screens::facts;
 use crate::views::icon::Icon;
@@ -85,11 +86,27 @@ pub struct Status {
 /// one, and the catalog's running time where it does not. A part the
 /// duration cannot give, such as the time left in a work of unknown
 /// length, leaves the line with no gap and no separator.
-pub fn status(progress: Option<&Progress>, duration: i64) -> Status {
+///
+/// `finish` says how a finished work was finished. A play on a screen
+/// names the month it finished in, a mark says it was marked, and a row
+/// from outside the cluster says only that the work was watched.
+/// `together` is true while more than one person watches, so the words
+/// say they are about the whole audience, and the faces after them say
+/// where each person stands.
+pub fn status(
+    progress: Option<&Progress>,
+    finish: Option<Finish>,
+    duration: i64,
+    together: bool,
+) -> Status {
+    let with = match together {
+        true => " together",
+        false => "",
+    };
     let words = match progress {
         Some(progress) if progress.finished => {
             return Status {
-                words: "Watched".to_string(),
+                words: finished(finish, with),
                 finished: true,
             };
         }
@@ -97,7 +114,7 @@ pub fn status(progress: Option<&Progress>, duration: i64) -> Status {
             let remaining = facts::runtime(duration - progress.position);
             facts::joined(&[
                 &format!(
-                    "{} watched",
+                    "{} watched{with}",
                     progress::position(progress.position, duration)
                 ),
                 &match remaining.is_empty() {
@@ -106,11 +123,39 @@ pub fn status(progress: Option<&Progress>, duration: i64) -> Status {
                 },
             ])
         }
-        _ => facts::joined(&["Not started", &facts::runtime(duration)]),
+        _ => facts::joined(&[&format!("Not started{with}"), &facts::runtime(duration)]),
     };
     Status {
         words,
         finished: false,
+    }
+}
+
+// The words for a finished work. A mark is one press for everyone at the
+// screen, so its words take no "together".
+fn finished(finish: Option<Finish>, with: &str) -> String {
+    match finish {
+        Some(Finish::Played { at }) => {
+            let (year, month) = clock::month_of(at);
+            facts::joined(&[&format!("Watched{with}"), &facts::month_year(year, month)])
+        }
+        Some(Finish::Marked) => "Marked watched".to_string(),
+        Some(Finish::Recorded) | None => format!("Watched{with}"),
+    }
+}
+
+/// What the status line says beside one person's face: "watched" where
+/// they finished the film, the share they reached where they are in the
+/// middle of it, and "not started" where they have no play of it. The
+/// share is a whole percent between 1 and 99, so a play that has started
+/// never reads as 0 and one that has not finished never reads as 100.
+pub fn person(share: Option<f32>, finished: bool) -> String {
+    if finished {
+        return "watched".to_string();
+    }
+    match share.filter(|share| *share > 0.0) {
+        Some(share) => format!("{}%", ((share * 100.0).round() as i64).clamp(1, 99)),
+        None => "not started".to_string(),
     }
 }
 
@@ -232,7 +277,7 @@ mod tests {
         ];
         for (progress, duration, words, finished) in cases {
             assert_eq!(
-                status(progress.as_ref(), duration),
+                status(progress.as_ref(), None, duration, false),
                 Status {
                     words: words.to_string(),
                     finished
@@ -243,11 +288,67 @@ mod tests {
 
     #[test]
     fn a_duration_the_catalog_does_not_hold_leaves_its_part_off_the_line() {
-        assert_eq!(status(None, 0).words, "Not started");
+        assert_eq!(status(None, None, 0, false).words, "Not started");
         assert_eq!(
-            status(Some(&reached(787, 0, false)), 0).words,
+            status(Some(&reached(787, 0, false)), None, 0, false).words,
             "13:07 watched"
         );
+    }
+
+    // The middle of March 2026, so the month is the same in every zone.
+    const MARCH: i64 = 1_773_662_400;
+
+    #[test]
+    fn a_finished_film_says_how_it_was_finished() {
+        let done = reached(RUNTIME, RUNTIME, true);
+        let cases = [
+            (
+                Some(Finish::Played { at: MARCH }),
+                false,
+                "Watched · March 2026",
+            ),
+            (
+                Some(Finish::Played { at: MARCH }),
+                true,
+                "Watched together · March 2026",
+            ),
+            (Some(Finish::Marked), false, "Marked watched"),
+            (Some(Finish::Marked), true, "Marked watched"),
+            (Some(Finish::Recorded), false, "Watched"),
+            (None, true, "Watched together"),
+        ];
+        for (finish, together, words) in cases {
+            let status = status(Some(&done), finish, RUNTIME, together);
+            assert_eq!(status.words, words, "{finish:?} {together}");
+            assert!(status.finished);
+        }
+    }
+
+    #[test]
+    fn the_words_for_a_whole_audience_say_together() {
+        assert_eq!(
+            status(None, None, RUNTIME, true).words,
+            "Not started together · 1h 39m"
+        );
+        assert_eq!(
+            status(Some(&reached(787, RUNTIME, false)), None, RUNTIME, true).words,
+            "0:13:07 watched together · 1h 26m remaining"
+        );
+    }
+
+    #[test]
+    fn each_person_reads_watched_a_share_or_not_started() {
+        let cases = [
+            (Some(1.0), true, "watched"),
+            (Some(0.678), false, "68%"),
+            (Some(0.001), false, "1%"),
+            (Some(0.998), false, "99%"),
+            (Some(0.0), false, "not started"),
+            (None, false, "not started"),
+        ];
+        for (share, finished, words) in cases {
+            assert_eq!(person(share, finished), words, "{share:?}");
+        }
     }
 
     #[test]

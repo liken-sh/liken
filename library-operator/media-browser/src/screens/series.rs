@@ -121,7 +121,9 @@ impl Still {
     pub fn status(&self) -> watch::Status {
         watch::status(
             self.progress.as_ref(),
+            None,
             marked_duration(self.progress.as_ref(), self.duration),
+            false,
         )
     }
 }

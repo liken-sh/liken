@@ -92,6 +92,8 @@ fn crowded(focus: Focus) -> Movie {
             &Preferences::default(),
         ),
         progress: None,
+        finish: None,
+        people: Vec::new(),
         via: None,
         set: Some(Set {
             id: "set:films".into(),

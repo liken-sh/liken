@@ -205,7 +205,13 @@ pub fn reach(people: &[String]) -> HashMap<Work, Reach> {
                 .map(|(_, person)| (person.clone(), 1.0))
                 .collect();
             if !finished.is_empty() {
-                reach.insert((slot.library, slot.id), Reach { people: finished });
+                reach.insert(
+                    (slot.library, slot.id),
+                    Reach {
+                        people: finished,
+                        ..Reach::default()
+                    },
+                );
             }
         }
     }

@@ -108,7 +108,7 @@ pub(super) fn under(at: Point) -> Point {
 /// row and the status never runs past the scrim's full shade. `focus` is
 /// the mark that holds focus.
 pub(super) fn status_line<'a>(
-    movie: &Movie,
+    movie: &'a Movie,
     status: &'a watch::Status,
     marks: &'a [(crate::views::icon::Icon, &'static str)],
     focus: Option<usize>,
@@ -117,6 +117,7 @@ pub(super) fn status_line<'a>(
         share: watch::share(movie.progress.as_ref()),
         status: &status.words,
         finished: status.finished,
+        people: &movie.people,
         marks,
         focus,
         halo: false,
@@ -370,6 +371,7 @@ impl<A: Art> Page<'_, A> {
             &status_line(movie, &status, &marks, marked),
             under(at),
             column,
+            self.faces,
         );
 
         // Each row draws at the scroll its own ease has reached at this

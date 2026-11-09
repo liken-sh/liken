@@ -8,7 +8,7 @@
 use rusqlite::{Connection, Row, ToSql};
 
 use super::collect;
-use crate::catalog::progress::{Credits, Progress, Resume, Seen, finished};
+use crate::catalog::progress::{Credits, Origin, Progress, Resume, Seen, finished};
 
 // The bound parameter list of the audience's names, `?1` upward.
 fn placeholders(people: &[String]) -> String {
@@ -117,9 +117,12 @@ fn progress(row: &Row<'_>, at: usize) -> rusqlite::Result<Progress> {
     let duration: i64 = row.get(at + 2)?;
     let ended: i64 = row.get(at + 3)?;
     let credits = parsed(row.get(at + 7)?);
+    let play: String = row.get(at)?;
+    let library: String = row.get(at + 9)?;
 
     Ok(Progress {
-        play: row.get(at)?,
+        origin: Origin::of(&play, &library),
+        play,
         position,
         duration,
         finished: finished(position, duration, &credits),
@@ -170,7 +173,7 @@ fn statement(people: &[String]) -> String {
     format!(
         "WITH watched AS (\
            SELECT plays.play, plays.position, plays.duration, plays.ended, \
-                  plays.recorded, plays.season, plays.episode \
+                  plays.recorded, plays.season, plays.episode, plays.library \
            FROM progress.plays plays WHERE {audience}\
          ), works AS (\
            SELECT watched.play, aliases.library, aliases.item, 'movie' AS kind \
@@ -188,7 +191,7 @@ fn statement(people: &[String]) -> String {
          SELECT works.library, 'movie', movies.id, movies.title, movies.released, movies.art, \
                 watched.play, watched.position, watched.duration, watched.ended, \
                 watched.recorded, watched.season, watched.episode, \
-                {movie_credits}, {PEOPLE} \
+                {movie_credits}, {PEOPLE}, watched.library \
          FROM works \
          JOIN watched ON watched.play = works.play \
          JOIN movies ON movies.library = works.library AND movies.id = works.item \
@@ -197,7 +200,7 @@ fn statement(people: &[String]) -> String {
          SELECT works.library, 'series', series.id, series.title, series.released, series.art, \
                 watched.play, watched.position, watched.duration, watched.ended, \
                 watched.recorded, watched.season, watched.episode, \
-                {episode_credits}, {PEOPLE} \
+                {episode_credits}, {PEOPLE}, watched.library \
          FROM works \
          JOIN watched ON watched.play = works.play \
          JOIN series ON series.library = works.library AND series.id = works.item \

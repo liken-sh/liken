@@ -155,6 +155,7 @@ fn a_film_the_audience_started_comes_back_as_a_resume() {
                 recorded: 10,
                 season: 0,
                 episode: 0,
+                origin: crate::catalog::progress::Origin::Screen,
             },
             exact: true,
         }]

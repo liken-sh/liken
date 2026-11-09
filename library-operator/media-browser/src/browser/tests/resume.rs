@@ -40,6 +40,7 @@ pub(super) fn reached(
         recorded,
         season: numbers.0,
         episode: numbers.1,
+        ..Progress::default()
     }
 }
 

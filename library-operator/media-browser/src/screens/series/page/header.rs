@@ -69,6 +69,7 @@ pub(crate) fn status_line<'a>(
         share: watch::share(still.progress.as_ref()),
         status: &status.words,
         finished: status.finished,
+        people: &[],
         marks,
         focus,
         halo: true,
@@ -212,6 +213,7 @@ impl<A: Art> Page<'_, A> {
             &status_line(still, &status, &marks, marked),
             under(beside),
             column.min(region.x + region.width - beside.x),
+            self.faces,
         );
     }
 }

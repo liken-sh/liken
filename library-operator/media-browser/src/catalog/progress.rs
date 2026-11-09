@@ -2,11 +2,13 @@
 // work it names, the rule that says a play finished, and the thread rule
 // the continue-watching row walks.
 
+pub mod finish;
 pub mod seen;
 pub mod thread;
 pub mod touched;
 pub mod watched;
 
+pub use finish::{Finish, Origin};
 pub use seen::{Reach, Seen, Work};
 pub use touched::Touched;
 pub use watched::{Credits, finished};
@@ -58,6 +60,9 @@ pub struct Progress {
     pub season: i64,
     /// The aired episode number, zero for a work that has none.
     pub episode: i64,
+    /// Where the row came from: a play on a screen, a mark, or outside
+    /// the cluster.
+    pub origin: Origin,
 }
 
 impl Progress {

@@ -192,3 +192,28 @@ fn a_play_after_a_clear_counts() {
 
     assert_eq!(reach.shared(&names(&["first"])), Some(0.25));
 }
+
+// The poster's faces and the page's status line read one answer, so each
+// person's finish comes from the same plays as their share: the plays
+// after their latest clear.
+#[test]
+fn each_person_finishes_by_their_own_plays_after_their_clear() {
+    use super::super::finish::Origin;
+    let mut watched = film("watched", &["first", "second"], 5950, 10);
+    watched.resume.progress.origin = Origin::Screen;
+    let mut marked = film("marked", &["second"], 6000, 30);
+    marked.resume.progress.origin = Origin::Mark;
+    let seen = [
+        watched,
+        film("cleared", &["second"], 0, 20),
+        marked,
+        film("third", &["third"], 3000, 10),
+    ];
+    let audience = names(&["first", "second", "third"]);
+
+    let reach = &films(&seen, &audience)[&(FILMS.into(), "film".into())];
+
+    assert_eq!(reach.finish("first"), Some(Finish::Played { at: 10 }));
+    assert_eq!(reach.finish("second"), Some(Finish::Marked));
+    assert_eq!(reach.finish("third"), None);
+}

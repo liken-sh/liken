@@ -237,7 +237,24 @@ where they stand, and the marks of
 |---|---|
 | Not started | `Not started · 1h 39m` |
 | In the middle of the film | `0:13:07 watched · 1h 26m remaining` |
-| Finished | A check, then `Watched` |
+| Finished on a screen | A check, then `Watched · March 2026` |
+| Marked watched by hand | A check, then `Marked watched` |
+| Finished only in Jellyfin | A check, then `Watched` |
+
+The month is the month of the last play on a screen of the cluster
+that finished the film, because that play's position moved as the film
+played. A mark you set with Mark watched says nothing about when you
+saw the film, so it gives no month. A play that Jellyfin reports does
+not say whether someone watched the film or marked it played there, so
+it gives no month either.
+
+When two or more people are at the screen, the status says where all
+of them stand together, as in `Not started together · 1h 30m`, and a
+face for each person follows it with where that person stands:
+`watched`, the share they reached, as in `68%`, or `not started`. The
+shares are the ones the faces on the film's poster come from, so the
+page explains a poster that shows two faces on a film the status calls
+not started.
 
 The position has hours in a title an hour or longer, as in `0:13:07`,
 and minutes and seconds in a shorter one, as in `21:40`. Down from the

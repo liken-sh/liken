@@ -49,8 +49,12 @@ impl TitleMark {
 /// screen, as long as no two presses share a second. The browser moves a
 /// second press within the same second to the next second.
 pub fn topic(branch: &str, player: &str, at: i64) -> String {
-    format!("{branch}/mark-{player}-{at}/mark")
+    format!("{branch}/{PREFIX}{player}-{at}/mark")
 }
+
+/// The words every mark's name starts with, and so every row a mark
+/// writes in the progress store.
+pub const PREFIX: &str = "mark-";
 
 /// The mark as bytes. `people` are the people at the screen, and
 /// `identity` names the work the way a play request names it, so the

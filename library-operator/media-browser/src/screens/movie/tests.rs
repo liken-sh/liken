@@ -4,6 +4,7 @@
 mod alike;
 mod marks;
 mod resume;
+mod standing;
 mod studios;
 
 use super::*;

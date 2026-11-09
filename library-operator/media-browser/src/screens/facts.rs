@@ -148,6 +148,13 @@ const MONTHS: [&str; 12] = [
     "December",
 ];
 
+/// A month as a person reads it, with its year: "March 2026". `month`
+/// counts from one.
+pub fn month_year(year: i64, month: u8) -> String {
+    let name = MONTHS[usize::from(month.clamp(1, 12)) - 1];
+    format!("{name} {year}")
+}
+
 /// A duration in seconds as hours and minutes, or nothing where the
 /// catalog holds none.
 pub fn runtime(seconds: i64) -> String {
@@ -289,6 +296,12 @@ mod tests {
             duration: 5_820,
             rating: "PG",
         }
+    }
+
+    #[test]
+    fn a_month_reads_its_name_and_its_year() {
+        assert_eq!(month_year(2026, 3), "March 2026");
+        assert_eq!(month_year(2025, 12), "December 2025");
     }
 
     #[test]

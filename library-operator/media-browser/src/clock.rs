@@ -84,9 +84,20 @@ fn to_next_minute(second: i32) -> f64 {
 /// glibc's `localtime_r` reads `TZ` and `/etc/localtime`, which the operator
 /// sets on the pod, so this is one libc call and not a date crate.
 pub(crate) fn local() -> libc::tm {
-    let now = unsafe { libc::time(std::ptr::null_mut()) };
+    local_at(unsafe { libc::time(std::ptr::null_mut()) })
+}
+
+/// The year and the month, from one, that these Unix seconds fall in, in
+/// the zone `TZ` names, the zone the clock reads.
+pub fn month_of(seconds: i64) -> (i64, u8) {
+    let local = local_at(seconds as libc::time_t);
+    (i64::from(local.tm_year) + 1900, (local.tm_mon + 1) as u8)
+}
+
+// The broken-down local time at these Unix seconds.
+fn local_at(at: libc::time_t) -> libc::tm {
     let mut local: libc::tm = unsafe { std::mem::zeroed() };
-    unsafe { libc::localtime_r(&now, &mut local) };
+    unsafe { libc::localtime_r(&at, &mut local) };
     local
 }
 
@@ -96,6 +107,12 @@ mod tests {
 
     fn at(hour: u8, minute: u8) -> String {
         Time { hour, minute }.twelve_hour()
+    }
+
+    // The middle of a month, so the month is the same in every zone.
+    #[test]
+    fn seconds_fall_in_their_month_and_year() {
+        assert_eq!(month_of(1_773_662_400), (2026, 3));
     }
 
     #[test]

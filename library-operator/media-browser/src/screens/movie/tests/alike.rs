@@ -123,6 +123,7 @@ fn a_film_someone_at_the_screen_finished_goes_last() {
         ("screening/films".to_string(), "one".to_string()),
         Reach {
             people: vec![("person-a".to_string(), 1.0)],
+            ..Reach::default()
         },
     );
     page.read_progress(&mut source, &["person-a".to_string()], &[]);
