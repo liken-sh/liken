@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +52,31 @@ func TestAnNFOFactKeepsAnElementWrittenWhileItAsked(t *testing.T) {
 	written := readFileString(t, nfoPath)
 	if !strings.Contains(written, "<fileinfo>") || !strings.Contains(written, "A keeper watches the ice.") {
 		t.Errorf(".nfo file = %s, want the probe's element and the plot", written)
+	}
+}
+
+// A phases volume that refuses the lock leaves the .nfo file as it was, and
+// the attempt is an error, so the error window asks again. A write with no
+// lock could lose another container's edit.
+func TestAnNFOFactWhoseLockIsRefusedIsAnError(t *testing.T) {
+	catalog, _ := newSQLiteCatalog(t)
+	root := t.TempDir()
+	nfoPath := seedNFOGap(t, catalog, root, "Winter Harbour (2011)", "movie:tmdb:4242")
+	before := readFileString(t, nfoPath)
+	work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+	work.writer.locks = filepath.Join(t.TempDir(), "a-file")
+	writeFile(t, work.writer.locks, "not a directory")
+	fake := &fakeAnswerer{name: "tmdb", facts: nfoFacts, answers: harbourAnswers()}
+
+	if err := work.nfoGap(t.Context(), factOverview, lineOf(fake)); err != nil {
+		t.Fatal(err)
+	}
+
+	if readFileString(t, nfoPath) != before {
+		t.Error("the .nfo file changed, want every byte as it was")
+	}
+	if attempts := attemptsBeside(t, nfoPath, factOverview); len(attempts) != 1 || attempts[0].Result != attemptError {
+		t.Errorf("attempts = %+v, want one error", attempts)
 	}
 }
 
