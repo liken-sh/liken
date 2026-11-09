@@ -430,9 +430,18 @@ fn a_reread_of_a_series_that_left_the_library_keeps_the_page() {
 
 #[test]
 fn a_series_whose_episodes_have_not_landed_names_no_seasons() {
-    assert_eq!(seasons_of(0), "");
-    assert_eq!(seasons_of(1), "1 season");
-    assert_eq!(seasons_of(4), "4 seasons");
+    let details = |seasons| SeriesDetails {
+        released: "2004".into(),
+        seasons,
+        rating: "TV-14".into(),
+        ..SeriesDetails::default()
+    };
+    assert_eq!(facts_without_genres(&details(0)), "2004 · TV-14");
+    assert_eq!(facts_without_genres(&details(1)), "2004 · 1 season · TV-14");
+    assert_eq!(
+        facts_without_genres(&details(4)),
+        "2004 · 4 seasons · TV-14"
+    );
 }
 
 // A page whose series is in a franchise and credits its people, which

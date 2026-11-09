@@ -162,6 +162,63 @@ pub fn runtime(seconds: i64) -> String {
     }
 }
 
+/// The columns of one work that its facts line reads. A field the catalog
+/// does not hold is empty or zero, and the line leaves its fact out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Work<'a> {
+    /// The release as the catalog stores it, a year or a date.
+    pub released: &'a str,
+    /// A series' season count, and zero for a film.
+    pub seasons: i64,
+    /// The running time in seconds.
+    pub duration: i64,
+    /// The content rating. A strip of one set's films passes none, because
+    /// every member of a set carries much the same rating.
+    pub rating: &'a str,
+}
+
+/// How a work's facts line spells its release.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Released<'a> {
+    /// The year alone, which a card has room for.
+    Year,
+    /// The whole date, worded against this day, which a page has room
+    /// for.
+    On(&'a str),
+}
+
+/// The facts of one work, each a whole fact, in the one order every card
+/// and page reads them: the release, a series' season count, the
+/// runtime, and the content rating.
+pub fn work_facts(work: &Work, released: Released) -> Vec<String> {
+    let when = match released {
+        Released::Year => year(work.released).to_string(),
+        Released::On(today) => date_worded(work.released, today),
+    };
+    let seasons = match work.seasons {
+        0 => String::new(),
+        count => counted(count, "seasons"),
+    };
+    [
+        when,
+        seasons,
+        runtime(work.duration),
+        work.rating.to_string(),
+    ]
+    .into_iter()
+    .filter(|fact| !fact.is_empty())
+    .collect()
+}
+
+/// The facts line of one work: [`work_facts`] joined. Every card and page
+/// that states a work's release, length, and rating spells it here, so
+/// the line reads the same on a wall, a strip, the banner, and a page.
+pub fn work_line(work: &Work, released: Released) -> String {
+    let facts = work_facts(work, released);
+    let parts: Vec<&str> = facts.iter().map(String::as_str).collect();
+    joined(&parts)
+}
+
 /// The facts that are present, joined into one line. A fact the row does
 /// not carry leaves no gap and no separator behind.
 pub fn joined(parts: &[&str]) -> String {
@@ -223,6 +280,58 @@ impl Line {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A film of 1h 37m rated PG, released on this date.
+    fn film() -> Work<'static> {
+        Work {
+            released: "1973-06-27",
+            seasons: 0,
+            duration: 5_820,
+            rating: "PG",
+        }
+    }
+
+    #[test]
+    fn every_work_reads_its_facts_in_one_order() {
+        let series = Work {
+            released: "1997-08-13",
+            seasons: 29,
+            duration: 0,
+            rating: "TV-MA",
+        };
+        let one = Work {
+            seasons: 1,
+            ..series
+        };
+        let cases = [
+            (film(), Released::Year, "1973 · 1h 37m · PG"),
+            (film(), Released::On(TODAY), "June 27, 1973 · 1h 37m · PG"),
+            (series, Released::Year, "1997 · 29 seasons · TV-MA"),
+            (one, Released::Year, "1997 · 1 season · TV-MA"),
+            (
+                Work {
+                    rating: "",
+                    ..film()
+                },
+                Released::Year,
+                "1973 · 1h 37m",
+            ),
+            (Work::default(), Released::Year, ""),
+        ];
+        for (work, released, want) in cases {
+            assert_eq!(work_line(&work, released), want, "{want}");
+        }
+    }
+
+    #[test]
+    fn a_line_led_by_a_name_cuts_the_works_facts_whole() {
+        let facts = work_facts(&film(), Released::Year);
+        let mut parts = vec!["Live and Let Die"];
+        parts.extend(facts.iter().map(String::as_str));
+        let line = Line::of(&parts);
+        assert_eq!(line.words(), "Live and Let Die · 1973 · 1h 37m · PG");
+        assert_eq!(line.fitting(30), "Live and Let Die · 1973");
+    }
 
     #[test]
     fn a_series_reads_as_a_series_and_every_other_kind_as_a_film() {

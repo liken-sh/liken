@@ -468,23 +468,17 @@ pub(crate) fn facts_of(details: &SeriesDetails) -> String {
 }
 
 /// The same line without the genres, for the home page's banner, which
-/// draws the genres on a line of its own.
+/// draws the genres on a line of its own. A series has no one runtime,
+/// so its line reads the year, the season count, and the rating, and a
+/// series whose episodes have not landed names no seasons.
 pub(crate) fn facts_without_genres(details: &SeriesDetails) -> String {
-    facts::joined(&[
-        facts::year(&details.released),
-        &seasons_of(details.seasons),
-        &details.rating,
-    ])
-}
-
-// The season count as a person reads it, and nothing at all for a series
-// whose episodes have not landed yet.
-pub(crate) fn seasons_of(seasons: i64) -> String {
-    match seasons {
-        0 => String::new(),
-        1 => "1 season".to_string(),
-        count => format!("{count} seasons"),
-    }
+    let work = facts::Work {
+        released: &details.released,
+        seasons: details.seasons,
+        duration: 0,
+        rating: &details.rating,
+    };
+    facts::work_line(&work, facts::Released::Year)
 }
 
 #[cfg(test)]

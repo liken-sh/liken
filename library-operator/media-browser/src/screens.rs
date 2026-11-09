@@ -30,7 +30,7 @@ use std::convert::Infallible;
 use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Rectangle, Theme};
 
-use self::series::seasons_of;
+use self::facts::Released;
 use crate::art::Art;
 use crate::audience::Viewer;
 use crate::audience::faces::Faces;
@@ -527,13 +527,25 @@ impl Item {
             .map(|place| place.name.as_str())
             .unwrap_or_default();
         let runtime = facts::runtime(slot.duration);
+        let work = facts::Work {
+            released: &slot.released,
+            seasons: slot.seasons,
+            duration: slot.duration,
+            rating: &slot.rating,
+        };
         let line = match slot.episode.is_some() {
             true => facts::Line::of(&[series, &numbers]),
-            false => facts::Line::of(&[&slot.title, year, &runtime, &slot.rating]),
+            false => {
+                let facts = facts::work_facts(&work, Released::Year);
+                let mut parts = vec![slot.title.as_str()];
+                parts.extend(facts.iter().map(String::as_str));
+                facts::Line::of(&parts)
+            }
         };
-        // The facts line. Only a series slot carries a season count, and
-        // it stands between the year and the runtime.
-        let facts = facts::joined(&[year, &seasons_of(slot.seasons), &runtime, &slot.rating]);
+        let facts = facts::work_line(&work, Released::Year);
+        // A set's strip leaves the rating out, because the films of one
+        // set carry much the same rating.
+        let set = facts::work_line(&facts::Work { rating: "", ..work }, Released::Year);
         // A whole show folded into one still reads the way one episode of
         // it does, so every still of a strip reads the same. The character
         // leads a work only where every part left is an `as` run.
@@ -556,7 +568,7 @@ impl Item {
                 },
                 tagged,
             ),
-            (None, Spelling::Set, _) => (leads, facts::joined(&[year, &runtime]), tagged),
+            (None, Spelling::Set, _) => (leads, set, tagged),
             (None, Spelling::Facts, _) => (leads, facts, tagged),
         };
         Self {

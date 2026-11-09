@@ -710,11 +710,13 @@ pub(crate) fn facts_of(details: &MovieDetails) -> String {
 /// The date is spelled against today, which the line reads at the read
 /// and not on every frame.
 pub(crate) fn facts_without_genres(details: &MovieDetails) -> String {
-    facts::joined(&[
-        &facts::date_worded(&details.released, &Date::today().iso()),
-        &facts::runtime(details.duration),
-        &details.rating,
-    ])
+    let work = facts::Work {
+        released: &details.released,
+        seasons: 0,
+        duration: details.duration,
+        rating: &details.rating,
+    };
+    facts::work_line(&work, facts::Released::On(&Date::today().iso()))
 }
 
 #[cfg(test)]
