@@ -63,7 +63,7 @@ func TestTheFacelessEndOfAFilmIsItsCreditsUntilABetterClueLands(t *testing.T) {
 	}
 
 	derive()
-	if got, want := facesMarksOf(t, catalog, liveFilm), []string{"-1 5600000  faces"}; !reflect.DeepEqual(got, want) {
+	if got, want := facesMarksOf(t, catalog, liveFilm), []string{"-1 5690000  faces"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("film = %v, want %v", got, want)
 	}
 	if got := facesMarksOf(t, catalog, drawnFilm); len(got) != 0 {

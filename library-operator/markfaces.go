@@ -24,15 +24,24 @@ const (
 	facelessCreditsShortest      = int64(120000)
 )
 
+// How far into the faceless run the estimate starts. A story often ends on
+// a shot with no face in it, such as a landscape or a ship that leaves, and
+// the credits start after that shot. A card that rises late costs a person
+// little, because it rises over the credits, and a card that rises early
+// covers the end of the story. So the estimate starts this much after the
+// run, which made an early rise of more than 30 seconds rare in the
+// measurement.
+const facelessCreditsDelay = int64(90000)
+
 // The genre whose titles the tier never reads. The detector finds few
 // drawn faces, so an animated film can be faceless for minutes in its
 // story.
 const animationGenre = "Animation"
 
 // The start of the credits that the faceless end of a film's detections
-// record gives, and false where it gives none. An episode gives none,
-// because the tier was measured on films alone, and an episode's credits
-// run under a minute.
+// record gives, 90 seconds into the run, and false where it gives none. An
+// episode gives none, because the tier was measured on films alone, and an
+// episode's credits run under a minute.
 func (f estimateFile) facelessCredits() (int64, bool) {
 	start := f.faceless
 	switch {
@@ -43,5 +52,5 @@ func (f estimateFile) facelessCredits() (int64, bool) {
 	case f.duration-start < facelessCreditsShortest:
 		return 0, false
 	}
-	return start, true
+	return start + facelessCreditsDelay, true
 }

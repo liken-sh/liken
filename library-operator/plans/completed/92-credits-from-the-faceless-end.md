@@ -37,8 +37,9 @@ at 7,039 s.
   neither an exact clue nor an inferred one. The run must start in the
   last 15% of the film and last at least 120 s, and a film whose genres
   include `Animation` never takes it, because the detector finds few
-  drawn faces. The row has the estimate's ordinal, so a better clue that
-  lands later replaces it in place.
+  drawn faces. The row starts 90 s after the run starts, which
+  [the early tail](#the-early-tail) chose. The row has the estimate's
+  ordinal, so a better clue that lands later replaces it in place.
 - **Old answers are read again.** An answer written before the worker
   read the run holds no `faceless`. The walk reads its found attempt as
   one whose output is missing, the rule that `uncountedProbe` follows
@@ -55,8 +56,9 @@ inferred tier cover most episodes.
 ## The measurement
 
 On 2026-11-09, read-only, over the home library above and its catalog.
-For each non-animated film with a detections record, the rule above
-ran on the record. Its start was compared with the film's better
+For each non-animated film with a detections record, the rule above,
+without the 90 s that [the early tail](#the-early-tail) added later the
+same day, ran on the record. Its start was compared with the film's better
 credits start: the earliest exact clue in the second half, or for a
 film with none, the inferred estimate. This is one library on one day,
 not a guarantee.
@@ -88,6 +90,58 @@ time from 22% at 60 s to 18%. A window of 10% or 20% in place of 15%
 changed no share by more than 1 point. Letting a run span one face
 sample, or counting only faces taller than 5% of the frame, changed no
 share by more than 2 points, so the rule counts every face.
+
+## The early tail
+
+The maintainer judged on 2026-11-09 that a card that rises late is
+acceptable and one that rises early is not, because an early card covers
+the end of the story. So the rule was measured again the same day, on
+the same library, for its early errors against the 302 films with an
+exact clue where it fired. 100 of them started more than 15 s early, 36
+more than 30 s, 15 more than 60 s, and 5 more than 120 s.
+
+The 36 films more than 30 s early have one shape. A large face of the
+film's cast is on screen 1 to 5 s before the run starts, and then the
+story ends on a shot with no face, such as a landscape, a ship that
+leaves, or a title card, for 30 to 100 s before the provider's credits
+start. None of them holds a face in a keyframe inside the run, and none
+holds tiny faces before the run: the faces before the run are large.
+The 5 films more than 120 s early have a provider's credits start only
+58 to 117 s before the end against a faceless run of 300 to 480 s, so
+the provider may mark a later part of the credits.
+
+| Rule | Exact films fired | Early > 30 s | Early > 120 s | Fired on films with no mark | Median error | Median late error | Within 30 s | Within 120 s |
+|---|---|---|---|---|---|---|---|---|
+| shipped first: unbroken run to the end, start in last 15%, at least 120 s | 302 | 36 (11.9%) | 5 (1.7%) | 589 (75.0%) | -6 s | 72 s | 69% | 86% |
+| a face in a keyframe ends the run | 306 | 38 (12.4%) | 5 (1.6%) | 605 (77.1%) | -6 s | 75 s | 69% | 86% |
+| later of the run and the last named cast face | 302 | 36 (11.9%) | 5 (1.7%) | 589 (75.0%) | -6 s | 72 s | 69% | 86% |
+| start in last 10% | 297 | 36 (12.1%) | 5 (1.7%) | 576 (73.4%) | -6 s | 71 s | 69% | 86% |
+| start in last 8% | 282 | 35 (12.4%) | 5 (1.8%) | 549 (69.9%) | -6 s | 74 s | 68% | 85% |
+| start in last 6% | 211 | 18 (8.5%) | 3 (1.4%) | 400 (51.0%) | -4 s | 74 s | 68% | 84% |
+| run at most 480 s | 252 | 30 (11.9%) | 3 (1.2%) | 502 (63.9%) | -5 s | 71 s | 67% | 86% |
+| run at most 360 s | 173 | 13 (7.5%) | 1 (0.6%) | 339 (43.2%) | -4 s | 68 s | 70% | 86% |
+| 30 s later | 302 | 15 (5.0%) | 3 (1.0%) | 589 (75.0%) | +24 s | 26 s | 65% | 85% |
+| 45 s later | 302 | 10 (3.3%) | 3 (1.0%) | 589 (75.0%) | +39 s | 40 s | 30% | 85% |
+| 60 s later | 302 | 8 (2.6%) | 3 (1.0%) | 589 (75.0%) | +54 s | 55 s | 9% | 82% |
+| 75 s later | 302 | 7 (2.3%) | 2 (0.7%) | 589 (75.0%) | +69 s | 69 s | 4% | 81% |
+| **90 s later** | 302 | 5 (1.7%) | 2 (0.7%) | 589 (75.0%) | +84 s | 84 s | 3% | 80% |
+| 120 s later | 302 | 3 (1.0%) | 2 (0.7%) | 589 (75.0%) | +114 s | 114 s | 2% | 69% |
+| 60 s later, start in last 8% | 282 | 8 (2.8%) | 3 (1.1%) | 549 (69.9%) | +54 s | 56 s | 10% | 81% |
+| 60 s later, run at most 480 s | 252 | 6 (2.4%) | 3 (1.2%) | 502 (63.9%) | +55 s | 56 s | 10% | 81% |
+
+The median late error is the median of the films that started late.
+The run already runs unbroken to the end of the record, so that
+candidate is the first row. A named cast face is a face, so the last one
+is never inside the run, and that row equals the first. Counting the
+keyframes made the early tail slightly worse. A narrower window or a cap
+on the run's length removed early films only by firing on fewer films.
+
+The rule starts the estimate 90 s into the run. It reached 5 films of
+302 more than 30 s early, 1.7%, and fires on the same films as before,
+so it costs no coverage. The cost is lateness: against the exact clues
+its median error is 84 s late, 90% of its errors are within 237 s, 80%
+are within 120 s where 86% were, and 57 films start more than 120 s
+late where 37 did.
 
 ## How the work is proved
 

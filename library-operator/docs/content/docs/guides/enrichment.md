@@ -1015,17 +1015,21 @@ above it have nothing:
 | exact | the providers' credits spans, a chapter whose title names the credits, such as `End Credits` or `Outro`, and the start of a provider's `preview` span | the providers' intro spans, and a chapter whose title names the intro, such as `Intro`, `Opening`, or `Main Titles`, up to the next chapter |
 | inferred | for an episode, the median length of the credits of the other episodes of the series, taken from the end of this one | for an episode, the median start and length of the intros of the other episodes of the same season, when at least two of them start within 30 seconds of each other |
 | inferred | in a subtitle file, the end of the last line before 45 seconds or more with no dialogue that runs to the end of the file, or to a scene of up to three minutes that ends it | in a subtitle file, the first 30 to 120 seconds with no dialogue that end in the first ten minutes |
-| faces | for a film whose genres do not include `Animation`, the start of the [faceless end](#appearances) of its detections record, when the run starts in the last 15% of the film and lasts at least two minutes | none |
+| faces | for a film whose genres do not include `Animation`, 90 seconds after the start of the [faceless end](#appearances) of its detections record, when the run starts in the last 15% of the film and lasts at least two minutes | none |
 
 An estimate of the faces tier has the source `faces` in place of
 `estimate`, so a reader can tell it apart. The detector finds few drawn
 faces, so an animated film can show no face for minutes of its story,
 and the tier skips it. It reads only films, because it was measured on
-films. On a home library on 2026-11-09, against 302 films with an exact
-credits clue, the faces tier was within 30 seconds of that clue for
-69% of them and within two minutes for 86%. It started more than two
-minutes early for 5 films and more than two minutes late for 37, where
-a film's credits open over scenes with actors in them. Plan 92 of
+films. The estimate starts 90 seconds into the faceless run, because a
+story often ends on a shot with no face, such as a landscape, before the
+credits start, and a card that rises a little after the credits start
+costs less than one that covers the end of the story. On a home library
+on 2026-11-09, against 302 films with an exact credits clue, the faces
+tier started a median 84 seconds after that clue, and within two
+minutes of it for 80% of the films. It started more than 30 seconds
+early for 5 films, 1.7%, and more than two minutes late for 57, where a
+film's credits open over scenes with actors in them. Plan 92 of
 `library-operator` records the measurement.
 
 In each tier the earliest clue wins, because a card that rises a little

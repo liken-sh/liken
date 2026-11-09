@@ -27,9 +27,11 @@ func facesCreditsAt(path string, start int64) markRow {
 func TestTheFacelessTailIsTheCreditsOnlyWhereNoOtherClueIs(t *testing.T) {
 	runEstimateCases(t, []estimateCase{
 		{
+			// The estimate starts 90 seconds into the run, because a story
+			// often ends on a faceless shot before its credits start.
 			name:  "a faceless tail alone",
 			files: []estimateFile{estimateFilm("a.mkv", 0).withFacelessTail(5600000)},
-			want:  []markRow{facesCreditsAt("a.mkv", 5600000)},
+			want:  []markRow{facesCreditsAt("a.mkv", 5690000)},
 		},
 		{
 			name:  "no faceless tail",
@@ -45,7 +47,7 @@ func TestTheFacelessTailIsTheCreditsOnlyWhereNoOtherClueIs(t *testing.T) {
 		{
 			name:  "a tail that starts at the edge of the last 15%",
 			files: []estimateFile{estimateFilm("a.mkv", 0).withFacelessTail(5100000)},
-			want:  []markRow{facesCreditsAt("a.mkv", 5100000)},
+			want:  []markRow{facesCreditsAt("a.mkv", 5190000)},
 		},
 		{
 			name:  "a tail shorter than credits run",
@@ -55,7 +57,7 @@ func TestTheFacelessTailIsTheCreditsOnlyWhereNoOtherClueIs(t *testing.T) {
 		{
 			name:  "a tail as long as the shortest credits",
 			files: []estimateFile{estimateFilm("a.mkv", 0).withFacelessTail(6000000 - facelessCreditsShortest)},
-			want:  []markRow{facesCreditsAt("a.mkv", 6000000-facelessCreditsShortest)},
+			want:  []markRow{facesCreditsAt("a.mkv", 5970000)},
 		},
 		{
 			// The detector finds few drawn faces, so a faceless run in an
