@@ -15,14 +15,15 @@ use crate::catalog::pool::Candidate;
 use crate::catalog::recency::DRAWN;
 use crate::catalog::stream::Tracks;
 use crate::catalog::{
-    Answer, Change, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry, Identity,
-    LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Progress, Query,
-    Reach, Resume, Seen, Selection, SeriesDetails, Slot, Sort, Source, TILES, Touched, Work,
+    Alike, Answer, Change, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry,
+    Identity, LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Progress,
+    Query, Reach, Resume, Seen, Selection, SeriesDetails, Slot, Sort, Source, TILES, Touched, Work,
     library_name, recency,
 };
 use crate::harness::Waker;
 use crate::tracks::Preferences;
 
+mod alike;
 mod details;
 mod files;
 mod franchises;
@@ -549,6 +550,10 @@ impl Source for LocalCatalog {
         found.season = season;
         found.episode = episode;
         found
+    }
+
+    fn alike(&mut self, library: &str, id: &str) -> Vec<Alike> {
+        self.read(|connection| alike::films(connection, library, id))
     }
 
     fn franchises_of(&mut self, library: &str, id: &str) -> Vec<Membership> {

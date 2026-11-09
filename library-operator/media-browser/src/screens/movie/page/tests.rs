@@ -49,6 +49,7 @@ fn stripes() -> Stripes {
 fn crowded(focus: Focus) -> Movie {
     Movie {
         franchises: crate::screens::franchise::strips::Strips::default(),
+        like: None,
         library: "screening/films".into(),
         id: "one".into(),
         title: "A Long Title That Wraps Onto Two".into(),
@@ -260,6 +261,36 @@ fn the_foot_follows_the_last_stripe_and_keeps_the_page_s_foot_margin() {
         blocks.foot.height,
         movie.foot.height(screen::region(FRAME).width)
     );
+}
+
+// A film in no set draws More like this under its last stripe, and the
+// studios follow the strip.
+#[test]
+fn the_more_like_this_strip_follows_the_stripes_and_the_studios_follow_it() {
+    let mut movie = crowded(Focus::Like(0));
+    movie.set = None;
+    movie.like = crate::screens::movie::alike::Like::of(vec![crate::catalog::Alike {
+        slot: crate::catalog::Slot {
+            library: "screening/films".into(),
+            kind: "movies".into(),
+            id: "two".into(),
+            ..crate::catalog::Slot::default()
+        },
+        score: 3,
+        rating: 0.0,
+    }]);
+    let blocks = blocks(&movie);
+    let last = blocks.stripes.last().expect("the crowded page credits");
+    let like = blocks.like.expect("the page draws the strip");
+    assert_eq!(like.top, last.bottom() + GAP + STRIPE_LEAD);
+    assert_eq!(like.height, strip::height(card::LINES));
+    assert_eq!(blocks.foot.top, like.bottom() + GAP + STRIPE_LEAD);
+    assert_eq!(blocks.after(*last), like.top);
+
+    let offset = blocks.scroll(&movie, SHORT);
+    assert!(like.bottom() - offset <= SHORT);
+    let marked = movie.marked(area(0.0, 0.0, WIDTH, SHORT));
+    assert!(marked.is_some_and(|around| around.y >= like.top - offset));
 }
 
 #[test]

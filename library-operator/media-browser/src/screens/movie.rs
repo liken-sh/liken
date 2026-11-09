@@ -2,7 +2,8 @@
 // page reads down: the logo or the title, the facts, the tagline, the
 // plot, the playback row, the status line under it, the set strip, a strip
 // for each franchise the movie belongs to, the stripes of credited people,
-// and the studios, each of which opens that studio's wall.
+// the More like this strip of a film in no set and no franchise, and the
+// studios, each of which opens that studio's wall.
 // Focus lands on the first button of the row, so a film is two presses
 // from the wall, as it was when the wall played it on select. That button
 // is Resume where the audience is in the middle of the film.
@@ -10,6 +11,7 @@
 // The motion of the page: where the focus outline goes, and how far the
 // page and each row under its playback row have scrolled while they ease
 // to rest.
+pub mod alike;
 mod motion;
 mod page;
 pub mod row;
@@ -54,6 +56,8 @@ pub enum Focus {
     Franchise(usize, Place),
     /// One headshot of one stripe: the stripe, and the slot in it.
     Stripe(usize, usize),
+    /// One film of the More like this strip.
+    Like(usize),
     /// One studio on the production line of the foot.
     Studio(usize),
 }
@@ -154,6 +158,10 @@ pub struct Movie {
     /// The franchises the movie belongs to, one strip each, under the set
     /// strip.
     pub franchises: Strips,
+    /// The films that share people with this one, under the stripes, or
+    /// nothing where the movie is in a set or a franchise, or no film
+    /// shares a director or a lead actor with it.
+    pub like: Option<alike::Like>,
     // The franchise page this page was opened from, which is the container
     // a play from here follows. It is nothing where the page was reached
     // any other way.
@@ -180,6 +188,13 @@ impl Movie {
     pub fn open(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
         let details = source.movie(library, id)?;
         let set = set_of(library, id, &details, source);
+        let franchises = Strips::of(library, id, source);
+        // A set strip or a franchise strip already leads on from the film,
+        // so only a film with neither reads the films like it.
+        let like = match set.is_none() && franchises.is_empty() {
+            true => alike::Like::of(source.alike(library, id)),
+            false => None,
+        };
         Some(Self {
             library: library.to_string(),
             id: id.to_string(),
@@ -198,7 +213,8 @@ impl Movie {
             foot: foot::Foot::of(&details.studios, &[]),
             files: files_of(library, id, source),
             set,
-            franchises: Strips::of(library, id, source),
+            franchises,
+            like,
             via: None,
             progress: None,
             focus: Focus::Buttons(0),
@@ -243,6 +259,10 @@ impl Movie {
             reached::fill(&mut set.members, &reach, people, viewers);
         }
         self.franchises.reach(&reach, people, viewers);
+        if let Some(like) = self.like.as_mut() {
+            like.order(&reach);
+            reached::fill(&mut like.members, &reach, people, viewers);
+        }
         let plays: Vec<thread::Play> = source
             .plays_of(&self.library, &self.id, people)
             .into_iter()
@@ -289,7 +309,8 @@ impl Movie {
 
     /// Fold one press in. Left and right move across the row that holds
     /// focus. Down reaches the marks, then the set strip, then the
-    /// franchise strips, then the stripes, and then the studios, and up
+    /// franchise strips, then the stripes, then the More like this strip,
+    /// and then the studios, and up
     /// climbs back to the playback row. A franchise strip's heading is a rung over its
     /// members.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
@@ -299,6 +320,7 @@ impl Movie {
             Focus::Strip(index) => self.on_strip(index, key, source),
             Focus::Franchise(strip, place) => self.on_franchise((strip, place), key, source),
             Focus::Stripe(stripe, slot) => self.on_stripe((stripe, slot), key, source),
+            Focus::Like(index) => self.on_like(index, key, source),
             Focus::Studio(index) => self.on_studio(index, key, source),
         }
     }
@@ -508,18 +530,68 @@ impl Movie {
         }
     }
 
-    // The rung under the stripes: the first studio, and nothing where the
-    // movie names none.
+    // One press on the More like this strip. Select opens the film's page
+    // over this one, so back returns here: the film is not of this one's
+    // order, as a sibling in a set is.
+    fn on_like(&mut self, index: usize, key: &str, source: &mut dyn Source) -> Step {
+        let Some(like) = &self.like else {
+            self.focus = Focus::Buttons(0);
+            return Step::Stay;
+        };
+        match key {
+            "enter" => {
+                let Some(member) = like.members.get(index) else {
+                    return Step::Stay;
+                };
+                match Self::open(&member.library, &member.id, source) {
+                    Some(page) => Step::Open(Screen::Movie(Box::new(page))),
+                    None => Step::Stay,
+                }
+            }
+            "up" => {
+                self.focus = self.over_like();
+                Step::Stay
+            }
+            "down" => {
+                self.focus = self.studios().unwrap_or(self.focus);
+                Step::Stay
+            }
+            _ => {
+                self.focus = Focus::Like(focus::row(index, like.members.len(), key));
+                Step::Stay
+            }
+        }
+    }
+
+    // The rung under the stripes: the More like this strip, then the first
+    // studio, and nothing where the page holds neither.
     fn after_stripes(&self) -> Option<Focus> {
+        match self.like {
+            Some(_) => Some(Focus::Like(0)),
+            None => self.studios(),
+        }
+    }
+
+    // The first studio, and nothing where the movie names none.
+    fn studios(&self) -> Option<Focus> {
         self.foot.studio(0).map(|_| Focus::Studio(0))
     }
 
-    // The rung over the studios: the last stripe, and the rung over the
-    // stripes where the movie credits nobody.
-    fn over_foot(&self) -> Focus {
+    // The rung over the More like this strip: the last stripe, and the
+    // rung over the stripes where the movie credits nobody.
+    fn over_like(&self) -> Focus {
         match self.stripes.last() {
             Some((stripe, slot)) => Focus::Stripe(stripe, slot),
             None => self.above(),
+        }
+    }
+
+    // The rung over the studios: the More like this strip, then the rung
+    // over that strip.
+    fn over_foot(&self) -> Focus {
+        match self.like {
+            Some(_) => Focus::Like(0),
+            None => self.over_like(),
         }
     }
 
@@ -658,6 +730,10 @@ impl Movie {
             },
             Focus::Stripe(stripe, slot) => match self.stripes.held((stripe, slot)) {
                 Some((stripe, slot)) => Focus::Stripe(stripe, slot),
+                None => Focus::Buttons(0),
+            },
+            Focus::Like(index) => match &self.like {
+                Some(like) => Focus::Like(index.min(like.members.len() - 1)),
                 None => Focus::Buttons(0),
             },
             Focus::Studio(index) => match self.foot.studios().count() {

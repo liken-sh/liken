@@ -246,8 +246,19 @@ the marks, and up returns to the playback row. Down from the marks
 moves on to the set strip, the franchise strips, or the cast. While a
 mark has focus, the bar is twice as tall and the status is brighter.
 
+A film that is in no set and no franchise draws a More like this strip
+under its people: up to 12 films of the same library that share a
+director or a lead actor with it. A shared director scores 3, each actor
+billed in the first four of both films scores 2, and the same leading
+genre adds 1, so a film never joins the strip for its genre alone. The
+films nobody at the screen has finished come first, then the higher
+score, then the higher IMDb rating. Enter on a film opens its page, and
+back returns here. A film that shares nobody with another draws no
+strip.
+
 The end of a movie's page names the studios after `Produced by`. Down
-from the last stripe of people puts focus on the first studio, left and
+from the last stripe of people, or from More like this, puts focus on
+the first studio, left and
 right move between the studios, and Enter opens the studio's wall: every
 movie and series of the catalog whose `.nfo` file names that studio, in
 every library, newest first, under a heading such as

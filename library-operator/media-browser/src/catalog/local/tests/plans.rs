@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use super::super::{details, files, item, people, progress, series};
+use super::super::{alike, details, files, item, people, progress, series};
 use super::SCHEMA;
 use super::progress::PROGRESS_SCHEMA;
 
@@ -137,6 +137,41 @@ fn the_episodes_read_searches_the_shipped_aired_order_index() {
             .all(|line| !line.starts_with("SCAN") && !line.contains("TEMP B-TREE")),
         "{plan:#?}"
     );
+}
+
+// The More like this read runs once on every movie page that opens, so
+// it finds the film's people by its own key, their other credits through
+// the contributor index, and each candidate's row and leading genre by
+// their keys. It walks no table: the only scans are of the read's own
+// intermediate results.
+#[test]
+fn the_alike_read_walks_no_table() {
+    let connection = shipped_schema();
+    let plan = alike::plan(&connection).unwrap();
+    let walks: Vec<&String> = plan
+        .iter()
+        .filter(|line| line.starts_with("SCAN"))
+        .collect();
+    assert!(
+        walks
+            .iter()
+            .all(|line| ["SCAN seeds", "SCAN shared", "SCAN (subquery"]
+                .iter()
+                .any(|own| line.starts_with(own))),
+        "{plan:#?}"
+    );
+    assert!(
+        plan.iter()
+            .any(|line| line.contains("credits_library_contributor_item")),
+        "{plan:#?}"
+    );
+}
+
+#[test]
+fn the_alike_read_requires_the_shipped_contributor_index() {
+    requires_index("credits_library_contributor_item", |connection| {
+        alike::films(connection, "test/films", "movie:1").map(|_| ())
+    });
 }
 
 #[test]

@@ -1,6 +1,7 @@
 // The movie page over an invented catalog: the words it builds out of a
 // body, and where a press takes focus.
 
+mod alike;
 mod marks;
 mod resume;
 mod studios;
@@ -43,6 +44,12 @@ struct Films {
     // Whether the body names no studio, which leaves the foot with no
     // stop.
     unproduced: bool,
+    // Whether the other two films share people with the one a page is
+    // about, which puts a More like this strip on a page with no set and
+    // no franchise.
+    alike: bool,
+    // How far the people at the screen got in each film.
+    reach: std::collections::HashMap<crate::catalog::Work, crate::catalog::Reach>,
     // Every play of every film of this catalog, as the store answers them,
     // and the people the last read of it named.
     plays: Vec<crate::catalog::Resume>,
@@ -209,6 +216,38 @@ impl Source for Films {
 
     fn play(&mut self, _library: &str, _selection: &Selection) -> Vec<PlayItem> {
         Vec::new()
+    }
+
+    // The other two films: "one" shares the director, and "three" shares
+    // a lead actor.
+    fn alike(&mut self, library: &str, id: &str) -> Vec<crate::catalog::Alike> {
+        if !self.alike {
+            return Vec::new();
+        }
+        [("one", 3), ("three", 2)]
+            .into_iter()
+            .filter(|(other, _)| *other != id)
+            .map(|(other, score)| crate::catalog::Alike {
+                slot: crate::catalog::Slot::of(
+                    library,
+                    "movies",
+                    Title {
+                        id: other.to_string(),
+                        title: format!("Film {other}"),
+                        ..Title::default()
+                    },
+                ),
+                score,
+                rating: 7.0,
+            })
+            .collect()
+    }
+
+    fn film_reach(
+        &mut self,
+        _people: &[String],
+    ) -> std::collections::HashMap<crate::catalog::Work, crate::catalog::Reach> {
+        self.reach.clone()
     }
 
     fn credits(&mut self, _library: &str, _id: &str) -> Credits {

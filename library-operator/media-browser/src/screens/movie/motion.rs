@@ -54,7 +54,11 @@ impl Movie {
                 let marks = watch::Mark::drawn(&self.marks());
                 line::focused(&status_line(self, &status, &marks, Some(index)), under(at))
             }
-            Focus::Strip(_) | Focus::Franchise(..) | Focus::Stripe(..) | Focus::Studio(_) => None,
+            Focus::Strip(_)
+            | Focus::Franchise(..)
+            | Focus::Stripe(..)
+            | Focus::Like(_)
+            | Focus::Studio(_) => None,
         }
     }
 

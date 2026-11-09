@@ -15,7 +15,7 @@ use iced_winit::core::{Point, Rectangle, Theme, mouse};
 use super::super::Item;
 use super::super::franchise::strips::Place;
 use super::super::stripes::Face;
-use super::{Focus, Movie, row, watch};
+use super::{Focus, Movie, alike, row, watch};
 use crate::art::Art;
 use crate::clock::Time;
 use crate::look;
@@ -101,7 +101,8 @@ pub(super) fn status_line<'a>(
 }
 
 /// The rows the page scrolls across, in the page's order: the set strip,
-/// the franchise strips, and the stripes of people, at this scroll down
+/// the franchise strips, the stripes of people, and the More like this
+/// strip, at this scroll down
 /// and with focus where `focus` puts it. Each row answers the scroll it
 /// rests at, and draws at the scroll it is given.
 pub(super) fn rows<'a>(
@@ -172,6 +173,26 @@ pub(super) fn rows<'a>(
             heading: band.heading,
             library: &movie.library,
             region: place(block, people::HEIGHT),
+            scroll: None,
+        }));
+    }
+    if let (Some(like), Some(block)) = (&movie.like, &blocks.like) {
+        rows.push(Across::Strip(strip::Strip {
+            faces: None,
+            room: None,
+            members: &like.members,
+            current: None,
+            kept: None,
+            focus: match focus {
+                Some(Focus::Like(index)) => Some(index),
+                _ => None,
+            },
+            heading: alike::HEADING,
+            library: &movie.library,
+            last: None,
+            lines: card::LINES,
+            headed: false,
+            region: place(block, strip::height(card::LINES)),
             scroll: None,
         }));
     }
@@ -378,6 +399,7 @@ pub(super) struct Blocks {
     strip: Option<Block>,
     franchises: Vec<Block>,
     stripes: Vec<Block>,
+    like: Option<Block>,
     foot: Block,
     files: Block,
     content: f32,
@@ -433,19 +455,22 @@ impl Blocks {
             .iter()
             .map(|_| place(STRIPE_LEAD, people::HEIGHT))
             .collect();
+        let like = movie
+            .like
+            .as_ref()
+            .map(|_| place(STRIPE_LEAD, strip::height(card::LINES)));
 
         let foot = place(STRIPE_LEAD, movie.foot.height(region.width));
         let files = place(FILES_LEAD, movie.files.height());
-        let last = stripes
-            .last()
-            .or(franchises.last())
-            .copied()
+        let last = like
+            .or(stripes.last().copied())
+            .or(franchises.last().copied())
             .or(strip)
             .unwrap_or(buttons);
         let end = [files, foot].into_iter().find(|block| block.height > 0.0);
         let content = match end {
             Some(block) => block.bottom() + FOOT,
-            None => match stripes.is_empty() && franchises.is_empty() {
+            None => match stripes.is_empty() && franchises.is_empty() && like.is_none() {
                 true => last.bottom(),
                 false => last.bottom() + FOOT,
             },
@@ -460,6 +485,7 @@ impl Blocks {
             strip,
             franchises,
             stripes,
+            like,
             foot,
             files,
             content,
@@ -474,6 +500,7 @@ impl Blocks {
             Focus::Stripe(stripe, _) => self.stripes.get(stripe).copied(),
             Focus::Franchise(strip, _) => self.franchises.get(strip).copied(),
             Focus::Strip(_) => self.strip,
+            Focus::Like(_) => self.like,
             Focus::Studio(_) => Some(self.foot),
             Focus::Buttons(_) | Focus::Marks(_) => None,
         }
@@ -490,6 +517,7 @@ impl Blocks {
             .into_iter()
             .chain(self.franchises.iter().copied())
             .chain(self.stripes.iter().copied())
+            .chain(self.like)
             .map(|under| under.top)
             .find(|top| *top > block.top)
             .unwrap_or(self.content)

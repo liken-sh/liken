@@ -58,6 +58,11 @@ pub mod subtitle;
 // a movie's page shows and chooses a play's tracks from.
 pub mod stream;
 
+// The films that share people with another, for a movie page's More like
+// this strip.
+pub mod alike;
+
+pub use alike::Alike;
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
 pub use identity::Identity;
 pub use mark::Mark;
@@ -522,6 +527,13 @@ pub trait Source {
     /// own aliases find the franchises, so a member resolves by string
     /// match and no library reads another's volume.
     fn franchises_of(&mut self, library: &str, id: &str) -> Vec<Membership>;
+
+    /// Every other film of the library that shares a director or a lead
+    /// actor with this one, with its score, in no order. A source that
+    /// keeps no credits answers none.
+    fn alike(&mut self, _library: &str, _id: &str) -> Vec<Alike> {
+        Vec::new()
+    }
 
     // Every franchise any of these works belongs to, each once, in the
     // order of the franchise's library and id, with the members some
