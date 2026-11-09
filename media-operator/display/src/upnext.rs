@@ -91,7 +91,7 @@ pub(crate) fn series_rise(duration: f64) -> f64 {
 
 /// The words the chip draws before the title. The block carries the three
 /// lines of the card and nothing for the chip, so they are spelled here.
-const CHIP_WORD: &str = "UP NEXT";
+const CHIP_WORD: &str = "Up next";
 
 // The seam the decode fills. The card asks for the offer's picture where
 // it draws the art plate, the decode answers with the size it draws at, and
@@ -726,7 +726,7 @@ mod tests {
         let mut upnext = UpNext::default();
         upnext.receive(r#"{"title":"","detail":"45 min"}"#);
         assert!(upnext.available());
-        assert_eq!(upnext.label(), "UP NEXT  ");
+        assert_eq!(upnext.label(), "Up next  ");
     }
 
     /// Any one of the four fields makes a block an offer.
@@ -750,7 +750,7 @@ mod tests {
         upnext.receive(OFFER);
 
         let line = upnext.chip_line(&canvas(), false);
-        assert_eq!(line.content, "UP NEXT  E05 \u{b7} The Long Tide");
+        assert_eq!(line.content, "Up next  E05 \u{b7} The Long Tide");
         assert_eq!(line.at, Point::new(RIGHT, 823.0));
         assert_eq!(line.anchor, Anchor::Right);
         assert_eq!(line.size, theme::type_scale::TINY);
@@ -777,7 +777,7 @@ mod tests {
 
         let panel = upnext.chip_panel(&canvas());
         let label = measure(
-            "UP NEXT  The Hobbit: The Desolation of Smaug",
+            "Up next  The Hobbit: The Desolation of Smaug",
             theme::type_scale::TINY,
         );
         assert!((panel.width - (label + 44.0)).abs() < 0.01);

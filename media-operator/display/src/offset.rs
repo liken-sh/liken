@@ -18,7 +18,7 @@ const X: f32 = theme::MARGIN_X;
 const W: f32 = 720.0;
 const PAD: f32 = 24.0;
 const H: f32 = 200.0;
-const HINT: &str = "left and right nudge, up resets, down done";
+const HINT: &str = "Left and right nudge, up resets, down done";
 
 /// One offset bound to a property. `track` names the track type the offset
 /// needs, when it needs one.
@@ -307,7 +307,10 @@ mod tests {
         assert_eq!(lines[1].content, "-0.05 s");
         assert_eq!(lines[1].at, Point::new(120.0, 754.0));
         assert_eq!(lines[1].size, 64.0);
-        assert_eq!(lines[2].content, HINT);
+        assert_eq!(
+            lines[2].content,
+            "Left and right nudge, up resets, down done"
+        );
         assert_eq!(lines[2].at, Point::new(120.0, 832.0));
         assert_eq!(lines[2].size, 34.0);
         assert_eq!(
