@@ -24,8 +24,9 @@ const (
 )
 
 // One image as TMDb states it. The language is null for an image with no text
-// in it, which is why the choice below reads a null language as its second
-// preference and never as a miss.
+// in it. The choice never reads a null language as a miss: the backdrop tries
+// it first, and every other art fact tries it second, as artType.languages
+// gives.
 type tmdbImage struct {
 	FilePath    string  `json:"file_path"`
 	Language    string  `json:"iso_639_1"`
