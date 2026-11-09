@@ -1010,6 +1010,14 @@ mod tests {
         assert_eq!(item.ratio(), POSTER);
     }
 
+    // The focused line of a one-line wall names the same facts as the
+    // card, so a series' line carries its season count too.
+    #[test]
+    fn a_series_line_names_its_season_count_as_its_card_does() {
+        let item = Item::of(&library(), serial());
+        assert_eq!(item.line.words(), "Serial 03 · 2004 · 5 seasons · TV-14");
+    }
+
     #[test]
     fn a_series_of_one_season_and_a_series_of_none_read_in_their_own_words() {
         let genre = Query::Genre {
