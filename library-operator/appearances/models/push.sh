@@ -72,15 +72,24 @@ run_oras() {
 	fi
 }
 
-# oras writes the time of the push into org.opencontainers.image.created
-# unless the push names a time. A fixed time keeps the manifest digest
-# the same on every push. The source annotation links the package on
-# ghcr.io to this repository.
+# These are the OCI keys that ci publish writes on every image of the
+# repository, less the two that would change on each commit. oras
+# writes the time of the push into org.opencontainers.image.created
+# unless the push names a time, so a fixed time keeps the manifest
+# digest the same on every push, and there is no revision key, because
+# the files come from OpenCV Zoo and not from a commit of this
+# repository. The source annotation links the package on ghcr.io to
+# this repository.
 digest=$(run_oras push \
 	--plain-http="$plain_http" \
 	--artifact-type application/vnd.liken.appearances.models.v1 \
 	--annotation org.opencontainers.image.created=2026-10-01T00:00:00Z \
+	--annotation org.opencontainers.image.title=library-operator-appearances-models \
+	--annotation org.opencontainers.image.version="$tag" \
 	--annotation org.opencontainers.image.source=https://github.com/liken-sh/liken \
+	--annotation org.opencontainers.image.url=https://liken.sh/ \
+	--annotation org.opencontainers.image.documentation=https://liken.sh/library/ \
+	--annotation org.opencontainers.image.vendor=liken \
 	--annotation org.opencontainers.image.licenses="MIT AND Apache-2.0" \
 	--annotation org.opencontainers.image.description="YuNet and SFace from OpenCV Zoo, for appearances" \
 	--format go-template='{{.digest}}' \
