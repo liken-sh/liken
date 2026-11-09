@@ -278,6 +278,6 @@ mod tests {
         assert_eq!(name.width, pitch());
         assert!(name.y > slot.y + slot.height);
         assert_eq!(part.y, name.y + name.height);
-        assert_eq!(part.y + part.height, region().y + HEIGHT);
+        assert!((part.y + part.height - (region().y + HEIGHT)).abs() < 1e-3);
     }
 }

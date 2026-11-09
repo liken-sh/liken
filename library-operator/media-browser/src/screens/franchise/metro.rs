@@ -52,7 +52,7 @@ const HUES: [f32; 8] = [20.0, 65.0, 110.0, 155.0, 200.0, 245.0, 290.0, 335.0];
 // The size a run's name draws at, the space between a run's first dot
 // and the foot of its name, and the room a name has across the strip:
 // the gutter between the dots of two lanes.
-const NAME: f32 = 17.0;
+const NAME: f32 = look::RUN_NAME;
 const NAME_GAP: f32 = 8.0;
 const NAME_ROOM: f32 = PITCH - 2.0 * DOT;
 

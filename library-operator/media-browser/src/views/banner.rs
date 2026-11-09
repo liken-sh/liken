@@ -56,7 +56,7 @@ pub fn height(page: f32) -> f32 {
 // The least the frame can be: the space over the head, the head, the
 // facts line, the genres line, the ratings row, the tagline, the gaps
 // between them, and the indicator row over the foot. Every size here is
-// a fixed number of pixels, so a page under about 943 pixels tall takes
+// a fixed number of pixels, so a page under about 967 pixels tall takes
 // this and not the share, and the column never runs into the indicators.
 fn least() -> f32 {
     TOP + LOGO_HEIGHT
@@ -225,7 +225,7 @@ mod tests {
 
     #[test]
     fn a_short_page_gives_the_frame_the_height_its_text_needs() {
-        assert_eq!(height(720.0), 377.0);
+        assert_eq!(height(720.0), 387.0);
         assert!(height(720.0) > 720.0 * SHARE);
     }
 

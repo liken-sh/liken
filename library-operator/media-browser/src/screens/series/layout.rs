@@ -22,8 +22,8 @@ pub const TOP: f32 = 28.0;
 /// so the header's text never touches the wall. It is narrower than
 /// `TOP`, because the first divider adds `HEAD` and the empty top of its
 /// own band over its heading. The header is short enough that at 1080
-/// the region under it holds a divider and two rows of stills, and a
-/// rail with one bar for each of twelve seasons.
+/// the region under it holds a divider, a row of stills, and the art of
+/// the next row, and a rail with one bar for each of nine seasons.
 pub const FOOT: f32 = 16.0;
 
 /// The space between two blocks of the header.

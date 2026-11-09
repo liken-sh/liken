@@ -392,12 +392,15 @@ fn two_blocks_stand_side_by_side_and_a_third_wraps_under_them() {
     );
     let head = text::height(1, look::HEADING) + HEADING_GAP;
     let tall = one.blocks[0].height();
-    assert_eq!(one.height(), head + tall);
-    assert_eq!(two.height(), head + tall);
-    assert_eq!(
+    // The heights are sums of fractions of a pixel, so they compare to
+    // within a thousandth of one.
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    assert!(near(one.height(), head + tall));
+    assert!(near(two.height(), head + tall));
+    assert!(near(
         three.height(),
         head + tall + ROW_GAP + three.blocks[2].height()
-    );
+    ));
     assert_eq!(Files::default().height(), 0.0);
 }
 

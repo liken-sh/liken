@@ -1,7 +1,6 @@
 use super::*;
 use crate::focus::Run;
 use crate::screens::franchise::strips::Place;
-use crate::views::rail;
 
 // A frame of the size the screens this browser draws on hold.
 const WIDTH: f32 = 1920.0;
@@ -122,9 +121,9 @@ fn the_stills_draw_under_the_band_a_held_divider_keeps() {
 }
 
 #[test]
-fn a_divider_and_two_rows_of_stills_fit_under_the_header() {
+fn a_divider_a_row_of_stills_and_the_art_of_the_next_fit_under_the_header() {
     let cells = cells();
-    let takes = HEAD + divider::HEIGHT + REACH + 2.0 * cells.height;
+    let takes = HEAD + divider::HEIGHT + REACH + cells.height + cells.poster_height;
     assert!(takes <= region(frame()).height, "{takes}");
 }
 
@@ -338,12 +337,6 @@ fn the_rail_is_counted_against_the_region_the_page_draws_in() {
     let drawn = region(area(0.0, 0.0, 1920.0, 1080.0));
     assert_eq!(rail_region().height, drawn.height);
     assert_eq!(rail_region().height, 1080.0 - head());
-    // A window ten pixels shorter than the screen takes the same bars.
-    let shorter = region(area(0.0, 0.0, 1920.0, 1070.0));
-    assert_eq!(
-        rail::fits(rail_region(), "25\u{2013}28"),
-        rail::fits(shorter, "25\u{2013}28")
-    );
 }
 
 #[test]

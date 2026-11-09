@@ -32,9 +32,8 @@ const LINE_LEAD: f32 = 14.0;
 /// The height of a mark, which is the height of the line.
 pub const MARK_HEIGHT: f32 = 48.0;
 
-// The size of the status and of a mark's words: a step under a playback
-// button's word, so the line reads after the row.
-const SIZE: f32 = 20.0;
+// The size of the status and of a mark's words, which `look` states.
+const SIZE: f32 = look::STATUS;
 
 // The space between the status and the first mark, and between two marks.
 const STATUS_GAP: f32 = 28.0;

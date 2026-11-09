@@ -260,15 +260,10 @@ fn more_seasons_than_the_region_fits_merge_into_ranges_that_cover_them_all() {
 }
 
 #[test]
-fn a_dozen_seasons_take_a_bar_each_because_their_numbers_fit() {
-    let bars = seasons::bars(&many(12), region());
+fn nine_seasons_take_a_bar_each_because_their_numbers_fit() {
+    let bars = seasons::bars(&many(9), region());
     let named: Vec<&str> = bars.iter().map(|bar| bar.label.as_str()).collect();
-    assert_eq!(
-        named,
-        [
-            "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"
-        ]
-    );
+    assert_eq!(named, ["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
 }
 
 #[test]

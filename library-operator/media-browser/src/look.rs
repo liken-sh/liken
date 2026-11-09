@@ -105,57 +105,113 @@ pub fn ground() -> Color {
 /// The far end of every gradient over art. It leaves the art as it is.
 pub const CLEAR: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.0);
 
-/// The size of the focused title's name under its poster, in logical
-/// pixels, large enough to read from a couch.
-pub const NAME: f32 = 24.0;
+/// One step of the type scale. Every line of text the browser draws is at
+/// one of these five sizes, in logical pixels, so two kinds of text
+/// either differ by a step a person sees from a couch or match.
+///
+/// The smallest step is the floor. It is the smallest type the player's
+/// overlay draws: a line box of 28 rows through the face's metric, 21
+/// pixels. So no text in the browser is smaller than the text a person
+/// reads over a film.
+///
+/// The clock and the person picker keep their own sizes, because each
+/// matches a line box that the player and the idle screen draw at, and
+/// `views::clock` and `screens::audience::identity` state them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// A page's title where the item has no logo.
+    Display,
+    /// A title inside a header of a fixed height.
+    Title,
+    /// What a person reads on a page: the plot, the facts, the buttons.
+    Body,
+    /// The first line under a card, and the heading over a strip.
+    Label,
+    /// The second line under a card, and the names under a headshot.
+    Caption,
+}
 
-/// The size of the one line under every slot of a wall.
-pub const CAPTION: f32 = 19.0;
+impl Step {
+    /// The five steps, from the largest to the floor.
+    pub const SCALE: [Step; 5] = [
+        Step::Display,
+        Step::Title,
+        Step::Body,
+        Step::Label,
+        Step::Caption,
+    ];
 
-/// The size of the two lines under a headshot in a stripe. A headshot is
-/// narrower than a poster, so its lines are smaller than a wall's caption
-/// to fit a full name.
-pub const FACE: f32 = 17.0;
+    /// The step's size in logical pixels.
+    pub const fn size(self) -> f32 {
+        match self {
+            Step::Display => 54.0,
+            Step::Title => 39.0,
+            Step::Body => 25.0,
+            Step::Label => 22.0,
+            Step::Caption => 21.0,
+        }
+    }
+}
+
+// The roles below name what a size is for. Each role is a step of the
+// scale and never a number of its own, so a change to the scale reaches
+// every role.
+
+/// The size of the focused title's name under its poster, the name of a
+/// screen in its band, and the words in the search field.
+pub const NAME: f32 = Step::Body.size();
+
+/// The size of the one line under every slot of a wall, and of the first
+/// line under a card.
+pub const CAPTION: f32 = Step::Label.size();
+
+/// The size of the second line under a card, and of the two lines under
+/// a headshot in a stripe.
+pub const FACE: f32 = Step::Caption.size();
 
 /// The size of a page's title, where the item has no logo.
-pub const TITLE: f32 = 54.0;
+pub const TITLE: f32 = Step::Display.size();
 
 /// The size of a title inside a header of a fixed height, where the item
 /// has no logo.
-pub const HEAD_TITLE: f32 = 39.0;
+pub const HEAD_TITLE: f32 = Step::Title.size();
 
 /// The size of a page's facts line.
-pub const FACTS: f32 = 22.0;
+pub const FACTS: f32 = Step::Body.size();
 
 /// The size of a page's tagline.
-pub const TAGLINE: f32 = 24.0;
+pub const TAGLINE: f32 = Step::Body.size();
 
 /// The size of a page's plot.
-pub const PLOT: f32 = 21.0;
+pub const PLOT: f32 = Step::Body.size();
 
 /// The size of the word in a button.
-pub const BUTTON: f32 = 22.0;
+pub const BUTTON: f32 = Step::Body.size();
+
+/// The size of the status beside a page's playback buttons and of the
+/// words in a mark: a step under a button's word, so the line reads after
+/// the row.
+pub const STATUS: f32 = Step::Label.size();
 
 /// The size of the heading over a strip, over a stripe, and over a season's
 /// divider.
-pub const HEADING: f32 = 21.0;
+pub const HEADING: f32 = Step::Label.size();
 
-/// The size of the word in a control of a wall's band.
-pub const CONTROL: f32 = 19.0;
+/// The size of the word in a control of a wall's band and in a key of the
+/// search grid.
+pub const CONTROL: f32 = Step::Caption.size();
 
-/// The size of a score on the ratings line, a step over the facts line
-/// it sits under, so the number reads first and the site's scale after
-/// it reads second.
-pub const SCORE: f32 = 25.0;
-
-/// The size of the credits and the cast on a page.
-pub const CREDITS: f32 = 19.0;
+/// The size of a score on the ratings line.
+pub const SCORE: f32 = Step::Body.size();
 
 /// The size of the number in the volume row.
-pub const ROW_NAME: f32 = 29.0;
+pub const ROW_NAME: f32 = Step::Body.size();
 
 /// The size of secondary text: details and placeholder titles.
-pub const DETAIL: f32 = 21.0;
+pub const DETAIL: f32 = Step::Caption.size();
+
+/// The size of a run's name beside its line on a franchise's metro strip.
+pub const RUN_NAME: f32 = Step::Caption.size();
 
 /// How long the page takes to leave when a person chooses a title, in
 /// seconds. The mark fades in over the same span.
@@ -417,6 +473,50 @@ mod tests {
         assert_eq!(eased(0.0), 0.0);
         assert_eq!(eased(0.5), 0.5);
         assert_eq!(eased(1.0), 1.0);
+    }
+
+    // Every role, by its name.
+    const ROLES: [(&str, f32); 16] = [
+        ("NAME", NAME),
+        ("CAPTION", CAPTION),
+        ("FACE", FACE),
+        ("TITLE", TITLE),
+        ("HEAD_TITLE", HEAD_TITLE),
+        ("FACTS", FACTS),
+        ("TAGLINE", TAGLINE),
+        ("PLOT", PLOT),
+        ("BUTTON", BUTTON),
+        ("STATUS", STATUS),
+        ("HEADING", HEADING),
+        ("CONTROL", CONTROL),
+        ("SCORE", SCORE),
+        ("ROW_NAME", ROW_NAME),
+        ("DETAIL", DETAIL),
+        ("RUN_NAME", RUN_NAME),
+    ];
+
+    #[test]
+    fn every_role_draws_at_a_step_of_the_scale() {
+        for (role, size) in ROLES {
+            assert!(
+                Step::SCALE.iter().any(|step| step.size() == size),
+                "{role} draws at {size}, which is no step"
+            );
+        }
+    }
+
+    #[test]
+    fn no_role_draws_under_the_overlays_smallest_type() {
+        assert_eq!(Step::Caption.size(), 21.0);
+        for (role, size) in ROLES {
+            assert!(size >= Step::Caption.size(), "{role} draws at {size}");
+        }
+    }
+
+    #[test]
+    fn the_scale_runs_from_the_largest_step_down_to_the_floor() {
+        let sizes = Step::SCALE.map(Step::size);
+        assert!(sizes.windows(2).all(|pair| pair[0] > pair[1]), "{sizes:?}");
     }
 
     #[test]

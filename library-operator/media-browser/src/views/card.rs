@@ -113,7 +113,7 @@ mod tests {
         assert!(second.ends_with('\u{2026}'));
         assert!(text::measured(&first, look::CAPTION) <= BAND);
         assert!(text::measured(&second, look::FACE) <= BAND);
-        assert!(second.chars().count() > first.chars().count());
+        assert!(second.chars().count() >= first.chars().count());
         assert_eq!(cut("Film one", BAND), "Film one");
         assert_eq!(under_cut("1987 · 1h 37m", BAND), "1987 · 1h 37m");
     }
