@@ -32,8 +32,9 @@ const (
 // The credits read title.principals first, because it names the people whose
 // names name.basics holds.
 var datasetsOfFact = map[string][]string{
-	factRatingIMDb: {datasetTitleEpisode, datasetTitleRatings},
-	factCredits:    {datasetTitlePrincipals, datasetNameBasics},
+	factRatingIMDb:      {datasetTitleEpisode, datasetTitleRatings},
+	factCredits:         {datasetTitlePrincipals, datasetNameBasics},
+	factAlternateTitles: {datasetTitleAkas},
 }
 
 // Every file the given facts read, in the order of the table, with no file
@@ -58,8 +59,8 @@ func datasetURL(base, name string) string {
 // The value IMDb writes in a cell that holds nothing.
 const datasetNull = `\N`
 
-// The longest line the reader accepts. The longest row of the four files
-// the plan reads is a few kilobytes, so a longer line is a file this reader
+// The longest line the reader accepts. The longest row of the files the
+// facts read is a few kilobytes, so a longer line is a file this reader
 // does not understand.
 const datasetMaxLine = 1 << 20
 

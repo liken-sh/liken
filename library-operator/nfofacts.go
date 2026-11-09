@@ -4,7 +4,10 @@ package main
 // query each fact works from. The full fact vocabulary is in factnames.go.
 // These names are the ones the nfo container runs today.
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // The nfo facts this image runs today, in the order the container names them
 // in LIBRARY_FACTS. overview runs first because it writes the elements every
@@ -15,6 +18,11 @@ var nfoFacts = []string{
 	factCredits,
 }
 
+// The facts the nfo container runs: the nfo facts, then the alternate titles,
+// which write no element of the .nfo file and read IMDb's datasets as the
+// rating and the credits do.
+var nfoContainerFacts = append(slices.Clone(nfoFacts), factAlternateTitles)
+
 // The container that fills the .nfo body, which is the phase a person reads
 // in kubectl get pod.
 const nfoContainerName = "nfo"
@@ -24,7 +32,7 @@ const nfoContainerName = "nfo"
 // serves and no more.
 func servedNFOFacts(library *Library, providers providerSet) []string {
 	var served []string
-	for _, fact := range nfoFacts {
+	for _, fact := range nfoContainerFacts {
 		if providers.serving(library.Metadata.Namespace, library.Spec.Sources, fact) != nil {
 			served = append(served, fact)
 		}

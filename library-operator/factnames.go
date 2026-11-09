@@ -20,6 +20,10 @@ const (
 	factRatingRottenTomatoes = "rating.rottentomatoes"
 	factRatingMetacritic     = "rating.metacritic"
 	factCredits              = "credits"
+	// The other titles of a movie or a series, which search matches. It writes
+	// no element of the .nfo file, because Kodi and Jellyfin define none for
+	// it, so its list is in its own ledger.
+	factAlternateTitles = "alternate-titles"
 
 	factPoster       = "poster"
 	factBackdrop     = "backdrop"
@@ -115,6 +119,7 @@ var factVocabulary = []string{
 	factRatingRottenTomatoes,
 	factRatingMetacritic,
 	factCredits,
+	factAlternateTitles,
 	factPoster,
 	factBackdrop,
 	factLogo,

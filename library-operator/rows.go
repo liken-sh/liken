@@ -49,17 +49,19 @@ type castMember struct {
 // movieBody is what movie.nfo holds beyond the shared header, stored in the
 // item's body column as JSON.
 type movieBody struct {
-	Plot          string            `json:"plot,omitempty"`
-	Tagline       string            `json:"tagline,omitempty"`
-	Cast          []castMember      `json:"cast,omitempty"`
-	Directors     []string          `json:"directors,omitempty"`
-	Writers       []string          `json:"writers,omitempty"`
-	Studios       []string          `json:"studios,omitempty"`
-	Genres        []string          `json:"genres,omitempty"`
-	Collection    string            `json:"collection,omitempty"`
-	ProviderIDs   map[string]string `json:"providerIds,omitempty"`
-	Country       string            `json:"country,omitempty"`
-	ContentRating string            `json:"contentRating,omitempty"`
+	Plot      string       `json:"plot,omitempty"`
+	Tagline   string       `json:"tagline,omitempty"`
+	Cast      []castMember `json:"cast,omitempty"`
+	Directors []string     `json:"directors,omitempty"`
+	Writers   []string     `json:"writers,omitempty"`
+	Studios   []string     `json:"studios,omitempty"`
+	Genres    []string     `json:"genres,omitempty"`
+	// The other titles the alternate-titles fact found, which search matches.
+	AlternateTitles []string          `json:"alternateTitles,omitempty"`
+	Collection      string            `json:"collection,omitempty"`
+	ProviderIDs     map[string]string `json:"providerIds,omitempty"`
+	Country         string            `json:"country,omitempty"`
+	ContentRating   string            `json:"contentRating,omitempty"`
 	// The ratings block of the .nfo file, each site's own name against its
 	// score on that site's scale.
 	Ratings map[string]float64 `json:"ratings,omitempty"`
@@ -68,15 +70,17 @@ type movieBody struct {
 // seriesBody is what tvshow.nfo holds beyond the shared header. A series
 // credits its creators where a movie credits its directors and writers.
 type seriesBody struct {
-	Plot          string            `json:"plot,omitempty"`
-	Tagline       string            `json:"tagline,omitempty"`
-	Cast          []castMember      `json:"cast,omitempty"`
-	Creators      []string          `json:"creators,omitempty"`
-	Studios       []string          `json:"studios,omitempty"`
-	Genres        []string          `json:"genres,omitempty"`
-	ProviderIDs   map[string]string `json:"providerIds,omitempty"`
-	Country       string            `json:"country,omitempty"`
-	ContentRating string            `json:"contentRating,omitempty"`
+	Plot     string       `json:"plot,omitempty"`
+	Tagline  string       `json:"tagline,omitempty"`
+	Cast     []castMember `json:"cast,omitempty"`
+	Creators []string     `json:"creators,omitempty"`
+	Studios  []string     `json:"studios,omitempty"`
+	Genres   []string     `json:"genres,omitempty"`
+	// The other titles the alternate-titles fact found, which search matches.
+	AlternateTitles []string          `json:"alternateTitles,omitempty"`
+	ProviderIDs     map[string]string `json:"providerIds,omitempty"`
+	Country         string            `json:"country,omitempty"`
+	ContentRating   string            `json:"contentRating,omitempty"`
 	// The ratings block of the .nfo file, in the same shape as a movie's.
 	Ratings map[string]float64 `json:"ratings,omitempty"`
 }

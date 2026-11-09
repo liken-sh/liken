@@ -33,6 +33,7 @@ var factRuns = map[string]factRun{
 	factRatingRottenTomatoes: nfoFactRun(factRatingRottenTomatoes),
 	factRatingMetacritic:     nfoFactRun(factRatingMetacritic),
 	factCredits:              nfoFactRun(factCredits),
+	factAlternateTitles:      func(ctx context.Context, e *enricher) error { return e.alternateTitlesFact(ctx) },
 
 	factPoster:       artFactRun(factPoster),
 	factBackdrop:     artFactRun(factBackdrop),

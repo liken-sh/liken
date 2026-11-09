@@ -261,7 +261,7 @@ func releaseDates(fact string) string {
 	if fact == factMarks {
 		return marksReleaseDates()
 	}
-	if fact == factIdentity || fact == factCredits || fact == factTrailer ||
+	if fact == factIdentity || fact == factCredits || fact == factAlternateTitles || fact == factTrailer ||
 		slices.Contains(nfoFacts, fact) {
 		return titleReleaseDates("id")
 	}
@@ -323,6 +323,7 @@ var gapQueries = map[string]string{
 	factRatingRottenTomatoes: nfoGapQuery(factRatingRottenTomatoes),
 	factRatingMetacritic:     nfoGapQuery(factRatingMetacritic),
 	factCredits:              creditsGapQuery(),
+	factAlternateTitles:      alternateTitlesGapQuery(),
 	factPoster:               titleArtGapSQL(factPoster),
 	factBackdrop:             titleArtGapSQL(factBackdrop),
 	factLogo:                 titleArtGapSQL(factLogo),

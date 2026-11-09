@@ -258,7 +258,7 @@ var providerBlocks = []providerBlock{
 	// in the Library's order answered.
 	{
 		name:     providerBlockIMDb,
-		facts:    []string{factRatingIMDb, factCredits},
+		facts:    []string{factRatingIMDb, factCredits, factAlternateTitles},
 		fallback: []string{factCredits},
 		pace:     time.Second,
 		base:     imdbDatasetsBase,

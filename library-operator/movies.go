@@ -104,6 +104,7 @@ func scanMovieFolder(scan folderScan, dir string, result *walkResult) {
 		added = arrivals[files[0]].added
 	}
 
+	movie := len(result.movies)
 	result.movies = append(result.movies, movieRow{
 		Id:       id,
 		Library:  library,
@@ -143,7 +144,8 @@ func scanMovieFolder(scan folderScan, dir string, result *walkResult) {
 	scanMovieFiles(root, dir, library, id, videos, ledgers, result)
 
 	result.aliases = append(result.aliases, aliasRowsForItem(library, scopeMovie, meta.ProviderIDs, key, id)...)
-	readLikenDir(likenDir{root: root, dir: dir, library: library, item: id}, result)
+	alternates := readLikenDir(likenDir{root: root, dir: dir, library: library, item: id}, result)
+	result.movies[movie].Body.AlternateTitles = alternatesOf(alternates, title)
 	result.titles++
 	if !identified {
 		result.unidentified++

@@ -75,11 +75,14 @@ The providers, and the facts each one serves:
   id and needs no account. Declare it with an empty block,
   `introdb: {}`.
 * `imdb`, IMDb's published datasets: the IMDb rating of movies, series,
-  and episodes, and the principal credits of movies and series, from
-  files that IMDb replaces every day. It needs no account and has no
-  daily limit. Declare it with an empty block, `imdb: {}`.
+  and episodes, and the principal credits and the alternate titles of
+  movies and series, from files that IMDb replaces every day. It needs
+  no account and has no daily limit. Declare it with an empty block,
+  `imdb: {}`.
   [IMDb ratings and credits from the datasets](#imdb-ratings-and-credits-from-the-datasets)
-  describes how the files are read and kept.
+  describes how the files are read and kept, and
+  [Alternate titles from the datasets](#alternate-titles-from-the-datasets)
+  describes the titles search matches.
 
 The operator checks that each provider answers with one call: when it
 starts, when you edit the provider, and then once an hour. A provider
@@ -1156,6 +1159,53 @@ the files from IMDb.
 
     kubectl -n media get metadataprovider imdb -o jsonpath='{.status.imdb.datasets}'
     kubectl -n media logs job/<job> -c nfo | grep -E 'title.ratings|title.principals'
+
+### Alternate titles from the datasets
+
+The `alternate-titles` fact lets the media browser's search find a
+movie or a series by a title other than its own: its original title,
+or the title it was released under in another English-speaking market.
+A search for `die hard 4` finds "Live Free or Die Hard" through its UK
+title, `Die Hard 4.0`. Only the `imdb` block serves the fact, and only
+for a title whose `.nfo` file holds an IMDb id.
+
+The `nfo` container reads `title.akas` once for its whole gap, as the
+rating and the credits read their files, and keeps only the rows of the
+titles in the gap. The file is the largest but one that the operator
+reads, about 520 MB gzipped and 60 million rows in November 2026, and
+the container holds only the rows it keeps. Of each title's rows it
+keeps five at most:
+
+1. The original title.
+2. Then, in IMDb's order, each title that IMDb marks as English, and
+   each US or UK title that IMDb marks with no language.
+
+A title that has the same letters and digits as the title in the
+`.nfo` file, or as a title kept before it, is left out, so `WINTER
+HARBOUR!` adds nothing to `Winter Harbour`.
+
+The fact writes the titles to the title's `.liken/alternate-titles.yaml`,
+beside its attempts, and writes nothing into the `.nfo` file, because
+Kodi and Jellyfin have no element for them. The scan reads the file into
+the `alternateTitles` field of the title's body, and the browser's
+search reads them from there:
+
+    titles:
+      - title: Port d'hiver
+        original: true
+      - title: Harbour of Winter
+        region: GB
+    attempts:
+      - path: .
+        at: 2026-11-09T04:12:00Z
+        result: found
+        provider: imdb
+        datasetModified: 2026-11-09T00:44:12Z
+
+A title that `title.akas` holds is found, even when none of its rows
+passed the rules, and the fact does not ask again on a timer. Set
+`alternate-titles` in `spec.refresh` to read the file again. A title the
+file does not hold is a miss, and the fact asks again after thirty days.
 
 ### When a fact asks again
 

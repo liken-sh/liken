@@ -102,7 +102,9 @@ func scanSeriesFolder(scan folderScan, dir string, result *walkResult) {
 		}
 	}
 	seriesShows, folderShowsByName := seriesFolderShows(seasons)
-	readLikenDir(likenDir{root: root, dir: dir, library: library, item: seriesID, shows: seriesShows}, result)
+	alternates := readLikenDir(likenDir{root: root, dir: dir, library: library, item: seriesID,
+		shows: seriesShows}, result)
+	result.series[series].Body.AlternateTitles = alternatesOf(alternates, title)
 	result.titles++
 	if !identified {
 		result.unidentified++

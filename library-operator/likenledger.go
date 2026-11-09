@@ -82,6 +82,9 @@ type likenLedger struct {
 	// person. Only the credits fact writes it, so the list, the answer, and the
 	// attempts are one write of one file.
 	Credits []creditEntry `yaml:"credits,omitempty"`
+	// The alternate-titles fact's own list: the other titles of the folder's
+	// title, which the walk puts in the title's body for search.
+	AlternateTitles []alternateTitle `yaml:"titles,omitempty"`
 	// The arrival fact's own list, in the file that is its ledger: one entry
 	// per video file with the time it arrived. Only the arrival fact writes it,
 	// and the walk reads it for the added and arrived columns.

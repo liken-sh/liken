@@ -98,7 +98,7 @@ func (e *enricher) writeOwnedRows(ctx context.Context, fact string, result *walk
 		// file whose provider dropped a span drops the row.
 		_, err := e.catalog.UpsertMarks(ctx, result.files, result.marks)
 		return err
-	case nfoFactSet[fact]:
+	case nfoFactSet[fact] || fact == factAlternateTitles:
 		return e.writeBodyRows(ctx, result)
 	case art:
 		return e.writeArtRows(ctx, result)

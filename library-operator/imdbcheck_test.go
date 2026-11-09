@@ -43,7 +43,7 @@ func TestTheIMDbCheckHeadsEachFileAndReportsItsHeaders(t *testing.T) {
 		t.Fatalf("Ready = %s/%s, want Reachable", ready.Status, ready.Reason)
 	}
 	want := []string{"HEAD title.episode 200", "HEAD title.ratings 200",
-		"HEAD title.principals 200", "HEAD name.basics 200"}
+		"HEAD title.principals 200", "HEAD name.basics 200", "HEAD title.akas 200"}
 	if got := server.log(); !slices.Equal(got, want) {
 		t.Errorf("requests = %v, want %v", got, want)
 	}
@@ -55,8 +55,8 @@ func TestTheIMDbCheckHeadsEachFileAndReportsItsHeaders(t *testing.T) {
 	if !written.Status.IMDb.Updated.Equal(modified) {
 		t.Errorf("updated = %v, want %v", written.Status.IMDb.Updated, modified)
 	}
-	if got := written.Status.Facts; !slices.Equal(got, []string{factRatingIMDb, factCredits}) {
-		t.Errorf("facts = %v, want the rating and the credits", got)
+	if got := written.Status.Facts; !slices.Equal(got, []string{factRatingIMDb, factCredits, factAlternateTitles}) {
+		t.Errorf("facts = %v, want the rating, the credits, and the alternate titles", got)
 	}
 }
 

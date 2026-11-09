@@ -16,9 +16,10 @@ func datasetsClaimName(provider string) string {
 	return provider + "-datasets"
 }
 
-// The four files the rating and the credits read take 1.2 GB, and the
-// replacement of one file needs room for a second copy of it, at most 784 MB
-// for title.principals. The rest leaves room for the files to grow.
+// The five files the rating, the credits, and the alternate titles read took
+// 1.7 GB in November 2026, and the replacement of one file needs room for a
+// second copy of it, at most 790 MB for title.principals. That is 2.5 GB at
+// most, and the rest leaves room for the files to grow.
 const datasetsClaimSize = "3Gi"
 
 // The provider owns the claim, so a deleted provider deletes its cache with

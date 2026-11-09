@@ -118,7 +118,8 @@ them a day on the check while its key works.
 The `imdb` block has no API to call. IMDb publishes its datasets as
 files, so the check sends one `HEAD` request for each file that the
 provider's served facts read: `title.ratings` and `title.episode` for
-`rating.imdb`, and `title.principals` and `name.basics` for `credits`. Every file must answer `200` for `Reachable`. Any other
+`rating.imdb`, `title.principals` and `name.basics` for `credits`, and
+`title.akas` for `alternate-titles`. Every file must answer `200` for `Reachable`. Any other
 status is `Unavailable`, and the message names the file. The check
 keeps the same schedule as every other provider, so while IMDb
 answers it sends one `HEAD` request for each file an hour. A `HEAD`
@@ -130,8 +131,8 @@ of the last check that read the files. The `UPDATED` column shows the
 oldest `lastModified`. IMDb replaces each file every day, so a file
 older than three days writes the `Stale` condition with status `True`,
 and its message names the file and its date. `Stale` does not change
-`Ready`, because a file from last week still gives correct ratings and
-credits.
+`Ready`, because a file from last week still gives correct ratings,
+credits, and titles.
 
     $ kubectl -n media get metadataprovider imdb
     NAME   PROVIDER   READY   REASON      UPDATED   AGE
@@ -164,7 +165,7 @@ The provider this account is with, and the facts it may serve. A spec that names
 | <span id="spec--archive"></span>`archive` | object | no | The account is with the Internet Archive, whose movie_trailers collection serves the trailer fact alone and needs no account. The block is empty, and its presence says that the operator may ask the archive. The operator asks it no faster than four times a second. |
 | <span id="spec--theintrodb"></span>`theintrodb` | [object](#spectheintrodb) | no | The account is with TheIntroDB, a community database of the intro, recap, credits, and preview spans of movies and episodes. It provides only the marks fact. It finds an episode by its series' TheTVDB id, then its TMDb id, then its IMDb id, and a movie by its TMDb id, then its TheTVDB id, then its IMDb id. TheIntroDB reads an episode's season and episode in TheTVDB's default order when the ask names a TheTVDB id. A key is optional. Without one, TheIntroDB answers 5,000 asks a day for each address, 30 every 10 seconds, and serves accepted submissions alone. With one, it answers 100,000 asks a day for the account, 120 every 10 seconds, and adds the account's own pending submissions. It answers at most 2,000 asks a day about one title. The operator checks it at /health, which spends none of the daily allowance and cannot test the key. |
 | <span id="spec--introdb"></span>`introdb` | object | no | The account is with IntroDB, a community database of the intro, recap, credits, and post-credits spans of movies and episodes. It provides only the marks fact, finds a work by its IMDb id, and needs no account. The block is empty, and its presence says that the operator may ask IntroDB. |
-| <span id="spec--imdb"></span>`imdb` | object | no | The account is with IMDb's published datasets, which serve the rating.imdb fact for movies, series, and episodes, and the credits fact for movies and series, and need no account. The credits hold about nine people for each title, so the operator uses them only where no source before this one in a Library's sources had credits. The block is empty, and its presence says that the operator may download the files. IMDb publishes the files for personal and non-commercial use, so each cluster downloads them from IMDb. An enricher reads each file once per run and keeps only the rows of the titles in its gap list. Where the cluster has a StorageClass whose provisioner is per-node.liken.sh, the operator makes the claim <provider>-datasets of 3Gi on it, and each node keeps a copy of each file there. |
+| <span id="spec--imdb"></span>`imdb` | object | no | The account is with IMDb's published datasets, which serve the rating.imdb fact for movies, series, and episodes, and the credits and alternate-titles facts for movies and series, and need no account. The credits hold about nine people for each title, so the operator uses them only where no source before this one in a Library's sources had credits. The block is empty, and its presence says that the operator may download the files. IMDb publishes the files for personal and non-commercial use, so each cluster downloads them from IMDb. An enricher reads each file once per run and keeps only the rows of the titles in its gap list. Where the cluster has a StorageClass whose provisioner is per-node.liken.sh, the operator makes the claim <provider>-datasets of 3Gi on it, and each node keeps a copy of each file there. |
 | <span id="spec--facts"></span>`facts` | []string | no | The facts this account may serve, from the fixed vocabulary. The list narrows what the operator can request from this provider. Omit it to serve all of them. A Library asks this provider only for a fact that status.facts lists. |
 
 ### spec.tmdb
@@ -262,11 +263,11 @@ What the check of an imdb block read from IMDb. A failed check leaves the entrie
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | <span id="statusimdb--updated"></span>`updated` | string | no | The oldest lastModified in datasets, which the UPDATED column shows. |
-| <span id="statusimdb--datasets"></span>`datasets` | [\[\]object](#statusimdbdatasets) | no | One entry for each dataset file the served facts read, with the headers IMDb returned for the check's HEAD request. rating.imdb reads title.ratings and title.episode, and credits reads title.principals and name.basics. |
+| <span id="statusimdb--datasets"></span>`datasets` | [\[\]object](#statusimdbdatasets) | no | One entry for each dataset file the served facts read, with the headers IMDb returned for the check's HEAD request. rating.imdb reads title.ratings and title.episode, credits reads title.principals and name.basics, and alternate-titles reads title.akas. |
 
 #### status.imdb.datasets[]
 
-One entry for each dataset file the served facts read, with the headers IMDb returned for the check's HEAD request. rating.imdb reads title.ratings and title.episode, and credits reads title.principals and name.basics.
+One entry for each dataset file the served facts read, with the headers IMDb returned for the check's HEAD request. rating.imdb reads title.ratings and title.episode, credits reads title.principals and name.basics, and alternate-titles reads title.akas.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |

@@ -69,6 +69,9 @@ type enricher struct {
 	// rating's and the credits'.
 	datasets *datasetReads
 	credits  *creditReads
+	// Whether the alternate-titles fact's read of title.akas failed in this
+	// container, so a later pass does not ask IMDb for the file again.
+	akasUnread bool
 	// The providers a container can ask, built once and held here, so a provider
 	// that spends its day in one fact is not asked again in the next fact of the
 	// same container.

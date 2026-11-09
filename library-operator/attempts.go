@@ -164,7 +164,7 @@ func (s likenDir) ledgerFacts() []string {
 var likenFacts = []string{factProbe, factArrival, factTrickplay, factIdentity,
 	factOverview, factCertification,
 	factRatingTMDb, factRatingIMDb, factRatingRottenTomatoes, factRatingMetacritic,
-	factCredits, factCreditsMove,
+	factCredits, factCreditsMove, factAlternateTitles,
 	factPoster, factBackdrop, factLogo, factClearart, factBanner,
 	factLandscape, factDiscart, factSeasonPoster, factSeasonBanner, factEpisodeThumb,
 	factTrailer, factTrailerFile, factMarks, factAppearances}
@@ -214,6 +214,8 @@ type likenRows struct {
 	credits  []creditRow
 	trailers []trailerRow
 	marks    []markRow
+	// The alternate titles the folder's ledger holds for its own title.
+	alternateTitles []alternateTitle
 	// The stale partial files the listing of the .liken directory found.
 	stale []string
 	// The art files a fact wrote under a season mapping that is no longer the
@@ -262,6 +264,8 @@ func (s likenDir) read(now time.Time) (likenRows, error) {
 		switch fact {
 		case factCredits:
 			held.credits = append(held.credits, creditRows(s.library, s.item, ledger.Credits)...)
+		case factAlternateTitles:
+			held.alternateTitles = ledger.AlternateTitles
 		case factTrailer:
 			held.trailers = append(held.trailers, s.trailerRows(ledger.Trailers)...)
 		case factMarks:
@@ -311,8 +315,9 @@ func (s likenDir) itemOf(fact, path string) string {
 
 // A folder whose .liken files cannot be read marks the pass incomplete, the
 // way an unreadable .nfo file does, so the sweep never removes rows the volume
-// still holds.
-func readLikenDir(liken likenDir, result *walkResult) {
+// still holds. It answers the alternate titles the folder's ledger holds for
+// its own title, which go into that title's body.
+func readLikenDir(liken likenDir, result *walkResult) []alternateTitle {
 	held, err := liken.read(time.Now())
 	result.noteReadError(err)
 	result.stalePartials = append(result.stalePartials, held.stale...)
@@ -321,6 +326,7 @@ func readLikenDir(liken likenDir, result *walkResult) {
 	result.trailers = append(result.trailers, held.trailers...)
 	result.marks = append(result.marks, held.marks...)
 	result.reshown = append(result.reshown, held.reshown...)
+	return held.alternateTitles
 }
 
 // The reporter counts a gap with the same query the container works from, so

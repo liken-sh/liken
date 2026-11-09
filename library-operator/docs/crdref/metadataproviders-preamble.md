@@ -108,7 +108,8 @@ them a day on the check while its key works.
 The `imdb` block has no API to call. IMDb publishes its datasets as
 files, so the check sends one `HEAD` request for each file that the
 provider's served facts read: `title.ratings` and `title.episode` for
-`rating.imdb`, and `title.principals` and `name.basics` for `credits`. Every file must answer `200` for `Reachable`. Any other
+`rating.imdb`, `title.principals` and `name.basics` for `credits`, and
+`title.akas` for `alternate-titles`. Every file must answer `200` for `Reachable`. Any other
 status is `Unavailable`, and the message names the file. The check
 keeps the same schedule as every other provider, so while IMDb
 answers it sends one `HEAD` request for each file an hour. A `HEAD`
@@ -120,8 +121,8 @@ of the last check that read the files. The `UPDATED` column shows the
 oldest `lastModified`. IMDb replaces each file every day, so a file
 older than three days writes the `Stale` condition with status `True`,
 and its message names the file and its date. `Stale` does not change
-`Ready`, because a file from last week still gives correct ratings and
-credits.
+`Ready`, because a file from last week still gives correct ratings,
+credits, and titles.
 
     $ kubectl -n media get metadataprovider imdb
     NAME   PROVIDER   READY   REASON      UPDATED   AGE

@@ -19,6 +19,7 @@ var refreshFactVocabulary = []string{
 	"rating.rottentomatoes",
 	"rating.metacritic",
 	"credits",
+	"alternate-titles",
 	"poster",
 	"backdrop",
 	"logo",
