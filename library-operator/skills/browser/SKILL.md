@@ -258,7 +258,10 @@ A `Play` that states its own preferences can take other tracks than the
 page marks, because the page reads the `Player`'s preferences before any
 `Play` exists.
 
-A series' page shows its seasons as a wall of episode stills. Enter on
+A series' page shows its seasons as a wall of episode stills. A series
+whose folder holds no file with an episode number in its name, as
+[Scanning](https://liken.sh/library/docs/guides/scanning/) describes, shows a line that says so
+in place of the wall. Enter on
 a still opens the episode's own row in the header, level with the
 ratings line. The row holds the playback buttons of a movie's page
 except Trailer, with the bar and the status line under it. Down from

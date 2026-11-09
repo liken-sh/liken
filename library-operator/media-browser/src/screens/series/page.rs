@@ -113,6 +113,11 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 );
             }
 
+            if let Some(top) = wall.layout.empty {
+                let at = Point::new(region.x + inset, region.y + top - offset);
+                text::line(frame, EMPTY, at, look::FACTS, look::muted(), width);
+            }
+
             // Each row draws at the scroll its own ease has reached at
             // this second, toward the place this frame's focus rests it at.
             for (index, row) in rows(series, &wall, offset, focus).into_iter().enumerate() {
@@ -151,6 +156,12 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         vec![frame.into_geometry()]
     }
 }
+
+/// The line a series with no episodes draws where its wall would be. The
+/// scan reads an episode only from a file whose name carries its number,
+/// so a folder of unnumbered files holds no episodes for the browser.
+pub(super) const EMPTY: &str =
+    "The scan found no episode files with a number such as S02E05 in this series' folder.";
 
 /// The side the seasons rail stands at, and how its bars fit the region.
 pub(super) const RAIL: (rail::Side, rail::Fit<'static>) = (rail::Side::Right, rail::Fit::Fitted);

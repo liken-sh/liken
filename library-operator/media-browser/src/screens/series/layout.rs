@@ -185,6 +185,9 @@ pub struct Layout {
     pub stripes: Vec<f32>,
     /// The top of the foot block, in the wall's own space.
     pub foot: f32,
+    /// The top of the line that says the series holds no episodes, in
+    /// the wall's own space, and nothing on a series that holds some.
+    pub empty: Option<f32>,
     /// The length of the wall, the gap under the header included.
     pub content: f32,
 }
@@ -216,6 +219,13 @@ impl Layout {
             });
             top += height;
         }
+        // A series the scan found no episodes of keeps its header, its
+        // stripes, and its foot, and the line says why the wall under
+        // the header is empty.
+        let empty = seasons.is_empty().then_some(top);
+        if empty.is_some() {
+            top += text::height(1, look::FACTS);
+        }
         let mut strips = Vec::with_capacity(franchises);
         for _ in 0..franchises {
             top += STRIPE_GAP;
@@ -244,6 +254,7 @@ impl Layout {
             franchises: strips,
             stripes: tops,
             foot: block,
+            empty,
             content: top,
         }
     }

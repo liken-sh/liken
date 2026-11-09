@@ -210,6 +210,17 @@ fn the_foot_follows_the_last_stripe_and_ends_the_wall() {
 }
 
 #[test]
+fn a_series_with_no_episodes_says_so_where_its_first_season_would_start() {
+    let empty = Layout::of(&[], cells(), 0, 3, FOOT_LINES);
+    let line = empty.empty.expect("a wall of no seasons draws the line");
+
+    assert_eq!(line, HEAD);
+    assert!(empty.stripes[0] >= line + text::height(1, look::FACTS) + STRIPE_GAP);
+    assert_eq!(empty.empty, Layout::of(&[], cells(), 0, 0, 0.0).empty);
+    assert_eq!(layout().empty, None);
+}
+
+#[test]
 fn a_wall_with_no_stripe_still_leaves_a_gap_over_its_foot() {
     let layout = Layout::of(&seasons(), cells(), 0, 0, FOOT_LINES);
     assert_eq!(
@@ -295,7 +306,7 @@ fn a_wall_shorter_than_its_region_never_scrolls() {
 #[test]
 fn a_series_with_no_episodes_never_scrolls() {
     let layout = Layout::of(&[], cells(), 0, 0, 0.0);
-    assert_eq!(layout.content, HEAD);
+    assert_eq!(layout.content, HEAD + text::height(1, look::FACTS));
     assert_eq!(layout.scroll(Focus::Still(0), &[], 1080.0), 0.0);
 }
 
