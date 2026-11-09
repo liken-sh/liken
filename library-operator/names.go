@@ -329,12 +329,15 @@ func fileAttributes(name string, stream *streamInfo) (container, videoCodec, aud
 
 // artRoles are the art an item row carries, in the order the body lists
 // them, and the first of them is the poster the item's own art column holds.
-var artRoles = []string{fileRolePoster, fileRoleBackdrop, fileRoleLogo}
+// The thumb is the 16:9 landscape art, which the browser draws first in a
+// 16:9 card and reads out of this list.
+var artRoles = []string{fileRolePoster, fileRoleBackdrop, fileRoleLogo, fileRoleThumb}
 
 // discoverArt reads the art beside a title. The primary is the poster, the art
-// the item row carries; the full list is the poster, the backdrop, and the logo,
-// in that order, for the body. Every path is relative to the library root, so
-// the display draws the art from the volume and the scanner copies nothing.
+// the item row carries; the full list is the poster, the backdrop, the logo,
+// and the landscape art, in that order, for the body. Every path is relative
+// to the library root, so the display draws the art from the volume and the
+// scanner copies nothing.
 //
 // The art comes from the same classification the file rows carry, so
 // what the files table calls a poster is what the item row shows, and a

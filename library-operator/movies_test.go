@@ -195,6 +195,30 @@ func TestWalkMoviesReadsNamePrefixedArt(t *testing.T) {
 	}
 }
 
+// The browser draws a film in a 16:9 row from its landscape art first, and
+// reads that file out of the movie row's arts, so the walk lists the
+// landscape after the poster, the backdrop, and the logo.
+func TestWalkMoviesListsTheLandscapeArt(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "Grey Lantern (1972)")
+	writeFile(t, filepath.Join(dir, "Grey Lantern (1972).mkv"), "video")
+	for _, name := range []string{"poster.jpg", "fanart.jpg", "clearlogo.png", "landscape.jpg"} {
+		writeFile(t, filepath.Join(dir, name), "image")
+	}
+
+	lantern, held := moviesByTitle(walkMovies(root, "house/movies", nil))["Grey Lantern"]
+	if !held {
+		t.Fatal("the walk did not read Grey Lantern")
+	}
+	want := []string{}
+	for _, name := range []string{"poster.jpg", "fanart.jpg", "clearlogo.png", "landscape.jpg"} {
+		want = append(want, filepath.Join("Grey Lantern (1972)", name))
+	}
+	if !reflect.DeepEqual(lantern.Arts, want) {
+		t.Errorf("arts = %v, want %v", lantern.Arts, want)
+	}
+}
+
 func TestWalkMoviesReadsFileAttributesFromStreamdetails(t *testing.T) {
 	result := walkMovies("testdata/movies", "house/movies", nil)
 	file, held := fileByItem(result, "movie:tmdb:1001")
