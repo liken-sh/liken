@@ -370,8 +370,15 @@ Search is a wall like any other. Every typed character rereads it.
 The heading over the wall reads the text and the count of hits, such
 as `live · 365`. It reads `Search` while the field is empty and `No
 titles match` when the text matches nothing.
-The index is built in memory from titles, original titles, people's
-names, episode titles, and descriptions, in that rank.
+The index is built in memory from titles, alternate titles, folder
+names and provider ids, people's names, episode titles, and
+descriptions, in that rank. The alternate titles are the ones the
+[`alternate-titles` fact](/docs/guides/enrichment/#alternate-titles-from-the-datasets)
+finds, such as the title a film was released under in the UK. A hit
+whose own title does not match the text, and that one of its alternate
+titles does, shows that alternate title as the second line of its card
+in place of its year, runtime, and rating. A search for `die hard 4`
+finds "Live Free or Die Hard" and shows `Die Hard 4.0` under it.
 
 The on-screen keyboard is a grid over the wall. The arrows move across
 it and enter types the focused cell. Down off the bottom row closes

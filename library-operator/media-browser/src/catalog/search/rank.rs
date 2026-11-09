@@ -1,5 +1,5 @@
 // The two halves a hit is ranked by: where the match landed (a title,
-// an alias, a person's name, an episode's title, a plot) and how it
+// an alternate title, an alias, a person's name, an episode's title, a plot) and how it
 // matched (the whole string, a prefix of the first word, a prefix of a
 // later word, a substring inside a word). Where orders first, so the
 // worst title match beats the best plot match.
@@ -16,6 +16,10 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Where {
     Title,
+    // Another title of the same work, such as the title it carried in
+    // another country. It ranks under the work's own title, so a query
+    // that names the title a person reads puts that work first.
+    Alternate,
     Alias,
     Person,
     EpisodeTitle,
@@ -28,10 +32,11 @@ impl Where {
     fn rung(self) -> u8 {
         match self {
             Self::Title => 0,
-            Self::Alias => 1,
-            Self::Person => 2,
-            Self::EpisodeTitle => 3,
-            Self::Plot | Self::EpisodePlot => 4,
+            Self::Alternate => 1,
+            Self::Alias => 2,
+            Self::Person => 3,
+            Self::EpisodeTitle => 4,
+            Self::Plot | Self::EpisodePlot => 5,
         }
     }
 
@@ -99,6 +104,11 @@ pub fn found(stored: u8, relation: Relation) -> u8 {
     (stored >> 3) << 2 | how
 }
 
+/// Whether a rank a read compares came off an alternate title.
+pub fn on_alternate(found: u8) -> bool {
+    found >> 2 == Where::Alternate.rung()
+}
+
 /// How a query word meets an indexed word, or nothing when it does not.
 pub fn relate(word: &str, asked: &str) -> Option<Relation> {
     if word == asked {
@@ -157,9 +167,10 @@ mod tests {
     }
 
     #[test]
-    fn the_five_rungs_rank_in_the_order_the_plan_names() {
+    fn the_six_rungs_rank_in_the_order_the_plan_names() {
         let rungs = [
             Where::Title,
+            Where::Alternate,
             Where::Alias,
             Where::Person,
             Where::EpisodeTitle,
@@ -174,6 +185,25 @@ mod tests {
             rank(Where::EpisodePlot, Position::Alone, Relation::Equal),
             rank(Where::Plot, Position::Alone, Relation::Equal)
         );
+    }
+
+    #[test]
+    fn only_a_match_on_an_alternate_title_reads_as_one() {
+        assert!(on_alternate(rank(
+            Where::Alternate,
+            Position::Later,
+            Relation::Inner
+        )));
+        assert!(!on_alternate(rank(
+            Where::Title,
+            Position::Later,
+            Relation::Inner
+        )));
+        assert!(!on_alternate(rank(
+            Where::Alias,
+            Position::Alone,
+            Relation::Equal
+        )));
     }
 
     #[test]

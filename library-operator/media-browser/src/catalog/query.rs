@@ -320,6 +320,10 @@ pub struct Slot {
     /// continue-watching row and on episodes with a play behind them.
     /// Nothing on every other slot.
     pub progress: Option<Played>,
+    /// The alternate title a search hit matched where its own title did
+    /// not match the query, which its card shows in place of the facts.
+    /// Empty on every other slot.
+    pub matched: String,
 }
 
 impl Slot {
@@ -341,6 +345,7 @@ impl Slot {
             new: 0,
             seasons: 0,
             progress: None,
+            matched: String::new(),
         }
     }
 

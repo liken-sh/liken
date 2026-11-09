@@ -482,7 +482,8 @@ impl Item {
     /// where that strip credits none; the year and the runtime on a set's
     /// strip, where every member is a film and the kind word says nothing;
     /// or the facts line: the year, a series' season count, the runtime,
-    /// and the rating.
+    /// and the rating. A search hit that matched only an alternate title
+    /// carries that title in place of any of the four.
     pub fn of(query: &Query, slot: Slot) -> Self {
         Self::spelled(slot, spelling(query))
     }
@@ -570,6 +571,13 @@ impl Item {
             ),
             (None, Spelling::Set, _) => (leads, set, tagged),
             (None, Spelling::Facts, _) => (leads, facts, tagged),
+        };
+        // A search hit that matched only an alternate title names that
+        // title under its card, because the title the card shows does
+        // not say why the hit is there.
+        let under = match slot.matched.is_empty() {
+            true => under,
+            false => slot.matched.clone(),
         };
         Self {
             library: slot.library,
@@ -768,6 +776,7 @@ mod tests {
             new: 0,
             seasons: 0,
             progress: None,
+            matched: String::new(),
         }
     }
 
@@ -1162,5 +1171,27 @@ mod tests {
         );
         assert_eq!(item.line.words(), "Specimen 0002");
         assert_eq!(item.line_fitting(4), "Specimen 0002");
+    }
+
+    #[test]
+    fn a_hit_on_an_alternate_title_names_it_in_place_of_the_facts() {
+        let query = Query::Search {
+            text: "specimen four".into(),
+        };
+        let mut item = Item::of(
+            &query,
+            Slot {
+                matched: "Specimen Four: The Long Return of the Specimen".into(),
+                ..specimen()
+            },
+        );
+        assert_eq!(item.caption(), "Specimen 0001");
+        assert_eq!(
+            item.under(),
+            "Specimen Four: The Long Return of the Specimen"
+        );
+        item.fit(120.0);
+        assert!(item.under_fitted().len() < item.under().len());
+        assert!(item.under_fitted().starts_with("Specimen"));
     }
 }

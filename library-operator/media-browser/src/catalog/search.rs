@@ -61,6 +61,10 @@ struct Held {
     sort_key: Span,
     duration: i32,
     seasons: i32,
+    // Where the item's alternate titles start in the index's list of
+    // them, and how many it holds, so a hit that matched one can name it.
+    alternates: u32,
+    alternate_count: u8,
     library: u16,
     word: u16,
     kind: Kind,
@@ -104,6 +108,8 @@ pub struct Index {
     places: Vec<u32>,
     ranks: Vec<u8>,
     items: Vec<Held>,
+    // Every title's alternate titles, each title's together in one run.
+    alternates: Vec<Span>,
     people: Vec<Someone>,
     libraries: Vec<String>,
     kinds: Vec<String>,
@@ -130,7 +136,40 @@ impl Index {
             found.close(*item);
         }
         hits.sort_by(|one, other| self.order(&found, *one, *other));
-        hits.into_iter().map(|item| self.slot(item)).collect()
+        hits.into_iter()
+            .map(|item| {
+                let mut slot = self.slot(item);
+                if rank::on_alternate(found.best[item]) {
+                    slot.matched = self.matched(item, &asked);
+                }
+                slot
+            })
+            .collect()
+    }
+
+    // The alternate title a hit matched, which its card shows because the
+    // title it shows does not say why the hit is there. The query's words
+    // can land on two alternates, so the one that meets the most of them
+    // names the hit, and the first of equals in the order the item holds
+    // them.
+    fn matched(&self, item: usize, asked: &[String]) -> String {
+        let Some(held) = self.items.get(item) else {
+            return String::new();
+        };
+        let start = held.alternates as usize;
+        let spans = &self.alternates[start..start + held.alternate_count as usize];
+        let mut best = (0, Span::default());
+        for span in spans {
+            let words = fold::words(self.slice(*span));
+            let met = asked
+                .iter()
+                .filter(|asked| words.iter().any(|word| rank::relate(word, asked).is_some()))
+                .count();
+            if met > best.0 {
+                best = (met, *span);
+            }
+        }
+        self.slice(best.1).to_string()
     }
 
     /// The size of the index, counted from the arrays' capacities.
@@ -145,6 +184,7 @@ impl Index {
                 + self.places.capacity() * size_of::<u32>()
                 + self.ranks.capacity()
                 + self.items.capacity() * size_of::<Held>()
+                + self.alternates.capacity() * size_of::<Span>()
                 + self.people.capacity() * size_of::<Someone>()
                 + self
                     .libraries
@@ -241,6 +281,7 @@ impl Index {
             new: 0,
             seasons: held.seasons as i64,
             progress: None,
+            matched: String::new(),
         }
     }
 

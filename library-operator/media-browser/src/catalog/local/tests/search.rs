@@ -145,6 +145,37 @@ fn a_film_hit_carries_what_a_card_draws() {
 }
 
 #[test]
+fn a_title_is_found_by_the_alternate_titles_its_body_holds() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    insert_page(
+        &path,
+        FEATURES,
+        "movie:2",
+        "2007",
+        "",
+        r#"{"alternateTitles":["Harbour Four","Hamnen"]}"#,
+    );
+    insert_series_page(
+        &path,
+        SERIALS,
+        "series:2",
+        "1996",
+        r#"{"alternateTitles":["The Long Shore"]}"#,
+    );
+    let connection = Connection::open(&path).unwrap();
+    let index = read::index(&connection).unwrap();
+
+    let film = index.find("harbour four");
+    assert_eq!(film[0].id, "movie:2");
+    assert_eq!(film[0].matched, "Harbour Four");
+    assert_eq!(index.find("hamnen")[0].matched, "Hamnen");
+    assert_eq!(index.find("long shore")[0].id, "series:2");
+    // A body with no alternates indexes as it did, and its hits name none.
+    assert_eq!(index.find("Film movie:2")[0].matched, "");
+}
+
+#[test]
 fn an_episode_whose_series_left_the_catalog_folds_into_nothing() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);

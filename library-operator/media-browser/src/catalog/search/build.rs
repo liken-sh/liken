@@ -60,6 +60,7 @@ pub struct Builder {
     vocabulary: HashMap<Box<str>, u32>,
     links: Vec<u64>,
     items: Vec<Held>,
+    alternates: Vec<Span>,
     people: Vec<Someone>,
     libraries: Vec<String>,
     kinds: Vec<String>,
@@ -76,10 +77,20 @@ impl Builder {
     /// Add one item and answer its place.
     pub fn add(&mut self, item: Item) -> Place {
         let place = Place(self.items.len() as u32);
+        let alternates = self.alternates.len() as u32;
         for (rung, string) in &item.strings {
             self.fold(place, *rung, string);
+            // The count is a byte. The operator keeps five alternates a
+            // title, and an item with more than 255 still matches on every
+            // one, but names only one of its first 255 under its card.
+            if *rung == Where::Alternate && self.alternates.len() - (alternates as usize) < 255 {
+                let span = self.hold(string);
+                self.alternates.push(span);
+            }
         }
         let held = Held {
+            alternates,
+            alternate_count: (self.alternates.len() - alternates as usize) as u8,
             library: named(&mut self.libraries, &item.slot.library),
             word: named(&mut self.kinds, &item.slot.kind),
             kind: item.kind,
@@ -160,6 +171,8 @@ impl Builder {
         items.shrink_to_fit();
         let mut people = self.people;
         people.shrink_to_fit();
+        let mut alternates = self.alternates;
+        alternates.shrink_to_fit();
         Index {
             text,
             words,
@@ -167,6 +180,7 @@ impl Builder {
             places,
             ranks,
             items,
+            alternates,
             people,
             libraries: self.libraries,
             kinds: self.kinds,

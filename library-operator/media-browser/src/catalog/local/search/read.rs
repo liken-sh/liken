@@ -1,5 +1,6 @@
 // The one read that builds an index off the replica. It walks the
-// tables in rung order: titles and their plots, sets and franchises,
+// tables in rung order: titles with their alternate titles and their
+// plots, sets and franchises,
 // then the episodes and aliases that fold onto them, then the people.
 // Every row streams into the builder as it is read, because collecting
 // 100,000 rows into Vecs first would double the build's peak memory.
@@ -43,7 +44,8 @@ fn titles(
         "SELECT library, id, title, sort_key, released, art, duration, \
                 IFNULL(content_rating, json_extract(body, '$.contentRating')), \
                 IFNULL(tagline, json_extract(body, '$.tagline')), \
-                json_extract(body, '$.plot'), {seasons} \
+                json_extract(body, '$.plot'), {seasons}, \
+                json_extract(body, '$.alternateTitles') \
          FROM {table}",
         seasons = item::seasons(table),
     );
@@ -70,6 +72,9 @@ fn titles(
         let plot = item::text(row, 9)?;
         if !plot.is_empty() {
             strings.push((Where::Plot, plot));
+        }
+        for alternate in item::strings(&item::text(row, 11)?) {
+            strings.push((Where::Alternate, alternate));
         }
         let place = builder.add(Item {
             slot,

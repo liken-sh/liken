@@ -201,3 +201,79 @@ fn an_index_reports_what_it_holds() {
     assert!(size.words >= 12, "the vocabulary holds every folded word");
     assert!(size.bytes > 0);
 }
+
+// Two films of one series of releases: the second carries a number only
+// in the titles it was released under in other countries.
+fn harbours() -> Index {
+    let mut builder = Builder::new();
+    movie(&mut builder, "movie:10", "Winter Harbour", "2001", &[]);
+    builder.add(Item {
+        slot: Slot {
+            library: LIBRARY.into(),
+            kind: "movies".into(),
+            id: "movie:11".into(),
+            title: "Live Free in Winter Harbour".into(),
+            released: "2007".into(),
+            ..Slot::default()
+        },
+        sort_key: "live free in winter harbour".into(),
+        kind: Kind::Title,
+        strings: vec![
+            (Where::Title, "Live Free in Winter Harbour".into()),
+            (Where::Alternate, "Winter Harbour 4.0".into()),
+            (Where::Alternate, "Harbour Four".into()),
+        ],
+    });
+    builder.finish()
+}
+
+// The older film whose own title is one of the newer film's alternates
+// comes first, though a tie would put the newer release first.
+#[test]
+fn a_title_match_outranks_an_alternate_match() {
+    let mut builder = Builder::new();
+    movie(&mut builder, "movie:12", "Harbour Four", "1990", &[]);
+    builder.add(Item {
+        slot: Slot {
+            library: LIBRARY.into(),
+            kind: "movies".into(),
+            id: "movie:13".into(),
+            title: "Live Free in Winter Harbour".into(),
+            released: "2007".into(),
+            ..Slot::default()
+        },
+        sort_key: "live free in winter harbour".into(),
+        kind: Kind::Title,
+        strings: vec![
+            (Where::Title, "Live Free in Winter Harbour".into()),
+            (Where::Alternate, "Harbour Four".into()),
+        ],
+    });
+    let hits = builder.finish().find("harbour four");
+    assert_eq!(
+        titles(&hits),
+        ["Harbour Four", "Live Free in Winter Harbour"]
+    );
+    assert_eq!(hits[0].matched, "");
+    assert_eq!(hits[1].matched, "Harbour Four");
+}
+
+#[test]
+fn a_hit_on_an_alternate_alone_names_the_alternate_it_matched() {
+    let hits = harbours().find("winter harbour 4");
+    assert_eq!(titles(&hits), ["Live Free in Winter Harbour"]);
+    assert_eq!(hits[0].matched, "Winter Harbour 4.0");
+}
+
+#[test]
+fn the_alternate_that_meets_the_most_words_names_the_hit() {
+    let hits = harbours().find("harbour four");
+    assert_eq!(hits[0].matched, "Harbour Four");
+}
+
+#[test]
+fn a_hit_its_own_title_answers_names_no_alternate() {
+    let hits = harbours().find("live free");
+    assert_eq!(titles(&hits), ["Live Free in Winter Harbour"]);
+    assert_eq!(hits[0].matched, "");
+}
