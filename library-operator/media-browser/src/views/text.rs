@@ -121,6 +121,81 @@ pub fn wrapped(content: &str, size: f32, width: f32) -> Vec<String> {
     lines
 }
 
+/// The content cut to the whole sentences that `cap` lines of this width
+/// hold at this size, so a cut plot ends on its own full stop and not in
+/// the middle of a thought. Content the lines hold whole comes back whole.
+/// Where the lines cannot hold even the first sentence, they hold as many
+/// words as they can and the last line ends on an ellipsis.
+///
+/// The lines wrap the way [`wrapped`] wraps, one word at a time, so the
+/// lines of the answer are the first lines of the whole content and the
+/// walk stops at the first word past the cap.
+pub fn sentences(content: &str, size: f32, width: f32, cap: usize) -> String {
+    let words: Vec<&str> = content.split_whitespace().collect();
+    let mut lines: Vec<String> = Vec::new();
+    let mut whole = 0;
+    for (index, word) in words.iter().enumerate() {
+        let joins = lines
+            .last()
+            .is_some_and(|line| measured(&format!("{line} {word}"), size) <= width);
+        if joins {
+            if let Some(line) = lines.last_mut() {
+                line.push(' ');
+                line.push_str(word);
+            }
+        } else if lines.len() == cap {
+            return cut_at(&words, whole, lines, size, width);
+        } else {
+            lines.push(word.to_string());
+        }
+        if ends_sentence(word, words.get(index + 1).copied()) {
+            whole = index + 1;
+        }
+    }
+    words.join(" ")
+}
+
+// The words through the last whole sentence, or the lines with an
+// ellipsis where no sentence ended inside them.
+fn cut_at(words: &[&str], whole: usize, mut lines: Vec<String>, size: f32, width: f32) -> String {
+    if whole > 0 {
+        return words[..whole].join(" ");
+    }
+    if let Some(last) = lines.last_mut() {
+        while measured(&format!("{last}\u{2026}"), size) > width {
+            match last.rfind(' ') {
+                Some(space) => last.truncate(space),
+                None => break,
+            }
+        }
+        last.push('\u{2026}');
+    }
+    lines.join(" ")
+}
+
+// The titles and the honorifics a plot writes with a full stop inside a
+// sentence.
+const ABBREVIATIONS: [&str; 12] = [
+    "Mr.", "Mrs.", "Ms.", "Dr.", "St.", "Jr.", "Sr.", "Lt.", "Col.", "Gen.", "Capt.", "vs.",
+];
+
+// Whether a sentence ends after this word: the word ends in a full stop,
+// a question mark, or an exclamation mark, past any closing quote or
+// bracket, and the next word starts a sentence. A title such as "Mr." and
+// an initial such as "J." end none.
+fn ends_sentence(word: &str, next: Option<&str>) -> bool {
+    let bare = word.trim_end_matches(['"', '\'', ')', '\u{201d}', '\u{2019}']);
+    if !bare.ends_with(['.', '!', '?']) || ABBREVIATIONS.contains(&bare) {
+        return false;
+    }
+    let initial = bare.chars().count() == 2 && bare.starts_with(char::is_uppercase);
+    let starts = next.is_none_or(|next| {
+        next.trim_start_matches(['"', '\'', '(', '\u{201c}', '\u{2018}'])
+            .starts_with(|first: char| first.is_uppercase() || first.is_ascii_digit())
+    });
+    !initial && starts
+}
+
 /// How many lines this content takes at this size and width. The count
 /// is an estimate from the number of characters, because the shaper runs
 /// on the draw path and the page decides its geometry before it draws.
@@ -381,6 +456,49 @@ pub fn block_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The size and the width the sentence cases are set at: about forty
+    // characters a line.
+    const SIZE: f32 = 25.0;
+    const WIDTH: f32 = 500.0;
+
+    #[test]
+    fn a_plot_the_lines_hold_whole_stays_whole() {
+        let plot = "A spy goes to Harlem. He meets a voodoo priest.";
+        assert_eq!(sentences(plot, SIZE, WIDTH, 2), plot);
+    }
+
+    #[test]
+    fn a_long_plot_keeps_the_whole_sentences_the_lines_hold() {
+        let plot = "A spy goes to Harlem. He meets a voodoo priest who reads \
+                    the cards. Then he follows a heroin trail to the bayou and \
+                    a gangster boss who runs it from a restaurant.";
+        let shown = sentences(plot, SIZE, WIDTH, 2);
+        assert_eq!(
+            shown,
+            "A spy goes to Harlem. He meets a voodoo priest who reads the cards."
+        );
+        assert!(wrapped(&shown, SIZE, WIDTH).len() <= 2);
+    }
+
+    #[test]
+    fn a_title_or_an_initial_with_a_full_stop_ends_no_sentence() {
+        let plot = "Bond meets Mr. Big and J. W. Pepper on the bayou. \
+                    Then a long chase across the river ends at a farm full of \
+                    crocodiles and a boat yard.";
+        assert_eq!(
+            sentences(plot, SIZE, WIDTH, 2),
+            "Bond meets Mr. Big and J. W. Pepper on the bayou."
+        );
+    }
+
+    #[test]
+    fn a_first_sentence_the_lines_cannot_hold_ends_in_an_ellipsis() {
+        let plot = "word ".repeat(60) + "end.";
+        let shown = sentences(&plot, SIZE, WIDTH, 2);
+        assert!(shown.ends_with('\u{2026}'), "{shown}");
+        assert_eq!(wrapped(&shown, SIZE, WIDTH).len(), 2);
+    }
 
     #[test]
     fn a_caption_longer_than_its_band_ends_in_an_ellipsis() {

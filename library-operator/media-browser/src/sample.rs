@@ -381,12 +381,14 @@ fn titles(library: &str, sort: Sort) -> Vec<Slot> {
     slots
 }
 
-// The tagline of one invented movie. Every third movie has none, so a
-// card of one falls back to its title.
+// The tagline of one invented movie. One movie in ten has one, about the
+// share of a real library's films whose .nfo file holds a tagline, so a
+// screen that falls back from a tagline shows its fallback in the sample
+// as often as it does on a real screen.
 pub(super) fn tagline(number: i64) -> String {
-    match number % 3 == 0 {
-        true => String::new(),
-        false => format!("The {number:04}th of its kind."),
+    match number % 10 == 1 {
+        true => format!("The {number:04}th of its kind."),
+        false => String::new(),
     }
 }
 

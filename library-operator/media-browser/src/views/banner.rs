@@ -2,12 +2,12 @@
 // draws under every image of that layer, so the scrim over the backdrop
 // needs the backdrop on a layer of its own. This module holds the
 // frame's geometry, the backdrop under it, and the scrim, the head, the
-// facts, the genres, the scores, the tagline, and the indicators over
+// facts, the genres, the scores, the tagline or the plot, and the indicators over
 // it. The focus outline around the frame is the browser's own layer.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
-use iced_winit::core::{Point, Rectangle};
+use iced_winit::core::{Font, Point, Rectangle};
 
 use super::stack::Stack;
 use super::{Tone, area, extent, header, layers, paint, ratings, text};
@@ -120,6 +120,8 @@ pub struct Banner<'a> {
     pub ratings: &'a [ratings::Score],
     /// The tagline, empty where the title has none.
     pub tagline: &'a str,
+    /// The plot, which draws where the title has no tagline.
+    pub plot: &'a str,
     /// How many titles the banner holds.
     pub count: usize,
     /// The index of the title the frame shows.
@@ -128,7 +130,23 @@ pub struct Banner<'a> {
     pub region: Rectangle,
 }
 
-/// The over layer: the head, the facts, the tagline, and the indicators.
+/// The words under the ratings row and the face they draw in. A tagline
+/// is the film's own words, so it draws in the italic, as a card's tagline
+/// does. Most titles have no tagline, and the frame would then show an
+/// empty band, so a title with none draws its plot in the roman face, cut
+/// to the whole sentences the lines hold in a column this wide.
+pub fn words(tagline: &str, plot: &str, column: f32) -> (String, Font) {
+    match tagline.is_empty() {
+        false => (tagline.to_string(), look::ITALIC),
+        true => (
+            text::sentences(plot, look::TAGLINE, column, TAGLINE_LINES),
+            Font::with_name(look::FONT),
+        ),
+    }
+}
+
+/// The over layer: the head, the facts, the tagline or the plot, and the
+/// indicators.
 pub fn draw<A: Art>(frame: &mut canvas::Frame<Renderer>, store: &mut A, banner: &Banner<'_>) {
     let region = banner.region;
 
@@ -188,13 +206,12 @@ pub fn draw<A: Art>(frame: &mut canvas::Frame<Renderer>, store: &mut A, banner: 
     let taken = ratings::draw(frame, banner.ratings, stack.at());
     stack.add(taken);
 
-    // A tagline is the film's own words, so it draws in the italic, as
-    // a card's tagline does.
+    let (words, face) = words(banner.tagline, banner.plot, column);
     text::block_in(
         frame,
-        banner.tagline,
+        &words,
         stack.at(),
-        (look::TAGLINE, look::ITALIC),
+        (look::TAGLINE, face),
         look::text(),
         column,
         TAGLINE_LINES,
@@ -216,6 +233,22 @@ mod tests {
 
     fn region() -> Rectangle {
         area(32.0, 104.0, 1856.0, height(1080.0))
+    }
+
+    #[test]
+    fn a_title_with_a_tagline_shows_it_in_the_italic() {
+        let (shown, face) = words("Some tagline.", "A plot. More plot.", 700.0);
+        assert_eq!((shown.as_str(), face), ("Some tagline.", look::ITALIC));
+    }
+
+    #[test]
+    fn a_title_with_no_tagline_shows_its_plot_cut_to_whole_sentences() {
+        let plot = "A spy goes to Harlem. ".repeat(12);
+        let (shown, face) = words("", &plot, 700.0);
+        assert_eq!(face, Font::with_name(look::FONT));
+        assert!(shown.ends_with("Harlem."), "{shown}");
+        assert!(text::wrapped(&shown, look::TAGLINE, 700.0).len() <= TAGLINE_LINES);
+        assert!(shown.len() < plot.trim_end().len());
     }
 
     #[test]

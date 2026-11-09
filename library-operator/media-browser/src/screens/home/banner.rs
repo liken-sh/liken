@@ -37,6 +37,8 @@ pub struct Title {
     pub ratings: Vec<ratings::Score>,
     /// The tagline, empty where the .nfo file named none.
     pub tagline: String,
+    /// The plot, which the frame draws where the title has no tagline.
+    pub plot: String,
 }
 
 impl Title {
@@ -64,6 +66,7 @@ impl Title {
                     genres,
                     ratings,
                     tagline: details.tagline,
+                    plot: details.plot,
                 }
             }
             None => {
@@ -80,6 +83,7 @@ impl Title {
                     genres,
                     ratings,
                     tagline: details.tagline,
+                    plot: details.plot,
                 }
             }
         };

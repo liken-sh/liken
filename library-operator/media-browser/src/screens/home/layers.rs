@@ -112,6 +112,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
                                 genres: &title.genres,
                                 ratings: &title.ratings,
                                 tagline: &title.tagline,
+                                plot: &title.plot,
                                 count: banner.titles.len(),
                                 current: banner.focus,
                                 region,
