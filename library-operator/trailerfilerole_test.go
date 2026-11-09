@@ -322,21 +322,35 @@ func TestTheTrailerFileGapEndsOnItsContext(t *testing.T) {
 }
 
 // A catalog read that fails ends the run, because the gap list is the work.
-func TestTheTrailerFileGapEndsWhereTheCatalogRefusesATitle(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		catalog, agent := newSQLiteCatalog(t)
-		root := t.TempDir()
-		seedTrailerFileRun(t, catalog, root)
-		work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-		// The gap query is the first read, and the title read after it is refused.
-		agent.queriesLeft = 1
+// refused names the read the catalog refuses, counted from one in the order
+// the run reads them.
+func TestTheTrailerFileGapEndsWhereTheCatalogRefusesARead(t *testing.T) {
+	cases := []struct {
+		name    string
+		refused int
+	}{
+		{name: "the gap", refused: 1},
+		{name: "the title", refused: 2},
+		{name: "the trailers", refused: 3},
+		{name: "the feature's height", refused: 4},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				catalog, agent := newSQLiteCatalog(t)
+				root := t.TempDir()
+				seedTrailerFileRun(t, catalog, root)
+				work, _ := testEnricher(t, libraryKindMovies, root, catalog)
+				agent.queriesLeft = one.refused
 
-		err := work.trailerFileGap(t.Context(), trailerFetchLineOf(t, "video bytes", []int{1080}, nil))
+				err := work.trailerFileGap(t.Context(), trailerFetchLineOf(t, "video bytes", []int{1080}, nil))
 
-		if err == nil {
-			t.Error("the run read every title, want the error the catalog gave")
-		}
-	})
+				if err == nil {
+					t.Error("the run read every title, want the error the catalog gave")
+				}
+			})
+		})
+	}
 }
 
 // The container builds its line out of the environment, the way the trailer
@@ -362,24 +376,6 @@ func TestTheTrailerFileFactBuildsItsLineOutOfTheEnvironment(t *testing.T) {
 
 		if work.trailerFiles == nil || len(work.trailerFiles.sources) != 1 {
 			t.Errorf("the line holds %+v, want the one site the environment names", work.trailerFiles)
-		}
-	})
-}
-
-// A catalog that refuses the trailers of a title ends the run.
-func TestTheTrailerFileGapEndsWhereTheCatalogRefusesTheTrailers(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		catalog, agent := newSQLiteCatalog(t)
-		root := t.TempDir()
-		seedTrailerFileRun(t, catalog, root)
-		work, _ := testEnricher(t, libraryKindMovies, root, catalog)
-		// The gap query and the title read answer, and the trailers read is refused.
-		agent.queriesLeft = 2
-
-		err := work.trailerFileGap(t.Context(), trailerFetchLineOf(t, "video bytes", []int{1080}, nil))
-
-		if err == nil {
-			t.Error("the run read every title, want the error the catalog gave")
 		}
 	})
 }
