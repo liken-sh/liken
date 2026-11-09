@@ -12,16 +12,17 @@ rip.
 
 The strip clips each track value and ends it in an ellipsis, the way
 `display/src/chooser.rs` clips a row that is wider than its panel
-(`Strip::lines` in `display/src/strip.rs`). A value with nothing
-beside it takes the room up to the next group, 430 canvas pixels
-(`GROUP_PITCH`) less a 24 pixel gap (`STOP_GAP`), and the last group
-takes 260 pixels (`GROUP_INK`). When a delay offset is set, the strip
-draws it one member, 200 pixels (`MEMBER_W`), to the right of its
-track, and the track value takes that member less the gap. Before the
-clip, an audio track titled "[English / DD+ 5.1 Atmos]" drew across
-the audio offset beside it, so the stop that a press lands on could
-not be read. The clip keeps the values apart, but a cut title such as
-"[English / DD+ 5.…" beside a set offset still says little.
+(`Strip::groups` in `display/src/strip.rs`). The strip always draws
+a delay offset one member, 200 canvas pixels (`MEMBER_W`), to the
+right of its track, so an audio or subtitle value takes that member
+less a 24 pixel gap (`STOP_GAP`), which is 176 pixels. A value with
+no offset beside it, such as the video track, takes the room up to the
+next group, 430 pixels (`GROUP_PITCH`) less the gap, and in the last
+group it takes 260 pixels (`GROUP_INK`). Before the clip, an audio
+track titled "[English / DD+ 5.1 Atmos]" drew across the audio offset
+beside it, so the stop that a press lands on could not be read. The
+clip keeps the values apart, but a cut title such as
+"[English / DD+ 5.…" still says little.
 
 Undecided: whether the audio cell should read only the language and
 the layout, as "English 5.1", the subtitle cell the language and its

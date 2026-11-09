@@ -489,6 +489,7 @@ fn hold() -> Command {
 mod tests {
     use super::*;
     use crate::marks::{Jump, Kind, Span};
+    use crate::strip::Control;
     use serde_json::json;
 
     /// One film, one presentation, and the two modules a press reaches.
@@ -665,11 +666,11 @@ mod tests {
             vec![Stop::Fine, Stop::Chapter]
         );
 
-        // A film with no tracks has no chooser to open, and so no strip, and
-        // with no length it has no scrubber either.
+        // A film with no tracks at all still has the audio offset, so the
+        // strip is the one stop it has.
         let mut bare = Display::new("{}");
         bare.film = Film::default();
-        assert!(Focus::present(&bare.parts()).is_empty());
+        assert_eq!(Focus::present(&bare.parts()), vec![Stop::Strip]);
     }
 
     /// A summon lands on the first stop below the offer, so the main button
@@ -808,6 +809,25 @@ mod tests {
             vec![vec![json!("set_property"), json!("aid"), json!("2")]]
         );
         assert!(display.strip.capturing().is_none());
+    }
+
+    /// back closes an open adjuster and leaves the strip's focus on its
+    /// offset, so the next select opens the same adjuster.
+    #[test]
+    fn back_returns_the_focus_to_the_offset_whose_adjuster_it_closed() {
+        let mut display = Display::new("{}");
+        display.summon();
+        display.press(Action::Down);
+        display.press(Action::Down);
+        display.press(Action::Right);
+        display.press(Action::Select);
+        assert_eq!(display.strip.capturing(), Some(Control::AudioOffset));
+
+        display.press(Action::Back);
+        assert_eq!(display.strip.capturing(), None);
+        assert_eq!(display.focus.focused_stop(), Some(Stop::Strip));
+        display.press(Action::Select);
+        assert_eq!(display.strip.capturing(), Some(Control::AudioOffset));
     }
 
     /// back closes an open chooser, then cancels a scan, then dismisses the

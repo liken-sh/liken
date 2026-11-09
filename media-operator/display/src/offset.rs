@@ -1,6 +1,6 @@
-//! One delay offset control. The audio chooser and the subtitle chooser each
-//! end on a row that opens one, and the strip draws a set offset beside the
-//! track it shifts.
+//! One delay offset control. The strip has two, one for the audio delay and
+//! one for the subtitle delay. Each is a stop beside the track it shifts, and
+//! a select on it opens the adjuster this module draws.
 
 use iced::{Point, Rectangle, Size};
 use serde_json::json;
@@ -97,12 +97,6 @@ impl Offset {
         milliseconds(self.delay(film))
     }
 
-    /// Whether the delay reads as anything but "0 ms". The strip draws the
-    /// offset only then.
-    pub fn set(self, film: &Film) -> bool {
-        whole_milliseconds(self.delay(film)) != 0
-    }
-
     /// left and right nudge the delay by a step, and the nudge applies at
     /// once, so there is nothing to confirm. up resets the delay to zero. down
     /// and select close the adjuster, and back closes it through the router.
@@ -176,14 +170,9 @@ fn seconds(at: f64) -> String {
     format!("{sign}{:.2} s", at.abs())
 }
 
-/// The size of a delay in whole milliseconds, with no sign.
-fn whole_milliseconds(at: f64) -> i64 {
-    (at.abs() * 1000.0 + 0.5).floor() as i64
-}
-
-/// Format a delay in milliseconds, for the strip cell and the chooser row.
+/// Format a delay in milliseconds, for the strip cell.
 fn milliseconds(at: f64) -> String {
-    let count = whole_milliseconds(at);
+    let count = (at.abs() * 1000.0 + 0.5).floor() as i64;
     if count == 0 {
         return "0 ms".to_string();
     }
@@ -218,16 +207,6 @@ mod tests {
         assert_eq!(Offset::Audio.value(&film), "-50 ms");
         assert_eq!(Offset::Subtitle.value(&film), "+200 ms");
         assert_eq!(Offset::Audio.value(&Film::default()), "0 ms");
-    }
-
-    /// A delay that rounds to "0 ms" is not set, so the strip leaves it out.
-    #[test]
-    fn a_delay_is_set_when_it_reads_as_more_than_nothing() {
-        assert!(!Offset::Audio.set(&film(0.0, 0.0)));
-        assert!(!Offset::Audio.set(&film(0.0004, 0.0)));
-        assert!(Offset::Audio.set(&film(-0.05, 0.0)));
-        assert!(Offset::Subtitle.set(&film(0.0, 0.1)));
-        assert!(!Offset::Subtitle.set(&film(0.1, 0.0)));
     }
 
     #[test]
