@@ -65,18 +65,13 @@ pub fn header(bounds: Rectangle) -> Rectangle {
     )
 }
 
-// The height of the screen the browser is drawn for. The rail's bars
-// are built at the read, before any frame exists, so the slots are
-// counted at this height the way a card's lines are cut at the screen's
-// width.
-const SCREEN: f32 = 1080.0;
-
-// The region the rail's bars are counted against at the read. The
-// header is one height on every series, so this is the region drawn on
-// a screen of SCREEN, and a shorter window draws the same bars in a
-// shorter rail.
+// The region the rail's bars are counted against at the read. The bars
+// are built at the read, before any frame exists, and the header is one
+// height on every series, so this is the region drawn on
+// `screen::FRAME`. A shorter window draws the same bars in a shorter
+// rail.
 pub fn rail_region() -> Rectangle {
-    region(area(0.0, 0.0, 0.0, SCREEN))
+    region(screen::FRAME)
 }
 
 // The part of the frame the rail draws in. The mark on a focused bar

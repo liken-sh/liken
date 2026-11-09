@@ -47,6 +47,24 @@ fn ids(page: &Person) -> Vec<&str> {
 }
 
 #[test]
+fn the_read_cuts_every_card_to_the_band_the_row_draws_its_caption_in() {
+    let (page, _) = opened(People {
+        works: 3,
+        born: "1956-01-02",
+        parts: "as The Part Whose Name Runs Far Past the Poster Above It",
+        ..People::default()
+    });
+    let row = super::page::row(crate::views::screen::FRAME, page.axis.is_some());
+    let drawn = crate::views::wall::caption(&row.cells, super::row::slot(&row, 0, 0.0)).width;
+
+    for credit in &page.credits {
+        let fitted = &credit.item.fitted;
+        assert!(fitted.ends_with('\u{2026}'), "{fitted}");
+        assert!(crate::views::text::measured(fitted, crate::look::CAPTION) <= drawn);
+    }
+}
+
+#[test]
 fn a_page_carries_the_name_the_facts_and_the_files() {
     let (page, _) = credited(3);
     assert_eq!(page.name, "A Player");

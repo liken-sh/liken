@@ -183,8 +183,25 @@ fn a_reread_that_drops_a_season_clamps_the_bar() {
 }
 
 #[test]
+fn the_read_cuts_the_stills_to_the_band_the_wall_draws_their_captions_in() {
+    for serials in [Serials::default(), long()] {
+        let (series, _) = page(serials);
+        let region = super::super::page::placed(&series, crate::views::screen::FRAME).region;
+        let cells = wall::lined(region.width, wall::STILL, COLUMNS, 2);
+        let drawn = wall::caption(&cells, wall::slot(&cells, 0, 0.0, COLUMNS)).width;
+
+        assert_eq!(
+            seasons::band(&series.bars),
+            drawn,
+            "{} bars",
+            series.bars.len()
+        );
+    }
+}
+
+#[test]
 fn a_still_whose_name_runs_past_its_cell_is_cut_at_the_read() {
-    let band = wall::band(COLUMNS);
+    let band = seasons::band(&[]);
     let still = seasons::still_of(
         Episode {
             season: 1,

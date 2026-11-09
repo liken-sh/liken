@@ -168,12 +168,16 @@ pub(super) struct Placed {
     pub(super) offset: f32,
 }
 
+/// The part of the wall's region the stills draw in at these bounds: the
+/// rail takes the right edge of the region, and the stills keep the rest.
+pub(super) fn stills_region(bounds: Rectangle, bars: &[rail::Bar]) -> Rectangle {
+    rail::beside_at(layout::region(bounds), bars, RAIL.0)
+}
+
 /// The wall of this series at these bounds, at rest.
 pub(super) fn placed(series: &Series, bounds: Rectangle) -> Placed {
-    // The rail takes the right edge of the region, and the wall keeps
-    // the rest.
     let whole = layout::region(bounds);
-    let region = rail::beside_at(whole, &series.bars, RAIL.0);
+    let region = stills_region(bounds, &series.bars);
     let cells = wall::lined(region.width, wall::STILL, COLUMNS, card::LINES);
     let inset = (cells.width - cells.poster_width) / 2.0;
     let layout = Layout::of(

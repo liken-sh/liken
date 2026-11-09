@@ -6,7 +6,6 @@
 use super::life::{Life, day};
 use crate::catalog::{Query, Slot, Source};
 use crate::screens::Item;
-use crate::views::wall;
 
 // The kind word a series' slot carries.
 const SERIES: &str = "series";
@@ -81,7 +80,6 @@ impl Credit {
         item.caption = caption;
         item.under = under;
         item.tagline = false;
-        item.fit(wall::band(wall::COLUMNS));
         Self {
             item,
             year,

@@ -76,7 +76,7 @@ impl Wall {
     /// Read the query's slots, with focus on the first of them.
     pub fn open(query: Query, source: &mut dyn Source) -> Self {
         let mut wall = Self {
-            slots: Slots::open(query, source),
+            slots: Slots::open(query, read_band(&[]), source),
             heading: String::new(),
             search: None,
             bars: Vec::new(),
@@ -121,6 +121,7 @@ impl Wall {
     // was on.
     fn railed(&mut self) {
         self.bars = rail::bars(&self.slots.items, &self.slots.query, rail::region());
+        self.slots.reband(read_band(&self.bars));
         if let Focus::Rail(cell) = self.focus {
             let cells = rail::cells(&self.bars, &self.slots.query);
             self.focus = match self.bars.is_empty() {
@@ -382,6 +383,20 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
     }
 }
 
+// The width the read cuts the wall's cards to: one caption band of the
+// grid the draw lays out beside these bars on `screen::FRAME`. The
+// rail's lanes narrow every cell, so a wall with a rail cuts its cards
+// narrower than a wall with none.
+fn read_band(bars: &[rail::Jump]) -> f32 {
+    wall::band(slots_region(screen::FRAME, 0.0, bars), wall::COLUMNS)
+}
+
+// The part of the region the slots draw in: the region less the lanes
+// the rail takes off its right edge.
+fn slots_region(bounds: Rectangle, under: f32, bars: &[rail::Jump]) -> Rectangle {
+    rail::beside(region(bounds, under), bars)
+}
+
 // The part of the frame the grid scrolls in: under the band, and under
 // the space that keeps the mark of a focused slot in the first row off
 // what is over it.
@@ -443,6 +458,41 @@ mod tests {
     fn a_row_of_posters_fits_under_the_band() {
         let cells = wall::lined(WIDTH, wall::POSTER, wall::COLUMNS, 1);
         assert!(cells.height <= region(frame(), 0.0).height);
+    }
+
+    // The width of the band the wall draws its first slot's caption in
+    // at these bounds.
+    fn drawn_band(wall: &Wall, bounds: Rectangle) -> f32 {
+        let (grid, _) = wall.slotted(bounds);
+        let cells = wall::lined(grid.region.width, wall::POSTER, wall::COLUMNS, 2);
+        wall::caption(&cells, wall::slot(&cells, 0, 0.0, wall::COLUMNS)).width
+    }
+
+    #[test]
+    fn the_read_cuts_the_cards_to_the_band_the_wall_draws_their_captions_in() {
+        let query = Query::Library {
+            library: "sample/features".into(),
+            sort: crate::catalog::Sort::Oldest,
+        };
+        let wall = Wall::open(query, &mut Catalog);
+        assert!(!wall.bars.is_empty(), "the wall draws a rail");
+
+        let drawn = drawn_band(&wall, frame());
+        assert_eq!(wall.slots.band(), drawn);
+        let long = "Borat Subsequent Moviefilm: Delivery of Prodigious Bribe";
+        let cut = crate::views::card::cut(long, wall.slots.band());
+        assert!(crate::views::text::measured(&cut, crate::look::CAPTION) <= drawn);
+    }
+
+    #[test]
+    fn a_wall_with_no_rail_cuts_its_cards_to_the_whole_cell() {
+        let query = Query::Search {
+            text: "serial".into(),
+        };
+        let wall = Wall::open(query, &mut Catalog);
+        assert!(wall.bars.is_empty(), "the wall draws no rail");
+
+        assert_eq!(wall.slots.band(), drawn_band(&wall, frame()));
     }
 
     #[test]

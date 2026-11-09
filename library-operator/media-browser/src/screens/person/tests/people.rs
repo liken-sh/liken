@@ -31,6 +31,9 @@ pub struct People {
     pub works: usize,
     // Whether the person is credited as an actor alone.
     pub acting: bool,
+    // The parts of every credit where the test names them, in place of
+    // the two the other tests read.
+    pub parts: &'static str,
     // Whether the scanner has credited the person in one more work,
     // released before every other.
     pub older: bool,
@@ -59,9 +62,10 @@ impl People {
             title: format!("Title {number}"),
             released: format!("{}-05-02", 2000 - number),
             art: format!("{number}.jpg"),
-            parts: match self.acting {
-                true => "as The Part".into(),
-                false => "Director, as The Part".into(),
+            parts: match (self.parts, self.acting) {
+                ("", true) => "as The Part".into(),
+                ("", false) => "Director, as The Part".into(),
+                (parts, _) => parts.into(),
             },
             ..Slot::default()
         }

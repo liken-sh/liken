@@ -32,17 +32,23 @@ pub struct Slots {
     // more than a press may take, so the read cuts the page around the
     // focus and a move cuts what it reaches.
     cut: Range<usize>,
+    // The width every card is cut to: the caption band of the grid the
+    // owner draws these slots in. The owner's rail takes its lanes off
+    // the grid, so the owner sets the band again when its bars change.
+    band: f32,
 }
 
 impl Slots {
-    /// Read the query's answer, with focus on the first slot.
-    pub fn open(query: Query, source: &mut dyn Source) -> Self {
+    /// Read the query's answer, with focus on the first slot, and cut
+    /// its cards to a band of this width.
+    pub fn open(query: Query, band: f32, source: &mut dyn Source) -> Self {
         let mut slots = Self {
             query,
             name: String::new(),
             items: Vec::new(),
             focus: 0,
             cut: 0..0,
+            band,
         };
         slots.reread(source);
         slots
@@ -94,6 +100,22 @@ impl Slots {
         self.stand(self.focus);
     }
 
+    /// Cut the cards to a band of this width from now on. The cards
+    /// already cut to another width are cut again, starting with the
+    /// page around the focus.
+    pub fn reband(&mut self, band: f32) {
+        if band != self.band {
+            self.band = band;
+            self.cut = 0..0;
+            self.stand(self.focus);
+        }
+    }
+
+    /// The width every card is cut to.
+    pub fn band(&self) -> f32 {
+        self.band
+    }
+
     /// Cut the cards of the page around this slot. The rail scrolls the
     /// wall to rows the focus has not reached, and every card a frame
     /// draws is cut at the read and never on the frame.
@@ -105,10 +127,9 @@ impl Slots {
     // holds, and leave the cards already cut as they are.
     fn fitted(&mut self, index: usize) {
         let page = page(index, self.items.len());
-        let band = wall::band(wall::COLUMNS);
         let cut = self.cut.clone();
         for index in page.clone().filter(|index| !cut.contains(index)) {
-            self.items[index].fit(band);
+            self.items[index].fit(self.band);
         }
         self.cut = match cut.is_empty() || page.start > cut.end || cut.start > page.end {
             true => page,
@@ -283,6 +304,9 @@ mod tests {
 
     const LIBRARY: &str = "sample/features";
 
+    // A band of about one cell of a six-column wall.
+    const BAND: f32 = 290.0;
+
     #[test]
     fn the_shaper_cuts_the_rows_around_the_focus_and_no_more() {
         assert_eq!(page(0, 5_000), 0..(PAGE + 1) * wall::COLUMNS);
@@ -299,7 +323,7 @@ mod tests {
             library: LIBRARY.into(),
             sort: Sort::default(),
         };
-        let mut slots = Slots::open(query, &mut Catalog);
+        let mut slots = Slots::open(query, BAND, &mut Catalog);
         assert_eq!(slots.cut, page(0, slots.items.len()));
         slots.key("down", &mut Catalog);
         assert_eq!(slots.cut, 0..page(slots.focus, slots.items.len()).end);
@@ -312,7 +336,7 @@ mod tests {
         let query = Query::Search {
             text: text.to_string(),
         };
-        let slots = Slots::open(query, &mut Catalog);
+        let slots = Slots::open(query, BAND, &mut Catalog);
         slots
             .items
             .into_iter()

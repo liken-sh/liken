@@ -74,6 +74,14 @@ pub fn row(bounds: Rectangle, axis: bool) -> Row {
     ))
 }
 
+/// The width the read cuts the cards of the row to: one caption band of
+/// the row the page draws on `screen::FRAME`, with or without the axis.
+/// The read runs before any frame exists.
+pub fn band(axis: bool) -> f32 {
+    let row = row(screen::FRAME, axis);
+    wall::caption(&row.cells, row::slot(&row, 0, 0.0)).width
+}
+
 /// The page as one canvas.
 pub struct Page<'a, A> {
     /// The person the page is about.

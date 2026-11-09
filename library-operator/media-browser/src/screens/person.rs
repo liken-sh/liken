@@ -141,10 +141,17 @@ impl Person {
             &entry.died,
             slots.iter().map(|slot| slot.released.as_str()),
         );
-        let credits: Vec<Credit> = slots
+        let mut credits: Vec<Credit> = slots
             .into_iter()
             .map(|slot| Credit::of(&query, slot, &life, now, source))
             .collect();
+        let axis = Axis::of(&credits, &life, now);
+        // The row's cells are narrower on a page with an axis, so the
+        // cards are cut once the read knows whether the page draws one.
+        let band = page::band(axis.is_some());
+        for credit in &mut credits {
+            credit.item.fit(band);
+        }
         let dates = dates(&entry.born, &entry.died);
         Some(Self {
             library: library.to_string(),
@@ -157,7 +164,7 @@ impl Person {
             biography_path: beside(&entry.biography_library, &entry.biography_path, BIOGRAPHY),
             biography_library: entry.biography_library,
             biography: String::new(),
-            axis: Axis::of(&credits, &life, now),
+            axis,
             walk: Walk::opened(&credits, None),
             credits,
             life,

@@ -256,9 +256,8 @@ impl Series {
     fn read(library: &str, id: &str, source: &mut dyn Source) -> Option<Self> {
         let details = source.series(library, id)?;
         let trailer = !details.trailer.is_empty();
-        let (stills, seasons) =
+        let (stills, seasons, bars) =
             seasons::wall_of(source.episodes(library, id), &Date::today().iso());
-        let bars = seasons::bars(&seasons, layout::rail_region());
         let reach = pickup::Reach::of(&stills);
         Some(Self {
             library: library.to_string(),

@@ -10,7 +10,7 @@ use iced_winit::core::Rectangle;
 use crate::catalog::{GenreSort, Query, Sort};
 use crate::look;
 use crate::screens::{Item, facts};
-use crate::views::{area, rail, rounded, text, wall};
+use crate::views::{area, rail, rounded, screen, text, wall};
 
 use crate::views::rail::Bar;
 
@@ -31,11 +31,6 @@ pub const SCREENS: usize = 4;
 /// How many rows of the wall one screen holds.
 pub const ROWS: usize = 2;
 
-// The height of the screen the browser is drawn for. The bars are built
-// at the read, before any frame exists, so they are fitted at this
-// height the way the series page fits its own.
-const SCREEN: f32 = 1080.0;
-
 /// Whether a wall this many rows long draws a rail.
 pub fn shows(rows: usize) -> bool {
     rows > SCREENS * ROWS
@@ -47,10 +42,11 @@ pub fn rows(items: usize) -> usize {
 }
 
 /// The region the bars are fitted against at the read, which is
-/// the wall's own region on a screen of [`SCREEN`]. A shorter window
-/// draws the same bars in a shorter rail.
+/// the wall's own region on [`screen::FRAME`]. The bars are built at the
+/// read, before any frame exists, and a shorter window draws the same
+/// bars in a shorter rail.
 pub fn region() -> Rectangle {
-    super::region(area(0.0, 0.0, 0.0, SCREEN), 0.0)
+    super::region(screen::FRAME, 0.0)
 }
 
 /// How many cells the rail's focus walks: one for each bar, and

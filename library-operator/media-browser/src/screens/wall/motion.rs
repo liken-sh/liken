@@ -17,8 +17,7 @@ impl Wall {
     /// The grid of slots at these bounds with its scroll at rest, and that
     /// scroll. The grid draws no mark of its own.
     pub(super) fn slotted(&self, bounds: Rectangle) -> (wall::Grid<'_, Item>, f32) {
-        let whole = region(bounds, self.under_band());
-        let region = rail::beside(whole, &self.bars);
+        let region = super::slots_region(bounds, self.under_band(), &self.bars);
         let cells = wall::lined(region.width, wall::POSTER, wall::COLUMNS, card::LINES);
         let standing = self.standing();
         let offset = wall::scrolled(

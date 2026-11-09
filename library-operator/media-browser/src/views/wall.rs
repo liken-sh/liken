@@ -85,15 +85,15 @@ pub fn below(lines: usize) -> f32 {
     GAP + card::height(lines) + FOOT
 }
 
-// The width the wall lays a cell out at when a read cuts a card to it.
-// The frame the wall draws in is not known at the read, so the cut runs
-// at the size the browser is drawn for.
-const SCREEN: f32 = 1920.0;
-
-/// The band a card's lines are cut to at the read: one cell of a wall of
-/// this many columns.
-pub fn band(columns: usize) -> f32 {
-    cells(SCREEN, POSTER, columns).width
+/// The band a card's lines are cut to at the read: the width of the band
+/// [`caption`] draws them in, one cell of a wall of this many columns
+/// across this region. The read runs before any frame exists, so the
+/// caller passes the region its draw lays the wall out in on
+/// [`super::screen::FRAME`]. A band any wider than that cell draws the
+/// line centred past both of the cell's edges, and the clip cuts off its
+/// first and last letters.
+pub fn band(region: Rectangle, columns: usize) -> f32 {
+    cells(region.width, POSTER, columns).width
 }
 
 /// A cell is wider than the art inside it, by the gutter that holds the
@@ -399,9 +399,13 @@ mod tests {
     }
 
     #[test]
-    fn a_cards_band_is_one_cell_of_the_wall_it_is_cut_for() {
-        assert_eq!(band(COLUMNS), cells(1920.0, POSTER, COLUMNS).width);
-        assert!(band(4) > band(COLUMNS));
+    fn a_cards_band_is_the_caption_band_of_the_wall_it_is_cut_for() {
+        let region = area(80.0, 200.0, 1700.0, 800.0);
+        let cells = cells(region.width, POSTER, COLUMNS);
+        let first = slot(&cells, 0, 0.0, COLUMNS);
+
+        assert_eq!(band(region, COLUMNS), caption(&cells, first).width);
+        assert!(band(region, 4) > band(region, COLUMNS));
     }
 
     #[test]

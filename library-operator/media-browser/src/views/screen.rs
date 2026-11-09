@@ -19,6 +19,17 @@ use super::area;
 /// `display/theme.lua` and in `idle/src/look.rs`.
 pub const MARGIN_X: f32 = 96.0;
 
+/// The frame the browser is drawn for: a 1920 by 1080 panel in logical
+/// pixels. A read lays its cards and rail bars out on this frame, because
+/// the read runs before any frame exists, and every read takes the
+/// region it cuts to from the same function its draw uses, at this frame.
+pub const FRAME: Rectangle = Rectangle {
+    x: 0.0,
+    y: 0.0,
+    width: 1920.0,
+    height: 1080.0,
+};
+
 /// The part of a frame a screen's content draws in: the frame less the
 /// margin at each side. A screen reads `x` and `width` from the answer
 /// and never reads the margin. The vertical extent is the frame's own,

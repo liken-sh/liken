@@ -1,26 +1,43 @@
 // The seasons of a series: the dividers and the stills one read of the
 // episodes builds, and the bars of the rail beside a long wall.
 
-use super::{COLUMNS, Focus, Season, Series, Still};
+use super::{COLUMNS, Focus, Season, Series, Still, layout, page};
 use crate::catalog::Episode;
 use crate::focus::{self, Run};
 use crate::screens::facts;
-use crate::views::{card, rail, scroll, wall};
+use crate::views::{card, rail, screen, scroll, wall};
 use iced_winit::core::Rectangle;
 
 /// How many seasons a series holds and still draws no rail.
 pub const SHORT: usize = 4;
 
-// The wall and its dividers out of one read of the episodes. The rows
-// arrive in aired order, so a season starts wherever the season number
-// changes, and its year is the year of the first episode that aired in
-// it.
-pub fn wall_of(episodes: Vec<Episode>, today: &str) -> (Vec<Still>, Vec<Season>) {
-    let band = wall::band(COLUMNS);
-    let mut stills = Vec::with_capacity(episodes.len());
+/// The wall, its dividers, and the bars of its rail out of one read of
+/// the episodes. The bars come before the stills, because the rail's
+/// lanes narrow the cells that every still's lines are cut to.
+pub fn wall_of(episodes: Vec<Episode>, today: &str) -> (Vec<Still>, Vec<Season>, Vec<rail::Bar>) {
+    let seasons = seasons_of(&episodes);
+    let bars = bars(&seasons, layout::rail_region());
+    let band = band(&bars);
+    let stills = episodes
+        .into_iter()
+        .map(|episode| still_of(episode, today, band))
+        .collect();
+    (stills, seasons, bars)
+}
+
+/// The width the read cuts the stills' lines to: one caption band of
+/// the grid the page draws beside these bars on `screen::FRAME`.
+pub fn band(bars: &[rail::Bar]) -> f32 {
+    wall::band(page::stills_region(screen::FRAME, bars), COLUMNS)
+}
+
+// The dividers out of the episodes. The rows arrive in aired order, so a
+// season starts wherever the season number changes, and its year is the
+// year of the first episode that aired in it.
+fn seasons_of(episodes: &[Episode]) -> Vec<Season> {
     let mut seasons: Vec<Season> = Vec::new();
     let mut years: Vec<String> = Vec::new();
-    for (index, episode) in episodes.into_iter().enumerate() {
+    for (index, episode) in episodes.iter().enumerate() {
         match seasons.last_mut() {
             Some(season) if season.number == episode.season => season.run.count += 1,
             _ => {
@@ -35,7 +52,6 @@ pub fn wall_of(episodes: Vec<Episode>, today: &str) -> (Vec<Still>, Vec<Season>)
                 years.push(facts::year(&episode.released).to_string());
             }
         }
-        stills.push(still_of(episode, today, band));
     }
     // The heading is written after the read, because it counts the
     // season's episodes, and the count is known only once the next
@@ -43,7 +59,7 @@ pub fn wall_of(episodes: Vec<Episode>, today: &str) -> (Vec<Still>, Vec<Season>)
     for (season, year) in seasons.iter_mut().zip(&years) {
         season.name = named(season.number, year, season.run.count);
     }
-    (stills, seasons)
+    seasons
 }
 
 // The divider's heading: the season, the year of its first episode
