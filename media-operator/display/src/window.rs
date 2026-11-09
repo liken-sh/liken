@@ -656,7 +656,7 @@ impl Display {
             &self.film,
             logo.map(|logo| logo.canvas_height(&canvas)),
         );
-        let reading = clock::lines(&canvas, now);
+        let reading = clock::lines(&canvas, &self.film, now);
         if let Some(logo) = logo.filter(|_| self.showing()) {
             logo.draw(brush, art::logo_at(&canvas));
         }
@@ -670,10 +670,7 @@ impl Display {
         }
 
         let bar = (!self.presentation.is_image())
-            .then(|| {
-                self.scrubber
-                    .bar(&canvas, &self.film, self.focus.axis(), now)
-            })
+            .then(|| self.scrubber.bar(&canvas, &self.film, self.focus.axis()))
             .flatten();
         let counter = if images::available(&self.presentation) {
             images::lines(&canvas, &self.film)

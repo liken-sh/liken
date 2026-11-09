@@ -6,8 +6,6 @@
 use iced::{Point, Rectangle, Size};
 use serde_json::json;
 
-use jiff::Zoned;
-
 use crate::canvas::{Anchor, Brush, Canvas, Line};
 use crate::clock;
 use crate::film::Film;
@@ -152,16 +150,9 @@ impl Scrubber {
             .clamp(0.0, duration)
     }
 
-    /// Everything the bar draws at one position, in canvas units, with the
-    /// wall clock at `now` for the end time. A film with no duration draws no
-    /// bar.
-    pub fn bar(
-        &self,
-        canvas: &Canvas,
-        film: &Film,
-        axis: Option<Axis>,
-        now: &Zoned,
-    ) -> Option<Bar> {
+    /// Everything the bar draws at one position, in canvas units. A film
+    /// with no duration draws no bar.
+    pub fn bar(&self, canvas: &Canvas, film: &Film, axis: Option<Axis>) -> Option<Bar> {
         let duration = length(film)?;
         let (position, chapter) = brightness(axis);
         let at = self.displayed(film, duration);
@@ -199,7 +190,7 @@ impl Scrubber {
                 .alpha(chapter)
             }),
             times: Line::new(
-                time_line(at, duration, now),
+                time_line(at, duration),
                 Point::new(canvas.right(), BELOW_Y),
                 Anchor::TopRight,
                 theme::type_scale::SMALL,
@@ -276,7 +267,7 @@ impl Scrubber {
         // to the bar, so the label stays on screen at either end.
         brush.text(bar.time.clone());
         // Below the bar on the left, the chapter title and position. Below on
-        // the right, the time line: the position, the time left, and the end.
+        // the right, the time line: the position and the time left.
         if let Some(chapter) = bar.chapter.clone() {
             brush.text(chapter);
         }
@@ -422,27 +413,22 @@ fn fmt(at: f64) -> String {
     format!("{minutes}:{seconds:02}")
 }
 
-/// The time line, "30:07  ·  1h 36m left  ·  ends 2:15 pm": the position,
-/// the time left to the nearest minute in the browser's runtime spelling, and
-/// the wall clock when the film ends. A person reads the three as one fact,
-/// so they share one line, and the film's whole length reads in the header.
-fn time_line(at: f64, duration: f64, now: &Zoned) -> String {
+/// The time line, "30:07  ·  1h 36m left": the position and the time left
+/// to the nearest minute in the browser's runtime spelling. The wall clock
+/// when the film ends is the clock's line, under the reading, and the film's
+/// whole length reads in the header.
+fn time_line(at: f64, duration: f64) -> String {
     let left = duration - at;
     let phrase = clock::length(left).map_or_else(
         || "less than a minute left".to_string(),
         |length| format!("{length} left"),
     );
-    [fmt(at), phrase, clock::ends(now, left)].join(crate::header::BETWEEN)
+    [fmt(at), phrase].join(crate::header::BETWEEN)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The wall clock every bar in these tests reads: noon, in UTC.
-    fn noon() -> Zoned {
-        crate::clock::at(12 * 3600)
-    }
 
     fn film() -> Film {
         let mut film = Film::default();
@@ -552,7 +538,7 @@ mod tests {
             None
         );
         assert_eq!(
-            scrubber.bar(&Canvas::default(), &Film::default(), None, &noon()),
+            scrubber.bar(&Canvas::default(), &Film::default(), None),
             None
         );
     }
@@ -678,21 +664,16 @@ mod tests {
         assert_eq!(fmt(7265.0), "2:01:05");
     }
 
-    /// The time line reads the position, the time left to the nearest
-    /// minute, and the wall clock when the film ends.
+    /// The time line reads the position and the time left to the nearest
+    /// minute. The end time is the clock's line, so the time line names
+    /// none.
     #[test]
-    fn the_time_line_reads_the_position_the_time_left_and_the_end() {
+    fn the_time_line_reads_the_position_and_the_time_left() {
+        assert_eq!(time_line(1807.0, 7559.0), "30:07  \u{00B7}  1h 36m left");
+        assert_eq!(time_line(5970.0, 6000.0), "1:39:30  \u{00B7}  1m left");
         assert_eq!(
-            time_line(1807.0, 7559.0, &noon()),
-            "30:07  \u{00B7}  1h 36m left  \u{00B7}  ends 1:36 pm"
-        );
-        assert_eq!(
-            time_line(5970.0, 6000.0, &noon()),
-            "1:39:30  \u{00B7}  1m left  \u{00B7}  ends 12:01 pm"
-        );
-        assert_eq!(
-            time_line(6000.0, 6000.0, &noon()),
-            "1:40:00  \u{00B7}  less than a minute left  \u{00B7}  ends 12:00 pm"
+            time_line(6000.0, 6000.0),
+            "1:40:00  \u{00B7}  less than a minute left"
         );
     }
 
@@ -701,7 +682,7 @@ mod tests {
     #[test]
     fn the_bar_puts_every_part_at_a_films_middle() {
         let bar = Scrubber::default()
-            .bar(&Canvas::default(), &chaptered(), Some(Axis::Fine), &noon())
+            .bar(&Canvas::default(), &chaptered(), Some(Axis::Fine))
             .expect("a film with a length draws a bar");
 
         assert_eq!(bar.head, 442.0);
@@ -720,10 +701,7 @@ mod tests {
         assert_eq!(chapter.size, 34.0);
         assert_eq!(chapter.color.a, theme::alpha::SUBDUED);
 
-        assert_eq!(
-            bar.times.content,
-            "20:00  \u{00B7}  1h 20m left  \u{00B7}  ends 1:20 pm"
-        );
+        assert_eq!(bar.times.content, "20:00  \u{00B7}  1h 20m left");
         assert_eq!(bar.times.at, Point::new(1824.0, 922.0));
         assert_eq!(bar.times.anchor, Anchor::TopRight);
         assert_eq!(bar.times.color.a, theme::alpha::OPAQUE);
@@ -737,7 +715,7 @@ mod tests {
         let bar = |at: f64| {
             let mut film = film();
             film.apply("time-pos", &json!(at));
-            Scrubber::default().bar(&canvas, &film, Some(Axis::Fine), &noon())
+            Scrubber::default().bar(&canvas, &film, Some(Axis::Fine))
         };
 
         assert_eq!(bar(1200.0), bar(1200.0417));
@@ -765,7 +743,7 @@ mod tests {
         let mut scrubber = Scrubber::default();
         scrubber.seek(1.0, 10.0, &film());
         let bar = scrubber
-            .bar(&Canvas::default(), &film(), Some(Axis::Fine), &noon())
+            .bar(&Canvas::default(), &film(), Some(Axis::Fine))
             .expect("a bar");
         assert_eq!(bar.head, 443.0);
         assert_eq!(bar.live, Some(442.0));
@@ -780,21 +758,21 @@ mod tests {
         let scrubber = Scrubber::default();
         assert_eq!(
             scrubber
-                .bar(&canvas, &chaptered(), Some(Axis::Chapter), &noon())
+                .bar(&canvas, &chaptered(), Some(Axis::Chapter))
                 .unwrap()
                 .current,
             Some(1)
         );
         assert_eq!(
             scrubber
-                .bar(&canvas, &chaptered(), Some(Axis::Fine), &noon())
+                .bar(&canvas, &chaptered(), Some(Axis::Fine))
                 .unwrap()
                 .current,
             None
         );
         assert_eq!(
             scrubber
-                .bar(&canvas, &film(), Some(Axis::Chapter), &noon())
+                .bar(&canvas, &film(), Some(Axis::Chapter))
                 .unwrap()
                 .current,
             None
@@ -808,19 +786,15 @@ mod tests {
         let canvas = Canvas::default();
         let mut film = film();
         film.apply("time-pos", &json!(0.0));
-        let bar = Scrubber::default()
-            .bar(&canvas, &film, None, &noon())
-            .unwrap();
+        let bar = Scrubber::default().bar(&canvas, &film, None).unwrap();
         assert_eq!(bar.time.at.x, 96.0);
 
         film.apply("time-pos", &json!(6000.0));
-        let bar = Scrubber::default()
-            .bar(&canvas, &film, None, &noon())
-            .unwrap();
+        let bar = Scrubber::default().bar(&canvas, &film, None).unwrap();
         assert_eq!(bar.time.at.x, 1824.0);
         assert_eq!(
             bar.times.content,
-            "1:40:00  \u{00B7}  less than a minute left  \u{00B7}  ends 12:00 pm"
+            "1:40:00  \u{00B7}  less than a minute left"
         );
     }
 
@@ -831,9 +805,7 @@ mod tests {
         let half = Canvas::for_output(Size::new(1280.0, 720.0));
         let mut film = film();
         film.apply("time-pos", &json!(1234.5));
-        let bar = Scrubber::default()
-            .bar(&half, &film, None, &noon())
-            .unwrap();
+        let bar = Scrubber::default().bar(&half, &film, None).unwrap();
         assert_eq!((bar.head * half.scale()).fract(), 0.0);
 
         assert_eq!(
