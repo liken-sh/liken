@@ -59,3 +59,43 @@ func TestARefusedRowWriteIsLoggedAndTheRunGoesOn(t *testing.T) {
 		})
 	}
 }
+
+// one series folder with a tvshow.nfo file and one episode, so the facts that
+// write the series' own rows have a series row to write.
+func refusedRowsSeries(t *testing.T) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	folder := filepath.Join(root, "Pine Hollow (1990)")
+	writeFile(t, filepath.Join(folder, "Season 01", "Pine Hollow - S01E01.mkv"), "video")
+	writeFile(t, filepath.Join(folder, seriesNFOName), `<tvshow><title>Pine Hollow</title>`+
+		`<uniqueid type="tvdb">389492</uniqueid></tvshow>`)
+	return root, folder
+}
+
+// The series' body, credits, and trailers rows are written in a loop over
+// the series apart from the loop over the movies, so a series folder whose
+// write the catalog refuses logs the refusal the same way.
+func TestARefusedSeriesRowWriteIsLogged(t *testing.T) {
+	cases := []struct {
+		fact    string
+		refused int
+	}{
+		{fact: factOverview, refused: 1},
+		{fact: factCredits, refused: 2},
+		{fact: factTrailer, refused: 1},
+	}
+	for _, one := range cases {
+		t.Run(fmt.Sprintf("%s write %d", one.fact, one.refused), func(t *testing.T) {
+			catalog, agent := newSQLiteCatalog(t)
+			root, folder := refusedRowsSeries(t)
+			work, log := testEnricher(t, libraryKindSeries, root, catalog)
+			agent.transactionsLeft = one.refused
+
+			work.writeRows(one.fact, folder, true)
+
+			if !strings.Contains(log.String(), "could not write the "+one.fact+" rows") {
+				t.Errorf("log = %q, want the refused write", log.String())
+			}
+		})
+	}
+}
