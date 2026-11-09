@@ -20,6 +20,14 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
 
+# bake builds an image as the target of the same name in the bake file at
+# the top of the repository, the build CI runs. A plain docker build of one
+# directory fails, because its Dockerfile names a base of the repository by
+# its bare name, as in `FROM corrosion`, and only the bake file resolves it.
+bake() {
+  (cd "$repo/.." && docker buildx bake "$1" --load --set "$1.tags=$2") >&2
+}
+
 # The scanner runs from the image the root Dockerfile builds, not from a
 # go build on the workstation, so it runs the same bytes here and in the
 # cluster.
@@ -90,7 +98,7 @@ fi
 # the same one CI runs.
 if [ -z "$(docker images --quiet "$image")" ]; then
   echo "local/scan: building $image" >&2
-  docker build "$repo" --tag "$image" >&2
+  bake library-operator "$image"
 fi
 
 # `--network host` puts the Job on loopback, where the catalog API

@@ -17,6 +17,14 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
 
+# bake builds an image as the target of the same name in the bake file at
+# the top of the repository, the build CI runs. A plain docker build of one
+# directory fails, because its Dockerfile names a base of the repository by
+# its bare name, as in `FROM corrosion`, and only the bake file resolves it.
+bake() {
+  (cd "$repo/.." && docker buildx bake "$1" --load --set "$1.tags=$2") >&2
+}
+
 # The agent runs from the image corrosion/Dockerfile builds, the same bytes
 # the cluster runs. local/catalog builds the same tag.
 image="library-operator-corrosion:local"
@@ -92,7 +100,7 @@ up() {
   # same one CI runs.
   if [ -z "$(docker images --quiet "$image")" ]; then
     echo "local/progress: building $image" >&2
-    docker build "$repo/corrosion" --tag "$image" >&2
+    bake library-operator-corrosion "$image"
   fi
 
   mkdir -p "$state"
