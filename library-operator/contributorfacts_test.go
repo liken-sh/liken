@@ -599,6 +599,46 @@ func TestAPersonsDirectoryTheVolumeRefusesIsAnErrorAttempt(t *testing.T) {
 	})
 }
 
+// An entry whose directory refuses the write of contributor.yaml keeps the
+// file as it was, and the attempt is an error, so the next run asks again.
+func TestAnEntryTheVolumeWillNotWriteIsAnErrorAttempt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root writes into a read-only directory")
+		}
+		root := t.TempDir()
+		entry := "name: Oren Tally\nids: {tmdb: 9031}\n"
+		folder := seedEntry(t, root, "oren-tally", entry)
+		if err := os.MkdirAll(filepath.Join(folder, likenDirectory), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(folder, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(folder, 0o755) })
+		work, log := testEnricher(t, libraryKindMovies, root, nil)
+		client, _ := newPersonTMDb(t, map[string]string{
+			tmdbKey("/3/person/9031", "", ""):              personAnswer("1961-03-14", "", "An actor.", ""),
+			tmdbKey("/3/person/9031/external_ids", "", ""): `{"imdb_id":"nm9000031"}`,
+		})
+
+		if work.fillContributorIDs(t.Context(), client, folder, contributorGap{path: contributorDirectory("oren-tally"), tmdb: "9031"}) {
+			t.Error("the fact reported a write into a directory that refuses it")
+		}
+
+		if got := readFileString(t, filepath.Join(folder, contributorFileName)); got != entry {
+			t.Errorf("contributor.yaml = %q, want %q", got, entry)
+		}
+		ledger := artLedger(t, folder, factContributorIDs)
+		if len(ledger.Attempts) != 1 || ledger.Attempts[0].Result != attemptError {
+			t.Errorf("ledger attempts = %+v, want one error", ledger.Attempts)
+		}
+		if !strings.Contains(log.String(), "could not write") {
+			t.Errorf("log = %q, want the write's error", log.String())
+		}
+	})
+}
+
 // A file that arrived between the read and the write is kept, and the ledger
 // records that it was already there.
 func TestAFileThatArrivedBeforeTheWriteIsKept(t *testing.T) {
