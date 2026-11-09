@@ -55,12 +55,15 @@ pub fn reading(at: &Zoned) -> String {
     format!("{twelve}:{:02} {suffix}", at.minute())
 }
 
-/// The wall clock `seconds` from `now`, as "ends 2:15 pm".
+/// The wall clock `seconds` from `now`, as "ends 2:15 pm". The time left
+/// rounds to the nearest minute, the same rounding as the "1h 36m left"
+/// beside it on the time line, so the clock reading plus that time left
+/// gives the end time on the screen.
 pub fn ends(now: &Zoned, seconds: f64) -> String {
-    let seconds = (seconds.max(0.0) + 0.5).floor() as i64;
+    let minutes = (seconds.max(0.0) / 60.0 + 0.5).floor() as i64;
     format!(
         "ends {}",
-        reading(&now.saturating_add(jiff::Span::new().seconds(seconds)))
+        reading(&now.saturating_add(jiff::Span::new().minutes(minutes)))
     )
 }
 
@@ -134,10 +137,12 @@ mod tests {
     }
 
     /// 4801 seconds after 3:01 pm is one hour and twenty minutes later, and a
-    /// time already past ends now.
+    /// time already past ends now. 5752 seconds read as "1h 36m left" on the
+    /// time line, so the end time is 96 minutes after the reading, not 95.
     #[test]
     fn an_end_time_is_the_reading_plus_the_time_left() {
         assert_eq!(ends(&wall(15, 1), 4801.0), "ends 4:21 pm");
+        assert_eq!(ends(&wall(15, 1), 5752.0), "ends 4:37 pm");
         assert_eq!(ends(&wall(15, 1), -30.0), "ends 3:01 pm");
     }
 

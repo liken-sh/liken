@@ -684,11 +684,11 @@ mod tests {
     fn the_time_line_reads_the_position_the_time_left_and_the_end() {
         assert_eq!(
             time_line(1807.0, 7559.0, &noon()),
-            "30:07  \u{00B7}  1h 36m left  \u{00B7}  ends 1:35 pm"
+            "30:07  \u{00B7}  1h 36m left  \u{00B7}  ends 1:36 pm"
         );
         assert_eq!(
             time_line(5970.0, 6000.0, &noon()),
-            "1:39:30  \u{00B7}  1m left  \u{00B7}  ends 12:00 pm"
+            "1:39:30  \u{00B7}  1m left  \u{00B7}  ends 12:01 pm"
         );
         assert_eq!(
             time_line(6000.0, 6000.0, &noon()),
