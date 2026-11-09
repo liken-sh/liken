@@ -17,6 +17,7 @@ use super::super::franchise::strips::Place;
 use super::super::stripes::Face;
 use super::{Focus, Movie, row, watch};
 use crate::art::Art;
+use crate::clock::Time;
 use crate::look;
 use crate::views::across::Across;
 use crate::views::stack::{self, Stack};
@@ -192,6 +193,9 @@ pub struct Page<'a, A> {
     pub held: bool,
     /// The second this frame draws, which the scrolls ease on.
     pub at: f64,
+    /// The wall clock's reading, which the playback row names its end
+    /// time from.
+    pub now: Time,
 }
 
 impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
@@ -271,6 +275,15 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         let words = row::Button::drawn(&movie.buttons());
         let at = blocks.buttons.at(offset);
         buttons::draw(&mut frame, &words, at);
+        let names: Vec<&str> = words.iter().map(|(_, name)| *name).collect();
+        buttons::draw_aside(
+            &mut frame,
+            &names,
+            at,
+            &movie.ends(self.now),
+            region.x + column,
+            false,
+        );
         let status = movie.status();
         let marks = watch::Mark::drawn(&movie.marks());
         let marked = match focus {

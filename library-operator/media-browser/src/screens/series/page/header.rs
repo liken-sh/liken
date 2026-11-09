@@ -182,10 +182,22 @@ impl<A: Art> Page<'_, A> {
         // An episode's own row draws in the same place, over the series'
         // row, while it holds focus.
         let beside = row_at(series, bounds);
-        buttons::draw(frame, &row::Button::drawn(&series.buttons()), beside);
+        let words = row::Button::drawn(&series.buttons());
+        buttons::draw(frame, &words, beside);
         let Some(still) = series.opened() else {
             return;
         };
+        // The row stands over the backdrop, so the end time draws over a
+        // halo, the way the status line under it does.
+        let names: Vec<&str> = words.iter().map(|(_, name)| *name).collect();
+        buttons::draw_aside(
+            frame,
+            &names,
+            beside,
+            &still.ends(self.now),
+            region.x + region.width,
+            true,
+        );
         // The status line draws over the backdrop, past the scrim's full
         // shade, so its status draws over a halo. The bar is as wide as the
         // text column where the header has the room.

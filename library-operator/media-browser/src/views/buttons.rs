@@ -11,7 +11,7 @@ use iced_winit::core::text::Alignment;
 use iced_winit::core::{Point, Rectangle};
 
 use super::icon::{self, Icon};
-use super::{area, extent, label, text};
+use super::{area, clock, extent, label, text};
 use crate::look;
 
 /// The height of a button.
@@ -71,6 +71,62 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, row: &[(Icon, &str)], at: Point
     HEIGHT
 }
 
+// The gap between the row's last button and the words beside it, the gap
+// the status line keeps between its words and its first mark.
+const ASIDE_GAP: f32 = 28.0;
+
+/// The box the words beside a row of these buttons draw in: a gap after
+/// the last button, as tall as a button, and as wide as the words at the
+/// status line's size. Nothing where the words would end past `right`, so
+/// a wide row drops its aside and never pushes it off the text column,
+/// and nothing where there are no words.
+pub fn aside(names: &[&str], at: Point, words: &str, right: f32) -> Option<Rectangle> {
+    let start = match names.len() {
+        0 => at.x,
+        count => {
+            let last = button(names, count - 1, at);
+            last.x + last.width + ASIDE_GAP
+        }
+    };
+    let width = text::measured(words, look::STATUS);
+    (!words.is_empty() && start + width <= right).then(|| area(start, at.y, width, HEIGHT))
+}
+
+/// Draw words beside a row of buttons in the muted ink, such as the time a
+/// play the row starts would end, where [`aside`] gives them room. `halo`
+/// draws them over dark copies, for a row that stands over art past the
+/// scrim's full shade.
+pub fn draw_aside(
+    frame: &mut canvas::Frame<Renderer>,
+    names: &[&str],
+    at: Point,
+    words: &str,
+    right: f32,
+    halo: bool,
+) {
+    let Some(bounds) = aside(names, at, words, right) else {
+        return;
+    };
+    let start = Point::new(bounds.x, bounds.center_y());
+    let ink = |point: Point, color| {
+        label(
+            words,
+            point,
+            look::STATUS,
+            color,
+            Alignment::Left,
+            Vertical::Center,
+            f32::INFINITY,
+        )
+    };
+    if halo {
+        for point in clock::halo(start) {
+            frame.fill_text(ink(point, look::BACKGROUND));
+        }
+    }
+    frame.fill_text(ink(start, look::muted()));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +146,28 @@ mod tests {
         assert_eq!(second.x, first.x + first.width + GAP);
         assert_eq!(second.y, first.y);
         assert_eq!(first.height, HEIGHT);
+    }
+
+    #[test]
+    fn the_words_beside_the_row_stand_a_gap_after_its_last_button() {
+        let names = ["Resume", "Start over"];
+        let at = Point::new(96.0, 600.0);
+        let last = button(&names, 1, at);
+        let words = aside(&names, at, "ends 10:42 pm", 1920.0).expect("room");
+        assert_eq!(words.x, last.x + last.width + ASIDE_GAP);
+        assert_eq!(words.center_y(), last.center_y());
+        assert_eq!(words.width, text::measured("ends 10:42 pm", look::STATUS));
+    }
+
+    #[test]
+    fn words_that_would_run_past_the_room_draw_nowhere() {
+        let names = ["Play"];
+        let at = Point::new(96.0, 600.0);
+        let fits = aside(&names, at, "ends 10:42 pm", 1920.0).expect("room");
+        let right = fits.x + fits.width;
+        assert_eq!(aside(&names, at, "ends 10:42 pm", right), Some(fits));
+        assert_eq!(aside(&names, at, "ends 10:42 pm", right - 1.0), None);
+        assert_eq!(aside(&names, at, "", 1920.0), None);
     }
 
     #[test]

@@ -288,6 +288,27 @@ fn the_last_stripe_pulls_the_foot_into_view() {
 }
 
 #[test]
+fn the_row_names_when_its_first_button_would_end() {
+    use crate::catalog::Progress;
+    use crate::clock::Time;
+    let now = Time {
+        hour: 20,
+        minute: 0,
+    };
+    let mut movie = crowded(Focus::Buttons(0));
+    assert_eq!(movie.ends(now), "ends 9:52 pm");
+    movie.progress = Some(Progress {
+        position: 3_600,
+        duration: 6_730,
+        ..Progress::default()
+    });
+    assert_eq!(movie.ends(now), "ends 8:52 pm");
+    movie.duration = 0;
+    movie.progress = None;
+    assert_eq!(movie.ends(now), "");
+}
+
+#[test]
 fn the_title_starts_on_the_top_margin_the_clock_hangs_from_at_any_height() {
     let movie = crowded(Focus::Buttons(0));
     for height in [HEIGHT, SHORT] {

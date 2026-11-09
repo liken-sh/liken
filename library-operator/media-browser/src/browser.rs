@@ -1092,6 +1092,7 @@ impl<S: Source, A: Art> Screen for Browser<S, A> {
             curtain,
             !self.on_strip,
             self.clock,
+            self.time,
         );
         // The outline draws over the layer that holds focus and under every
         // layer over that one, so the dim of the room covers an outline on

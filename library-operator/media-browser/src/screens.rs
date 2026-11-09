@@ -300,7 +300,9 @@ impl Screen {
     /// strip, so a screen then draws nothing as focused, such as the
     /// fill of a focused bar or the taller bar under a focused mark.
     ///
-    /// `at` is the second the frame draws, which a scroll eases on.
+    /// `at` is the second the frame draws, which a scroll eases on, and
+    /// `now` is the wall clock's reading, which a title's playback row
+    /// names its end time from.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
@@ -308,12 +310,13 @@ impl Screen {
         curtain: Option<Curtain<'a>>,
         held: bool,
         at: f64,
+        now: crate::clock::Time,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         match self {
             Self::Home(screen) => screen.view(store, faces, held, at),
             Self::Wall(screen) => screen.view(store, faces, held, at),
-            Self::Movie(screen) => screen.view(store, faces, curtain, held, at),
-            Self::Series(screen) => screen.view(store, faces, curtain, held, at),
+            Self::Movie(screen) => screen.view(store, faces, curtain, held, at, now),
+            Self::Series(screen) => screen.view(store, faces, curtain, held, at, now),
             Self::Person(screen) => screen.view(store, faces, held, at),
             Self::Franchise(screen) => screen.view(store, faces, at),
         }

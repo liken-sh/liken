@@ -60,6 +60,27 @@ fn select_on_a_still_opens_its_row_with_focus_on_the_first_button() {
 }
 
 #[test]
+fn an_episodes_row_names_when_its_first_button_would_end() {
+    let now = crate::clock::Time {
+        hour: 21,
+        minute: 30,
+    };
+    let (mut page, mut source) = stopped_at(Some(690));
+    page.key("enter", &mut source);
+    assert_eq!(
+        page.opened().map(|still| still.ends(now)).as_deref(),
+        Some("ends 10:05 pm")
+    );
+
+    let (mut page, mut source) = stopped_at(None);
+    page.key("enter", &mut source);
+    assert_eq!(
+        page.opened().map(|still| still.ends(now)).as_deref(),
+        Some("ends 10:16 pm")
+    );
+}
+
+#[test]
 fn the_row_of_an_episode_they_have_not_started_offers_play_and_the_watched_mark() {
     let (mut page, mut source) = stopped_at(None);
     page.key("enter", &mut source);

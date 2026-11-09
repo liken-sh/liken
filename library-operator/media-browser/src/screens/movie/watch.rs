@@ -114,6 +114,16 @@ pub fn status(progress: Option<&Progress>, duration: i64) -> Status {
     }
 }
 
+/// How many seconds a press on the playback row's first button plays, in
+/// a work of this duration: the rest of a work they are in the middle of,
+/// which Resume plays, and the whole of any other, which Play plays.
+pub fn left(progress: Option<&Progress>, duration: i64) -> i64 {
+    match progress {
+        Some(progress) if row::resuming(Some(progress)) => duration - progress.position,
+        _ => duration,
+    }
+}
+
 /// The share of the work the bar under the playback row draws: none on a
 /// work the audience has not started, the whole bar on one they finished,
 /// and the share they reached on one they are in the middle of.
@@ -176,6 +186,19 @@ mod tests {
             Mark::drawn(&[Mark::Cleared]),
             [(Icon::Undo, "Clear progress")]
         );
+    }
+
+    #[test]
+    fn the_first_button_plays_the_rest_of_a_work_they_are_in_and_all_of_any_other() {
+        let cases = [
+            (None, RUNTIME),
+            (Some(reached(0, RUNTIME, false)), RUNTIME),
+            (Some(reached(787, RUNTIME, false)), RUNTIME - 787),
+            (Some(reached(RUNTIME, RUNTIME, true)), RUNTIME),
+        ];
+        for (progress, want) in cases {
+            assert_eq!(left(progress.as_ref(), RUNTIME), want, "{progress:?}");
+        }
     }
 
     #[test]

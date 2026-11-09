@@ -23,6 +23,7 @@ use super::super::stripes::Face;
 use super::layout::{self, Layout};
 use super::{COLUMNS, Focus, Series, Still, seasons};
 use crate::art::Art;
+use crate::clock::Time;
 use crate::look;
 use crate::views::across::Across;
 use crate::views::curtain::{Curtain, Head, Layer};
@@ -54,6 +55,9 @@ pub struct Page<'a, A> {
     pub held: bool,
     /// The second this frame draws, which the scrolls ease on.
     pub at: f64,
+    /// The wall clock's reading, which an episode's row names its end
+    /// time from.
+    pub now: Time,
 }
 
 impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
@@ -325,7 +329,9 @@ impl Series {
     /// header and the wall over both, and the departing art of the
     /// loading state over all three while that state runs. The dim of the
     /// room and the curtain's front are the frame's own layers over this
-    /// one. `at` is the second the frame draws, which the scrolls ease on.
+    /// one. `at` is the second the frame draws, which the scrolls ease on,
+    /// and `now` is the wall clock's reading, which an episode's row names
+    /// its end time from.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
@@ -333,6 +339,7 @@ impl Series {
         curtain: Option<Curtain<'a>>,
         held: bool,
         at: f64,
+        now: Time,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
             library: &self.library,
@@ -346,6 +353,7 @@ impl Series {
                 lifted: curtain.is_some(),
                 held,
                 at,
+                now,
             },
             over: curtain.map(|curtain| self.curtain(store, curtain)),
         }

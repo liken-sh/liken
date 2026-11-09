@@ -22,6 +22,29 @@ impl Time {
         };
         format!("{twelve}:{:02} {suffix}", self.minute)
     }
+
+    // The reading this many seconds after this one, to the nearest
+    // minute, turning past midnight.
+    fn after(self, seconds: i64) -> Time {
+        const DAY: i64 = 24 * 60;
+        let minutes = i64::from(self.hour) * 60 + i64::from(self.minute) + (seconds + 30) / 60;
+        let minutes = minutes.rem_euclid(DAY);
+        Time {
+            hour: (minutes / 60) as u8,
+            minute: (minutes % 60) as u8,
+        }
+    }
+}
+
+/// When a play of this many seconds that starts now ends, the way the
+/// browser spells it beside the button that starts it: "ends 10:42 pm",
+/// in the reading the clock draws. A length the catalog does not hold
+/// names no end, so the words are empty.
+pub fn ends(now: Time, seconds: i64) -> String {
+    match seconds > 0 {
+        true => format!("ends {}", now.after(seconds).twelve_hour()),
+        false => String::new(),
+    }
 }
 
 /// The time now, in the zone `TZ` names.
@@ -91,6 +114,31 @@ mod tests {
     fn both_ends_of_the_day_read_twelve() {
         assert_eq!(at(0, 0), "12:00 am");
         assert_eq!(at(12, 0), "12:00 pm");
+    }
+
+    #[test]
+    fn a_play_ends_at_the_reading_its_length_reaches_from_now() {
+        let now = Time {
+            hour: 20,
+            minute: 51,
+        };
+        let cases = [
+            (6_660, "ends 10:42 pm"),
+            (6_689, "ends 10:42 pm"),
+            (6_690, "ends 10:43 pm"),
+            (3 * 3_600 + 9 * 60, "ends 12:00 am"),
+            (5 * 3_600, "ends 1:51 am"),
+            (60, "ends 8:52 pm"),
+        ];
+        for (seconds, want) in cases {
+            assert_eq!(ends(now, seconds), want, "{seconds}");
+        }
+    }
+
+    #[test]
+    fn a_play_of_no_known_length_names_no_end() {
+        assert_eq!(ends(Time::default(), 0), "");
+        assert_eq!(ends(Time::default(), -5), "");
     }
 
     #[test]

@@ -22,6 +22,7 @@ use super::movie::{marked_duration, row, watch};
 use super::{InFranchise, Step, facts, foot, stripes};
 use crate::catalog::draw::Date;
 use crate::catalog::{Progress, SeriesDetails, Source};
+use crate::clock::{self, Time};
 use crate::focus::Run;
 use crate::motion::{Glide, Rows};
 use crate::views::{Card, rail, ratings};
@@ -106,6 +107,13 @@ pub struct Still {
 }
 
 impl Still {
+    /// When a press on the episode row's first button would end, read at
+    /// `now`, for the words beside the row.
+    pub fn ends(&self, now: Time) -> String {
+        let duration = marked_duration(self.progress.as_ref(), self.duration);
+        clock::ends(now, watch::left(self.progress.as_ref(), duration))
+    }
+
     /// What the status line under the episode's row says about where the
     /// audience stands, against the duration a mark would state.
     pub fn status(&self) -> watch::Status {

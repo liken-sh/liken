@@ -215,7 +215,11 @@ A movie's page shows its art, its facts, its people, and the set or
 franchise it is part of. Under the plot, the playback row holds Play,
 or Resume and Start over for a film the people at the screen are in the
 middle of, and Trailer where the film has a trailer file. Every button
-of the row starts a play.
+of the row starts a play. Beside the row, the page gives the time a
+play from the first button would end at the clock's reading, as in
+`ends 10:42 pm`: the end of the rest of the film for Resume, and of the
+whole film for Play. A row too wide for the text column to hold the
+time after it leaves the time out.
 
 Under the playback row, a bar as wide as the text column shows how far
 the people at the screen reached. Under the bar, the status line gives
@@ -267,7 +271,8 @@ whose folder holds no file with an episode number in its name, as
 in place of the wall. Enter on
 a still opens the episode's own row in the header, level with the
 ratings line. The row holds the playback buttons of a movie's page
-except Trailer, with the bar and the status line under it. Down from
+except Trailer, the time a play from its first button would end beside
+them, and the bar and the status line under it. Down from
 the row puts focus on the marks, down from the marks returns to the
 still, and back closes the row.
 

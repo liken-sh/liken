@@ -32,6 +32,7 @@ use crate::audience::Viewer;
 use crate::catalog::draw::Date;
 use crate::catalog::progress::thread;
 use crate::catalog::{MovieDetails, MovieSet, Progress, Query, Selection, Slot, Source};
+use crate::clock::{self, Time};
 use crate::focus;
 use crate::motion::{Glide, Rows};
 use crate::screens::reached;
@@ -267,6 +268,13 @@ impl Movie {
         watch::marks(self.progress.as_ref())
     }
 
+    /// When a press on the playback row's first button would end, read at
+    /// `now`, for the words beside the row.
+    pub fn ends(&self, now: Time) -> String {
+        let duration = marked_duration(self.progress.as_ref(), self.duration);
+        clock::ends(now, watch::left(self.progress.as_ref(), duration))
+    }
+
     /// What the status line says about where the audience stands, against
     /// the duration a mark would state.
     pub fn status(&self) -> watch::Status {
@@ -295,7 +303,8 @@ impl Movie {
     /// the departing art of the loading state over all three while that
     /// state runs. The dim of the room and the curtain's front are the
     /// frame's own layers over this one. `at` is the second the frame
-    /// draws, which the scrolls ease on.
+    /// draws, which the scrolls ease on, and `now` is the wall clock's
+    /// reading, which the playback row names its end time from.
     pub fn view<'a, A: Art>(
         &'a self,
         store: &'a RefCell<A>,
@@ -303,6 +312,7 @@ impl Movie {
         curtain: Option<Curtain<'a>>,
         held: bool,
         at: f64,
+        now: Time,
     ) -> Element<'a, Infallible, Theme, Renderer> {
         layers::Page {
             library: &self.library,
@@ -316,6 +326,7 @@ impl Movie {
                 lifted: curtain.is_some(),
                 held,
                 at,
+                now,
             },
             over: curtain.map(|curtain| self.curtain(store, curtain)),
         }
