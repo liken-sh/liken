@@ -17,10 +17,12 @@ const FRAME: Rectangle = Rectangle {
 
 // The sample's first film with a cast of twelve, so its one stripe, the
 // last row of the page, is longer than the frame is wide, at rest with
-// focus on this rung.
+// focus on this rung. Every sample film names one shared studio, and the
+// page draws no More from strip of it, so the stripe stays the last row.
 fn on(focus: Focus) -> Movie {
     let mut page =
         Movie::open("sample/features", "movie:sample:0001", &mut Catalog).expect("a sample film");
+    page.more = None;
     let slot = |part: usize| CreditSlot {
         name: format!("Player {part}"),
         role: format!("Part {part}"),

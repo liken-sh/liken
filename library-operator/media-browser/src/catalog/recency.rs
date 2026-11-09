@@ -37,6 +37,13 @@ pub const FILL: usize = SHOWN * 2;
 /// catalog whose newest arrivals are all one series.
 pub const PAGES: usize = 8;
 
+/// The fewest slots a drawn strip shows. A strip the day drew that reads
+/// fewer holds nothing, so a whole row never stands on two or three
+/// posters. A title page's More from strip takes the same floor. The
+/// recency strips, the libraries, the genres, and the franchises show
+/// whatever they hold, because they are not a draw.
+pub const FLOOR: usize = 4;
+
 /// A person enters the pool with more works than this. A person
 /// credited in one or two titles makes a strip of one or two slots.
 pub const WORKS_FLOOR: u64 = 3;

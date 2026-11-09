@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use super::super::{alike, details, files, item, people, progress, series};
+use super::super::{alike, details, files, item, people, progress, series, studios};
 use super::SCHEMA;
 use super::progress::PROGRESS_SCHEMA;
 
@@ -172,6 +172,34 @@ fn the_alike_read_requires_the_shipped_contributor_index() {
     requires_index("credits_library_contributor_item", |connection| {
         alike::films(connection, "test/films", "movie:1").map(|_| ())
     });
+}
+
+// The studios read runs once on every title page that opens, and no
+// index holds a title's studios, so it walks each item table. It walks
+// each one once: the outer loop is the table, and the names the page
+// asked for are the inner loop over each title's studios. With the names
+// outside, SQLite walks the table again for every name.
+#[test]
+fn the_studios_read_walks_each_item_table_once() {
+    let connection = shipped_schema();
+    let plan = studios::plan(&connection).unwrap();
+    let walks: Vec<&str> = plan
+        .iter()
+        .filter_map(|line| line.strip_prefix("SCAN "))
+        .map(|line| line.split(' ').next().unwrap_or_default())
+        .collect();
+    assert_eq!(
+        walks,
+        [
+            "movies",
+            "studio",
+            "json_each",
+            "series",
+            "studio",
+            "json_each"
+        ],
+        "{plan:#?}"
+    );
 }
 
 #[test]

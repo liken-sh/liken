@@ -62,12 +62,17 @@ pub mod stream;
 // this strip.
 pub mod alike;
 
+// The titles of each studio a title names, for the More from strip of a
+// title's page.
+pub mod studio;
+
 pub use alike::Alike;
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
 pub use identity::Identity;
 pub use mark::Mark;
 pub use progress::{Played, Progress, Reach, Resume, Seen, Touched, Work};
 pub use query::{Answer, Counts, Fold, GenreSort, InSeries, Order, Query, Slot, Sort};
+pub use studio::Studio;
 pub use subtitle::{Subtitle, Track};
 
 /// How many posters the tile of a library or a genre draws, as a 2x2.
@@ -533,6 +538,22 @@ pub trait Source {
     /// keeps no credits answers none.
     fn alike(&mut self, _library: &str, _id: &str) -> Vec<Alike> {
         Vec::new()
+    }
+
+    /// Every title of the catalog whose body names each of these
+    /// studios, one answer for each name in the order given, each newest
+    /// release first. The default reads each studio's wall, which a
+    /// source with few titles may keep. The local catalog answers all of
+    /// them in one statement, because a title's page reads it when it
+    /// opens.
+    fn studios(&mut self, names: &[String]) -> Vec<Studio> {
+        names
+            .iter()
+            .map(|name| Studio {
+                name: name.clone(),
+                titles: self.wall(&Query::studio(name)).slots,
+            })
+            .collect()
     }
 
     // Every franchise any of these works belongs to, each once, in the

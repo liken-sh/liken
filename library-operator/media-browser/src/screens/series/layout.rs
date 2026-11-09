@@ -183,6 +183,9 @@ pub struct Layout {
     pub franchises: Vec<f32>,
     /// The top of each stripe, in the wall's own space.
     pub stripes: Vec<f32>,
+    /// The top of the More from strip, in the wall's own space, and
+    /// nothing on a page that draws none.
+    pub more: Option<f32>,
     /// The top of the foot block, in the wall's own space.
     pub foot: f32,
     /// The top of the line that says the series holds no episodes, in
@@ -201,6 +204,7 @@ impl Layout {
         cells: wall::Cells,
         franchises: usize,
         stripes: usize,
+        more: bool,
         foot: f32,
     ) -> Self {
         let mut bands = Vec::with_capacity(seasons.len());
@@ -238,12 +242,19 @@ impl Layout {
             tops.push(top);
             top += people::HEIGHT;
         }
-        if stripes > 0 || franchises > 0 {
+        let more = more.then(|| {
+            top += STRIPE_GAP;
+            let at = top;
+            top += strip_height();
+            at
+        });
+        let rows = stripes > 0 || franchises > 0 || more.is_some();
+        if rows {
             top += STRIPE_GAP;
         }
         let mut block = top;
         if foot > 0.0 {
-            if stripes == 0 && franchises == 0 {
+            if !rows {
                 block += STRIPE_GAP;
             }
             top = block + foot + STRIPE_GAP;
@@ -253,6 +264,7 @@ impl Layout {
             bands,
             franchises: strips,
             stripes: tops,
+            more,
             foot: block,
             empty,
             content: top,
@@ -292,6 +304,15 @@ impl Layout {
                     };
                     (area(0.0, *top, 0.0, people::HEIGHT), tail)
                 }
+                None => return 0.0,
+            },
+            // The More from strip is the last row, so it pulls the foot
+            // under it into view, as the last stripe does.
+            Focus::More(..) => match self.more {
+                Some(top) => (
+                    area(0.0, top, 0.0, strip_height()),
+                    self.content - top - strip_height(),
+                ),
                 None => return 0.0,
             },
             // The foot is the last block, so a studio pulls the page's end

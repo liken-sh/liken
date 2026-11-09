@@ -58,6 +58,7 @@ impl Movie {
             | Focus::Franchise(..)
             | Focus::Stripe(..)
             | Focus::Like(_)
+            | Focus::More(_)
             | Focus::Studio(_) => None,
         }
     }

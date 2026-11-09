@@ -33,6 +33,9 @@ pub struct Serials {
     // between the last season and the stripes.
     pub franchise: bool,
     pub trailer: bool,
+    // Whether "A Network" aired four more serials than the two of the
+    // franchise, which puts a More from strip on the page.
+    pub made: bool,
     // The episode count of each season, or the three of SEASONS where the
     // test names none.
     pub seasons: Vec<i64>,
@@ -134,6 +137,45 @@ impl Source for Serials {
 
     fn wall(&mut self, _query: &Query) -> Answer {
         Answer::default()
+    }
+
+    // "A Studio" made this serial alone. "A Network" aired this one,
+    // "series:two", and four more where the test says so, newest first.
+    fn studios(&mut self, names: &[String]) -> Vec<crate::catalog::Studio> {
+        let aired: &[&str] = match self.made {
+            true => &[
+                "series:six",
+                "series:two",
+                "series:five",
+                SERIES,
+                "series:four",
+                "series:three",
+            ],
+            false => &["series:two", SERIES],
+        };
+        names
+            .iter()
+            .map(|name| crate::catalog::Studio {
+                name: name.clone(),
+                titles: match name.as_str() {
+                    "A Network" => aired,
+                    _ => &[SERIES],
+                }
+                .iter()
+                .map(|id| {
+                    crate::catalog::Slot::of(
+                        "screening/serials",
+                        "series",
+                        crate::catalog::Title {
+                            id: id.to_string(),
+                            title: format!("Serial {id}"),
+                            ..crate::catalog::Title::default()
+                        },
+                    )
+                })
+                .collect(),
+            })
+            .collect()
     }
 
     fn movie(&mut self, _library: &str, _id: &str) -> Option<MovieDetails> {
@@ -341,6 +383,7 @@ pub fn still(focus: Focus) -> usize {
         | Focus::Rail(..)
         | Focus::Franchise(..)
         | Focus::Stripe(..)
+        | Focus::More(..)
         | Focus::Studio(..) => {
             panic!("focus left the wall")
         }

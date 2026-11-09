@@ -38,7 +38,7 @@ impl Series {
                 let (side, fit) = RAIL;
                 rail::focused(placed.whole, &self.bars, Some(bar), side, fit)
             }
-            Focus::Franchise(..) | Focus::Stripe(..) => {
+            Focus::Franchise(..) | Focus::Stripe(..) | Focus::More(..) => {
                 rows(self, &placed, placed.offset, Some(self.focus))
                     .iter()
                     .find_map(Across::focused)

@@ -3,6 +3,7 @@
 
 mod alike;
 mod marks;
+mod more;
 mod resume;
 mod standing;
 mod studios;
@@ -49,6 +50,11 @@ struct Films {
     // about, which puts a More like this strip on a page with no set and
     // no franchise.
     alike: bool,
+    // Whether "A Studio" made more of the catalog than this set, which
+    // puts a More from strip on the page, and whether the body names that
+    // studio alone.
+    made: bool,
+    solo: bool,
     // How far the people at the screen got in each film.
     reach: std::collections::HashMap<crate::catalog::Work, crate::catalog::Reach>,
     // Every play of every film of this catalog, as the store answers them,
@@ -73,9 +79,10 @@ impl Films {
                 name: "A Player".into(),
                 role: "The Part".into(),
             }],
-            studios: match self.unproduced {
-                true => Vec::new(),
-                false => vec!["A Studio".into(), "Another Studio".into()],
+            studios: match (self.unproduced, self.solo) {
+                (true, _) => Vec::new(),
+                (false, true) => vec!["A Studio".into()],
+                (false, false) => vec!["A Studio".into(), "Another Studio".into()],
             },
             ratings: vec![
                 ("imdb".into(), 6.5),
@@ -240,6 +247,40 @@ impl Source for Films {
                 ),
                 score,
                 rating: 7.0,
+            })
+            .collect()
+    }
+
+    // "A Studio" made the three films of the set and four more, newest
+    // first, and "Another Studio" made only these three. So a page in no
+    // set shows six of A Studio's titles, and a page in the set or the
+    // franchise shows the four outside it.
+    fn studios(&mut self, names: &[String]) -> Vec<crate::catalog::Studio> {
+        let made: &[&str] = match self.made {
+            true => &["one", "four", "five", "six", "seven", "three", "two"],
+            false => &["one", "three", "two"],
+        };
+        names
+            .iter()
+            .map(|name| crate::catalog::Studio {
+                name: name.clone(),
+                titles: match name.as_str() {
+                    "A Studio" => made,
+                    _ => &["one", "three", "two"],
+                }
+                .iter()
+                .map(|id| {
+                    crate::catalog::Slot::of(
+                        "screening/films",
+                        "movies",
+                        Title {
+                            id: id.to_string(),
+                            title: format!("Film {id}"),
+                            ..Title::default()
+                        },
+                    )
+                })
+                .collect(),
             })
             .collect()
     }

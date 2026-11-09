@@ -1,8 +1,9 @@
 // A series' page. One screen holds the whole series: a header over the
 // backdrop, and under it a wall of episode stills in aired order, with a
 // divider before each season's first row, a strip for each franchise the
-// series belongs to after the last season, and the stripes of credited
-// people after those. The header stays at the top of the frame, because
+// series belongs to after the last season, the stripes of credited
+// people after those, the More from strip of one of its studios or
+// networks, and the other studios. The header stays at the top of the frame, because
 // it shows the focused episode's facts and plot.
 
 mod episode;
@@ -21,7 +22,9 @@ use super::franchise::strips::{Place, Strips};
 use super::movie::{marked_duration, row, watch};
 use super::{InFranchise, Step, facts, foot, stripes};
 use crate::catalog::draw::Date;
-use crate::catalog::{Progress, SeriesDetails, Source};
+use std::collections::HashSet;
+
+use crate::catalog::{Progress, SeriesDetails, Source, Work};
 use crate::clock::{self, Time};
 use crate::focus::Run;
 use crate::motion::{Glide, Rows};
@@ -52,6 +55,9 @@ pub enum Focus {
     Franchise(usize, Place),
     /// One headshot of one stripe: the stripe, and the slot in it.
     Stripe(usize, usize),
+    /// One slot of the More from strip: a title, or the See all slot
+    /// after the last title.
+    More(usize),
     /// One studio or network on the production line of the foot.
     Studio(usize),
 }
@@ -184,9 +190,13 @@ pub struct Series {
     pub franchises: Strips,
     /// The credited people, as the stripes after the last season.
     pub stripes: stripes::Stripes,
-    /// The studios the series' body names. The foot draws them whatever
-    /// episode holds focus.
+    /// The studios and networks the series' body names, except the one
+    /// the More from strip is about. The foot draws them whatever episode
+    /// holds focus.
     pub studios: Vec<String>,
+    /// The other titles of the first studio or network that made enough
+    /// of them, after the stripes, or nothing where none did.
+    pub more: Option<foot::more::More>,
     /// The studios and the focused episode's files, as the block after the
     /// last stripe.
     pub foot: foot::Foot,
@@ -271,6 +281,12 @@ impl Series {
         let (stills, seasons, bars) =
             seasons::wall_of(source.episodes(library, id), &Date::today().iso());
         let reach = pickup::Reach::of(&stills);
+        let franchises = Strips::of(library, id, source);
+        let more = foot::more::More::of(
+            source.studios(&details.studios),
+            &shown(library, id, &franchises),
+        );
+        let studios = foot::more::named(&details.studios, more.as_ref());
         Some(Self {
             library: library.to_string(),
             id: id.to_string(),
@@ -282,9 +298,10 @@ impl Series {
             ratings: ratings::scores(&details.ratings),
             tagline: details.tagline.clone(),
             plot: details.plot.clone(),
-            franchises: Strips::of(library, id, source),
+            franchises,
             stripes: stripes::Stripes::of(source.credits(library, id)),
-            studios: details.studios.clone(),
+            studios,
+            more,
             foot: foot::Foot::default(),
             seasons,
             stills,
@@ -361,6 +378,10 @@ impl Series {
                 Some((stripe, slot)) => Focus::Stripe(stripe, slot),
                 None => Focus::Still(0),
             },
+            Focus::More(index) => match &self.more {
+                Some(more) => Focus::More(index.min(more.count() - 1)),
+                None => Focus::Still(0),
+            },
             Focus::Studio(index) => match self.foot.studios().count() {
                 0 => Focus::Still(0),
                 count => Focus::Studio(index.min(count - 1)),
@@ -380,6 +401,7 @@ impl Series {
             | Focus::Rail(..)
             | Focus::Franchise(..)
             | Focus::Stripe(..)
+            | Focus::More(..)
             | Focus::Studio(..) => None,
         }
     }
@@ -458,6 +480,7 @@ impl Series {
             Focus::Rail(bar) => self.on_rail(bar, key, source),
             Focus::Franchise(strip, place) => self.on_franchise((strip, place), key, source),
             Focus::Stripe(stripe, slot) => self.on_stripe((stripe, slot), key, source),
+            Focus::More(index) => self.on_more(index, key, source),
             Focus::Studio(index) => self.on_studio(index, key, source),
         };
         // A press that leaves the row of the arrival shows the wall, and a
@@ -472,6 +495,19 @@ impl Series {
             false => step,
         }
     }
+}
+
+// The titles the page already draws: its own, and the members of its
+// franchise strips, which the More from strip leaves out.
+fn shown(library: &str, id: &str, franchises: &Strips) -> HashSet<Work> {
+    let members = franchises
+        .bands()
+        .iter()
+        .flat_map(|band| band.members.iter())
+        .map(|item| (item.library.clone(), item.id.clone()));
+    std::iter::once((library.to_string(), id.to_string()))
+        .chain(members)
+        .collect()
 }
 
 /// The facts line of one series: the year, the season count, the

@@ -7,7 +7,7 @@
 use super::resume;
 use crate::audience::Viewer;
 use crate::catalog::pool::Candidate;
-use crate::catalog::recency::SHOWN;
+use crate::catalog::recency::{FLOOR, SHOWN};
 use crate::catalog::{
     Fold, FranchiseEntry, GenreEntry, GenreSort, LibraryEntry, Order, Query, Sort, Source,
     library_name,
@@ -17,12 +17,6 @@ use crate::screens;
 use crate::screens::wall::Wall;
 use crate::screens::{Item, Screen, Step, credits, facts, franchise, person, slots};
 use crate::views::{card, strip};
-
-// The fewest slots a drawn strip shows. A strip the day drew that
-// reads fewer holds nothing, so a whole row never stands on two or
-// three posters. The recency strips, the libraries, the genres, and the
-// franchises show whatever they hold, because they are not a draw.
-const FLOOR: usize = 4;
 
 // The kind an item of the libraries strip carries, so a select on it
 // opens the library's wall and never a page.

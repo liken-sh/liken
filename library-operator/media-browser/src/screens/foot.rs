@@ -10,6 +10,10 @@
 // is not about. The names are measured by the shaper once, at the read,
 // so the boxes the outline goes around are the ones the names draw in.
 
+// The More from strip, which takes one studio's place on the production
+// line.
+pub mod more;
+
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Point, Rectangle};

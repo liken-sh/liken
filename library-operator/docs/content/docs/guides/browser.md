@@ -273,17 +273,32 @@ score, then the higher IMDb rating. Enter on a film opens its page, and
 back returns here. A film that shares nobody with another draws no
 strip.
 
-The end of a movie's page names the studios after `Produced by`. Down
-from the last stripe of people, or from More like this, puts focus on
-the first studio, left and
-right move between the studios, and Enter opens the studio's wall: every
-movie and series of the catalog whose `.nfo` file names that studio, in
-every library, newest first, under a heading such as
-`Gullwing Pictures · 7 movies, 2 series`. The rail's sort button cycles the wall between
-`Newest`, `Oldest`, and `Title`. A studio is matched by its exact name,
-so `Fox Searchlight Pictures` and `Searchlight Pictures` are two walls.
-A series' page names its studios and networks at its end the same way,
-and each one opens a wall.
+A studio that made more of the catalog draws a strip under that, such
+as `More from Gullwing Pictures`: the other movies and series of the
+catalog whose `.nfo` file names that studio, in every library, newest
+release first. The strip leaves out the film itself and the films its
+set strip and its franchise strips already show. A studio draws the
+strip only when at least 4 such titles remain, the floor the home page
+sets for the strips it draws each day, and the strip shows the newest
+24, as a strip of the home page does. A See all slot ends it and opens the studio's wall.
+When several studios of the film qualify, the first one the `.nfo` file
+names draws the strip, so the page is the same every time it opens.
+Enter on a title opens its page, and back returns here.
+
+The end of a movie's page names the other studios after `Produced by`.
+The studio of the More from strip is not on that line, and a film whose
+only studio draws the strip has no line. Down from the last stripe of
+people, from More like this, or from More from puts focus on the first
+studio, left and right move between the studios, and Enter opens the
+studio's wall: every movie and series of the catalog whose `.nfo` file
+names that studio, in every library, newest first, under a heading such
+as `Gullwing Pictures · 7 movies, 2 series`. The rail's sort button
+cycles the wall between `Newest`, `Oldest`, and `Title`. A studio is
+matched by its exact name, so `Fox Searchlight Pictures` and
+`Searchlight Pictures` are two walls and two strips. A series' page
+draws the More from strip for its studios and networks by the same
+rule, under its people, and names the others at its end the same way,
+each of which opens a wall.
 
 Under the studios, the Files
 section shows each video file of the film, so you can see which copy a

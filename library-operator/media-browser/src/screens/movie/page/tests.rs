@@ -50,6 +50,7 @@ fn crowded(focus: Focus) -> Movie {
     Movie {
         franchises: crate::screens::franchise::strips::Strips::default(),
         like: None,
+        more: None,
         library: "screening/films".into(),
         id: "one".into(),
         title: "A Long Title That Wraps Onto Two".into(),
@@ -343,24 +344,86 @@ fn the_more_like_this_strip_follows_the_stripes_and_the_studios_follow_it() {
     assert!(marked.is_some_and(|around| around.y >= like.top - offset));
 }
 
-// More like this and the studios on the foot scroll like every other row,
-// so focus on either rests under the strip's line.
+// One film like the crowded one, for its More like this strip.
+fn like() -> Option<crate::screens::movie::alike::Like> {
+    crate::screens::movie::alike::Like::of(vec![crate::catalog::Alike {
+        slot: crate::catalog::Slot {
+            library: "screening/films".into(),
+            kind: "movies".into(),
+            id: "two".into(),
+            ..crate::catalog::Slot::default()
+        },
+        score: 3,
+        rating: 0.0,
+    }])
+}
+
+// A studio that made twelve more films, for the More from strip.
+fn more() -> Option<foot::more::More> {
+    let titles = (0..12)
+        .map(|number| crate::catalog::Slot {
+            library: "screening/films".into(),
+            kind: "movies".into(),
+            id: format!("made:{number}"),
+            ..crate::catalog::Slot::default()
+        })
+        .collect();
+    foot::more::More::of(
+        vec![crate::catalog::Studio {
+            name: "A Studio".into(),
+            titles,
+        }],
+        &Default::default(),
+    )
+}
+
+// More from follows More like this, and the studios that stay names
+// follow it.
 #[test]
-fn focus_on_more_like_this_and_on_a_studio_rests_under_the_strip() {
+fn the_more_from_strip_follows_more_like_this_and_the_studios_follow_it() {
+    let mut movie = crowded(Focus::More(0));
+    movie.set = None;
+    movie.like = like();
+    movie.more = more();
+    let blocks = blocks(&movie);
+    let like = blocks.like.expect("the page draws More like this");
+    let more = blocks.more.expect("the page draws More from");
+    assert_eq!(more.top, like.bottom() + GAP + STRIPE_LEAD);
+    assert_eq!(more.height, strip::height(card::LINES));
+    assert_eq!(blocks.foot.top, more.bottom() + GAP + STRIPE_LEAD);
+    assert_eq!(blocks.after(like), more.top);
+}
+
+// A page whose one studio drew the strip ends at the strip's foot, with
+// no production line under it.
+#[test]
+fn a_page_whose_studio_line_is_empty_ends_after_the_more_from_strip() {
+    let mut movie = crowded(Focus::More(0));
+    movie.foot = foot::Foot::of(&[], &[]);
+    movie.files = files::Files::default();
+    movie.more = more();
+    let blocks = blocks(&movie);
+    let more = blocks.more.expect("the page draws More from");
+    assert_eq!(blocks.content, more.bottom() + FOOT);
+}
+
+// More like this, every slot of More from, and the studios on the foot
+// scroll like every other row, so focus on any of them rests under the
+// strip's line.
+#[test]
+fn focus_on_the_strips_of_the_foot_and_on_a_studio_rests_under_the_strip() {
+    let see_all = more().expect("the studio made enough").count() - 1;
     for height in [HEIGHT, SHORT] {
-        for focus in [Focus::Like(0), Focus::Studio(0)] {
+        for focus in [
+            Focus::Like(0),
+            Focus::More(0),
+            Focus::More(see_all),
+            Focus::Studio(0),
+        ] {
             let mut movie = crowded(focus);
             movie.set = None;
-            movie.like = crate::screens::movie::alike::Like::of(vec![crate::catalog::Alike {
-                slot: crate::catalog::Slot {
-                    library: "screening/films".into(),
-                    kind: "movies".into(),
-                    id: "two".into(),
-                    ..crate::catalog::Slot::default()
-                },
-                score: 3,
-                rating: 0.0,
-            }]);
+            movie.like = like();
+            movie.more = more();
             let frame = area(0.0, 0.0, WIDTH, height);
             let marked = movie.marked(frame).expect("the page marks the focus");
             assert!(
@@ -368,6 +431,7 @@ fn focus_on_more_like_this_and_on_a_studio_rests_under_the_strip() {
                 "{focus:?} at {height}: {marked:?}"
             );
             assert!(marked.y + marked.height <= height, "{focus:?} at {height}");
+            assert!(marked.x + marked.width <= WIDTH, "{focus:?} at {height}");
         }
     }
 }

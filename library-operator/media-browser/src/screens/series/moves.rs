@@ -1,7 +1,7 @@
 // The moves across a series' page outside an episode's row: the series'
 // own button row, the wall of stills, the seasons rail beside it, and the
-// franchise strips, the stripes of people, and the studios under it. `episode.rs` holds
-// the moves inside an episode's row.
+// franchise strips, the stripes of people, the More from strip, and the
+// studios under it. `episode.rs` holds the moves inside an episode's row.
 
 use super::{COLUMNS, Focus, Series, seasons};
 use crate::catalog::{Query, Selection, Source};
@@ -99,16 +99,55 @@ impl Series {
     }
 
     // The rung under the last row of stills: the first franchise strip,
-    // then the first stripe, then the first studio, and the still itself
-    // where the page holds none of them.
+    // then the first stripe, then the More from strip, then the first
+    // studio, and the still itself where the page holds none of them.
     fn under_wall(&self, index: usize) -> Focus {
         if let Some((strip, place)) = self.franchises.first() {
             return Focus::Franchise(strip, place);
         }
         match self.stripes.first() {
             Some((stripe, slot)) => Focus::Stripe(stripe, slot),
-            None => self.studios().unwrap_or(Focus::Still(index)),
+            None => self.after_stripes().unwrap_or(Focus::Still(index)),
         }
+    }
+
+    // The rung under the stripes: the More from strip, then the first
+    // studio, and nothing where the page holds neither.
+    fn after_stripes(&self) -> Option<Focus> {
+        match self.more {
+            Some(_) => Some(Focus::More(0)),
+            None => self.studios(),
+        }
+    }
+
+    // The rung over the More from strip: the last stripe, the last
+    // franchise strip, or the wall's last still, and nothing where the
+    // page holds none of them.
+    fn over_more(&self) -> Option<Focus> {
+        match (self.stripes.last(), self.franchises.last()) {
+            (Some((stripe, slot)), _) => Some(Focus::Stripe(stripe, slot)),
+            (None, Some((strip, place))) => Some(Focus::Franchise(strip, place)),
+            (None, None) => self.stills.len().checked_sub(1).map(Focus::Still),
+        }
+    }
+
+    // One press on the More from strip. Select opens a title's page over
+    // this one, or the wall of the studio from the See all slot.
+    pub(super) fn on_more(&mut self, index: usize, key: &str, source: &mut dyn Source) -> Step {
+        let Some(more) = &self.more else {
+            self.focus = Focus::Still(0);
+            return Step::Stay;
+        };
+        match key {
+            "enter" => return more.select(index, source),
+            "up" => {
+                self.focus = self.over_more().unwrap_or(self.focus);
+                self.refoot(source);
+            }
+            "down" => self.focus = self.studios().unwrap_or(self.focus),
+            _ => self.focus = Focus::More(focus::row(index, more.count(), key)),
+        }
+        Step::Stay
     }
 
     // The first studio, which the block over the foot moves down onto,
@@ -132,13 +171,9 @@ impl Series {
                 };
             }
             "up" => {
-                self.focus = match (self.stripes.last(), self.franchises.last()) {
-                    (Some((stripe, slot)), _) => Focus::Stripe(stripe, slot),
-                    (None, Some((strip, place))) => Focus::Franchise(strip, place),
-                    (None, None) => match self.stills.len() {
-                        0 => Focus::Studio(index),
-                        count => Focus::Still(count - 1),
-                    },
+                self.focus = match self.more {
+                    Some(_) => Focus::More(0),
+                    None => self.over_more().unwrap_or(Focus::Studio(index)),
                 };
                 self.refoot(source);
             }
@@ -183,7 +218,9 @@ impl Series {
             },
             Move::Below => match self.stripes.first() {
                 Some((stripe, slot)) => Focus::Stripe(stripe, slot),
-                None => self.studios().unwrap_or(Focus::Franchise(rung.0, rung.1)),
+                None => self
+                    .after_stripes()
+                    .unwrap_or(Focus::Franchise(rung.0, rung.1)),
             },
         };
         self.refoot(source);
@@ -217,7 +254,7 @@ impl Series {
             };
         }
         if key == "down" && self.stripes.last() == Some((rung.0, 0)) {
-            self.focus = self.studios().unwrap_or(self.focus);
+            self.focus = self.after_stripes().unwrap_or(self.focus);
             return Step::Stay;
         }
         self.focus = match self.stripes.key(rung, key) {

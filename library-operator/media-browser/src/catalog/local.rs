@@ -17,8 +17,8 @@ use crate::catalog::stream::Tracks;
 use crate::catalog::{
     Alike, Answer, Change, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry,
     Identity, LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Progress,
-    Query, Reach, Resume, Seen, Selection, SeriesDetails, Slot, Sort, Source, TILES, Touched, Work,
-    library_name, recency,
+    Query, Reach, Resume, Seen, Selection, SeriesDetails, Slot, Sort, Source, Studio, TILES,
+    Touched, Work, library_name, recency,
 };
 use crate::harness::Waker;
 use crate::tracks::Preferences;
@@ -554,6 +554,10 @@ impl Source for LocalCatalog {
 
     fn alike(&mut self, library: &str, id: &str) -> Vec<Alike> {
         self.read(|connection| alike::films(connection, library, id))
+    }
+
+    fn studios(&mut self, names: &[String]) -> Vec<Studio> {
+        self.read(|connection| studios::named(connection, names))
     }
 
     fn franchises_of(&mut self, library: &str, id: &str) -> Vec<Membership> {

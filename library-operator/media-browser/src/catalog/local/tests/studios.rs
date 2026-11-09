@@ -99,3 +99,80 @@ fn a_studio_no_title_names_answers_an_empty_wall() {
     let answer = source.wall(&Query::studio("Gullwing"));
     assert!(answer.slots.is_empty());
 }
+
+// The titles of each studio a page reads in one statement: the titles
+// each studio's wall holds newest first, one answer for each name in the
+// order the page gave.
+fn studios(source: &mut LocalCatalog, names: &[&str]) -> Vec<(String, Vec<String>)> {
+    let names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+    source
+        .studios(&names)
+        .into_iter()
+        .map(|studio| {
+            let ids = studio.titles.iter().map(|slot| slot.id.clone()).collect();
+            (studio.name, ids)
+        })
+        .collect()
+}
+
+#[test]
+fn the_studios_read_answers_each_name_in_order_with_its_wall_s_titles() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    gullwing(&path);
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    assert_eq!(
+        studios(
+            &mut source,
+            &["Lantern Works", "Gullwing Pictures", "Gullwing"]
+        ),
+        [
+            ("Lantern Works".to_string(), vec!["b".to_string()]),
+            (
+                "Gullwing Pictures".to_string(),
+                vec!["b".to_string(), "a".to_string(), "c".to_string()]
+            ),
+            ("Gullwing".to_string(), Vec::new()),
+        ]
+    );
+}
+
+#[test]
+fn the_studios_read_carries_each_title_s_library_and_kind() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    gullwing(&path);
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    let found = source.studios(&["Gullwing Pictures".to_string()]);
+    let places: Vec<(&str, &str, &str)> = found[0]
+        .titles
+        .iter()
+        .map(|slot| {
+            (
+                slot.library.as_str(),
+                slot.kind.as_str(),
+                slot.released.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        places,
+        [
+            (FILMS, "movies", "2004"),
+            (FILMS, "movies", "1999"),
+            (SHOWS, "series", "1994"),
+        ]
+    );
+}
+
+#[test]
+fn the_studios_read_of_no_name_answers_none() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    gullwing(&path);
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    assert!(source.studios(&[]).is_empty());
+}

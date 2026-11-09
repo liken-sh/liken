@@ -203,6 +203,7 @@ pub(super) fn placed(series: &Series, bounds: Rectangle) -> Placed {
         cells,
         series.franchises.bands().len(),
         series.stripes.bands().len(),
+        series.more.is_some(),
         series.foot.height(region.width - 2.0 * inset),
     );
     let offset = layout.scroll(seasons::standing(series), &series.seasons, region.height);
@@ -248,8 +249,8 @@ pub(super) fn stills<'a>(
 }
 
 /// The rows the wall scrolls across, in the page's order: the franchise
-/// strips, then the stripes of people, at this scroll down and with focus
-/// where `focus` puts it.
+/// strips, then the stripes of people, then the More from strip, at this
+/// scroll down and with focus where `focus` puts it.
 pub(super) fn rows<'a>(
     series: &'a Series,
     wall: &Placed,
@@ -307,6 +308,26 @@ pub(super) fn rows<'a>(
             heading: band.heading,
             library: &series.library,
             region: place(*top, people::HEIGHT),
+            scroll: None,
+        }));
+    }
+    if let (Some(more), Some(top)) = (&series.more, wall.layout.more) {
+        rows.push(Across::Strip(strip::Strip {
+            faces: None,
+            room: None,
+            members: &more.members,
+            current: None,
+            kept: None,
+            focus: match focus {
+                Some(Focus::More(index)) => Some(index),
+                _ => None,
+            },
+            heading: &more.heading,
+            library: &series.library,
+            last: Some(more.last()),
+            lines: card::LINES,
+            headed: false,
+            region: place(top, layout::strip_height()),
             scroll: None,
         }));
     }

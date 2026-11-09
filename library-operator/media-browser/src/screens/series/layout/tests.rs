@@ -30,18 +30,18 @@ fn cells() -> wall::Cells {
 }
 
 fn layout() -> Layout {
-    Layout::of(&seasons(), cells(), 0, 0, 0.0)
+    Layout::of(&seasons(), cells(), 0, 0, false, 0.0)
 }
 
 // The same wall with the three stripes of a title's credits
 // after it.
 fn with_stripes() -> Layout {
-    Layout::of(&seasons(), cells(), 0, 3, 0.0)
+    Layout::of(&seasons(), cells(), 0, 3, false, 0.0)
 }
 
 // The same wall, its stripes, and a foot of two lines under them.
 fn with_foot() -> Layout {
-    Layout::of(&seasons(), cells(), 0, 3, FOOT_LINES)
+    Layout::of(&seasons(), cells(), 0, 3, false, FOOT_LINES)
 }
 
 // The height of a foot of two lines.
@@ -163,7 +163,7 @@ fn the_stripes_follow_the_last_season_of_the_wall() {
 // The same wall with one franchise strip between the seasons and
 // the stripes.
 fn with_franchise() -> Layout {
-    Layout::of(&seasons(), cells(), 1, 3, 0.0)
+    Layout::of(&seasons(), cells(), 1, 3, false, 0.0)
 }
 
 #[test]
@@ -184,6 +184,40 @@ fn a_franchise_strip_stands_between_the_last_season_and_the_stripes() {
         layout.franchises[0] + strip_height() + STRIPE_GAP
     );
     assert!((layout.content - plain.content - strip_height() - STRIPE_GAP).abs() < 1e-3);
+}
+
+// The same wall with its stripes, a More from strip, and a foot.
+fn with_more() -> Layout {
+    Layout::of(&seasons(), cells(), 0, 3, true, FOOT_LINES)
+}
+
+#[test]
+fn the_more_from_strip_stands_between_the_last_stripe_and_the_foot() {
+    let plain = with_foot();
+    let layout = with_more();
+    let top = layout.more.expect("the layout places the strip");
+    assert_eq!(plain.more, None);
+    assert_eq!(top, plain.stripes[2] + people::HEIGHT + STRIPE_GAP);
+    assert_eq!(layout.foot, top + strip_height() + STRIPE_GAP);
+    assert!((layout.content - plain.content - strip_height() - STRIPE_GAP).abs() < 1e-3);
+}
+
+// A series with no stripe still keeps a gap between the strip and the
+// foot, and the strip pulls the foot into view.
+#[test]
+fn the_more_from_strip_pulls_the_foot_into_view() {
+    let height = region(frame()).height;
+    for layout in [
+        with_more(),
+        Layout::of(&seasons(), cells(), 0, 0, true, FOOT_LINES),
+    ] {
+        let top = layout.more.expect("the layout places the strip");
+        assert_eq!(layout.foot, top + strip_height() + STRIPE_GAP);
+        let offset = layout.scroll(Focus::More(0), &seasons(), height);
+        assert!(top - offset >= 0.0);
+        assert!(layout.foot + FOOT_LINES - offset <= height);
+    }
+    assert_eq!(layout().scroll(Focus::More(0), &seasons(), height), 0.0);
 }
 
 #[test]
@@ -210,18 +244,21 @@ fn the_foot_follows_the_last_stripe_and_ends_the_wall() {
 
 #[test]
 fn a_series_with_no_episodes_says_so_where_its_first_season_would_start() {
-    let empty = Layout::of(&[], cells(), 0, 3, FOOT_LINES);
+    let empty = Layout::of(&[], cells(), 0, 3, false, FOOT_LINES);
     let line = empty.empty.expect("a wall of no seasons draws the line");
 
     assert_eq!(line, HEAD);
     assert!(empty.stripes[0] >= line + text::height(1, look::FACTS) + STRIPE_GAP);
-    assert_eq!(empty.empty, Layout::of(&[], cells(), 0, 0, 0.0).empty);
+    assert_eq!(
+        empty.empty,
+        Layout::of(&[], cells(), 0, 0, false, 0.0).empty
+    );
     assert_eq!(layout().empty, None);
 }
 
 #[test]
 fn a_wall_with_no_stripe_still_leaves_a_gap_over_its_foot() {
-    let layout = Layout::of(&seasons(), cells(), 0, 0, FOOT_LINES);
+    let layout = Layout::of(&seasons(), cells(), 0, 0, false, FOOT_LINES);
     assert_eq!(
         layout.foot,
         layout.bands[2].top + layout.bands[2].height + STRIPE_GAP
@@ -298,13 +335,13 @@ fn the_scroll_stops_at_the_foot_of_the_wall() {
 
 #[test]
 fn a_wall_shorter_than_its_region_never_scrolls() {
-    let layout = Layout::of(&seasons()[..1], cells(), 0, 0, 0.0);
+    let layout = Layout::of(&seasons()[..1], cells(), 0, 0, false, 0.0);
     assert_eq!(layout.scroll(Focus::Still(7), &seasons()[..1], 2000.0), 0.0);
 }
 
 #[test]
 fn a_series_with_no_episodes_never_scrolls() {
-    let layout = Layout::of(&[], cells(), 0, 0, 0.0);
+    let layout = Layout::of(&[], cells(), 0, 0, false, 0.0);
     assert_eq!(layout.content, HEAD + text::height(1, look::FACTS));
     assert_eq!(layout.scroll(Focus::Still(0), &[], 1080.0), 0.0);
 }
