@@ -310,7 +310,7 @@ func TestTheAppearancesWorkerWritesTheLedger(t *testing.T) {
 	item := seedAppearancesMovie(t, root)
 	seedAppearancesModels(t)
 	seedRenderNodes(t)
-	calls := standInAppearances{record: detectionsLine(t, item.Size),
+	calls := standInAppearances{record: detectionsLine(t, item.Size) + detectionsSamples(10, []int{0, 1, 2}),
 		document: matchDocumentFor(appearancesFile, item.Size)}.install(t)
 	work, log := testFactWorker(t, appearancesWorker, libraryKindMovies, root)
 
@@ -339,6 +339,7 @@ func TestTheAppearancesWorkerWritesTheLedger(t *testing.T) {
 		},
 		Unmatched: []appearancesPerson{{Contributor: ".contributors/bo/bo-reyes", Name: "Bo Reyes", Headshot: "missing"}},
 		Named:     appearancesNamed{Headshot: 2, Film: 1}, People: 1,
+		Faceless: &timeSpan{Start: 3001, End: 9001},
 	}
 	if len(ledger.Appearances) != 1 || !sameAppearances(ledger.Appearances[0], want) {
 		t.Errorf("appearances = %+v, want %+v", ledger.Appearances, want)

@@ -60,6 +60,7 @@ type replacedFile struct {
 func (r *walkResult) settleFacts() {
 	identities := r.identities
 	r.identities = nil
+	unread := r.fillFaceless()
 	r.dropEarlierOutputs(identities)
 	r.dropReshownOutputs()
 	outputs := r.outputsOnVolume()
@@ -72,7 +73,8 @@ func (r *walkResult) settleFacts() {
 			}
 			continue
 		}
-		if attempt.Result == attemptFound && (!outputs.hold(attempt) || uncountedProbe(attempt, identities)) {
+		if attempt.Result == attemptFound && (!outputs.hold(attempt) || uncountedProbe(attempt, identities) ||
+			(attempt.Fact == factAppearances && unread[attempt.Item])) {
 			r.reopened.missing++
 			continue
 		}

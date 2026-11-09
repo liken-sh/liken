@@ -120,6 +120,13 @@ func (w *factWorkerRun) appearancesOne(ctx context.Context, item workItem) {
 		w.failAppearances(ctx, absolute, folder, entry, err)
 		return
 	}
+	faceless, err := readFacelessTail(absolute)
+	if err != nil {
+		w.logf("could not read the faceless end of %s: %v", w.named(absolute), err)
+		w.failAppearances(ctx, absolute, folder, entry, err)
+		return
+	}
+	answer.Faceless = &faceless
 	people := "1 person"
 	if answer.People != 1 {
 		people = fmt.Sprintf("%d people", answer.People)

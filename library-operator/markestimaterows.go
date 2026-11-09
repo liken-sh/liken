@@ -88,21 +88,25 @@ func sameEdge(a, b *int64) bool {
 }
 
 // The primary video of every movie and episode of the library that has a
-// length, with the chapters the probe found and the series and season of an
-// episode.
+// length, with the chapters the probe found, the series and season of an
+// episode, the faceless end of its detections record, and whether a film's
+// genres include Animation.
 func (c *Catalog) estimateFiles(ctx context.Context, library string) ([]estimateFile, error) {
 	var files []estimateFile
 	err := c.stream(ctx, `SELECT files.path, files.duration_ms, files.credits_chapter_ms, `+
 		`files.intro_chapter_start_ms, files.intro_chapter_end_ms, `+
-		`IFNULL(MIN(episodes.series), ''), IFNULL(MIN(episodes.season), 0) FROM files `+
+		`IFNULL(MIN(episodes.series), ''), IFNULL(MIN(episodes.season), 0), files.faceless_tail_ms, `+
+		`COUNT(drawn.item) > 0 FROM files `+
 		`JOIN file_items ON file_items.library = files.library AND file_items.path = files.path `+
 		`LEFT JOIN movies ON movies.library = file_items.library AND movies.id = file_items.item `+
 		`LEFT JOIN episodes ON episodes.library = file_items.library AND episodes.id = file_items.item `+
+		`LEFT JOIN genres AS drawn ON drawn.library = movies.library AND drawn.item = movies.id `+
+		`AND lower(drawn.genre) = lower('`+animationGenre+`') `+
 		`WHERE files.library = ? AND files.type = '`+fileTypeVideo+`' AND files.role = '`+fileRolePrimary+`' `+
 		`AND files.duration_ms > 0 AND (movies.id IS NOT NULL OR episodes.id IS NOT NULL) `+
 		`GROUP BY files.path ORDER BY files.path`,
 		[]any{library}, func(cells []any) error {
-			if len(cells) < 7 {
+			if len(cells) < 9 {
 				return nil
 			}
 			path, _ := cells[0].(string)
@@ -111,6 +115,7 @@ func (c *Catalog) estimateFiles(ctx context.Context, library string) ([]estimate
 				path: path, duration: cellNumber(cells[1]), chapter: cellNumber(cells[2]),
 				intro:  timeSpan{Start: cellNumber(cells[3]), End: cellNumber(cells[4])},
 				series: series, season: int(cellNumber(cells[6])),
+				faceless: cellNumber(cells[7]), animation: cellNumber(cells[8]) != 0,
 			})
 			return nil
 		})

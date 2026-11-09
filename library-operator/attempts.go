@@ -216,6 +216,8 @@ type likenRows struct {
 	marks    []markRow
 	// The alternate titles the folder's ledger holds for its own title.
 	alternateTitles []alternateTitle
+	// The faceless end of each video the appearances ledger answers for.
+	faceless []facelessAnswer
 	// The stale partial files the listing of the .liken directory found.
 	stale []string
 	// The art files a fact wrote under a season mapping that is no longer the
@@ -271,6 +273,8 @@ func (s likenDir) read(now time.Time) (likenRows, error) {
 		case factMarks:
 			held.marks = append(held.marks, s.markRows(slices.DeleteFunc(ledger.Marks,
 				func(mark markEntry) bool { return reshown[mark.Path] }))...)
+		case factAppearances:
+			held.faceless = append(held.faceless, s.facelessAnswers(ledger.Appearances)...)
 		}
 		for _, attempt := range ledger.Attempts {
 			item := s.itemOf(fact, attempt.Path)
@@ -325,6 +329,7 @@ func readLikenDir(liken likenDir, result *walkResult) []alternateTitle {
 	result.credits = append(result.credits, held.credits...)
 	result.trailers = append(result.trailers, held.trailers...)
 	result.marks = append(result.marks, held.marks...)
+	result.faceless = append(result.faceless, held.faceless...)
 	result.reshown = append(result.reshown, held.reshown...)
 	return held.alternateTitles
 }

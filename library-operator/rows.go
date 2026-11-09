@@ -203,7 +203,10 @@ type fileRow struct {
 	// How many timed cues a text subtitle file holds, from the probe
 	// ledger, and nil where the probe has counted none.
 	Events *int64
-	Items  []string
+	// The start of the final faceless run of a video's detections record,
+	// from the appearances ledger, and zero for none.
+	FacelessTailMs int64
+	Items          []string
 }
 
 // fileItemKey names one row of the link table: the file's path, and the id of

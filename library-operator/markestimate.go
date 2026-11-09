@@ -9,14 +9,16 @@ package main
 // candidate in the marks table, with the source `estimate`, beside the
 // provider marks, and every reader takes it the way it takes a provider's.
 //
-// The clues come in two tiers. The exact tier is what names the span in the
+// The clues come in three tiers. The exact tier is what names the span in the
 // file itself or for the work: the providers' marks, a chapter whose title
 // names the span, and for the credits the start of a `preview` span. The
 // inferred tier is used only where the exact tier has nothing: the span the
 // other episodes of the series have, and the quiet stretches in a subtitle
 // file beside the video. In each tier the earliest clue wins, because a card
 // that rises a little early costs less than one that rises after the
-// credits have run.
+// credits have run. The third tier, for the credits of a film alone, is the
+// faceless end of the film's detections record (markfaces.go), used only
+// where both tiers above it have nothing.
 
 import (
 	"math"
@@ -104,6 +106,11 @@ type estimateFile struct {
 	intro    timeSpan
 	marks    []markRow
 	dialogue *subtitleDialogue
+	// The start of the final run of the detections record with no face,
+	// and 0 for none, and whether the title's genres include Animation.
+	// markfaces.go reads both.
+	faceless  int64
+	animation bool
 }
 
 // The siblings a file is measured against for the credits: the episodes of
@@ -291,7 +298,12 @@ func (f estimateFile) creditsEstimate(siblings []int64) (markRow, bool) {
 	}
 	inferred = slices.DeleteFunc(inferred, func(start int64) bool { return !f.secondHalf(start) })
 	if len(inferred) == 0 {
-		return markRow{}, false
+		start, held := f.facelessCredits()
+		if !held {
+			return markRow{}, false
+		}
+		row.Start, row.Source = &start, markSourceFaces
+		return row, true
 	}
 	start := slices.Min(inferred)
 	row.Start = &start

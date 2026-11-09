@@ -256,6 +256,12 @@ CREATE TABLE files (
     -- subtitle file the probe has not counted, because no count is not a
     -- count of zero. The streams table holds the count of an embedded track.
     events INTEGER,
+    -- On a video, faceless_tail_ms is the start of the final run of
+    -- samples with no face in the detections record of the appearances
+    -- tool, from the appearances ledger, and 0 where the record ends on a
+    -- face or the ledger holds no answer for the file. The marks estimate
+    -- reads it as the last clue to a film's credits. See markfaces.go.
+    faceless_tail_ms INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (library, path)
 );
 

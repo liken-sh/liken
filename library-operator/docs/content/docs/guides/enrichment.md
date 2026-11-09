@@ -521,6 +521,12 @@ For each video, the worker runs two passes of the `appearances` tool:
    name one actor, and they are at least 30% of the faces close to it.
    The match takes 1 to 5 seconds, and it runs on the CPU.
 
+After the match, the worker reads the detections record once more for
+its faceless end: the last run of one-second samples in which the
+detector found no face. End credits are text, so this run is where the
+credits of most live-action films start, and the
+[estimated marks](#estimated-marks) read it.
+
 The worker writes the answer to `.liken/appearances.yaml` beside the
 video, one entry per file:
 
@@ -537,6 +543,9 @@ video, one entry per file:
             - {contributor: .contributors/bo/bo-reyes, name: Bo Reyes, headshot: missing}
           named: {headshot: 4326, film: 921}
           people: 21
+          faceless:
+            start: 7051006
+            end: 7469351
     attempts:
         - path: Example Movie (2019).mkv
           at: 2026-10-01T12:00:00Z
@@ -547,7 +556,12 @@ embedding model, the threshold, the margin, and each actor's headshot
 with its hash. `named` counts the faces each pass named, and `people`
 counts the actors they name. `unmatched` lists the actors who cannot be
 named, because their entry holds no headshot or the detector found no
-face in it.
+face in it. `faceless` is the faceless end in milliseconds, from the
+first sample of the run to the last sample of the record. Its `start`
+and `end` are the same where the last sample holds a face. An entry
+with no `faceless` was written before the worker read the faceless end,
+so the walk opens its video to the worker again, and the worker reads
+the record on the volume and runs the match without a decode.
 
 The faces themselves are in `.liken/appearances/<file>.matches.json`
 beside the video, one JSON document of 0.4 to 0.8 MB for a film. Each
@@ -993,14 +1007,26 @@ provider's candidate. Nothing on the volume holds an estimate, so it
 needs no `marks` provider, and a rebuilt catalog gets it again at the
 end of its next `Job`.
 
-The clues come in two tiers, and the second is read only when the first
-has nothing:
+The clues come in three tiers, and each is read only when the tiers
+above it have nothing:
 
 | Tier | Credits, in the second half of the file | Intro, in the first half |
 |---|---|---|
 | exact | the providers' credits spans, a chapter whose title names the credits, such as `End Credits` or `Outro`, and the start of a provider's `preview` span | the providers' intro spans, and a chapter whose title names the intro, such as `Intro`, `Opening`, or `Main Titles`, up to the next chapter |
 | inferred | for an episode, the median length of the credits of the other episodes of the series, taken from the end of this one | for an episode, the median start and length of the intros of the other episodes of the same season, when at least two of them start within 30 seconds of each other |
 | inferred | in a subtitle file, the end of the last line before 45 seconds or more with no dialogue that runs to the end of the file, or to a scene of up to three minutes that ends it | in a subtitle file, the first 30 to 120 seconds with no dialogue that end in the first ten minutes |
+| faces | for a film whose genres do not include `Animation`, the start of the [faceless end](#appearances) of its detections record, when the run starts in the last 15% of the film and lasts at least two minutes | none |
+
+An estimate of the faces tier has the source `faces` in place of
+`estimate`, so a reader can tell it apart. The detector finds few drawn
+faces, so an animated film can show no face for minutes of its story,
+and the tier skips it. It reads only films, because it was measured on
+films. On a home library on 2026-11-09, against 302 films with an exact
+credits clue, the faces tier was within 30 seconds of that clue for
+69% of them and within two minutes for 86%. It started more than two
+minutes early for 5 films and more than two minutes late for 37, where
+a film's credits open over scenes with actors in them. Plan 92 of
+`library-operator` records the measurement.
 
 In each tier the earliest clue wins, because a card that rises a little
 early costs less than one that rises after the credits have run. A

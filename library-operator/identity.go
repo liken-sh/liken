@@ -65,7 +65,10 @@ type walkResult struct {
 	trailers []trailerRow
 	// The marks of each video file, off the marks ledger of the folder that
 	// holds the file, the way the streams come off the probe ledger.
-	marks        []markRow
+	marks []markRow
+	// The faceless end of each video, off the appearances ledger, which the
+	// folder read copies into the video's file row and then drops.
+	faceless     []facelessAnswer
 	contributors []contributorRow
 	// The ids of the people. Each row becomes one row of contributor_aliases
 	// and one row of contributor_ids.

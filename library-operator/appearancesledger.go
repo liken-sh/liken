@@ -36,6 +36,12 @@ type appearancesEntry struct {
 	Named     appearancesNamed    `yaml:"named"`
 	// How many different people the faces name.
 	People int `yaml:"people"`
+	// The final run of the detections record's samples with no face
+	// (appearancesfaceless.go). An entry that holds none was written before
+	// the worker read the run, and the walk opens its file to the worker
+	// again, which reads the record already on the volume and decodes
+	// nothing.
+	Faceless *timeSpan `yaml:"faceless,omitempty"`
 }
 
 // How many faces each pass of the match named. The headshot pass names a
