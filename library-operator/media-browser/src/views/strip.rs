@@ -30,6 +30,11 @@ const HEADING: f32 = 46.0;
 // The gap between two posters.
 const GAP: f32 = 26.0;
 
+// The least space between the captions of two neighbouring slots. A
+// caption may run a little past its slot's edges into the gap, but two
+// long captions that each took half the gap would read as one line.
+const CLEAR: f32 = 16.0;
+
 // The space between a slot and the caption line under it, wider than
 // the mark reaches.
 const FOOT: f32 = 12.0;
@@ -130,11 +135,12 @@ pub fn width_at(ratio: f32) -> f32 {
     POSTER / ratio
 }
 
-/// The width of the caption band under a slot at this ratio. It is a
-/// constant of the strip and not of the frame, so a caption is cut to it
-/// once, at the read.
+/// The width of the caption band under a slot at this ratio: the slot
+/// and the part of the gap at each side that leaves [`CLEAR`] between
+/// it and its neighbour's caption. It is a constant of the strip and not
+/// of the frame, so a caption is cut to it once, at the read.
 pub fn caption_width(ratio: f32) -> f32 {
-    width_at(ratio) + GAP
+    width_at(ratio) + GAP - CLEAR
 }
 
 /// The slot that ends a strip and opens what the strip is about: its
@@ -406,13 +412,15 @@ fn pilled<T: Card>(frame: &mut canvas::Frame<Renderer>, member: &T, slot: Rectan
     frame.fill_text(ink(at, look::text()));
 }
 
-// The band the first caption line of a slot draws in, a gap wider than
-// the slot so a caption may run a little past its edges.
+// The band the first caption line of a slot draws in, a little wider
+// than the slot so a caption may run past its edges, and narrow enough
+// to leave `CLEAR` between it and the next slot's caption.
 fn caption_band(slot: Rectangle) -> Rectangle {
+    let width = slot.width + GAP - CLEAR;
     area(
-        slot.center_x() - (slot.width + GAP) / 2.0,
+        slot.center_x() - width / 2.0,
         slot.y + slot.height + FOOT,
-        slot.width + GAP,
+        width,
         text::height(1, look::CAPTION),
     )
 }
@@ -661,9 +669,23 @@ mod tests {
     }
 
     #[test]
-    fn the_caption_band_is_one_slot_and_one_gap_wide() {
-        assert_eq!(caption_width(wall::POSTER), poster_width() + GAP);
-        assert_eq!(caption_width(wall::STILL), width_at(wall::STILL) + GAP);
+    fn two_neighbouring_captions_leave_the_clear_space_between_them() {
+        let members = mixed();
+        let slots = placed(&members, false);
+        let region = area(0.0, 0.0, 1000.0, height(2));
+        let first = caption_band(slot(region, &slots, 0.0, 0));
+        let second = caption_band(slot(region, &slots, 0.0, 1));
+        let long = "Hellbound: Hellraiser II and a Long Way Further";
+        let cut = card::cut(long, first.width);
+        let ends = first.center_x() + text::measured(&cut, look::CAPTION) / 2.0;
+        let starts = second.center_x() - text::measured(&cut, look::CAPTION) / 2.0;
+
+        assert!(second.x - (first.x + first.width) >= CLEAR);
+        assert!(starts - ends >= CLEAR, "{} px apart", starts - ends);
+    }
+
+    #[test]
+    fn the_caption_band_is_the_same_width_at_the_read_and_on_the_frame() {
         let members = mixed();
         let slots = placed(&members, false);
         let region = area(0.0, 0.0, 1000.0, height(2));
