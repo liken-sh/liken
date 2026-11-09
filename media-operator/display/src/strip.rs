@@ -6,7 +6,7 @@
 
 use iced::Point;
 
-use crate::canvas::{Anchor, Brush, Canvas, Line};
+use crate::canvas::{Anchor, Brush, Canvas, Line, clip};
 use crate::chooser;
 use crate::film::Film;
 use crate::focus::Action;
@@ -22,6 +22,11 @@ const Y_HEAD: f32 = 990.0;
 const Y_VAL: f32 = 1016.0;
 /// Within a group, the offset value sits this far right of the track value.
 const MEMBER_W: f32 = 200.0;
+/// The least space between the end of one value and the start of the next.
+/// A value wider than its member, less this gap, ends on an ellipsis, so a
+/// long track title cannot draw over the offset beside it and hide the stop
+/// that a press lands on.
+const STOP_GAP: f32 = 24.0;
 /// The pitch between two groups, and the nominal ink width of one group. The
 /// strip right-aligns the row on the nominal, so the row holds its place when a
 /// value changes width.
@@ -245,7 +250,11 @@ impl Strip {
                 let focused = Some(control) == here;
                 lines.push(
                     Line::new(
-                        control.value(film),
+                        clip(
+                            &control.value(film),
+                            theme::type_scale::TINY,
+                            MEMBER_W - STOP_GAP,
+                        ),
                         Point::new(x + member as f32 * MEMBER_W, Y_VAL),
                         Anchor::Left,
                         theme::type_scale::TINY,
@@ -295,6 +304,7 @@ impl Strip {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::measure;
     use serde_json::json;
 
     fn film() -> Film {
@@ -369,6 +379,44 @@ mod tests {
                 ("0 ms".to_string(), Point::new(1764.0, 1016.0)),
             ]
         );
+    }
+
+    /// A Blu-ray rip titles its audio track with the codec and the layout,
+    /// and that title is wider than the room before the offset. Every value
+    /// of the row ends at least a gap short of the value to its right.
+    #[test]
+    fn a_long_value_stops_short_of_its_neighbour() {
+        let mut film = Film::default();
+        film.apply(
+            "track-list",
+            &json!([
+                { "id": 1, "type": "video", "selected": true,
+                  "title": "Main feature, theatrical cut" },
+                { "id": 2, "type": "video", "title": "Angle" },
+                { "id": 1, "type": "audio", "lang": "eng", "selected": true,
+                  "title": "[English / DD+ 5.1 Atmos]" },
+                { "id": 1, "type": "sub", "lang": "eng", "selected": true,
+                  "title": "English (SDH) Full Subtitles Track" },
+            ]),
+        );
+        let values: Vec<Line> = Strip::default()
+            .lines(&Canvas::default(), &block("{}"), &film, false)
+            .into_iter()
+            .filter(|line| line.at.y == Y_VAL)
+            .collect();
+        assert_eq!(values.len(), 5);
+        for pair in values.windows(2) {
+            let ends = pair[0].at.x + measure(&pair[0].content, pair[0].size);
+            assert!(
+                ends + STOP_GAP <= pair[1].at.x,
+                "{:?} ends at {ends} and runs into {:?} at {}",
+                pair[0].content,
+                pair[1].content,
+                pair[1].at.x
+            );
+        }
+        let last = &values[values.len() - 1];
+        assert!(last.at.x + measure(&last.content, last.size) <= Canvas::default().right());
     }
 
     /// A music item draws no strip at all, and a file with no tracks draws

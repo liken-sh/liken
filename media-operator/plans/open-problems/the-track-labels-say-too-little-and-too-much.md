@@ -8,21 +8,20 @@ title, and too short in the subtitle chooser when a file gives no
 title. Both were seen on a home cluster's television with a Blu-ray
 rip.
 
-## A long title runs over the strip
+## A long title is cut short in the strip
 
-The strip draws its groups at a fixed pitch of 430 canvas pixels
-(`GROUP_PITCH` in `display/src/strip.rs`), and it draws a track value
-with no limit on its width. An audio track titled "Compatibility
-Track / Dolby Digital Audio / 5.1 / 48 kHz / 640 kbps" draws across the
-audio offset, the `subtitles` heading, and the subtitle value. The
-chooser does not have this fault: `display/src/chooser.rs` clips a row
-that is wider than the panel and ends it in an ellipsis, so a long
-commentary title reads correctly there.
+The strip draws each value in a member 200 canvas pixels wide
+(`MEMBER_W` in `display/src/strip.rs`), and it clips a value to that
+width less a 24 pixel gap and ends it in an ellipsis, the way
+`display/src/chooser.rs` clips a row that is wider than its panel.
+Before the clip, an audio track titled "[English / DD+ 5.1 Atmos]"
+drew across the audio offset beside it, so the stop that a press lands
+on could not be read. The clip keeps the stops apart, but a cut title
+such as "[English / DD+ 5.…" still says little.
 
-The fix is probably to clip each strip value to its group's width in
-the same way. Undecided: whether the audio cell should read only the
-language, as the subtitle cell does, and leave the full title to the
-chooser.
+Undecided: whether the audio cell should read only the language and
+the layout, as "English 5.1", the subtitle cell the language and its
+flags, as "English SDH", and the full title be left to the chooser.
 
 ## A subtitle list reads only language codes
 
