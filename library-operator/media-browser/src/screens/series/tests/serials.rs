@@ -23,6 +23,9 @@ pub struct Serials {
     pub last: Option<i64>,
     // Whether the series credits anybody at all.
     pub credits: bool,
+    // Whether the body names no studio or network, which leaves the foot
+    // with no stop.
+    pub unproduced: bool,
     // Whether the episodes carry no release at all, which is what a
     // library the enrichers have not reached looks like.
     pub undated: bool,
@@ -158,7 +161,10 @@ impl Source for Serials {
                 name: "A Player".into(),
                 role: "The Part".into(),
             }],
-            studios: vec!["A Studio".into()],
+            studios: match self.unproduced {
+                true => Vec::new(),
+                false => vec!["A Studio".into(), "A Network".into()],
+            },
             ratings: vec![("imdb".into(), 8.3), ("tomatometerallcritics".into(), 95.0)],
             backdrop: "backdrop.jpg".into(),
             trailer: match self.trailer {
@@ -334,7 +340,8 @@ pub fn still(focus: Focus) -> usize {
         | Focus::EpisodeMark(..)
         | Focus::Rail(..)
         | Focus::Franchise(..)
-        | Focus::Stripe(..) => {
+        | Focus::Stripe(..)
+        | Focus::Studio(..) => {
             panic!("focus left the wall")
         }
     }

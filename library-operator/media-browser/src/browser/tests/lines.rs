@@ -412,6 +412,10 @@ fn a_screen_is_named_by_its_kind_and_its_opaque_id() {
             "a genre wall".to_string(),
         ),
         (
+            wall(Query::studio("Hidden Pictures")),
+            "a studio wall".to_string(),
+        ),
+        (
             wall(Query::Released { fold: Fold::Titles }),
             "the recently released wall".to_string(),
         ),

@@ -114,9 +114,13 @@ impl GenreSort {
 /// `Franchise` is the members of one franchise that some library holds,
 /// in story order; it names the `Library` of kind franchises that holds
 /// the order, and never a member's own library.
+/// `Studio` is every movie and series across every library whose body
+/// names the studio, by the exact name the body spells it with, in its
+/// `Sort`.
 /// `Search` is the text a person typed, answered from the in-memory
 /// search index and never from SQL, best hit first.
-/// `Library` and `Genre` carry the order their rail's button cycles.
+/// `Library`, `Genre`, and `Studio` carry the order their rail's button
+/// cycles.
 /// The recency queries are newest first by definition and carry none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
@@ -147,12 +151,25 @@ pub enum Query {
         library: String,
         id: String,
     },
+    Studio {
+        name: String,
+        sort: Sort,
+    },
     Search {
         text: String,
     },
 }
 
 impl Query {
+    /// The wall of one studio as a page opens it: newest first, because
+    /// a studio's titles read as its history.
+    pub fn studio(name: &str) -> Self {
+        Self::Studio {
+            name: name.to_string(),
+            sort: Sort::Newest,
+        }
+    }
+
     /// The heading without the count, which is what a strip draws over its
     /// slots. A person's, a set's, and a franchise's name comes with the
     /// answer, because only the catalog holds it.
@@ -164,7 +181,7 @@ impl Query {
             Self::Person { .. } | Self::Set { .. } | Self::Franchise { .. } => name.to_string(),
             Self::Released { .. } => "Recently released".to_string(),
             Self::Added { .. } => "Recently added".to_string(),
-            Self::Genre { name, .. } => name.clone(),
+            Self::Genre { name, .. } | Self::Studio { name, .. } => name.clone(),
             Self::Search { text } => text.clone(),
         }
     }
@@ -172,9 +189,9 @@ impl Query {
     /// The heading the band draws over this query's slots. A library's
     /// heading and a recency query's carry the count. A person's, a set's,
     /// and a franchise's carry the name alone.
-    /// A genre's heading carries the counts by kind, "Science Fiction ·
-    /// 120 movies, 15 series", which is what the head over the wall
-    /// carried before the band took it.
+    /// A genre's heading and a studio's carry the counts by kind,
+    /// "Science Fiction · 120 movies, 15 series", because both walls span
+    /// the libraries of both kinds.
     /// A search with no text yet is headed "Search", and one that matches
     /// nothing says so, because a heading of the text and a count of 0
     /// over an empty wall reads as a wall that failed to load.
@@ -183,7 +200,9 @@ impl Query {
             Self::Search { text } if text.is_empty() => "Search".to_string(),
             Self::Search { .. } if counts.items == 0 => "No titles match".to_string(),
             Self::Person { .. } | Self::Set { .. } | Self::Franchise { .. } => name.to_string(),
-            Self::Genre { .. } => format!("{} · {}", self.name(name), counts.words()),
+            Self::Genre { .. } | Self::Studio { .. } => {
+                format!("{} · {}", self.name(name), counts.words())
+            }
             _ => format!("{} · {}", self.name(name), counts.items),
         }
     }
@@ -201,6 +220,10 @@ impl Query {
                 order,
                 sort: sort.next(),
             },
+            Self::Studio { name, sort } => Self::Studio {
+                name,
+                sort: sort.next(),
+            },
             query => query,
         }
     }
@@ -210,7 +233,7 @@ impl Query {
     /// search.
     pub fn sort_word(&self) -> Option<&'static str> {
         match self {
-            Self::Library { sort, .. } => Some(sort.word()),
+            Self::Library { sort, .. } | Self::Studio { sort, .. } => Some(sort.word()),
             Self::Genre { sort, .. } => Some(sort.word()),
             _ => None,
         }

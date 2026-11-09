@@ -287,6 +287,25 @@ fn the_last_stripe_pulls_the_foot_into_view() {
     assert!(blocks.foot.bottom() - offset <= SHORT);
 }
 
+// A studio on the foot is the last stop of the page, so the page scrolls
+// to its end and the outline goes around the name where the foot draws
+// it, on the screen.
+#[test]
+fn the_outline_goes_around_the_focused_studio_at_the_end_of_the_page() {
+    let movie = crowded(Focus::Studio(0));
+    let (blocks, offset) = placed(&movie, area(0.0, 0.0, WIDTH, SHORT));
+    let region = screen::region(FRAME);
+    let name = movie
+        .foot
+        .placed(Point::new(region.x, blocks.foot.top - offset), region.width)[0];
+    assert_eq!(offset, blocks.content - SHORT);
+    assert_eq!(
+        movie.marked(area(0.0, 0.0, WIDTH, SHORT)),
+        Some(crate::views::marked(name))
+    );
+    assert!(name.y + name.height <= SHORT);
+}
+
 #[test]
 fn the_row_names_when_its_first_button_would_end() {
     use crate::catalog::Progress;

@@ -79,7 +79,10 @@ fn down_from_the_marks_reaches_the_cast_and_up_returns_to_the_marks() {
 
 #[test]
 fn down_from_the_marks_with_nothing_under_them_stays_on_the_mark() {
-    let (mut page, mut source) = page(Films::default());
+    let (mut page, mut source) = page(Films {
+        unproduced: true,
+        ..Films::default()
+    });
 
     assert_eq!(
         after(&mut page, &mut source, &["down", "down"]),

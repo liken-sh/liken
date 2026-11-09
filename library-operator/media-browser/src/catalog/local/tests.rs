@@ -13,6 +13,7 @@ mod recent_queries;
 mod search;
 mod series;
 mod sorts;
+mod studios;
 mod subtitles;
 
 use std::fs;

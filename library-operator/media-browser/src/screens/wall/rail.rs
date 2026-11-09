@@ -215,7 +215,7 @@ enum Order {
 // rail.
 fn order(query: &Query) -> Option<Order> {
     match query {
-        Query::Library { sort, .. } => Some(sorted(*sort)),
+        Query::Library { sort, .. } | Query::Studio { sort, .. } => Some(sorted(*sort)),
         Query::Genre {
             sort: GenreSort::Leads,
             ..

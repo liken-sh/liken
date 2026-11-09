@@ -7,7 +7,7 @@
 
 use iced_winit::core::Rectangle;
 
-use super::page::{Blocks, placed, rows, status_line, under};
+use super::page::{Blocks, placed, rows, status_line, studio, under};
 use super::{Focus, Movie, row, watch};
 use crate::look;
 use crate::views::across::Across;
@@ -23,15 +23,18 @@ impl Movie {
     }
 
     /// The rectangle the focus outline goes to on this page at these
-    /// bounds: around the focused button, mark, member, heading, or
-    /// headshot, at the place every scroll comes to rest.
+    /// bounds: around the focused button, mark, member, heading,
+    /// headshot, or studio, at the place every scroll comes to rest.
     pub fn marked(&self, bounds: Rectangle) -> Option<Rectangle> {
         let (blocks, offset) = placed(self, bounds);
-        let around = self.playback(&blocks, offset).or_else(|| {
-            rows(self, &blocks, bounds, offset, Some(self.focus))
-                .iter()
-                .find_map(Across::focused)
-        });
+        let around = self
+            .playback(&blocks, offset)
+            .or_else(|| studio(self, &blocks, bounds, offset))
+            .or_else(|| {
+                rows(self, &blocks, bounds, offset, Some(self.focus))
+                    .iter()
+                    .find_map(Across::focused)
+            });
         around.map(views::marked)
     }
 
@@ -51,7 +54,7 @@ impl Movie {
                 let marks = watch::Mark::drawn(&self.marks());
                 line::focused(&status_line(self, &status, &marks, Some(index)), under(at))
             }
-            Focus::Strip(_) | Focus::Franchise(..) | Focus::Stripe(..) => None,
+            Focus::Strip(_) | Focus::Franchise(..) | Focus::Stripe(..) | Focus::Studio(_) => None,
         }
     }
 

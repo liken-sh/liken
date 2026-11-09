@@ -245,7 +245,18 @@ the marks, and up returns to the playback row. Down from the marks
 moves on to the set strip, the franchise strips, or the cast. While a
 mark has focus, the bar is twice as tall and the status is brighter.
 
-The end of a movie's page names the studios, and then the Files
+The end of a movie's page names the studios after `Produced by`. Down
+from the last stripe of people puts focus on the first studio, left and
+right move between the studios, and Enter opens the studio's wall: every
+movie and series of the catalog whose `.nfo` file names that studio, in
+every library, newest first, under a heading such as
+`Gullwing Pictures · 7 movies, 2 series`. The rail's sort button cycles the wall between
+`Newest`, `Oldest`, and `Title`. A studio is matched by its exact name,
+so `Fox Searchlight Pictures` and `Searchlight Pictures` are two walls.
+A series' page names its studios and networks at its end the same way,
+and each one opens a wall.
+
+Under the studios, the Files
 section shows each video file of the film, so you can see which copy a
 play takes and what it plays with. A film with two copies, such as a
 4K remux and a 1080p encode, shows them side by side. Each file shows a

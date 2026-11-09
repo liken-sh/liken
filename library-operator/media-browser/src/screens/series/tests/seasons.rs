@@ -135,12 +135,11 @@ fn the_foot_keeps_the_still_the_wall_last_held_while_a_bar_has_focus() {
     assert_eq!(pressed(&mut screen, &mut source, "right"), Focus::Rail(0));
 
     assert!(screen.focused().is_none());
-    let lines: Vec<String> = screen
-        .foot
-        .rows()
-        .map(|row| row.content.to_string())
-        .collect();
-    assert_eq!(lines, ["A Studio", "1920×1080 · x264 · AAC · 4.0 GB"]);
+    assert_eq!(
+        screen.foot.studios().collect::<Vec<_>>(),
+        ["A Studio", "A Network"]
+    );
+    assert_eq!(screen.foot.files(), ["1920×1080 · x264 · AAC · 4.0 GB"]);
 }
 
 #[test]

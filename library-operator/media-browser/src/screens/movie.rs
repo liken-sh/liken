@@ -1,8 +1,8 @@
 // A movie's page. The backdrop draws full bleed under the text, and the
 // page reads down: the logo or the title, the facts, the tagline, the
 // plot, the playback row, the status line under it, the set strip, a strip
-// for each franchise the movie belongs to, and the stripes of credited
-// people.
+// for each franchise the movie belongs to, the stripes of credited people,
+// and the studios, each of which opens that studio's wall.
 // Focus lands on the first button of the row, so a film is two presses
 // from the wall, as it was when the wall played it on select. That button
 // is Resume where the audience is in the middle of the film.
@@ -23,6 +23,7 @@ use iced_wgpu::Renderer;
 use iced_winit::core::{Element, Rectangle, Theme};
 
 use super::franchise::strips::{self, Move, Place, Strips};
+use super::wall::Wall;
 use super::{
     InFranchise, Item, Screen, Step, TitleMark, facts, files, foot, franchise, person, stripes,
     upnext,
@@ -53,6 +54,8 @@ pub enum Focus {
     Franchise(usize, Place),
     /// One headshot of one stripe: the stripe, and the slot in it.
     Stripe(usize, usize),
+    /// One studio on the production line of the foot.
+    Studio(usize),
 }
 
 /// The words after a set's name on its strip heading. The count is the
@@ -286,8 +289,8 @@ impl Movie {
 
     /// Fold one press in. Left and right move across the row that holds
     /// focus. Down reaches the marks, then the set strip, then the
-    /// franchise strips, and then the stripes, and up climbs back to the
-    /// playback row. A franchise strip's heading is a rung over its
+    /// franchise strips, then the stripes, and then the studios, and up
+    /// climbs back to the playback row. A franchise strip's heading is a rung over its
     /// members.
     pub fn key(&mut self, key: &str, source: &mut dyn Source) -> Step {
         match self.focus {
@@ -296,6 +299,7 @@ impl Movie {
             Focus::Strip(index) => self.on_strip(index, key, source),
             Focus::Franchise(strip, place) => self.on_franchise((strip, place), key, source),
             Focus::Stripe(stripe, slot) => self.on_stripe((stripe, slot), key, source),
+            Focus::Studio(index) => self.on_studio(index, key, source),
         }
     }
 
@@ -468,6 +472,10 @@ impl Movie {
                 None => Step::Stay,
             };
         }
+        if key == "down" && self.stripes.last() == Some((rung.0, 0)) {
+            self.focus = self.after_stripes().unwrap_or(self.focus);
+            return Step::Stay;
+        }
         self.focus = match self.stripes.key(rung, key) {
             Some((stripe, slot)) => Focus::Stripe(stripe, slot),
             None => self.above(),
@@ -475,9 +483,49 @@ impl Movie {
         Step::Stay
     }
 
+    // One press on a studio. Select opens the wall of every title the
+    // catalog holds from that studio, over this page, so back returns
+    // here.
+    fn on_studio(&mut self, index: usize, key: &str, source: &mut dyn Source) -> Step {
+        match key {
+            "enter" => match self.foot.studio(index) {
+                Some(name) => Step::Open(Screen::Wall(Box::new(Wall::open(
+                    Query::studio(name),
+                    source,
+                )))),
+                None => Step::Stay,
+            },
+            "up" => {
+                self.focus = self.over_foot();
+                Step::Stay
+            }
+            "down" => Step::Stay,
+            _ => {
+                let count = self.foot.studios().count();
+                self.focus = Focus::Studio(focus::row(index, count, key));
+                Step::Stay
+            }
+        }
+    }
+
+    // The rung under the stripes: the first studio, and nothing where the
+    // movie names none.
+    fn after_stripes(&self) -> Option<Focus> {
+        self.foot.studio(0).map(|_| Focus::Studio(0))
+    }
+
+    // The rung over the studios: the last stripe, and the rung over the
+    // stripes where the movie credits nobody.
+    fn over_foot(&self) -> Focus {
+        match self.stripes.last() {
+            Some((stripe, slot)) => Focus::Stripe(stripe, slot),
+            None => self.above(),
+        }
+    }
+
     // The rung under the status line: the set strip where the movie is in
-    // a set, then the franchise strips, then the first stripe, and
-    // nothing where the page holds none of the three.
+    // a set, then the franchise strips, then the first stripe, then the
+    // first studio, and nothing where the page holds none of them.
     fn below(&self) -> Option<Focus> {
         if let Some(set) = &self.set {
             return Some(Focus::Strip(set.current));
@@ -487,19 +535,20 @@ impl Movie {
             None => self
                 .stripes
                 .first()
-                .map(|(stripe, slot)| Focus::Stripe(stripe, slot)),
+                .map(|(stripe, slot)| Focus::Stripe(stripe, slot))
+                .or_else(|| self.after_stripes()),
         }
     }
 
     // The rung under the set strip: the first franchise strip, then the
-    // first stripe, and the set strip itself where the page holds
-    // neither.
+    // first stripe, then the first studio, and the set strip itself where
+    // the page holds none of them.
     fn under_strip(&self) -> Focus {
         match self.franchises.first() {
             Some((strip, place)) => Focus::Franchise(strip, place),
             None => match self.stripes.first() {
                 Some((stripe, slot)) => Focus::Stripe(stripe, slot),
-                None => self.focus,
+                None => self.after_stripes().unwrap_or(self.focus),
             },
         }
     }
@@ -535,7 +584,9 @@ impl Movie {
             Move::Above => self.over_franchises(),
             Move::Below => match self.stripes.first() {
                 Some((stripe, slot)) => Focus::Stripe(stripe, slot),
-                None => Focus::Franchise(rung.0, rung.1),
+                None => self
+                    .after_stripes()
+                    .unwrap_or(Focus::Franchise(rung.0, rung.1)),
             },
         };
         Step::Stay
@@ -608,6 +659,10 @@ impl Movie {
             Focus::Stripe(stripe, slot) => match self.stripes.held((stripe, slot)) {
                 Some((stripe, slot)) => Focus::Stripe(stripe, slot),
                 None => Focus::Buttons(0),
+            },
+            Focus::Studio(index) => match self.foot.studios().count() {
+                0 => Focus::Buttons(0),
+                count => Focus::Studio(index.min(count - 1)),
             },
         }
     }

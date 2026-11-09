@@ -1,13 +1,14 @@
 // The moves across a series' page outside an episode's row: the series'
 // own button row, the wall of stills, the seasons rail beside it, and the
-// franchise strips and the stripes of people under it. `episode.rs` holds
+// franchise strips, the stripes of people, and the studios under it. `episode.rs` holds
 // the moves inside an episode's row.
 
 use super::{COLUMNS, Focus, Series, seasons};
-use crate::catalog::{Selection, Source};
+use crate::catalog::{Query, Selection, Source};
 use crate::focus::{self, Run};
 use crate::screens::franchise::strips::{self, Move};
 use crate::screens::movie::{franchise_press, row};
+use crate::screens::wall::Wall;
 use crate::screens::{Screen, Step, person, stripes};
 
 impl Series {
@@ -98,16 +99,56 @@ impl Series {
     }
 
     // The rung under the last row of stills: the first franchise strip,
-    // then the first stripe, and the still itself where the page holds
-    // neither.
+    // then the first stripe, then the first studio, and the still itself
+    // where the page holds none of them.
     fn under_wall(&self, index: usize) -> Focus {
         if let Some((strip, place)) = self.franchises.first() {
             return Focus::Franchise(strip, place);
         }
         match self.stripes.first() {
             Some((stripe, slot)) => Focus::Stripe(stripe, slot),
-            None => Focus::Still(index),
+            None => self.studios().unwrap_or(Focus::Still(index)),
         }
+    }
+
+    // The first studio, which the block over the foot moves down onto,
+    // and nothing where the series names none.
+    fn studios(&self) -> Option<Focus> {
+        self.foot.studio(0).map(|_| Focus::Studio(0))
+    }
+
+    // One press on a studio. Select opens the wall of every title the
+    // catalog holds from that studio, over this page. Up climbs to the
+    // last stripe, the last franchise strip, or the wall's last still.
+    pub(super) fn on_studio(&mut self, index: usize, key: &str, source: &mut dyn Source) -> Step {
+        match key {
+            "enter" => {
+                return match self.foot.studio(index) {
+                    Some(name) => Step::Open(Screen::Wall(Box::new(Wall::open(
+                        Query::studio(name),
+                        source,
+                    )))),
+                    None => Step::Stay,
+                };
+            }
+            "up" => {
+                self.focus = match (self.stripes.last(), self.franchises.last()) {
+                    (Some((stripe, slot)), _) => Focus::Stripe(stripe, slot),
+                    (None, Some((strip, place))) => Focus::Franchise(strip, place),
+                    (None, None) => match self.stills.len() {
+                        0 => Focus::Studio(index),
+                        count => Focus::Still(count - 1),
+                    },
+                };
+                self.refoot(source);
+            }
+            "down" => {}
+            _ => {
+                let count = self.foot.studios().count();
+                self.focus = Focus::Studio(focus::row(index, count, key));
+            }
+        }
+        Step::Stay
     }
 
     // The rung over the first stripe: the last franchise strip, and the
@@ -142,7 +183,7 @@ impl Series {
             },
             Move::Below => match self.stripes.first() {
                 Some((stripe, slot)) => Focus::Stripe(stripe, slot),
-                None => Focus::Franchise(rung.0, rung.1),
+                None => self.studios().unwrap_or(Focus::Franchise(rung.0, rung.1)),
             },
         };
         self.refoot(source);
@@ -174,6 +215,10 @@ impl Series {
                 Some(page) => Step::Open(Screen::Person(Box::new(page))),
                 None => Step::Stay,
             };
+        }
+        if key == "down" && self.stripes.last() == Some((rung.0, 0)) {
+            self.focus = self.studios().unwrap_or(self.focus);
+            return Step::Stay;
         }
         self.focus = match self.stripes.key(rung, key) {
             Some((stripe, slot)) => Focus::Stripe(stripe, slot),

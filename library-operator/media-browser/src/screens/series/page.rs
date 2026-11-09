@@ -129,24 +129,8 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 row.at(scroll).faced(self.faces).draw(frame, store);
             }
 
-            let mut at = Point::new(region.x + inset, region.y + wall.layout.foot - offset);
-            for row in series.foot.rows() {
-                at.y += row.lead;
-                let color = match row.faint {
-                    true => look::faint(),
-                    false => look::text(),
-                };
-                text::line(frame, row.prefix, at, row.size, look::faint(), width);
-                let after = Point::new(at.x + row.indent(), at.y);
-                at.y += text::line(
-                    frame,
-                    row.content,
-                    after,
-                    row.size,
-                    color,
-                    width - row.indent(),
-                );
-            }
+            let (at, width) = foot_at(&wall, offset);
+            series.foot.draw(frame, at, width);
         });
 
         frame.with_clip(layout::rail_clip(whole), |frame| {
@@ -181,6 +165,25 @@ pub(super) struct Placed {
     inset: f32,
     layout: Layout,
     pub(super) offset: f32,
+}
+
+/// The top left of the foot at the wall's scroll, and its width: under
+/// the stills' own inset, so the studios start where the stills do.
+fn foot_at(placed: &Placed, offset: f32) -> (Point, f32) {
+    (
+        Point::new(
+            placed.region.x + placed.inset,
+            placed.region.y + placed.layout.foot - offset,
+        ),
+        placed.region.width - 2.0 * placed.inset,
+    )
+}
+
+/// The box of one studio on the foot at the wall's resting scroll, or
+/// nothing past the last.
+pub(super) fn studio_box(series: &Series, placed: &Placed, index: usize) -> Option<Rectangle> {
+    let (at, width) = foot_at(placed, placed.offset);
+    series.foot.placed(at, width).get(index).copied()
 }
 
 /// The part of the wall's region the stills draw in at these bounds: the

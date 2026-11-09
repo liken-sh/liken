@@ -283,7 +283,8 @@ impl Layout {
             Focus::Stripe(stripe, _) => match self.stripes.get(stripe) {
                 Some(top) => {
                     // The last stripe pulls everything under it into view,
-                    // because the foot takes no focus of its own.
+                    // so the studios under it show before focus reaches
+                    // them.
                     let below = self.content - top - people::HEIGHT;
                     let tail = match stripe + 1 == self.stripes.len() {
                         true => below,
@@ -293,6 +294,9 @@ impl Layout {
                 }
                 None => return 0.0,
             },
+            // The foot is the last block, so a studio pulls the page's end
+            // into view.
+            Focus::Studio(..) => (area(0.0, self.foot, 0.0, 0.0), self.content - self.foot),
             // The episode's own row and its marks are in the header too,
             // and the wall stands at the still they were opened from.
             Focus::Still(index) | Focus::Episode(index, _) | Focus::EpisodeMark(index, _) => {

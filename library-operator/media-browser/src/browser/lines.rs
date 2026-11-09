@@ -55,6 +55,7 @@ fn walled(query: &Query) -> String {
             format!("the wall of franchise {} in {library}", opaque(id))
         }
         Query::Genre { .. } => "a genre wall".to_string(),
+        Query::Studio { .. } => "a studio wall".to_string(),
         Query::Search { .. } => "the search wall".to_string(),
     }
 }

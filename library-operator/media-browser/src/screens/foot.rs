@@ -1,13 +1,24 @@
 // The foot of a title's page: the studios, and one line for every video
 // file the title holds. A series page draws both. A movie's page draws the
-// studios alone, and its files section shows each file in full. Every
-// function here is pure over the rows, so the tests need no window.
+// studios alone, and its files section shows each file in full.
+//
+// Each studio is a stop of its own, which opens the wall of every title
+// the catalog holds from that studio. The browser's focus outline goes
+// around the focused name, and the outline reaches past the name's box.
+// So the names stand apart by more than that reach, from the words that
+// lead them and from each other, and the outline never touches a word it
+// is not about. The names are measured by the shaper once, at the read,
+// so the boxes the outline goes around are the ones the names draw in.
+
+use iced_wgpu::Renderer;
+use iced_widget::canvas;
+use iced_winit::core::{Point, Rectangle};
 
 use crate::catalog::FileFacts;
 use crate::language;
 use crate::look;
 use crate::screens::facts;
-use crate::views::text;
+use crate::views::{area, text};
 
 /// The size the production line draws at, and the smaller size the file
 /// lines draw at under it, so the technical detail reads second.
@@ -17,13 +28,30 @@ pub const DETAIL: f32 = look::FACE;
 // The space between the production line and the first file line.
 const GAP: f32 = 8.0;
 
-// The space after the leading words of a line, because the average
-// advance the width is measured by undercounts a trailing space.
-const AFTER_PREFIX: f32 = 4.0;
-
 /// The words that lead the studios on the production line, in the faint
 /// face, so the names read first.
-pub const PRODUCED_BY: &str = "Produced by ";
+pub const PRODUCED_BY: &str = "Produced by";
+
+// How far the focus outline reaches past the box of the name it goes
+// around: the gap `views::marked` leaves, and the whole stroke.
+const REACH: f32 = look::MARK_GAP + look::MARK;
+
+// The space between the leading words and the first name: the outline's
+// reach, and room after it, so the outline on the first name stays clear
+// of "Produced by".
+const AFTER_PREFIX: f32 = REACH + 6.0;
+
+// The space between two names on one line, with the dot that parts them
+// in its middle: the outline's reach at each side, and the dot's own room
+// between the two reaches.
+const BETWEEN: f32 = 2.0 * REACH + 16.0;
+
+// The space between two lines of names, so the outline on a name of the
+// lower line stays clear of the line over it.
+const LINE_GAP: f32 = REACH + 4.0;
+
+// The mark that parts two names on one line.
+const DOT: &str = "\u{b7}";
 
 // The two categories of the files table the foot reads, and the role a
 // title's own video file holds. A trailer is a video of the title too,
@@ -35,42 +63,22 @@ const PRIMARY: &str = "primary";
 // The word that leads the subtitle languages on a file's line.
 const SUBTITLES: &str = "Subtitles: ";
 
-/// The foot of one title: the studios on one line, then one line for every
-/// video file.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// The foot of one title: the studios on the production line, then one
+/// line for every video file.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Foot {
-    studios: String,
+    studios: Vec<Studio>,
+    // The width the leading words draw at, and zero on a foot that names
+    // no studio.
+    prefix: f32,
     files: Vec<String>,
 }
 
-/// One line of the foot as a page draws it: the faint words that lead it,
-/// its text, its size, whether the text draws in the faint face rather
-/// than the full one, and the space over it. The names are values and
-/// draw at full brightness; the words that name them, and the technical
-/// detail of the files, are asides and draw faint.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Row<'a> {
-    pub prefix: &'static str,
-    pub content: &'a str,
-    pub size: f32,
-    pub faint: bool,
-    pub lead: f32,
-}
-
-impl Row<'_> {
-    /// The width the leading words take, which the text starts after.
-    pub fn indent(&self) -> f32 {
-        match self.prefix.is_empty() {
-            true => 0.0,
-            false => text::width(self.prefix, self.size) + AFTER_PREFIX,
-        }
-    }
-
-    /// The height the row takes at this width, its lead included.
-    pub fn height(&self, width: f32) -> f32 {
-        let lines = text::lines(self.content, self.size, width - self.indent());
-        self.lead + text::height(lines, self.size)
-    }
+// One studio's name and the width the shaper sets it at.
+#[derive(Debug, Clone, PartialEq)]
+struct Studio {
+    name: String,
+    width: f32,
 }
 
 impl Foot {
@@ -92,41 +100,122 @@ impl Foot {
             })
             .filter(|line| !line.is_empty())
             .collect();
+        let studios: Vec<Studio> = studios
+            .iter()
+            .filter(|name| !name.is_empty())
+            .map(|name| Studio {
+                name: name.clone(),
+                width: text::measured(name, PRODUCTION),
+            })
+            .collect();
+        let prefix = match studios.is_empty() {
+            true => 0.0,
+            false => text::measured(PRODUCED_BY, PRODUCTION),
+        };
         Self {
-            studios: studios.join(", "),
+            studios,
+            prefix,
             files,
         }
     }
 
-    /// The lines the block draws, in order: the production line, then a
-    /// gap, then the file lines. A line the title carries nothing for is
-    /// left out, and so is the gap over a file line with no production
-    /// line above it.
-    pub fn rows(&self) -> impl Iterator<Item = Row<'_>> {
-        let production = (!self.studios.is_empty()).then_some(Row {
-            prefix: PRODUCED_BY,
-            content: self.studios.as_str(),
-            size: PRODUCTION,
-            faint: false,
-            lead: 0.0,
-        });
-        let files = self.files.iter().enumerate().map(move |(index, file)| Row {
-            prefix: "",
-            content: file.as_str(),
-            size: DETAIL,
-            faint: true,
-            lead: match index == 0 && production.is_some() {
-                true => GAP,
-                false => 0.0,
-            },
-        });
-        production.into_iter().chain(files)
+    /// The studios, in the order the body names them. Each one is a stop.
+    pub fn studios(&self) -> impl Iterator<Item = &str> {
+        self.studios.iter().map(|studio| studio.name.as_str())
+    }
+
+    /// The name of one studio, or nothing past the last.
+    pub fn studio(&self, index: usize) -> Option<&str> {
+        self.studios.get(index).map(|studio| studio.name.as_str())
+    }
+
+    /// The line of every video file, in the order the catalog answered
+    /// them.
+    pub fn files(&self) -> &[String] {
+        &self.files
+    }
+
+    /// The box each studio's name draws in, for a foot whose top left is
+    /// at `at` and that is this wide. The names follow the leading words
+    /// on one line, and a name that would run past the width starts the
+    /// next line under the first name.
+    pub fn placed(&self, at: Point, width: f32) -> Vec<Rectangle> {
+        let line = text::height(1, PRODUCTION);
+        let start = at.x + self.prefix + AFTER_PREFIX;
+        let (mut x, mut y) = (start, at.y);
+        let mut boxes = Vec::with_capacity(self.studios.len());
+        for (index, studio) in self.studios.iter().enumerate() {
+            if index > 0 {
+                x += BETWEEN;
+                if x + studio.width > at.x + width {
+                    x = start;
+                    y += line + LINE_GAP;
+                }
+            }
+            boxes.push(area(x, y, studio.width, line));
+            x += studio.width;
+        }
+        boxes
     }
 
     /// The height the block takes at this width, and zero where the title
     /// carries no line at all.
     pub fn height(&self, width: f32) -> f32 {
-        self.rows().map(|row| row.height(width)).sum()
+        let production = self
+            .placed(Point::ORIGIN, width)
+            .last()
+            .map_or(0.0, |last| last.y + last.height);
+        let files: f32 = self
+            .files
+            .iter()
+            .map(|file| text::height(text::lines(file, DETAIL, width), DETAIL))
+            .sum();
+        let gap = match production > 0.0 && !self.files.is_empty() {
+            true => GAP,
+            false => 0.0,
+        };
+        production + gap + files
+    }
+
+    /// Draw the block with its top left at `at`, this wide: the leading
+    /// words faint, the names at full ink with a faint dot between two on
+    /// one line, and the file lines faint and smaller under them.
+    pub fn draw(&self, frame: &mut canvas::Frame<Renderer>, at: Point, width: f32) {
+        let boxes = self.placed(at, width);
+        if !boxes.is_empty() {
+            text::line(frame, PRODUCED_BY, at, PRODUCTION, look::faint(), width);
+        }
+        for (index, (studio, place)) in self.studios.iter().zip(&boxes).enumerate() {
+            text::line(
+                frame,
+                &studio.name,
+                place.position(),
+                PRODUCTION,
+                look::text(),
+                f32::INFINITY,
+            );
+            let Some(next) = boxes.get(index + 1).filter(|next| next.y == place.y) else {
+                continue;
+            };
+            let band = area(
+                place.x + place.width,
+                place.y,
+                next.x - place.x - place.width,
+                place.height,
+            );
+            text::centered(frame, DOT, band, PRODUCTION, look::faint());
+        }
+        let mut y = boxes.last().map_or(at.y, |last| last.y + last.height + GAP);
+        for file in &self.files {
+            y += text::line(
+                frame,
+                file,
+                Point::new(at.x, y),
+                DETAIL,
+                look::faint(),
+                width,
+            );
+        }
     }
 }
 
@@ -174,125 +263,4 @@ fn subtitles(files: &[FileFacts]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn video() -> FileFacts {
-        FileFacts {
-            role: "primary".into(),
-            kind: "video".into(),
-            container: "mkv".into(),
-            video_codec: "x265".into(),
-            audio_codec: "AC3".into(),
-            width: 1_920,
-            height: 804,
-            size_bytes: 4_200_000_000,
-            ..FileFacts::default()
-        }
-    }
-
-    fn subtitle(language: &str) -> FileFacts {
-        FileFacts {
-            role: "subtitle".into(),
-            kind: "subtitle".into(),
-            language: language.into(),
-            ..FileFacts::default()
-        }
-    }
-
-    #[test]
-    fn a_title_names_its_studios_and_then_every_video_file_it_holds() {
-        let foot = Foot::of(
-            &["A Studio".to_string(), "Another".to_string()],
-            &[video(), subtitle("en"), subtitle("fr")],
-        );
-        let rows: Vec<&str> = foot.rows().map(|row| row.content).collect();
-        assert_eq!(
-            rows,
-            [
-                "A Studio, Another",
-                "1920×804 · x265 · AC3 · 4.2 GB · Subtitles: English, French",
-            ]
-        );
-    }
-
-    #[test]
-    fn a_language_the_table_does_not_name_draws_as_the_file_carries_it() {
-        let foot = Foot::of(&[], &[video(), subtitle("qq"), subtitle("eng")]);
-        let rows: Vec<&str> = foot.rows().map(|row| row.content).collect();
-        assert_eq!(
-            rows,
-            ["1920×804 · x265 · AC3 · 4.2 GB · Subtitles: qq, English"]
-        );
-    }
-
-    #[test]
-    fn a_file_the_scanner_read_no_frame_or_codec_of_shows_what_it_has() {
-        let bare = FileFacts {
-            size_bytes: 700_000_000,
-            ..video()
-        };
-        let foot = Foot::of(
-            &[],
-            &[FileFacts {
-                width: 0,
-                height: 0,
-                video_codec: String::new(),
-                ..bare
-            }],
-        );
-        let rows: Vec<&str> = foot.rows().map(|row| row.content).collect();
-        assert_eq!(rows, ["AC3 · 700 MB"]);
-    }
-
-    #[test]
-    fn the_foot_names_the_title_s_own_video_files_and_no_other_file() {
-        let trailer = FileFacts {
-            role: "trailer".into(),
-            ..video()
-        };
-        let art = FileFacts {
-            role: "backdrop".into(),
-            kind: "image".into(),
-            ..FileFacts::default()
-        };
-        let foot = Foot::of(&[], &[video(), trailer, art]);
-        assert_eq!(foot.rows().count(), 1);
-    }
-
-    #[test]
-    fn a_title_with_no_studio_and_no_file_takes_no_height() {
-        let foot = Foot::of(&[], &[]);
-        assert_eq!(foot.rows().count(), 0);
-        assert_eq!(foot.height(900.0), 0.0);
-    }
-
-    #[test]
-    fn a_foot_is_as_tall_as_its_lines_and_the_gap_between_the_two_kinds() {
-        let foot = Foot::of(&["A Studio".to_string()], &[video()]);
-        assert_eq!(
-            foot.height(1_680.0),
-            text::height(1, PRODUCTION) + GAP + text::height(1, DETAIL)
-        );
-    }
-
-    #[test]
-    fn the_file_lines_draw_smaller_and_fainter_than_the_production_line() {
-        let foot = Foot::of(&["A Studio".to_string()], &[video()]);
-        let rows: Vec<Row> = foot.rows().collect();
-        assert_eq!(rows[0].prefix, PRODUCED_BY);
-        assert!(!rows[0].faint);
-        assert_eq!(rows[1].prefix, "");
-        assert!(rows[1].faint);
-        assert!(rows[1].size < rows[0].size);
-        assert_eq!(rows[1].lead, GAP);
-    }
-
-    #[test]
-    fn a_file_line_with_no_production_line_over_it_takes_no_gap() {
-        let foot = Foot::of(&[], &[video()]);
-        let rows: Vec<Row> = foot.rows().collect();
-        assert_eq!(rows[0].lead, 0.0);
-        assert_eq!(foot.height(1_680.0), text::height(1, DETAIL));
-    }
-}
+mod tests;

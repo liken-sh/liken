@@ -498,7 +498,7 @@ impl Source for Fake {
                 crate::catalog::franchise::answer(self.franchise(library, id))
             }
             Query::Released { fold, .. } | Query::Added { fold, .. } => self.recency(*fold),
-            Query::Genre { name, .. } => Answer {
+            Query::Genre { name, .. } | Query::Studio { name, .. } => Answer {
                 name: name.clone(),
                 slots: (1..=self.movies)
                     .map(|number| Slot::of("screening/films", "movies", self.member(number)))

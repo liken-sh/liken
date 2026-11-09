@@ -3,6 +3,7 @@
 
 mod marks;
 mod resume;
+mod studios;
 
 use super::*;
 use crate::catalog::Answer;
@@ -39,6 +40,9 @@ struct Films {
     // Whether the movie belongs to a franchise, which puts a strip
     // under the set strip.
     franchise: bool,
+    // Whether the body names no studio, which leaves the foot with no
+    // stop.
+    unproduced: bool,
     // Every play of every film of this catalog, as the store answers them,
     // and the people the last read of it named.
     plays: Vec<crate::catalog::Resume>,
@@ -61,7 +65,10 @@ impl Films {
                 name: "A Player".into(),
                 role: "The Part".into(),
             }],
-            studios: vec!["A Studio".into(), "Another Studio".into()],
+            studios: match self.unproduced {
+                true => Vec::new(),
+                false => vec!["A Studio".into(), "Another Studio".into()],
+            },
             ratings: vec![
                 ("imdb".into(), 6.5),
                 ("metacritic".into(), 80.0),
@@ -358,12 +365,11 @@ fn a_page_carries_the_scores_its_body_holds_and_leaves_tmdb_off() {
 #[test]
 fn the_foot_names_the_studios_and_the_files_section_each_video_file() {
     let (page, _) = page(Films::default());
-    let rows: Vec<String> = page
-        .foot
-        .rows()
-        .map(|row| row.content.to_string())
-        .collect();
-    assert_eq!(rows, ["A Studio, Another Studio"]);
+    assert_eq!(
+        page.foot.studios().collect::<Vec<_>>(),
+        ["A Studio", "Another Studio"]
+    );
+    assert!(page.foot.files().is_empty());
     let blocks: Vec<(&str, &str)> = page
         .files
         .blocks
@@ -526,8 +532,11 @@ fn down_reaches_the_strip_at_this_film_and_up_returns_to_the_marks() {
 }
 
 #[test]
-fn down_with_no_strip_and_no_stripe_stops_on_the_marks() {
-    let (mut page, mut source) = page(Films::default());
+fn down_with_no_strip_no_stripe_and_no_studio_stops_on_the_marks() {
+    let (mut page, mut source) = page(Films {
+        unproduced: true,
+        ..Films::default()
+    });
     page.key("down", &mut source);
     page.key("down", &mut source);
     assert_eq!(page.focus, Focus::Marks(0));
@@ -561,7 +570,11 @@ fn down_from_the_strip_reaches_the_stripes_and_up_returns_to_it() {
 
 #[test]
 fn the_arrows_move_within_a_stripe_and_between_the_stripes() {
-    let (mut page, mut source) = credited();
+    let (mut page, mut source) = page(Films {
+        credits: true,
+        unproduced: true,
+        ..Films::default()
+    });
     page.key("down", &mut source);
     page.key("down", &mut source);
     assert_eq!(page.focus, Focus::Stripe(0, 0));
@@ -683,6 +696,7 @@ fn a_select_on_a_stripe_slot_past_the_credits_opens_nothing() {
 fn down_from_the_set_strip_holds_where_nothing_stands_under_it() {
     let mut source = Films {
         set: true,
+        unproduced: true,
         ..Films::default()
     };
     let mut page = Movie::open("screening/films", "one", &mut source).expect("the film is there");
@@ -695,6 +709,7 @@ fn down_from_the_set_strip_holds_where_nothing_stands_under_it() {
 fn down_from_a_franchise_member_holds_where_the_film_credits_nobody() {
     let mut source = Films {
         franchise: true,
+        unproduced: true,
         ..Films::default()
     };
     let mut page = Movie::open("screening/films", "one", &mut source).expect("the film is there");

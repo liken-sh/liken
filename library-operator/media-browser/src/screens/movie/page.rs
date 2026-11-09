@@ -178,6 +178,22 @@ pub(super) fn rows<'a>(
     rows
 }
 
+/// The box of the focused studio on the foot at this scroll down, or
+/// nothing while focus is elsewhere.
+pub(super) fn studio(
+    movie: &Movie,
+    blocks: &Blocks,
+    bounds: Rectangle,
+    offset: f32,
+) -> Option<Rectangle> {
+    let Focus::Studio(index) = movie.focus else {
+        return None;
+    };
+    let region = screen::region(bounds);
+    let at = Point::new(region.x, blocks.foot.top - offset);
+    movie.foot.placed(at, region.width).get(index).copied()
+}
+
 /// The page's front layer as one canvas.
 pub struct Page<'a, A> {
     /// The movie the page is about.
@@ -314,25 +330,11 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             region.width,
         );
 
-        let mut at = Point::new(region.x, blocks.foot.top - offset);
-        let width = region.width;
-        for row in movie.foot.rows() {
-            at.y += row.lead;
-            let color = match row.faint {
-                true => look::faint(),
-                false => look::text(),
-            };
-            text::line(&mut frame, row.prefix, at, row.size, look::faint(), width);
-            let after = Point::new(at.x + row.indent(), at.y);
-            at.y += text::line(
-                &mut frame,
-                row.content,
-                after,
-                row.size,
-                color,
-                width - row.indent(),
-            );
-        }
+        movie.foot.draw(
+            &mut frame,
+            Point::new(region.x, blocks.foot.top - offset),
+            region.width,
+        );
 
         vec![frame.into_geometry()]
     }
@@ -472,6 +474,7 @@ impl Blocks {
             Focus::Stripe(stripe, _) => self.stripes.get(stripe).copied(),
             Focus::Franchise(strip, _) => self.franchises.get(strip).copied(),
             Focus::Strip(_) => self.strip,
+            Focus::Studio(_) => Some(self.foot),
             Focus::Buttons(_) | Focus::Marks(_) => None,
         }
         .unwrap_or(self.buttons);

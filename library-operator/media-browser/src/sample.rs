@@ -30,6 +30,9 @@ mod files;
 // page draw.
 mod orders;
 
+// The invented studios, which a movie's page and a studio's wall share.
+mod studios;
+
 // The search index over the invented rows, so a local run with no
 // catalog and a test search the way a run over the local catalog does.
 mod search;
@@ -142,6 +145,10 @@ impl Source for Catalog {
                 slots: draw::titles(name, *order, *sort),
             },
             Query::Franchise { library, id } => franchise::answer(self.franchise(library, id)),
+            Query::Studio { name, sort } => Answer {
+                name: name.clone(),
+                slots: studios::wall(name, *sort),
+            },
             Query::Search { text } => Answer {
                 name: String::new(),
                 slots: search::index().find(text),
@@ -179,7 +186,7 @@ impl Source for Catalog {
                     role: format!("Part {part}"),
                 })
                 .collect(),
-            studios: vec![format!("Studio {number:02}")],
+            studios: studios::of_serial(number),
             ratings: ratings(number),
             backdrop: format!("backdrops/serial-{number:02}.jpg"),
             logo: String::new(),
@@ -243,7 +250,7 @@ impl Source for Catalog {
                     role: format!("Part {part}"),
                 })
                 .collect(),
-            studios: vec![format!("Studio {number:04}"), "A Second Studio".into()],
+            studios: studios::of_movie(number),
             ratings: ratings(number),
             set_id: set_of(number),
             backdrop: format!("backdrops/specimen-{number:04}.jpg"),

@@ -172,6 +172,37 @@ fn a_genre_cycles_leads_newest_oldest_title_and_back() {
 }
 
 #[test]
+fn a_studio_is_headed_by_its_name_and_the_counts_of_both_kinds() {
+    let query = Query::studio("Gullwing Pictures");
+    assert_eq!(query.name("ignored"), "Gullwing Pictures");
+    assert_eq!(
+        query.heading("ignored", counts(9, 7, 2)),
+        "Gullwing Pictures · 7 movies, 2 series"
+    );
+    assert_eq!(query.all_titles(), query);
+}
+
+// A studio's wall opens newest first, because a studio's titles read as
+// its history, and its button cycles the three orders a library's does.
+#[test]
+fn a_studio_opens_newest_first_and_cycles_the_library_orders() {
+    let mut query = Query::studio("Gullwing Pictures");
+    let mut words = Vec::new();
+    for _ in 0..4 {
+        words.push(query.sort_word().expect("a studio draws a button"));
+        query = query.resorted();
+    }
+    assert_eq!(words, ["Newest", "Oldest", "Title", "Newest"]);
+    assert_eq!(
+        query,
+        Query::Studio {
+            name: "Gullwing Pictures".into(),
+            sort: Sort::Oldest,
+        }
+    );
+}
+
+#[test]
 fn every_other_query_draws_no_button_and_never_resorts() {
     for query in [
         Query::Person {

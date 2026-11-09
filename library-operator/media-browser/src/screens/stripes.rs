@@ -139,6 +139,12 @@ impl Stripes {
         (!self.bands.is_empty()).then_some((0, 0))
     }
 
+    /// The first rung of the last stripe, which up from the block under
+    /// the stripes lands on, or nothing where the title credits nobody.
+    pub fn last(&self) -> Option<Rung> {
+        self.bands.len().checked_sub(1).map(|stripe| (stripe, 0))
+    }
+
     /// The person at one rung, or nothing where the rung is past
     /// what the title credits.
     pub fn face(&self, (stripe, slot): Rung) -> Option<&Face> {

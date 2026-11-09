@@ -8,6 +8,7 @@ mod pickup;
 mod resume;
 mod seasons;
 mod serials;
+mod studios;
 mod update;
 
 use super::*;
@@ -248,7 +249,10 @@ fn down_and_up_cross_the_dividers() {
 
 #[test]
 fn the_first_and_the_last_row_of_a_page_hold_focus() {
-    let (mut page, mut source) = page(Serials::default());
+    let (mut page, mut source) = page(Serials {
+        unproduced: true,
+        ..Serials::default()
+    });
     assert_eq!(still(pressed(&mut page, &mut source, "up")), 0);
     page.focus = Focus::Still(13);
     assert_eq!(still(pressed(&mut page, &mut source, "down")), 13);
@@ -278,20 +282,18 @@ fn the_scores_are_the_series_own_and_stand_while_a_still_holds_focus() {
 #[test]
 fn the_foot_names_the_studios_and_the_focused_episode_s_file() {
     let (mut page, mut source) = page(Serials::default());
-    let first: Vec<String> = page
-        .foot
-        .rows()
-        .map(|row| row.content.to_string())
-        .collect();
-    assert_eq!(first, ["A Studio", "1920×1080 · x264 · AAC · 1.0 GB"]);
+    assert_eq!(
+        page.foot.studios().collect::<Vec<_>>(),
+        ["A Studio", "A Network"]
+    );
+    assert_eq!(page.foot.files(), ["1920×1080 · x264 · AAC · 1.0 GB"]);
 
     pressed(&mut page, &mut source, "right");
-    let second: Vec<String> = page
-        .foot
-        .rows()
-        .map(|row| row.content.to_string())
-        .collect();
-    assert_eq!(second, ["A Studio", "1920×1080 · x264 · AAC · 2.0 GB"]);
+    assert_eq!(
+        page.foot.studios().collect::<Vec<_>>(),
+        ["A Studio", "A Network"]
+    );
+    assert_eq!(page.foot.files(), ["1920×1080 · x264 · AAC · 2.0 GB"]);
 }
 
 #[test]

@@ -9,7 +9,7 @@
 
 use iced_winit::core::Rectangle;
 
-use super::page::{Placed, RAIL, placed, row_at, rows, status_line, stills, under};
+use super::page::{Placed, RAIL, placed, row_at, rows, status_line, stills, studio_box, under};
 use super::{Focus, Series, row, watch};
 use crate::look;
 use crate::views::across::Across;
@@ -26,7 +26,8 @@ impl Series {
 
     /// The rectangle the focus outline goes to on this page at these
     /// bounds: around the focused button, mark, still, bar, member,
-    /// heading, or headshot, at the place every scroll comes to rest.
+    /// heading, headshot, or studio, at the place every scroll comes to
+    /// rest.
     pub fn marked(&self, bounds: Rectangle) -> Option<Rectangle> {
         let placed = placed(self, bounds);
         let around = match self.focus {
@@ -42,6 +43,7 @@ impl Series {
                     .iter()
                     .find_map(Across::focused)
             }
+            Focus::Studio(index) => studio_box(self, &placed, index),
         };
         around.map(views::marked)
     }

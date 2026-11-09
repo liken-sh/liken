@@ -52,6 +52,8 @@ pub enum Focus {
     Franchise(usize, Place),
     /// One headshot of one stripe: the stripe, and the slot in it.
     Stripe(usize, usize),
+    /// One studio or network on the production line of the foot.
+    Studio(usize),
 }
 
 /// One season, as the divider before its first row draws it.
@@ -357,6 +359,10 @@ impl Series {
                 Some((stripe, slot)) => Focus::Stripe(stripe, slot),
                 None => Focus::Still(0),
             },
+            Focus::Studio(index) => match self.foot.studios().count() {
+                0 => Focus::Still(0),
+                count => Focus::Studio(index.min(count - 1)),
+            },
         }
     }
 
@@ -368,7 +374,11 @@ impl Series {
             Focus::Still(index) | Focus::Episode(index, _) | Focus::EpisodeMark(index, _) => {
                 self.stills.get(index)
             }
-            Focus::Buttons(..) | Focus::Rail(..) | Focus::Franchise(..) | Focus::Stripe(..) => None,
+            Focus::Buttons(..)
+            | Focus::Rail(..)
+            | Focus::Franchise(..)
+            | Focus::Stripe(..)
+            | Focus::Studio(..) => None,
         }
     }
 
@@ -446,6 +456,7 @@ impl Series {
             Focus::Rail(bar) => self.on_rail(bar, key, source),
             Focus::Franchise(strip, place) => self.on_franchise((strip, place), key, source),
             Focus::Stripe(stripe, slot) => self.on_stripe((stripe, slot), key, source),
+            Focus::Studio(index) => self.on_studio(index, key, source),
         };
         // A press that leaves the row of the arrival shows the wall, and a
         // row opened from the wall after that closes on back as any other.

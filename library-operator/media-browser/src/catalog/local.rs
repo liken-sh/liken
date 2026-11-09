@@ -38,6 +38,7 @@ mod search;
 mod seen;
 mod series;
 mod streams;
+mod studios;
 mod subtitles;
 mod touched;
 mod updates;
@@ -465,6 +466,15 @@ impl Source for LocalCatalog {
                 }
             }
             Query::Franchise { library, id } => franchise::answer(self.franchise(library, id)),
+            Query::Studio { name, sort } => {
+                let kinds = self.library_kinds();
+                Answer {
+                    name: name.clone(),
+                    slots: kinds.map_or_else(Vec::new, |kinds| {
+                        self.read(|connection| studios::titles(connection, name, *sort, &kinds))
+                    }),
+                }
+            }
             Query::Search { text } => Answer {
                 name: String::new(),
                 slots: self.shelf.find(text),
