@@ -12,8 +12,9 @@ import (
 	"testing/synctest"
 )
 
-// The choice takes the highest-voted image of the library's own language,
-// then the highest-voted image with no language, then any.
+// The choice of a poster, a logo, or any art that names the title takes the
+// highest-voted image of the library's own language, then the highest-voted
+// image with no language, then any.
 func TestTheChoiceFollowsTheLanguageOrder(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -58,7 +59,7 @@ func TestTheChoiceFollowsTheLanguageOrder(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				candidate, held := chooseArt(test.candidates, artLanguage)
+				candidate, held := chooseArt(test.candidates, artTypes[factPoster].languages(artLanguage))
 				if held != (test.want != "") {
 					t.Fatalf("chose %+v, want %q", candidate, test.want)
 				}
@@ -66,6 +67,43 @@ func TestTheChoiceFollowsTheLanguageOrder(t *testing.T) {
 					t.Errorf("chose %q, want %q", candidate.URL, test.want)
 				}
 			})
+		})
+	}
+}
+
+// A backdrop draws behind the title's own logo and its name, so an image
+// with text in it prints the title twice. The backdrop takes the image with
+// no language first, and every other art fact keeps the library's language
+// first.
+func TestEachArtFactPrefersItsOwnLanguageOrder(t *testing.T) {
+	offered := []artCandidate{
+		{URL: "/de.jpg", Language: "de", Votes: 9},
+		{URL: "/en.jpg", Language: "en", Votes: 5},
+		{URL: "/none.jpg", Language: "", Votes: 3},
+	}
+	cases := []struct {
+		fact       string
+		candidates []artCandidate
+		want       string
+	}{
+		{fact: factBackdrop, candidates: offered, want: "/none.jpg"},
+		{fact: factBackdrop, candidates: offered[:2], want: "/en.jpg"},
+		{fact: factBackdrop, candidates: offered[:1], want: "/de.jpg"},
+		{fact: factPoster, candidates: offered, want: "/en.jpg"},
+		{fact: factLogo, candidates: offered, want: "/en.jpg"},
+		{fact: factLandscape, candidates: offered, want: "/en.jpg"},
+		{fact: factBanner, candidates: offered, want: "/en.jpg"},
+		{fact: factClearart, candidates: offered, want: "/en.jpg"},
+		{fact: factDiscart, candidates: offered, want: "/en.jpg"},
+		{fact: factSeasonPoster, candidates: offered, want: "/en.jpg"},
+		{fact: factEpisodeThumb, candidates: offered, want: "/en.jpg"},
+	}
+	for _, test := range cases {
+		t.Run(test.fact+test.want, func(t *testing.T) {
+			candidate, _ := chooseArt(test.candidates, artTypes[test.fact].languages(artLanguage))
+			if candidate.URL != test.want {
+				t.Errorf("the %s chose %q, want %q", test.fact, candidate.URL, test.want)
+			}
 		})
 	}
 }

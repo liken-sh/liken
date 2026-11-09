@@ -102,7 +102,7 @@ func (e *enricher) artOne(ctx context.Context, line *artLine, art artType, gap a
 		e.recordArt(folder, art.fact, gap, "", attemptError)
 		return false
 	}
-	image, held := chooseArt(candidates, artLanguage)
+	image, held := chooseArt(candidates, art.languages(artLanguage))
 	if answerer == nil || !held {
 		e.logf("no provider holds the %s of %s", art.fact, e.named(gap.key))
 		e.recordArt(folder, art.fact, gap, "", attemptNothing)

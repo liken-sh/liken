@@ -137,7 +137,9 @@ func firstHeldImages(lists ...[]fanartImage) []fanartImage {
 
 // One list as the choice reads it. The likes are the votes and the lang is
 // the language. Fanart.tv states the likes as a string, so a count it did not
-// state reads as no votes.
+// state reads as no votes. Fanart.tv marks an image with no text by the
+// language 00, and the choice reads an image with no text as an empty
+// language, which is how TMDb states it.
 func fanartCandidates(images []fanartImage) []artCandidate {
 	candidates := []artCandidate{}
 	for _, image := range images {
@@ -147,9 +149,17 @@ func fanartCandidates(images []fanartImage) []artCandidate {
 		likes, _ := strconv.Atoi(strings.TrimSpace(image.Likes))
 		candidates = append(candidates, artCandidate{
 			URL:      image.URL,
-			Language: image.Lang,
+			Language: fanartLanguage(image.Lang),
 			Votes:    float64(likes),
 		})
 	}
 	return candidates
+}
+
+// The language 00 is Fanart.tv's mark for an image with no text.
+func fanartLanguage(lang string) string {
+	if lang == "00" {
+		return ""
+	}
+	return lang
 }

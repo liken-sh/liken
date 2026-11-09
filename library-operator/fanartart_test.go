@@ -326,3 +326,24 @@ func TestWhatTheFanartAnswererDoesWithAMissAndARefusal(t *testing.T) {
 		}
 	})
 }
+
+// Fanart.tv marks an image with no text by the language 00, where TMDb
+// leaves the language null, so the choice reads 00 as no language.
+func TestFanartReadsLanguage00AsNoLanguage(t *testing.T) {
+	cases := []struct {
+		lang string
+		want string
+	}{
+		{lang: "00", want: ""},
+		{lang: "", want: ""},
+		{lang: "en", want: "en"},
+	}
+	for _, test := range cases {
+		t.Run(test.lang, func(t *testing.T) {
+			got := fanartCandidates([]fanartImage{{URL: "https://example.test/a.jpg", Lang: test.lang}})
+			if len(got) != 1 || got[0].Language != test.want {
+				t.Errorf("candidates = %+v, want the language %q", got, test.want)
+			}
+		})
+	}
+}

@@ -45,13 +45,27 @@ func servedArtFacts(library *Library, providers providerSet) []string {
 // no file at all, because it is named for its episode file. The kind is the
 // one kind of library that carries this art, and empty for the art both kinds
 // carry. The list is the TMDb array the fact reads, and the size is the one it
-// fetches.
+// fetches. Textless marks the art a screen draws behind the title's own logo
+// and name, where an image that prints the title shows it twice.
 type artType struct {
-	fact string
-	file string
-	kind string
-	list string
-	size string
+	fact     string
+	file     string
+	kind     string
+	list     string
+	size     string
+	textless bool
+}
+
+// The languages the choice tries, in order, before it takes an image of any
+// language. An empty language is an image with no text. Textless art takes
+// that image first, because the backdrop draws behind the title's logo and
+// name. Every other fact takes the library's language first, because a
+// poster, a logo, or a banner shows the title in words the household reads.
+func (t artType) languages(library string) []string {
+	if t.textless {
+		return []string{"", library}
+	}
+	return []string{library, ""}
 }
 
 // Whether a library of this kind carries this art at all. A disc is a
@@ -71,7 +85,7 @@ func (t artType) holds(kind string) bool {
 // decided.
 var artTypes = map[string]artType{
 	factPoster:       {fact: factPoster, file: "poster.jpg", list: tmdbPosters, size: "w780"},
-	factBackdrop:     {fact: factBackdrop, file: "fanart.jpg", list: tmdbBackdrops, size: "w1280"},
+	factBackdrop:     {fact: factBackdrop, file: "fanart.jpg", list: tmdbBackdrops, size: "w1280", textless: true},
 	factLogo:         {fact: factLogo, file: "clearlogo.png", list: tmdbLogos, size: "w500"},
 	factClearart:     {fact: factClearart, file: "clearart.png"},
 	factBanner:       {fact: factBanner, file: "banner.jpg"},

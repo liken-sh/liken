@@ -99,12 +99,11 @@ func (l *artLine) ask(ctx context.Context, fact string, gap artGap,
 	return nil, nil, failure
 }
 
-// The choice: the highest-voted image in the library's own language, then the
-// highest-voted image with no language, then the highest-voted image of any
-// language. Art with the title's own text is what a person reads on the
-// screen, and art with no text reads in every language.
-func chooseArt(candidates []artCandidate, language string) (artCandidate, bool) {
-	for _, want := range []string{language, ""} {
+// The choice: the highest-voted image in each language the fact tries, in
+// the order artType.languages gives, and then the highest-voted image of any
+// language.
+func chooseArt(candidates []artCandidate, languages []string) (artCandidate, bool) {
+	for _, want := range languages {
 		if candidate, held := bestArt(candidates, func(candidate artCandidate) bool {
 			return candidate.Language == want
 		}); held {

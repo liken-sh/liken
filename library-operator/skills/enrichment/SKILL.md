@@ -744,6 +744,16 @@ replaced the video at the same path. That thumbnail is a frame of the
 earlier file, so the fact downloads the still again and writes it over
 the old one.
 
+When a provider offers several images for one art file, the fact takes
+the image with the most votes in the first language it tries, and an
+image of any language when none of them has one. The backdrop,
+`fanart.jpg`, tries an image with no text first and then English,
+because the browser draws the backdrop behind the title's logo and
+name, and a backdrop with the title in it shows the title twice. Every
+other art file tries English first and then an image with no text.
+TMDb states an image with no text as a null language, and Fanart.tv
+states it as the language `00`.
+
 Every file lands whole: the writer fills a temporary beside it and
 renames the temporary into place. Two clusters can mount one library,
 each with its own `Library` over the same root, and their writers can
