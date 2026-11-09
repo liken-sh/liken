@@ -160,6 +160,12 @@ pub fn plan(connection: &Connection, people: &[String]) -> rusqlite::Result<Vec<
     collect(connection, &sql, &names(people), |row| row.get(3))
 }
 
+// A play's aliases name a provider and an id but not a kind, and TMDb
+// numbers films and series in separate ranges that overlap: id 253 is a
+// film and a series. So each branch takes only the plays of its own kind,
+// by the episode number that the store writes as 0 for a film and as the
+// episode's number for an episode, or an episode's play would resume a
+// film that shares its series' id.
 fn statement(people: &[String]) -> String {
     format!(
         "WITH watched AS (\
@@ -171,11 +177,13 @@ fn statement(people: &[String]) -> String {
            FROM watched \
            JOIN progress.play_aliases named ON named.play = watched.play \
            JOIN aliases ON aliases.alias = 'movie:' || named.provider || ':' || named.id \
+           WHERE watched.episode = 0 \
            UNION \
            SELECT watched.play, aliases.library, aliases.item, 'series' AS kind \
            FROM watched \
            JOIN progress.play_aliases named ON named.play = watched.play \
-           JOIN aliases ON aliases.alias = 'series:' || named.provider || ':' || named.id\
+           JOIN aliases ON aliases.alias = 'series:' || named.provider || ':' || named.id \
+           WHERE watched.episode > 0\
          ) \
          SELECT works.library, 'movie', movies.id, movies.title, movies.released, movies.art, \
                 watched.play, watched.position, watched.duration, watched.ended, \

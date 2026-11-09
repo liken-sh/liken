@@ -212,6 +212,49 @@ fn a_play_that_names_the_audience_and_nobody_more_is_exact() {
 }
 
 #[test]
+fn an_episode_play_never_resumes_a_film_that_shares_its_id() {
+    let dir = TempDir::new().unwrap();
+    let catalog = fixture(&dir);
+    let store = progress_fixture(&dir);
+    a_film(&catalog);
+    a_show(&catalog);
+    insert_alias(&catalog, SHOWS, "series:tmdb:7001", SHOW);
+    insert_play(
+        &store,
+        "one",
+        &[FILM_ALIAS],
+        &["first"],
+        (600, 6000, 10),
+        (1, 5),
+    );
+    let mut source = source_over(&catalog, store);
+
+    let libraries: Vec<String> = watching(&mut source, &["first"])
+        .into_iter()
+        .map(|resume| resume.library)
+        .collect();
+    assert_eq!(libraries, [SHOWS]);
+}
+
+#[test]
+fn a_film_play_never_resumes_a_series_that_shares_its_id() {
+    let dir = TempDir::new().unwrap();
+    let catalog = fixture(&dir);
+    let store = progress_fixture(&dir);
+    a_film(&catalog);
+    a_show(&catalog);
+    insert_alias(&catalog, SHOWS, "series:tmdb:7001", SHOW);
+    film_play(&store, "one", &["first"], (600, 6000, 10));
+    let mut source = source_over(&catalog, store);
+
+    let libraries: Vec<String> = watching(&mut source, &["first"])
+        .into_iter()
+        .map(|resume| resume.library)
+        .collect();
+    assert_eq!(libraries, [FILMS]);
+}
+
+#[test]
 fn a_play_carrying_two_aliases_of_one_work_answers_once() {
     let dir = TempDir::new().unwrap();
     let catalog = fixture(&dir);
