@@ -209,7 +209,12 @@ impl Source for Catalog {
                     duration: 2_400 + (episode % 7) * 60,
                     plot: format!("Segment {episode:02} of season {season}. {PLOT}"),
                     art: format!("stills/serial-{number:02}-s{season:02}e{episode:02}.jpg"),
+                    added: 0,
                 })
+            })
+            .map(|mut episode| {
+                episode.added = arrival(number, &episode);
+                episode
             })
             .collect()
     }
@@ -435,7 +440,7 @@ fn recent<K: Ord>(key: impl Fn(&Candidate) -> K) -> Vec<Candidate> {
         for episode in catalog.episodes(SERIALS_LIBRARY, &serial(number).id) {
             candidates.push(Candidate::Episode {
                 library: SERIALS_LIBRARY.into(),
-                added: arrival(number, &episode),
+                added: episode.added,
                 season: episode.season,
                 number: episode.episode,
                 episode: Title {

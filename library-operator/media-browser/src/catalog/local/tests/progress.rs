@@ -1,6 +1,7 @@
 // The continue-watching read over a real catalog file and a real progress
 // file, and the fixtures every progress read is tested from.
 
+mod arrivals;
 mod credits;
 mod store;
 mod touched;

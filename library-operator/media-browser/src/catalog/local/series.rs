@@ -70,16 +70,7 @@ pub fn episodes(
     library: &str,
     id: &str,
 ) -> rusqlite::Result<Vec<Episode>> {
-    let sql = "SELECT episodes.season, episodes.episode, episodes.title, \
-                      episodes.released, episodes.duration, \
-                      json_extract(episodes.body, '$.plot'), episodes.art, episodes.id, \
-                      IFNULL(series.art, ''), IFNULL(series.arts, '[]') \
-               FROM episodes \
-               LEFT JOIN series ON series.library = episodes.library \
-               AND series.id = episodes.series \
-               WHERE episodes.library = ? AND episodes.series = ? \
-               ORDER BY episodes.season, episodes.episode";
-    collect(connection, sql, &[&library, &id], |row| {
+    collect(connection, EPISODES, &[&library, &id], |row| {
         let still = art::still(
             &item::text(row, 6)?,
             &item::text(row, 8)?,
@@ -94,6 +85,26 @@ pub fn episodes(
             plot: item::text(row, 5)?,
             art: still,
             id: row.get(7)?,
+            added: row.get(10)?,
         })
     })
+}
+
+const EPISODES: &str = "SELECT episodes.season, episodes.episode, episodes.title, \
+                               episodes.released, episodes.duration, \
+                               json_extract(episodes.body, '$.plot'), episodes.art, episodes.id, \
+                               IFNULL(series.art, ''), IFNULL(series.arts, '[]'), \
+                               episodes.added \
+                        FROM episodes \
+                        LEFT JOIN series ON series.library = episodes.library \
+                        AND series.id = episodes.series \
+                        WHERE episodes.library = ? AND episodes.series = ? \
+                        ORDER BY episodes.season, episodes.episode";
+
+/// The lines of SQLite's plan for the episodes read, so a test checks how
+/// it finds its rows.
+#[cfg(test)]
+pub fn episodes_plan(connection: &Connection) -> rusqlite::Result<Vec<String>> {
+    let sql = format!("EXPLAIN QUERY PLAN {EPISODES}");
+    collect(connection, &sql, &[&"", &""], |row| row.get(3))
 }

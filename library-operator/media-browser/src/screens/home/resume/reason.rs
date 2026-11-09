@@ -1,20 +1,25 @@
 // The reasons a card of the continue-watching row carries: one per
 // container that offers its leaf, stacked in the order resume, series,
-// set, franchise, and spelled with the container's title. A press follows
-// the first of them.
+// set, franchise, and spelled with the container's title. A series whose
+// next episode arrived after the audience caught up says "New" in the
+// place of "Next in". A press follows the first of them.
 
 use crate::screens::facts;
 
 // One reason a leaf is in the row. `Resume` carries the series title for
 // an episode and nothing for a film, so every thread that resumes one leaf
 // spells the same reason once. `Franchise` carries what a press needs to
-// open the franchise page on the member.
+// open the franchise page on the member. `New` carries the series title
+// for a series thread whose next episode is new to the audience.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reason {
     Resume {
         series: String,
     },
     Series(String),
+    New {
+        series: String,
+    },
     Set(String),
     Franchise {
         library: String,
@@ -32,17 +37,18 @@ impl Reason {
     fn rank(&self) -> u8 {
         match self {
             Self::Resume { .. } => 0,
-            Self::Series(_) => 1,
+            Self::Series(_) | Self::New { .. } => 1,
             Self::Set(_) => 2,
             Self::Franchise { .. } => 3,
         }
     }
 
-    // The words one reason reads as: "Resume", "Resume · The Night Desk", or
-    // "Next in" and the container's title.
+    // The words one reason reads as: "Resume", "Resume · The Night Desk",
+    // "New · The Night Desk", or "Next in" and the container's title.
     fn spelled(&self) -> String {
         match self {
             Self::Resume { series } => facts::joined(&["Resume", series]),
+            Self::New { series } => facts::joined(&["New", series]),
             Self::Series(title) | Self::Set(title) | Self::Franchise { title, .. } => {
                 format!("Next in {title}")
             }
@@ -127,6 +133,21 @@ mod tests {
         assert_eq!(
             line(&reasons),
             "Resume · Harborlight · Next in the Northwind Saga"
+        );
+    }
+
+    #[test]
+    fn a_new_episode_names_the_show_in_the_place_of_the_series() {
+        let mut reasons = vec![
+            northwind(),
+            Reason::New {
+                series: "Harborlight".into(),
+            },
+        ];
+        stacked(&mut reasons);
+        assert_eq!(
+            line(&reasons),
+            "New · Harborlight · Next in the Northwind Saga"
         );
     }
 

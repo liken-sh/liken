@@ -166,6 +166,15 @@ franchise. A card that is next in a series or a set opens that title's
 page. A card that is next in a franchise alone opens the franchise page
 on that member.
 
+The row puts the card of the newest play first. When you finish every
+episode of a series that the library holds, and a later episode arrives
+after that, the series' card sorts by the time the episode's file arrived,
+so it moves to the front of the row. Its second line then reads "New"
+and the series, as in "New · Harbor Lights · S02". A series that you
+stopped inside an episode, or that has an episode the library held before
+your last play and you have not watched, keeps the time of your last
+play.
+
 When you choose people while focus is at the top of the home page, on
 the banner or the first row, focus moves to their continue-watching
 row when it comes in. Further down the page, focus stays where it is.

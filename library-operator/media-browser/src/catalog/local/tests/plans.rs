@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use super::super::{details, files, item, people, progress};
+use super::super::{details, files, item, people, progress, series};
 use super::SCHEMA;
 use super::progress::PROGRESS_SCHEMA;
 
@@ -115,6 +115,26 @@ fn the_progress_read_walks_no_table_of_the_store() {
         walks
             .iter()
             .all(|line| line.contains(" named") || line.contains(" works")),
+        "{plan:#?}"
+    );
+}
+
+// The continue-watching row lists the episodes of every series the
+// audience has a thread in, and the series page lists them on every open,
+// so the read finds one series' episodes through the index that holds them
+// in aired order and never sorts them itself.
+#[test]
+fn the_episodes_read_searches_the_shipped_aired_order_index() {
+    let plan = series::episodes_plan(&shipped_schema()).unwrap();
+
+    assert!(
+        plan.iter().any(|line| line.starts_with("SEARCH episodes")
+            && line.contains("episodes_library_series_season_episode")),
+        "{plan:#?}"
+    );
+    assert!(
+        plan.iter()
+            .all(|line| !line.starts_with("SCAN") && !line.contains("TEMP B-TREE")),
         "{plan:#?}"
     );
 }

@@ -254,6 +254,24 @@ fn episodes_come_back_by_season_and_then_by_episode() {
 }
 
 #[test]
+fn an_episode_carries_the_second_its_file_arrived() {
+    let dir = TempDir::new().unwrap();
+    let path = fixture(&dir);
+    let series = "series:tvdb:8001";
+    insert_episode(&path, "default/shows", "episode:tvdb:1", series, 1, 1);
+    Connection::open(&path)
+        .unwrap()
+        .execute("UPDATE episodes SET added = 1794116747", [])
+        .unwrap();
+
+    let mut source = LocalCatalog::new(&path, NO_AGENT);
+    assert_eq!(
+        source.episodes("default/shows", series)[0].added,
+        1794116747
+    );
+}
+
+#[test]
 fn a_missing_file_reads_as_empty_until_the_agent_writes_it() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("catalog.db");

@@ -309,6 +309,10 @@ pub struct Episode {
     /// holds no still for the episode. Empty where the series holds no
     /// art either. See [`art::still`].
     pub art: String,
+    /// The second the episode's file arrived, in seconds since the Unix
+    /// epoch, from the arrival ledger. The continue-watching row compares
+    /// it with the audience's last play of the series.
+    pub added: i64,
 }
 
 /// One slot of a title's stripe: the person, what they did on this

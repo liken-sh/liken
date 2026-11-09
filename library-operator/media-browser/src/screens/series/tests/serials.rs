@@ -201,6 +201,7 @@ impl Source for Serials {
                     },
                     plot: format!("The plot of S{season} E{episode}."),
                     art: format!("s{season}e{episode}.jpg"),
+                    added: 0,
                 })
             })
             .collect()

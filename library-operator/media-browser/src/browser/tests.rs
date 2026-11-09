@@ -597,6 +597,7 @@ impl Source for Fake {
                     duration: 2_760,
                     plot: format!("The plot of S{season} E{episode}."),
                     art: format!("s{season}e{episode}.jpg"),
+                    added: 0,
                 })
             })
             .collect()

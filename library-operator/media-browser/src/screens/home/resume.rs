@@ -5,6 +5,7 @@
 // work belongs to), walks each one, and folds the offers into cards. A
 // press on a card opens the page its first reason points at.
 
+mod arrival;
 pub(crate) mod containers;
 mod reason;
 
@@ -28,7 +29,8 @@ const SERIES: &str = "series";
 // One card of the row: the leaf as a slot, with the position to resume
 // at where a thread stands unfinished on it; the reasons in their order;
 // and the recorded time of the newest play that moved a thread onto it,
-// which the row sorts on.
+// or the arrival of a new episode for a caught-up audience, which the row
+// sorts on.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Card {
     pub slot: Slot,
@@ -48,8 +50,14 @@ pub fn cards(source: &mut dyn Source, people: &[String]) -> Vec<Card> {
             continue;
         };
         let leaf = &leaves[offer.leaf];
-        let reason = match &offer.progress {
-            Some(_) => Reason::Resume {
+        let arrived = match &container {
+            Container::Series { library, id, .. } => {
+                arrival::new_episode(&episodes.of(source, library, id), &offer)
+            }
+            _ => None,
+        };
+        let reason = match (&offer.progress, &container, arrived) {
+            (Some(_), _, _) => Reason::Resume {
                 series: leaf
                     .slot
                     .episode
@@ -57,14 +65,17 @@ pub fn cards(source: &mut dyn Source, people: &[String]) -> Vec<Card> {
                     .map(|place| place.name.clone())
                     .unwrap_or_default(),
             },
-            None => match containers::title(source, &container) {
+            (None, Container::Series { title, .. }, Some(_)) => Reason::New {
+                series: title.clone(),
+            },
+            (None, _, _) => match containers::title(source, &container) {
                 Some(title) => next_in(&container, leaf.member, title),
                 None => continue,
             },
         };
         let mut slot = leaf.slot.clone();
         slot.progress = offer.progress;
-        fold(&mut cards, slot, reason, offer.recorded);
+        fold(&mut cards, slot, reason, arrived.unwrap_or(offer.recorded));
     }
     for card in &mut cards {
         reason::stacked(&mut card.reasons);
