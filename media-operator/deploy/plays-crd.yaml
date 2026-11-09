@@ -194,7 +194,7 @@ spec:
                           year:
                             type: integer
                             minimum: 0
-                            description: The release year, shown under a movie's title.
+                            description: The release year, shown under a movie's title beside the film's length.
                           date:
                             type: string
                             description: >-

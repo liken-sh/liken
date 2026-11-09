@@ -1,8 +1,12 @@
-//! The control strip, the lowest region. It lays the controls out in groups, a
-//! heading over each track and its delay offset, moves the horizontal focus
-//! across the controls present for this file, and asks the focused control to
-//! act on select. A control that opens a chooser captures every press until it
-//! closes.
+//! The control strip, the lowest region. It lays the tracks out in groups, a
+//! heading over each track, moves the horizontal focus across the tracks
+//! present for this file, and opens the focused track's chooser on select. A
+//! chooser captures every press until it closes.
+//!
+//! The audio and subtitle choosers end on a row for the track's delay offset,
+//! and a select there opens the offset's adjuster. The strip draws an offset
+//! beside its track only while the offset is set, because a delay of nothing
+//! is the usual case and tells the person who reads the strip nothing.
 
 use iced::Point;
 
@@ -20,12 +24,11 @@ use crate::track::Track;
 /// above its value, and the pair sits clear below the scrubber's time line.
 const Y_HEAD: f32 = 990.0;
 const Y_VAL: f32 = 1016.0;
-/// Within a group, the offset value sits this far right of the track value.
+/// Within a group, a set offset sits this far right of the track value.
 const MEMBER_W: f32 = 200.0;
 /// The least space between the end of one value and the start of the next.
-/// A value wider than its member, less this gap, ends on an ellipsis, so a
-/// long track title cannot draw over the offset beside it and hide the stop
-/// that a press lands on.
+/// A value wider than its room ends on an ellipsis, so a long track title
+/// cannot draw over the offset or the group beside it.
 const STOP_GAP: f32 = 24.0;
 /// The pitch between two groups, and the nominal ink width of one group. The
 /// strip right-aligns the row on the nominal, so the row holds its place when a
@@ -33,7 +36,8 @@ const STOP_GAP: f32 = 24.0;
 const GROUP_PITCH: f32 = 430.0;
 const GROUP_INK: f32 = 260.0;
 
-/// One control of the strip.
+/// One control of the strip: a track the focus stands on, or the offset that
+/// its chooser's last row opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Control {
     Audio,
@@ -43,21 +47,16 @@ pub enum Control {
     Video,
 }
 
-/// The flat focus order the left and right presses walk.
-const ORDER: [Control; 5] = [
-    Control::Audio,
-    Control::AudioOffset,
-    Control::Subtitles,
-    Control::SubOffset,
-    Control::Video,
-];
+/// The flat focus order the left and right presses walk. An offset takes no
+/// focus of its own, because its track's chooser opens it.
+const ORDER: [Control; 3] = [Control::Audio, Control::Subtitles, Control::Video];
 
-/// The layout groups, a heading over a track and its offset. The offsets carry
-/// no heading of their own, because they read under the group's heading.
-const GROUPS: [(&str, &[Control]); 3] = [
-    ("audio", &[Control::Audio, Control::AudioOffset]),
-    ("subtitles", &[Control::Subtitles, Control::SubOffset]),
-    ("video", &[Control::Video]),
+/// The layout groups, a heading over a track. The headings are in sentence
+/// case, as the browser's are.
+const GROUPS: [(&str, Control); 3] = [
+    ("Audio", Control::Audio),
+    ("Subtitles", Control::Subtitles),
+    ("Video", Control::Video),
 ];
 
 impl Control {
@@ -78,6 +77,15 @@ impl Control {
         }
     }
 
+    /// The offset a track's chooser ends on. A video track has none.
+    fn paired(self) -> Option<Control> {
+        match self {
+            Control::Audio => Some(Control::AudioOffset),
+            Control::Subtitles => Some(Control::SubOffset),
+            _ => None,
+        }
+    }
+
     pub fn available(self, presentation: &Presentation, film: &Film) -> bool {
         match (self.track(), self.offset()) {
             (Some(track), _) => track.available(film),
@@ -92,6 +100,19 @@ impl Control {
             (_, Some(offset)) => offset.value(film),
             _ => String::new(),
         }
+    }
+
+    /// The chooser's rows: the tracks, then the offset row when the track
+    /// has an offset.
+    fn entries(self, film: &Film) -> Vec<String> {
+        let Some(track) = self.track() else {
+            return Vec::new();
+        };
+        let mut entries = track.entries(film);
+        if let Some(offset) = self.paired().and_then(Control::offset) {
+            entries.push(format!("Offset {}", offset.value(film)));
+        }
+        entries
     }
 }
 
@@ -135,8 +156,8 @@ impl Strip {
         self.open = None;
     }
 
-    /// left and right walk the controls present for this file, and select asks
-    /// the focused one to act.
+    /// left and right walk the tracks present for this file, and select opens
+    /// the focused track's chooser.
     pub fn press(
         &mut self,
         action: Action,
@@ -164,20 +185,30 @@ impl Strip {
     }
 
     /// A chooser is a vertical list, so it moves on up and down, applies on
-    /// select, and ignores left and right. The delay adjuster uses left and
-    /// right to nudge a delay.
+    /// select, and ignores left and right. A select on its offset row opens
+    /// the delay adjuster in its place, which uses left and right to nudge the
+    /// delay.
     pub fn handle(&mut self, action: Action, film: &Film) -> Vec<Command> {
         let Some(open) = self.open.as_mut() else {
             return Vec::new();
         };
         if let Some(track) = open.control.track() {
-            let entries = track.entries(film).len();
+            let entries = open.control.entries(film).len();
             match action {
                 Action::Up => open.selected = open.selected.saturating_sub(1),
                 Action::Down => {
                     open.selected = (open.selected + 1).min(entries.saturating_sub(1));
                 }
                 Action::Select => {
+                    if let Some(offset) = open.control.paired()
+                        && open.selected + 1 == entries
+                    {
+                        self.open = Some(Open {
+                            control: offset,
+                            selected: 0,
+                        });
+                        return Vec::new();
+                    }
                     let commands = track.apply(film, open.selected);
                     self.close();
                     return commands;
@@ -196,28 +227,14 @@ impl Strip {
         commands
     }
 
-    /// The present groups, each with its available members. A group with no
-    /// present member is left out, so a file with no subtitles draws no
-    /// subtitle group. It reads the present controls the caller already
-    /// resolved, so one rebuild asks each control once whether it is there.
-    fn present_groups(present: &[Control]) -> Vec<(&'static str, Vec<Control>)> {
-        GROUPS
-            .into_iter()
-            .filter_map(|(heading, members)| {
-                let members: Vec<Control> = members
-                    .iter()
-                    .copied()
-                    .filter(|control| present.contains(control))
-                    .collect();
-                (!members.is_empty()).then_some((heading, members))
-            })
-            .collect()
-    }
-
-    /// Every line of the strip: one heading per group, and one value per
-    /// control. Right-align the row of groups, so the last group's nominal ink
-    /// ends at the margin and the row holds its right edge as a value changes
-    /// width.
+    /// Every line of the strip: one heading and one value per present track,
+    /// and a set offset beside its track. Right-align the row of groups, so
+    /// the last group's nominal ink ends at the margin and the row holds its
+    /// right edge as a value changes width.
+    ///
+    /// A track value takes the room up to the next group, less the gap. The
+    /// last group's value takes the nominal ink, so it ends inside the margin,
+    /// and a value with a set offset beside it takes one member.
     pub fn lines(
         &self,
         canvas: &Canvas,
@@ -230,15 +247,18 @@ impl Strip {
             return Vec::new();
         }
         let here = focused.then(|| present[self.index.min(present.len() - 1)]);
-        let groups = Self::present_groups(&present);
+        let groups: Vec<(&str, Control)> = GROUPS
+            .into_iter()
+            .filter(|(_, control)| present.contains(control))
+            .collect();
         let start = canvas.right() - GROUP_INK - (groups.len() as f32 - 1.0) * GROUP_PITCH;
 
         let mut lines = Vec::new();
-        for (at, (heading, members)) in groups.into_iter().enumerate() {
+        for (at, (heading, control)) in groups.iter().copied().enumerate() {
             let x = start + at as f32 * GROUP_PITCH;
             lines.push(
                 Line::new(
-                    heading.to_string(),
+                    heading,
                     Point::new(x, Y_HEAD),
                     Anchor::Left,
                     theme::type_scale::TINY,
@@ -246,29 +266,49 @@ impl Strip {
                 )
                 .alpha(theme::alpha::SUBDUED),
             );
-            for (member, control) in members.into_iter().enumerate() {
-                let focused = Some(control) == here;
+            let offset = control
+                .paired()
+                .filter(|paired| paired.available(presentation, film))
+                .and_then(Control::offset)
+                .filter(|offset| offset.set(film));
+            let room = match (offset, at + 1 == groups.len()) {
+                (Some(_), _) => MEMBER_W - STOP_GAP,
+                (None, true) => GROUP_INK,
+                (None, false) => GROUP_PITCH - STOP_GAP,
+            };
+            let focused = Some(control) == here;
+            lines.push(
+                Line::new(
+                    clip(&control.value(film), theme::type_scale::TINY, room),
+                    Point::new(x, Y_VAL),
+                    Anchor::Left,
+                    theme::type_scale::TINY,
+                    if focused {
+                        theme::color::fill()
+                    } else {
+                        theme::color::text()
+                    },
+                )
+                .alpha(if focused {
+                    theme::alpha::OPAQUE
+                } else {
+                    theme::alpha::SUBDUED
+                }),
+            );
+            if let Some(offset) = offset {
                 lines.push(
                     Line::new(
                         clip(
-                            &control.value(film),
+                            &offset.value(film),
                             theme::type_scale::TINY,
-                            MEMBER_W - STOP_GAP,
+                            GROUP_PITCH - MEMBER_W - STOP_GAP,
                         ),
-                        Point::new(x + member as f32 * MEMBER_W, Y_VAL),
+                        Point::new(x + MEMBER_W, Y_VAL),
                         Anchor::Left,
                         theme::type_scale::TINY,
-                        if focused {
-                            theme::color::fill()
-                        } else {
-                            theme::color::text()
-                        },
+                        theme::color::text(),
                     )
-                    .alpha(if focused {
-                        theme::alpha::OPAQUE
-                    } else {
-                        theme::alpha::SUBDUED
-                    }),
+                    .alpha(theme::alpha::SUBDUED),
                 );
             }
         }
@@ -293,8 +333,8 @@ impl Strip {
         let Some(open) = self.open else {
             return;
         };
-        if let Some(track) = open.control.track() {
-            chooser::draw(brush, &track.entries(film), open.selected);
+        if open.control.track().is_some() {
+            chooser::draw(brush, &open.control.entries(film), open.selected);
         } else if let Some(offset) = open.control.offset() {
             offset.draw(brush, film);
         }
@@ -321,6 +361,21 @@ mod tests {
         film
     }
 
+    /// The film with a second video track, so all three groups draw.
+    fn angles() -> Film {
+        let mut film = film();
+        film.apply(
+            "track-list",
+            &json!([
+                { "id": 1, "type": "video", "title": "Main", "selected": true },
+                { "id": 2, "type": "video", "title": "Angle" },
+                { "id": 1, "type": "audio", "lang": "eng", "selected": true },
+                { "id": 1, "type": "sub", "lang": "spa" },
+            ]),
+        );
+        film
+    }
+
     fn block(text: &str) -> Presentation {
         let mut presentation = Presentation::default();
         presentation.receive(text);
@@ -335,31 +390,44 @@ mod tests {
             .collect()
     }
 
+    fn line(content: &str, x: f32, y: f32) -> (String, Point) {
+        (content.to_string(), Point::new(x, y))
+    }
+
     /// Three groups right-align on the margin: the audio group at 704, the
     /// subtitle group one pitch along, and the video group at the last pitch.
+    /// With no delay set, no offset draws.
     #[test]
     fn the_groups_right_align_on_the_side_margin() {
-        let mut film = film();
-        film.apply(
-            "track-list",
-            &json!([
-                { "id": 1, "type": "video", "title": "Main", "selected": true },
-                { "id": 2, "type": "video", "title": "Angle" },
-                { "id": 1, "type": "audio", "lang": "eng", "selected": true },
-                { "id": 1, "type": "sub", "lang": "spa" },
-            ]),
+        assert_eq!(
+            shown(&Strip::default(), &angles(), false),
+            vec![
+                line("Audio", 704.0, 990.0),
+                line("ENG", 704.0, 1016.0),
+                line("Subtitles", 1134.0, 990.0),
+                line("off", 1134.0, 1016.0),
+                line("Video", 1564.0, 990.0),
+                line("Main", 1564.0, 1016.0),
+            ]
         );
+    }
+
+    /// A set delay draws one member to the right of its track, and a delay of
+    /// nothing draws nothing.
+    #[test]
+    fn a_set_offset_draws_beside_its_track() {
+        let mut film = angles();
+        film.apply("sub-delay", &json!(-0.2));
         assert_eq!(
             shown(&Strip::default(), &film, false),
             vec![
-                ("audio".to_string(), Point::new(704.0, 990.0)),
-                ("ENG".to_string(), Point::new(704.0, 1016.0)),
-                ("0 ms".to_string(), Point::new(904.0, 1016.0)),
-                ("subtitles".to_string(), Point::new(1134.0, 990.0)),
-                ("off".to_string(), Point::new(1134.0, 1016.0)),
-                ("0 ms".to_string(), Point::new(1334.0, 1016.0)),
-                ("video".to_string(), Point::new(1564.0, 990.0)),
-                ("Main".to_string(), Point::new(1564.0, 1016.0)),
+                line("Audio", 704.0, 990.0),
+                line("ENG", 704.0, 1016.0),
+                line("Subtitles", 1134.0, 990.0),
+                line("off", 1134.0, 1016.0),
+                line("-200 ms", 1334.0, 1016.0),
+                line("Video", 1564.0, 990.0),
+                line("Main", 1564.0, 1016.0),
             ]
         );
     }
@@ -371,19 +439,18 @@ mod tests {
         assert_eq!(
             shown(&Strip::default(), &film(), false),
             vec![
-                ("audio".to_string(), Point::new(1134.0, 990.0)),
-                ("ENG".to_string(), Point::new(1134.0, 1016.0)),
-                ("0 ms".to_string(), Point::new(1334.0, 1016.0)),
-                ("subtitles".to_string(), Point::new(1564.0, 990.0)),
-                ("off".to_string(), Point::new(1564.0, 1016.0)),
-                ("0 ms".to_string(), Point::new(1764.0, 1016.0)),
+                line("Audio", 1134.0, 990.0),
+                line("ENG", 1134.0, 1016.0),
+                line("Subtitles", 1564.0, 990.0),
+                line("off", 1564.0, 1016.0),
             ]
         );
     }
 
     /// A Blu-ray rip titles its audio track with the codec and the layout,
-    /// and that title is wider than the room before the offset. Every value
-    /// of the row ends at least a gap short of the value to its right.
+    /// and that title is wider than the room before a set offset. Every value
+    /// of the row ends at least a gap short of the value to its right, and
+    /// the last one ends inside the margin.
     #[test]
     fn a_long_value_stops_short_of_its_neighbour() {
         let mut film = Film::default();
@@ -399,6 +466,8 @@ mod tests {
                   "title": "English (SDH) Full Subtitles Track" },
             ]),
         );
+        film.apply("audio-delay", &json!(0.05));
+        film.apply("sub-delay", &json!(-1.2));
         let values: Vec<Line> = Strip::default()
             .lines(&Canvas::default(), &block("{}"), &film, false)
             .into_iter()
@@ -419,6 +488,25 @@ mod tests {
         assert!(last.at.x + measure(&last.content, last.size) <= Canvas::default().right());
     }
 
+    /// With no offset beside it, a track value keeps the room up to the next
+    /// group, so a title that fits there draws whole.
+    #[test]
+    fn a_value_alone_keeps_the_room_to_the_next_group() {
+        let mut film = film();
+        film.apply(
+            "track-list",
+            &json!([
+                { "id": 1, "type": "audio", "lang": "eng", "selected": true,
+                  "title": "[English / DD+ 5.1 Atmos]" },
+                { "id": 1, "type": "sub", "lang": "spa" },
+            ]),
+        );
+        assert_eq!(
+            shown(&Strip::default(), &film, false)[1].0,
+            "[English / DD+ 5.1 Atmos] (ENG)"
+        );
+    }
+
     /// A music item draws no strip at all, and a file with no tracks draws
     /// none either.
     #[test]
@@ -435,11 +523,7 @@ mod tests {
                 )
                 .is_empty()
         );
-        // A film with no tracks at all still carries the audio offset.
-        assert_eq!(
-            Strip::present(&block("{}"), &Film::default()),
-            vec![Control::AudioOffset]
-        );
+        assert!(Strip::present(&block("{}"), &Film::default()).is_empty());
         assert!(Strip::available(&block("{}"), &film()));
     }
 
@@ -453,7 +537,7 @@ mod tests {
             theme::at(theme::color::fill(), theme::alpha::OPAQUE)
         );
         assert_eq!(
-            lines[2].color,
+            lines[3].color,
             theme::at(theme::color::text(), theme::alpha::SUBDUED)
         );
         assert_eq!(lines[0].color.r, theme::color::muted().r);
@@ -465,26 +549,34 @@ mod tests {
         );
     }
 
-    /// left and right walk the flat order and hold at its ends.
+    /// left and right walk the tracks and hold at the ends of the row. An
+    /// offset takes no stop of its own.
     #[test]
     fn the_horizontal_focus_holds_at_the_ends_of_the_row() {
         let mut strip = Strip::default();
-        let present = Strip::present(&block("{}"), &film());
-        assert_eq!(present.len(), 4);
+        let present = Strip::present(&block("{}"), &angles());
+        assert_eq!(
+            present,
+            vec![Control::Audio, Control::Subtitles, Control::Video]
+        );
 
-        assert!(strip.press(Action::Left, &block("{}"), &film()).is_empty());
+        assert!(
+            strip
+                .press(Action::Left, &block("{}"), &angles())
+                .is_empty()
+        );
         assert_eq!(strip.index, 0);
-        for _ in 0..3 {
-            strip.press(Action::Right, &block("{}"), &film());
+        for _ in 0..2 {
+            strip.press(Action::Right, &block("{}"), &angles());
         }
-        assert_eq!(strip.index, 3);
-        strip.press(Action::Right, &block("{}"), &film());
-        assert_eq!(strip.index, 3);
-        strip.press(Action::Left, &block("{}"), &film());
         assert_eq!(strip.index, 2);
+        strip.press(Action::Right, &block("{}"), &angles());
+        assert_eq!(strip.index, 2);
+        strip.press(Action::Left, &block("{}"), &angles());
+        assert_eq!(strip.index, 1);
     }
 
-    /// A select opens the focused control's chooser, on the track that plays.
+    /// A select opens the focused track's chooser, on the track that plays.
     #[test]
     fn a_select_opens_the_focused_controls_chooser() {
         let mut strip = Strip::default();
@@ -494,7 +586,31 @@ mod tests {
         strip.close();
         strip.press(Action::Right, &block("{}"), &film());
         strip.press(Action::Select, &block("{}"), &film());
-        assert_eq!(strip.capturing(), Some(Control::AudioOffset));
+        assert_eq!(strip.capturing(), Some(Control::Subtitles));
+    }
+
+    /// The audio and subtitle choosers end on the offset row, and the video
+    /// chooser has none.
+    #[test]
+    fn a_track_chooser_ends_on_its_offset() {
+        let mut film = angles();
+        film.apply("audio-delay", &json!(0.05));
+        assert_eq!(
+            Control::Audio.entries(&film),
+            vec!["ENG".to_string(), "Offset +50 ms".to_string()]
+        );
+        assert_eq!(
+            Control::Subtitles.entries(&film),
+            vec![
+                "Off".to_string(),
+                "SPA".to_string(),
+                "Offset 0 ms".to_string()
+            ]
+        );
+        assert_eq!(
+            Control::Video.entries(&film),
+            vec!["Main".to_string(), "Angle".to_string()]
+        );
     }
 
     /// The chooser opens on the track that plays, moves on up and down, holds
@@ -506,7 +622,6 @@ mod tests {
         assert!(strip.handle(Action::Up, &film()).is_empty());
         assert!(strip.handle(Action::Left, &film()).is_empty());
         strip.handle(Action::Down, &film());
-        strip.handle(Action::Down, &film());
         assert_eq!(
             strip.handle(Action::Select, &film()),
             vec![vec![json!("set_property"), json!("aid"), json!("2")]]
@@ -514,13 +629,16 @@ mod tests {
         assert_eq!(strip.capturing(), None);
     }
 
-    /// A delay adjuster nudges on left and right, resets on up, and closes on
-    /// down and on select.
+    /// A select on the offset row opens the adjuster, which nudges on left
+    /// and right and closes on down and on select.
     #[test]
-    fn an_adjuster_nudges_and_closes() {
+    fn the_offset_row_opens_the_adjuster() {
         let mut strip = Strip::default();
-        strip.press(Action::Right, &block("{}"), &film());
         strip.press(Action::Select, &block("{}"), &film());
+        for _ in 0..3 {
+            strip.handle(Action::Down, &film());
+        }
+        assert!(strip.handle(Action::Select, &film()).is_empty());
         assert_eq!(strip.capturing(), Some(Control::AudioOffset));
         assert_eq!(
             strip.handle(Action::Right, &film()),
@@ -540,8 +658,8 @@ mod tests {
     #[test]
     fn a_focus_past_the_end_of_the_row_holds_on_its_last_control() {
         let mut strip = Strip::default();
-        for _ in 0..3 {
-            strip.press(Action::Right, &block("{}"), &film());
+        for _ in 0..2 {
+            strip.press(Action::Right, &block("{}"), &angles());
         }
         let mut alone = Film::default();
         alone.apply(
@@ -551,9 +669,8 @@ mod tests {
         assert_eq!(
             shown(&strip, &alone, true),
             vec![
-                ("audio".to_string(), Point::new(1564.0, 990.0)),
-                ("Track 1".to_string(), Point::new(1564.0, 1016.0)),
-                ("0 ms".to_string(), Point::new(1764.0, 1016.0)),
+                line("Audio", 1564.0, 990.0),
+                line("Track 1", 1564.0, 1016.0)
             ]
         );
     }

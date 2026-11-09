@@ -106,7 +106,7 @@ How the item should look, for the fields the display cannot read from the file. 
 | <span id="specitemspresentation--season"></span>`season` | integer | no | The season number of the episode. |
 | <span id="specitemspresentation--episode"></span>`episode` | integer | no | The episode number within its season. |
 | <span id="specitemspresentation--episodetitle"></span>`episodeTitle` | string | no | The title of the episode. |
-| <span id="specitemspresentation--year"></span>`year` | integer | no | The release year, shown under a movie's title. |
+| <span id="specitemspresentation--year"></span>`year` | integer | no | The release year, shown under a movie's title beside the film's length. |
 | <span id="specitemspresentation--date"></span>`date` | string | no | The air date of an episode, shown on its line. Give it as an ISO date like 2017-03-05, and the display formats it. |
 | <span id="specitemspresentation--artist"></span>`artist` | string | no | The artist of a music item, shown in the header under the title. For an album this field is the one source; a standalone track can also leave it unset and let its own tags supply it. |
 | <span id="specitemspresentation--album"></span>`album` | string | no | The record a music item belongs to, shown in the header beside the year. It fills in the same way the artist does. |

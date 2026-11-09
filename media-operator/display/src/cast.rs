@@ -67,7 +67,7 @@ const TEXT_GAP: f32 = 12.0;
 /// of them comes or goes.
 const ROW_TOP: f32 = 688.0;
 const HEADING_Y: f32 = 652.0;
-const HEADING: &str = "IN THIS SCENE";
+const HEADING: &str = "In this scene";
 
 /// The drop from the card's top to each of its three lines.
 const NAME_Y: f32 = 5.0;

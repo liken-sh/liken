@@ -1,14 +1,13 @@
-//! The clock, the top-right element. It reads the wall-clock time and the time
-//! the film ends, now plus the time left, so a viewer reads the hour without
-//! leaving the film. The current time reads bright, and the end time reads dim.
+//! The clock, the top-right element, and the spellings of a time that the
+//! other regions share. It reads the wall-clock time, so a viewer reads the
+//! hour without leaving the film. The time the film ends draws on the
+//! scrubber's time line, beside the position and the time left, because a
+//! person reads the three as one fact.
 //!
 //! The reading holds one box. It hangs from the top margin and ends on the side
-//! margin, whether or not the film has a duration. The idle screen and the
-//! library browser draw their own clock in the same box. The three screens
-//! follow each other on one panel, and a reading that moved would make the hour
-//! jump when one screen replaces another. The end time therefore draws on the
-//! line under the reading, where the idle screen draws its activity line. An end
-//! time beside the reading would push the reading left by its own width.
+//! margin. The idle screen and the library browser draw their own clock in the
+//! same box. The three screens follow each other on one panel, and a reading
+//! that moved would make the hour jump when one screen replaces another.
 //!
 //! Rust's standard library has no time zones, so the reading goes through
 //! `jiff`. `jiff` reads `TZ` and falls back to `/etc/localtime`, and it resolves
@@ -21,12 +20,10 @@ use iced::Point;
 use jiff::Zoned;
 
 use crate::canvas::{Anchor, Canvas, Line};
-use crate::film::Film;
 use crate::theme;
 
-/// The row the reading hangs from, and the row the end time draws on.
+/// The row the reading hangs from.
 const TOP_Y: f32 = theme::MARGIN_Y;
-const ENDS_Y: f32 = theme::MARGIN_Y + theme::LINE_PITCH;
 
 /// The wall clock now, in the zone `TZ` names.
 pub fn now() -> Zoned {
@@ -58,40 +55,42 @@ pub fn reading(at: &Zoned) -> String {
     format!("{twelve}:{:02} {suffix}", at.minute())
 }
 
-/// The lines of the top-right column. With a duration it adds the end time,
-/// now plus the time left, on the line under the reading. A paused film reads
-/// the hour it would end from where it sits, which is close enough to read at
-/// a glance. The current time draws bright and the end time draws dim, so the
-/// two tell apart.
-pub fn lines(canvas: &Canvas, film: &Film, now: &Zoned) -> Vec<Line> {
-    let right = canvas.right();
-    let mut lines = vec![Line::new(
+/// The wall clock `seconds` from `now`, as "ends 2:15 pm".
+pub fn ends(now: &Zoned, seconds: f64) -> String {
+    let seconds = (seconds.max(0.0) + 0.5).floor() as i64;
+    format!(
+        "ends {}",
+        reading(&now.saturating_add(jiff::Span::new().seconds(seconds)))
+    )
+}
+
+/// Whole minutes as the browser spells a runtime: "46m", "1h", "1h 30m".
+/// Nothing under a minute.
+pub fn runtime(seconds: i64) -> Option<String> {
+    let minutes = seconds / 60;
+    match (minutes / 60, minutes % 60) {
+        (0, 0) => None,
+        (0, minutes) => Some(format!("{minutes}m")),
+        (hours, 0) => Some(format!("{hours}h")),
+        (hours, minutes) => Some(format!("{hours}h {minutes}m")),
+    }
+}
+
+/// A length in seconds as a runtime, to the nearest minute, so a film of
+/// 2:05:59 reads "2h 6m".
+pub fn length(seconds: f64) -> Option<String> {
+    runtime(((seconds.max(0.0) / 60.0 + 0.5).floor() as i64) * 60)
+}
+
+/// The top-right column: the reading, bright.
+pub fn lines(canvas: &Canvas, now: &Zoned) -> Vec<Line> {
+    vec![Line::new(
         reading(now),
-        Point::new(right, TOP_Y),
+        Point::new(canvas.right(), TOP_Y),
         Anchor::TopRight,
         theme::type_scale::SMALL,
         theme::color::text(),
-    )];
-
-    let (Some(duration), Some(position)) = (film.duration, film.position) else {
-        return lines;
-    };
-    if duration <= 0.0 {
-        return lines;
-    }
-    let left = (duration - position + 0.5).floor();
-    let ends = now.saturating_add(jiff::Span::new().seconds(left as i64));
-    lines.push(
-        Line::new(
-            format!("ends {}", reading(&ends)),
-            Point::new(right, ENDS_Y),
-            Anchor::TopRight,
-            theme::type_scale::SMALL,
-            theme::color::text(),
-        )
-        .alpha(theme::alpha::SUBDUED),
-    );
-    lines
+    )]
 }
 
 /// One wall clock a test states, read in UTC so the numbers hold in any zone.
@@ -105,18 +104,6 @@ pub fn at(unix: i64) -> Zoned {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-
-    fn film(duration: Option<f64>, position: Option<f64>) -> Film {
-        let mut film = Film::default();
-        if let Some(duration) = duration {
-            film.apply("duration", &json!(duration));
-        }
-        if let Some(position) = position {
-            film.apply("time-pos", &json!(position));
-        }
-        film
-    }
 
     /// 1970-01-01 15:01:00 UTC, and the hours around it.
     fn wall(hour: i64, minute: i64) -> Zoned {
@@ -133,11 +120,11 @@ mod tests {
         assert_eq!(reading(&wall(12, 0)), "12:00 pm");
     }
 
-    /// The reading hangs from the top margin at the right, and carries no end
-    /// time without a duration.
+    /// The reading hangs from the top margin at the right, and the column
+    /// holds the reading alone.
     #[test]
     fn the_reading_hangs_from_the_top_margin_at_the_right() {
-        let lines = lines(&Canvas::default(), &film(None, None), &wall(15, 1));
+        let lines = lines(&Canvas::default(), &wall(15, 1));
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].at, Point::new(1824.0, 90.0));
         assert_eq!(lines[0].anchor, Anchor::TopRight);
@@ -146,43 +133,32 @@ mod tests {
         assert_eq!(lines[0].content, "3:01 pm");
     }
 
-    /// The end time draws one line pitch under the reading, and reads dimmer
-    /// than it.
+    /// 4801 seconds after 3:01 pm is one hour and twenty minutes later, and a
+    /// time already past ends now.
     #[test]
-    fn the_end_time_draws_one_line_pitch_under_the_reading() {
-        let lines = lines(
-            &Canvas::default(),
-            &film(Some(6000.0), Some(1199.0)),
-            &wall(15, 1),
-        );
-        assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0].at, Point::new(1824.0, 90.0));
-        assert_eq!(lines[1].at, Point::new(1824.0, 136.0));
-        assert_eq!(lines[1].color.a, theme::alpha::SUBDUED);
-        // 4801 seconds are left, so the film ends one hour and twenty
-        // minutes after the reading.
-        assert_eq!(lines[1].content, "ends 4:21 pm");
+    fn an_end_time_is_the_reading_plus_the_time_left() {
+        assert_eq!(ends(&wall(15, 1), 4801.0), "ends 4:21 pm");
+        assert_eq!(ends(&wall(15, 1), -30.0), "ends 3:01 pm");
     }
 
     #[test]
-    fn a_film_with_no_length_draws_no_end_time() {
-        for (duration, position) in [
-            (Some(0.0), Some(10.0)),
-            (None, Some(10.0)),
-            (Some(600.0), None),
-        ] {
-            assert_eq!(
-                lines(&Canvas::default(), &film(duration, position), &wall(15, 1)).len(),
-                1
-            );
-        }
+    fn a_runtime_reads_in_hours_and_minutes() {
+        assert_eq!(runtime(0), None);
+        assert_eq!(runtime(59), None);
+        assert_eq!(runtime(46 * 60), Some("46m".to_string()));
+        assert_eq!(runtime(3600), Some("1h".to_string()));
+        assert_eq!(runtime(5400), Some("1h 30m".to_string()));
+        assert_eq!(length(7559.0), Some("2h 6m".to_string()));
+        assert_eq!(length(5752.0), Some("1h 36m".to_string()));
+        assert_eq!(length(29.0), None);
+        assert_eq!(length(30.0), Some("1m".to_string()));
     }
 
     /// The reading hangs off the right edge of a wider canvas.
     #[test]
     fn the_reading_follows_the_side_margin_of_a_wider_canvas() {
         let wide = Canvas::for_output(iced::Size::new(2560.0, 1080.0));
-        let lines = lines(&wide, &film(None, None), &wall(15, 1));
+        let lines = lines(&wide, &wall(15, 1));
         assert_eq!(lines[0].at, Point::new(2464.0, 90.0));
     }
 

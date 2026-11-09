@@ -1,6 +1,7 @@
 //! The header, the passive top-left region. It draws the current item's name
 //! from the resolved presentation fields, and takes no focus. A movie shows
-//! its title. A series shows the series name over a season and episode line.
+//! its title over its facts line, the year and the length. A series shows the
+//! series name over a season and episode line.
 //! When the item carries a logo, the header shows the logo in place of that
 //! name.
 //! A music item shows the track title over the artist, then the album with
@@ -13,6 +14,7 @@ use iced::Point;
 use serde_json::Value;
 
 use crate::canvas::{Anchor, Line};
+use crate::clock;
 use crate::film::Film;
 use crate::presentation::Presentation;
 use crate::theme;
@@ -105,6 +107,19 @@ pub fn second_line(presentation: &Presentation) -> Option<String> {
     if let Some(date) = presentation.date() {
         parts.push(format_date(date));
     }
+    (!parts.is_empty()).then(|| parts.join(BETWEEN))
+}
+
+/// A film's facts line: the year, then the whole length to the nearest
+/// minute, as "2008  ·  2h 6m". The length is here and not on the scrubber's
+/// time line, because it does not change while the film plays.
+fn facts(presentation: &Presentation, film: &Film) -> Option<String> {
+    let parts: Vec<String> = presentation
+        .year()
+        .map(num)
+        .into_iter()
+        .chain(film.duration.and_then(clock::length))
+        .collect();
     (!parts.is_empty()).then(|| parts.join(BETWEEN))
 }
 
@@ -213,7 +228,7 @@ pub fn lines(presentation: &Presentation, film: &Film, logo: Option<f32>) -> Vec
             lines.push(title(name, TOP_Y));
         }
         if (logo.is_some() || name.is_some())
-            && let Some(line) = marked(presentation.year().map(num), presentation)
+            && let Some(line) = marked(facts(presentation, film), presentation)
         {
             lines.push(under(line, second_y(logo)));
         }
@@ -247,6 +262,29 @@ mod tests {
                 ("A Film".to_string(), Point::new(96.0, 90.0), 64.0),
                 ("2014".to_string(), Point::new(96.0, 172.0), 34.0),
             ]
+        );
+    }
+
+    /// A film's line under its title holds its facts: the year, then the
+    /// whole length to the nearest minute, as the browser spells a runtime.
+    #[test]
+    fn a_film_reads_its_year_and_length_on_one_line() {
+        let mut film = Film::default();
+        film.apply("duration", &json!(7559.0));
+        assert_eq!(
+            shown(r#"{"title":"A Film","year":2008}"#, &film),
+            vec![
+                ("A Film".to_string(), Point::new(96.0, 90.0), 64.0),
+                (
+                    "2008  \u{00B7}  2h 6m".to_string(),
+                    Point::new(96.0, 172.0),
+                    34.0
+                ),
+            ]
+        );
+        assert_eq!(
+            shown(r#"{"title":"A Film"}"#, &film)[1].0,
+            "2h 6m".to_string()
         );
     }
 

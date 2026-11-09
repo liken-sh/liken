@@ -665,11 +665,11 @@ mod tests {
             vec![Stop::Fine, Stop::Chapter]
         );
 
-        // A film with no tracks at all still carries the audio offset, so the
-        // strip is the one stop it has.
+        // A film with no tracks has no chooser to open, and so no strip, and
+        // with no length it has no scrubber either.
         let mut bare = Display::new("{}");
         bare.film = Film::default();
-        assert_eq!(Focus::present(&bare.parts()), vec![Stop::Strip]);
+        assert!(Focus::present(&bare.parts()).is_empty());
     }
 
     /// A summon lands on the first stop below the offer, so the main button

@@ -113,22 +113,10 @@ pub trait Art {
 fn ends_at(offer: &Offer, now: &Zoned) -> Option<String> {
     let seconds = offer.remaining?;
     let ends = clock::reading(&now.saturating_add(jiff::Span::new().seconds(seconds)));
-    Some(match runtime(seconds) {
+    Some(match clock::runtime(seconds) {
         Some(runtime) => format!("{runtime} \u{b7} ends at {ends}"),
         None => format!("Ends at {ends}"),
     })
-}
-
-/// Whole minutes as the browser spells a runtime: "46m", "1h", "1h 30m".
-/// Nothing under a minute.
-fn runtime(seconds: i64) -> Option<String> {
-    let minutes = seconds / 60;
-    match (minutes / 60, minutes % 60) {
-        (0, 0) => None,
-        (0, minutes) => Some(format!("{minutes}m")),
-        (hours, 0) => Some(format!("{hours}h")),
-        (hours, minutes) => Some(format!("{hours}h {minutes}m")),
-    }
 }
 
 /// The block the sidecar sent. A block with none of the three lines and no
