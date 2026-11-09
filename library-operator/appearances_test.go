@@ -483,7 +483,9 @@ func TestWhatAFailedAppearancesRunRecords(t *testing.T) {
 		name     string
 		document func(size int64) string
 		record   bool
-		want     string
+		// The lines the record holds after its header.
+		samples string
+		want    string
 	}{
 		{name: "detect fails", document: func(size int64) string { return matchDocumentFor(appearancesFile, size) },
 			want: "ffmpeg exited with exit status: 1"},
@@ -500,6 +502,9 @@ func TestWhatAFailedAppearancesRunRecords(t *testing.T) {
 			want:     "liken.sh/appearances/summary/v9"},
 		{name: "match prints no JSON", record: true, document: func(int64) string { return "faces" },
 			want: "reading the match document"},
+		{name: "the record holds a sample that is not JSON", record: true, samples: "faces\n",
+			document: func(size int64) string { return matchDocumentFor(appearancesFile, size) },
+			want:     "reading a sample of"},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -509,7 +514,7 @@ func TestWhatAFailedAppearancesRunRecords(t *testing.T) {
 			seedRenderNodes(t)
 			tool := standInAppearances{document: test.document(item.Size)}
 			if test.record {
-				tool.record = detectionsLine(t, item.Size)
+				tool.record = detectionsLine(t, item.Size) + test.samples
 			}
 			tool.install(t)
 			work, log := testFactWorker(t, appearancesWorker, libraryKindMovies, root)

@@ -4,6 +4,7 @@ package main
 // detections record.
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -81,17 +82,24 @@ func TestTheFacelessEndOfADetectionsRecord(t *testing.T) {
 
 func TestADetectionsRecordThatDoesNotReadIsAnError(t *testing.T) {
 	cases := []struct {
-		name   string
-		record string
+		name      string
+		record    string
+		directory bool
 	}{
 		{name: "no record"},
 		{name: "a sample that is not JSON", record: "{}\nnot json\n"},
+		{name: "a directory in the record's place", directory: true},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			video := filepath.Join(t.TempDir(), "Film.mkv")
 			if test.record != "" {
 				writeFile(t, detectionsPath(video), test.record)
+			}
+			if test.directory {
+				if err := os.MkdirAll(detectionsPath(video), 0o755); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			if _, err := readFacelessTail(video); err == nil {
