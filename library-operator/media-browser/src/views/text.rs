@@ -12,6 +12,10 @@ use iced_winit::core::{Color, Font, Pixels, Point, Rectangle, Vector};
 use super::{area, label};
 use crate::look;
 
+// The cut of a block to its cap of lines, with the ellipsis or the
+// sentence's end that the last line ends on.
+mod clamp;
+
 /// The height of one line as a share of its size. Every block of text on
 /// a page is measured in it.
 pub const LEADING: f32 = 1.32;
@@ -305,8 +309,9 @@ fn turned(
     });
 }
 
-/// A block of text cut to `cap` lines. The answer is the height the block
-/// took, so the caller stacks the next block under it.
+/// A block of text cut to `cap` lines, with the last line ended the way
+/// `clamp::clamped` ends it where the text goes on. The answer is the height
+/// the block took, so the caller stacks the next block under it.
 pub fn block(
     frame: &mut canvas::Frame<Renderer>,
     content: &str,
@@ -327,6 +332,14 @@ pub fn block(
     )
 }
 
+/// The height a block of this content takes once [`block`] cuts it to
+/// `cap` lines. A page that places another block under this one asks
+/// here, so the space the page leaves and the lines the block draws are
+/// one count.
+pub fn block_height(content: &str, size: f32, width: f32, cap: usize) -> f32 {
+    height(clamp::kept(content, size, width, cap).1, size)
+}
+
 /// A block at a size, in a named face, so a tagline draws in the
 /// family's italic while every other block keeps the roman one.
 pub fn block_in(
@@ -338,24 +351,25 @@ pub fn block_in(
     width: f32,
     cap: usize,
 ) -> f32 {
-    let taken = lines(content, size, width);
+    let (kept, taken) = clamp::kept(content, size, width, cap);
     if taken == 0 {
         return 0.0;
     }
-    let height = height(taken.min(cap), size);
+    let height = height(taken, size);
     let block = area(at.x, at.y, width, height);
 
-    // The clip cuts the block at its last line, so a plot of any length
-    // draws in the space the page gave it and never over the row below.
+    // The lines are broken already, so the shaper draws them as they
+    // stand and wraps none of them again. The clip keeps a word wider
+    // than the column inside the space the page gave the block.
     frame.with_clip(block, |frame| {
         let mut text = label(
-            content,
+            &kept,
             at,
             size,
             color,
             Alignment::Left,
             Vertical::Top,
-            width,
+            f32::INFINITY,
         );
         text.font = font;
         frame.fill_text(text);

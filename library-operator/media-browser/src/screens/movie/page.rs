@@ -491,12 +491,12 @@ fn column(bounds: Rectangle) -> f32 {
 
 // The height a block of text takes at this size and width, cut to `cap`
 // lines where the caller cuts it, and zero where the movie carries no
-// such line.
+// such line. A cut block is counted by the lines `text::block` draws,
+// so the row under the plot starts where the plot's last line ends.
 fn lines(content: &str, size: f32, width: f32, cap: usize) -> f32 {
-    let taken = text::lines(content, size, width);
     match cap {
-        0 => text::height(taken, size),
-        cap => text::height(taken.min(cap), size),
+        0 => text::height(text::lines(content, size, width), size),
+        cap => text::block_height(content, size, width, cap),
     }
 }
 
