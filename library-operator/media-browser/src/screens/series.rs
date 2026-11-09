@@ -462,9 +462,24 @@ impl Series {
 }
 
 /// The facts line of one series: the year, the season count, the
-/// content rating, and the genres, the way a film's line reads.
+/// content rating, the creators, and the genres, the way a film's line
+/// reads. The header cuts the line at the column's edge, so the genres
+/// come last: a cut drops a genre before it drops a creator's name.
 pub(crate) fn facts_of(details: &SeriesDetails) -> String {
-    facts::joined(&[&facts_without_genres(details), &details.genres.join(", ")])
+    facts::joined(&[
+        &facts_without_genres(details),
+        &created_by(&details.creators),
+        &details.genres.join(", "),
+    ])
+}
+
+// The creators as one fact, or nothing for a series whose body names
+// none.
+fn created_by(creators: &[String]) -> String {
+    match creators.is_empty() {
+        true => String::new(),
+        false => format!("Created by {}", creators.join(", ")),
+    }
 }
 
 /// The same line without the genres, for the home page's banner, which

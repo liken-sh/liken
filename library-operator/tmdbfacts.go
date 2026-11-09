@@ -59,13 +59,15 @@ func (c *tmdbClient) externalIDs(ctx context.Context, kind string, id int) (tmdb
 }
 
 // One call answers the whole overview and the score, because TMDb states them
-// together on the title itself.
+// together on the title itself. A series also states who created it there,
+// and a movie states no one.
 type tmdbDetails struct {
 	Overview     string     `json:"overview"`
 	Tagline      string     `json:"tagline"`
 	Genres       []tmdbName `json:"genres"`
 	Companies    []tmdbName `json:"production_companies"`
 	Networks     []tmdbName `json:"networks"`
+	CreatedBy    []tmdbName `json:"created_by"`
 	ReleaseDate  string     `json:"release_date"`
 	FirstAirDate string     `json:"first_air_date"`
 	Runtime      int        `json:"runtime"`
@@ -349,6 +351,7 @@ func (a tmdbAnswerer) overview(ctx context.Context, kind string, id int) (factAn
 		Tagline:        strings.TrimSpace(details.Tagline),
 		Genres:         namesOf(details.Genres),
 		Studios:        details.studios(),
+		Creators:       namesOf(details.CreatedBy),
 		Premiered:      strings.TrimSpace(details.premiered()),
 		RuntimeMinutes: details.runtimeMinutes(),
 	}

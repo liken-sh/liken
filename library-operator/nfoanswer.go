@@ -60,10 +60,15 @@ type titleRating struct {
 // provider fills the fields of the fact it was asked for and leaves the rest
 // empty.
 type factAnswer struct {
-	Plot           string
-	Tagline        string
-	Genres         []string
-	Studios        []string
+	Plot    string
+	Tagline string
+	Genres  []string
+	Studios []string
+	// The people who created a series, which the overview fact writes as the
+	// creator elements of tvshow.nfo. They are not credits: the credits fact
+	// writes the people of credits.yaml and .contributors/, and a series'
+	// director and writer elements name the crews of its episodes.
+	Creators       []string
 	Premiered      string
 	RuntimeMinutes int
 	Certification  string
@@ -152,6 +157,7 @@ func mergeOverview(merged *factAnswer, held providerAnswer, note func(string)) {
 	}
 	merged.Genres = unionOf(merged.Genres, canonicalGenres(held.answer.Genres), held.block, note)
 	merged.Studios = unionOf(merged.Studios, held.answer.Studios, held.block, note)
+	merged.Creators = unionOf(merged.Creators, held.answer.Creators, held.block, note)
 }
 
 func unionOf(held, adding []string, block string, note func(string)) []string {
@@ -286,7 +292,8 @@ func answersFact(fact string, answer factAnswer) bool {
 	switch fact {
 	case factOverview:
 		return answer.Plot != "" || answer.Tagline != "" || answer.Premiered != "" ||
-			answer.RuntimeMinutes > 0 || len(answer.Genres) > 0 || len(answer.Studios) > 0
+			answer.RuntimeMinutes > 0 || len(answer.Genres) > 0 || len(answer.Studios) > 0 ||
+			len(answer.Creators) > 0
 	case factCertification:
 		return answer.Certification != ""
 	case factCredits:

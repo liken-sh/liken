@@ -1,7 +1,7 @@
 package main
 
 // What the series facts ask TVmaze: a lookup by an id another provider gave,
-// the show itself, its cast, and its images. TVmaze serves series alone and
+// the show itself, its cast, its crew, and its images. TVmaze serves series alone and
 // takes no account, so a MetadataProvider of this block names no Secret. Its
 // limit is 20 calls every 10 seconds per address, and a 429 takes the
 // cooldown every provider takes.
@@ -98,6 +98,13 @@ type tvmazeCharacter struct {
 	Name string `json:"name"`
 }
 
+// One credit of a show's crew. The type names the job, such as Creator,
+// Developer, or Executive Producer.
+type tvmazeCrewMember struct {
+	Type   string       `json:"type"`
+	Person tvmazePerson `json:"person"`
+}
+
 // One image of a show. The type is poster, banner, background, or typography,
 // and every image carries its original resolution.
 type tvmazeArtwork struct {
@@ -152,6 +159,15 @@ func (c *tvmazeClient) show(ctx context.Context, id int) (*tvmazeShow, error) {
 func (c *tvmazeClient) cast(ctx context.Context, id int) ([]tvmazeCastMember, error) {
 	answer := []tvmazeCastMember{}
 	if err := c.get(ctx, tvmazeShowsPath+strconv.Itoa(id)+"/cast", nil, &answer); err != nil {
+		return nil, err
+	}
+	return answer, nil
+}
+
+// The crew of one show, which the overview fact reads the creators from.
+func (c *tvmazeClient) crew(ctx context.Context, id int) ([]tvmazeCrewMember, error) {
+	answer := []tvmazeCrewMember{}
+	if err := c.get(ctx, tvmazeShowsPath+strconv.Itoa(id)+"/crew", nil, &answer); err != nil {
 		return nil, err
 	}
 	return answer, nil

@@ -43,7 +43,7 @@ func nfoGroup(fact string) elementGroup {
 	case factOverview:
 		return elementGroup{owned: []xmlElement{
 			{name: "plot"}, {name: "tagline"}, {name: "genre"},
-			{name: "studio"}, {name: "premiered"}, {name: "runtime"},
+			{name: "studio"}, {name: "creator"}, {name: "premiered"}, {name: "runtime"},
 		}}
 	case factCertification:
 		return elementGroup{owned: []xmlElement{{name: "mpaa"}}}
@@ -106,6 +106,11 @@ func overviewElements(answer factAnswer) [][]byte {
 	}
 	for _, studio := range answer.Studios {
 		elements = append(elements, textElement("studio", studio))
+	}
+	// A series names its creators in creator elements, which is where the
+	// scanner reads the creators of the series body from. A movie has none.
+	for _, creator := range answer.Creators {
+		elements = append(elements, textElement("creator", creator))
 	}
 	if answer.Premiered != "" {
 		elements = append(elements, textElement("premiered", answer.Premiered))

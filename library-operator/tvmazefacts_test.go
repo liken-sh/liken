@@ -25,6 +25,9 @@ const tvmazeHarbourCast = `[{"person":{"id":8,"name":"Nora Vance",
 	"character":{"id":11,"name":"Captain"}},
 	{"person":{"id":9,"name":"Ada Ferris","image":{}},"character":{"id":12,"name":"Keeper"}}]`
 
+// The crew of that show, with no creator in it, which the overview reads.
+const tvmazeHarbourCrew = `[{"type":"Executive Producer","person":{"id":10,"name":"Pell Arden"}}]`
+
 func TestTheTVmazeAnswererReadsWhatTheProviderStates(t *testing.T) {
 	cases := []struct {
 		fact  string
@@ -70,6 +73,7 @@ func TestTheTVmazeAnswererReadsWhatTheProviderStates(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				client, _ := newFakeTVmaze(t, http.StatusOK, map[string]string{
 					tvmazeLookupPath:              tvmazeHarbour,
+					tvmazeShowsPath + "4242/crew": tvmazeHarbourCrew,
 					tvmazeShowsPath + "4242/cast": tvmazeHarbourCast,
 				})
 				answerer := newTVmazeAnswerer(client)
@@ -89,13 +93,14 @@ func TestTheTVmazeAnswererReadsWhatTheProviderStates(t *testing.T) {
 	}
 }
 
-// The facts of one title cost one lookup. the first fact looks the show up and
-// the others read the show the container holds, so the credits fact asks only
-// for the cast.
+// The facts of one title cost one lookup. The first fact looks the show up and
+// the others read the show the container holds, so the overview asks only for
+// the crew and the credits fact asks only for the cast.
 func TestTheFactsOfOneTitleCostOneTVmazeLookup(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		client, fake := newFakeTVmaze(t, http.StatusOK, map[string]string{
 			tvmazeLookupPath:              tvmazeHarbour,
+			tvmazeShowsPath + "4242/crew": tvmazeHarbourCrew,
 			tvmazeShowsPath + "4242/cast": tvmazeHarbourCast,
 		})
 		answerer := newTVmazeAnswerer(client)
@@ -107,12 +112,9 @@ func TestTheFactsOfOneTitleCostOneTVmazeLookup(t *testing.T) {
 			}
 		}
 
-		paths := []string{}
-		for _, request := range fake.requests {
-			paths = append(paths, request.URL.Path)
-		}
-		if !slices.Equal(paths, []string{tvmazeLookupPath, tvmazeShowsPath + "4242/cast"}) {
-			t.Errorf("the answerer asked for %v, want the one lookup and the cast", paths)
+		want := []string{tvmazeLookupPath, tvmazeShowsPath + "4242/crew", tvmazeShowsPath + "4242/cast"}
+		if paths := requestPaths(fake); !slices.Equal(paths, want) {
+			t.Errorf("the answerer asked for %v, want the one lookup, the crew, and the cast", paths)
 		}
 	})
 }
@@ -138,8 +140,10 @@ func TestTheTVmazeAnswererAsksWithTheIDItHas(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				client, fake := newFakeTVmaze(t, http.StatusOK,
-					map[string]string{tvmazeLookupPath: tvmazeHarbour})
+				client, fake := newFakeTVmaze(t, http.StatusOK, map[string]string{
+					tvmazeLookupPath:              tvmazeHarbour,
+					tvmazeShowsPath + "4242/crew": tvmazeHarbourCrew,
+				})
 
 				_, held, err := newTVmazeAnswerer(client).answer(t.Context(), factOverview,
 					titleRef{kind: libraryKindSeries, ids: test.ids})
@@ -147,8 +151,9 @@ func TestTheTVmazeAnswererAsksWithTheIDItHas(t *testing.T) {
 				if err != nil || !held {
 					t.Fatalf("answered %v with %v, want the overview", held, err)
 				}
-				if len(fake.requests) != 1 {
-					t.Fatalf("the answerer made %d requests, want one", len(fake.requests))
+				if paths := requestPaths(fake); slices.Index(paths, tvmazeLookupPath) != 0 ||
+					slices.Index(paths[1:], tvmazeLookupPath) >= 0 {
+					t.Fatalf("the answerer asked for %v, want one lookup first", paths)
 				}
 				if got := fake.requests[0].URL.Query().Get(test.scheme); got != test.id {
 					t.Errorf("the lookup asked %v, want %s of %s", fake.requests[0].URL.Query(), test.scheme, test.id)
@@ -210,7 +215,10 @@ func TestATVmazeShowThatAnswersNothing(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				client, _ := newFakeTVmaze(t, test.status, map[string]string{tvmazeLookupPath: test.show})
+				client, _ := newFakeTVmaze(t, test.status, map[string]string{
+					tvmazeLookupPath:              test.show,
+					tvmazeShowsPath + "4242/crew": "[]",
+				})
 
 				_, held, err := newTVmazeAnswerer(client).answer(t.Context(), factOverview,
 					titleRef{kind: libraryKindSeries, ids: providerIDs{"imdb": "tt4242424"}})
@@ -230,6 +238,7 @@ func TestAShowOnAStreamingServiceNamesItsWebChannel(t *testing.T) {
 		client, _ := newFakeTVmaze(t, http.StatusOK, map[string]string{
 			tvmazeLookupPath: `{"id":4242,"summary":"<p>A keeper watches the ice.</p>",
 				"network":null,"webChannel":{"id":9,"name":"Harbour Stream"}}`,
+			tvmazeShowsPath + "4242/crew": "[]",
 		})
 
 		answer, held, err := newTVmazeAnswerer(client).answer(t.Context(), factOverview,
@@ -249,7 +258,8 @@ func TestAShowOnAStreamingServiceNamesItsWebChannel(t *testing.T) {
 func TestAShowWithNoSlotTakesTheAverageRuntime(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		client, _ := newFakeTVmaze(t, http.StatusOK, map[string]string{
-			tvmazeLookupPath: `{"id":4242,"runtime":0,"averageRuntime":45}`,
+			tvmazeLookupPath:              `{"id":4242,"runtime":0,"averageRuntime":45}`,
+			tvmazeShowsPath + "4242/crew": "[]",
 		})
 
 		answer, held, err := newTVmazeAnswerer(client).answer(t.Context(), factOverview,

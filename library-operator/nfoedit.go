@@ -1,7 +1,7 @@
 package main
 
 // The one-element edit of volumewrite.go, widened to the group of elements
-// one fact owns. A group is the unit because a fact such as overview owns six
+// one fact owns. A group is the unit because a fact such as overview owns seven
 // elements and writes them together, and a rating sits under the ratings
 // element beside the ratings other facts write. Every other byte of the
 // document stays as it was.

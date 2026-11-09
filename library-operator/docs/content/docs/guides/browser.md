@@ -271,7 +271,16 @@ A `Play` that states its own preferences can take other tracks than the
 page marks, because the page reads the `Player`'s preferences before any
 `Play` exists.
 
-A series' page shows its seasons as a wall of episode stills. A series
+A series' page opens with a header whose facts line reads the year,
+the season count, the content rating, the creators, and the genres, as
+in `2004 · 3 seasons · TV-14 · Created by Dale Morrow · Drama`. The
+line is cut at the edge of the header's text column, and the genres
+are last, so a long line loses a genre before a creator's name. The
+creators are the `<creator>` elements of `tvshow.nfo`, which the
+`overview` fact writes, as
+[The write rule](/docs/guides/enrichment/#the-write-rule) describes.
+
+Under the header, the page shows its seasons as a wall of episode stills. A series
 whose folder holds no file with an episode number in its name, as
 [Scanning](/docs/guides/scanning/) describes, shows a line that says so
 in place of the wall. Enter on

@@ -20,7 +20,10 @@ fn a_page_opens_on_the_first_episode_of_the_first_season() {
     let (page, _) = page(Serials::default());
     assert_eq!(page.focus, Focus::Still(0));
     assert_eq!(page.title, "Serial One");
-    assert_eq!(page.facts, "2004 · 3 seasons · TV-14");
+    assert_eq!(
+        page.facts,
+        "2004 · 3 seasons · TV-14 · Created by A Creator"
+    );
     assert_eq!(page.tagline, "One line of it.");
     assert_eq!(page.stills.len(), 14);
 }
@@ -38,6 +41,24 @@ fn the_facts_line_carries_the_genres_and_the_banner_line_does_not() {
     assert_eq!(
         facts_of(&details),
         "2026 · 2 seasons · TV-MA · Drama, Thriller"
+    );
+    assert_eq!(facts_without_genres(&details), "2026 · 2 seasons · TV-MA");
+}
+
+#[test]
+fn the_facts_line_names_the_creators_before_the_genres() {
+    let details = SeriesDetails {
+        released: "2026-01-02".into(),
+        seasons: 2,
+        rating: "TV-MA".into(),
+        genres: vec!["Drama".into(), "Thriller".into()],
+        creators: vec!["Ada Ferris".into(), "Nora Vance".into()],
+        ..SeriesDetails::default()
+    };
+
+    assert_eq!(
+        facts_of(&details),
+        "2026 · 2 seasons · TV-MA · Created by Ada Ferris, Nora Vance · Drama, Thriller"
     );
     assert_eq!(facts_without_genres(&details), "2026 · 2 seasons · TV-MA");
 }

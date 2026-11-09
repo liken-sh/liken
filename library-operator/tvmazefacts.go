@@ -2,8 +2,8 @@ package main
 
 // What the nfo facts make of TVmaze. TVmaze holds series alone and takes no
 // account. The lookup keys on the IMDb id or the TheTVDB id the identity fact
-// wrote, the show it answers carries the overview, and one more call carries
-// the cast. A movie library's title is no answer.
+// wrote, the show it answers carries the overview, one more call carries the
+// creators of the overview, and another carries the cast. A movie library's title is no answer.
 
 import (
 	"context"
@@ -72,6 +72,24 @@ func tvmazeCast(members []tvmazeCastMember) []creditedActor {
 	return cast
 }
 
+// The job TVmaze names a series' creator by. A developer adapts a show from
+// another work, and TMDb names that person under created_by too, but TVmaze
+// keeps the two jobs apart, and the creator element takes the creator alone.
+const tvmazeCreatorType = "Creator"
+
+// The creators in the order TVmaze holds them, one name per person.
+func tvmazeCreators(crew []tvmazeCrewMember) []string {
+	var creators []string
+	for _, member := range crew {
+		name := strings.TrimSpace(member.Person.Name)
+		if member.Type != tvmazeCreatorType || name == "" || slices.Contains(creators, name) {
+			continue
+		}
+		creators = append(creators, name)
+	}
+	return creators
+}
+
 // The TVmaze answerer. It needs no key, and it answers nothing for a movie
 // library, because TVmaze holds series alone. The show each id answered is
 // held for the life of the container, so the facts of one title cost one
@@ -107,10 +125,15 @@ func (a tvmazeAnswerer) answer(ctx context.Context, fact string, title titleRef)
 	if fact == factCredits {
 		return a.credits(ctx, show.ID)
 	}
+	crew, err := a.client.crew(ctx, show.ID)
+	if err != nil {
+		return factAnswer{}, false, err
+	}
 	answer := factAnswer{
 		Plot:           tvmazePlot(show.Summary),
 		Genres:         show.Genres,
 		Studios:        tvmazeStudios(*show),
+		Creators:       tvmazeCreators(crew),
 		Premiered:      strings.TrimSpace(show.Premiered),
 		RuntimeMinutes: tvmazeRuntimeMinutes(*show),
 	}

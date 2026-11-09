@@ -726,7 +726,8 @@ and the walk logs one line that names the file and the reason.
 
 Each fact owns a fixed group of elements in the `.nfo` file and writes
 nothing outside it. The `overview` fact owns the plot, the tagline,
-the genres, the studios, the premiere date, and the runtime. Each
+the genres, the studios, a series' creators, the premiere date, and
+the runtime. Each
 rating owns its one element. `credits` owns the actors, directors,
 and writers. Before a fact writes again, it hashes the group as it is
 now and compares that hash with the one it recorded after its last
@@ -736,6 +737,18 @@ counts the fights. A group that has no element left is not a fight:
 no writer holds it, so the fact writes it again. Radarr deletes
 `movie.nfo` when it upgrades a movie's file, and this rule lets each
 fact fill the new file.
+
+A series' creators are the people TMDb names under `created_by` and the
+people TVmaze names in the show's crew with the type `Creator`. The
+`overview` fact writes one `<creator>` element for each, and the
+series page shows them in its facts line. They are not the series'
+`<director>` and `<writer>` elements, because those name the people
+who directed and wrote its episodes. The `overview` fact asks again
+only for a title with no plot, so a series that already has a plot
+gets its creators when you refresh the fact, as
+[When a fact asks again](#when-a-fact-asks-again) describes:
+
+    kubectl liken library reenrich series --only overview
 
 An art file that already exists is never replaced. The fact records it
 as answered and downloads nothing. The one exception is an episode's
