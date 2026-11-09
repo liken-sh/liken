@@ -5,6 +5,7 @@ package main
 // names them.
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -226,5 +227,32 @@ func TestTwoProvidersMergeTheCrewByTheUnion(t *testing.T) {
 	}
 	if !slices.Equal(names, providerNames{providerBlockTMDb, providerBlockOMDb}) {
 		t.Errorf("providers = %v, want the two that answered", names)
+	}
+}
+
+// A person the first provider names with no ids takes every id the second
+// gives, and an id the first gave is never replaced.
+func TestAPersonBothProvidersNameKeepsTheFirstIDs(t *testing.T) {
+	cases := []struct {
+		name  string
+		first providerIDs
+		want  providerIDs
+	}{
+		{name: "no ids from the first", first: nil, want: providerIDs{"tmdb": "12", "imdb": "nm12"}},
+		{name: "an id from the first", first: providerIDs{"tmdb": "11"}, want: providerIDs{"tmdb": "11", "imdb": "nm12"}},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			merged, _ := mergeAnswers(factCredits, []providerAnswer{
+				{block: providerBlockTMDb, answer: factAnswer{
+					Writers: []creditedPerson{{Name: "Iris Kell", IDs: one.first}}}},
+				{block: providerBlockOMDb, answer: factAnswer{
+					Writers: []creditedPerson{{Name: "iris kell", IDs: providerIDs{"tmdb": "12", "imdb": "nm12"}}}}},
+			})
+
+			if len(merged.Writers) != 1 || !maps.Equal(merged.Writers[0].IDs, one.want) {
+				t.Errorf("writers = %+v, want one with ids %v", merged.Writers, one.want)
+			}
+		})
 	}
 }
