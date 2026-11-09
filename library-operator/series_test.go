@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -225,9 +226,10 @@ func TestWalkSeriesSkipsIgnoredFolders(t *testing.T) {
 	writeFile(t, filepath.Join(root, "Show", "tvshow.nfo"), `<tvshow><title>Show</title><uniqueid type="tvdb">9</uniqueid></tvshow>`)
 	writeFile(t, filepath.Join(root, "Show", "Season 01", "Show S01E01.mkv"), "video")
 	writeFile(t, filepath.Join(root, "Show", "#recycle", "Show S09E09.mkv"), "video")
+	writeFile(t, filepath.Join(root, "Show", "Staging", "Show S08E08.mkv"), "video")
 	writeFile(t, filepath.Join(root, "#recycle", "Other", "Other S01E01.mkv"), "video")
 
-	result := walkSeries(root, "house/series", ignoreSet{"#recycle": true})
+	result := walkSeries(root, "house/series", ignoreSet{"#recycle": true, "Staging": true})
 	if result.titles != 1 {
 		t.Fatalf("titles = %d, want only the series outside the recycle bin", result.titles)
 	}
@@ -236,6 +238,15 @@ func TestWalkSeriesSkipsIgnoredFolders(t *testing.T) {
 	}
 	if result.episodes[0].Episode != 1 {
 		t.Errorf("episode = %d, want the numbered one, not the staged file", result.episodes[0].Episode)
+	}
+	var videos []string
+	for _, file := range result.files {
+		if file.Type == fileTypeVideo {
+			videos = append(videos, file.Path)
+		}
+	}
+	if want := []string{filepath.Join("Show", "Season 01", "Show S01E01.mkv")}; !slices.Equal(videos, want) {
+		t.Errorf("video files = %v, want %v alone", videos, want)
 	}
 }
 
