@@ -305,7 +305,10 @@ first year to now. The brighter part of the line spans the years of
 the posters the row shows.
 
 Under the axis is one row of posters, oldest at the left and the
-credits with no release date at the right end. Under each poster, the
+credits with no release date at the right end. The posters take the
+height that the head and the axis leave, and the row holds as many as
+fit across: six on a 16:9 screen, and more on a wider screen, such as
+eight on a 2560 by 1080 screen. Under each poster, the
 first line is the character the person played, or the job, such as
 `Director`, and the second is the year and the age, as in
 `1986 · age 15`. A work released after the death reads

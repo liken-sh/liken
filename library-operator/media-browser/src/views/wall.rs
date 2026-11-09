@@ -33,9 +33,9 @@ pub const POSTER: f32 = 1.5;
 /// episode's own art is.
 pub const STILL: f32 = 9.0 / 16.0;
 
-// The poster's share of its cell; the rest is the gutter, which holds the
-// mark of a focused slot.
-const POSTER_SHARE: f32 = 0.84;
+/// The poster's share of its cell; the rest is the gutter, which holds the
+/// mark of a focused slot.
+pub const POSTER_SHARE: f32 = 0.84;
 
 // The space between a slot and the line under it, and the space under
 // that line before the next row. Both are wider than the mark reaches, so
@@ -73,10 +73,16 @@ pub fn lined(width: f32, ratio: f32, columns: usize, lines: usize) -> Cells {
     let poster_height = poster_width * ratio;
     Cells {
         width,
-        height: poster_height + GAP + card::height(lines) + FOOT,
+        height: poster_height + below(lines),
         poster_width,
         poster_height,
     }
+}
+
+/// The height a cell keeps under its slot: the gap, this many lines, and
+/// the foot.
+pub fn below(lines: usize) -> f32 {
+    GAP + card::height(lines) + FOOT
 }
 
 // The width the wall lays a cell out at when a read cuts a card to it.

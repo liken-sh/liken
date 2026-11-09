@@ -8,7 +8,7 @@ use super::opened;
 use super::people::People;
 use crate::look;
 use crate::screens::person::Person;
-use crate::screens::person::page::{line, region};
+use crate::screens::person::page::{line, row};
 use crate::screens::person::walk::Focus;
 use crate::views;
 
@@ -59,7 +59,7 @@ fn the_outline_goes_to_the_poster_where_the_row_comes_to_rest() {
     };
     let at = |second: f64| {
         views::marked(crate::screens::person::row::slot(
-            region(FRAME, true),
+            &row(FRAME, true),
             index,
             page.row_at(FRAME, second),
         ))

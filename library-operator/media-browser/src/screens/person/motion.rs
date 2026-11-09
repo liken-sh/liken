@@ -10,30 +10,34 @@
 
 use iced_winit::core::Rectangle;
 
-use super::page::{line, region};
+use super::page::{line, row};
+use super::row::Row;
 use super::walk::Focus;
 use super::{Person, row};
 use crate::look;
 use crate::views;
 
 impl Person {
-    // The region of the row, which depends on whether the page draws an
-    // axis over it.
-    fn region(&self, bounds: Rectangle) -> Rectangle {
-        region(bounds, self.axis.is_some())
+    // The row of posters, which depends on whether the page draws an axis
+    // over it.
+    fn row(&self, bounds: Rectangle) -> Row {
+        row(bounds, self.axis.is_some())
     }
 
     // How far the row scrolls to come to rest.
     fn settled_row(&self, bounds: Rectangle) -> f32 {
-        row::offset(self.walk.rest, self.credits.len(), self.region(bounds))
+        row::offset(self.walk.rest, self.credits.len(), &self.row(bounds))
     }
 
     // The two ends of the bright part of the line at rest: the years of
     // the dated credits the row shows whole. Nothing where it shows none.
     fn settled_window(&self, bounds: Rectangle) -> Option<(f32, f32)> {
         let axis = self.axis.as_ref()?;
-        let region = self.region(bounds);
-        let shown = row::shown(region, self.credits.len(), self.settled_row(bounds));
+        let shown = row::shown(
+            &self.row(bounds),
+            self.credits.len(),
+            self.settled_row(bounds),
+        );
         let years = self.credits[shown].iter().filter_map(|credit| credit.year);
         let (first, last) = years.fold(None, |span: Option<(i64, i64)>, year| {
             Some(span.map_or((year, year), |(first, last)| {
@@ -92,7 +96,7 @@ impl Person {
         let around = match (self.walk.focus, self.axis.as_ref()) {
             (Focus::Axis(year), Some(axis)) => axis.column(line(bounds), year),
             (Focus::Poster(index), _) if index < self.credits.len() => {
-                row::slot(self.region(bounds), index, self.settled_row(bounds))
+                row::slot(&self.row(bounds), index, self.settled_row(bounds))
             }
             _ => return None,
         };

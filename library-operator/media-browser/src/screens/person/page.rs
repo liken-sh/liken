@@ -13,7 +13,7 @@ use iced_winit::core::{Point, Rectangle, Theme, mouse};
 
 use super::Person;
 use super::axis::draw::{self, Drawn};
-use super::row;
+use super::row::{self, Row};
 use crate::art::Art;
 use crate::audience::faces::Faces;
 use crate::look;
@@ -56,23 +56,22 @@ pub fn line(bounds: Rectangle) -> Rectangle {
     area(content.x, bounds.y + LINE, content.width, 1.0)
 }
 
-/// The part of the frame the row of posters draws in: under the axis,
-/// or under the head where the page draws no axis. The row is the
-/// screen's content region widened by the cell gutter, so the art of
-/// the first poster at rest is on the content region's left edge, under
-/// the headshot.
-pub fn region(bounds: Rectangle, axis: bool) -> Rectangle {
+/// The row of posters at these bounds: under the axis, or under the head
+/// where the page draws no axis, across the screen's content region and
+/// down to the foot of the frame. The art of the first poster at rest is
+/// on the content region's left edge, under the headshot.
+pub fn row(bounds: Rectangle, axis: bool) -> Row {
     let top = match axis {
         true => ROW,
         false => ROW_ALONE,
     };
-    let grid = wall::columned(screen::region(bounds), wall::COLUMNS);
-    area(
-        grid.x,
+    let content = screen::region(bounds);
+    Row::new(area(
+        content.x,
         bounds.y + top,
-        grid.width,
+        content.width,
         (bounds.height - top).max(0.0),
-    )
+    ))
 }
 
 /// The page as one canvas.
@@ -140,11 +139,12 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         // reaches a pixel past each side, because the renderer drops a
         // line of text whose own clip reaches outside the row's, and a
         // card at rest on the edge reaches outside it by a rounding.
-        let region = region(bounds, person.axis.is_some());
+        let row = row(bounds, person.axis.is_some());
         let offset = person.row_at(bounds, self.at);
+        let region = row.region;
         let clip = area(region.x - 1.0, region.y, region.width + 2.0, region.height);
         frame.with_clip(clip, |frame| {
-            row::draw(frame, store, &person.credits, region, offset, self.faces);
+            row::draw(frame, store, &person.credits, &row, offset, self.faces);
         });
 
         vec![frame.into_geometry()]
@@ -202,30 +202,99 @@ mod tests {
     #[test]
     fn the_axis_and_the_row_stand_under_the_head() {
         assert!(line(frame()).y > head());
-        assert!(region(frame(), true).y > line(frame()).y);
-        assert!(region(frame(), false).y > head());
-        assert!(region(frame(), false).y < region(frame(), true).y);
+        let (with, without) = (row(frame(), true).region, row(frame(), false).region);
+        assert!(with.y > line(frame()).y);
+        assert!(without.y > head());
+        assert!(without.y < with.y);
     }
 
     // The first poster of the row at rest and the headshot share one left
     // edge: the left edge of the screen's content region.
     #[test]
     fn the_first_poster_stands_under_the_headshot() {
-        let region = region(frame(), true);
-        let first = row::slot(region, 0, 0.0);
+        let first = row::slot(&row(frame(), true), 0, 0.0);
         let content = screen::region(frame());
         assert!((first.x - content.x).abs() < 0.01, "{first:?}");
         assert_eq!(line(frame()).x, content.x);
     }
 
+    // The frames of a 16:9 screen, two ultrawide screens, a 16:10
+    // screen, and a 4:3 screen, with and without an axis.
+    const FRAMES: [(f32, f32, bool); 10] = [
+        (1920.0, 1080.0, true),
+        (1920.0, 1080.0, false),
+        (2560.0, 1080.0, true),
+        (2560.0, 1080.0, false),
+        (3440.0, 1440.0, true),
+        (5120.0, 1440.0, true),
+        (1920.0, 1200.0, true),
+        (1920.0, 1200.0, false),
+        (1440.0, 1080.0, true),
+        (1440.0, 1080.0, false),
+    ];
+
     #[test]
     fn both_lines_of_a_card_end_inside_the_frame() {
+        for (width, height, axis) in FRAMES {
+            let row = row(area(0.0, 0.0, width, height), axis);
+            let slot = row::slot(&row, 0, 0.0);
+            let under = wall::under(&row.cells, slot);
+            assert!(
+                under.y + under.height <= height,
+                "{width}x{height} {under:?}"
+            );
+        }
+    }
+
+    // The first and the last poster of the row at rest stand on the two
+    // edges of the content region, at every frame.
+    #[test]
+    fn the_row_at_rest_fills_the_content_region() {
+        for (width, height, axis) in FRAMES {
+            let bounds = area(0.0, 0.0, width, height);
+            let content = screen::region(bounds);
+            let row = row(bounds, axis);
+            let first = row::slot(&row, 0, 0.0);
+            let last = row::slot(&row, row.across() - 1, 0.0);
+            assert!(
+                (first.x - content.x).abs() < 0.01,
+                "{width}x{height} {first:?}"
+            );
+            let right = content.x + content.width;
+            assert!(
+                (last.x + last.width - right).abs() < 0.01,
+                "{width}x{height} {last:?}"
+            );
+        }
+    }
+
+    // A 16:9 screen holds six posters of the wall's size, with or without
+    // an axis. A screen wider than 16:9 holds more posters, as tall as the
+    // height under the axis allows, and a screen squarer than 16:9 holds
+    // six smaller ones.
+    #[test]
+    fn the_row_holds_as_many_posters_as_fit_across() {
+        let cases = [
+            (1920.0, 1080.0, true, 6),
+            (1920.0, 1080.0, false, 6),
+            (2560.0, 1080.0, true, 8),
+            (3440.0, 1440.0, true, 6),
+            (3440.0, 1080.0, true, 11),
+            (1920.0, 1200.0, true, 6),
+            (1440.0, 1080.0, true, 6),
+        ];
+        for (width, height, axis, across) in cases {
+            let row = row(area(0.0, 0.0, width, height), axis);
+            assert_eq!(row.across(), across, "{width}x{height} {row:?}");
+        }
+    }
+
+    #[test]
+    fn a_16_9_poster_is_the_size_of_a_wall_poster() {
         for axis in [true, false] {
-            let region = region(frame(), axis);
-            let cells = row::cells(region);
-            let slot = row::slot(region, 0, 0.0);
-            let under = wall::under(&cells, slot);
-            assert!(under.y + under.height <= HEIGHT, "{under:?}");
+            let cells = row(frame(), axis).cells;
+            assert!((cells.poster_width - 248.55).abs() < 0.05, "{cells:?}");
+            assert!((cells.poster_height - 372.82).abs() < 0.05, "{cells:?}");
         }
     }
 }
