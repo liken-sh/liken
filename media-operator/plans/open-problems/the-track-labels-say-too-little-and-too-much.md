@@ -10,14 +10,18 @@ rip.
 
 ## A long title is cut short in the strip
 
-The strip draws each value in a member 200 canvas pixels wide
-(`MEMBER_W` in `display/src/strip.rs`), and it clips a value to that
-width less a 24 pixel gap and ends it in an ellipsis, the way
-`display/src/chooser.rs` clips a row that is wider than its panel.
-Before the clip, an audio track titled "[English / DD+ 5.1 Atmos]"
-drew across the audio offset beside it, so the stop that a press lands
-on could not be read. The clip keeps the stops apart, but a cut title
-such as "[English / DD+ 5.…" still says little.
+The strip clips each track value and ends it in an ellipsis, the way
+`display/src/chooser.rs` clips a row that is wider than its panel
+(`Strip::lines` in `display/src/strip.rs`). A value with nothing
+beside it takes the room up to the next group, 430 canvas pixels
+(`GROUP_PITCH`) less a 24 pixel gap (`STOP_GAP`), and the last group
+takes 260 pixels (`GROUP_INK`). When a delay offset is set, the strip
+draws it one member, 200 pixels (`MEMBER_W`), to the right of its
+track, and the track value takes that member less the gap. Before the
+clip, an audio track titled "[English / DD+ 5.1 Atmos]" drew across
+the audio offset beside it, so the stop that a press lands on could
+not be read. The clip keeps the values apart, but a cut title such as
+"[English / DD+ 5.…" beside a set offset still says little.
 
 Undecided: whether the audio cell should read only the language and
 the layout, as "English 5.1", the subtitle cell the language and its
