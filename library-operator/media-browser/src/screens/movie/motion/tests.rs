@@ -46,6 +46,20 @@ fn settled(page: &Movie) -> Vec<f32> {
 }
 
 #[test]
+fn the_strip_backs_itself_as_the_page_scrolls_to_its_cast() {
+    use crate::views::clock::backing;
+    let mut page = on(Focus::Buttons(0));
+    page.backdrop = String::new();
+    assert_eq!(page.strip_backing(0.0), 0.0);
+    page.backdrop = "backdrop.jpg".into();
+    assert_eq!(page.strip_backing(0.0), backing::AT_REST);
+
+    let mut page = on(Focus::Stripe(0, 0));
+    page.backdrop = String::new();
+    assert_eq!(page.strip_backing(0.0), 1.0);
+}
+
+#[test]
 fn a_press_down_eases_the_page_to_the_next_row() {
     let mut page = on(Focus::Strip(0));
     let (_, from) = page.drawn(FRAME, 0.0);

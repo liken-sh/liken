@@ -13,9 +13,17 @@ use super::page::{Placed, RAIL, placed, row_at, rows, status_line, stills, under
 use super::{Focus, Series, row, watch};
 use crate::look;
 use crate::views::across::Across;
+use crate::views::clock::backing;
 use crate::views::{self, buttons, rail, wall, watch as line};
 
 impl Series {
+    /// The level of the backing under the browser's strip. The header
+    /// never scrolls, so the level is the one a page at rest takes over
+    /// its backdrop.
+    pub fn strip_backing(&self) -> f32 {
+        backing::level(!self.backdrop.is_empty(), 0.0)
+    }
+
     /// The rectangle the focus outline goes to on this page at these
     /// bounds: around the focused button, mark, still, bar, member,
     /// heading, or headshot, at the place every scroll comes to rest.

@@ -319,6 +319,20 @@ impl Screen {
         }
     }
 
+    /// The level of the backing the browser draws under its strip over
+    /// this screen at the second `at`, from 0 for none to 1 for its peak.
+    /// A title's page draws art under the strip, a backdrop at rest and
+    /// its own blocks once it scrolls. The home page and a wall draw a
+    /// black band there, a franchise page draws its own band, and a
+    /// person's page draws nothing under the strip, so those take none.
+    pub fn strip_backing(&self, at: f64) -> f32 {
+        match self {
+            Self::Movie(screen) => screen.strip_backing(at),
+            Self::Series(screen) => screen.strip_backing(),
+            Self::Home(_) | Self::Wall(_) | Self::Person(_) | Self::Franchise(_) => 0.0,
+        }
+    }
+
     /// The rectangle the browser's focus outline goes to on this screen at
     /// these bounds, at the place every scroll comes to rest. Every screen
     /// answers it and draws no focus mark of its own, so one outline

@@ -135,7 +135,10 @@ the outline starts on the new page's focus with no travel. While the
 loading screen covers a title's page, the outline is hidden.
 
 Up from the top of any wall puts focus on the strip, the row across
-the top that holds the clock and the search glass. Right from the last
+the top that holds the clock and the search glass. On a title's page,
+a shade darkens the top of the frame under the strip: lightly over the
+backdrop, and fully once the page scrolls its text and faces up under
+the strip, so the clock and the glass read over any art. Right from the last
 column of a long wall puts focus on the rail. The rail is the bars at
 the right edge, and they jump through the wall by year, decade,
 letter, or season. A year, a decade, or a letter with fewer titles

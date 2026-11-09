@@ -11,6 +11,7 @@ use super::page::{Blocks, placed, rows, status_line, under};
 use super::{Focus, Movie, row, watch};
 use crate::look;
 use crate::views::across::Across;
+use crate::views::clock::backing;
 use crate::views::{self, buttons, watch as line};
 
 impl Movie {
@@ -52,6 +53,13 @@ impl Movie {
             }
             Focus::Strip(_) | Focus::Franchise(..) | Focus::Stripe(..) => None,
         }
+    }
+
+    /// The level of the backing under the browser's strip at this second:
+    /// part of its peak over the backdrop at rest, and all of it once the
+    /// page has scrolled its blocks up under the strip.
+    pub fn strip_backing(&self, at: f64) -> f32 {
+        backing::level(!self.backdrop.is_empty(), self.scroll.at(at))
     }
 
     /// Follow the places the page and every row scroll to at these

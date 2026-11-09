@@ -46,6 +46,9 @@ pub const SIZE: f32 = 26.0;
 // the search icon, the field it expands into, and the reading.
 pub mod strip;
 
+// The shade under the strip on a page that draws art there.
+pub mod backing;
+
 // The widest reading of the day. The clock reserves the room this one
 // takes, so the controls beside it hold their place as the minute turns.
 const WIDEST: &str = "12:00 pm";

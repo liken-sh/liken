@@ -35,6 +35,16 @@ fn drawn_still(page: &Series, offset: f32) -> Option<Rectangle> {
 }
 
 #[test]
+fn the_strip_backs_itself_over_a_backdrop_and_the_wall_s_scroll_moves_nothing() {
+    use crate::views::clock::backing;
+    let mut page = on(Focus::Still(0));
+    page.backdrop = "backdrop.jpg".into();
+    assert_eq!(page.strip_backing(), backing::AT_REST);
+    page.backdrop = String::new();
+    assert_eq!(page.strip_backing(), 0.0);
+}
+
+#[test]
 fn a_press_down_eases_the_wall_into_the_next_season() {
     let mut page = on(Focus::Still(4));
     let from = placed(&page, FRAME).offset;
