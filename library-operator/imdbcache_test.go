@@ -272,6 +272,29 @@ func TestAWaitForTheLockEndsWithTheContext(t *testing.T) {
 	})
 }
 
+// A lock that another container holds past the lock's timeout ends the wait,
+// and the error names the lock.
+func TestAWaitForTheLockEndsAtItsTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), datasetTitleRatings)
+		held, err := lockDatasetDirectory(t.Context(), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer held()
+		started := time.Now()
+
+		_, err = lockDatasetDirectory(t.Context(), dir)
+
+		if err == nil || !strings.Contains(err.Error(), "locking") {
+			t.Errorf("lock = %v, want the lock's error", err)
+		}
+		if waited := time.Since(started); waited < datasetLockTimeout {
+			t.Errorf("waited %s, want the lock's timeout of %s", waited, datasetLockTimeout)
+		}
+	})
+}
+
 // A body whose byte count is not Content-Length is an error, and no copy
 // lands, even when the gzip stream it holds is whole.
 func TestADownloadShorterThanItsLengthLandsNoCopy(t *testing.T) {
@@ -301,21 +324,34 @@ func TestADownloadShorterThanItsLengthLandsNoCopy(t *testing.T) {
 	})
 }
 
-// A record the container cannot read is no copy, so the run downloads the
-// file again.
+// A record the container cannot read is no copy, and neither is a record
+// whose copy is gone, so the run downloads the file again and asks with no
+// ETag, which a 304 would answer with no copy to read.
 func TestARecordThatWillNotReadDownloadsAgain(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		server := newDatasetServer(t, testNow)
-		cache := t.TempDir()
-		writeFile(t, filepath.Join(cache, datasetTitleRatings, datasetRecordName), "not json")
-		fetcher, _ := testFetcher(server, cache)
+	cases := []struct {
+		name   string
+		record string
+	}{
+		{name: "a record that is not JSON", record: "not json"},
+		{name: "a record whose copy is gone", record: `{"etag":"\"gone\"","size":10}`},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				server := newDatasetServer(t, testNow)
+				cache := t.TempDir()
+				writeFile(t, filepath.Join(cache, datasetTitleRatings, datasetRecordName), test.record)
+				fetcher, _ := testFetcher(server, cache)
 
-		readIDs(t, fetcher, datasetTitleRatings)
-
-		if got := server.log(); !slices.Equal(got, []string{"GET title.ratings 200"}) {
-			t.Errorf("requests = %v, want one download", got)
-		}
-	})
+				if got := readIDs(t, fetcher, datasetTitleRatings); !slices.Equal(got, fixtureRatingIDs) {
+					t.Errorf("rows = %v, want %v", got, fixtureRatingIDs)
+				}
+				if got := server.log(); !slices.Equal(got, []string{"GET title.ratings 200"}) {
+					t.Errorf("requests = %v, want one download", got)
+				}
+			})
+		})
+	}
 }
 
 // A request that waits for the pace stops waiting when the context ends.
