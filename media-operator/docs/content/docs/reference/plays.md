@@ -321,7 +321,11 @@ ends where the person is out of the picture for more than 10 seconds,
 which is also when their card leaves the row, so the seek never lands
 in the scene that plays now. A person who does not appear again reads
 "No later scene", and `select` does nothing there. `up` and `down`
-move between the panel's rows. While a chooser, an adjuster, or a
+move between the panel's rows. In a track chooser and in a card's
+panel, the row the focus is on reads bright and has an underline in
+the accent, the same mark the focused stop of the strip under the bar
+has. A track chooser also puts a dot before the track that plays now,
+so the dot stays where it is when the focus moves. While a chooser, an adjuster, or a
 card's panel is open, the on-screen display stays up, and it hides on
 its own again only after the panel closes.
 

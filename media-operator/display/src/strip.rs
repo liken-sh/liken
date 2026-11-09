@@ -11,9 +11,10 @@
 //! tracks first.
 //!
 //! While the strip has the focus, the focused stop's value reads brighter
-//! than the others and has a bar under it in the accent.
+//! than the others and has the accent underline under it, the same mark a
+//! chooser's focused row takes.
 
-use iced::{Point, Rectangle, Size};
+use iced::{Point, Rectangle};
 
 use crate::canvas::{Anchor, Brush, Canvas, Line, clip, measure};
 use crate::chooser;
@@ -41,13 +42,6 @@ const STOP_GAP: f32 = 24.0;
 /// value changes width.
 const GROUP_PITCH: f32 = 430.0;
 const GROUP_INK: f32 = 260.0;
-
-/// The bar under the focused stop's value: its thickness, and the space
-/// between the value's line box and the bar. The bar is thick enough to read
-/// from a couch at 1080 rows, and it is a bar and not a box so that the mark
-/// stays as quiet as the row it marks.
-const MARK_H: f32 = 3.0;
-const MARK_GAP: f32 = 4.0;
 
 /// One control of the strip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -358,9 +352,10 @@ impl Strip {
             .flat_map(|group| group.cells)
             .find(|cell| cell.control == here)
             .map(|cell| {
-                Rectangle::new(
-                    Point::new(cell.x, Y_VAL + theme::type_scale::TINY / 2.0 + MARK_GAP),
-                    Size::new(measure(&cell.content, theme::type_scale::TINY), MARK_H),
+                theme::underline(
+                    cell.x,
+                    Y_VAL + theme::type_scale::TINY / 2.0,
+                    measure(&cell.content, theme::type_scale::TINY),
                 )
             })
     }
@@ -387,7 +382,12 @@ impl Strip {
             return;
         };
         if let Some(track) = open.control.track() {
-            chooser::draw(brush, &track.entries(film), open.selected);
+            chooser::draw(
+                brush,
+                &track.entries(film),
+                open.selected,
+                track.playing(film),
+            );
         } else if let Some(offset) = open.control.offset() {
             offset.draw(brush, film);
         }
@@ -398,6 +398,7 @@ impl Strip {
 mod tests {
     use super::*;
     use crate::canvas::ELLIPSIS;
+    use iced::Size;
     use serde_json::json;
 
     fn film() -> Film {
@@ -719,7 +720,7 @@ mod tests {
     ];
 
     /// The focused stop has a bar under its value, as wide as the value's
-    /// text, 3 canvas pixels thick, and 4 under the value's line box. The
+    /// text, 4 canvas pixels thick, and 4 under the value's line box. The
     /// strip gives one mark at most, so no other stop has one.
     #[test]
     fn the_focused_stop_is_underlined() {
@@ -732,7 +733,7 @@ mod tests {
                 strip.mark(&Canvas::default(), &block("{}"), &angles(), true),
                 Some(Rectangle::new(
                     Point::new(x, 1034.0),
-                    Size::new(measure(content, theme::type_scale::TINY), 3.0),
+                    Size::new(measure(content, theme::type_scale::TINY), 4.0),
                 )),
                 "the mark under {content:?} at {x}"
             );

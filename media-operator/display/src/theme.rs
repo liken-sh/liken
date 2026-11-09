@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use iced::Color;
+use iced::{Color, Point, Rectangle, Size};
 
 /// The display draws in one space 1080 rows tall. The canvas module scales
 /// the whole layer to the real output, so the same layout serves 720, 1080,
@@ -49,8 +49,8 @@ pub mod color {
         fill()
     }
 
-    /// The bar under the focused stop of the control strip, which takes the
-    /// accent.
+    /// The underline under the focused stop of the control strip and under
+    /// the focused row of a chooser, which takes the accent.
     pub fn focus() -> Color {
         fill()
     }
@@ -160,6 +160,28 @@ pub fn type_size(height: f32) -> f32 {
     height / FACE_METRIC
 }
 
+/// The underline that marks where the focus is: the control strip's focused
+/// stop and a chooser's focused row both draw it, so the two marks read as
+/// one. It is a bar under the text and not a box or a fill around it, so the
+/// mark stays as quiet as the text it marks, and it is thick enough to read
+/// from a couch at 1080 rows.
+pub mod underline {
+    /// The bar's thickness, in canvas pixels.
+    pub const THICKNESS: f32 = 4.0;
+    /// The space between the bottom of the text's line box and the bar.
+    pub const GAP: f32 = 4.0;
+}
+
+/// The underline under one run of text whose line box ends at `bottom`. It
+/// starts at `left` and is `width` wide, which is the width of the text as it
+/// draws, so the bar ends where the text ends.
+pub fn underline(left: f32, bottom: f32, width: f32) -> Rectangle {
+    Rectangle::new(
+        Point::new(left, bottom + underline::GAP),
+        Size::new(width, underline::THICKNESS),
+    )
+}
+
 /// The side margin every flush-left and flush-right element keeps.
 pub const MARGIN_X: f32 = 96.0;
 
@@ -235,6 +257,16 @@ mod tests {
         assert!((alpha::PANEL - 0.922).abs() < 0.001);
         assert!((alpha::HIGHLIGHT - 0.812).abs() < 0.001);
         assert!((alpha::SCRIM_EDGE - 0.796).abs() < 0.001);
+    }
+
+    /// The underline starts under the text's left edge, one gap under its
+    /// line box, and is as wide as the text.
+    #[test]
+    fn an_underline_hangs_one_gap_under_the_line_box() {
+        assert_eq!(
+            underline(120.0, 718.0, 300.0),
+            Rectangle::new(Point::new(120.0, 722.0), Size::new(300.0, 4.0))
+        );
     }
 
     /// The display states a size as an ASS `\\fs`, which is the line box. The

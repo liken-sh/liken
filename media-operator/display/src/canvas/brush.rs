@@ -341,6 +341,18 @@ impl<'a> Brush<'a> {
         );
     }
 
+    /// A list's backing: the panel's dark fill without its border. A chooser
+    /// or an adjuster marks its focus inside the plate, so a border in the
+    /// accent around the plate would draw a second focus mark around the
+    /// first.
+    pub fn plate(&mut self, shape: Rectangle) {
+        self.paint(
+            &shape::rounded(shape, PANEL_RADIUS),
+            Paint::Fill,
+            theme::at(theme::color::SHADOW, theme::alpha::PANEL),
+        );
+    }
+
     /// One path the caller states, for a mark the named shapes above do not
     /// cover, such as the volume glyph. The path is already where it stands,
     /// and the mark takes the same fade every other shape takes.

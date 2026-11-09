@@ -82,11 +82,18 @@ impl Track {
 
     /// The entry a chooser opens on, which is the track that plays now.
     pub fn opens_on(self, film: &Film) -> usize {
+        self.playing(film).unwrap_or(0)
+    }
+
+    /// The entry of the track that plays now, which the chooser dots. A
+    /// subtitle list with no track playing has its Off entry playing. Any
+    /// other list with no track playing has no entry to dot.
+    pub fn playing(self, film: &Film) -> Option<usize> {
         let at = film.tracks_of(self.kind()).position(|track| track.selected);
         match (self, at) {
-            (Track::Subtitles, Some(at)) => at + 1,
-            (Track::Subtitles, None) => 0,
-            (_, at) => at.unwrap_or(0),
+            (Track::Subtitles, Some(at)) => Some(at + 1),
+            (Track::Subtitles, None) => Some(0),
+            (_, at) => at,
         }
     }
 
@@ -215,6 +222,26 @@ mod tests {
         );
         assert_eq!(Track::Audio.opens_on(&film), 1);
         assert_eq!(Track::Subtitles.opens_on(&film), 2);
+    }
+
+    /// The playing entry is the track mpv plays, Off for a subtitle list with
+    /// none, and no entry for an audio list with none.
+    #[test]
+    fn the_playing_entry_is_the_track_mpv_plays() {
+        let mut film = film();
+        assert_eq!(Track::Audio.playing(&film), Some(0));
+        assert_eq!(Track::Subtitles.playing(&film), Some(0));
+
+        film.apply(
+            "track-list",
+            &json!([
+                { "id": 1, "type": "audio", "lang": "eng" },
+                { "id": 1, "type": "sub", "lang": "spa" },
+                { "id": 2, "type": "sub", "lang": "eng", "selected": true },
+            ]),
+        );
+        assert_eq!(Track::Audio.playing(&film), None);
+        assert_eq!(Track::Subtitles.playing(&film), Some(2));
     }
 
     #[test]

@@ -154,7 +154,7 @@ impl Offset {
     }
 
     pub fn draw(self, brush: &mut Brush<'_>, film: &Film) {
-        brush.panel(self.shape());
+        brush.plate(self.shape());
         for line in self.lines(film) {
             brush.text(line);
         }
