@@ -31,7 +31,8 @@ const FADE_STEPS: usize = 24;
 /// One frame's axis: the axis, the credits its years index into, where
 /// the line is, the bright part of the line as this second draws it, the
 /// label over the focused year with the `x` of its center, while the axis
-/// holds focus, and the credit whose poster holds focus, while one does.
+/// holds focus, the credit whose poster holds focus, while one does, and
+/// the year that holds focus, while the axis does.
 pub struct Drawn<'a> {
     pub axis: &'a Axis,
     pub credits: &'a [Credit],
@@ -39,6 +40,7 @@ pub struct Drawn<'a> {
     pub window: Option<(f32, f32)>,
     pub label: Option<(String, f32)>,
     pub accented: Option<usize>,
+    pub focused: Option<usize>,
 }
 
 /// Draw the axis.
@@ -55,7 +57,7 @@ pub fn draw(frame: &mut Frame<Renderer>, drawn: &Drawn) {
         frame.fill_rectangle(window.position(), extent(window), look::axis_window());
     }
     match axis.mode {
-        Mode::Dots => dotted(frame, axis, drawn.credits, line, drawn.accented),
+        Mode::Dots => dotted(frame, drawn),
         Mode::Bars => barred(frame, axis, line),
     }
     // In the bar mode a year's bar holds many credits, so the focused
@@ -166,21 +168,30 @@ fn italic(frame: &mut Frame<Renderer>, words: &str, band: Rectangle) {
 }
 
 // One dot for each credit, stacked by year from the line up. The dot of
-// the credit whose poster holds focus draws in the accent.
-fn dotted(
-    frame: &mut Frame<Renderer>,
-    axis: &Axis,
-    credits: &[Credit],
-    line: Rectangle,
-    accented: Option<usize>,
-) {
-    for year in &axis.years {
+// the credit whose poster holds focus draws in the accent, and the dots of
+// the year that holds focus draw bright over the underline.
+fn dotted(frame: &mut Frame<Renderer>, drawn: &Drawn) {
+    let (axis, line) = (drawn.axis, drawn.line);
+    for (at, year) in axis.years.iter().enumerate() {
         for (stacked, index) in year.credits.iter().enumerate() {
             let center = axis.dot(line, year.year, stacked);
-            let inks = Inks::of(credits[*index].seen, accented == Some(*index));
-            dot(frame, center, inks);
+            let tone = match (drawn.accented == Some(*index), drawn.focused == Some(at)) {
+                (true, _) => Tone::Accented,
+                (false, true) => Tone::Focused,
+                (false, false) => Tone::Plain,
+            };
+            dot(frame, center, Inks::of(drawn.credits[*index].seen, tone));
         }
     }
+}
+
+/// How one dot stands out: not at all, as a dot of the year that holds
+/// focus, or as the dot of the poster that holds focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tone {
+    Plain,
+    Focused,
+    Accented,
 }
 
 /// The inks of one credit's dot. An open ring is a credit nobody has
@@ -189,7 +200,10 @@ fn dotted(
 /// have. The difference is a shape and not a color, so it reads for a
 /// person who cannot tell the inks apart. The dot of the poster that holds
 /// focus keeps its shape and draws it in the accent, so the axis shows
-/// where the poster is in the career and what was seen of it.
+/// where the poster is in the career and what was seen of it. The dots of
+/// the year that holds focus keep their shapes and draw their rings as
+/// bright as their fills, so the year reads apart from the years beside
+/// it without a box around it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Inks {
     ring: Option<Color>,
@@ -198,10 +212,11 @@ struct Inks {
 }
 
 impl Inks {
-    fn of(seen: Seen, accented: bool) -> Self {
-        let (bright, ring) = match accented {
-            true => (look::accent(), look::accent()),
-            false => (look::text(), look::muted()),
+    fn of(seen: Seen, tone: Tone) -> Self {
+        let (bright, ring) = match tone {
+            Tone::Accented => (look::accent(), look::accent()),
+            Tone::Focused => (look::text(), look::text()),
+            Tone::Plain => (look::text(), look::muted()),
         };
         match seen {
             Seen::Everyone => Self {
@@ -300,8 +315,8 @@ mod tests {
             (Seen::Everyone, (false, false, true)),
         ];
         for (seen, held) in cases {
-            let plain = Inks::of(seen, false);
-            let accented = Inks::of(seen, true);
+            let plain = Inks::of(seen, Tone::Plain);
+            let accented = Inks::of(seen, Tone::Accented);
             assert_eq!(shape(plain), held, "{seen:?}");
             assert_eq!(shape(accented), held, "{seen:?}");
             let inks = [accented.ring, accented.half, accented.disc];
@@ -315,6 +330,30 @@ mod tests {
                 "{seen:?}"
             );
         }
+    }
+
+    // A dot of the focused year keeps its shape and draws its ring as
+    // bright as its fill, in the text's ink and not the accent.
+    #[test]
+    fn a_dot_of_the_focused_year_keeps_its_shape_and_draws_bright() {
+        let cases = [
+            (Seen::Nobody, (true, false, false)),
+            (Seen::Some, (true, true, false)),
+            (Seen::Everyone, (false, false, true)),
+        ];
+        for (seen, held) in cases {
+            let focused = Inks::of(seen, Tone::Focused);
+            assert_eq!(shape(focused), held, "{seen:?}");
+            let inks = [focused.ring, focused.half, focused.disc];
+            assert!(
+                inks.into_iter().flatten().all(|ink| ink == look::text()),
+                "{seen:?}"
+            );
+        }
+        assert_eq!(
+            Inks::of(Seen::Nobody, Tone::Plain).ring,
+            Some(look::muted())
+        );
     }
 
     #[test]

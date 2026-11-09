@@ -82,11 +82,12 @@ fn up_from_a_poster_moves_the_outline_and_nothing_else() {
     let Focus::Axis(year) = page.walk.focus else {
         panic!("the axis holds focus");
     };
-    let column = axis.column(line(FRAME), year);
-    assert_eq!(page.marked(FRAME), Some(views::marked(column)));
+    let underline = axis.underline(line(FRAME), year);
+    assert_eq!(page.marked(FRAME), Some(underline));
+    assert_eq!(page.focused_year(), Some(year));
     let (words, middle) = page.label_at(FRAME, 1.0).expect("a label");
     assert_eq!(words, "1999 · 1 credit");
-    assert_eq!(middle, column.center_x());
+    assert_eq!(middle, underline.center_x());
 }
 
 #[test]

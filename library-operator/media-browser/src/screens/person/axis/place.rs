@@ -22,16 +22,15 @@ const FIRST_ROW: f32 = 14.0;
 /// How tall the tallest year's bar is.
 pub const BARS: f32 = 80.0;
 
-// How far the focus column reaches over the line, past a stack of five
-// dots and past the tallest bar, and how far under it, past the tick. The
-// column is one height on every year, so a press left or right moves the
-// outline across and never changes its height.
-const COLUMN_UP: f32 = 86.0;
-const COLUMN_DOWN: f32 = 8.0;
-
-// How far the column reaches past each side of its year, so a dot at the
-// size floor of a narrow year still has room inside the outline.
-const COLUMN_SIDE: f32 = 2.0;
+// The focus underline of a year: how far under the line its middle is,
+// and how long it is before the stroke's ends. The bar is the focus
+// stroke's width tall and reaches half of it past each end, so it runs
+// from 5 to 9 under the line, clear of the bright part of the line at 1
+// over to 2 under, and it is 20 long, a dot and a stroke's width at each
+// side. A fixed length stays as visible on a career of eighty years,
+// where a year is narrower than a dot, as on one of ten.
+const UNDERLINE_DOWN: f32 = 7.0;
+const UNDERLINE: f32 = DOT + look::MARK;
 
 // The space between a bar and the bars of the years beside it, and the
 // inset of a bar's fills inside its frame.
@@ -51,7 +50,8 @@ const TICK_LABELS: f32 = 20.0;
 const LEFT_WORDS: f32 = 28.0;
 
 // How far over the line the label over the focused year starts. It sits
-// over the column's outline, so the outline never covers its words.
+// over a stack of five dots and over the tallest bar, so no mark covers
+// its words.
 const LABEL: f32 = 121.0;
 
 // How far under the line the mark of a focused poster's year starts in
@@ -85,20 +85,21 @@ impl Axis {
         line.width / self.across()
     }
 
-    /// The box the focus outline goes around on one year with credits: a
-    /// year wide, from over the tallest mark to under the tick.
-    pub fn column(&self, line: Rectangle, index: usize) -> Rectangle {
+    /// The focus underline of one year with credits, centred on the
+    /// year's dots, as the flat rectangle that the browser's focus stroke
+    /// draws as a bar. Every year's underline is one length, so a press
+    /// left or right moves the bar across and never changes its length.
+    pub fn underline(&self, line: Rectangle, index: usize) -> Rectangle {
         let year = self
             .years
             .get(index)
             .map(|year| year.year)
             .unwrap_or(self.start);
-        let width = self.year_width(line).max(DOT) + 2.0 * COLUMN_SIDE;
         area(
-            self.middle(line, year) - width / 2.0,
-            line.y - COLUMN_UP,
-            width,
-            COLUMN_UP + COLUMN_DOWN,
+            self.middle(line, year) - UNDERLINE / 2.0,
+            line.y + UNDERLINE_DOWN,
+            UNDERLINE,
+            0.0,
         )
     }
 
@@ -238,17 +239,21 @@ mod tests {
         assert!(near(axis.x(LINE, 2027.0), LINE.x + LINE.width));
     }
 
-    // The outline of the final boards goes around 1991 at x 724.63, y 365,
-    // 46.32 by 106, which is the column with the focus stroke's outset.
+    // The underline of 1991 is centred on its dots and draws, through the
+    // focus stroke, as a bar from 5 to 9 under the line: under the bright
+    // part of the line, which ends 2 under it, and 20 long on every year.
     #[test]
-    fn the_column_is_a_year_wide_from_over_the_stack_to_under_the_tick() {
+    fn the_underline_is_centred_on_the_year_under_the_bright_part() {
         let axis = mara();
-        let marked = crate::views::marked(axis.column(LINE, 3));
-        assert!(near(marked.x, 724.63), "{marked:?}");
-        assert!(near(marked.y, 365.0), "{marked:?}");
-        assert!(near(marked.width, 46.32), "{marked:?}");
-        assert!(near(marked.height, 106.0), "{marked:?}");
-        assert_eq!(axis.column(LINE, 0).height, axis.column(LINE, 3).height);
+        let underline = axis.underline(LINE, 3);
+        assert!(near(underline.center_x(), axis.middle(LINE, 1991)));
+        assert_eq!(underline.height, 0.0);
+        let top = underline.y - look::MARK / 2.0;
+        assert_eq!(top, LINE.y + 5.0);
+        assert_eq!(underline.y + look::MARK / 2.0, LINE.y + 9.0);
+        assert!(top > LINE.y - 1.0 + WINDOW, "{underline:?}");
+        assert_eq!(underline.width + look::MARK, 20.0);
+        assert_eq!(axis.underline(LINE, 0).width, underline.width);
     }
 
     #[test]
@@ -258,7 +263,8 @@ mod tests {
         assert!(near(first.x, 747.79), "{first:?}");
         assert_eq!(first.y, 443.0);
         assert_eq!(axis.dot(LINE, 1991, 1).y, 443.0 - STEP);
-        assert!(axis.dot(LINE, 1991, 4).y - DOT / 2.0 > axis.column(LINE, 3).y);
+        let label = axis.label_band(LINE, 0.0, 100.0);
+        assert!(axis.dot(LINE, 1991, 4).y - DOT / 2.0 > label.y + label.height);
     }
 
     #[test]
@@ -272,7 +278,8 @@ mod tests {
         assert_eq!(frame.height, BARS / 2.0);
         assert_eq!(everyone.height, BARS / 4.0);
         assert_eq!(some.y + some.height, everyone.y);
-        assert!(frame.y > axis.column(LINE, 3).y);
+        let label = axis.label_band(LINE, 0.0, 100.0);
+        assert!(frame.y > label.y + label.height);
     }
 
     #[test]

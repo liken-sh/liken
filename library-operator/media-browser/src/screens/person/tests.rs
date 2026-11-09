@@ -277,7 +277,8 @@ fn each_credit_is_seen_by_nobody_by_some_or_by_everyone() {
 }
 
 // While a poster holds focus, its dot on the axis takes the accent. While
-// the axis holds focus, the outline marks the year, and no dot does.
+// the axis holds focus, the underline marks the year, and no dot takes
+// the accent.
 #[test]
 fn only_a_focused_poster_accents_its_credit_on_the_axis() {
     let (mut page, mut source) = credited(6);

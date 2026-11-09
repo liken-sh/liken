@@ -53,12 +53,13 @@ impl Person {
         let (Focus::Axis(year), Some(axis)) = (self.walk.focus, self.axis.as_ref()) else {
             return None;
         };
-        Some(axis.column(line(bounds), year).center_x())
+        Some(axis.underline(line(bounds), year).center_x())
     }
 
     /// The credit whose dot takes the accent: the one whose poster holds
     /// focus, on a page with an axis, where the credit has a year. While
-    /// the axis holds focus, the outline marks the year and no dot does.
+    /// the axis holds focus, the underline marks the year and no dot takes
+    /// the accent.
     pub fn accented(&self) -> Option<usize> {
         let index = self.walk.poster()?;
         self.axis.as_ref()?.year_of(index).map(|_| index)
@@ -89,18 +90,29 @@ impl Person {
         Some((axis.label(year), self.label.toward(middle, at)))
     }
 
-    /// The rectangle the focus outline goes to at these bounds: around the
-    /// focused year's column on the axis, or around the focused poster at
-    /// the place the row comes to rest. Nothing on a page with no credits.
+    /// The rectangle the focus outline goes to at these bounds: the flat
+    /// underline of the focused year on the axis, or around the focused
+    /// poster at the place the row comes to rest. Nothing on a page with
+    /// no credits. A year takes an underline and not a box, because a box
+    /// around a column of small dots reads heavier than the dots it marks.
+    /// The outline glides between the two as it glides between posters.
     pub fn marked(&self, bounds: Rectangle) -> Option<Rectangle> {
-        let around = match (self.walk.focus, self.axis.as_ref()) {
-            (Focus::Axis(year), Some(axis)) => axis.column(line(bounds), year),
-            (Focus::Poster(index), _) if index < self.credits.len() => {
-                row::slot(&self.row(bounds), index, self.settled_row(bounds))
-            }
-            _ => return None,
-        };
-        Some(views::marked(around))
+        match (self.walk.focus, self.axis.as_ref()) {
+            (Focus::Axis(year), Some(axis)) => Some(axis.underline(line(bounds), year)),
+            (Focus::Poster(index), _) if index < self.credits.len() => Some(views::marked(
+                row::slot(&self.row(bounds), index, self.settled_row(bounds)),
+            )),
+            _ => None,
+        }
+    }
+
+    /// The year on the axis that holds focus, as an index into its years,
+    /// and nothing while a poster does.
+    pub fn focused_year(&self) -> Option<usize> {
+        match (self.walk.focus, self.axis.as_ref()) {
+            (Focus::Axis(year), Some(_)) => Some(year),
+            _ => None,
+        }
     }
 
     /// Follow the places the row, the bright part, and the label go to at
@@ -119,10 +131,10 @@ impl Person {
         // nothing but the outline.
         let line = line(bounds);
         let label = match (self.walk.focus, self.axis.as_ref()) {
-            (Focus::Axis(year), Some(axis)) => Some((axis.column(line, year).center_x(), pace)),
+            (Focus::Axis(year), Some(axis)) => Some((axis.underline(line, year).center_x(), pace)),
             (Focus::Poster(index), Some(axis)) => axis
                 .year_of(index)
-                .map(|year| (axis.column(line, year).center_x(), None)),
+                .map(|year| (axis.underline(line, year).center_x(), None)),
             _ => None,
         };
         if let Some((middle, pace)) = label {

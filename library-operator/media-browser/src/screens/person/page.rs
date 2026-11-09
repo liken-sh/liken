@@ -139,6 +139,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                     window: person.window_at(bounds, self.at),
                     label: person.label_at(bounds, self.at).filter(|_| self.held),
                     accented: person.accented().filter(|_| self.held),
+                    focused: person.focused_year().filter(|_| self.held),
                 },
             );
         }

@@ -388,7 +388,10 @@ The page opens on the work whose page you came from, or on the newest
 credit. Left and right move one poster. The dot of the poster in focus
 draws in green and keeps its shape, and in the bar mode a short green
 stroke under the bar marks its year. Up moves focus to the axis, on
-that poster's year, and a label over the year gives its count, as in
+that poster's year. The focus there is a short green underline under
+the line, centred on the year, and outside the bar mode the year's
+dots draw bright. A
+label over the year gives its count, as in
 `2009 · 11 credits · 3 seen`. Left and right on the axis move to the
 previous or next year with credits, and the row shows that year's
 credits from its left edge. Down or enter returns to the posters: to the

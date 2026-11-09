@@ -368,7 +368,16 @@ pub fn underlined(slot: Rectangle) -> Rectangle {
 // The focus stroke along this rectangle, in this color: the one mark
 // focus takes everywhere, which the browser's outline draws as it travels
 // and breathes. No screen strokes a mark of its own.
+//
+// A rectangle with no height is an underline: a screen answers one where a
+// box around the focus would read too heavy, such as a year on a career's
+// axis. The bar is what the stroke of that flat rectangle covers, so the
+// outline that glides from a box down to it lands on it without a jump.
 pub(crate) fn stroke(frame: &mut canvas::Frame<Renderer>, around: Rectangle, color: Color) {
+    if let Some(bar) = flat(around) {
+        frame.fill_rectangle(bar.position(), extent(bar), color);
+        return;
+    }
     frame.stroke_rectangle(
         around.position(),
         extent(around),
@@ -376,6 +385,20 @@ pub(crate) fn stroke(frame: &mut canvas::Frame<Renderer>, around: Rectangle, col
             .with_color(color)
             .with_width(look::MARK),
     );
+}
+
+// The bar the focus stroke draws for a rectangle with no height: the
+// stroke's width tall, centred on the rectangle's `y`, and half the
+// stroke's width longer at each end, as a stroke's square corners are.
+fn flat(around: Rectangle) -> Option<Rectangle> {
+    (around.height <= 0.0).then(|| {
+        area(
+            around.x - look::MARK / 2.0,
+            around.y - look::MARK / 2.0,
+            around.width + look::MARK,
+            look::MARK,
+        )
+    })
 }
 
 // The underline that marks the current member of a strip, in the same
@@ -480,6 +503,17 @@ mod tests {
         let around = marked(slot);
         assert_eq!(slot.y - (around.y - look::MARK / 2.0), REACH);
         assert_eq!(around.center_x(), slot.center_x());
+    }
+
+    // A flat rectangle draws as a bar the stroke's width tall, centred on
+    // its line, and a rectangle with a height draws as a stroke around it.
+    #[test]
+    fn a_flat_focus_draws_as_a_bar_on_its_line() {
+        assert_eq!(
+            flat(area(100.0, 460.0, 16.0, 0.0)),
+            Some(area(98.0, 458.0, 20.0, look::MARK))
+        );
+        assert_eq!(flat(slot()), None);
     }
 
     #[test]
