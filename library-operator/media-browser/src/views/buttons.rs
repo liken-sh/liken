@@ -58,15 +58,18 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, row: &[(Icon, &str)], at: Point
         frame.fill_rectangle(bounds.position(), extent(bounds), look::slot());
         let (shape, words) = content(bounds);
         icon::draw(frame, *glyph, shape, look::text());
-        frame.fill_text(label(
-            name,
-            words,
-            look::BUTTON,
-            look::text(),
-            Alignment::Left,
-            Vertical::Center,
-            f32::INFINITY,
-        ));
+        crate::views::ink::ink(
+            frame,
+            label(
+                name,
+                words,
+                look::BUTTON,
+                look::text(),
+                Alignment::Left,
+                Vertical::Center,
+                f32::INFINITY,
+            ),
+        );
     }
     HEIGHT
 }
@@ -121,10 +124,10 @@ pub fn draw_aside(
     };
     if halo {
         for point in clock::halo(start) {
-            frame.fill_text(ink(point, look::BACKGROUND));
+            crate::views::ink::ink(frame, ink(point, look::BACKGROUND));
         }
     }
-    frame.fill_text(ink(start, look::muted()));
+    crate::views::ink::ink(frame, ink(start, look::muted()));
 }
 
 #[cfg(test)]

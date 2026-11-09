@@ -200,15 +200,18 @@ fn beside(
 ) -> f32 {
     let width = text::width(content, size);
     let band = area(at.x, at.y, width, MARK);
-    frame.fill_text(label(
-        content,
-        Point::new(band.x, band.center_y()),
-        size,
-        color,
-        Alignment::Left,
-        Vertical::Center,
-        f32::INFINITY,
-    ));
+    crate::views::ink::ink(
+        frame,
+        label(
+            content,
+            Point::new(band.x, band.center_y()),
+            size,
+            color,
+            Alignment::Left,
+            Vertical::Center,
+            f32::INFINITY,
+        ),
+    );
     width
 }
 

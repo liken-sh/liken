@@ -249,18 +249,21 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Front<'_, A> {
         // the state runs: there is one logo on the screen, and it moves.
         match logo {
             Some((image, at)) => paint(&mut frame, &image, at, Tone::Full),
-            None => frame.fill_text(label(
-                layer.name,
-                Point::new(bounds.center_x(), layer.centre(bounds)),
-                look::TITLE,
-                Color {
-                    a: away,
-                    ..look::text()
-                },
-                Alignment::Center,
-                Vertical::Bottom,
-                bounds.width * NAME,
-            )),
+            None => crate::views::ink::ink(
+                &mut frame,
+                label(
+                    layer.name,
+                    Point::new(bounds.center_x(), layer.centre(bounds)),
+                    look::TITLE,
+                    Color {
+                        a: away,
+                        ..look::text()
+                    },
+                    Alignment::Center,
+                    Vertical::Bottom,
+                    bounds.width * NAME,
+                ),
+            ),
         }
 
         vec![shade, frame.into_geometry()]

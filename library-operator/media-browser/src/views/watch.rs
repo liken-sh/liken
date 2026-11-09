@@ -238,23 +238,26 @@ pub fn draw(
     };
     if line.halo {
         for point in clock::halo(words_at) {
-            frame.fill_text(status(point, look::BACKGROUND));
+            crate::views::ink::ink(frame, status(point, look::BACKGROUND));
         }
     }
-    frame.fill_text(status(words_at, ink));
+    crate::views::ink::ink(frame, status(words_at, ink));
 
     let status = status_width(line.status, line.finished);
     for ((viewer, words), face) in line.people.iter().zip(faces(band, status, line.people)) {
         clock::strip::circle(frame, face, viewer, people);
-        frame.fill_text(label(
-            words,
-            Point::new(face.x + FACE + FACE_GAP, band.center_y()),
-            SIZE,
-            ink,
-            Alignment::Left,
-            Vertical::Center,
-            f32::INFINITY,
-        ));
+        crate::views::ink::ink(
+            frame,
+            label(
+                words,
+                Point::new(face.x + FACE + FACE_GAP, band.center_y()),
+                SIZE,
+                ink,
+                Alignment::Left,
+                Vertical::Center,
+                f32::INFINITY,
+            ),
+        );
     }
 
     for (index, ((glyph, words), shape)) in line.marks.iter().zip(shapes(line, band)).enumerate() {
@@ -320,15 +323,18 @@ fn one_mark(
         area(left, shape.center_y() - side / 2.0, side, side),
         ink,
     );
-    frame.fill_text(label(
-        words,
-        Point::new(left + side + icon_gap(), shape.center_y()),
-        SIZE,
-        ink,
-        Alignment::Left,
-        Vertical::Center,
-        f32::INFINITY,
-    ));
+    crate::views::ink::ink(
+        frame,
+        label(
+            words,
+            Point::new(left + side + icon_gap(), shape.center_y()),
+            SIZE,
+            ink,
+            Alignment::Left,
+            Vertical::Center,
+            f32::INFINITY,
+        ),
+    );
 }
 
 #[cfg(test)]

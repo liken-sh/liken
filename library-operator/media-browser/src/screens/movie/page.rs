@@ -27,6 +27,7 @@ use crate::art::Art;
 use crate::clock::Time;
 use crate::look;
 use crate::views::across::Across;
+use crate::views::ink;
 use crate::views::stack::{self, Stack};
 use crate::views::{
     area, band, buttons, card, curtain, header, people, ratings, screen, strip, text, watch as line,
@@ -292,8 +293,14 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let (blocks, offset) = self.movie.drawn(bounds, self.at);
-        frame.with_clip(shown(bounds, offset), |frame| {
-            self.blocks(frame, bounds, &blocks, offset);
+        // The clip cuts the art and the fills at the top of what the page
+        // shows, and `ink::under` keeps every line of text under it too,
+        // because a line of text keeps the clip of its own band.
+        let shown = shown(bounds, offset);
+        ink::under(shown.y, || {
+            frame.with_clip(shown, |frame| {
+                self.blocks(frame, bounds, &blocks, offset);
+            });
         });
         vec![frame.into_geometry()]
     }

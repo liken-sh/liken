@@ -256,7 +256,7 @@ pub fn line_in(
         width,
     );
     text.font = font;
-    frame.fill_text(text);
+    crate::views::ink::ink(frame, text);
     height(lines(content, size, width), size)
 }
 
@@ -310,18 +310,21 @@ pub fn faced(
         return;
     }
     frame.with_clip(band, |frame| {
-        frame.fill_text(canvas::Text {
-            font,
-            ..label(
-                content,
-                Point::new(band.center_x(), band.y),
-                size,
-                color,
-                Alignment::Center,
-                Vertical::Top,
-                f32::INFINITY,
-            )
-        });
+        crate::views::ink::ink(
+            frame,
+            canvas::Text {
+                font,
+                ..label(
+                    content,
+                    Point::new(band.center_x(), band.y),
+                    size,
+                    color,
+                    Alignment::Center,
+                    Vertical::Top,
+                    f32::INFINITY,
+                )
+            },
+        );
     });
 }
 
@@ -369,18 +372,21 @@ fn turned(
     frame.with_save(|frame| {
         frame.translate(Vector::new(at.center_x(), at.center_y()));
         frame.rotate(angle);
-        frame.fill_text(label(
-            content,
-            Point::ORIGIN,
-            size,
-            color,
-            Alignment::Center,
-            Vertical::Center,
-            // The words are cut to the box already, and a width the
-            // shaper may exceed would wrap them into a second line that
-            // draws across the first once the box turns them.
-            f32::INFINITY,
-        ));
+        crate::views::ink::ink(
+            frame,
+            label(
+                content,
+                Point::ORIGIN,
+                size,
+                color,
+                Alignment::Center,
+                Vertical::Center,
+                // The words are cut to the box already, and a width the
+                // shaper may exceed would wrap them into a second line that
+                // draws across the first once the box turns them.
+                f32::INFINITY,
+            ),
+        );
     });
 }
 
@@ -447,7 +453,7 @@ pub fn block_in(
             f32::INFINITY,
         );
         text.font = font;
-        frame.fill_text(text);
+        crate::views::ink::ink(frame, text);
     });
 
     height

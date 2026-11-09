@@ -149,15 +149,18 @@ impl canvas::Program<Infallible, Theme, Renderer> for Row {
             frame.fill(&slash, faded(ink, fade));
         }
 
-        frame.fill_text(label(
-            &self.volume.percent().to_string(),
-            row.number,
-            look::ROW_NAME,
-            faded(look::text(), fade),
-            Alignment::Right,
-            Vertical::Top,
-            NUMBER_WIDTH,
-        ));
+        crate::views::ink::ink(
+            &mut frame,
+            label(
+                &self.volume.percent().to_string(),
+                row.number,
+                look::ROW_NAME,
+                faded(look::text(), fade),
+                Alignment::Right,
+                Vertical::Top,
+                NUMBER_WIDTH,
+            ),
+        );
 
         vec![frame.into_geometry()]
     }

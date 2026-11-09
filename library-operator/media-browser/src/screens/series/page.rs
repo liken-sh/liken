@@ -27,8 +27,8 @@ use crate::clock::Time;
 use crate::look;
 use crate::views::across::Across;
 use crate::views::curtain::{Curtain, Head, Layer};
-use crate::views::layers;
 use crate::views::{area, card, divider, people, rail, strip, text, wall};
+use crate::views::{ink, layers};
 
 // The header: its blocks, and where its button row and status line stand.
 mod header;
@@ -96,41 +96,50 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         // dividers over their own clip, because the renderer draws every
         // image of a layer over every fill of it, and a still that reached
         // the band would cross the divider's rule.
-        frame.with_clip(layout::stills(region), |frame| {
-            for (season, band) in bands.iter().enumerate() {
-                if band.shows(offset, region.height) {
-                    wall::draw(frame, store, &stills(series, &wall, season, offset, focus));
+        // The clips cut the art at the top of the wall, and `ink::under`
+        // keeps every caption and heading under it too, because a line of
+        // text keeps the clip of its own band and would draw over the
+        // header.
+        let under_dividers = layout::stills(region);
+        ink::under(under_dividers.y, || {
+            frame.with_clip(under_dividers, |frame| {
+                for (season, band) in bands.iter().enumerate() {
+                    if band.shows(offset, region.height) {
+                        wall::draw(frame, store, &stills(series, &wall, season, offset, focus));
+                    }
                 }
-            }
+            });
         });
 
         let dividers = area(region.x + inset, region.y, width, region.height);
-        frame.with_clip(region, |frame| {
-            for (season, band) in series.seasons.iter().zip(bands) {
-                if !band.shows(offset, region.height) {
-                    continue;
+        ink::under(region.y, || {
+            frame.with_clip(region, |frame| {
+                for (season, band) in series.seasons.iter().zip(bands) {
+                    if !band.shows(offset, region.height) {
+                        continue;
+                    }
+                    divider::draw(
+                        frame,
+                        layout::divider_box(dividers, band, offset),
+                        &season.name,
+                    );
                 }
-                divider::draw(
-                    frame,
-                    layout::divider_box(dividers, band, offset),
-                    &season.name,
-                );
-            }
 
-            if let Some(top) = wall.layout.empty {
-                let at = Point::new(region.x + inset, region.y + top - offset);
-                text::line(frame, EMPTY, at, look::FACTS, look::muted(), width);
-            }
+                if let Some(top) = wall.layout.empty {
+                    let at = Point::new(region.x + inset, region.y + top - offset);
+                    text::line(frame, EMPTY, at, look::FACTS, look::muted(), width);
+                }
 
-            // Each row draws at the scroll its own ease has reached at
-            // this second, toward the place this frame's focus rests it at.
-            for (index, row) in rows(series, &wall, offset, focus).into_iter().enumerate() {
-                let scroll = series.rows.at(index, row.scrolled(), self.at);
-                row.at(scroll).faced(self.faces).draw(frame, store);
-            }
+                // Each row draws at the scroll its own ease has reached at
+                // this second, toward the place this frame's focus rests it at.
+                for (index, row) in rows(series, &wall, offset, focus).into_iter().enumerate() {
+                    let scroll = series.rows.at(index, row.scrolled(), self.at);
+                    row.at(scroll).faced(self.faces).draw(frame, store);
+                }
 
-            let (at, width) = foot_at(&wall, offset);
-            series.foot.draw(frame, at, width);
+                let (at, width) = foot_at(&wall, offset);
+                series.foot.draw(frame, at, width);
+            })
         });
 
         frame.with_clip(layout::rail_clip(whole), |frame| {

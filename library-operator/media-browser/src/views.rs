@@ -47,6 +47,7 @@ pub mod divider;
 pub mod field;
 pub mod header;
 pub mod icon;
+pub mod ink;
 pub mod keyboard;
 pub mod layers;
 pub mod outline;
@@ -249,15 +250,18 @@ pub(crate) fn artwork<A: Art>(
     // slot fits a whole word per line where a poster slot fits several.
     frame.fill_rectangle(slot.position(), slot.size(), look::slot());
     if !name.is_empty() {
-        frame.fill_text(label(
-            name,
-            Point::new(slot.center_x(), slot.center_y()),
-            look::DETAIL.min(slot.width / 8.0),
-            look::muted(),
-            Alignment::Center,
-            Vertical::Center,
-            slot.width - 16.0,
-        ));
+        crate::views::ink::ink(
+            frame,
+            label(
+                name,
+                Point::new(slot.center_x(), slot.center_y()),
+                look::DETAIL.min(slot.width / 8.0),
+                look::muted(),
+                Alignment::Center,
+                Vertical::Center,
+                slot.width - 16.0,
+            ),
+        );
     }
 }
 

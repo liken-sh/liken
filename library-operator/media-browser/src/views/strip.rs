@@ -85,15 +85,18 @@ fn headed(frame: &mut canvas::Frame<Renderer>, region: Rectangle, heading: &str)
         if content.is_empty() {
             continue;
         }
-        frame.fill_text(label(
-            content,
-            Point::new(region.x, region.y),
-            look::HEADING,
-            color,
-            Alignment::Left,
-            Vertical::Top,
-            region.width,
-        ));
+        crate::views::ink::ink(
+            frame,
+            label(
+                content,
+                Point::new(region.x, region.y),
+                look::HEADING,
+                color,
+                Alignment::Left,
+                Vertical::Top,
+                region.width,
+            ),
+        );
     }
 }
 
@@ -408,9 +411,9 @@ fn pilled<T: Card>(frame: &mut canvas::Frame<Renderer>, member: &T, slot: Rectan
         )
     };
     for point in clock::halo(at) {
-        frame.fill_text(ink(point, look::BACKGROUND));
+        crate::views::ink::ink(frame, ink(point, look::BACKGROUND));
     }
-    frame.fill_text(ink(at, look::text()));
+    crate::views::ink::ink(frame, ink(at, look::text()));
 }
 
 // The band the first caption line of a slot draws in, a little wider

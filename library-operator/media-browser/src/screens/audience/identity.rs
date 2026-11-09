@@ -355,18 +355,21 @@ fn hexagon(center: Point) -> canvas::Path {
 // the same box the idle screen places, and the steps above are the gaps
 // between the anchors and nothing more.
 fn write(frame: &mut canvas::Frame<Renderer>, run: Run<'_>) {
-    frame.fill_text(canvas::Text {
-        content: run.words.to_string(),
-        position: run.at,
-        color: run.color,
-        size: Pixels(run.size),
-        line_height: LineHeight::Absolute(Pixels(line_box(run.size))),
-        font: Font::with_name(look::FONT),
-        align_x: Alignment::Left,
-        align_y: Vertical::Bottom,
-        max_width: f32::INFINITY,
-        shaping: Shaping::Advanced,
-    });
+    crate::views::ink::ink(
+        frame,
+        canvas::Text {
+            content: run.words.to_string(),
+            position: run.at,
+            color: run.color,
+            size: Pixels(run.size),
+            line_height: LineHeight::Absolute(Pixels(line_box(run.size))),
+            font: Font::with_name(look::FONT),
+            align_x: Alignment::Left,
+            align_y: Vertical::Bottom,
+            max_width: f32::INFINITY,
+            shaping: Shaping::Advanced,
+        },
+    );
 }
 
 #[cfg(test)]

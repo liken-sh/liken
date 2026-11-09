@@ -37,15 +37,18 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, region: Rectangle, name: &str) 
 pub fn two(frame: &mut canvas::Frame<Renderer>, region: Rectangle, heading: &str, bright: &str) {
     let baseline = region.y + region.height - LIFT - RULE;
     for (content, color) in [(heading, look::muted()), (bright, look::text())] {
-        frame.fill_text(label(
-            content,
-            Point::new(region.x, baseline),
-            look::HEADING,
-            color,
-            Alignment::Left,
-            Vertical::Bottom,
-            region.width,
-        ));
+        crate::views::ink::ink(
+            frame,
+            label(
+                content,
+                Point::new(region.x, baseline),
+                look::HEADING,
+                color,
+                Alignment::Left,
+                Vertical::Bottom,
+                region.width,
+            ),
+        );
     }
 
     let rule = area(

@@ -45,25 +45,31 @@ pub fn draw(frame: &mut canvas::Frame<Renderer>, width: f32, heading: &str, note
     };
     // The heading starts on the screen's side margin, the same margin the
     // clock's reading ends on at the other edge.
-    frame.fill_text(label(
-        heading,
-        Point::new(screen::MARGIN_X, middle),
-        look::NAME,
-        look::text(),
-        Alignment::Left,
-        Vertical::Center,
-        width / 2.0,
-    ));
-    if !note.is_empty() {
-        frame.fill_text(label(
-            &text::cut(note, look::CAPTION, width / 2.0),
-            Point::new(screen::MARGIN_X, clock::middle() + DROP),
-            look::CAPTION,
-            look::faint(),
+    crate::views::ink::ink(
+        frame,
+        label(
+            heading,
+            Point::new(screen::MARGIN_X, middle),
+            look::NAME,
+            look::text(),
             Alignment::Left,
             Vertical::Center,
-            f32::INFINITY,
-        ));
+            width / 2.0,
+        ),
+    );
+    if !note.is_empty() {
+        crate::views::ink::ink(
+            frame,
+            label(
+                &text::cut(note, look::CAPTION, width / 2.0),
+                Point::new(screen::MARGIN_X, clock::middle() + DROP),
+                look::CAPTION,
+                look::faint(),
+                Alignment::Left,
+                Vertical::Center,
+                f32::INFINITY,
+            ),
+        );
     }
 
     let rule = area(0.0, HEIGHT - 2.0, width, 2.0);

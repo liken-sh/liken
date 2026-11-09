@@ -116,15 +116,18 @@ pub fn draw<T: Card, A: Art>(
     store: &mut A,
     stripe: &Stripe<'_, T>,
 ) {
-    frame.fill_text(label(
-        stripe.heading,
-        Point::new(stripe.region.x, stripe.region.y),
-        look::HEADING,
-        look::muted(),
-        Alignment::Left,
-        Vertical::Top,
-        stripe.region.width,
-    ));
+    crate::views::ink::ink(
+        frame,
+        label(
+            stripe.heading,
+            Point::new(stripe.region.x, stripe.region.y),
+            look::HEADING,
+            look::muted(),
+            Alignment::Left,
+            Vertical::Top,
+            stripe.region.width,
+        ),
+    );
 
     let count = stripe.people.len();
     let offset = stripe.scroll.unwrap_or_else(|| scrolled(stripe));

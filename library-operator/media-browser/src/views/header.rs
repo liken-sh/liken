@@ -68,14 +68,17 @@ pub fn title<A: Art>(frame: &mut canvas::Frame<Renderer>, store: &mut A, head: &
         return height;
     }
 
-    frame.fill_text(label(
-        head.name,
-        head.at,
-        head.size,
-        look::text(),
-        Alignment::Left,
-        Vertical::Top,
-        head.width,
-    ));
+    crate::views::ink::ink(
+        frame,
+        label(
+            head.name,
+            head.at,
+            head.size,
+            look::text(),
+            Alignment::Left,
+            Vertical::Top,
+            head.width,
+        ),
+    );
     text::height(text::lines(head.name, head.size, head.width), head.size)
 }

@@ -131,9 +131,9 @@ pub(crate) fn reading(frame: &mut canvas::Frame<Renderer>, bounds: Rectangle, ti
         )
     };
     for point in halo(at) {
-        frame.fill_text(ink(point, look::BACKGROUND));
+        crate::views::ink::ink(frame, ink(point, look::BACKGROUND));
     }
-    frame.fill_text(ink(at, look::text()));
+    crate::views::ink::ink(frame, ink(at, look::text()));
 }
 
 #[cfg(test)]
