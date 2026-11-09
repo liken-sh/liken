@@ -117,6 +117,33 @@ files the provider reads.
 [MetadataProvider](/docs/reference/metadataproviders/) describes every
 field.
 
+### Provider terms and credits
+
+Each provider sets its own terms for the data it gives your account or
+your address. These are the credits the terms ask for:
+
+* TMDb requires its logo, less prominent than your own, and this
+  notice, placed prominently in or on the application that uses its
+  data:
+
+  > This product uses TMDB and the TMDB APIs but is not endorsed,
+  > certified, or otherwise approved by TMDB.
+
+* TVmaze licenses its data under CC BY-SA 4.0. You credit TVmaze as
+  the source with a link to TVmaze, and what you make from its data
+  shares under the same license.
+* IMDb's datasets are for personal and non-commercial use, and IMDb
+  requires the credit that
+  [IMDb ratings and credits from the datasets](#imdb-ratings-and-credits-from-the-datasets)
+  gives.
+* IntroDB asks for the credit "Intro data provided by IntroDB
+  (introdb.app)" and does not require it.
+* OMDb's terms name no credit.
+* Fanart.tv, TheIntroDB, the Internet Archive, and each PeerTube
+  instance state their terms on their own sites. A trailer from the
+  Internet Archive or a PeerTube instance carries the license its
+  uploader gave it.
+
 ## 2. Name the sources on the Library
 
 A `Library` asks the providers it names in `spec.sources`, in that
