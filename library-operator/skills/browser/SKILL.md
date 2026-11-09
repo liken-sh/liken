@@ -341,6 +341,9 @@ and right jump an era at a time. The wall moves only when the row in
 focus would leave the screen.
 
 Search is a wall like any other. Every typed character rereads it.
+The heading over the wall reads the text and the count of hits, such
+as `live · 365`. It reads `Search` while the field is empty and `No
+titles match` when the text matches nothing.
 The index is built in memory from titles, original titles, people's
 names, episode titles, and descriptions, in that rank.
 

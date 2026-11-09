@@ -107,6 +107,20 @@ fn a_search_is_headed_by_the_text_and_the_count() {
 }
 
 #[test]
+fn a_search_with_no_text_or_no_hits_says_so_in_words() {
+    let cases = [
+        ("", counts(0, 0, 0), "Search"),
+        ("zqxj", counts(0, 0, 0), "No titles match"),
+        ("zqxj", counts(1, 1, 0), "zqxj · 1"),
+    ];
+
+    for (text, counts, want) in cases {
+        let query = Query::Search { text: text.into() };
+        assert_eq!(query.heading("ignored", counts), want, "{text:?}");
+    }
+}
+
+#[test]
 fn a_wall_counts_its_items_by_kind() {
     let counted = Counts::of(["movies", "series", "movies", "episodes"]);
     assert_eq!(counted, counts(4, 2, 1));

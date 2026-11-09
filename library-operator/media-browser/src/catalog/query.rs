@@ -175,8 +175,13 @@ impl Query {
     /// A genre's heading carries the counts by kind, "Science Fiction ·
     /// 120 movies, 15 series", which is what the head over the wall
     /// carried before the band took it.
+    /// A search with no text yet is headed "Search", and one that matches
+    /// nothing says so, because a heading of the text and a count of 0
+    /// over an empty wall reads as a wall that failed to load.
     pub fn heading(&self, name: &str, counts: Counts) -> String {
         match self {
+            Self::Search { text } if text.is_empty() => "Search".to_string(),
+            Self::Search { .. } if counts.items == 0 => "No titles match".to_string(),
             Self::Person { .. } | Self::Set { .. } | Self::Franchise { .. } => name.to_string(),
             Self::Genre { .. } => format!("{} · {}", self.name(name), counts.words()),
             _ => format!("{} · {}", self.name(name), counts.items),
