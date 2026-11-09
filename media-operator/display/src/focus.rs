@@ -210,12 +210,24 @@ impl Focus {
             self.summoned = true;
             self.focused = Self::first_present(parts, passed);
         }
-        // A summon while paused arms nothing, so the display stands for as
-        // long as the film does.
-        self.clock.show(match self.paused {
+        self.clock.show(self.idle_window(parts));
+    }
+
+    /// Whether an open chooser or adjuster captures the presses. The display
+    /// stands while one is open, because the idle hide would close it under
+    /// a person who is still reading it.
+    fn holding(parts: &Parts<'_>) -> bool {
+        parts.strip.capturing().is_some()
+    }
+
+    /// The idle window the display asks for now. A pause arms nothing, so
+    /// the display stands for as long as the film does, and an open chooser
+    /// or adjuster arms nothing, so it stands until it closes.
+    fn idle_window(self, parts: &Parts<'_>) -> Hide {
+        match self.paused || Self::holding(parts) {
             true => Hide::Cancel,
             false => Hide::Arm,
-        });
+        }
     }
 
     /// Clear the display and cancel the idle window.
@@ -408,7 +420,22 @@ impl Focus {
     /// whole screen. Else, at the bare video, back asks the command sidecar
     /// to end the run, and the sidecar quits mpv with code 0, so the pod ends
     /// as the Completed a finished film gives, not an Error.
+    ///
+    /// A press that opens a chooser or an adjuster cancels the idle window,
+    /// and the press that closes it starts the whole window again, so the
+    /// display hides a full window after the last thing a person read.
     pub fn nav(&mut self, action: Action, parts: &mut Parts<'_>) -> Vec<Command> {
+        let held = Self::holding(parts);
+        let commands = self.answer(action, parts);
+        if Self::holding(parts) {
+            self.clock.ask(Hide::Cancel);
+        } else if held && self.summoned {
+            self.clock.ask(self.idle_window(parts));
+        }
+        commands
+    }
+
+    fn answer(&mut self, action: Action, parts: &mut Parts<'_>) -> Vec<Command> {
         // The offer is taken and the next Play is starting, so the display
         // routes every press to nothing. back still ends the run, on the same
         // message the bare video sends, because a person must be able to leave.
@@ -964,6 +991,83 @@ mod tests {
         display.pause(false);
         display.pause(true);
         assert!(display.focus.visible());
+        assert_eq!(display.focus.take_hide(), Hide::Cancel);
+    }
+
+    /// The strip stop's select, which opens the audio chooser.
+    fn open_the_chooser(display: &mut Display) {
+        display.summon();
+        display.press(Action::Down);
+        display.press(Action::Down);
+        display.press(Action::Select);
+        assert_eq!(display.strip.capturing(), Some(Control::Audio));
+    }
+
+    /// An open chooser cancels the idle window, and every press inside it
+    /// keeps the window cancelled, so the hide never closes a list a person
+    /// is reading. The select that applies a track closes the chooser and
+    /// starts the whole window again.
+    #[test]
+    fn an_open_chooser_holds_the_display_up() {
+        let mut display = Display::new("{}");
+        open_the_chooser(&mut display);
+        assert_eq!(display.focus.take_hide(), Hide::Cancel);
+
+        display.press(Action::Down);
+        assert_ne!(display.focus.take_hide(), Hide::Arm);
+
+        display.press(Action::Select);
+        assert_eq!(display.strip.capturing(), None);
+        assert_eq!(display.focus.take_hide(), Hide::Arm);
+    }
+
+    /// An adjuster holds the display up the same way, and the back that
+    /// closes it starts the window again.
+    #[test]
+    fn an_open_adjuster_holds_the_display_up() {
+        let mut display = Display::new("{}");
+        display.summon();
+        display.press(Action::Down);
+        display.press(Action::Down);
+        display.press(Action::Right);
+        display.press(Action::Select);
+        assert_eq!(display.strip.capturing(), Some(Control::AudioOffset));
+        assert_eq!(display.focus.take_hide(), Hide::Cancel);
+
+        display.press(Action::Right);
+        assert_ne!(display.focus.take_hide(), Hide::Arm);
+
+        display.press(Action::Back);
+        assert_eq!(display.strip.capturing(), None);
+        assert_eq!(display.focus.take_hide(), Hide::Arm);
+    }
+
+    /// The command sidecar summons the display after a seek of its own. A
+    /// summon over an open chooser arms nothing, so it does not start a
+    /// window that would close the list.
+    #[test]
+    fn a_summon_over_an_open_chooser_arms_nothing() {
+        let mut display = Display::new("{}");
+        open_the_chooser(&mut display);
+        display.focus.take_hide();
+
+        display.summon();
+        assert_eq!(display.focus.take_hide(), Hide::Cancel);
+    }
+
+    /// A paused film holds the display up on its own, so a chooser that
+    /// closes over it arms no window either.
+    #[test]
+    fn a_chooser_that_closes_over_a_pause_arms_nothing() {
+        let mut display = Display::new("{}");
+        display.pause(false);
+        display.pause(true);
+        display.press(Action::Down);
+        display.press(Action::Down);
+        display.press(Action::Select);
+        assert!(display.strip.capturing().is_some());
+
+        display.press(Action::Back);
         assert_eq!(display.focus.take_hide(), Hide::Cancel);
     }
 

@@ -1301,6 +1301,36 @@ mod tests {
         assert_eq!(display.idle.armed, None);
     }
 
+    /// The window the summon armed runs out while the audio chooser is
+    /// open, and the chooser and the display both stay up. The back that
+    /// closes the chooser arms a new window, and that one takes the display
+    /// down.
+    #[tokio::test]
+    async fn the_idle_window_leaves_an_open_chooser_up() {
+        let (mut display, _) = display();
+        let _ = display.update(message("summon"));
+        let summoned = display.idle.armed.expect("a summon arms an idle window");
+        for word in ["down", "down", "select"] {
+            let _ = display.update(message(word));
+        }
+        assert!(display.strip.capturing().is_some());
+
+        let _ = display.update(Message::Hide(summoned));
+        settle(&mut display);
+        assert!(display.strip.capturing().is_some());
+        assert!(display.focus.visible());
+        assert_eq!(display.idle.armed, None);
+
+        let _ = display.update(message("back"));
+        let closed = display
+            .idle
+            .armed
+            .expect("closing the chooser arms a window");
+        let _ = display.update(Message::Hide(closed));
+        settle(&mut display);
+        assert!(!display.focus.visible());
+    }
+
     /// A second summon arms a second window, and the first one's expiry
     /// dismisses nothing.
     #[tokio::test]
