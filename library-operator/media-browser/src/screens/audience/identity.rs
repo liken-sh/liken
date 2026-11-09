@@ -203,7 +203,7 @@ pub fn block(unit: &Unit, bounds: Rectangle) -> Option<Block<'_>> {
         return None;
     }
 
-    let bottom = bounds.y + bounds.height - clock::MARGIN_Y;
+    let bottom = bounds.y + bounds.height - screen::MARGIN_Y;
     let above = |index: usize| unit.parts.len() - 1 - index;
     let lines = unit
         .parts

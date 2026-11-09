@@ -288,6 +288,15 @@ fn the_last_stripe_pulls_the_foot_into_view() {
 }
 
 #[test]
+fn the_title_starts_on_the_top_margin_the_clock_hangs_from_at_any_height() {
+    let movie = crowded(Focus::Buttons(0));
+    for height in [HEIGHT, SHORT] {
+        let frame = Rectangle { height, ..FRAME };
+        assert_eq!(Blocks::of(&movie, frame).title.top, screen::MARGIN_Y);
+    }
+}
+
+#[test]
 fn a_movie_with_a_logo_reserves_the_box_it_draws_in() {
     let mut movie = crowded(Focus::Buttons(0));
     movie.logo = "logo.png".into();

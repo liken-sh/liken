@@ -20,8 +20,9 @@ use crate::look;
 use crate::views::stack::Stack;
 use crate::views::{area, card, extent, screen, text, wall};
 
-// The space over the headshot.
-const TOP: f32 = 56.0;
+// The space over the headshot and the name: the top margin, which the
+// clock hangs from too.
+const TOP: f32 = screen::MARGIN_Y;
 
 // The height of the headshot, and the space between it and the
 // words beside it.

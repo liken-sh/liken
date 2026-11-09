@@ -13,11 +13,11 @@
 // replaces another while a person watches. The reading holds one box
 // across all three, so the hour stays where it is when the screen
 // changes. The media operator states the same numbers in
-// `display/theme.lua` and in `idle/src/look.rs`.
+// `display/src/theme.rs` and in `idle/src/look.rs`.
 //
-// The vertical measures of that box are below. The side margin the
-// reading ends on is the margin every screen keeps, and `views::screen`
-// states it.
+// The box's height and type size are below. The top margin the box hangs
+// from and the side margin the reading ends on are the margins every
+// screen keeps, and `views::screen` states them.
 
 use iced_wgpu::Renderer;
 use iced_widget::canvas;
@@ -28,12 +28,6 @@ use iced_winit::core::{Color, Point, Rectangle};
 use super::{label, screen, text};
 use crate::clock::Time;
 use crate::look;
-
-/// The top margin the reading's line box hangs from, in logical pixels.
-/// The player's canvas is 1080 rows tall, and so is this frame at the
-/// scale the compositor states. The two spaces therefore share every
-/// vertical measure.
-pub const MARGIN_Y: f32 = 90.0;
 
 /// The line box the reading draws in, in logical pixels. `libass`
 /// scales the face until its bounding height fills the size an ASS
@@ -113,7 +107,7 @@ pub fn left(width: f32) -> f32 {
 /// line on the point it is given. So the same line is half a box lower
 /// here. The strip's other parts take this line as well.
 pub fn middle() -> f32 {
-    MARGIN_Y + BOX / 2.0
+    screen::MARGIN_Y + BOX / 2.0
 }
 
 // The reading in the room the clock reserves at the right of the frame.

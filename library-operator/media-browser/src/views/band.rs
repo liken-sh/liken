@@ -20,7 +20,7 @@ use crate::look;
 /// start at its bottom edge. The strip draws the clock over the band. A
 /// row that reached the clock's line would scroll under the reading. So
 /// the band holds that line and the air under it.
-pub const HEIGHT: f32 = clock::MARGIN_Y + clock::BOX + AIR;
+pub const HEIGHT: f32 = screen::MARGIN_Y + clock::BOX + AIR;
 
 // The air between the clock's line and the first row of a screen.
 const AIR: f32 = 30.0;
@@ -109,6 +109,6 @@ mod tests {
     // reading, so the band holds the whole line box and the air under it.
     #[test]
     fn the_band_clears_the_clock_s_line() {
-        const { assert!(HEIGHT > clock::MARGIN_Y + clock::BOX) };
+        const { assert!(HEIGHT > screen::MARGIN_Y + clock::BOX) };
     }
 }

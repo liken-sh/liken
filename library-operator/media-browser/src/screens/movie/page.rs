@@ -29,9 +29,6 @@ use crate::views::{
 // over the art whatever the art holds.
 const COLUMN: f32 = 0.42;
 
-// The share of the height above the first block.
-const TOP: f32 = 0.12;
-
 // The space between two blocks.
 const GAP: f32 = 16.0;
 
@@ -375,7 +372,7 @@ impl Blocks {
     fn of(movie: &Movie, bounds: Rectangle) -> Self {
         let region = screen::region(bounds);
         let column = column(bounds);
-        let mut cursor = Stack::new(Point::new(region.x, bounds.height * TOP), GAP);
+        let mut cursor = Stack::new(Point::new(region.x, screen::MARGIN_Y), GAP);
         let mut place = |lead: f32, height: f32| {
             cursor.skip(lead);
             let block = Block {

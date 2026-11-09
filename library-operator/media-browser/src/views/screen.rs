@@ -1,7 +1,8 @@
-// The frame: the side margin every screen keeps, and the region a
-// screen's content draws in. A page, a wall, and the home rows all take
-// their region from here, so no screen states a margin of its own and
-// the screens cannot drift apart.
+// The frame: the side margin every screen keeps, the top margin a page's
+// title and the clock hang from, and the region a screen's content draws
+// in. A page, a wall, and the home rows all take their region from here,
+// so no screen states a margin of its own and the screens cannot drift
+// apart.
 
 use iced_winit::core::Rectangle;
 
@@ -16,7 +17,7 @@ use super::area;
 /// the player's `mpv` display, and the idle screen between films. One
 /// replaces another while a person watches, so a different margin would
 /// show as a jump. The media operator states the same number in
-/// `display/theme.lua` and in `idle/src/look.rs`.
+/// `display/src/theme.rs` and in `idle/src/look.rs`.
 pub const MARGIN_X: f32 = 96.0;
 
 /// The frame the browser is drawn for: a 1920 by 1080 panel in logical
@@ -29,6 +30,15 @@ pub const FRAME: Rectangle = Rectangle {
     width: 1920.0,
     height: 1080.0,
 };
+
+/// The top margin in logical pixels: the top of the clock's line box and
+/// of the first block of a page's head, such as a movie's logo or a
+/// person's headshot, so the title and the clock start on one line. The
+/// player's canvas is 1080 rows tall, and so is this frame at the scale
+/// the compositor states, so the player's header and clock hang from the
+/// same row. The media operator states the same number in
+/// `display/src/theme.rs` and in `idle/src/look.rs`.
+pub const MARGIN_Y: f32 = 90.0;
 
 /// The part of a frame a screen's content draws in: the frame less the
 /// margin at each side. A screen reads `x` and `width` from the answer
