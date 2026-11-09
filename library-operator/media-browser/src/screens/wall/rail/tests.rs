@@ -212,21 +212,16 @@ fn a_unit_of_less_than_one_row_folds_into_its_neighbour() {
         (
             "a thin unit inside the wall",
             vec![("1999", 30), ("1998", 3), ("1997", 30)],
-            vec!["1999\u{2013}1998", "1997"],
+            vec!["1999", "1997"],
         ),
         (
             "a thin unit at the head of the wall",
             vec![("2000", 3), ("1999", 30), ("1998", 30)],
-            vec!["2000\u{2013}1999", "1998"],
+            vec!["1999", "1998"],
         ),
         (
             "a thin unit at the foot of the wall",
             vec![("1999", 30), ("1998", 30), ("1997", 3)],
-            vec!["1999", "1998\u{2013}1997"],
-        ),
-        (
-            "an undated unit at the foot of the wall",
-            vec![("1999", 30), ("1998", 30), ("", 3)],
             vec!["1999", "1998"],
         ),
         ("a wall with no dates at all", vec![("", 60)], vec![""]),
@@ -235,60 +230,9 @@ fn a_unit_of_less_than_one_row_folds_into_its_neighbour() {
     for (name, runs, want) in cases {
         let query = library(Sort::Newest);
         let items = dated_wall(&runs);
-        let region = room(2, "1999\u{2013}1998", &query);
+        let region = room(2, "1999", &query);
         assert_eq!(labels(&bars(&items, &query, region)), want, "{name}");
     }
-}
-
-// Units of these names and sizes, one after the other.
-fn units(runs: &[(&str, usize)]) -> Vec<Unit> {
-    let mut first = 0;
-    runs.iter()
-        .map(|(label, count)| {
-            let unit = Unit::one((*label).to_string(), first, *count);
-            first += count;
-            unit
-        })
-        .collect()
-}
-
-fn named(units: &[Unit]) -> Vec<String> {
-    units.iter().map(Unit::named).collect()
-}
-
-#[test]
-fn units_folded_together_are_named_for_the_first_and_the_last() {
-    let cases = [
-        (
-            "thin decades after a full one",
-            vec![("1930s", 2), ("1940s", 2), ("1950s", 2), ("1960s", 16)],
-            vec!["1930s\u{2013}1950s", "1960s"],
-        ),
-        (
-            "thin decades at the head",
-            vec![("1930s", 2), ("1940s", 2), ("1950s", 16), ("1960s", 16)],
-            vec!["1930s\u{2013}1950s", "1960s"],
-        ),
-        (
-            "an undated run at the head",
-            vec![("", 2), ("1950s", 16), ("1960s", 16)],
-            vec!["1950s", "1960s"],
-        ),
-        (
-            "ranges of folded units",
-            vec![("A", 2), ("B", 12), ("C", 12), ("D", 2)],
-            vec!["A\u{2013}B", "C\u{2013}D"],
-        ),
-    ];
-
-    for (name, runs, want) in cases {
-        assert_eq!(named(&merged(units(&runs))), want, "{name}");
-    }
-    let ranges = ranged(
-        &merged(units(&[("A", 2), ("B", 12), ("C", 12), ("D", 2)])),
-        1,
-    );
-    assert_eq!(named(&ranges), vec!["A\u{2013}D"]);
 }
 
 #[test]

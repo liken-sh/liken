@@ -142,9 +142,7 @@ backdrop, and fully once the page scrolls its text and faces up under
 the strip, so the clock and the glass draw over a darker ground. Right from the last
 column of a long wall puts focus on the rail. The rail is the bars at
 the right edge, and they jump through the wall by year, decade,
-letter, or season. A year, a decade, or a letter with fewer titles
-than one row shares the bar of its neighbour, and that bar names the
-first and the last it holds, such as `1930s–1950s`.
+letter, or season.
 Enter on the rail's sort button cycles the wall's order.
 
 ## 5. The screens
