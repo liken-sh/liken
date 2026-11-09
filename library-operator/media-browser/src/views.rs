@@ -198,6 +198,27 @@ impl Tone {
     }
 }
 
+/// The order a wall or a strip asks the store for its art in one frame.
+/// The store's queue serves the newest request first, so the slot asked
+/// for last decodes first. Every slot is asked for from the last to the
+/// first, the row ahead of the viewport before the drawn slots, and the
+/// focused slot last. The focused poster then decodes first, the rest of
+/// the screen follows in reading order, and the row ahead decodes after
+/// everything on the screen. Every frame asks again for the art that has
+/// not landed, and a repeat request moves to the top of the queue, so
+/// each frame keeps this order.
+pub(crate) fn asked(
+    drawn: std::ops::Range<usize>,
+    ahead: std::ops::Range<usize>,
+    focus: Option<usize>,
+) -> impl Iterator<Item = usize> {
+    let focus = focus.filter(|index| drawn.contains(index));
+    ahead
+        .rev()
+        .chain(drawn.rev().filter(move |index| Some(*index) != focus))
+        .chain(focus)
+}
+
 // Both programs draw art through this one function, so one place
 // enforces the rule: the store is asked only for a slot that is drawn,
 // at the slot's exact pixel size, and never for a row with no art
@@ -425,6 +446,21 @@ mod tests {
 
     fn slot() -> Rectangle {
         area(100.0, 200.0, 300.0, 450.0)
+    }
+
+    #[test]
+    fn the_art_is_asked_for_ahead_first_then_backward_then_the_focus() {
+        let cases = [
+            (0..4, 4..6, Some(1), vec![5, 4, 3, 2, 0, 1]),
+            (0..4, 4..4, Some(3), vec![2, 1, 0, 3]),
+            (0..4, 4..6, None, vec![5, 4, 3, 2, 1, 0]),
+            // A focus outside the drawn slots asks for nothing more.
+            (2..4, 4..5, Some(0), vec![4, 3, 2]),
+        ];
+        for (drawn, ahead, focus, want) in cases {
+            let order: Vec<usize> = asked(drawn.clone(), ahead.clone(), focus).collect();
+            assert_eq!(order, want, "{drawn:?} {ahead:?} {focus:?}");
+        }
     }
 
     #[test]

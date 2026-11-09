@@ -139,6 +139,36 @@ mod tests {
         assert_eq!(queue.take(), Some("page"));
     }
 
+    // One frame of a wall that opens on its second slot: six slots drawn,
+    // one row of six ahead. The focused poster decodes first, the rest of
+    // the screen follows in reading order, and the row ahead decodes last.
+    #[test]
+    fn a_wall_s_frame_serves_the_focused_slot_first_and_the_row_ahead_last() {
+        let mut queue = RequestQueue::default();
+        for index in crate::views::asked(0..6, 6..12, Some(1)) {
+            queue.request(index, false);
+        }
+        let served: Vec<usize> = std::iter::from_fn(|| queue.take()).collect();
+        assert_eq!(served, [1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    }
+
+    // A second frame asks again for every slot that has not landed, and
+    // the order holds, so a frame drawn while the decodes run does not
+    // put the row ahead back in front of the screen.
+    #[test]
+    fn a_second_frame_keeps_the_order_of_the_first() {
+        let mut queue = RequestQueue::default();
+        for index in crate::views::asked(0..6, 6..12, Some(4)) {
+            queue.request(index, false);
+        }
+        assert_eq!(queue.take(), Some(4));
+        for index in crate::views::asked(0..6, 6..12, Some(4)) {
+            queue.request(index, false);
+        }
+        let served: Vec<usize> = std::iter::from_fn(|| queue.take()).collect();
+        assert_eq!(served, [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11]);
+    }
+
     #[test]
     fn a_finished_slot_leaves_the_page_lane_alone() {
         let mut queue = RequestQueue::default();

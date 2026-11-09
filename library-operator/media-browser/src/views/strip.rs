@@ -13,7 +13,7 @@ use iced_winit::core::text::Alignment;
 use iced_winit::core::{Color, Point, Rectangle};
 
 use super::{
-    Card, Tone, area, artwork, card, clock, label, mosaic, progress, text, underline, wall,
+    Card, Tone, area, artwork, asked, card, clock, label, mosaic, progress, text, underline, wall,
 };
 use crate::art::Art;
 use crate::audience::Viewer;
@@ -284,7 +284,8 @@ pub fn slot(strip_region: Rectangle, slots: &[(f32, f32)], offset: f32, index: u
 }
 
 /// Draw the strip. Only the posters inside the region become geometry,
-/// so a set of any length costs one row of slots.
+/// so a set of any length costs one row of slots. The slots draw in the
+/// order `asked` gives, so the focused slot's art decodes first.
 pub fn draw<T: Card, A: Art>(
     frame: &mut canvas::Frame<Renderer>,
     store: &mut A,
@@ -307,7 +308,7 @@ pub fn draw<T: Card, A: Art>(
     let offset = strip.scroll.unwrap_or_else(|| scrolled(strip));
     let right = strip.region.x + strip.region.width;
 
-    for index in 0..slots.len() {
+    for index in asked(0..slots.len(), 0..0, strip.focus) {
         let slot = slot(strip.region, &slots, offset, index);
         if slot.x + slot.width < strip.region.x || slot.x > right {
             continue;

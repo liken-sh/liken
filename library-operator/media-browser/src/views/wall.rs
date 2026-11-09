@@ -16,7 +16,7 @@ use iced_wgpu::Renderer;
 use iced_widget::canvas;
 use iced_winit::core::{Color, Rectangle};
 
-use super::{Card, Tone, area, artwork, card, progress, scroll, text};
+use super::{Card, Tone, area, artwork, asked, card, progress, scroll, text};
 use crate::art::Art;
 use crate::audience::faces::Faces;
 use crate::look;
@@ -196,7 +196,8 @@ pub const HEAD: f32 = 20.0;
 
 /// Draw one wall. The store is asked for the slots this frame draws and
 /// for one row past them, so a scroll's next art decodes before it
-/// appears.
+/// appears. The slots draw in the order `asked` gives, so the focused
+/// poster decodes first and the row past them last.
 pub fn draw<T: Card, A: Art>(
     frame: &mut canvas::Frame<Renderer>,
     store: &mut A,
@@ -212,8 +213,23 @@ pub fn draw<T: Card, A: Art>(
         grid.columns,
     );
 
-    for index in range.clone() {
+    // One row past the viewport is asked for and not drawn, so a
+    // scroll's next art decodes before it appears.
+    let ahead = range.end..(range.end + grid.columns).min(grid.items.len());
+    for index in asked(range.clone(), ahead, grid.focus) {
         let item = &grid.items[index];
+        if !range.contains(&index) {
+            let ahead = slot(&cells, index, grid.offset, grid.columns);
+            if !item.art().is_empty() {
+                let _ = store.covered(
+                    library_of(item, grid.library),
+                    item.art(),
+                    ahead.width as u32,
+                    ahead.height as u32,
+                );
+            }
+            continue;
+        }
         let slot = placed(slot(&cells, index, grid.offset, grid.columns), grid.region);
         artwork(
             frame,
@@ -243,21 +259,6 @@ pub fn draw<T: Card, A: Art>(
                 written(frame, band, content, color);
             }
             _ => card::draw(frame, item, band),
-        }
-    }
-
-    // One row past the viewport is asked for and not drawn, so a
-    // scroll's next art decodes before it appears.
-    for index in range.end..(range.end + grid.columns).min(grid.items.len()) {
-        let item = &grid.items[index];
-        let ahead = slot(&cells, index, grid.offset, grid.columns);
-        if !item.art().is_empty() {
-            let _ = store.covered(
-                library_of(item, grid.library),
-                item.art(),
-                ahead.width as u32,
-                ahead.height as u32,
-            );
         }
     }
 }
