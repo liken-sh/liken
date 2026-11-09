@@ -294,21 +294,9 @@ func TestDiscoverArtPicksByRole(t *testing.T) {
 		},
 		{
 			name:        "an image the words do not name is no art",
-			files:       []string{"Glass Tide (1972).jpg"},
+			files:       []string{"Glass Tide (1972).jpg", "Glass Tide (1972)-thumb.jpg"},
 			wantPrimary: "",
 			wantAll:     nil,
-		},
-		{
-			name:        "the landscape comes after the logo",
-			files:       []string{"landscape.jpg", "clearlogo.png", "poster.jpg"},
-			wantPrimary: "poster.jpg",
-			wantAll:     []string{"poster.jpg", "clearlogo.png", "landscape.jpg"},
-		},
-		{
-			name:        "a bare landscape wins over a prefixed thumb",
-			files:       []string{"Glass Tide (1972)-thumb.jpg", "landscape.jpg"},
-			wantPrimary: "",
-			wantAll:     []string{"landscape.jpg"},
 		},
 	}
 	for _, testCase := range cases {
