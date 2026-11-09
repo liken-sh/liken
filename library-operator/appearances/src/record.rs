@@ -24,7 +24,9 @@
 // Each embedding is SFace's unit vector as 16-bit floats in little-endian
 // order, base64 encoded: 128 values in 256 bytes.
 
-use std::io::{BufRead, Write};
+use std::fs;
+use std::io::{self, BufRead, Write};
+use std::os::unix::fs::{MetadataExt, lchown};
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
@@ -138,9 +140,132 @@ pub fn partial(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
+// Every directory and file the tool lands in a title's folder takes the
+// owner and the group of the directory it lands in, the rule the operator's
+// own writes follow (volumeowner.go). Radarr and Sonarr own the folders they
+// make, and they rename and delete what is in them when they upgrade or
+// remove a title, which fails on a directory that the pod's root user owns.
+// The hand-over never fails the run: a file it cannot hand over keeps the
+// owner it was written with. A run as a user other than root, and a share
+// that maps root to another user, both refuse the change, and a directory
+// that is gone fails the write's own rename after this.
+pub fn adopt_owner(path: &Path, directory: &Path) {
+    if let Ok(folder) = fs::metadata(directory) {
+        let _ = lchown(path, Some(folder.uid()), Some(folder.gid()));
+    }
+}
+
+// The directory a file lands in, made with every missing directory above it.
+// Each directory this call made takes the owner of the nearest one that was
+// already there.
+pub fn make_dirs(directory: &Path) -> io::Result<()> {
+    let mut made = Vec::new();
+    let mut held = directory;
+    loop {
+        match fs::symlink_metadata(held) {
+            Ok(_) => break,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => made.push(held),
+            Err(e) => return Err(e),
+        }
+        match held.parent() {
+            Some(parent) => held = parent,
+            None => break,
+        }
+    }
+    fs::create_dir_all(directory)?;
+    for path in made {
+        adopt_owner(path, held);
+    }
+    Ok(())
+}
+
+// The rename that puts a partial file under its name. The partial file takes
+// its folder's owner first, so no reader sees the file under its name with
+// another owner.
+pub fn land(partial: &Path, path: &Path) -> io::Result<()> {
+    if let Some(directory) = path.parent() {
+        adopt_owner(partial, directory);
+    }
+    fs::rename(partial, path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A title's folder that another group owns, the way a folder Radarr or
+    // Sonarr made is owned by the uid and gid they run as. A user who is not
+    // root can give a directory to any group they belong to, so the tests
+    // need a second group, and they pass without a check where the user
+    // has one group alone.
+    fn foreign_folder(name: &str) -> Option<(PathBuf, u32)> {
+        let status = fs::read_to_string("/proc/self/status").unwrap();
+        let field = |key: &str| -> Vec<u32> {
+            status
+                .lines()
+                .find_map(|line| line.strip_prefix(key))
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(|id| id.parse().unwrap())
+                .collect()
+        };
+        let own = field("Gid:")[1];
+        let Some(other) = field("Groups:").into_iter().find(|g| *g != own) else {
+            eprintln!("the user belongs to one group, so no folder can belong to another");
+            return None;
+        };
+        let root = std::env::temp_dir().join(format!("appearances-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let folder = root.join("Film [1999]");
+        fs::create_dir_all(&folder).unwrap();
+        std::os::unix::fs::chown(&folder, None, Some(other)).unwrap();
+        Some((folder, other))
+    }
+
+    fn group_of(path: &Path) -> u32 {
+        fs::symlink_metadata(path).unwrap().gid()
+    }
+
+    // Every directory and file the tool lands in a title's folder takes the
+    // folder's owner, so the tool that owns the folder can rename and
+    // delete it.
+    #[test]
+    fn a_landed_file_and_its_new_directories_take_the_owner_of_the_folder() {
+        let Some((folder, group)) = foreign_folder("owner") else {
+            return;
+        };
+        let path = folder.join(".liken/appearances/Film.mkv.jsonl");
+        make_dirs(path.parent().unwrap()).unwrap();
+        let staged = partial(&path);
+        fs::write(&staged, b"{}").unwrap();
+
+        land(&staged, &path).unwrap();
+
+        for landed in [
+            ".liken",
+            ".liken/appearances",
+            ".liken/appearances/Film.mkv.jsonl",
+        ] {
+            assert_eq!(group_of(&folder.join(landed)), group, "{landed}");
+        }
+    }
+
+    // A run that may not change an owner, such as one as a user other than
+    // root or on a share that maps root to another user, leaves each file
+    // with the owner it was written with, and the run goes on.
+    #[test]
+    fn a_file_the_run_may_not_hand_over_keeps_its_owner() {
+        let scratch = std::env::temp_dir().join(format!("appearances-keep-{}", std::process::id()));
+        fs::create_dir_all(&scratch).unwrap();
+        let path = scratch.join("Film.mkv.jsonl");
+        fs::write(&path, b"{}").unwrap();
+        let own = group_of(&path);
+
+        for directory in [Path::new("/"), &scratch.join("gone")] {
+            adopt_owner(&path, directory);
+            assert_eq!(group_of(&path), own, "{}", directory.display());
+        }
+    }
 
     #[test]
     fn an_embedding_survives_the_round_trip_within_half_precision() {

@@ -310,8 +310,11 @@ pub fn run(
         &mut detector,
         &mut embedder,
     )?;
-    fs::create_dir_all(gallery_path(title).parent().unwrap())?;
-    fs::write(gallery_path(title), serde_json::to_vec_pretty(&gallery)?)?;
+    let written = gallery_path(title);
+    let directory = written.parent().unwrap();
+    record::make_dirs(directory)?;
+    fs::write(&written, serde_json::to_vec_pretty(&gallery)?)?;
+    record::adopt_owner(&written, directory);
     let records = records(title)?;
     let found = matches(&gallery, &records, rule)?;
     write_files(title, &root, &gallery, &records, &found)?;
@@ -358,7 +361,7 @@ fn write_files(
 fn write_whole(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     let partial = record::partial(path);
     fs::write(&partial, bytes)?;
-    fs::rename(&partial, path)?;
+    record::land(&partial, path)?;
     Ok(())
 }
 

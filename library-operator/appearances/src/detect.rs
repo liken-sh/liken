@@ -82,7 +82,7 @@ pub fn run(video: &Path, settings: &Settings) -> Result<PathBuf, Error> {
     let ready = started.elapsed();
 
     let path = record_path(video);
-    fs::create_dir_all(path.parent().unwrap())?;
+    record::make_dirs(path.parent().unwrap())?;
     // The record is written beside its final name and renamed into place,
     // so a run that stops partway leaves no record that looks complete.
     let partial = record::partial(&path);
@@ -149,7 +149,7 @@ pub fn run(video: &Path, settings: &Settings) -> Result<PathBuf, Error> {
     samples.finish()?;
     out.flush()?;
     drop(out);
-    fs::rename(&partial, &path)?;
+    record::land(&partial, &path)?;
 
     let per = |total: Duration, count: usize| total.as_secs_f64() * 1000.0 / count.max(1) as f64;
     eprintln!(
