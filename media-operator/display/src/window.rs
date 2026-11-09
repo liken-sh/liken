@@ -470,7 +470,7 @@ impl Display {
             // focus on the cast row then moves to the bar.
             if self.focus.focused_stop() == Some(Stop::Cast) && !self.cast.available(&self.film) {
                 let mut focus = self.focus;
-                focus.refocus(&self.parts());
+                focus.refocus(&mut self.parts());
                 self.focus = focus;
             }
             // With the display down nothing under it follows the position, so
@@ -514,7 +514,7 @@ impl Display {
             return;
         }
         let mut focus = self.focus;
-        focus.refocus(&self.parts());
+        focus.refocus(&mut self.parts());
         self.focus = focus;
         self.redraw();
     }
@@ -766,6 +766,11 @@ impl Display {
                 theme::at(theme::color::SHADOW, theme::alpha::DIM),
             );
             self.strip.draw_chooser(brush, &self.film);
+        }
+        // A cast card's panel stands above the row and dims nothing, so the
+        // card it belongs to reads at full strength beside it.
+        if self.cast_showing() {
+            self.cast.draw_actions(brush, &self.film);
         }
         // The card shows itself with the OSD down when the playhead crosses
         // the rise, and a taken card fades out over the hand-off with the OSD
@@ -1723,6 +1728,40 @@ mod tests {
         );
         let _ = asks(&mut display, pause(false));
         assert!(!display.cast_showing());
+    }
+
+    /// A select on the focused cast card opens its panel, which outlasts the
+    /// window the summon armed. "Next scene" then sends mpv the seek to the
+    /// person's next scene, and the panel closes with the display still up.
+    #[tokio::test]
+    async fn next_scene_on_a_cast_card_seeks_to_the_persons_next_scene() {
+        let (mut display, mut commands) = display();
+        let _ = display.update(present(r#"{"appearances":"/art/spans.json"}"#));
+        let spans = Spans::parse(
+            r#"{"format":"liken.sh/appearances/spans/v1",
+                "people":{"ja/jane":{"name":"Jane"}},
+                "spans":[{"start":1190.0,"end":1210.0,"people":["ja/jane"]},
+                         {"start":1500.0,"end":1510.0,"people":["ja/jane"]}]}"#,
+        );
+        let _ = display.update(Message::Cast(1, spans));
+        let _ = display.update(message("summon"));
+        let summoned = display.idle.armed.expect("a summon arms an idle window");
+        let _ = display.update(message("up"));
+        let _ = display.update(message("select"));
+        assert!(display.cast.acting());
+
+        let _ = display.update(Message::Hide(summoned));
+        assert!(display.cast.acting());
+        sent(&mut commands);
+
+        let _ = display.update(message("select"));
+        assert_eq!(
+            sent(&mut commands),
+            vec!["{\"command\":[\"seek\",1500.0,\"absolute+exact\"],\"request_id\":1000}"]
+        );
+        assert!(!display.cast.acting());
+        assert!(display.focus.visible());
+        assert!(display.idle.armed.is_some());
     }
 
     #[tokio::test]

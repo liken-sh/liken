@@ -315,8 +315,18 @@ post-credits scene, the display offers a skip control, and `select`
 takes it. A skip to a post-credits scene takes `select` only while the
 on-screen display is up. The display never skips on its own.
 
+`select` on a focused card opens a panel above the row. Its "Next
+scene" row seeks to the start of that person's next scene. A scene
+ends where the person is out of the picture for more than 10 seconds,
+which is also when their card leaves the row, so the seek never lands
+in the scene that plays now. A person who does not appear again reads
+"No later scene", and `select` does nothing there. `up` and `down`
+move between the panel's rows. While a chooser, an adjuster, or a
+card's panel is open, the on-screen display stays up, and it hides on
+its own again only after the panel closes.
+
 `back` has one meaning for each state, tried in order. It closes an
-open chooser, cancels a scan's preview, and hides the on-screen
+open chooser or a card's panel, cancels a scan's preview, and hides the on-screen
 display. With the display hidden and the film stepped back beside the
 up-next column ([`next`](#spec--next)), it returns the film to the
 whole screen and the film plays on. At the bare video it ends the run,

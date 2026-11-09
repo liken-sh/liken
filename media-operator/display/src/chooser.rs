@@ -1,7 +1,8 @@
-//! The chooser panel. A control opens one to pick a track. It draws a vertical
-//! list, bottom-anchored above the control strip, with the focused entry
-//! marked. It is the one element that captures input, so it draws on top of
-//! every region.
+//! The chooser panel. A control opens one to pick a track, and a cast card
+//! opens one to act on its person. It draws a vertical list, bottom-anchored
+//! above the control strip or above the cast row, with the focused entry
+//! marked. It captures input while it is open, so it draws on top of every
+//! region.
 
 use iced::{Point, Rectangle, Size};
 
@@ -31,17 +32,26 @@ pub struct Panel {
     pub rows: Vec<Row>,
 }
 
-/// One row of the list: the label as it draws, the row it draws on, and
-/// whether it is the entry the chooser stands on.
+/// One row of the list: the label as it draws, the row it draws on, whether
+/// it is the entry the chooser stands on, and whether a select can take it.
+/// A row that a select cannot take still draws, fainter, so it states a
+/// fact such as "No later scene" where the action would be.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub label: String,
     pub y: f32,
     pub selected: bool,
+    pub enabled: bool,
 }
 
-/// The panel one list draws as, at the entry it stands on.
+/// The panel one list draws as, at the entry it stands on, above the
+/// control strip.
 pub fn panel(entries: &[String], selected: usize) -> Panel {
+    panel_at(entries, selected, BOTTOM)
+}
+
+/// The panel one list draws as, grown upward from the baseline `bottom`.
+pub fn panel_at(entries: &[String], selected: usize, bottom: f32) -> Panel {
     let visible = entries.len().min(MAX_ROWS);
     let first = if entries.len() > MAX_ROWS {
         selected
@@ -52,7 +62,7 @@ pub fn panel(entries: &[String], selected: usize) -> Panel {
     };
 
     let height = visible as f32 * ROW_H + PAD * 2.0;
-    let top = BOTTOM - height;
+    let top = bottom - height;
     let row0 = top + PAD;
 
     Panel {
@@ -62,13 +72,19 @@ pub fn panel(entries: &[String], selected: usize) -> Panel {
                 label: clip(&entries[at], theme::type_scale::LABEL, MAX_WIDTH),
                 y: row0 + (at - first) as f32 * ROW_H,
                 selected: at == selected,
+                enabled: true,
             })
             .collect(),
     }
 }
 
 pub fn draw(brush: &mut Brush<'_>, entries: &[String], selected: usize) {
-    let panel = panel(entries, selected);
+    paint(brush, panel(entries, selected));
+}
+
+/// Draw one panel: the box, the mark behind the entry the chooser stands
+/// on, and every row's label. A row a select cannot take draws subdued.
+pub fn paint(brush: &mut Brush<'_>, panel: Panel) {
     brush.panel(panel.shape);
     for row in panel.rows {
         if row.selected {
@@ -81,7 +97,7 @@ pub fn draw(brush: &mut Brush<'_>, entries: &[String], selected: usize) {
                 theme::at(theme::color::fill(), theme::alpha::HIGHLIGHT),
             );
         }
-        brush.text(Line::new(
+        let line = Line::new(
             row.label,
             Point::new(X + PAD, row.y),
             Anchor::TopLeft,
@@ -91,7 +107,11 @@ pub fn draw(brush: &mut Brush<'_>, entries: &[String], selected: usize) {
             } else {
                 theme::color::muted()
             },
-        ));
+        );
+        brush.text(match row.enabled {
+            true => line,
+            false => line.alpha(theme::alpha::SUBDUED),
+        });
     }
 }
 
