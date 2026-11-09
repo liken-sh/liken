@@ -236,13 +236,46 @@ fn sorted(sort: Sort) -> Order {
     }
 }
 
-// One stretch of the wall's order before it is measured in rows:
-// what it is called, where it starts, and how many items it holds.
+// One stretch of the wall's order before it is measured in rows: what
+// its first and its last run are called, where it starts, and how many
+// items it holds. A stretch of one run has one name, and a stretch that
+// several runs folded into is named for the first and the last of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Unit {
     label: String,
+    last: String,
     first: usize,
     count: usize,
+}
+
+impl Unit {
+    // The stretch of one run.
+    fn one(label: String, first: usize, count: usize) -> Self {
+        Self {
+            last: label.clone(),
+            label,
+            first,
+            count,
+        }
+    }
+
+    // What the bar of this stretch says.
+    fn named(&self) -> String {
+        spanned(&self.label, &self.last)
+    }
+
+    // The stretch with the next one folded into it. A run the catalog
+    // named nothing adds its items and leaves the names as they are.
+    fn fold(&mut self, next: Unit) {
+        self.count += next.count;
+        if next.label.is_empty() {
+            return;
+        }
+        if self.label.is_empty() {
+            self.label = next.label;
+        }
+        self.last = next.last;
+    }
 }
 
 // The units of a wall in release order: years while the years
@@ -250,7 +283,7 @@ struct Unit {
 // where the decades do not fit either.
 fn dated(items: &[Item], region: Rectangle) -> Vec<Unit> {
     let years = merged(runs(items, |item| facts::year(&item.released).to_string()));
-    if years.len() <= rail::fits(region, longest(&years)) {
+    if years.len() <= rail::fits(region, &longest(&years)) {
         return years;
     }
     fitted(merged(runs(items, |item| decade(&item.released))), region)
@@ -270,7 +303,7 @@ fn fitted(units: Vec<Unit>, region: Rectangle) -> Vec<Unit> {
     let mut count = units.len();
     loop {
         let held = ranged(&units, count);
-        let fits = rail::fits(region, longest(&held));
+        let fits = rail::fits(region, &longest(&held));
         if fits >= count {
             return held;
         }
@@ -280,11 +313,11 @@ fn fitted(units: Vec<Unit>, region: Rectangle) -> Vec<Unit> {
 
 // The longest label of these units, which is the one the rail has
 // to hold.
-fn longest(units: &[Unit]) -> &str {
+fn longest(units: &[Unit]) -> String {
     units
         .iter()
-        .max_by_key(|unit| unit.label.chars().count())
-        .map(|unit| unit.label.as_str())
+        .map(Unit::named)
+        .max_by_key(|label| label.chars().count())
         .unwrap_or_default()
 }
 
@@ -294,18 +327,14 @@ fn leads(items: &[Item], genre: String) -> Vec<Unit> {
     let boundary = restarts(items).unwrap_or(items.len());
     let mut units = Vec::new();
     if boundary > 0 {
-        units.push(Unit {
-            label: format!("primarily {genre}"),
-            first: 0,
-            count: boundary,
-        });
+        units.push(Unit::one(format!("primarily {genre}"), 0, boundary));
     }
     if boundary < items.len() {
-        units.push(Unit {
-            label: format!("other {genre}"),
-            first: boundary,
-            count: items.len() - boundary,
-        });
+        units.push(Unit::one(
+            format!("other {genre}"),
+            boundary,
+            items.len() - boundary,
+        ));
     }
     units
 }
@@ -330,11 +359,7 @@ fn runs<K: Fn(&Item) -> String>(items: &[Item], key: K) -> Vec<Unit> {
         let label = key(item);
         match units.last_mut() {
             Some(unit) if unit.label == label => unit.count += 1,
-            _ => units.push(Unit {
-                label,
-                first: index,
-                count: 1,
-            }),
+            _ => units.push(Unit::one(label, index, 1)),
         }
     }
     units
@@ -342,19 +367,20 @@ fn runs<K: Fn(&Item) -> String>(items: &[Item], key: K) -> Vec<Unit> {
 
 // The units with every unit of less than one row folded into its
 // neighbour, so no bar jumps to a row another bar already holds. A unit
-// the catalog named nothing folds the same way.
+// the catalog named nothing folds the same way. A unit that others fold
+// into is named for the first and the last of them, so the bar names
+// every run it holds: three thin decades read "1930s–1950s".
 fn merged(units: Vec<Unit>) -> Vec<Unit> {
     let mut kept: Vec<Unit> = Vec::new();
     for unit in units {
         match kept.last_mut() {
-            Some(last) if thin(&unit) => last.count += unit.count,
+            Some(last) if thin(&unit) => last.fold(unit),
             _ => kept.push(unit),
         }
     }
     while kept.len() > 1 && thin(&kept[0]) {
         let next = kept.remove(1);
-        kept[0].count += next.count;
-        kept[0].label = next.label;
+        kept[0].fold(next);
     }
     kept
 }
@@ -374,7 +400,8 @@ fn ranged(units: &[Unit], slots: usize) -> Vec<Unit> {
             let first = &units[start];
             let last = &units[end - 1];
             Unit {
-                label: spanned(&first.label, &last.label),
+                label: first.label.clone(),
+                last: last.last.clone(),
                 first: first.first,
                 count: last.first + last.count - first.first,
             }
@@ -409,7 +436,7 @@ fn barred(units: &[Unit], rows: usize) -> Vec<Jump> {
         }
         bars.push(Jump {
             bar: Bar {
-                label: unit.label.clone(),
+                label: unit.named(),
                 first: start,
                 last: rows - 1,
                 lane: 0,
