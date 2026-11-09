@@ -167,14 +167,14 @@ type creditsClues struct {
 
 func (f estimateFile) exactCredits() creditsClues {
 	clues := creditsClues{}
+	// The provider's candidates are taken first, so a chapter or a preview
+	// at the same start leaves the clue the provider's.
 	take := func(start int64, provided bool) {
 		if !f.secondHalf(start) {
 			return
 		}
 		if !clues.held || start < clues.start {
 			clues.start, clues.held, clues.provided = start, true, provided
-		} else if start == clues.start && provided {
-			clues.provided = true
 		}
 	}
 	for _, span := range f.candidates(markKindCredits) {
