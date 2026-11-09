@@ -45,9 +45,12 @@ at 7,039 s.
   one whose output is missing, the rule that `uncountedProbe` follows
   for the probe, so the appearances gap opens. The worker finds the
   current detections record, runs only the match, and writes the entry
-  with the run. That costs one match run for each video with an answer,
-  each a pod of the worker `Job`, and no decode. On the library above
-  that is more than 1,500 films, and every episode with an answer.
+  with the run. The reopened videos go through the worker's fan-out of
+  [plan 79](79-one-video-per-index.md): the library `Job` lists them on
+  the bus, and one Indexed `Job` works the list with one video for each
+  index, at most `spec.appearances.parallelism` pods at once, 1 where
+  the field is unset. So 1,500 reopened films are one `Job` of 1,500
+  completions, and each pod runs one match and no decode.
 
 An episode takes no estimate of this tier. Its credits run under a
 minute, the tier was not measured on episodes, and the siblings of the
