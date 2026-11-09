@@ -754,7 +754,7 @@ func TestPruneScopeLeavesTheOtherLibrarysFolder(t *testing.T) {
 func TestPruneLibraryStopsAtTheStepItsCatalogRefuses(t *testing.T) {
 	// The sweep reads once per table plus the count of marks, and the
 	// franchise tables are the last of them.
-	for step := 1; step <= 16; step++ {
+	for step := 1; step <= 19; step++ {
 		t.Run(fmt.Sprintf("the read %d of the sweep", step), func(t *testing.T) {
 			catalog, agent := newSQLiteCatalog(t)
 			ctx := t.Context()
@@ -768,6 +768,25 @@ func TestPruneLibraryStopsAtTheStepItsCatalogRefuses(t *testing.T) {
 			}
 			if removed < 0 || removed > 6 {
 				t.Errorf("removed = %d, want the rows it took before the read it could not make", removed)
+			}
+		})
+	}
+}
+
+// A refused write stops the prune the same way a refused read does: the
+// streams and the marks of a file, the file, each item table, and the
+// cleanup of the walk's marks all report the refusal.
+func TestPruneLibraryStopsAtTheWriteItsCatalogRefuses(t *testing.T) {
+	for step := 1; step <= 8; step++ {
+		t.Run(fmt.Sprintf("the write %d of the sweep", step), func(t *testing.T) {
+			catalog, agent := newSQLiteCatalog(t)
+			epoch := seedOnePrunableTitle(t, catalog, agent)
+			agent.transactionsLeft = step
+
+			removed, err := pruneLibrary(t.Context(), catalog, "house/movies", epoch)
+
+			if err == nil {
+				t.Fatalf("the prune removed %d rows and reported no error, want the refused write", removed)
 			}
 		})
 	}
