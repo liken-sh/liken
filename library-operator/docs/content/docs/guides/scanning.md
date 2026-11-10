@@ -70,7 +70,10 @@ number comes from a marker in its file name, `s02e05` or `2x05`, and a
 range such as `s04e10-e11` names two episodes in one file. Both play
 the file from the start, because nothing on the volume marks where the
 second begins. The season comes from the folder first, then from the
-marker.
+marker. The `.nfo` beside a file of two episodes can hold one
+`<episodedetails>` block or one for each episode, in any order. Each
+block gives its title and plot to the episode that its `<episode>`
+number names, and an episode with no block shows as `S04E11`.
 
 ### Extras and file kinds
 
