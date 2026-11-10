@@ -76,9 +76,12 @@ here.
 - **Networks and studios.** Whether a series' network is the same kind
   of record as a film's production company, or a different one with a
   page of its own. The foot of a series page names both today.
-- **The home page.** Whether a studio joins the home page's pool of
-  candidate strips, beside the genres, the people, and the sets, and
-  what weight it carries there.
+- **The home page.** A studio strip on the home page was asked for on
+  2026-11-09: the day's draw picks a studio at random, as it picks a
+  genre, a person, and a set. That strip does not need the rest of
+  this plan, because a studio matches by its exact name today, and on
+  a home library that day 30 names had 8 or more titles. What weight a
+  studio carries in the draw is open.
 - **History.** Where the founding date, the renames, and a short
   description come from, and whether a person can correct them.
 
@@ -86,5 +89,5 @@ here.
 
 The storage, the provider of the ids, the join rule for renames and
 spellings, the source and the file of a logo, whether networks are
-studios, and the place of a studio in the home page's pool. This stub
+studios, and the weight of a studio in the home page's draw. This stub
 chooses none of them.
