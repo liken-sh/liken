@@ -200,3 +200,33 @@ fn the_print_of_the_store_carries_one_line_for_each_episode() {
         "{lines:?}"
     );
 }
+
+// A Jellyfin row as the jellyfin role writes it: no library, ended, at the
+// end of a double whose probe duration has an odd number of seconds. The
+// read resolves the work by the series' alias and the file by the alias's
+// library, so the empty library of the row does not matter.
+#[test]
+fn an_ended_jellyfin_row_at_the_end_of_an_odd_double_finishes_both_episodes() {
+    let dir = TempDir::new().unwrap();
+    let catalog = fixture(&dir);
+    let store = progress_fixture(&dir);
+    a_show(&catalog);
+    insert_episode(&catalog, SHOWS, "episode:tvdb:72974:s01e01", SHOW, 1, 1);
+    insert_episode(&catalog, SHOWS, "episode:tvdb:72974:s01e02", SHOW, 1, 2);
+    insert_parted_file(
+        &catalog,
+        "Tenacious D/Season 01/S01E01-E02 a b.mkv",
+        1_321_283,
+        &[
+            ("episode:tvdb:72974:s01e01", 1, 2),
+            ("episode:tvdb:72974:s01e02", 2, 2),
+        ],
+    );
+    show_play(&store, "jellyfin-u-i", (1_321, 1_321, 10), (1, 1));
+    from_outside(&store, "jellyfin-u-i");
+    end_play(&store, "jellyfin-u-i", 11);
+    assert_eq!(
+        episodes(&catalog, store),
+        [(1, 660, 660, true), (2, 661, 661, true)]
+    );
+}
