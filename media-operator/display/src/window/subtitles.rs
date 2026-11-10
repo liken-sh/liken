@@ -10,19 +10,17 @@ impl Display {
     /// the frame, or nothing while the display draws nothing there or no
     /// subtitle track plays. It follows what `paint_below` and `paint_above`
     /// draw: the time over the scrubber always, the up-next chip or the skip
-    /// control on the row above it, the cast row and its actions, a scan's
-    /// thumbnail, and an open chooser or adjuster.
+    /// control on the row above it, the cast row, a scan's thumbnail, and an
+    /// open chooser or adjuster.
     fn band_top(&self) -> Option<f32> {
         if !self.focus.fade().shown() || !self.film.tracks_of("sub").any(|track| track.selected) {
             return None;
         }
-        let cast = self.cast_showing();
         [
             Some(crate::scrubber::TOP),
             (self.upnext.chip_showing() || self.skip.available())
                 .then_some(crate::upnext::CHIP_TOP),
-            cast.then_some(crate::cast::TOP),
-            self.cast.actions_top().filter(|_| cast),
+            self.cast_showing().then_some(crate::cast::TOP),
             self.previewing().map(|_| crate::art::TILE_TOP),
             self.strip.panel_top(&self.film),
         ]

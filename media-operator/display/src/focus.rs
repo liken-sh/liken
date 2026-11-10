@@ -213,11 +213,11 @@ impl Focus {
         self.clock.show(self.idle_window(parts));
     }
 
-    /// Whether an open chooser, adjuster, or cast panel captures the
-    /// presses. The display stands while one is open, because the idle hide
-    /// would close it under a person who is still reading it.
+    /// Whether an open chooser or adjuster captures the presses. The display
+    /// stands while one is open, because the idle hide would close it under
+    /// a person who is still reading it.
     fn holding(parts: &Parts<'_>) -> bool {
-        parts.strip.capturing().is_some() || parts.cast.acting()
+        parts.strip.capturing().is_some()
     }
 
     /// The idle window the display asks for now. A pause arms nothing, so
@@ -235,7 +235,6 @@ impl Focus {
         self.summoned = false;
         parts.upnext.collapse();
         parts.strip.close();
-        parts.cast.close();
         self.clock.ask(Hide::Cancel);
         self.clock.hide();
     }
@@ -258,15 +257,11 @@ impl Focus {
     /// A stop can leave while the focus is on it: the skip control
     /// leaves when the playhead leaves its span or a select skips it. The
     /// frame loop and the select call this then, and a focus on a stop that
-    /// is gone moves to the first stop below the offer. A cast panel belongs
-    /// to the row, so it closes when the row goes.
-    pub fn refocus(&mut self, parts: &mut Parts<'_>) {
+    /// is gone moves to the first stop below the offer.
+    pub fn refocus(&mut self, parts: &Parts<'_>) {
         let present = Self::present(parts);
         if self.focused.is_some_and(|stop| !present.contains(&stop)) {
             self.focused = Self::first_present(parts, &[Stop::Cast, Stop::Next, Stop::Skip]);
-        }
-        if self.focused != Some(Stop::Cast) {
-            parts.cast.close();
         }
     }
 
@@ -328,8 +323,8 @@ impl Focus {
             // The offer and the skip control are each one thing to take, so
             // they answer select and nothing else.
             Some(Stop::Next | Stop::Skip) | None => Vec::new(),
-            // The cast row moves its own focus. select opens the focused
-            // card's panel, which `select` handles.
+            // The cast row moves its own focus, and select falls through to
+            // play-pause, so the press that resumes the film resumes it.
             Some(Stop::Cast) => {
                 match action {
                     Action::Left => parts.cast.step(-1, parts.film),
@@ -358,23 +353,16 @@ impl Focus {
     }
 
     /// select carries the main action and play/pause on one button. It acts on
-    /// an open chooser or cast panel, the focused strip control or cast card,
-    /// a fine scan in flight, or the skip control or the up-next card the
-    /// bare video shows focused, and otherwise toggles play/pause. So the
-    /// button confirms a choice when the display has one to make, and plays
-    /// or pauses the film when it does not.
+    /// an open chooser, the focused strip control, a fine scan in flight, or
+    /// the skip control or the up-next card the bare video shows focused, and
+    /// otherwise toggles play/pause. So the button confirms a choice when the
+    /// display has one to make, and plays or pauses the film when it does
+    /// not.
     fn select(&mut self, parts: &mut Parts<'_>) -> Vec<Command> {
         if parts.strip.capturing().is_some() {
             return parts.strip.handle(Action::Select, parts.film);
         }
-        if parts.cast.acting() {
-            return parts.cast.handle(Action::Select, parts.film);
-        }
         if self.summoned {
-            if self.focused == Some(Stop::Cast) {
-                parts.cast.act(parts.film);
-                return Vec::new();
-            }
             if self.focused == Some(Stop::Next) {
                 // The first select on the chip grows it into the card, and a
                 // select on the card sends the ask. So the offer shows what it
@@ -426,15 +414,14 @@ impl Focus {
         vec![next(), hold()]
     }
 
-    /// back has one meaning per state, tried in order. An open chooser or
-    /// cast panel closes. Else a fine scan cancels its preview. Else the
-    /// visible display dismisses. Else a film stepped back at the credits
-    /// returns to the whole screen. Else, at the bare video, back asks the
-    /// command sidecar to end the run, and the sidecar quits mpv with code 0,
-    /// so the pod ends as the Completed a finished film gives, not an Error.
+    /// back has one meaning per state, tried in order. An open chooser closes.
+    /// Else a fine scan cancels its preview. Else the visible display
+    /// dismisses. Else a film stepped back at the credits returns to the
+    /// whole screen. Else, at the bare video, back asks the command sidecar
+    /// to end the run, and the sidecar quits mpv with code 0, so the pod ends
+    /// as the Completed a finished film gives, not an Error.
     ///
-    /// A press that opens a chooser, an adjuster, or a cast panel cancels
-    /// the idle window,
+    /// A press that opens a chooser or an adjuster cancels the idle window,
     /// and the press that closes it starts the whole window again, so the
     /// display hides a full window after the last thing a person read.
     pub fn nav(&mut self, action: Action, parts: &mut Parts<'_>) -> Vec<Command> {
@@ -462,8 +449,6 @@ impl Focus {
         if action == Action::Back {
             if parts.strip.capturing().is_some() {
                 parts.strip.close();
-            } else if parts.cast.acting() {
-                parts.cast.close();
             } else if self.focused == Some(Stop::Fine) && parts.scrubber.scanning() {
                 // A scan is in flight, so back cancels the preview and leaves
                 // the video where it plays.
@@ -501,9 +486,6 @@ impl Focus {
         // above, closes the widget.
         if parts.strip.capturing().is_some() {
             return parts.strip.handle(action, parts.film);
-        }
-        if parts.cast.acting() {
-            return parts.cast.handle(action, parts.film);
         }
 
         match action {
@@ -627,7 +609,7 @@ mod tests {
 
         fn refocus(&mut self) {
             let mut focus = self.focus;
-            focus.refocus(&mut self.parts());
+            focus.refocus(&self.parts());
             self.focus = focus;
         }
 
@@ -1089,16 +1071,17 @@ mod tests {
         assert_eq!(display.focus.take_hide(), Hide::Cancel);
     }
 
-    /// A spans file in which one person is in the scene at the playhead,
-    /// 1200, again 8 seconds later in the same scene, and next at 1500.
+    /// A spans file in which one person is in the scene at the playhead, 1200.
     const SPANS: &str = r#"{"format":"liken.sh/appearances/spans/v1",
         "people":{"p/pilot":{"name":"Jane Roe"}},
-        "spans":[{"start":1190.0,"end":1205.0,"people":["p/pilot"]},
-                 {"start":1213.0,"end":1220.0,"people":["p/pilot"]},
-                 {"start":1500.0,"end":1530.0,"people":["p/pilot"]}]}"#;
+        "spans":[{"start":1190.0,"end":1205.0,"people":["p/pilot"]}]}"#;
 
-    /// The display up, with the focus on the cast row's one card.
-    fn on_the_cast_row() -> Display {
+    /// A card of the cast row is something to read, so a select on the
+    /// focused card plays or pauses the film as it does at the bar. It opens
+    /// nothing that captures the presses or holds the display up, and the
+    /// focus stays on the row.
+    #[test]
+    fn a_select_on_a_cast_card_opens_nothing() {
         let mut display = Display::new("{}");
         let (item, _) = display
             .cast
@@ -1109,70 +1092,11 @@ mod tests {
         display.press(Action::Up);
         assert_eq!(display.focus.focused_stop(), Some(Stop::Cast));
         display.focus.take_hide();
-        display
-    }
 
-    /// A select on a focused card opens its panel, which holds the display
-    /// up as a chooser does. A select on "Next scene" seeks past the rest of
-    /// the scene to 1500, closes the panel, and leaves the focus on the row
-    /// with the whole idle window to read it.
-    #[test]
-    fn a_select_on_a_cast_card_opens_its_actions() {
-        let mut display = on_the_cast_row();
-        assert!(display.press(Action::Select).is_empty());
-        assert!(display.cast.acting());
-        assert_eq!(display.focus.take_hide(), Hide::Cancel);
-
-        assert_eq!(
-            display.press(Action::Select),
-            vec![vec![json!("seek"), json!(1500.0), json!("absolute+exact")]]
-        );
-        assert!(!display.cast.acting());
+        assert_eq!(display.press(Action::Select), pause_toggle());
+        assert_eq!(display.strip.capturing(), None);
         assert_eq!(display.focus.focused_stop(), Some(Stop::Cast));
-        assert!(display.focus.visible());
-        assert_eq!(display.focus.take_hide(), Hide::Arm);
-    }
-
-    /// The open panel captures the arrows, so none of them moves the
-    /// display's focus or the row's, and back closes the panel and leaves
-    /// the display up on the card.
-    #[test]
-    fn the_cast_panel_captures_every_press_and_back_closes_it() {
-        let mut display = on_the_cast_row();
-        display.press(Action::Select);
-        for action in [Action::Up, Action::Down, Action::Left, Action::Right] {
-            assert!(display.press(action).is_empty(), "{action:?}");
-            assert!(display.cast.acting(), "{action:?}");
-            assert_eq!(display.focus.focused_stop(), Some(Stop::Cast), "{action:?}");
-        }
-
-        assert!(display.press(Action::Back).is_empty());
-        assert!(!display.cast.acting());
-        assert!(display.focus.visible());
-        assert_eq!(display.focus.focused_stop(), Some(Stop::Cast));
-    }
-
-    /// A dismiss closes the panel, so the next summon shows the row.
-    #[test]
-    fn a_dismiss_closes_the_cast_panel() {
-        let mut display = on_the_cast_row();
-        display.press(Action::Select);
-        let mut focus = display.focus;
-        focus.dismiss(&mut display.parts());
-        display.focus = focus;
-        assert!(!display.cast.acting());
-    }
-
-    /// When the row empties under the panel, the focus moves to the bar and
-    /// the panel closes with it.
-    #[test]
-    fn the_cast_panel_closes_when_the_row_empties() {
-        let mut display = on_the_cast_row();
-        display.press(Action::Select);
-        display.film.apply("time-pos", &json!(1300.0));
-        display.refocus();
-        assert_eq!(display.focus.focused_stop(), Some(Stop::Fine));
-        assert!(!display.cast.acting());
+        assert_ne!(display.focus.take_hide(), Hide::Cancel);
     }
 
     /// A film that loads paused starts with the display hidden, a later pause

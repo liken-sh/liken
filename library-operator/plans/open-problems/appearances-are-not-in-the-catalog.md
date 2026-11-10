@@ -31,3 +31,16 @@ intervals. The spans file already holds them. Rows of observations keep
 each face's similarity for a later threshold, but the ledger on the
 volume keeps it too. Rows of spans were the recommendation when plan 78
 set this work aside.
+
+## A panel of actions on a cast card
+
+On 2026-11-09 the film's display opened a panel when a person pressed
+`select` on a focused card of the "In this scene" row, and the same
+day it was removed, so `select` on a card plays or pauses the film
+again. The panel had a "Next scene" row, and an "Open <person>" row
+was designed for it but never landed. "Next scene" read only the spans
+file, so it needed nothing from the catalog. It sought to the start of
+that person's next scene by the rule the cast row uses: a gap of up to
+10 seconds between two spans does not end a scene. "Open <person>"
+needs a message from the player to the media browser that opens that
+person's page, and no plan has designed that message.

@@ -1,10 +1,9 @@
-//! The chooser panel. A control opens one to pick a track, and a cast card
-//! opens one to act on its person. It draws a vertical list on a dark plate,
-//! bottom-anchored above the control strip or above the cast row. The
-//! focused row reads bright and has the accent underline under its text,
+//! The chooser panel. A control opens one to pick a track. It draws a
+//! vertical list on a dark plate, bottom-anchored above the control strip.
+//! The focused row reads bright and has the accent underline under its text,
 //! the same mark the control strip's focused stop takes, and the row of the
-//! track that plays now has a dot before it. It captures input while it is
-//! open, so it draws on top of every region.
+//! track that plays now has a dot before it. It is the one element that
+//! captures input, so it draws on top of every region.
 
 use iced::widget::canvas::Path;
 use iced::{Point, Rectangle, Size};
@@ -43,25 +42,22 @@ pub struct Panel {
 }
 
 /// One row of the list: the label as it draws, the row it draws on, whether
-/// it is the entry the chooser stands on, whether a select can take it, and
-/// whether it is the track that plays now. A row that a select cannot take
-/// still draws, fainter, so it states a fact such as "No later scene" where
-/// the action would be.
+/// it is the entry the chooser stands on, and whether it is the track that
+/// plays now.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub label: String,
     pub y: f32,
     pub selected: bool,
-    pub enabled: bool,
     pub playing: bool,
 }
 
 impl Row {
     /// The underline under the focused row's label, as wide as the label
-    /// draws. A row the focus is not on, or one a select cannot take, has
-    /// none. The bar ends inside the row's own height, above the next row.
+    /// draws. A row the focus is not on has none. The bar ends inside the
+    /// row's own height, above the next row.
     pub fn underline(&self) -> Option<Rectangle> {
-        (self.selected && self.enabled).then(|| {
+        self.selected.then(|| {
             theme::underline(
                 X + PAD,
                 self.y + theme::type_scale::LABEL,
@@ -81,12 +77,24 @@ impl Row {
 /// The panel one list draws as, at the entry it stands on, above the
 /// control strip, with the entry that plays now dotted.
 pub fn panel(entries: &[String], selected: usize, playing: Option<usize>) -> Panel {
-    let mut panel = panel_at(entries, selected, BOTTOM);
+    let visible = entries.len().min(MAX_ROWS);
     let first = first(entries.len(), selected);
-    for (at, row) in panel.rows.iter_mut().enumerate() {
-        row.playing = playing == Some(first + at);
+
+    let top = top(entries.len());
+    let height = BOTTOM - top;
+    let row0 = top + PAD;
+
+    Panel {
+        shape: Rectangle::new(Point::new(X, top), Size::new(W, height)),
+        rows: (first..first + visible)
+            .map(|at| Row {
+                label: clip(&entries[at], theme::type_scale::LABEL, MAX_WIDTH),
+                y: row0 + (at - first) as f32 * ROW_H,
+                selected: at == selected,
+                playing: playing == Some(at),
+            })
+            .collect(),
     }
-    panel
 }
 
 /// The first entry of the window of rows a list of `len` entries shows.
@@ -101,48 +109,15 @@ fn first(len: usize, selected: usize) -> usize {
 /// The top edge of the panel a list of `len` entries draws as above the
 /// control strip.
 pub fn top(len: usize) -> f32 {
-    top_at(len, BOTTOM)
+    BOTTOM - (len.min(MAX_ROWS) as f32 * ROW_H + PAD * 2.0)
 }
 
-/// The top edge of the panel a list of `len` entries draws as, grown upward
-/// from the baseline `bottom`.
-pub fn top_at(len: usize, bottom: f32) -> f32 {
-    bottom - (len.min(MAX_ROWS) as f32 * ROW_H + PAD * 2.0)
-}
-
-/// The panel one list draws as, grown upward from the baseline `bottom`.
-pub fn panel_at(entries: &[String], selected: usize, bottom: f32) -> Panel {
-    let visible = entries.len().min(MAX_ROWS);
-    let first = first(entries.len(), selected);
-
-    let top = top_at(entries.len(), bottom);
-    let height = bottom - top;
-    let row0 = top + PAD;
-
-    Panel {
-        shape: Rectangle::new(Point::new(X, top), Size::new(W, height)),
-        rows: (first..first + visible)
-            .map(|at| Row {
-                label: clip(&entries[at], theme::type_scale::LABEL, MAX_WIDTH),
-                y: row0 + (at - first) as f32 * ROW_H,
-                selected: at == selected,
-                enabled: true,
-                playing: false,
-            })
-            .collect(),
-    }
-}
-
-pub fn draw(brush: &mut Brush<'_>, entries: &[String], selected: usize, playing: Option<usize>) {
-    paint(brush, panel(entries, selected, playing));
-}
-
-/// Draw one panel: the plate, the underline under the focused row, the dot
+/// Draw one list: the plate, the underline under the focused row, the dot
 /// before the playing row, and every row's label. The focused row's label
-/// reads bright and the others muted, and a row a select cannot take draws
-/// subdued. The plate has no border, because a border in the accent would
-/// draw a second focus mark around the underline.
-pub fn paint(brush: &mut Brush<'_>, panel: Panel) {
+/// reads bright and the others muted. The plate has no border, because a
+/// border in the accent would draw a second focus mark around the underline.
+pub fn draw(brush: &mut Brush<'_>, entries: &[String], selected: usize, playing: Option<usize>) {
+    let panel = panel(entries, selected, playing);
     brush.plate(panel.shape);
     for row in panel.rows {
         if let Some(bar) = row.underline() {
@@ -156,17 +131,13 @@ pub fn paint(brush: &mut Brush<'_>, panel: Panel) {
         if let Some(centre) = row.dot() {
             brush.shape(&Path::circle(centre, DOT_R), color);
         }
-        let line = Line::new(
+        brush.text(Line::new(
             row.label,
             Point::new(X + PAD, row.y),
             Anchor::TopLeft,
             theme::type_scale::LABEL,
             color,
-        );
-        brush.text(match row.enabled {
-            true => line,
-            false => line.alpha(theme::alpha::SUBDUED),
-        });
+        ));
     }
 }
 
@@ -260,15 +231,6 @@ mod tests {
         assert!(bar.y + bar.height <= panel.rows[2].y);
         assert_eq!(panel.rows[0].underline(), None);
         assert_eq!(panel.rows[2].underline(), None);
-    }
-
-    /// A row a select cannot take keeps no underline, even with the focus
-    /// on it.
-    #[test]
-    fn a_row_a_select_cannot_take_is_not_underlined() {
-        let mut panel = panel(&entries(1), 0, None);
-        panel.rows[0].enabled = false;
-        assert_eq!(panel.rows[0].underline(), None);
     }
 
     /// The row of the entry that plays now has a dot in the panel's left

@@ -28,11 +28,7 @@
 //! and right move along it. The focus belongs to a person and not to a
 //! place, so a cut that changes the row leaves the focus on the same person.
 //! A row with more people than the screen holds runs off the right edge, and
-//! the row slides to keep the focused card on screen. A select on the
-//! focused card opens the panel of actions on that person, which `actions`
-//! explains.
-
-mod actions;
+//! the row slides to keep the focused card on screen.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -338,8 +334,6 @@ pub struct Cast {
     /// How many whole cards the last frame had room for, which a press reads
     /// to know when the row has to slide.
     room: Cell<usize>,
-    /// The panel of actions on one person, while it is open.
-    actions: Option<actions::Actions>,
 }
 
 impl Cast {
@@ -355,7 +349,6 @@ impl Cast {
         self.spans = None;
         self.contributors = contributors.map(str::to_string);
         *self.focus.get_mut() = Focus::default();
-        self.actions = None;
         Some((self.item, appearances?.to_string()))
     }
 
@@ -620,7 +613,7 @@ mod tests {
         cast
     }
 
-    pub(super) fn paused_at(second: f64) -> Film {
+    fn paused_at(second: f64) -> Film {
         Film {
             position: Some(second),
             paused: true,
@@ -709,7 +702,7 @@ mod tests {
 
     /// A row of one-letter people from a list of spans, each as its start,
     /// its end, and its people left to right.
-    pub(super) fn scene(spans: &[(f64, f64, &[&str])]) -> Cast {
+    fn scene(spans: &[(f64, f64, &[&str])]) -> Cast {
         let people = spans
             .iter()
             .flat_map(|(_, _, people)| people.iter())

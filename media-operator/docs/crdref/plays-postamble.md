@@ -118,34 +118,29 @@ direction: seconds for `seek`, and chapters for `chapter`.
 Two parts of the on-screen display answer these actions. When an item
 names an `appearances` file and the on-screen display is up, playing
 or paused, the display draws a row of cards above the skip control and
-the chip, one for each credited person in the scene, and `up`, `left`,
-and `right` move the focus along it. When an item's `marks` place the
-playhead inside an intro or a recap, or inside the credits before a
-post-credits scene, the display offers a skip control, and `select`
-takes it. A skip to a post-credits scene takes `select` only while the
-on-screen display is up. The display never skips on its own.
+the chip, one for each credited person in the scene. `up`, `left`,
+and `right` move the focus along it, and `select` on a card plays or
+pauses the film. When an item's `marks` place the playhead inside an
+intro or a recap, or inside the credits before a post-credits scene,
+the display offers a skip control, and `select` takes it. A skip to a
+post-credits scene takes `select` only while the on-screen display is
+up. The display never skips on its own.
 
-`select` on a focused card opens a panel above the row. Its "Next
-scene" row seeks to the start of that person's next scene. A scene
-ends where the person is out of the picture for more than 10 seconds,
-which is also when their card leaves the row, so the seek never lands
-in the scene that plays now. A person who does not appear again reads
-"No later scene", and `select` does nothing there. `up` and `down`
-move between the panel's rows. In a track chooser and in a card's
-panel, the row the focus is on reads bright and has an underline in
-the accent, the same mark the focused stop of the strip under the bar
-has. A track chooser also puts a dot before the track that plays now,
-so the dot stays where it is when the focus moves. While a chooser, an adjuster, or a
-card's panel is open, the on-screen display stays up, and it hides on
-its own again only after the panel closes.
+In a track chooser, the row the focus is on reads bright and has an
+underline in the accent, the same mark the focused stop of the strip
+under the bar has. A track chooser also puts a dot before the track
+that plays now, so the dot stays where it is when the focus moves.
+While a chooser or an adjuster is open, the on-screen display stays
+up, and it hides on its own again only after the chooser or adjuster
+closes.
 
 The subtitles stay readable while the on-screen display is up. mpv
 draws them under the display, so the display moves them up until
 their lowest line ends a small gap above the highest thing it draws at
 the foot of the frame: the time over the scrubber, the up-next chip
-or the skip control, the row of cards and a card's panel, a scan's
-thumbnail, or an open chooser or adjuster. They move with the
-display's fade in and return to their place with its fade out. The
+or the skip control, the row of cards, a scan's thumbnail, or an open
+chooser or adjuster. They move with the display's fade in and return
+to their place with its fade out. The
 display sets mpv's `sub-pos` for this, which moves text tracks, ASS
 tracks, and image tracks such as PGS. An ASS sign that the track
 places at a fixed point does not move, and neither does the part of an
@@ -156,7 +151,7 @@ place inside the picture that is already higher than a text cue's. The display
 moves no subtitles while no subtitle track plays.
 
 `back` has one meaning for each state, tried in order. It closes an
-open chooser or a card's panel, cancels a scan's preview, and hides the on-screen
+open chooser, cancels a scan's preview, and hides the on-screen
 display. With the display hidden and the film stepped back beside the
 up-next column ([`next`](#spec--next)), it returns the film to the
 whole screen and the film plays on. At the bare video it ends the run,

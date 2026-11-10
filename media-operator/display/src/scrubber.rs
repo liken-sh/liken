@@ -174,7 +174,7 @@ impl Scrubber {
                 .chapter
                 .filter(|_| axis == Some(Axis::Chapter) && !film.chapters.is_empty()),
             time: Line::new(
-                timecode(at),
+                fmt(at),
                 Point::new(head.clamp(LEFT, canvas.right()), TOP_Y),
                 Anchor::BottomCentre,
                 theme::type_scale::LABEL,
@@ -404,9 +404,7 @@ fn chapter_line(film: &Film) -> Option<String> {
     )
 }
 
-/// A position in the film as the scrubber names it: "30:12", or "1:06:34"
-/// past the first hour, rounded to the nearest second.
-pub fn timecode(at: f64) -> String {
+fn fmt(at: f64) -> String {
     let at = (at + 0.5).floor() as i64;
     let hours = at / 3600;
     let minutes = (at % 3600) / 60;
@@ -427,7 +425,7 @@ fn time_line(at: f64, duration: f64) -> String {
         || "less than a minute left".to_string(),
         |length| format!("{length} left"),
     );
-    [timecode(at), phrase].join(crate::header::BETWEEN)
+    [fmt(at), phrase].join(crate::header::BETWEEN)
 }
 
 #[cfg(test)]
@@ -658,14 +656,14 @@ mod tests {
 
     #[test]
     fn a_time_reads_in_hours_only_when_it_runs_to_one() {
-        assert_eq!(timecode(0.0), "0:00");
-        assert_eq!(timecode(0.4), "0:00");
-        assert_eq!(timecode(0.5), "0:01");
-        assert_eq!(timecode(59.6), "1:00");
-        assert_eq!(timecode(1200.0), "20:00");
-        assert_eq!(timecode(3599.0), "59:59");
-        assert_eq!(timecode(3600.0), "1:00:00");
-        assert_eq!(timecode(7265.0), "2:01:05");
+        assert_eq!(fmt(0.0), "0:00");
+        assert_eq!(fmt(0.4), "0:00");
+        assert_eq!(fmt(0.5), "0:01");
+        assert_eq!(fmt(59.6), "1:00");
+        assert_eq!(fmt(1200.0), "20:00");
+        assert_eq!(fmt(3599.0), "59:59");
+        assert_eq!(fmt(3600.0), "1:00:00");
+        assert_eq!(fmt(7265.0), "2:01:05");
     }
 
     /// The time line reads the position and the time left to the nearest
