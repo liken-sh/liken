@@ -4,9 +4,11 @@ Proposed and built on 2026-11-10. Touches `mpv`, `toolchains`, `ci`,
 and, through the recipes, `weston`, `trust`, `indi`, and
 `observatory-operator`. The image built and passed its smoke check and
 the player's on a workstation with no GPU, no compositor, and no sound
-server. A seek in a TrueHD film passed through to a receiver, and
-playback on a screen with `dmabuf-wayland`, VA-API, and PipeWire, have
-not run yet on the `liken-1` testbed.
+server. On the same day, on a home cluster, the development build
+`2026.11.09-003-dev-002-1353639c` played a TrueHD film with Atmos
+through a receiver on a television, with `dmabuf-wayland`, VA-API, and
+PipeWire, and the sound stayed through the seeks that had stopped it
+before. The `liken-1` testbed has not run the build yet.
 
 ## The problem
 
@@ -153,10 +155,8 @@ change that, and no test has shown whether a receiver reacts to it.
 
 ## What is not proved
 
-- A seek in a TrueHD film passed through to a receiver. A start in the
-  middle of a generated TrueHD clip played on both the old and the new
-  image, so it did not tell them apart.
-- Playback on a screen: `dmabuf-wayland`, VA-API decoding, and
-  PipeWire output. The workstation lists each one in mpv's help, and
-  `liken-1` has not played with the new image.
-- The first CI run of the change.
+- Playback with the new image on the `liken-1` testbed. A home
+  cluster played a TrueHD film on a television with it, as the header
+  says.
+- A film with a codec or a subtitle format that the narrow build
+  reads through a library the test films did not use.

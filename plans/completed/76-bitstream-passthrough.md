@@ -207,7 +207,9 @@ and a 7-channel receiver set up as 5.1.2:
   did not bring it back. A change of the audio track and back did.
   The E-AC-3 and DTS-HD films kept their sound through seeks. The
   cause is in mpv 0.41, and
-  [plan 92](92-mpv-from-its-release.md) holds the fix.
+  [plan 92](92-mpv-from-its-release.md) holds the fix. With the
+  development build `2026.11.09-003-dev-002-1353639c` of
+  media-operator, the same film kept its sound through seeks.
 
 Not run yet: the volume keys during a bitstream, a pause of more than
 a few seconds, and a film that starts while the receiver wakes.
