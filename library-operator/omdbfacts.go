@@ -153,11 +153,25 @@ func (a omdbAnswerer) title(ctx context.Context, imdb string) (*omdbTitle, error
 	return held, nil
 }
 
+// OMDb states that a title has no US rating as "Not Rated" or "Unrated". The
+// mpaa element takes NR for both, the value TMDb answers for the same title,
+// so a library holds one spelling for no rating whichever provider answered.
+// The fact still counts as answered, because NR is the provider's answer and
+// asking again would get the same one.
+func omdbCertification(rated string) string {
+	switch value := omdbValue(rated); {
+	case strings.EqualFold(value, "Not Rated"), strings.EqualFold(value, "Unrated"):
+		return "NR"
+	default:
+		return value
+	}
+}
+
 // Which fields of the one answer each fact reads. OMDb names no studio and no
 // tagline, so the overview it answers holds neither. The certification is the
-// Rated value as it stands, which is what Jellyfin writes into the mpaa
-// element, per its MediaBrowser.Providers/Plugins/Omdb/OmdbProvider.cs, read
-// on 2026-09-03.
+// Rated value, which is what Jellyfin writes into the mpaa element, per its
+// MediaBrowser.Providers/Plugins/Omdb/OmdbProvider.cs, read on 2026-09-03,
+// with its two spellings of no rating written as one.
 func omdbAnswerOf(fact string, title omdbTitle) factAnswer {
 	switch fact {
 	case factOverview:
@@ -168,7 +182,7 @@ func omdbAnswerOf(fact string, title omdbTitle) factAnswer {
 			RuntimeMinutes: omdbRuntimeMinutes(title.Runtime),
 		}
 	case factCertification:
-		return factAnswer{Certification: omdbValue(title.Rated)}
+		return factAnswer{Certification: omdbCertification(title.Rated)}
 	case factRatingIMDb:
 		return factAnswer{Rating: omdbIMDbRating(title)}
 	case factRatingRottenTomatoes:

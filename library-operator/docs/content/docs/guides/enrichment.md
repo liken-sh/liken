@@ -46,6 +46,9 @@ The providers, and the facts each one serves:
 * `omdb`, OMDb: overview, certification, and the IMDb, Rotten
   Tomatoes, and Metacritic ratings. It answers on an IMDb id, which
   TMDb supplies. The free tier allows a thousand calls a day.
+  OMDb states a title with no US rating as `Not Rated` or `Unrated`,
+  and the certification fact writes `NR` for both, the value TMDb
+  answers.
 * `fanart`, Fanart.tv: art only, and the one source of clear art,
   banners, landscapes, disc art, and season banners.
 * `tvmaze`, TVmaze: series only, and it needs no account. Declare it

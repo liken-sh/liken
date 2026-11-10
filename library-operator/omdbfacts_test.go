@@ -129,6 +129,35 @@ func TestTheOMDbScoresReadFromTheRatingsList(t *testing.T) {
 	}
 }
 
+// OMDb states that a title has no rating in two spellings, and the mpaa
+// element takes NR, the one TMDb answers, for both. Every other value is a US
+// rating in the form the MPA or the TV Parental Guidelines print it.
+func TestAnOMDbTitleWithNoRatingIsWrittenAsNR(t *testing.T) {
+	cases := []struct{ rated, want string }{
+		{"Not Rated", "NR"},
+		{"Unrated", "NR"},
+		{"NR", "NR"},
+		{"PG-13", "PG-13"},
+		{"TV-14", "TV-14"},
+	}
+	for _, test := range cases {
+		t.Run(test.rated, func(t *testing.T) {
+			client, _ := newFakeOMDb(t, func(url.Values) (int, string) {
+				return http.StatusOK, fmt.Sprintf(`{"Response":"True","Rated":%q}`, test.rated)
+			})
+			answer, held, err := newOMDbAnswerer(client).answer(t.Context(), factCertification,
+				titleRef{kind: libraryKindMovies, ids: harbourIDs()})
+
+			if err != nil || !held {
+				t.Fatalf("answered %v with %v, want the certification", held, err)
+			}
+			if answer.Certification != test.want {
+				t.Errorf("certification = %q, want %q", answer.Certification, test.want)
+			}
+		})
+	}
+}
+
 // A value OMDb holds none of is N/A, which is no answer at all, so the fact
 // records a miss and writes no element.
 func TestAnOMDbValueOfNotAvailableIsNoAnswer(t *testing.T) {
