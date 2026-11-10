@@ -367,7 +367,8 @@ impl Movie {
         }
     }
 
-    /// The view: the backdrop, the scrim over it, the page over both, and
+    /// The view: the backdrop, the scrim and the ground under the rows
+    /// over it, the page over both, and
     /// the departing art of the loading state over all three while that
     /// state runs. The dim of the room and the curtain's front are the
     /// frame's own layers over this one. `at` is the second the frame
@@ -386,7 +387,7 @@ impl Movie {
             library: &self.library,
             art: &self.backdrop,
             store,
-            ground: layers::Ground::None,
+            ground: move |bounds| self.ground(bounds, at),
             front: page::Page {
                 movie: self,
                 store,

@@ -14,7 +14,7 @@ const WIDTH: f32 = 1920.0;
 const HEIGHT: f32 = 1080.0;
 
 // The frame every measure here is taken against.
-const FRAME: Rectangle = Rectangle {
+pub(super) const FRAME: Rectangle = Rectangle {
     x: 0.0,
     y: 0.0,
     width: WIDTH,
@@ -23,7 +23,7 @@ const FRAME: Rectangle = Rectangle {
 
 // A 720p frame, which a crowded page is taller than, so the scroll
 // has something to do.
-const SHORT: f32 = 720.0;
+pub(super) const SHORT: f32 = 720.0;
 
 // The two stripes of an invented title, so a crowded page carries
 // every rung a press can reach.
@@ -46,7 +46,7 @@ fn stripes() -> Stripes {
 // A page with everything on it: a title that wraps onto a second
 // line, a tagline, a plot of four lines, a set strip, and three
 // stripes of credited people.
-fn crowded(focus: Focus) -> Movie {
+pub(super) fn crowded(focus: Focus) -> Movie {
     Movie {
         franchises: crate::screens::franchise::strips::Strips::default(),
         like: None,

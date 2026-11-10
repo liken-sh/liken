@@ -378,7 +378,7 @@ impl Series {
             library: &self.library,
             art: &self.backdrop,
             store,
-            ground: layers::Ground::Below(layout::head()),
+            ground: |_| layers::Ground::Below(layout::head()),
             front: Page {
                 series: self,
                 store,

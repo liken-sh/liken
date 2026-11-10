@@ -8,6 +8,7 @@ mod broker;
 mod cache;
 mod faces;
 mod flags;
+mod ground;
 mod picker;
 mod progress;
 mod screens;

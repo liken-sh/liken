@@ -24,10 +24,13 @@ const CLEARS_AT: f32 = 0.68;
 const HOLDS_TO: f32 = 0.62;
 
 /// The ground under the part of a page that holds art of its own. A
-/// movie's page has none, because nothing on it sits on the backdrop but
-/// text and one strip. A series' page lays a near-black ground under its
-/// episode wall, so the stills never fight the backdrop and the backdrop
-/// still shows whole above them, heads included.
+/// series' page lays it under its episode wall, and a movie's page under
+/// its rows of posters and headshots. A row runs the whole width of the
+/// frame and the scrim clears by the right third of it, so without the
+/// ground a caption at the right end of a row draws on the bare backdrop.
+/// With it, the art never fights the backdrop and every caption reads on
+/// near-black, and the backdrop still shows whole above the rows, heads
+/// included.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Ground {
     /// No ground. The backdrop shows through the scrim alone.
@@ -71,15 +74,17 @@ impl Ground {
 /// state over all three. The dim of the room and the curtain's own front
 /// are the frame's layers over this page, because the dim covers every
 /// screen and not a page alone.
-pub struct Page<'a, A, F> {
+pub struct Page<'a, A, F, G> {
     /// The library the art paths resolve against.
     pub library: &'a str,
     /// The path of the backdrop file, empty where the item has none.
     pub art: &'a str,
     /// The store the backdrop comes from.
     pub store: &'a RefCell<A>,
-    /// The ground under the page's own art, where it has any.
-    pub ground: Ground,
+    /// The ground under the page's own art, where it has any, at the
+    /// bounds the frame draws at. A page whose rows scroll moves its
+    /// ground with them, and where its rows stand depends on the bounds.
+    pub ground: G,
     /// The page itself: its fills, its art, and its text, in that draw
     /// order inside its own layer.
     pub front: F,
@@ -88,10 +93,11 @@ pub struct Page<'a, A, F> {
     pub over: Option<curtain::Layer<'a, A>>,
 }
 
-impl<'a, A, F> Page<'a, A, F>
+impl<'a, A, F, G> Page<'a, A, F, G>
 where
     A: Art + 'a,
     F: canvas::Program<Infallible, Theme, Renderer> + 'a,
+    G: Fn(Rectangle) -> Ground + 'a,
 {
     /// The page as one element, its layers in depth order.
     pub fn view(self) -> Element<'a, Infallible, Theme, Renderer> {
@@ -239,11 +245,11 @@ pub fn scrim(frame: &mut canvas::Frame<Renderer>, bounds: Rectangle) {
 // and its fade are ramps like the scrim, because the renderer draws the
 // images of a layer in the order the canvas drew them, and a mesh under
 // them all would put the ground under the scrim.
-struct Scrim {
-    ground: Ground,
+struct Scrim<G> {
+    ground: G,
 }
 
-impl canvas::Program<Infallible, Theme, Renderer> for Scrim {
+impl<G: Fn(Rectangle) -> Ground> canvas::Program<Infallible, Theme, Renderer> for Scrim<G> {
     type State = ();
 
     fn draw(
@@ -256,7 +262,8 @@ impl canvas::Program<Infallible, Theme, Renderer> for Scrim {
     ) -> Vec<canvas::Geometry<Renderer>> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         scrim(&mut frame, bounds);
-        if let (Some(fade), Some(ground)) = (self.ground.fade(bounds), self.ground.of(bounds)) {
+        let laid = (self.ground)(bounds);
+        if let (Some(fade), Some(ground)) = (laid.fade(bounds), laid.of(bounds)) {
             ramp::fill(
                 &mut frame,
                 fade,

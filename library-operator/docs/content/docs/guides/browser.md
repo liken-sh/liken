@@ -139,7 +139,11 @@ the top that holds the clock and the search glass. On a title's page,
 a light shade darkens the backdrop under the strip, so the clock and
 the glass draw over a darker ground. A movie's page that scrolls down
 to its rows shows them only under the strip's line, so no poster or
-headshot passes under the clock. Right from the last
+headshot passes under the clock. A title's page draws its rows of
+posters, headshots, and episode stills on a near-black ground across
+the whole width, so a caption at the right end of a row reads over a
+bright backdrop too. Above the rows, the backdrop shows whole. Right
+from the last
 column of a long wall puts focus on the rail. The rail is the bars at
 the right edge, and they jump through the wall by year, decade,
 letter, or season.
