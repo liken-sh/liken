@@ -231,14 +231,18 @@ registry learns what a tag holds: each one becomes the image label
 version that the snapshot installs. Read the versions from the
 snapshot's `Packages` indexes, or with `dpkg-query -W` in the builder.
 
-The `weston` entry of `weston/package.toml` is the exception. The
-weston image builds Weston from the upstream release, so
-`weston/latest.sh` reports and bumps that entry, with the tarball's
-URL and digest in the Dockerfile and in `weston/pin.toml`, which the
-image's SBOM record reads, and the snapshot holds no package that the
-image installs under that name.
-`built_from_source` in `vulkan/latest.sh` names that entry, so the
-snapshot's report and its `--bump` skip it.
+The `weston` entry of `weston/package.toml` and the `mpv` entry of
+`mpv/package.toml` are the exceptions. The weston image builds Weston
+from the upstream release, and the mpv image builds mpv from the
+upstream release, so `weston/latest.sh` and `mpv/latest.sh` report
+and bump those entries, with the tarball's URL and digest in the
+Dockerfile and in the `pin.toml` beside it, which the image's SBOM
+record reads. The snapshot holds no package that either image installs
+under that name. `built_from_source` in `vulkan/latest.sh` names both
+entries, so the snapshot's report and its `--bump` skip them. A bump
+of mpv can bring a new meson option, which the build leaves off until
+`mpv/Dockerfile` names it, so read the release's `meson.options`
+against the Dockerfile's list.
 
 **A new revision.** CI hashes each base's recipe: its `package.toml`,
 its `Dockerfile`, every file in its build context, the digest of each

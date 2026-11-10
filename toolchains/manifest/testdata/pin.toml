@@ -33,3 +33,15 @@ purl = "pkg:generic/weston@16.0.2?download_url=https://gitlab.freedesktop.org/-/
 license = "MIT"
 type = "application"
 cpe = "cpe:2.3:a:wayland:weston:16.0.2:*:*:*:*:*:*:*"
+
+# An entry that the build patches with an upstream commit that a later
+# release holds, in the form of mpv/pin.toml.
+[mpv]
+version = "0.41.0"
+url = "https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz"
+sha256 = "ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209"
+purl = "pkg:github/mpv-player/mpv@v0.41.0"
+license = "GPL-2.0-or-later"
+type = "application"
+cpe = "cpe:2.3:a:mpv:mpv:0.41.0:*:*:*:*:*:*:*"
+backports = "https://github.com/mpv-player/mpv/commit/1388a453950f202a29d1c0346797d730a9710d72"

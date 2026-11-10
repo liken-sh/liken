@@ -62,13 +62,14 @@ upstreams() {
 
 # built_from_source is true for an entry that the image builds from an
 # upstream release and not from the snapshot. The weston image builds
-# Weston from its release tarball, and weston/latest.sh reports and
-# bumps that entry. sid also has a weston package, so without this
-# check a bump here writes the version of Debian's package over the
-# release that the image builds.
+# Weston from its release tarball, and the mpv image builds mpv from
+# its release tarball. weston/latest.sh and mpv/latest.sh report and
+# bump those entries. sid also has a weston package and an mpv package,
+# so without this check a bump here writes the version of Debian's
+# package over the release that the image builds.
 built_from_source() {
     case "$1/$2" in
-    weston/weston) return 0 ;;
+    weston/weston | mpv/mpv) return 0 ;;
     esac
     return 1
 }

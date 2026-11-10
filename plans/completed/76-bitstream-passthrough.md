@@ -186,3 +186,28 @@ Atmos or DTS:X mark in the media browser. One fault is open: a
 bitstream that PipeWire refuses plays with no sound, which
 [media-operator's open problem](../../media-operator/plans/open-problems/a-refused-bitstream-plays-nothing.md)
 records with a remedy.
+
+## What the drill measured
+
+On 2026-11-10, on a home cluster, with the development build
+`2026.11.09-003-dev-001-51956c1f` of audio-operator and media-operator
+and a 7-channel receiver set up as 5.1.2:
+
+* With the receiver on, the `Sink` reported the layout
+  `FL,FR,RL,RR,FC,LFE,SL,SR` and `AC3`, `DTS`, `EAC3`, `DTS-HD`, and
+  `TrueHD` in `status.passthrough`. In standby, the receiver's ELD
+  gave `FL,FR` with `AC3`, `EAC3`, and `TrueHD`. About 10 seconds
+  after the receiver turned on, the operator had written the new
+  declaration and PipeWire ran it.
+* A TrueHD film with Atmos, an E-AC-3 film with Atmos, and a DTS-HD
+  Master Audio film each played with sound, and the receiver's front
+  panel named each format.
+* After a seek in the TrueHD film, the sound sometimes stopped and
+  the receiver showed Dolby TrueHD with no Atmos. A pause and resume
+  did not bring it back. A change of the audio track and back did.
+  The E-AC-3 and DTS-HD films kept their sound through seeks. The
+  cause is in mpv 0.41, and
+  [plan 92](92-mpv-from-its-release.md) holds the fix.
+
+Not run yet: the volume keys during a bitstream, a pause of more than
+a few seconds, and a film that starts while the receiver wakes.

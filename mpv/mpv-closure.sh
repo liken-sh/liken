@@ -4,10 +4,12 @@
 # ghcr.io/liken-sh/mpv image, the base the media operator's player
 # builds on.
 #
-# Run it in a builder that has the packages installed. It writes a
-# rootfs to the first directory named on the command line, less every
-# file the second directory already holds. The second is the tree of
-# the ffmpeg image, which holds the vaapi and vulkan trees too.
+# The Dockerfile builds mpv from its release with only the outputs that
+# the player uses, and installs the libraries around it from Debian
+# packages. Run it in that builder. It writes a rootfs to the first
+# directory named on the command line, less every file the second
+# directory already holds. The second is the tree of the ffmpeg image,
+# which holds the vaapi and vulkan trees too.
 set -eu
 
 # closure.sh is in the vulkan directory, the lowest base, and the
@@ -26,11 +28,7 @@ shift
 # that asks for a bus. The audiomixer, control, and videoconvert plugins
 # are named in the configuration and loaded by no traced run; they are
 # tens of kilobytes each and are here so a path the trace missed does
-# not fail at the first play. libpulse opens libpulsecommon at process
-# start, whether or not --ao=pulse is selected. Its file name carries
-# the PulseAudio version, as the libweston directory in
-# weston-closure.sh does. A snapshot that changes the version fails
-# this build, which is the report that the list needs reading again.
+# not fail at the first play.
 seeds="
 /usr/bin/mpv
 $lib/pipewire-0.3/libpipewire-module-adapter.so
@@ -46,16 +44,21 @@ $lib/spa-0.2/control/libspa-control.so
 $lib/spa-0.2/videoconvert/libspa-videoconvert.so
 $lib/spa-0.2/support/libspa-dbus.so
 $lib/spa-0.2/support/libspa-support.so
-$lib/pulseaudio/libpulsecommon-17.0.so
 "
 
-# libpipewire refuses to build a client context without client.conf.
+# The first three lines are mpv's license, which the build installs,
+# because no Debian package brings mpv's copyright file. meson installs
+# mpv's sample configuration files into the same directory, and the
+# image leaves them out. libpipewire refuses to build a client context without client.conf.
 # libass resolves the OSD font family through fontconfig, which reads
 # fonts.conf and every file the links under /etc/fonts/conf.d point at,
 # half of them under /usr/share/fontconfig. /etc/fonts copies whole, so
 # it also carries the configuration of a font family the builder
 # installed and the image does not, which is harmless.
 data="
+/usr/share/doc/mpv/Copyright
+/usr/share/doc/mpv/LICENSE.GPL
+/usr/share/doc/mpv/LICENSE.LGPL
 /usr/share/pipewire/client.conf
 /etc/fonts
 /usr/share/fontconfig

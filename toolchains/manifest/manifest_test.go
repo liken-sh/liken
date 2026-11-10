@@ -37,7 +37,7 @@ func TestComponentsGivesOneComponentForEachEntry(t *testing.T) {
 	for _, c := range components {
 		names = append(names, c["name"].(string))
 	}
-	want := []string{"grub2-common", "k3s", "linux-modules", "weston"}
+	want := []string{"grub2-common", "k3s", "linux-modules", "mpv", "weston"}
 	if len(names) != len(want) {
 		t.Fatalf("got the components %v, want %v", names, want)
 	}
@@ -90,6 +90,23 @@ func TestComponentsGivesTheDigestTheLicenseAndTheDownload(t *testing.T) {
 	want := `{"externalReferences":[{"hashes":[{"alg":"SHA-256","content":"92b94582eb7b34a8cf532e6006842b9ed215a6783cf56a3dd6271fd35243b2c0"}],"type":"distribution","url":"https://github.com/k3s-io/k3s/releases/download/v1.37.1%2Bk3s1/k3s"}],"hashes":[{"alg":"SHA-256","content":"92b94582eb7b34a8cf532e6006842b9ed215a6783cf56a3dd6271fd35243b2c0"}],"licenses":[{"expression":"Apache-2.0"}]}`
 	if string(data) != want {
 		t.Errorf("got %s\nwant %s", data, want)
+	}
+}
+
+func TestComponentsGivesEachBackportAsAPatchOfThePedigree(t *testing.T) {
+	data, err := json.Marshal(componentsByName(t)["mpv"]["pedigree"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"commits":[{"uid":"1388a453950f202a29d1c0346797d730a9710d72","url":"https://github.com/mpv-player/mpv/commit/1388a453950f202a29d1c0346797d730a9710d72"}],"patches":[{"diff":{"url":"https://github.com/mpv-player/mpv/commit/1388a453950f202a29d1c0346797d730a9710d72.patch"},"type":"backport"}]}`
+	if string(data) != want {
+		t.Errorf("got %s\nwant %s", data, want)
+	}
+}
+
+func TestComponentsLeavesOutThePedigreeOfAnUnpatchedEntry(t *testing.T) {
+	if pedigree, ok := componentsByName(t)["weston"]["pedigree"]; ok {
+		t.Errorf("weston has the pedigree %v, and its entry names no backport", pedigree)
 	}
 }
 

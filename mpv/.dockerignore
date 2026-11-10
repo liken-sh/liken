@@ -8,3 +8,8 @@ LICENSE
 package.toml
 .pre-commit-config.yaml
 smoke/
+# The pin's report and the key that its bump checks a release against.
+latest.sh
+signing-keys.asc
+# What a patch in patches/ must be, for the person who adds one.
+patches/README.md

@@ -42,8 +42,15 @@ var manifestScopes = []string{"required", "optional", "excluded"}
 // the upstream under. An entry that an image ships names a type that
 // syft keeps, because toolchains/manifest/image-sbom refuses one that
 // syft drops, and a CPE where NVD has one, because syft otherwise
-// guesses several.
-var optionalFields = []string{"scope", "type", "cpe"}
+// guesses several. The backports are the GitHub URLs of the upstream
+// commits that a build applies to the release, which the SBOM states
+// as the component's pedigree, so it does not name the stock release.
+var optionalFields = []string{"scope", "type", "cpe", "backports"}
+
+// githubCommit is the form of a backport: the URL of one commit of a
+// GitHub repository, by its full id. toolchains/manifest takes the
+// last element as the commit's id and adds .patch for its diff.
+var githubCommit = regexp.MustCompile(`^https://github\.com/[^/]+/[^/]+/commit/[0-9a-f]{40}$`)
 
 // componentTypes are the component types of CycloneDX 1.6.
 var componentTypes = []string{
@@ -247,6 +254,11 @@ func entryFindings(manifest, name string, entry map[string]string) []string {
 	}
 	if cpe, ok := entry["cpe"]; ok {
 		findings = append(findings, cpeFindings(manifest, name, cpe, entry["version"])...)
+	}
+	for _, backport := range strings.Fields(entry["backports"]) {
+		if !githubCommit.MatchString(backport) {
+			findings = append(findings, fmt.Sprintf("%s: [%s] has the backport %q, which is not the URL of a commit on GitHub", manifest, name, backport))
+		}
 	}
 	if digest := entry["sha256"]; digest != "" && !sha256Hex.MatchString(digest) {
 		findings = append(findings, fmt.Sprintf("%s: [%s] has a sha256 that is not 64 hex digits", manifest, name))

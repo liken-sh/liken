@@ -274,7 +274,11 @@ pin_dir() {
 # bump writes it. toolchains/manifest gives each entry as a CycloneDX
 # component, for the SBOM of a release and for the record that an
 # image carries. A person writes the license, the scope, and the type,
-# which a bump leaves as they are. `ci pins`
+# which a bump leaves as they are. A person also writes backports, the
+# space-separated GitHub URLs of the upstream commits that a build
+# applies to the release, which the SBOM states as the component's
+# pedigree, and removes them when the bump reaches a release that holds
+# the commits. `ci pins`
 # fails a pin that ships with no manifest, an entry with a missing
 # field, and a manifest at another version than the pin's VERSION. The
 # reader is the shell, so every value is a string on one line.

@@ -1,18 +1,23 @@
-# The ffmpeg image plus mpv and every library and data file it opens by
-# name.
+# The ffmpeg image plus mpv, built from its release, and every library
+# and data file it opens by name.
 [package]
 name = "mpv"
 # The date of the snapshot.debian.org archive that the build installs
 # from, as YYYYMMDD. Every base on Debian uses the same date.
 version = "20261101"
-revision = 2
+revision = 3
 license = "MIT"
 
-# The upstream releases that the snapshot holds, as Debian names them.
-# Each one is a label of the image, sh.liken.upstream.<name>. A new
-# snapshot date updates them.
+# The upstream releases that the image holds. Each one is a label of
+# the image, sh.liken.upstream.<name>. mpv is the release that the
+# Dockerfile builds from its tarball, and latest.sh beside this file
+# moves it. libplacebo and pipewire are the versions that the snapshot
+# holds, as Debian names them, and a new snapshot date updates them.
+# mpv links the snapshot's libplacebo, and latest.sh reads its version
+# here to tell whether the newest mpv release can build.
 [package.upstream]
-mpv = "0.41.0-2+b4"
+mpv = "0.41.0"
+libplacebo = "7.360.1-1"
 pipewire = "1.6.9-2"
 
 # shellcheck and the whitespace checks, from .pre-commit-config.yaml.
@@ -22,12 +27,14 @@ toolchain = "prek"
 
 # The image builds on ffmpeg. The build takes the vulkan directory as
 # the context builder, for the scripts that every base on Debian uses.
-# Its Debian image comes from toolchains.
+# Its Debian and Go images come from toolchains, and the build takes
+# toolchains/manifest as the context manifest, for image-sbom, which
+# writes the SBOM record of the mpv tarball.
 [depends]
 components = ["ffmpeg", "toolchains", "vulkan"]
 
 [[outputs.images]]
 name = "mpv"
-description = "mpv on the ffmpeg image, with every library and data file it opens by name."
-contexts = { builder = "vulkan" }
+description = "mpv, built from its release, on the ffmpeg image, with every library and data file it opens by name."
+contexts = { builder = "vulkan", manifest = "toolchains/manifest" }
 smoke = "mpv/smoke/mpv.sh"

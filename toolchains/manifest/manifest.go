@@ -15,7 +15,9 @@ package manifest
 import (
 	"fmt"
 	"maps"
+	"path"
 	"slices"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -35,6 +37,28 @@ type license struct {
 	Expression string `json:"expression"`
 }
 
+// A pedigree states that the shipped program is the upstream release
+// with changes applied. CycloneDX names each change a patch, and the
+// commit it came from a commit.
+type pedigree struct {
+	Commits []commit `json:"commits"`
+	Patches []patch  `json:"patches"`
+}
+
+type commit struct {
+	UID string `json:"uid"`
+	URL string `json:"url"`
+}
+
+type patch struct {
+	Type string `json:"type"`
+	Diff diff   `json:"diff"`
+}
+
+type diff struct {
+	URL string `json:"url"`
+}
+
 type reference struct {
 	Type   string `json:"type"`
 	URL    string `json:"url"`
@@ -51,6 +75,13 @@ type reference struct {
 // the same hash, so a reader can download the file and check it. The
 // bom-ref is pin:<entry>, the name by which a claim in the release's
 // SBOM names the component.
+//
+// An entry's backports field lists, separated by spaces, the GitHub
+// URL of each upstream commit that the build applies to the release.
+// The component then carries a pedigree with one commit and one patch
+// of the type backport for each, and the patch's diff is the commit's
+// .patch form. So the SBOM does not state the stock release where the
+// build ships a patched one, and the version stays the release's own.
 //
 // A component is a map, not a struct, because the release's SBOM adds
 // properties to it and copies it with every field it holds.
@@ -79,9 +110,23 @@ func Components(path string) ([]map[string]any, error) {
 		if cpe := entry["cpe"]; cpe != "" {
 			c["cpe"] = cpe
 		}
+		if backports := strings.Fields(entry["backports"]); len(backports) > 0 {
+			c["pedigree"] = backportPedigree(backports)
+		}
 		components = append(components, c)
 	}
 	return components, nil
+}
+
+// backportPedigree gives each commit URL as a commit, named by the
+// commit's id, the last element of the URL, and as a backport patch.
+func backportPedigree(urls []string) pedigree {
+	var p pedigree
+	for _, url := range urls {
+		p.Commits = append(p.Commits, commit{UID: path.Base(url), URL: url})
+		p.Patches = append(p.Patches, patch{Type: "backport", Diff: diff{URL: url + ".patch"}})
+	}
+	return p
 }
 
 func orDefault(value, fallback string) string {

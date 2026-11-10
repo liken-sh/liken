@@ -1,0 +1,22 @@
+# The file that the Dockerfile fetches and builds mpv from, for the
+# SBOM record that the image carries. latest.sh --bump writes the
+# version, url, sha256, purl, and cpe, and toolchains/pin.sh describes
+# each field. The Dockerfile fetches the same file by its checksum, and
+# `ci pins` fails when its URL or digest differs from this entry.
+
+# mpv, the player, from the archive that GitHub serves for the release
+# tag. The build keeps mpv's GPL files, so the program is
+# GPL-2.0-or-later, as the Copyright file in the tarball states. NVD
+# lists mpv under the vendor mpv. The build applies each upstream commit
+# in backports from the patch of the same commit in patches/, so the
+# SBOM states the release with those commits as its pedigree, and the
+# bump to a release that holds them removes them.
+[mpv]
+version = "0.41.0"
+url = "https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz"
+sha256 = "ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209"
+purl = "pkg:github/mpv-player/mpv@v0.41.0"
+license = "GPL-2.0-or-later"
+type = "application"
+cpe = "cpe:2.3:a:mpv:mpv:0.41.0:*:*:*:*:*:*:*"
+backports = "https://github.com/mpv-player/mpv/commit/1388a453950f202a29d1c0346797d730a9710d72"

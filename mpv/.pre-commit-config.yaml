@@ -4,8 +4,14 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # A patch in patches/ is git format-patch output, byte for byte. A
+      # blank context line in a diff is one space, and the file ends
+      # with git's signature and a blank line, so these two hooks would
+      # change it.
       - id: trailing-whitespace
+        exclude: ^patches/
       - id: end-of-file-fixer
+        exclude: ^patches/
       - id: check-merge-conflict
       - id: check-added-large-files
   # shellcheck-py wraps a prebuilt shellcheck binary, so the hook
