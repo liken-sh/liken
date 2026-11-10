@@ -118,9 +118,9 @@ func (p Publisher) metadata(c *Component, image Image, version, recipe string) (
 // license of its package.toml. A pinned image holds the packages of
 // other projects under their own licenses, so it writes no licenses
 // key, and its SBOM names the license of each package. created is the
-// committer time of the commit, the same time the build takes as
-// SOURCE_DATE_EPOCH, so the label and the config's created field agree,
-// and a run again at the commit writes the same value.
+// committer time of the commit, so a run again at the commit writes
+// the same value. The config's created field is the time of the build,
+// as the Created field of Publisher says.
 func (p Publisher) ownLabels(c *Component, image Image, version, recipe string) map[string]string {
 	labels := map[string]string{
 		ociKey("title"):         image.Name,

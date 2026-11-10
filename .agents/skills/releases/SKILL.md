@@ -249,11 +249,12 @@ config. The attestation manifests carry no annotation.
 | `sh.liken.recipe` | a pinned image's recipe | config |
 | `sh.liken.upstream.<name>` | each entry of a pinned component's `[package.upstream]` | config |
 
-The build takes the same committer time as `SOURCE_DATE_EPOCH`, so
-the `created` field of the config and of each history entry that the
-build adds is the commit's time too, and a run again at the commit
-writes the same value. The provenance attestation still records when
-the build ran.
+The `created` field of the config, and of each history entry that the
+build adds, is the time of the build, and the provenance attestation
+records the same time. The publish sets no `SOURCE_DATE_EPOCH`,
+because BuildKit writes that argument into each `WORKDIR` step, and a
+publish that sets it misses the layer cache that the images job writes
+and builds every image again.
 
 `licenses` names the license of `liken`'s own code in the image. A
 tracked image can hold programs of other projects as well, such as

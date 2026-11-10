@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -205,15 +206,14 @@ func metadataArgs(target string, keyValues ...string) string {
 }
 
 // The publish writes every OCI key onto each image, as a label of its
-// config and as an annotation of its index and its manifest, and the
-// build takes the commit's time as SOURCE_DATE_EPOCH.
+// config and as an annotation of its index and its manifest.
 func TestAReleasePushesEveryImageThenTheDeployArtifactThenLatest(t *testing.T) {
 	p, rec, c := publishFixture(t, map[string][]string{"operator": {"2026.09.27-001"}})
 	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
 		t.Fatal(err)
 	}
 	labels := func(target string) string {
-		return " --set " + target + ".args.SOURCE_DATE_EPOCH=1790933400" + metadataArgs(target,
+		return metadataArgs(target,
 			"org.opencontainers.image.created=2026-10-02T09:30:00Z",
 			"org.opencontainers.image.description=The "+target+" image.",
 			"org.opencontainers.image.documentation=https://liken.sh/operator/",
@@ -249,6 +249,34 @@ func TestAReleasePushesEveryImageThenTheDeployArtifactThenLatest(t *testing.T) {
 		rest[1] != "flux tag artifact oci://ghcr.io/liken-sh/operator-deploy:2026.10.02-001 --tag latest" {
 		t.Errorf("the deploy commands:\n%s", strings.Join(rest, "\n"))
 	}
+}
+
+// The publish sets no build argument except VERSION, because the
+// images job writes the layer cache that the publish reads, and the
+// images job sets VERSION alone. A build argument can change a step's
+// cache key when no Dockerfile declares it: BuildKit writes
+// SOURCE_DATE_EPOCH as the created time of each WORKDIR step, so a
+// publish that sets it misses the cache from the first step of every
+// stage, and builds each image again.
+func TestThePublishSetsNoBuildArgumentExceptVersion(t *testing.T) {
+	p, rec, c := publishFixture(t, nil)
+	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
+		t.Fatal(err)
+	}
+	if got := buildArguments(rec.commands); !reflect.DeepEqual(got, []string{"VERSION"}) {
+		t.Errorf("the publish sets the build arguments %v, and the images job sets only VERSION", got)
+	}
+}
+
+// buildArguments gives the name of each build argument that the
+// commands set on a bake target, sorted, each one once.
+func buildArguments(commands []string) []string {
+	var names []string
+	for _, match := range regexp.MustCompile(`\.args\.([A-Za-z0-9_]+)=`).FindAllStringSubmatch(strings.Join(commands, "\n"), -1) {
+		names = append(names, match[1])
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
 // The deploy artifact names its commit and carries the commit's time as
@@ -522,7 +550,7 @@ func TestAPinnedComponentPushesItsTagWithItsRecipeThenMovesLatest(t *testing.T) 
 		labels += " --set base.labels." + kv
 		annotations += " --set base.annotations=index,manifest:" + kv
 	}
-	want := "docker buildx bake --file docker-bake.hcl --push --set base.args.SOURCE_DATE_EPOCH=1790933400" +
+	want := "docker buildx bake --file docker-bake.hcl --push" +
 		labels + " --set base.labels.sh.liken.recipe=" + recipe + annotations +
 		" --set base.tags=ghcr.io/liken-sh/base:20260928-1" +
 		" --set base.attest=type=sbom,generator=" + fixtureScanner + " --set base.attest=type=provenance,mode=max --metadata-file <metadata> base"

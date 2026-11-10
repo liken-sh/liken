@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -43,9 +42,11 @@ type Publisher struct {
 	// Commit is the full sha that the outputs are built from.
 	Commit string
 	// Created is the committer time of Commit. Each output carries it as
-	// org.opencontainers.image.created, and each image build takes it as
-	// SOURCE_DATE_EPOCH, so the config's created field is the time of the
-	// commit and not the time of the build.
+	// org.opencontainers.image.created. No build takes it as
+	// SOURCE_DATE_EPOCH, because that argument changes the cache key of
+	// each WORKDIR step, and the publish would then miss the layer cache
+	// that the images job writes. So the config's created field is the
+	// time of the build.
 	Created time.Time
 	// Components is every component, because a pinned component's
 	// recipe covers the tags of its dependencies, and an image writes
@@ -216,7 +217,6 @@ func (p Publisher) image(c *Component, image Image, version, mode, recipe string
 		if !c.Pinned() {
 			args = append(args, set("args.VERSION", version)...)
 		}
-		args = append(args, set("args.SOURCE_DATE_EPOCH", strconv.FormatInt(p.Created.Unix(), 10))...)
 		args = append(args, metadata.bakeArgs(target)...)
 		for _, name := range names {
 			args = append(args, set("tags", ref(name, version))...)
