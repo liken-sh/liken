@@ -377,6 +377,18 @@ spec:
                     Whether the Player is on. Off turns its panel, TV, and
                     receiver off and stops its Play, and a Play that starts
                     sets On; omit it for On.
+                passthrough:
+                  type: string
+                  enum: ["On", "Off"]
+                  description: >-
+                    Whether a film's Dolby and DTS tracks go to the receiver
+                    encoded, so the receiver decodes them and its height
+                    speakers play Dolby Atmos and DTS:X. On takes effect
+                    only for a Player with one entry in sinks whose level a
+                    reachable Receiver sets, and only for the formats that
+                    the remembered Sink lists in status.passthrough. While
+                    a track passes through, only the receiver's own volume
+                    changes the level. Omit it for Off.
             status:
               type: object
               description: >-

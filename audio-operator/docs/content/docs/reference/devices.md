@@ -164,6 +164,7 @@ identity BlueZ carries that survives a reboot.
 | `lpcmMaxRateHz` | int | the highest uncompressed sample rate the monitor accepts, in hertz |
 | `lpcmBitDepths` | string | the uncompressed depths the monitor accepts, ascending: `16 20 24` |
 | `speakers` | string | the speaker allocation, in the kernel's names: `FL/FR` |
+| `encodedFormats` | string | the encoded formats the monitor decodes itself, from the ELD, in PipeWire's names and separated by spaces: `AC3 DTS EAC3 DTS-HD TrueHD`. Absent when the monitor lists none |
 | `monitor.liken.sh/id` | string | the pairing identity, described below |
 | `address` | string | the speaker's peer MAC, uppercase with colons: `A0:AB:51:33:B7:12` |
 | `name` | string | the speaker's name, the alias BlueZ reports |

@@ -44,7 +44,7 @@ wake a sleeping child.
   objects ([plan 77](completed/77-the-media-bus-stops-at-media-operator.md)),
   and [media-operator plan 43](../media-operator/plans/43-the-level-follows-the-sound.md)
   proposes which of the two takes it.
-- [Plan 76](76-bitstream-passthrough.md) states that PipeWire cannot
+- [Plan 76](completed/76-bitstream-passthrough.md) states that PipeWire cannot
   scale a bitstream, so mpv's level and the sink's level do nothing
   during passthrough. Only the receiver's own volume changes the
   level then.

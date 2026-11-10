@@ -1680,7 +1680,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 	running, err := GetPod(o.client, namespace, podName(name))
 	if errors.Is(err, apiclient.ErrNotFound) {
 		if reason, owed := o.replacements[key]; owed {
-			pod, err := o.finishReplacement(play, claim, resolved, prefs, remotes, reason)
+			pod, err := o.finishReplacement(play, player, claim, resolved, prefs, remotes, reason)
 			return pod, false, err
 		}
 		// Nothing answers for the pod: a taint evicted it, its node was lost,
@@ -1699,7 +1699,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		// its first frame. A Player that is off turns on first.
 		o.turnOnForPlay(play, player)
 		o.applyReceiverSession(player)
-		pod, err := o.createPodAtStash(play, claim, resolved, prefs, remotes)
+		pod, err := o.createPodAtStash(play, player, claim, resolved, prefs, remotes)
 		switch {
 		case err != nil:
 		case resuming:
@@ -1738,7 +1738,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 		if !o.mayResume(key) {
 			return running, false, nil
 		}
-		pod, err := o.replace(play, running, claim, resolved, prefs, remotes, false,
+		pod, err := o.replace(play, player, running, claim, resolved, prefs, remotes, false,
 			recreate{reason: "the pod failed" + podMessage(running), fault: true})
 		return pod, false, err
 	}
@@ -1754,7 +1754,7 @@ func (o *operator) ensurePlayback(play *Play, player *Player, claim *ResourceCla
 	if claimChanged {
 		changed = "its devices"
 	}
-	pod, err := o.replace(play, running, claim, resolved, prefs, remotes, claimChanged,
+	pod, err := o.replace(play, player, running, claim, resolved, prefs, remotes, claimChanged,
 		recreate{reason: "a spec edit changed " + changed + " on player " + player.Metadata.Name})
 	return pod, false, err
 }
@@ -1811,19 +1811,24 @@ func podMessage(pod *Pod) string {
 // createPodAtStash creates the playback pod with mpv's start set to the
 // film's saved place. A genuinely new run has no saved place, so the start
 // falls back to spec.start.
-func (o *operator) createPodAtStash(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
+func (o *operator) createPodAtStash(play *Play, player *Player, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	resume := *play
 	resume.Spec.Start = o.stashedPosition(play)
-	return o.createPod(&resume, claim, resolved, prefs, remotes)
+	return o.createPod(&resume, player, claim, resolved, prefs, remotes)
 }
 
 // createPod creates one playback pod and reads it back on a 409,
 // because another pass, or another copy of this operator, created the
-// pod first.
-func (o *operator) createPod(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
+// pod first. Each create starts mpv, so each one decides what mpv passes
+// through and writes that decision's line.
+func (o *operator) createPod(play *Play, player *Player, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
+	passthrough := o.passthroughFor(player)
 	created, err := CreatePod(o.client, o.resources.apply(buildPod(play, claim, resolved, o.image, o.sidecarImage,
-		o.displayImage, o.busAddress, o.topicBase, remotes, prefs, o.playerVerbose)))
+		o.displayImage, o.busAddress, o.topicBase, remotes, prefs, passthrough.codecs, o.playerVerbose)))
+	if err == nil {
+		o.logPassthrough(play, player, passthrough)
+	}
 	if errors.Is(err, apiclient.ErrConflict) {
 		return GetPod(o.client, namespace, podName(name))
 	}

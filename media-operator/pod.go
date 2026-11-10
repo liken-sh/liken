@@ -106,7 +106,7 @@ func podName(play string) string {
 func buildPod(
 	play *Play, claim *ResourceClaim, resolved resolution,
 	image, sidecarImage, displayImage, busAddress, topicBase string,
-	remotes []boundRemote, prefs resolvedPreferences, playerVerbose string,
+	remotes []boundRemote, prefs resolvedPreferences, passthrough []string, playerVerbose string,
 ) *Pod {
 	grace := int64(playbackGracePeriod)
 	// The IPC volume is unconditional, so mpv serves its socket at one
@@ -145,13 +145,18 @@ func buildPod(
 		container.Env = append(container.Env,
 			EnvVar{Name: playStartVariable, Value: play.Spec.Start})
 	}
-	// Pass the resolved preference flags to the shim. Nothing is passed when no
-	// tier stated a preference, so mpv keeps its own default and the feature adds
-	// no behavior.
+	// Pass the resolved preference flags and the passthrough codecs to the
+	// shim. Nothing is passed when no tier stated a preference and no codec
+	// passes through, so mpv keeps its own defaults and decodes every track.
+	// With codecs, mpv sends those tracks to the receiver encoded and
+	// decodes every other track (passthrough.go).
 	//
 	// mpv plays at unity, its own default, so no level joins the list.
 	// The receiver or the sinks set the room's level (volumeengine.go).
 	options := mpvPreferenceOptions(prefs)
+	if len(passthrough) > 0 {
+		options = append(options, spdifOption(passthrough))
+	}
 	if len(options) > 0 {
 		container.Env = append(container.Env,
 			EnvVar{Name: playerOptionsVariable, Value: strings.Join(options, "\n")})

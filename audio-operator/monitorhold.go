@@ -320,6 +320,7 @@ func publishedELD(device SliceDevice) (eld, bool) {
 			block.LPCMDepths |= 1 << bit
 		}
 	}
+	block.EncodedTypes = encodedTypes(strings.Fields(text(encodedFormatsAttribute)))
 	return block, true
 }
 

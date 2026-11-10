@@ -14,7 +14,8 @@ func TestTheDeclarationReadsBackAsItWasWritten(t *testing.T) {
 	usb := alsaEndpoint{Card: 1, PCM: 0}
 	microphone := alsaEndpoint{Card: 1, PCM: 0, Capture: true}
 	layouts := map[nodeAddress]channelLayout{
-		hdmi.graphAddress():   {Source: layoutFromELD, Positions: surround71Layout},
+		hdmi.graphAddress(): {Source: layoutFromELD, Positions: surround71Layout,
+			Encoded: []string{"AC3", "EAC3", "TrueHD"}},
 		analog.graphAddress(): {Source: layoutFromSpec, Positions: []string{"FL", "FR", "RL", "RR"}},
 		usb.graphAddress():    {Source: layoutFromChannelMap},
 	}

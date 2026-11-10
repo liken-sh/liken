@@ -325,6 +325,11 @@ type PlayerSpec struct {
 	// keys and kubectl write the same field, and this operator turns
 	// the unit's hardware to follow it (playerpower.go).
 	Power string `json:"power,omitempty"`
+
+	// Passthrough is On or Off, and an absent field is Off. On sends a
+	// film's Dolby or DTS track to the receiver encoded, when the unit
+	// can take it (passthrough.go).
+	Passthrough string `json:"passthrough,omitempty"`
 }
 
 // IdlePolicy is what the idle screen does while nothing plays. The same

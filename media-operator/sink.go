@@ -63,9 +63,13 @@ func (v *SinkVolume) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*plain)(v))
 }
 
+// Passthrough is the encoded formats the running sink accepts, in
+// PipeWire's IEC958 codec names, such as AC3 and TrueHD. It is empty for
+// a sink that accepts none (passthrough.go).
 type SinkStatus struct {
-	Observed SinkObserved `json:"observed"`
-	Session  *SinkSession `json:"session,omitempty"`
+	Observed    SinkObserved `json:"observed"`
+	Session     *SinkSession `json:"session,omitempty"`
+	Passthrough []string     `json:"passthrough,omitempty"`
 }
 
 // SinkObserved is the level and the mute the sink last reported.

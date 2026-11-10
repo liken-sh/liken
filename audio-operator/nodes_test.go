@@ -204,11 +204,11 @@ func TestNodeConfigDeclaresEachKindOfLayout(t *testing.T) {
 		chmap    string
 		source   string
 	}{
-		{"a 7.1 layout from the ELD", channelLayout{layoutFromELD, surround71Layout},
+		{"a 7.1 layout from the ELD", channelLayout{Source: layoutFromELD, Positions: surround71Layout},
 			"8", "[ FL FR RL RR FC LFE SL SR ]", absent, "ELD"},
-		{"a stereo layout from the ELD", channelLayout{layoutFromELD, stereoLayout},
+		{"a stereo layout from the ELD", channelLayout{Source: layoutFromELD, Positions: stereoLayout},
 			"2", "[ FL FR ]", absent, "ELD"},
-		{"a layout from spec", channelLayout{layoutFromSpec, surround51Layout},
+		{"a layout from spec", channelLayout{Source: layoutFromSpec, Positions: surround51Layout},
 			"6", "[ FL FR RL RR FC LFE ]", absent, "Spec"},
 		{"the channel map", channelLayout{Source: layoutFromChannelMap},
 			absent, absent, "true", "ChannelMap"},

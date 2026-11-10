@@ -101,6 +101,11 @@ COPY config/50-audio-operator.conf /usr/share/wireplumber/wireplumber.conf.d/
 # The access rule beside it stops WirePlumber's default policy from
 # restricting this pod's clients, itself included. The file says why.
 COPY config/51-access-rules.conf /usr/share/wireplumber/wireplumber.conf.d/
+# The one linking hook of this operator's own, which the profile above
+# requires. WirePlumber finds a script by its path under
+# /usr/share/wireplumber/scripts, beside its own. The file says what
+# the hook restores.
+COPY config/restore-device-ports.lua /usr/share/wireplumber/scripts/liken/
 
 # PipeWire's access mode is baked in for the same reason. It goes
 # under /usr/share because the pod mounts an emptyDir over

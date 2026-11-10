@@ -462,6 +462,12 @@ func TestSinkStatusReportsTheLayout(t *testing.T) {
 				Applied: true, Reason: layoutReasonApplied, Message: "runs"},
 			surround71Layout, "ELD",
 			condition(LayoutAppliedCondition, true, layoutReasonApplied, "runs", factsTime)},
+		{"a receiver that decodes encoded formats itself",
+			layoutState{Layout: channelLayout{Source: layoutFromELD, Positions: surround71Layout,
+				Encoded: []string{"AC3", "EAC3", "TrueHD"}},
+				Applied: true, Reason: layoutReasonApplied, Message: "runs"},
+			surround71Layout, "ELD",
+			condition(LayoutAppliedCondition, true, layoutReasonApplied, "runs", factsTime)},
 		{"a layout that waits for the film to end",
 			layoutState{Layout: channelLayout{Source: layoutNone}, Reason: layoutReasonAwaitingIdle, Message: "waits"},
 			nil, "None",
@@ -476,6 +482,9 @@ func TestSinkStatusReportsTheLayout(t *testing.T) {
 			state := c.state
 			status := endpointFacts{Name: "sink", Direction: directionSink, Layout: &state}.
 				status(EndpointStatus{}, factsTime)
+			if !reflect.DeepEqual(status.Passthrough, c.state.Layout.Encoded) {
+				t.Errorf("passthrough = %v, want %v", status.Passthrough, c.state.Layout.Encoded)
+			}
 			if !reflect.DeepEqual(status.Layout, c.positions) || status.LayoutSource != c.source {
 				t.Errorf("layout = %v from %q, want %v from %q", status.Layout, status.LayoutSource, c.positions, c.source)
 			}

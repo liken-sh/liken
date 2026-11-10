@@ -85,7 +85,8 @@ for path in \
   /usr/lib/x86_64-linux-gnu/spa-0.2/alsa/libspa-alsa.so \
   /usr/lib/x86_64-linux-gnu/spa-0.2/bluez5/libspa-bluez5.so \
   /usr/lib/x86_64-linux-gnu/spa-0.2/bluez5/libspa-codec-bluez5-sbc.so \
-  /usr/share/spa-0.2/bluez5/bluez-hardware.conf
+  /usr/share/spa-0.2/bluez5/bluez-hardware.conf \
+  /usr/share/wireplumber/scripts/liken/restore-device-ports.lua
 do
   grep -qx "$path" "$work/image-files.txt" \
     || { echo "the image has no $path"; exit 1; }

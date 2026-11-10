@@ -216,6 +216,7 @@ func (f endpointFacts) status(published EndpointStatus, now time.Time) EndpointS
 	if f.Layout != nil {
 		status.Layout = f.Layout.Layout.Positions
 		status.LayoutSource = string(f.Layout.Layout.source())
+		status.Passthrough = f.Layout.Layout.Encoded
 		status.Conditions = setCondition(status.Conditions,
 			condition(LayoutAppliedCondition, f.Layout.Applied, f.Layout.Reason, f.Layout.Message, now))
 	}

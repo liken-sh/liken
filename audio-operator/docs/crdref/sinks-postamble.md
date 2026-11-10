@@ -192,7 +192,7 @@ waits, and with the reason `Restarting` until the new PipeWire
 starts. Each change posts one `LayoutChanged` `Event` on the `Sink`,
 which names the old layout, the new one, and the source.
 
-Two things the operator does not do:
+The operator does not write the kernel's channel map:
 
 * It does not write the kernel's channel map. On HDMI the kernel
   routes each slot by its standard allocation for the channel count,
@@ -200,9 +200,56 @@ Two things the operator does not do:
   that the kernel sends to another speaker. The kernel can route
   front heights (CEA allocation 0x2f), but only when a program
   writes the PCM's channel map while the device is open and stopped.
-* It does not pass a bitstream through. A receiver that plays height
-  speakers from Dolby Atmos or DTS:X needs the compressed stream,
-  and the operator sends PCM. Passthrough is a separate design.
+
+## Encoded formats
+
+A receiver plays Dolby Atmos or DTS:X on its height speakers only
+when it decodes the track itself. So a sink can send a film's Dolby
+or DTS track to its monitor as the encoded bitstream, and
+`status.passthrough` lists the formats it sends that way:
+
+    kubectl get sink <name> -o jsonpath='{.status.passthrough}'
+
+| Name | Format | Also carries |
+| --- | --- | --- |
+| `AC3` | Dolby Digital | |
+| `EAC3` | Dolby Digital Plus | Dolby Atmos |
+| `TrueHD` | Dolby TrueHD | Dolby Atmos |
+| `DTS` | DTS | |
+| `DTS-HD` | DTS-HD High Resolution and Master Audio | DTS:X |
+
+The formats are the ones the monitor's ELD lists, and the device
+attribute `encodedFormats` holds the same list for a claim to select
+by. The operator declares the sink to PipeWire with them, and with
+alsa-lib's `hdmi` device for the output in place of the `hw` device,
+because PipeWire's ALSA node sends a bitstream only through a device
+of that name. An output of a card whose driver is not `HDA-Intel`
+sends PCM alone, and so does every analog, USB, and Bluetooth sink.
+
+The sink does not choose what a stream sends. A player whose stream
+is a bitstream in one of these formats is linked as it is, and
+every other stream is PCM, as before. A player has to send only the
+formats the list names: PipeWire refuses a bitstream in any other
+format, and the stream then plays nothing.
+[media-operator](https://liken.sh/media/)
+reads this list for a `Player` that states `passthrough: On`.
+
+While a bitstream plays through a sink:
+
+* The sink's level and mute do nothing, because PipeWire cannot
+  scale a bitstream. Only the receiver's own volume changes the
+  level.
+* The bitstream has the sink to itself. PipeWire refuses a second
+  stream to the sink, and a tap of the sink through `audio-api`,
+  until the bitstream ends. A stream or a tap that holds the sink
+  first makes PipeWire refuse the bitstream.
+
+The formats change the same way the layout does. A monitor that
+answers with another list is a layout change: the operator writes
+the declaration again and PipeWire restarts when no stream plays,
+`LayoutApplied` reports the wait, and the `LayoutChanged` `Event`
+names the formats. A sink keeps its formats while its monitor is
+off.
 
 ## Events
 

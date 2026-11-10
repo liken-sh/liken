@@ -150,8 +150,9 @@ func (s SourceSpec) declaration() declaration {
 
 // EndpointStatus is what the hardware declares and what the operator
 // last read. Both kinds carry this shape, and the fields that belong
-// to a Sink alone, monitor, bluetooth, layout, and layoutSource, are
-// absent on a Source because no capture endpoint has them.
+// to a Sink alone, monitor, bluetooth, layout, layoutSource, and
+// passthrough, are absent on a Source because no capture endpoint has
+// them.
 type EndpointStatus struct {
 	Node           string                       `json:"node,omitempty"`
 	Location       string                       `json:"location,omitempty"`
@@ -165,6 +166,7 @@ type EndpointStatus struct {
 	Capabilities   map[string]controlCapability `json:"capabilities,omitempty"`
 	Layout         []string                     `json:"layout,omitempty"`
 	LayoutSource   string                       `json:"layoutSource,omitempty"`
+	Passthrough    []string                     `json:"passthrough,omitempty"`
 	Observed       *EndpointObserved            `json:"observed,omitempty"`
 	Applied        *EndpointApplied             `json:"applied,omitempty"`
 	Claims         []EndpointClaim              `json:"claims,omitempty"`

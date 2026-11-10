@@ -75,7 +75,7 @@ func testPod(t *testing.T) *Pod {
 	t.Helper()
 	play := testPlay()
 	claim := buildClaim(play, testPlayer())
-	return buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+	return buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, nil, "")
 }
 
 // The same pod, with two controllers bound to the player.
@@ -83,7 +83,7 @@ func testPodWithRemotes(t *testing.T) *Pod {
 	t.Helper()
 	play := testPlay()
 	claim := buildClaim(play, testPlayer())
-	return buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, testBoundRemotes(), resolvedPreferences{}, "")
+	return buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, testBoundRemotes(), resolvedPreferences{}, nil, "")
 }
 
 // restartPolicy is Never, because a finished film is not a failure to
@@ -155,7 +155,7 @@ func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
 	play := testPlay()
 	play.Spec.Start = "0:10:00"
 	claim := buildClaim(play, testPlayer())
-	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, nil, "")
 
 	env := pod.Spec.Containers[0].Env
 	want := []EnvVar{
@@ -173,7 +173,7 @@ func TestBuildPodCarriesTheDeclaredStart(t *testing.T) {
 func TestBuildPodPassesTheVerboseSwitchToThePlayer(t *testing.T) {
 	play := testPlay()
 	claim := buildClaim(play, testPlayer())
-	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "1")
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, nil, "1")
 
 	if got := envValue(pod.Spec.Containers[0], playerVerboseVariable); got != "1" {
 		t.Errorf("%s = %q, want 1", playerVerboseVariable, got)
@@ -246,7 +246,7 @@ func TestBuildPodToleratesThePlayerNodeTaint(t *testing.T) {
 func TestBuildPodCarriesTheResolvedVolumesAndMounts(t *testing.T) {
 	resolved := testResolution(t)
 	play := testPlay()
-	pod := buildPod(play, buildClaim(play, testPlayer()), resolved, testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+	pod := buildPod(play, buildClaim(play, testPlayer()), resolved, testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, nil, "")
 
 	volumes := append(append([]Volume{}, resolved.Volumes...),
 		Volume{Name: "ipc", EmptyDir: &EmptyDirVolumeSource{}})
@@ -344,7 +344,7 @@ func TestBuildPodBakesThePresentationBlocks(t *testing.T) {
 		},
 	}
 	claim := buildClaim(play, testPlayer())
-	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, nil, "")
 
 	command := initContainer(t, pod, commandContainer)
 	got := envValue(command, presentationsVariable)
@@ -371,7 +371,7 @@ func TestBuildPodBakesTheMarksAsWritten(t *testing.T) {
 		}},
 	}}
 	claim := buildClaim(play, testPlayer())
-	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, nil, "")
 
 	got := envValue(initContainer(t, pod, commandContainer), presentationsVariable)
 	want := `[{"marks":[{"kind":"intro","end":107,"source":"theintrodb"},{"kind":"intro","start":7.007,"end":107},{"kind":"credits","start":7.007,"end":3316},{"kind":"cold-open"}]}]`
@@ -478,7 +478,7 @@ func TestBuildPodCarriesTheResolvedOptions(t *testing.T) {
 	play := testPlay()
 	claim := buildClaim(play, testPlayer())
 	prefs := resolvedPreferences{AudioLanguages: []string{"en", "ja"}, Subtitles: subtitlesAuto}
-	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, prefs, "")
+	pod := buildPod(play, claim, testResolution(t), testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, prefs, nil, "")
 
 	got := envValue(pod.Spec.Containers[0], playerOptionsVariable)
 	want := "--alang=en,ja\n--subs-with-matching-audio=forced\n--reset-on-next-file=sid\n--subs-match-os-language=no"
@@ -532,7 +532,7 @@ func TestTheCommandSidecarCarriesTheSubtitlePreferences(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			play := testPlay()
 			pod := buildPod(play, buildClaim(play, testPlayer()), testResolution(t),
-				testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, one.prefs, "")
+				testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, one.prefs, nil, "")
 			mustMatch(t, envValue(initContainer(t, pod, commandContainer), subtitlePreferencesVariable), one.want)
 		})
 	}
@@ -554,7 +554,7 @@ func TestTheCommandSidecarCarriesTheVolumeTopicOnlyWithSpeakers(t *testing.T) {
 	}
 	play := testPlay()
 	pod := buildPod(play, buildClaim(play, speakerless), testResolution(t),
-		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, nil, "")
 
 	mustMatch(t, envValue(initContainer(t, pod, commandContainer), playerVolumeTopicVariable), "")
 	mustMatch(t, envValue(initContainer(t, testPod(t), commandContainer), playerVolumeTopicVariable),
@@ -579,7 +579,7 @@ func TestBuildPodCarriesTheNextBlockToBothContainers(t *testing.T) {
 	resolved, err := resolvePlay("house", play.Spec.Items, play.Spec.Next, frame{})
 	mustSucceed(t, err)
 	pod := buildPod(play, buildClaim(play, testPlayer()), resolved,
-		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, "")
+		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase, nil, resolvedPreferences{}, nil, "")
 
 	want := `{"reason":"Next in Harbor Lights","title":"E05","detail":"45 min","art":"/media/1/shows/next.jpg","remainingSeconds":2160,"request":{"library":"living-room/shows"}}`
 	mustMatch(t, envValue(pod.Spec.Containers[0], nextVariable), want)
@@ -611,7 +611,7 @@ func testPodWithPreferences(t *testing.T, prefs resolvedPreferences) *Pod {
 	claim := buildClaim(play, testPlayer())
 	return buildPod(play, claim, testResolution(t),
 		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase,
-		nil, prefs, "")
+		nil, prefs, nil, "")
 }
 
 func TestThePlaybackPodMountsNoServiceAccountToken(t *testing.T) {
@@ -639,7 +639,7 @@ func TestAPlayerWithNoDisplayGetsNoDisplayContainer(t *testing.T) {
 	player.Spec.Display = nil
 	pod := buildPod(play, buildClaim(play, player), testResolution(t),
 		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase,
-		nil, resolvedPreferences{}, "")
+		nil, resolvedPreferences{}, nil, "")
 
 	mustMatch(t, len(pod.Spec.Containers), 1)
 	mustMatchAll(t, initContainerNames(pod), []string{commandContainer})
@@ -677,7 +677,7 @@ func TestTheDisplayContainerCarriesTheTrickplayInterval(t *testing.T) {
 	play.Spec.TrickplayInterval = "5s"
 	pod := buildPod(play, buildClaim(play, testPlayer()), testResolution(t),
 		testPlayerImage, testSidecarImage, testDisplayImage, testBusAddress, testTopicBase,
-		nil, resolvedPreferences{}, "")
+		nil, resolvedPreferences{}, nil, "")
 	mustMatchAll(t, initContainer(t, pod, displayContainer).Env,
 		[]EnvVar{{Name: trickplayIntervalVariable, Value: "5s"}})
 }

@@ -582,7 +582,7 @@ func housePlaybackPod() *Pod {
 	pod := buildPod(play, buildClaim(play, housePlayer()),
 		resolution{Items: []string{"https://nas/film.mkv"}},
 		"registry.example/player:test", "registry.example/sidecar:test", "registry.example/display:test",
-		"bus.media.svc:1883", defaultTopicBase, nil, resolvedPreferences{}, "")
+		"bus.media.svc:1883", defaultTopicBase, nil, resolvedPreferences{}, nil, "")
 	pod.Status.Phase = podRunning
 	return pod
 }
@@ -1442,7 +1442,7 @@ func runningCluster(player *Player) *fakeCluster {
 	pod := buildPod(play, buildClaim(play, player),
 		resolution{Items: []string{"https://nas/film.mkv"}},
 		"registry.example/player:test", "registry.example/sidecar:test", "registry.example/display:test",
-		"bus.media.svc:1883", defaultTopicBase, nil, resolvedPreferences{}, "")
+		"bus.media.svc:1883", defaultTopicBase, nil, resolvedPreferences{}, nil, "")
 	pod.Status.Phase = podRunning
 	cluster.pods["movie-playback"] = pod
 	cluster.claims["movie-devices"] = buildClaim(play, player)
@@ -1602,7 +1602,7 @@ func remoteChangeCluster() *fakeCluster {
 	pod := buildPod(play, buildClaim(play, player),
 		resolution{Items: []string{"https://nas/film.mkv"}},
 		"registry.example/player:test", "registry.example/sidecar:test", "registry.example/display:test",
-		"bus.media.svc:1883", defaultTopicBase, sofa, resolvedPreferences{}, "")
+		"bus.media.svc:1883", defaultTopicBase, sofa, resolvedPreferences{}, nil, "")
 	pod.Status.Phase = podRunning
 	cluster.pods["movie-playback"] = pod
 	cluster.claims["movie-devices"] = buildClaim(play, player)

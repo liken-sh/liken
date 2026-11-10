@@ -210,6 +210,8 @@ const configHeader = `# The claimed card's endpoints, written by the pod's decla
 // api.alsa.path is the ALSA device name the node opens, in the same
 // hw:<card>,<device> form that aplay -D takes. It is the whole of what
 // this node needs from ALSA, and it needs no udev device to resolve.
+// A sink that passes encoded formats through opens alsa-lib's hdmi
+// device for the same PCM device instead, which bitstream.go explains.
 // api.alsa.pcm.card holds the card number on its own, because the
 // node opens the card's control interface for its mixer elements and
 // reads the number from that property rather than from the path.
@@ -248,6 +250,9 @@ func sinkObject(card, pcm int, layout channelLayout) staticNode {
 		},
 	}
 	maps.Copy(node.Args, layoutArgs(layout))
+	// A sink that passes encoded formats through takes the hdmi name
+	// of the same PCM device in place of the hw name (bitstream.go).
+	maps.Copy(node.Args, bitstreamArgs(card, pcm, layout))
 	return node
 }
 

@@ -234,6 +234,12 @@ func addMonitorAttributes(attributes map[string]DeviceAttribute, block eld) {
 	if block.Speakers != "" {
 		attributes["speakers"] = AttrString(attributeString(block.Speakers))
 	}
+	// The encoded formats the monitor decodes itself. A claim for a
+	// film's sound selects a receiver that decodes TrueHD by this list
+	// instead of naming a receiver model.
+	if formats := block.encodedFormats(); len(formats) > 0 {
+		attributes[encodedFormatsAttribute] = AttrString(strings.Join(formats, " "))
+	}
 	// The ELD version is the format version of the block. parseELD
 	// rejects any value it cannot read, so a published block always
 	// carries one of the versions this operator reads.

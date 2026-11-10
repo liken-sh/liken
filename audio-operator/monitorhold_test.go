@@ -149,6 +149,26 @@ func TestAPublishedDeviceGivesBackItsELD(t *testing.T) {
 	}
 }
 
+// The encoded formats are among those facts. A seed that lost them
+// would read as a monitor that stopped accepting them, and the pass
+// would declare the sink again without them.
+func TestAPublishedDeviceGivesBackItsEncodedFormats(t *testing.T) {
+	block, err := parseELD(receiverBlock(t, 2, 10, 12))
+	if err != nil {
+		t.Fatal(err)
+	}
+	device := sliceDevices(named(alsaEndpoint{Card: 0, PCM: 3, HDMI: true, Monitor: true, ELD: block}),
+		nil, outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: sinkNodeName(0, 3)}))[0]
+
+	if got := device.Attributes[encodedFormatsAttribute]; got.String == nil || *got.String != "AC3 EAC3 TrueHD" {
+		t.Errorf("%s = %+v, want AC3 EAC3 TrueHD", encodedFormatsAttribute, got)
+	}
+	got, ok := publishedELD(device)
+	if !ok || got.EncodedTypes != block.EncodedTypes {
+		t.Errorf("the device gives back the types %#x (%v), want %#x", got.EncodedTypes, ok, block.EncodedTypes)
+	}
+}
+
 // Only a device the slice published with a monitor seeds a hold: a
 // device tainted for no monitor, and a device with no ELD facts at
 // all, seed nothing.

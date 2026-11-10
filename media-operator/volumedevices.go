@@ -30,7 +30,7 @@ const mainZone = "main"
 // Receiver the unit's screen matches and the Sinks the unit plays
 // through.
 func (o *operator) volumeDevices(player *Player, sinks []PlayerSinkStatus) []volumeDevice {
-	if receiver, _, matched := o.matchReceiver(player); matched && receiverReachable(receiver) == conditionTrue {
+	if receiver, sets := o.levelReceiver(player); sets {
 		return []volumeDevice{receiverDevice(receiver)}
 	}
 	var devices []volumeDevice
@@ -45,6 +45,18 @@ func (o *operator) volumeDevices(player *Player, sinks []PlayerSinkStatus) []vol
 		devices = append(devices, sinkDevice(sink))
 	}
 	return devices
+}
+
+// levelReceiver answers the Receiver that sets one unit's level: the
+// Receiver the unit's screen matches, while its Reachable condition is
+// True. The volume presses go to it, and passthrough needs it, because
+// only the receiver's own volume scales a bitstream.
+func (o *operator) levelReceiver(player *Player) (*Receiver, bool) {
+	receiver, _, matched := o.matchReceiver(player)
+	if !matched || receiverReachable(receiver) != conditionTrue {
+		return nil, false
+	}
+	return receiver, true
 }
 
 // driverScaleTops is the top of each driver's own volume scale, for a

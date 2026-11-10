@@ -83,9 +83,8 @@ var eldSampleRates = []int{32000, 44100, 48000, 88200, 96000, 176400, 192000}
 var eldBitDepths = []int{16, 20, 24}
 
 // eld holds what this operator publishes out of one block. The block
-// holds more, including the audio sync delay, the HDCP and AI flags,
-// and one descriptor for each compressed format the monitor accepts.
-// None of those select an output.
+// holds more, including the audio sync delay and the HDCP and AI
+// flags. None of those select an output.
 //
 // The block has no serial number. snd_hdmi_print_eld_info prints
 // every field, and there is no EDID serial among them, so an audio
@@ -112,6 +111,10 @@ type eld struct {
 	Speakers          string
 	SpeakerAllocation byte
 	PortID            uint64
+	// EncodedTypes has one bit for each audio coding type that a
+	// descriptor other than LPCM names, at the bit of the type's own
+	// number. bitstream.go names the types a sink passes through.
+	EncodedTypes uint16
 }
 
 // parseELD reads one raw block. A block that is too short, or that
@@ -161,7 +164,8 @@ func parseELD(raw []byte) (eld, error) {
 			return parsed, fmt.Errorf("descriptor %d runs past the end of a %d byte block", i, len(raw))
 		}
 		descriptor := raw[start : start+3]
-		if (descriptor[0]>>3)&0xf != audioCodingTypeLPCM {
+		if codingType := (descriptor[0] >> 3) & 0xf; codingType != audioCodingTypeLPCM {
+			parsed.EncodedTypes |= 1 << codingType
 			continue
 		}
 		if channels := int(descriptor[0]&0x7) + 1; channels > parsed.LPCMChannels {

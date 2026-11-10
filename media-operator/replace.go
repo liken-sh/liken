@@ -29,7 +29,7 @@ import (
 // The report desk learns the old pod's UID before the delete goes out, so
 // the ending its sidecar reports on the SIGTERM is not read as the Play's.
 // runpod.go says what that ending would do.
-func (o *operator) replace(play *Play, running *Pod, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, claimChanged bool, reason recreate) (*Pod, error) {
+func (o *operator) replace(play *Play, player *Player, running *Pod, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, claimChanged bool, reason recreate) (*Pod, error) {
 	namespace, name := play.Metadata.Namespace, play.Metadata.Name
 	o.reports.replacing(namespace, name, running.Metadata.UID)
 	if err := DeletePod(o.client, namespace, podName(name)); err != nil {
@@ -44,7 +44,7 @@ func (o *operator) replace(play *Play, running *Pod, claim *ResourceClaim, resol
 	o.replacements[runKey(namespace, name)] = reason
 	_, err := GetPod(o.client, namespace, podName(name))
 	if errors.Is(err, apiclient.ErrNotFound) {
-		return o.finishReplacement(play, claim, resolved, prefs, remotes, reason)
+		return o.finishReplacement(play, player, claim, resolved, prefs, remotes, reason)
 	}
 	return nil, err
 }
@@ -52,7 +52,7 @@ func (o *operator) replace(play *Play, running *Pod, claim *ResourceClaim, resol
 // finishReplacement creates the pod a recreate owes, once the old pod is
 // gone. A claim that is still being deleted is not the claim the new pod
 // must hold, so the pod waits for the claim too.
-func (o *operator) finishReplacement(play *Play, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, reason recreate) (*Pod, error) {
+func (o *operator) finishReplacement(play *Play, player *Player, claim *ResourceClaim, resolved resolution, prefs resolvedPreferences, remotes []boundRemote, reason recreate) (*Pod, error) {
 	key := runKey(play.Metadata.Namespace, play.Metadata.Name)
 	held, err := GetResourceClaim(o.client, claim.Metadata.Namespace, claim.Metadata.Name)
 	switch {
@@ -69,7 +69,7 @@ func (o *operator) finishReplacement(play *Play, claim *ResourceClaim, resolved 
 		// (changewake.go), and that pass creates the pod.
 		return nil, nil
 	}
-	pod, err := o.createPodAtStash(play, claim, resolved, prefs, remotes)
+	pod, err := o.createPodAtStash(play, player, claim, resolved, prefs, remotes)
 	if err != nil {
 		return nil, err
 	}

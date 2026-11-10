@@ -176,11 +176,15 @@ the sink to the layout its hardware reports:
     kubectl patch sink node-1-pci-0000-00-1f-3-alc257-analog --type json \
       -p '[{"op":"remove","path":"/spec/layout"}]'
 
-The operator sends PCM and does not write the kernel's channel map.
-So a height speaker plays only what a receiver makes from the other
-channels, and Dolby Atmos and DTS:X do not reach the receiver. The
+The operator does not write the kernel's channel map, so PCM does not
+reach a height speaker: it plays only what a receiver makes from the
+other channels. A receiver plays Dolby Atmos and DTS:X on its height
+speakers when the track reaches it as a bitstream, and the `Sink`'s
+`status.passthrough` lists the formats the sink sends that way. The
 [`Sink` reference](/docs/reference/sinks/#the-channel-layout) gives
-the layouts the operator selects and the reasons.
+the layouts the operator selects and the reasons, and
+[its next section](/docs/reference/sinks/#encoded-formats) gives the
+formats.
 
 <a id="share-an-endpoint-between-claims"></a>
 

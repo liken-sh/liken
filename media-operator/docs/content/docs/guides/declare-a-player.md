@@ -1,7 +1,7 @@
 ---
 title: Declare a Player
 weight: 15
-description: "Declare a Player for the screen and speakers a machine is connected to, take it from created to a Screen condition of Present, and prove it plays. Use when a machine is connected to a television or a monitor and should play media on it, or when a Player's idle pod stays Pending."
+description: "Declare a Player for the screen and speakers a machine is connected to, take it from created to a Screen condition of Present, and prove it plays. Use when a machine is connected to a television or a monitor and should play media on it, when a Player's idle pod stays Pending, or when a film's Dolby or DTS track should reach an A/V receiver encoded."
 ---
 
 # Declare a Player
@@ -203,3 +203,60 @@ The operator's own idle screen is the default. Three fields on
 Set the defaults once for every unit in the cluster's
 [`MediaPreferences`](/docs/reference/mediapreferences/), and set a
 field on a `Player` only where that unit differs.
+
+## Send Dolby and DTS to the receiver
+
+With `passthrough: On`, a film's Dolby and DTS tracks go to an A/V
+receiver encoded, and the receiver decodes them itself. That is the
+only way the receiver's height speakers play Dolby Atmos and DTS:X,
+because `mpv` decodes a track to its channel bed and drops the height
+objects. A track whose format the receiver does not take is decoded,
+as it is with passthrough off.
+
+You need:
+
+* A `Receiver` under the `Player`, with a `Reachable` condition of
+  `True`. The equipment operator's
+  [install guide](https://liken.sh/equipment/docs/guides/install/#put-it-under-a-player)
+  wires it in.
+* Exactly one entry in `spec.sinks`, because one `mpv` stream goes to
+  one sink.
+* A sink that lists the formats the receiver accepts. The audio
+  operator writes them from the receiver's own report, and an empty
+  answer means the sink takes none:
+
+        kubectl get sink <name> -o jsonpath='{.status.passthrough}{"\n"}'
+        ["AC3","EAC3","DTS","DTS-HD","TrueHD"]
+
+Set the field on the `Player`:
+
+    kubectl patch player den -n media --type merge -p '{"spec":{"passthrough":"On"}}'
+
+The setting is off by default, because it changes how the volume
+works. PipeWire cannot scale an encoded track, so while one plays, the
+sink's level and mute do nothing. The remote's volume keys move the
+receiver's own volume, as they do for every `Player` whose level a
+reachable `Receiver` sets.
+
+The operator reads the formats when it creates the playback pod, from
+the sink in `status.sinks`. So two plays decode although the setting
+is on:
+
+* The first play after the `Player`'s first sink allocation. The
+  operator creates the pod before the scheduler allocates its sink,
+  so `status.sinks` names no sink yet. Every later play reads it.
+* A play that starts while the receiver is still waking. A receiver in
+  standby can report fewer formats or none, and the sink then lists
+  only those until the receiver is on. Stop the play and start it
+  again when the receiver is on.
+
+The operator writes one line for each play start on a `Player` with
+`passthrough: On`. The line names the codecs `mpv` passes through and
+the sink, or says why the play decodes:
+
+    kubectl logs -n liken-system deploy/media-operator | grep passthrough
+
+To confirm that the receiver gets the bitstream, read its front panel
+or its sound mode during the film. It names the format, such as Dolby
+Atmos or DTS:X. A receiver that shows multichannel PCM gets a decoded
+track.

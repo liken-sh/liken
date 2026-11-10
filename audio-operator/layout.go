@@ -19,7 +19,10 @@ package main
 // that none of them covers, such as the analog jack, is declared
 // with no positions, and its streams stay stereo.
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // layoutSource is where a sink's layout came from. The four values
 // are the ones status.layoutSource reports.
@@ -36,9 +39,16 @@ const (
 // is the PCM slot order in PipeWire's channel names. A layout from
 // the channel map has no positions here, because PipeWire reads them
 // from the device when it opens the PCM.
+//
+// Encoded names the encoded formats the sink passes to its monitor
+// without decoding them (bitstream.go). They are part of the layout
+// because they reach PipeWire the same way the positions do, through
+// the declaration alone, so one comparison finds a change of either
+// and one restart applies it.
 type channelLayout struct {
 	Source    layoutSource
 	Positions []string
+	Encoded   []string
 }
 
 // source answers the layout's source, with the zero value read as
@@ -56,15 +66,9 @@ func (l channelLayout) source() layoutSource {
 // change of the declaration even when the new positions match the
 // ELD's.
 func (l channelLayout) equal(other channelLayout) bool {
-	if l.source() != other.source() || len(l.Positions) != len(other.Positions) {
-		return false
-	}
-	for i := range l.Positions {
-		if l.Positions[i] != other.Positions[i] {
-			return false
-		}
-	}
-	return true
+	return l.source() == other.source() &&
+		slices.Equal(l.Positions, other.Positions) &&
+		slices.Equal(l.Encoded, other.Encoded)
 }
 
 // String is the form a log line and an Event message name a layout in.
@@ -75,7 +79,11 @@ func (l channelLayout) String() string {
 	case layoutFromChannelMap:
 		return "the device's channel map"
 	}
-	return strings.Join(l.Positions, ",") + " from " + string(l.Source)
+	positions := strings.Join(l.Positions, ",") + " from " + string(l.Source)
+	if len(l.Encoded) == 0 {
+		return positions
+	}
+	return positions + ", with " + strings.Join(l.Encoded, ",") + " passed through"
 }
 
 // PipeWire's own HDMI layouts: the channel-map lines of the
@@ -144,6 +152,10 @@ func eldPositions(block eld) []string {
 // other layout falls to None, which is what removing spec.layout from
 // such an output asks for.
 //
+// The encoded formats come from the ELD whatever the source of the
+// positions (selectEncoded), so a spec.layout over a receiver's ELD
+// keeps the receiver's formats.
+//
 // api.alsa.use-chmap stays off for HDMI. PipeWire takes the channel
 // map's positions in the order the map lists them, FL FR LFE FC RL RR
 // RLC RRC for 8 channels, while the kernel routes the slots in the
@@ -155,9 +167,10 @@ func eldPositions(block eld) []string {
 func selectLayout(output alsaEndpoint, spec []string, declared channelLayout) channelLayout {
 	switch {
 	case len(spec) > 0:
-		return channelLayout{Source: layoutFromSpec, Positions: spec}
+		return channelLayout{Source: layoutFromSpec, Positions: spec, Encoded: selectEncoded(output, declared)}
 	case output.HDMI && output.Monitor:
-		return channelLayout{Source: layoutFromELD, Positions: eldPositions(output.ELD)}
+		return channelLayout{Source: layoutFromELD, Positions: eldPositions(output.ELD),
+			Encoded: selectEncoded(output, declared)}
 	case output.HDMI && declared.source() == layoutFromELD:
 		return declared
 	case output.HDMI:

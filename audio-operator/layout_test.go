@@ -149,10 +149,12 @@ func TestLayoutsCompareBySourceAndPositions(t *testing.T) {
 		a, b channelLayout
 		want bool
 	}{
-		{"the same layout", channelLayout{layoutFromELD, stereoLayout}, channelLayout{layoutFromELD, stereoLayout}, true},
-		{"another source", channelLayout{layoutFromELD, stereoLayout}, channelLayout{layoutFromSpec, stereoLayout}, false},
-		{"other positions", channelLayout{layoutFromELD, stereoLayout}, channelLayout{layoutFromELD, surround51Layout}, false},
+		{"the same layout", channelLayout{Source: layoutFromELD, Positions: stereoLayout}, channelLayout{Source: layoutFromELD, Positions: stereoLayout}, true},
+		{"another source", channelLayout{Source: layoutFromELD, Positions: stereoLayout}, channelLayout{Source: layoutFromSpec, Positions: stereoLayout}, false},
+		{"other positions", channelLayout{Source: layoutFromELD, Positions: stereoLayout}, channelLayout{Source: layoutFromELD, Positions: surround51Layout}, false},
 		{"none and the zero value", channelLayout{Source: layoutNone}, channelLayout{}, true},
+		{"other encoded formats", channelLayout{Source: layoutFromELD, Positions: stereoLayout, Encoded: []string{"AC3"}},
+			channelLayout{Source: layoutFromELD, Positions: stereoLayout}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -169,6 +171,8 @@ func TestLayoutString(t *testing.T) {
 		want   string
 	}{
 		{channelLayout{Source: layoutFromELD, Positions: stereoLayout}, "FL,FR from ELD"},
+		{channelLayout{Source: layoutFromELD, Positions: stereoLayout, Encoded: []string{"AC3", "EAC3"}},
+			"FL,FR from ELD, with AC3,EAC3 passed through"},
 		{channelLayout{Source: layoutFromChannelMap}, "the device's channel map"},
 		{channelLayout{}, "no positions"},
 	}

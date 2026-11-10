@@ -67,7 +67,7 @@ func declaredLayout(args map[string]string) channelLayout {
 	if len(positions) == 0 {
 		positions = nil
 	}
-	return channelLayout{Source: source, Positions: positions}
+	return channelLayout{Source: source, Positions: positions, Encoded: declaredEncoded(args)}
 }
 
 // declaredLayouts holds the layout of every declared sink, keyed by

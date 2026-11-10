@@ -1,10 +1,16 @@
 # 76, Bitstream passthrough
 
-Proposed on 2026-10-01. A film's Dolby or DTS track can go to an AV
-receiver as the encoded bitstream instead of as decoded PCM, so the
-receiver can decode it itself. That is the only way a receiver's height
-speakers play Dolby Atmos or DTS:X. The work touches audio-operator,
-media-operator, and equipment-operator.
+Proposed on 2026-10-01. Built on 2026-11-10 in audio-operator and
+media-operator, with no change to equipment-operator. A film's Dolby or
+DTS track can go to an AV receiver as the encoded bitstream instead of
+as decoded PCM, so the receiver can decode it itself. That is the only
+way a receiver's height speakers play Dolby Atmos or DTS:X.
+
+The text below is the proposal as it was written, and "What was built"
+at the end says where the build differs. The drill on a receiver, under
+"How it will be proved", has not run. The build was proved on a laptop
+with no monitor on its HDMI output, where every format played at normal
+speed and no receiver decoded it.
 
 ## The problem
 
@@ -150,3 +156,33 @@ On a home cluster with an Atmos-capable receiver:
   passthrough.
 * A `Player` with passthrough off, and a TV that accepts no compressed
   formats, play the same films as decoded PCM.
+
+## What was built
+
+On 2026-11-10. The measurements and the detail are in
+[audio-operator's plan 15](../../audio-operator/plans/completed/15-sinks-that-pass-bitstreams-through.md)
+and
+[media-operator's plan 45](../../media-operator/plans/completed/45-a-player-passes-bitstreams-through.md).
+
+* **Step one.** The stall of finding 3 did not occur on PipeWire
+  1.6.9, which the audio-operator image now ships. E-AC-3, TrueHD, DTS,
+  and AC-3 each played at normal speed with the stock rates, so the
+  PipeWire configuration did not change.
+* **Finding 4** occurred every time, and its cause is in WirePlumber.
+  A hook in the audio-operator image gives the sink its channels back
+  when the next PCM stream links, so nothing restarts.
+* **audio-operator** declares an HDMI sink of an HDA-Intel card with
+  alsa-lib's `hdmi` device and the formats of the ELD, and reports
+  them as `status.passthrough` on the `Sink`.
+* **media-operator** has `spec.passthrough` on the `Player`. The
+  operator, and not the playback pod, reads the `Sink`'s formats when
+  it creates the pod, and gives them to mpv as `--audio-spdif`. It
+  does so only when a `Receiver` sets the unit's level.
+* **equipment-operator** did not change. A volume press already
+  reaches the `Receiver` that the unit's screen matches.
+
+Not built: the line on the display that names the format, and the
+Atmos or DTS:X mark in the media browser. One fault is open: a
+bitstream that PipeWire refuses plays with no sound, which
+[media-operator's open problem](../../media-operator/plans/open-problems/a-refused-bitstream-plays-nothing.md)
+records with a remedy.

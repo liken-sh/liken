@@ -70,6 +70,7 @@ The devices that form the unit, each selected from what a hardware operator publ
 | <span id="spec--sdh"></span>`sdh` | string | no | A per-Player override of whether an SDH track ranks ahead of a full track in the same language; omit it to inherit the default MediaPreferences. One of: `prefer`, `avoid`. |
 | <span id="spec--idle"></span>`idle` | [object](#specidle) | no | This unit's idle screen policy. Each field overrides the default MediaPreferences on its own. |
 | <span id="spec--power"></span>`power` | string | no | Whether the Player is on. Off turns its panel, TV, and receiver off and stops its Play, and a Play that starts sets On; omit it for On. One of: `On`, `Off`. |
+| <span id="spec--passthrough"></span>`passthrough` | string | no | Whether a film's Dolby and DTS tracks go to the receiver encoded, so the receiver decodes them and its height speakers play Dolby Atmos and DTS:X. On takes effect only for a Player with one entry in sinks whose level a reachable Receiver sets, and only for the formats that the remembered Sink lists in status.passthrough. While a track passes through, only the receiver's own volume changes the level. Omit it for Off. One of: `On`, `Off`. |
 
 ### spec.display
 
