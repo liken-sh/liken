@@ -24,10 +24,12 @@ design.
 
 **The OS publishes facts and guards the boot chain.** It knows nothing
 about vendor firmware. `liken`'s
-[milestone 87](../../liken/plans/87-firmware-facts-a-machine-publishes.md)
+[milestone 87](../../liken/plans/completed/87-firmware-facts-a-machine-publishes.md)
 adds the USB bus and device numbers to each device in a machine's
-`ResourceSlice`, and reports in `status.hardware.missingFirmware` the
-files that the kernel requested and did not find. The OS offers
+`ResourceSlice`. The open problem
+[firmware the kernel did not find is not reported](../../liken/plans/open-problems/firmware-the-kernel-did-not-find-is-not-reported.md)
+proposes to report in `status.hardware.missingFirmware` the files
+that the kernel requested and did not find. The OS offers
 capabilities that an add-on uses, and makes no firmware write itself.
 Milestone 88 gives a component a reboot turn for a machine through a
 `Disruption`. Milestone 33 hands the turn's one-shot boot to the

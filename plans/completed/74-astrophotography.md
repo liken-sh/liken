@@ -7,7 +7,7 @@ test clusters from 2026-10-05 to 2026-10-12. Mode 2,
 08 and the horizon filter of its plan 04, and released in
 `2026.10.13-001`. The parts of mode 2 that are not built continue in
 the plans of `astrophotography-operator`: the scheduler's score in
-[plan 04](../../astrophotography-operator/plans/04-the-scheduler.md),
+[plan 11](../../astrophotography-operator/plans/11-the-scheduler-chooses-by-the-sun-the-moon-and-the-work-left.md),
 reservations on demand in
 [plan 05](../../astrophotography-operator/plans/05-reservations-on-demand.md),
 grading in

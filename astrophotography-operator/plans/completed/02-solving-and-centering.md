@@ -324,7 +324,7 @@ of paths: from the operator to the worker and to the solver, on port
    precession and nutation, from Meeus's *Astronomical Algorithms*,
    chapters 21 and 22, in a small package of this operator, `sky`,
    whose tests hold the book's worked examples. [Plan
-   04](../04-the-scheduler.md) chooses its source of the sky's geometry,
+   04](04-the-scheduler.md) chooses its source of the sky's geometry,
    and can replace the package.
 3. **A centering exposure** of `centering.exposure` (default 5 s),
    through `centering.filter` (default the first sequence's filter),

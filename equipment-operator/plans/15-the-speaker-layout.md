@@ -205,7 +205,7 @@ calibration. The guide says so: declare the layout from status after
 calibrating, and remove the declared layout before calibrating again.
 
 The WiiM's subwoofer rows belong to
-[plan 16](16-the-wiims-settings.md).
+[plan 20](20-the-wiims-zero-value-fix-and-its-field-table.md).
 
 ## Considered and set aside
 

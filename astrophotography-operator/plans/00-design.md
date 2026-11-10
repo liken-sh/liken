@@ -115,10 +115,11 @@ The plans are otherwise in the order they build on each other.
 | [01](completed/01-run-a-targets-sequence.md) | Built: `Target`, running its sequences inside a reservation, and the frame catalog |
 | [02](completed/02-solving-and-centering.md) | Built: the `astrometry` image, the `Solver`, the worker, and centering |
 | [03](completed/03-promotion-to-the-archive.md) | Built: moving frames from the outbox to the target's archive, and verifying them |
-| [04](04-the-scheduler.md) | Choosing the next target from the sky, the horizon, and the work left. The horizon filter is built |
+| [04](completed/04-the-scheduler.md) | Built: the horizon filter. The rest of its design is plan 11 |
 | [05](05-reservations-on-demand.md) | Creating and ending reservations as the sky allows |
 | [06](06-grading-policies.md) | Rejecting frames by a person's policy |
 | [07](07-calibration-frames.md) | Capturing and keeping darks and flats |
 | [08](completed/08-the-component-and-the-first-session.md) | The component's scaffold, the order of the build, and the drill of the first session |
 | [09](09-a-targets-position-by-name.md) | A target's position by name, from a catalog in the image |
 | [10](10-planetary-and-solar-imaging.md) | Planetary and solar imaging, a stub |
+| [11](11-the-scheduler-chooses-by-the-sun-the-moon-and-the-work-left.md) | Choosing the next target from the sun, the moon, the work left, and the cost of a switch |

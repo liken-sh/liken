@@ -11,15 +11,24 @@ device's node and tell one appearance of a device from the next. And
 `Machine` status reports the firmware files that the kernel requested
 and did not find, which was the open problem `missing-firmware-status`.
 
+Status on 2026-11-10: closed. The USB bus and device numbers are built
+(dd3b0cdb): machine-operator publishes `busNumber` and `deviceNumber`
+for each USB device in its slice (`machine-operator/dra.go:261`), and
+the `devices` guide and the devices reference page list both. The
+report of missing kernel firmware is not built, and its four open
+questions are still open. The open problem
+[firmware the kernel did not find is not reported](../open-problems/firmware-the-kernel-did-not-find-is-not-reported.md)
+holds it, with its evidence, its design, and its open questions.
+
 ## The boundary
 
 The word "firmware" names three different jobs. Root
-[plan 81](../../plans/completed/81-firmware.md) records the owner of each:
+[plan 81](../../../plans/completed/81-firmware.md) records the owner of each:
 
 | | The kernel loads it | The host uploads it | The device keeps it |
 |---|---|---|---|
 | Example | i915 and wifi blobs | a QHY guide camera on a Cypress FX2 chip | UEFI, a dock, an SSD |
-| Owner | the OS image, [milestone 32](completed/32-hardware-support-in-the-image.md) | `firmware-operator`, its plan 01 | `firmware-operator`, its plans 03 to 08, with the OS parts in [milestone 33](completed/33-firmware-updates.md) |
+| Owner | the OS image, [milestone 32](32-hardware-support-in-the-image.md) | `firmware-operator`, its plan 01 | `firmware-operator`, its plans 03 to 08, with the OS parts in [milestone 33](33-firmware-updates.md) |
 
 `firmware-operator` is an add-on. It ships apart from the OS, like
 display-operator, and a cluster that does not install it loses
@@ -89,8 +98,8 @@ lists hardware with no driver, and `missingFirmware` lists hardware
 whose driver is missing a file.
 
 The kernel log reader today is the `liken-logs` relay:
-[`kmsg.go`](../logs/kmsg.go) reads `/dev/kmsg`, and
-[`cursor.go`](../logs/cursor.go) stores its position. Its kernel
+[`kmsg.go`](../../logs/kmsg.go) reads `/dev/kmsg`, and
+[`cursor.go`](../../logs/cursor.go) stores its position. Its kernel
 container writes records to stdout and has no API token, so a new log
 pattern is not enough. The failures need a path to machine-operator,
 or machine-operator reads `/dev/kmsg` itself. The open questions below

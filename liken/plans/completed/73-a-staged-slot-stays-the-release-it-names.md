@@ -2,7 +2,7 @@
 
 Milestone 73. Built 2026-10-08. It closes the open problem of
 retargeting over a staged release and builds part five of
-[milestone 66](../66-durability-and-safety.md#part-five-release-downloads-finish-or-stop),
+[milestone 66](66-durability-and-safety.md#part-five-release-downloads-finish-or-stop),
 the release downloads that never end. Both are faults of one writer,
 the release fetcher in `machine-operator/fetch.go`, and of the slot it
 writes. The QEMU drill under UEFI passed, and

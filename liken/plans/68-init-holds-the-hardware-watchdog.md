@@ -183,8 +183,9 @@ Two new status fields carry it:
 
 Neither field changes `Ready`. A machine with no watchdog works, and
 a fleet of such machines is a normal case, not a fault. The schema
-change in `api/` is the necessary half, because the API server prunes
-any field that the schema does not declare.
+change in `machine/manifests/machines-crd.yaml`, beside the Go types
+in `machine/status.go`, is the necessary half, because the API server
+prunes any field that the schema does not declare.
 
 ## The drills
 

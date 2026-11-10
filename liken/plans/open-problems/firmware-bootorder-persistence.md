@@ -41,8 +41,16 @@ the proven slot leads `BootOrder`, and reports it as
 `status.firmware.bootOrderKept`
 ([milestone 33, as built](../completed/33-firmware-updates.md#as-built)). Every
 shutdown asserts that order, so `false` is the mismatch this problem
-describes, with no record kept. Only the handover of `BootNext` to a
-`Disruption`'s requester reads it. Release trials still arm as before,
+describes, with no record kept. Three readers use it. `init`'s
+handover of `BootNext` to a `Disruption`'s requester reads the value
+that it reports (`bootOrderKept`, `init/handover.go:71`).
+`firmware-operator` refuses to stage a capsule apply on a machine whose
+`status.firmware.bootOrderKept` is not `true`
+(`firmware-operator/apply.go:241`). And `firmware-operator`'s
+`hasNextESP` (`firmware-operator/machine.go:36`) reads whether the
+field is set at all, to tell a rehearsal pod whether the machine has an
+ESP for its next boot (`firmware-operator/rehearsal.go:172`). Release
+trials still arm as before,
 so the policy decisions below remain open.
 
 ## The first readings on liken-1

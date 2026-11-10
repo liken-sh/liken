@@ -65,9 +65,10 @@ only needs a driver at least as new as the pod's CUDA requires.
 The payload is not the difficult part. The module build is the
 difficult part. It is an out-of-tree compile
 against the kernel pin, in CI, and it must run again with every kernel
-bump. Other vendored domains, such as `liken/wpa-supplicant/`, build
-from source inside a pinned container, but none of them builds against
-the kernel pin. A
+bump. Other programs of the OS build from source: buildroot builds
+`wpa_supplicant` and the other static programs from `liken/userland`
+(`liken/userland/os.config`) in the pinned `buildroot` builder image.
+None of them builds against the kernel pin. A
 wrong build does not affect the boot path: it breaks GPU workloads, and
 the base OS still boots.
 

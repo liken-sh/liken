@@ -1,7 +1,7 @@
 # 72. The OS builds from source
 
 Milestone 72. Split from
-[plan 69](../../plans/completed/69-one-repository-builds-every-component.md) on
+[plan 69](../../../plans/completed/69-one-repository-builds-every-component.md) on
 2026-09-29. Plan 69 moved every component into this repository and
 built the component graph, and it is complete. This plan is plan 69's
 second stage, as plan 69 wrote it: it moves the OS's vendored domains
@@ -9,6 +9,26 @@ to stagex builds through that graph.
 
 Plan 69's "A component" and "When a component builds" describe the
 `package.toml`, the driver, and the recipe hash that this plan uses.
+
+Status on 2026-11-10: closed, with most of it not built. The goal of
+step 9 is reached by another route. Under
+[root plan 88](../../../plans/completed/88-one-way-to-build-each-kind-of-thing.md),
+buildroot builds `mke2fs`, `mount.nfs`, `wpa_supplicant`, and tzdata
+(3015ef80) and open-iscsi (2a17ee53) as static programs from the
+BR2_EXTERNAL tree in `userland/`, so Alpine, Debian, and gokrazy are no
+longer sources of the OS. stagex is not used. Root plan 88 also signs
+each file of an OS release keyless with cosign (dc214a22) and publishes
+a CycloneDX SBOM with each release (80bcc875), in place of the
+`actions/attest` statements that "Attestations" below proposes. Not
+built: stagex as the build toolchain, the kernel (still Canonical's
+mainline build, `kernel/fetch.sh`), GRUB and systemd-boot (still
+Ubuntu packages), `k3s-root` and `k3s` (still the k3s projects' release
+binaries), the data components, and the `components/` tree on the
+channel.
+[Milestone 95](../95-the-kernel-the-bootloaders-and-k3s-build-from-source.md)
+holds that work, with its design, and its first open question is
+whether stagex is still the toolchain now that buildroot builds the
+project's static programs.
 
 ## The problem
 

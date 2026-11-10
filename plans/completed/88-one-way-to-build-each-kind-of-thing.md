@@ -53,8 +53,9 @@ four reviews tested a move to Nix and rejected it. Nix copies whole
 store paths into an image, so the `mpv` base would grow from 206 MB to
 at least 488 MB compressed. Fixes to widely shared libraries reach
 nixpkgs-unstable through a staging cycle of three to four weeks, and
-no scanner matches vulnerabilities in a Nix SBOM well. Plan 72 in
-`liken/plans/` rejects Nix for the OS because a reader must learn the
+no scanner matches vulnerabilities in a Nix SBOM well.
+[Plan 72](../../liken/plans/completed/72-the-os-builds-from-source.md)
+in `liken/plans/` rejects Nix for the OS because a reader must learn the
 framework to understand the build.
 
 ## The shared core

@@ -40,7 +40,7 @@ machine changes when the image changes.
 none of its own, such as a camera on a bare USB microcontroller, each
 time the device appears. The bytes come from the vendor's container
 image, and a power cycle removes them. The OS's only part is the USB
-facts that [milestone 87](../87-firmware-facts-a-machine-publishes.md)
+facts that [milestone 87](87-firmware-facts-a-machine-publishes.md)
 publishes.
 
 This milestone is about the third kind: firmware that a device keeps

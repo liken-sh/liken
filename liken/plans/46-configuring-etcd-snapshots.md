@@ -83,10 +83,13 @@ spec:
         endpointCA: ""
 ```
 
-`spec.datastore` names what is snapshotted. The Cluster document does
-not describe its datastore anywhere else today: `len(spec.leaders) > 1`
-is what selects embedded etcd over sqlite, and that rule is written in
-`cluster/cluster.go` rather than in the document. A `datastore`
+`spec.datastore` names what is snapshotted. The Cluster document
+describes its datastore today only in `spec.origin`
+(`cluster/manifests/clusters-crd.yaml`), which says how the datastore
+came to exist: `Founded` or `Adopted`. For a founded cluster, two or
+more entries in `spec.leaders` select embedded etcd over sqlite, and
+that rule is written in `leaderJoinConfig` (`init/k3s.go:159`) rather
+than in the document. A `datastore`
 section is where that choice and its settings belong, and snapshots
 are its first entry.
 
@@ -233,6 +236,15 @@ document from a file, because that document never passed through an
 API server.
 
 Followers render none of these keys. They run no datastore.
+
+Note, 2026-11-10: the CEL rule above would also refuse an adopted cluster
+with one leader. `leaderJoinConfig` (`init/k3s.go:159`) joins every
+leader of a cluster with `origin: Adopted` to the existing datastore,
+through `spec.endpoint` or the first leader's address, whatever the
+number of leaders, and an adopted k3s cluster runs embedded etcd
+(the `adopt` guide). So an adopted cluster with one `liken` leader has
+an etcd to snapshot. Whether the refusal reads `spec.origin` as well
+as `spec.leaders` is an open question.
 
 ## What status reports
 

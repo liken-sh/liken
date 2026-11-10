@@ -1,7 +1,7 @@
 # 09, A target's position by name
 
 Proposed on 2026-10-15, in the design conversation of [plan
-04](04-the-scheduler.md). Not built.
+04](completed/04-the-scheduler.md). Not built.
 
 ## The problem
 

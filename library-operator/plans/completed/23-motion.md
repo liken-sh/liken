@@ -1,7 +1,7 @@
 # Animation in the media browser
 
 Plan 23. It is step 4 of
-[root plan 85](../../plans/completed/85-motion.md), which sets the rules and the
+[root plan 85](../../../plans/completed/85-motion.md), which sets the rules and the
 durations that every surface shares. It adds animation to
 the media browser: the focus outline slides, pages open, and walls
 scroll smoothly. It draws no frame that the machine does not need.
@@ -41,6 +41,21 @@ edges now move together over one length, `GLIDE`, 110 ms, which is
 `SCROLL`, and a row and the outline land together. `LEAD` and `FOLLOW`
 are gone. The held key's rule is unchanged, as a share of `GLIDE`. The
 section below keeps the lead and the follow as they were decided.
+
+Status on 2026-11-10: closed. Every motion of this plan is built except
+the page backdrop's fade. Each motion takes its share of its length
+from `look::share` and eases it with `look::eased`
+(`media-browser/src/look.rs`). The outline glides as one piece in
+`motion/outline.rs`, and a held key shortens each motion through
+`motion/pace.rs`. The commits are ce62ee62 (the outline glides and
+breathes), 4146e433 (the outline glides on every page), 5f156541 (the
+outline glides as one piece), and dc88b8c7 (a series page's header
+scrolls away). The open problem
+[browser motion that is not decided](../open-problems/browser-motion-that-is-not-decided.md)
+holds the page backdrop's fade, the items under "Later", the frame
+budget and the shade's fade from "What is not decided", and the part of
+root plan 85's step 6 that this plan held: `brand/motion.md` does not
+yet state the durations and curves that every surface shares.
 
 ## The focus outline
 
@@ -176,7 +191,7 @@ fades in with the mark, and it leaves with the mark.
 
 - The film steps back when it is paused, in the same arrangement as the
   up-next step-back that
-  [media-operator plan 44](../../media-operator/plans/completed/44-the-display-arranges-its-claim.md)
+  [media-operator plan 44](../../../media-operator/plans/completed/44-the-display-arranges-its-claim.md)
   built.
 - A poster that opens into the film at the start of a play. It is
   parked because the image pull and the film's start take a variable

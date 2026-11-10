@@ -1,12 +1,21 @@
 # 16, The WiiM's settings
 
 Proposed on 2026-10-06. Replaces the WiiM part of plan 13
-([rejected/13-every-setting-a-receiver-exposes.md](rejected/13-every-setting-a-receiver-exposes.md)).
-Plan 14 ([14-one-settings-model-for-every-receiver.md](14-one-settings-model-for-every-receiver.md))
+([rejected/13-every-setting-a-receiver-exposes.md](../rejected/13-every-setting-a-receiver-exposes.md)).
+Plan 14 ([14-one-settings-model-for-every-receiver.md](../14-one-settings-model-for-every-receiver.md))
 holds the common settings model, the tiers, and `settingExceptions`
 that this plan uses. Phase 1 can be built now. Phase 2 was built on
 2026-11-06, and its section "What phase 2 built" records how. Drills
 D1 to D7 have not run.
+
+Status on 2026-11-10: closed. Phase 2 is built: `settingsResync` in
+`wiim/client.go` (78f136a5), with the follow-ups 769cb7d4, a787959f,
+12fe4791, 7a3d639d, and 19a47568. No drill has run, D1 to D8 among
+them, and neither has the proof of phase 2 on an amp under "How it
+will be proved". Phases 1, 3, and 4 are not built.
+[Plan 20](../20-the-wiims-zero-value-fix-and-its-field-table.md) holds
+them, with the field tables, the drills, and the line references of
+phase 1 checked again against the code.
 
 ## The problem
 
@@ -303,7 +312,7 @@ Notes on the rows:
   changes its sample rate. It is not a lip-sync delay
   (`openapi.json`: "SPDIF sample rate switch latency").
 * **`maxVolume`.** The amp's own ceiling overlaps `spec.volume.max`.
-  [Plan 14's open question](14-one-settings-model-for-every-receiver.md#open-questions)
+  [Plan 14's open question](../14-one-settings-model-for-every-receiver.md#open-questions)
   asks which one a person declares, so the field is Reported until it
   is answered.
 * **`network.static`.** Setters exist (`setWlanStaticIp`,

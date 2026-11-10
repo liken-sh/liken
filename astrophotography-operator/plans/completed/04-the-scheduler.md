@@ -9,6 +9,15 @@ first rise on a timer. The sky's geometry is a port of Meeus in
 of this plan is not built. It records the decisions of the design
 conversation of 2026-10-15, which replaced the first draft's score.
 
+Status on 2026-11-10: closed. The horizon filter is built (558625c8,
+`horizon.go` and `sky/horizontal.go`). Nothing else of the design is
+built: `sky/` has no sun or moon, the runner still chooses by priority
+and age (`selection.go`), and no condition says `NotDark` or
+`MoonTooClose`. [Plan 11](../11-the-scheduler-chooses-by-the-sun-the-moon-and-the-work-left.md)
+holds the rest of the design: the sun and the moon, slack, the cost of
+a switch, the new reasons, the `SLACK` and `NEXT` columns, and the
+questions under "Still open".
+
 ## The problem
 
 Inside a reservation, the operator has to choose what to image next,
@@ -194,7 +203,7 @@ rest again.
   hours than its geometry says. A person who worries about a target
   raises its priority.
 - **Deep-sky targets only.** Planetary and solar imaging are [plan
-  10](10-planetary-and-solar-imaging.md).
+  10](../10-planetary-and-solar-imaging.md).
 
 ## Still open
 

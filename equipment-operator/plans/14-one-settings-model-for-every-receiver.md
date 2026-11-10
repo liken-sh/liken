@@ -27,7 +27,7 @@ once for each change of the block (`denon/settings_pending.go:29-38`).
 A person cannot see which treatment a field gets, or tell "this model
 does not have it" from "not read yet". The WiiM driver also reports a
 zero for a failed read (`wiim/settings.go:154-162`);
-[plan 16](16-the-wiims-settings.md) fixes that first.
+[plan 20](20-the-wiims-zero-value-fix-and-its-field-table.md) fixes that first.
 
 Plan 13's rule, "a `Receiver` exposes every setting the receiver
 serves on any protocol", grows without bound. A Yamaha or an Arcam
@@ -389,7 +389,7 @@ block that needs them.
 
 The phases build the engine and the moves for today's fields only.
 New families come with [plan 15](15-the-speaker-layout.md),
-[plan 16](16-the-wiims-settings.md), and
+[plan 20](20-the-wiims-zero-value-fix-and-its-field-table.md), and
 [plan 17](17-the-denons-inputs-zones-and-web-setup.md).
 
 1. The `equipment.Settings` interface, table rows with tiers for every

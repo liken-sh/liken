@@ -11,8 +11,10 @@ and the step-back of step 3 by
 The rest continues in the component plans.
 [library-operator plan 84](../../library-operator/plans/completed/84-a-larger-up-next-card.md)
 holds the card's timing and content from step 3.
-[library-operator plan 23](../../library-operator/plans/23-motion.md)
-holds step 4, and with it the part of step 6 that is not written:
+[library-operator plan 23](../../library-operator/plans/completed/23-motion.md)
+built step 4 except the page backdrop's fade. The open problem
+[browser motion that is not decided](../../library-operator/plans/open-problems/browser-motion-that-is-not-decided.md)
+holds that fade and the part of step 6 that is not written:
 `brand/motion.md` states the rules of the mark and the focus outline,
 and not yet the durations and curves that every surface shares. Step
 5 waits for a workload that needs a moving `Layout` region, and the
@@ -38,7 +40,7 @@ today. When mpv moves its own picture, the move lands only on the
 film's frames, so a 24 fps film moves in 24 uneven steps a second. Each
 step also rebuilds a full-screen buffer in mpv 0.41, and on `liken-1`
 the player container ran out of memory after about 165 steps.
-[library-operator plan 23](../../library-operator/plans/23-motion.md),
+[library-operator plan 23](../../library-operator/plans/completed/23-motion.md),
 motion in the browser, waits on the same missing piece: nobody has
 measured whether a machine keeps its frame rate while something moves.
 

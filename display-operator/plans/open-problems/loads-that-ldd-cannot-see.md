@@ -41,9 +41,10 @@ graph points at a data file either:
 
 The smoke check of the `weston` image, `weston/smoke/weston.sh`,
 starts the compositor headless on an ordinary runner, reads the log,
-and requires three lines in it: `Using GL renderer`, the registration
-of `ivi_layout_api_v1` that `ivi-shell` prints, and the control socket
-that `liken-layout` reports. The image does not publish to ghcr.io
+and requires four lines in it: `Using GL renderer`, the registration
+of `ivi_layout_api_v1` that `ivi-shell` prints, the control socket
+that `liken-layout` reports, and the `weston` line that names the
+version the Dockerfile pins as `WESTON_VERSION`. The image does not publish to ghcr.io
 until that check passes. `go test` covers none of this, because the
 failure is a file that is not in the image.
 

@@ -32,7 +32,7 @@ as it takes.
   group it. The name `Session` stays unused.
 - **In this plan, a person creates the reservation** and names this
   operator as its holder. The scheduler of [plan
-  04](../04-the-scheduler.md) and the reservations of [plan
+  11](../11-the-scheduler-chooses-by-the-sun-the-moon-and-the-work-left.md) and the reservations of [plan
   05](../05-reservations-on-demand.md) build on a sequence that already
   runs by hand.
 - **The operator drives the telescope over INDI and PHD2's API, not
@@ -216,7 +216,7 @@ reasons. A list of targets on the `Reservation` would put imaging into
 `observatory-operator`'s resource, which knows nothing of targets. A
 list of reservations on the `Target` would need an edit every night,
 because a reservation lasts one night. And every target of a namespace
-being eligible is how pods meet nodes: [plan 04](../04-the-scheduler.md)
+being eligible is how pods meet nodes: [plan 11](../11-the-scheduler-chooses-by-the-sun-the-moon-and-the-work-left.md)
 replaces only the order, with a choice for each exposure, and keeps
 the rule of eligibility. Until then, a person suspends a target that
 is below the horizon.

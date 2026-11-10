@@ -4,7 +4,7 @@ Proposed on 2026-10-19. Built on 2026-10-19 and released in
 2026.10.19-004. The first drill passed on liken-1 on 2026-10-20, under
 [Tests](#tests). The replug during a reservation and the operator
 restart during an upload have not run on hardware. It needs `liken`'s
-[milestone 87](../../../liken/plans/87-firmware-facts-a-machine-publishes.md),
+[milestone 87](../../../liken/plans/completed/87-firmware-facts-a-machine-publishes.md),
 which publishes the USB bus and device numbers of each device, and
 whose USB part was built on 2026-10-19. This
 plan adds the cluster-scoped `Firmware` resource and its `upload`

@@ -122,7 +122,7 @@ LLVM is in the `vulkan` base since plan 16, because the AMD Vulkan
 driver links it. A narrow mesa in the `weston` image alone therefore
 leaves LLVM in the image. The `vulkan` base needs the same decision.
 
-[Plan 72](../../../liken/plans/72-the-os-builds-from-source.md) moves
+[`liken` milestone 95](../../../liken/plans/95-the-kernel-the-bootloaders-and-k3s-build-from-source.md) moves
 the OS's vendored binaries to builds from source, with stagex images
 for the build tools. It leaves the operator images out until their
 builds use that toolchain. A narrow mesa would be a build of the same
@@ -151,10 +151,11 @@ kind, and it could use the same toolchain.
 ## The release check runs on llvmpipe
 
 The release starts the compositor headless on an ordinary runner with
-no graphics card. `weston/smoke/weston.sh` requires three lines in the
+no graphics card. `weston/smoke/weston.sh` requires four lines in the
 log: `Using GL renderer`, the registration of `ivi_layout_api_v1` that
-`ivi-shell` prints, and the control socket that `liken-layout`
-reports.
+`ivi-shell` prints, the control socket that `liken-layout` reports,
+and the `weston` line that names the version the Dockerfile pins as
+`WESTON_VERSION`.
 Plan 01 records what that run printed: `GL renderer: llvmpipe (LLVM
 19.1.7)`. llvmpipe is what makes the check possible. A mesa without
 llvmpipe fails that check on the first line it reads.
@@ -175,7 +176,7 @@ There are three options, and none is chosen:
   with_gallium_softpipe or with_gallium_llvmpipe`. Whether weston's
   headless backend starts its GL renderer on softpipe, and how long one
   frame takes, is unverified. Softpipe is slower than llvmpipe by
-  design. But the check starts the compositor and reads three lines from
+  design. But the check starts the compositor and reads four lines from
   the log, so a slower rasterizer costs seconds of runner time and
   does not block the check.
 * **Move the check to hardware.** The

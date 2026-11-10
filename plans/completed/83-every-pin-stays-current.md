@@ -184,8 +184,10 @@ stops reading it. This step changes how the domain builds and keeps
 the pinned version at 1.47.1. The bump to 1.47.4 is in step 6, like
 the other bumps.
 
-`liken/plans/72-the-os-builds-from-source.md` moves the kernel,
-`grub`, `systemd-boot`, and `e2fsprogs` to stagex builds. Under this
+`liken/plans/95-the-kernel-the-bootloaders-and-k3s-build-from-source.md`
+moves the kernel, `grub`, and `systemd-boot` to builds from source.
+(Note, 2026-11-10: milestone 72 named `e2fsprogs` too, and buildroot
+builds it since root plan 88.) Under this
 rule each of them then follows its upstream release. Until then the
 kernel follows Canonical's mainline builds, and the rule accepts
 their lag behind kernel.org.

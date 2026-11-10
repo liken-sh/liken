@@ -8,12 +8,12 @@ fade's milliseconds, and a region that states none jumps. The pass
 sends the module a `move` for a placed surface whose rectangle changed
 (`enterTransition` in `display-operator/placementpass.go`), and the
 module sends the client one configure at the start and glides the view
-on the animation engine (`weston/layout/liken-layout.c`). So the move
+on the animation engine (`weston/layout/motion.c`). So the move
 borrows the enter fade's length, and a region has no length or curve
 for a move of its own.
 
 The compositor already has what the motion needs. The animation engine
-in `liken-layout.c` advances on each repaint of the output, and the
+in `motion.c` advances on each repaint of the output, and the
 arranger inside each region tweens surfaces through
 `liken_arrangement_v1`
 ([plan 31](../completed/31-an-arranger-inside-each-region.md)). Step 5

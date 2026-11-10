@@ -246,13 +246,16 @@ number. Each later plan has its own number in this directory:
 - [14](14-one-settings-model-for-every-receiver.md), one settings model
   for every receiver. Not built.
 - [15](15-the-speaker-layout.md), the speaker layout. Not built.
-- [16](16-the-wiims-settings.md), the WiiM's settings. Not built.
+- [16](completed/16-the-wiims-settings.md), the WiiM's settings. Built: the
+  settings reads on a trigger and a backstop. The rest is plan 20.
 - [17](17-the-denons-inputs-zones-and-web-setup.md), the Denon's
   inputs, zones, and web setup. Not built.
 - [18](completed/18-system-audio-mode-on-the-wake.md), System Audio
   Mode on the wake.
 - [19](completed/19-an-entry-is-current-while-its-pod-is-ready.md), an
   adapter's entry is current while its pod is `Ready`.
+- [20](20-the-wiims-zero-value-fix-and-its-field-table.md), the WiiM's
+  zero-value fix and its field table. Not built.
 
 [Plan 77](../../plans/completed/77-the-media-bus-stops-at-media-operator.md),
 at the top of the repository, moved the level, power, and input asks

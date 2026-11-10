@@ -1,7 +1,7 @@
 # 10, Planetary and solar imaging
 
 Proposed on 2026-10-15, in the design conversation of [plan
-04](04-the-scheduler.md), as a stub so that the work is not lost. Not
+04](completed/04-the-scheduler.md), as a stub so that the work is not lost. Not
 designed.
 
 ## The problem
@@ -15,7 +15,7 @@ work.
   keeps the sharpest. The mount tracks at the planet's own rate, and
   PHD2 does not guide.
 - **Solar imaging is in daylight, through a solar filter.** The
-  twilight filter of [plan 04](04-the-scheduler.md) turns around, and
+  twilight filter of [plan 11](11-the-scheduler-chooses-by-the-sun-the-moon-and-the-work-left.md) turns around, and
   safety becomes a rule: the mount never slews near the sun without
   the filter on.
 - **A body's position moves.** The sun, the moon, and the planets come

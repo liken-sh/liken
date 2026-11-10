@@ -25,7 +25,7 @@ Status on 2026-10-04:
   fetchers: `machine-operator/fetch.go` and `releases/fetch.go` still
   call a bare `http.Get`. Part five covers them.
 * Built 2026-10-08: part five, in
-  [milestone 73](completed/73-a-staged-slot-stays-the-release-it-names.md).
+  [milestone 73](73-a-staged-slot-stays-the-release-it-names.md).
   Both release fetchers download through `releases.Get`, which stops a
   request that receives no bytes for a minute, and a changed target
   cancels the running download.
@@ -81,6 +81,30 @@ Status on 2026-10-04:
   Each item below carries a correction where the code or the fix
   differs from the survey.
 * Every other item is not built.
+
+Status on 2026-11-10: closed. Two more items are built, and every item
+that is not built continues in
+[milestone 94](../94-durability-and-safety-fixes-that-are-not-built.md),
+with the fix text and the corrections below.
+
+* Built 2026-11-01: the external actions of part six. Every `uses:` of
+  a GitHub Action names the commit of a release (1619aea0), and
+  `ci/actions.go` checks the pins.
+* Built 2026-11-01: the `mke2fs` prerequisite of part four's Make
+  gaps. buildroot builds `mke2fs`, and `image/Makefile` lists
+  `$(USERLAND_DIST)/sbin/mke2fs` with the other programs of
+  `liken/userland` (3015ef80, `image/Makefile:53`).
+* Not built, in milestone 94: the device flush after the BIOS arm, the
+  promotion, and the `grub.cfg` heal, and the readback after it; the
+  wrong FAT comment in `init/durable.go`; the barrier between the two
+  GPT copies and `LastUsableLBA`; the race on close in
+  `init/wpactrl.go`; the two unbounded waits after SIGKILL; the proving
+  watchdog's reboot; the node password after a failed symlink; the
+  empty device walk; the drain skipped on a failed Node read; the
+  conditions stamped with the current generation; the grow-only CEL
+  rules on status writes; the flux seed tests that CI skips; the BIOS
+  drill of the release publish; `.DELETE_ON_ERROR`; and the `lego`
+  digest and the split of `RELEASES_CERT_TOKEN`.
 
 The round has six parts: the boot chain's writes, init's process
 supervision, the operators' failure paths, the CRD schema and CI
@@ -603,7 +627,7 @@ transfers. A user-configurable timeout or retry policy is a separate
 interface decision, and the fix for the unbounded wait needs none.
 
 The fix must agree with the open problem
-[staged-slot consistency](completed/73-a-staged-slot-stays-the-release-it-names.md).
+[staged-slot consistency](73-a-staged-slot-stays-the-release-it-names.md).
 A stopped writer can leave a partially updated slot. Stopping the
 writer does not by itself make that slot safe to boot.
 
@@ -674,7 +698,7 @@ The fix:
   composite-action references local.
 * Add a reviewable update process for both kinds of pin. Version
   reporting can follow
-  [milestone 48](completed/48-check-and-update-dependency-pins.md), but
+  [milestone 48](48-check-and-update-dependency-pins.md), but
   action pins are outside the table that milestone watches.
 
 A pin fixes which upstream bytes run. It does not make them
