@@ -49,6 +49,13 @@ pub struct Client {
     /// the second its reading turns. It is a field so a test states the wall
     /// clock instead of reading the real one.
     wall: fn() -> f64,
+    /// What `wall` read at the tick, so the turn of the minute is measured
+    /// from the second of the frame being drawn. The harness asks for the
+    /// next frame at that second, after the frame's work, and a reading
+    /// taken then would name the turn early by that work: the frame drawn
+    /// at that early second shows the old minute, and when the minute turns
+    /// during its work, the next ask names the turn after it.
+    into_minute: f64,
 }
 
 impl Client {
@@ -70,6 +77,7 @@ impl Client {
             keys,
             at: 0.0,
             wall: crate::clock::into_minute,
+            into_minute: 0.0,
         }
     }
 
@@ -86,7 +94,7 @@ impl Client {
             unit: &self.unit,
             at: self.at,
             preview: self.keys.is_some(),
-            into_minute: (self.wall)(),
+            into_minute: self.into_minute,
         }
     }
 
@@ -151,6 +159,7 @@ impl Screen for Client {
 
     fn tick(&mut self, at: f64) {
         self.at = at;
+        self.into_minute = (self.wall)();
     }
 
     /// Hand the loop's waker to the reader, so a press on a controller shows
@@ -277,6 +286,75 @@ mod tests {
         // The clock names the turn of the wall clock's minute, ten seconds
         // on, and nothing else on a settled screen names a second before it.
         assert_eq!(client.next_frame(7.25), Some(17.25));
+    }
+
+    // The harness asks for the next frame after the work of the last one, at
+    // the second of that frame, and the wall clock has moved on by the work.
+    // The turn is read with the frame, so the frame that draws the new minute
+    // is due at the turn and not one frame's work before it.
+    #[test]
+    fn the_turn_of_the_minute_is_read_at_the_frame_on_the_glass() {
+        let mut client = seeded();
+        client.wall = || 50.0;
+        client.tick(7.25);
+        client.wall = || 50.02;
+
+        assert_eq!(client.next_frame(7.25), Some(17.25));
+    }
+
+    // A press that `media-operator` turned into a level.
+    fn pressed() -> Moment {
+        Moment::Level {
+            volume: media_screen::volume::Volume {
+                level: 0.4,
+                ..Default::default()
+            },
+            pressed: true,
+        }
+    }
+
+    // The volume row, pressed at the second 10: it fades in until 10.35,
+    // holds until 14.0, and fades out until 14.6.
+    fn a_press() -> Vec<(Moment, f64)> {
+        vec![(pressed(), 10.0)]
+    }
+
+    // The shade, sent down at the second 10: it falls to dark until 14.0.
+    fn a_sleep() -> Vec<(Moment, f64)> {
+        vec![(Moment::Sleep, 10.0)]
+    }
+
+    // The shade, dark since the second 6 and lifted at 10: it eases to clear
+    // until 10.4.
+    fn a_wake() -> Vec<(Moment, f64)> {
+        vec![(Moment::Sleep, 6.0), (Moment::Wake, 10.0)]
+    }
+
+    // The eases that end on their own. A frame drawn a hundredth of a second
+    // short of the end is due again at once, and a frame at the end or after
+    // it leaves the screen to the clock's next minute, or to the row's
+    // leaving.
+    #[test]
+    fn a_frame_drawn_short_of_an_ease_s_end_is_due_another() {
+        let cases = [
+            (a_press(), 10.34, Some(10.34)),
+            (a_press(), 10.35, Some(14.0)),
+            (a_press(), 14.59, Some(14.59)),
+            (a_press(), 14.75, Some(54.75)),
+            (a_sleep(), 13.99, Some(13.99)),
+            (a_sleep(), 14.0, Some(54.0)),
+            (a_wake(), 10.39, Some(10.39)),
+            (a_wake(), 10.5, Some(50.5)),
+        ];
+        for (moments, drawn, due) in cases {
+            let mut client = seeded();
+            client.wall = || 20.0;
+            for (moment, at) in moments {
+                client.receive(moment, at);
+            }
+            client.tick(drawn);
+            assert_eq!(client.next_frame(drawn), due, "{drawn}");
+        }
     }
 
     #[test]

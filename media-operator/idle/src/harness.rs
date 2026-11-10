@@ -92,10 +92,12 @@ pub trait Screen {
     fn view(&self) -> Element<'_, Self::Message, Theme, Renderer>;
 
     /// The second at which the screen next changes, on the same clock
-    /// [`Screen::tick`] reads. `at` is what that clock reads now, at or after
-    /// the second of the last frame. The harness sleeps until the second this
-    /// answer names, so a screen whose clock draws no seconds redraws once a
-    /// minute rather than sixty times a second.
+    /// [`Screen::tick`] reads. `at` is the second of the last frame, the
+    /// one on the glass, and not the clock now: a motion that ended while
+    /// that frame was drawn is still in motion at `at`, so the answer asks
+    /// for the frame that shows its end. The harness sleeps until the
+    /// second this answer names, so a screen whose clock draws no seconds
+    /// redraws once a minute rather than sixty times a second.
     ///
     /// `None` says nothing on this screen is scheduled, and the loop then
     /// draws on an event alone. A screen that folds in a source of its own,
@@ -184,9 +186,8 @@ pub struct Ready<S: Screen> {
     pub(crate) events: Vec<Event>,
     pub(crate) resized: bool,
     /// The second the screen named for its next change, while the loop sleeps
-    /// toward it. The harness holds that second rather than asking again on
-    /// every pass, because a fresh answer names the change after it and the
-    /// frame would never be drawn.
+    /// toward it. The harness holds that second until the frame it names is
+    /// drawn, and a press or a fold that changed the screen drops it.
     pub(crate) scheduled: Option<f64>,
     /// The timeline's zero: the first frame, not the launch. A compositor
     /// can take seconds to give a window, and a script or a capture that

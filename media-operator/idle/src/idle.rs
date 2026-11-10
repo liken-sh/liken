@@ -101,16 +101,17 @@ pub struct Idle<'a> {
     /// Whether the preview keys are bound, which only a workstation does. The
     /// legend draws under it, so a cluster's idle screen never carries one.
     pub preview: bool,
-    /// How far the wall clock is into its minute, in seconds, which tells the
-    /// clock when its reading next turns.
+    /// How far the wall clock is into its minute, in seconds, at the second
+    /// of the frame, which tells the clock when its reading next turns.
     pub into_minute: f64,
 }
 
 impl Idle<'_> {
     /// The second this screen next changes, which is the first second any one
-    /// element changes at. `at` is what the harness's clock reads now, at or
-    /// after the second of the last frame. A second at or before `at` asks the
-    /// harness to draw now.
+    /// element changes at. `at` is the second of the last frame, the one on
+    /// the glass, and not the clock now, so an ease that ended while that
+    /// frame was drawn still asks for the frame that shows its end. A second
+    /// at or before `at` asks the harness to draw now.
     ///
     /// Each element answers for itself, beside the code that computes its own
     /// drawing, so a change to an ease changes the schedule with it. Most of
