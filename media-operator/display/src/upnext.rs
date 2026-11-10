@@ -47,6 +47,9 @@ pub(crate) const CHIP_Y: f32 = 809.0;
 pub(crate) const CHIP_H: f32 = theme::type_scale::TINY;
 pub(crate) const CHIP_PAD_X: f32 = 22.0;
 pub(crate) const CHIP_PAD_Y: f32 = 9.0;
+/// The top edge of the box around the chip's label, and of the skip
+/// control's.
+pub const CHIP_TOP: f32 = CHIP_Y - CHIP_PAD_Y;
 /// A button rounds at half its height, so its ends are round and it reads
 /// apart from a panel, which rounds at `CARD_R`.
 pub(crate) const CHIP_R: f32 = (CHIP_H + 2.0 * CHIP_PAD_Y) / 2.0;
@@ -564,17 +567,20 @@ impl UpNext {
         }
     }
 
+    /// Whether the OSD draws the chip: an offer that waits for its rise, not
+    /// taken and not beside a stepped-back film.
+    pub fn chip_showing(&self) -> bool {
+        self.offer.is_some() && !self.waiting && !self.stepped && !self.showing_card()
+    }
+
     /// Draw the offer as part of the OSD, the chip before the rise and the
     /// card after it, at the OSD's own fade. A taken offer fades on its own
     /// clock outside the OSD, so the OSD draws nothing of it.
     pub fn draw(&self, brush: &mut Brush<'_>, focused: bool, art: &dyn Art, now: &Zoned) {
-        if self.offer.is_none() || self.waiting || self.stepped {
-            return;
-        }
-        if self.showing_card() {
-            self.card(brush, focused, art, now);
-        } else {
+        if self.chip_showing() {
             self.chip(brush, focused);
+        } else if self.offer.is_some() && !self.waiting && !self.stepped {
+            self.card(brush, focused, art, now);
         }
     }
 

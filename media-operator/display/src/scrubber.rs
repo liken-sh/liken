@@ -27,6 +27,8 @@ const BELOW_GAP: f32 = 18.0;
 /// The current time rides above the bar; the chapter title and the time left
 /// sit below it.
 const TOP_Y: f32 = BAR_Y - TIME_ABOVE;
+/// The top of the time's line box, the highest row the scrubber draws on.
+pub const TOP: f32 = TOP_Y - theme::type_scale::LABEL;
 const BELOW_Y: f32 = BAR_Y + BELOW_GAP;
 /// The playhead stands proud of the bar, so its points read against the video
 /// above and below the green fill it rides on.

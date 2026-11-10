@@ -71,6 +71,8 @@ const TEXT_GAP: f32 = 12.0;
 /// of them comes or goes.
 const ROW_TOP: f32 = 688.0;
 const HEADING_Y: f32 = 652.0;
+/// The top of the heading's line box, the highest row the cast row draws on.
+pub const TOP: f32 = HEADING_Y;
 const HEADING: &str = "In this scene";
 
 /// The drop from the card's top to each of its three lines.

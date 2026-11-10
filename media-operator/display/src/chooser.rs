@@ -98,13 +98,25 @@ fn first(len: usize, selected: usize) -> usize {
     }
 }
 
+/// The top edge of the panel a list of `len` entries draws as above the
+/// control strip.
+pub fn top(len: usize) -> f32 {
+    top_at(len, BOTTOM)
+}
+
+/// The top edge of the panel a list of `len` entries draws as, grown upward
+/// from the baseline `bottom`.
+pub fn top_at(len: usize, bottom: f32) -> f32 {
+    bottom - (len.min(MAX_ROWS) as f32 * ROW_H + PAD * 2.0)
+}
+
 /// The panel one list draws as, grown upward from the baseline `bottom`.
 pub fn panel_at(entries: &[String], selected: usize, bottom: f32) -> Panel {
     let visible = entries.len().min(MAX_ROWS);
     let first = first(entries.len(), selected);
 
-    let height = visible as f32 * ROW_H + PAD * 2.0;
-    let top = bottom - height;
+    let top = top_at(entries.len(), bottom);
+    let height = bottom - top;
     let row0 = top + PAD;
 
     Panel {

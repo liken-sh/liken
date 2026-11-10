@@ -20,6 +20,7 @@ pub mod record;
 pub mod scrubber;
 pub mod skip;
 pub mod strip;
+pub mod subtitles;
 pub mod theme;
 pub mod track;
 pub mod upnext;

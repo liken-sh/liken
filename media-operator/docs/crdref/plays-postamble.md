@@ -139,6 +139,22 @@ so the dot stays where it is when the focus moves. While a chooser, an adjuster,
 card's panel is open, the on-screen display stays up, and it hides on
 its own again only after the panel closes.
 
+The subtitles stay readable while the on-screen display is up. mpv
+draws them under the display, so the display moves them up until
+their lowest line ends a small gap above the highest thing it draws at
+the foot of the frame: the time over the scrubber, the up-next chip
+or the skip control, the row of cards and a card's panel, a scan's
+thumbnail, or an open chooser or adjuster. They move with the
+display's fade in and return to their place with its fade out. The
+display sets mpv's `sub-pos` for this, which moves text tracks, ASS
+tracks, and image tracks such as PGS. An ASS sign that the track
+places at a fixed point does not move, and neither does the part of an
+image track that draws in the upper half of the picture. mpv moves an
+image track's cue by a share of the picture's height, not the
+frame's, so on a letterboxed film the cue moves a shorter way, from a
+place inside the picture that is already higher than a text cue's. The display
+moves no subtitles while no subtitle track plays.
+
 `back` has one meaning for each state, tried in order. It closes an
 open chooser or a card's panel, cancels a scan's preview, and hides the on-screen
 display. With the display hidden and the film stepped back beside the

@@ -192,6 +192,13 @@ impl Cast {
         Vec::new()
     }
 
+    /// The top edge of the open panel, or nothing while it is closed.
+    pub fn actions_top(&self) -> Option<f32> {
+        self.actions
+            .as_ref()
+            .map(|_| chooser::top_at(ROWS.len(), BOTTOM))
+    }
+
     /// The open panel, as the chooser draws it.
     pub fn draw_actions(&self, brush: &mut Brush<'_>, film: &Film) {
         let Some(actions) = self.actions.as_ref() else {

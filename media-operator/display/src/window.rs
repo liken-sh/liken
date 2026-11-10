@@ -16,6 +16,7 @@ use tokio::sync::{broadcast, watch};
 
 mod arranging;
 mod detaching;
+mod subtitles;
 
 use crate::arranger::link::{self, Link};
 use crate::arranger::{self as arrangement, Arranger};
@@ -149,6 +150,8 @@ pub struct Display {
     volume: Volume,
     cast: Cast,
     art: Art,
+    /// Where the display last asked mpv to draw the subtitles.
+    subtitles: crate::subtitles::Subtitles,
     /// What the compositor granted and where the film stands, and the
     /// binding that carries each arrangement to the compositor.
     arranger: Arranger,
@@ -223,6 +226,7 @@ impl Display {
             volume: Volume::default(),
             cast: Cast::default(),
             art: Art::default(),
+            subtitles: crate::subtitles::Subtitles::default(),
             arranger: Arranger::default(),
             link: None,
             detached: false,
@@ -248,6 +252,7 @@ impl Display {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.step(message);
         self.follow_offer();
+        self.follow_subtitles();
         let jobs = self.sync_art();
         let _ = self.watching.send(Watching {
             canvas: self.canvas,

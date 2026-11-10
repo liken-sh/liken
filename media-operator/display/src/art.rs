@@ -38,6 +38,9 @@ const TILE_H: f32 = 220.0;
 /// The tile's bottom edge in canvas coordinates. The tile sits above the time
 /// label and the bar, and grows upward from this line.
 const TILE_BOTTOM_Y: f32 = 836.0;
+/// The top edge of the largest thumbnail, the highest row a scan's preview
+/// draws on.
+pub const TILE_TOP: f32 = TILE_BOTTOM_Y - TILE_H;
 
 /// The region the cover fits in: between the left margin and the right one,
 /// and from under the header block to above the scrubber.

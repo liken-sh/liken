@@ -376,6 +376,17 @@ impl Strip {
         }
     }
 
+    /// The top edge of the open chooser's or adjuster's panel, or nothing
+    /// while none is open.
+    pub fn panel_top(&self, film: &Film) -> Option<f32> {
+        let open = self.open?;
+        match (open.control.track(), open.control.offset()) {
+            (Some(track), _) => Some(chooser::top(track.entries(film).len())),
+            (_, Some(offset)) => Some(offset.shape().y),
+            _ => None,
+        }
+    }
+
     /// The open chooser, which draws over every region and the dim under it.
     pub fn draw_chooser(&self, brush: &mut Brush<'_>, film: &Film) {
         let Some(open) = self.open else {
