@@ -92,7 +92,9 @@ fn a_divider_holds_at_the_top_of_the_wall_while_its_rows_scroll_under_it() {
     let layout = layout();
     let region = region(frame());
     let seasons = seasons();
-    let offset = layout.scroll(Focus::Still(7), &seasons, region.height);
+    let offset = layout
+        .rest(Focus::Still(7), &seasons, region.height + head())
+        .offset;
     assert!(offset > layout.bands[0].top);
     assert_eq!(divider_box(region, &layout.bands[0], offset).y, region.y);
 }
@@ -202,34 +204,42 @@ fn the_more_from_strip_stands_between_the_last_stripe_and_the_foot() {
     assert!((layout.content - plain.content - strip_height() - STRIPE_GAP).abs() < 1e-3);
 }
 
+// Where a block that starts this far down the wall draws in the frame
+// with the page at rest: under the header's foot, which has risen by the
+// lift, and up by the wall's own scroll.
+fn drawn(top: f32, rest: Rest) -> f32 {
+    head() - rest.lift + top - rest.offset
+}
+
 // A series with no stripe still keeps a gap between the strip and the
 // foot, and the strip pulls the foot into view.
 #[test]
 fn the_more_from_strip_pulls_the_foot_into_view() {
-    let height = region(frame()).height;
     for layout in [
         with_more(),
         Layout::of(&seasons(), cells(), 0, 0, true, FOOT_LINES),
     ] {
         let top = layout.more.expect("the layout places the strip");
         assert_eq!(layout.foot, top + strip_height() + STRIPE_GAP);
-        let offset = layout.scroll(Focus::More(0), &seasons(), height);
-        assert!(top - offset >= 0.0);
-        assert!(layout.foot + FOOT_LINES - offset <= height);
+        let rest = layout.rest(Focus::More(0), &seasons(), HEIGHT);
+        assert!(drawn(top, rest) >= VIEWPORT_TOP);
+        assert!(drawn(layout.foot + FOOT_LINES, rest) <= HEIGHT);
     }
-    assert_eq!(layout().scroll(Focus::More(0), &seasons(), height), 0.0);
+    assert_eq!(
+        layout().rest(Focus::More(0), &seasons(), HEIGHT),
+        Rest::default()
+    );
 }
 
 #[test]
-fn the_wall_scrolls_the_focused_franchise_strip_into_view() {
+fn the_page_scrolls_the_focused_franchise_strip_into_view() {
     let layout = with_franchise();
-    let height = region(frame()).height;
-    let offset = layout.scroll(Focus::Franchise(0, Place::Heading), &seasons(), height);
-    assert!(layout.franchises[0] - offset >= 0.0);
-    assert!(layout.franchises[0] + strip_height() - offset <= height);
+    let rest = layout.rest(Focus::Franchise(0, Place::Heading), &seasons(), HEIGHT);
+    assert!(drawn(layout.franchises[0], rest) >= VIEWPORT_TOP);
+    assert!(drawn(layout.franchises[0] + strip_height(), rest) <= HEIGHT);
     assert_eq!(
-        layout.scroll(Focus::Franchise(9, Place::Heading), &seasons(), height),
-        0.0
+        layout.rest(Focus::Franchise(9, Place::Heading), &seasons(), HEIGHT),
+        Rest::default()
     );
 }
 
@@ -268,25 +278,44 @@ fn a_wall_with_no_stripe_still_leaves_a_gap_over_its_foot() {
 #[test]
 fn the_last_stripe_pulls_the_foot_into_view() {
     let layout = with_foot();
-    let height = region(frame()).height;
-    let offset = layout.scroll(Focus::Stripe(2, 0), &seasons(), height);
-    assert!(layout.foot + FOOT_LINES - offset <= height);
+    let rest = layout.rest(Focus::Stripe(2, 0), &seasons(), HEIGHT);
+    assert!(drawn(layout.foot + FOOT_LINES, rest) <= HEIGHT);
 }
 
+// Focus on a stripe rests it whole between the strip's line and the foot
+// of the frame. The header has scrolled up out of the way first, as far
+// as the line and no further, and the wall's own scroll does the rest.
 #[test]
-fn the_wall_scrolls_the_focused_stripe_into_view() {
+fn the_page_scrolls_the_focused_stripe_into_view() {
     let layout = with_stripes();
-    let height = region(frame()).height;
-    let mut offsets = Vec::new();
+    let over = head() - VIEWPORT_TOP;
+    let mut pages = Vec::new();
     for stripe in 0..3 {
-        let offset = layout.scroll(Focus::Stripe(stripe, 0), &seasons(), height);
-        assert!(layout.stripes[stripe] - offset >= 0.0);
-        assert!(layout.stripes[stripe] + people::HEIGHT - offset <= height);
-        offsets.push(offset);
+        let rest = layout.rest(Focus::Stripe(stripe, 0), &seasons(), HEIGHT);
+        assert!(drawn(layout.stripes[stripe], rest) >= VIEWPORT_TOP);
+        assert!(drawn(layout.stripes[stripe] + people::HEIGHT, rest) <= HEIGHT);
+        assert_eq!(rest.lift, over);
+        pages.push(rest.lift + rest.offset);
     }
-    assert!(offsets[0] > layout.scroll(Focus::Still(26), &seasons(), height));
-    assert!(offsets[2] > offsets[1]);
-    assert_eq!(offsets[2], layout.content - height);
+    let wall = layout.rest(Focus::Still(26), &seasons(), HEIGHT);
+    assert_eq!(wall.lift, 0.0);
+    assert!(pages[0] > wall.offset);
+    assert!(pages[2] > pages[1]);
+    assert_eq!(pages[2], over + layout.content - (HEIGHT - VIEWPORT_TOP));
+}
+
+// A page whose rows fit under a header lifted part of the way lifts it
+// only that far, as a movie's short page scrolls its head part way.
+#[test]
+fn a_short_page_lifts_the_header_only_as_far_as_its_rows_need() {
+    let layout = Layout::of(&[], cells(), 0, 2, false, 0.0);
+    let rest = layout.rest(Focus::Stripe(1, 0), &[], HEIGHT);
+    assert!(
+        rest.lift > 0.0 && rest.lift < head() - VIEWPORT_TOP,
+        "{rest:?}"
+    );
+    assert_eq!(rest.offset, 0.0);
+    assert_eq!(drawn(layout.content, rest), HEIGHT);
 }
 
 #[test]
@@ -303,10 +332,14 @@ fn the_header_stands_still_while_the_wall_scrolls_under_it() {
     let layout = layout();
     let region = region(frame());
     assert_eq!(
-        layout.scroll(Focus::Still(0), &seasons(), region.height),
+        layout
+            .rest(Focus::Still(0), &seasons(), region.height + head())
+            .offset,
         0.0
     );
-    let deep = layout.scroll(Focus::Still(20), &seasons(), region.height);
+    let deep = layout
+        .rest(Focus::Still(20), &seasons(), region.height + head())
+        .offset;
     assert!(deep > 0.0);
     assert_eq!(header(frame()), header(frame()));
     assert_eq!(super::region(frame()), region);
@@ -316,9 +349,18 @@ fn the_header_stands_still_while_the_wall_scrolls_under_it() {
 fn the_wall_scrolls_as_focus_moves_down() {
     let layout = layout();
     let height = region(frame()).height;
-    assert_eq!(layout.scroll(Focus::Still(0), &seasons(), height), 0.0);
-    let deep = layout.scroll(Focus::Still(20), &seasons(), height);
-    let deeper = layout.scroll(Focus::Still(26), &seasons(), height);
+    assert_eq!(
+        layout
+            .rest(Focus::Still(0), &seasons(), height + head())
+            .offset,
+        0.0
+    );
+    let deep = layout
+        .rest(Focus::Still(20), &seasons(), height + head())
+        .offset;
+    let deeper = layout
+        .rest(Focus::Still(26), &seasons(), height + head())
+        .offset;
     assert!(deep > 0.0);
     assert!(deeper > deep);
 }
@@ -328,7 +370,9 @@ fn the_scroll_stops_at_the_foot_of_the_wall() {
     let layout = layout();
     let height = region(frame()).height;
     assert_eq!(
-        layout.scroll(Focus::Still(26), &seasons(), height),
+        layout
+            .rest(Focus::Still(26), &seasons(), height + head())
+            .offset,
         layout.content - height
     );
 }
@@ -336,14 +380,22 @@ fn the_scroll_stops_at_the_foot_of_the_wall() {
 #[test]
 fn a_wall_shorter_than_its_region_never_scrolls() {
     let layout = Layout::of(&seasons()[..1], cells(), 0, 0, false, 0.0);
-    assert_eq!(layout.scroll(Focus::Still(7), &seasons()[..1], 2000.0), 0.0);
+    assert_eq!(
+        layout
+            .rest(Focus::Still(7), &seasons()[..1], 2000.0 + head())
+            .offset,
+        0.0
+    );
 }
 
 #[test]
 fn a_series_with_no_episodes_never_scrolls() {
     let layout = Layout::of(&[], cells(), 0, 0, false, 0.0);
     assert_eq!(layout.content, HEAD + text::height(1, look::FACTS));
-    assert_eq!(layout.scroll(Focus::Still(0), &[], 1080.0), 0.0);
+    assert_eq!(
+        layout.rest(Focus::Still(0), &[], 1080.0 + head()).offset,
+        0.0
+    );
 }
 
 #[test]
@@ -359,14 +411,24 @@ fn a_band_shows_only_where_the_region_reaches_it() {
 fn the_rail_reaches_this_measure_as_the_still_its_bar_lands_on() {
     let layout = layout();
     let height = region(frame()).height;
-    assert_eq!(layout.scroll(Focus::Rail(2), &seasons(), height), 0.0);
+    assert_eq!(
+        layout
+            .rest(Focus::Rail(2), &seasons(), height + head())
+            .offset,
+        0.0
+    );
 }
 
 #[test]
 fn the_wall_stands_at_its_top_while_the_button_row_holds_focus() {
     let layout = layout();
     let height = region(frame()).height;
-    assert_eq!(layout.scroll(Focus::Buttons(0), &seasons(), height), 0.0);
+    assert_eq!(
+        layout
+            .rest(Focus::Buttons(0), &seasons(), height + head())
+            .offset,
+        0.0
+    );
 }
 
 #[test]

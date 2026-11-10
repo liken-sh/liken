@@ -138,7 +138,8 @@ Up from the top of any wall puts focus on the strip, the row across
 the top that holds the clock and the search glass. On a title's page,
 a light shade darkens the backdrop under the strip, so the clock and
 the glass draw over a darker ground. A movie's page that scrolls down
-to its rows shows them only under the strip's line, so no poster or
+to its rows, and a series' page that scrolls down to the rows under its
+seasons, show them only under the strip's line, so no poster or
 headshot passes under the clock. A title's page draws its rows of
 posters, headshots, and episode stills on a near-black ground across
 the whole width, so a caption at the right end of a row reads over a
@@ -353,7 +354,12 @@ file.
 Under the header, the page shows its seasons as a wall of episode stills. A series
 whose folder holds no file with an episode number in its name, as
 [Scanning](/docs/guides/scanning/) describes, shows a line that says so
-in place of the wall. Enter on
+in place of the wall. While focus is on the wall, the header stays at
+the top of the screen and the wall scrolls under it, because the header
+shows the focused episode's name, air date, and plot. Down from the last
+season to the rows under it, such as the cast or the studios, scrolls
+the header away the way a movie's page scrolls its head, and up to the
+wall brings it back. Enter on
 a still opens the episode's own row in the header, level with the
 ratings line. The row holds the playback buttons of a movie's page
 except Trailer, the time a play from its first button would end beside

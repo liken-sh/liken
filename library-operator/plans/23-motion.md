@@ -137,8 +137,13 @@ page and a series page hold one for the page and a `motion::Rows`, one
 `Glide` for each strip and stripe under the playback row or the
 seasons. A row there scrolls back to the slot it keeps when focus
 leaves it, so a press that moves focus from one row to the next eases
-both. The header of a series page never scrolls, so a press between
-the wall and the header's button row moves the outline and no scroll.
+both. The header of a series page holds while focus is on the wall or
+on the header's button row, so a press between the two moves the
+outline and no scroll. When focus moves to a row under the seasons, the
+header shows no episode, so the page scrolls it away the way a movie
+page scrolls its head, and the rows stop at the strip's line. A second
+`Glide`, the header's lift, eases on the same curve and length as the
+wall's scroll, so the header and the wall move together.
 A franchise's wall moves only when focus leaves the view, so its next
 rest is measured from the place its `Glide` last went to.
 `Screen::follow` moves each scroll to where the screen now rests, on

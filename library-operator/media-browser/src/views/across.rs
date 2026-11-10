@@ -42,6 +42,15 @@ impl<'a, T: Card, P: Card> Across<'a, T, P> {
         }
     }
 
+    /// The box the row draws in on its page: its heading, its slots, and
+    /// the captions under them.
+    pub fn region(&self) -> Rectangle {
+        match self {
+            Self::Strip(row) => row.region,
+            Self::Stripe(row) => row.region,
+        }
+    }
+
     /// The box the focus outline goes around on this row, where its scroll
     /// comes to rest, or nothing while another row of the page holds focus.
     pub fn focused(&self) -> Option<Rectangle> {

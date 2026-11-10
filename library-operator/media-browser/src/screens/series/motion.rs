@@ -3,9 +3,12 @@
 // scrolls across to keep its anchor in view. Each scroll eases from where
 // it is drawn to where a press puts it, and the browser's focus outline
 // travels to the focused still, bar, button, mark, poster, or headshot at
-// the place those scrolls come to rest. The header never scrolls, so a
-// press between the wall and the header's row moves the outline and no
-// scroll.
+// the place those scrolls come to rest. The header holds while focus is
+// on the wall or on the header's own row, so a press between the two
+// moves the outline and no scroll. A press from the wall to a row under
+// the seasons eases the header up out of the frame and the wall up with
+// it, on the same curve and over the same time, and a press back eases
+// both back.
 
 use iced_winit::core::Rectangle;
 
@@ -17,9 +20,9 @@ use crate::views::clock::backing;
 use crate::views::{self, buttons, rail, wall, watch as line};
 
 impl Series {
-    /// The level of the backing under the browser's strip. The header
-    /// never scrolls, so the level is the one a page at rest takes over
-    /// its backdrop.
+    /// The level of the backing under the browser's strip: the one a page
+    /// takes over its backdrop, because the backdrop stays behind the
+    /// strip whether the header holds or has scrolled away.
     pub fn strip_backing(&self) -> f32 {
         backing::level(!self.backdrop.is_empty())
     }
@@ -75,10 +78,10 @@ impl Series {
         wall::focused(&grid)
     }
 
-    /// Follow the places the wall and every row under the seasons scroll
-    /// to at these bounds: ease there on the pace of a press, or snap
-    /// there where nothing pressed. The answer is the second the last
-    /// scroll comes to rest.
+    /// Follow the places the header, the wall, and every row under the
+    /// seasons scroll to at these bounds: ease there on the pace of a
+    /// press, or snap there where nothing pressed. The answer is the
+    /// second the last scroll comes to rest.
     pub fn follow(&mut self, bounds: Rectangle, at: f64, pace: Option<f64>) -> f64 {
         let placed = placed(self, bounds);
         let across: Vec<f32> = rows(self, &placed, placed.offset, Some(self.focus))
@@ -86,7 +89,8 @@ impl Series {
             .map(Across::scrolled)
             .collect();
         let down = self.scroll.follow(placed.offset, at, pace, look::SCROLL);
-        down.max(self.rows.follow(&across, at, pace))
+        let lift = self.lift.follow(placed.lift, at, pace, look::SCROLL);
+        down.max(lift).max(self.rows.follow(&across, at, pace))
     }
 }
 

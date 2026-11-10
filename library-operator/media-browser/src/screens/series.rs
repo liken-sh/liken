@@ -3,8 +3,11 @@
 // divider before each season's first row, a strip for each franchise the
 // series belongs to after the last season, the stripes of credited
 // people after those, the More from strip of one of its studios or
-// networks, and the other studios. The header stays at the top of the frame, because
-// it shows the focused episode's facts and plot.
+// networks, and the other studios. The header stays at the top of the
+// frame while focus is on the wall, because it shows the focused
+// episode's facts and plot. Once focus moves to a row under the seasons,
+// the header shows no episode, and the page scrolls it away the way a
+// movie's page scrolls its head.
 
 mod episode;
 mod layout;
@@ -234,6 +237,10 @@ pub struct Series {
     // How far the wall has scrolled down, as it eases to the place that
     // keeps the focused still or row in view.
     scroll: Glide,
+    // How far the header has scrolled up out of the frame, as it eases
+    // away when focus moves under the seasons and back when focus returns
+    // to the wall.
+    lift: Glide,
     // How far each row under the seasons has scrolled across, as it eases
     // to the place that keeps its anchor in view.
     rows: Rows,
@@ -314,6 +321,7 @@ impl Series {
             via: None,
             focus: Focus::Still(0),
             scroll: Glide::still(0.0),
+            lift: Glide::still(0.0),
             rows: Rows::default(),
         })
     }
@@ -342,6 +350,7 @@ impl Series {
         fresh.entered = self.entered.min(fresh.stills.len().saturating_sub(1));
         fresh.via = self.via.clone();
         fresh.scroll = self.scroll;
+        fresh.lift = self.lift;
         fresh.rows = std::mem::take(&mut self.rows);
         let focus = self.focus;
         *self = fresh;

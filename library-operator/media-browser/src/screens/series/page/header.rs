@@ -88,22 +88,28 @@ impl<A: Art> Page<'_, A> {
     // never pushes the header past its fixed height. The focused
     // episode's line and plot stand in the place the series' plot takes on
     // a series whose episodes have not landed, and while a stripe holds
-    // focus.
+    // focus. `shown` is the part of the frame the header shows at its
+    // lift. The logo's own clip keeps to it, because a clip made inside
+    // another takes its own bounds and not the part the two share.
     pub(super) fn header(
         &self,
         frame: &mut canvas::Frame<Renderer>,
         store: &mut A,
         bounds: Rectangle,
-        region: Rectangle,
+        shown: Rectangle,
         focus: Option<Focus>,
     ) {
         let series = self.series;
+        let region = layout::header(bounds);
         // The column is a share of the whole frame's width, and not of the
         // content region's, so it ends inside the scrim's full shade.
         let column = bounds.width * COLUMN;
         let mut stack = Stack::new(Point::new(region.x, region.y + layout::TOP), layout::GAP);
 
         let title = area(stack.at().x, stack.at().y, column, layout::LOGO_HEIGHT);
+        let title = title
+            .intersection(&shown)
+            .unwrap_or(area(title.x, shown.y, 0.0, 0.0));
         crate::views::clip::within(frame, title, |frame| {
             header::title(
                 frame,

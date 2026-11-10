@@ -94,11 +94,9 @@ fn scrolled(page: &Series) -> f32 {
         COLUMNS,
         crate::views::card::LINES,
     );
-    Layout::of(&page.seasons, cells, 0, 0, false, 0.0).scroll(
-        seasons::standing(page),
-        &page.seasons,
-        region.height,
-    )
+    Layout::of(&page.seasons, cells, 0, 0, false, 0.0)
+        .rest(seasons::standing(page), &page.seasons, bounds.height)
+        .offset
 }
 
 fn arrived_deep() -> (Series, Serials) {

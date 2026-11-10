@@ -1,8 +1,11 @@
 // The series page's front layer: the header at the top of the frame, and
-// the wall of episode stills in the region under it. The header stands
-// still, because it carries the focused episode's line and its plot, and
-// the wall scrolls inside its own region, clipped to it, so no still and
-// no divider draws over the header.
+// the wall of episode stills in the region under it. The header holds
+// while focus is on the wall, because it carries the focused episode's
+// line and its plot, and the wall scrolls inside its own region, clipped
+// to it, so no still and no divider draws over the header. While focus
+// is on a row under the seasons, the header rises out of the frame and
+// the region rises with its foot, up to the line under the browser's
+// strip, so the rows take the frame and still never cross the header.
 //
 // The backdrop and the scrim under this layer cover the header alone, so
 // the wall draws on the black ground and no art sits over art. The page's
@@ -79,9 +82,25 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let store = &mut *self.store.borrow_mut();
 
-        self.header(&mut frame, store, bounds, layout::header(bounds), focus);
+        // The header and the wall move together: the header rises out of
+        // the frame by the lift the ease has reached at this second, and
+        // the wall's region rises with the header's foot.
+        let rest = placed(series, bounds);
+        let lift = series.lift.toward(rest.lift, self.at);
+        let wall = rest.at(lift);
 
-        let wall = placed(series, bounds);
+        // A rising header shows only under the line the page shows its
+        // blocks under, so it never draws under the browser's strip.
+        // `ink::under` holds its text there too, because a line of text
+        // keeps the clip of its own band.
+        let raised = area(bounds.x, bounds.y - lift, bounds.width, bounds.height);
+        let shown = layout::head_shown(bounds, lift);
+        ink::under(shown.y, || {
+            crate::views::clip::within(&mut frame, shown, |frame| {
+                self.header(frame, store, raised, shown, focus);
+            });
+        });
+
         let Placed {
             whole,
             region,
@@ -90,7 +109,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         } = wall;
         let bands = &wall.layout.bands;
         let width = region.width - 2.0 * inset;
-        let offset = series.scroll.toward(wall.offset, self.at);
+        let offset = series.scroll.toward(rest.offset, self.at);
 
         // The stills draw under the band a held divider keeps, and the
         // dividers over their own clip, because the renderer draws every
@@ -134,7 +153,10 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
                 // this second, toward the place this frame's focus rests it at.
                 for (index, row) in rows(series, &wall, offset, focus).into_iter().enumerate() {
                     let scroll = series.rows.at(index, row.scrolled(), self.at);
-                    row.at(scroll).faced(self.faces).draw(frame, store);
+                    let line = captions_line(row.region(), region.y);
+                    ink::under(line, || {
+                        row.at(scroll).faced(self.faces).draw(frame, store);
+                    });
                 }
 
                 let (at, width) = foot_at(&wall, offset);
@@ -174,6 +196,47 @@ pub(super) struct Placed {
     inset: f32,
     layout: Layout,
     pub(super) offset: f32,
+    pub(super) lift: f32,
+}
+
+impl Placed {
+    /// The same wall with the header lifted this far: the regions move
+    /// with the foot of the header, which is where a frame part way
+    /// through an ease draws them. The rail keeps its height, so its bars
+    /// keep the fit they were counted for.
+    pub(super) fn at(&self, lift: f32) -> Self {
+        let by = lift - self.lift;
+        Self {
+            whole: area(
+                self.whole.x,
+                self.whole.y - by,
+                self.whole.width,
+                self.whole.height,
+            ),
+            region: layout::lifted(self.region, by),
+            inset: self.inset,
+            layout: self.layout.clone(),
+            offset: self.offset,
+            lift,
+        }
+    }
+
+    // The same wall scrolled this far down its region.
+    fn scrolled(self, offset: f32) -> Self {
+        Self { offset, ..self }
+    }
+}
+
+/// The line no text of a row may reach above, for a row that draws in
+/// this box under a region that starts at `top`. A row whose top has
+/// scrolled past the region's top shows only part of its posters or
+/// headshots, so it draws none of its text: names under pictures that
+/// are cut away would read as a row of their own.
+pub(super) fn captions_line(row: Rectangle, top: f32) -> f32 {
+    match row.y < top {
+        true => row.y + row.height,
+        false => top,
+    }
 }
 
 /// The top left of the foot at the wall's scroll, and its width: under
@@ -215,14 +278,17 @@ pub(super) fn placed(series: &Series, bounds: Rectangle) -> Placed {
         series.more.is_some(),
         series.foot.height(region.width - 2.0 * inset),
     );
-    let offset = layout.scroll(seasons::standing(series), &series.seasons, region.height);
+    let rest = layout.rest(seasons::standing(series), &series.seasons, bounds.height);
     Placed {
         whole,
         region,
         inset,
         layout,
-        offset,
+        offset: 0.0,
+        lift: 0.0,
     }
+    .at(rest.lift)
+    .scrolled(rest.offset)
 }
 
 /// The grid of one season's stills at this scroll down of the wall, with
@@ -378,7 +444,14 @@ impl Series {
             library: &self.library,
             art: &self.backdrop,
             store,
-            ground: |_| layers::Ground::Below(layout::head()),
+            // The ground rises with the foot of the header, at the lift the
+            // ease has reached this frame, so the rows that scroll up into
+            // the header's place draw on the ground and not over the
+            // backdrop.
+            ground: move |bounds| {
+                let lift = self.lift.toward(placed(self, bounds).lift, at);
+                layers::Ground::Below(layout::head() - lift)
+            },
             front: Page {
                 series: self,
                 store,

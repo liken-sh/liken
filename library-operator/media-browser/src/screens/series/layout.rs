@@ -1,16 +1,22 @@
 // The series page's geometry: a header of a fixed height at the top, and
 // under it the region the wall of stills scrolls in. The header stays
-// because it carries the focused episode's line and its plot, and a person
-// reads them while moving across the wall. Every measure here is pure over
+// while focus is on the wall, because it carries the focused episode's
+// line and its plot, and a person reads them while moving across the
+// wall. Focus on a row under the seasons lifts the header out of the
+// frame, because it shows no episode then. Every measure here is pure over
 // numbers, so the fit at 1080 and the scroll are tested without a window.
 
 use super::{COLUMNS, Focus, Season};
 use crate::look;
 use crate::views::{
-    REACH, area, card, clip_marked, divider, people, ratings, screen, scroll, stack, strip, text,
-    wall,
+    REACH, area, band, card, clip_marked, divider, people, ratings, screen, scroll, stack, strip,
+    text, wall,
 };
 use iced_winit::core::Rectangle;
+
+/// The line a page scrolled to its rows shows them under: the foot of
+/// the browser's strip, where a movie's page stops its rows too.
+pub const VIEWPORT_TOP: f32 = band::HEIGHT;
 
 /// The space between the foot of the header and the first divider.
 pub const HEAD: f32 = 20.0;
@@ -95,6 +101,33 @@ pub fn region(bounds: Rectangle) -> Rectangle {
     )
 }
 
+/// A region of the page moved up by the header's lift: its top rises
+/// with the foot of the header, and its foot stays at the foot of the
+/// frame.
+pub fn lifted(region: Rectangle, lift: f32) -> Rectangle {
+    area(
+        region.x,
+        region.y - lift,
+        region.width,
+        region.height + lift,
+    )
+}
+
+/// The part of the frame the header still draws in at this lift: from
+/// the line the page shows its blocks under, which falls from the top of
+/// the frame to `VIEWPORT_TOP` as the header rises, down to the foot of
+/// the header. A header lifted wholly past that line draws nothing.
+pub fn head_shown(bounds: Rectangle, lift: f32) -> Rectangle {
+    let top = lift.clamp(0.0, VIEWPORT_TOP);
+    let foot = head() - lift;
+    area(
+        bounds.x,
+        bounds.y + top,
+        bounds.width,
+        (foot - top).max(0.0),
+    )
+}
+
 /// The height the header's blocks take with every one of them present.
 /// Each block is cut to its own lines, so this is the height of any
 /// series' header and not of one series'.
@@ -169,6 +202,28 @@ impl Band {
     pub fn shows(&self, offset: f32, height: f32) -> bool {
         self.top < offset + height && self.top + self.height > offset
     }
+}
+
+/// Where the page rests: how far the header has scrolled up out of the
+/// frame, and how far the wall has scrolled in the region under it.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Rest {
+    /// How far the header has scrolled up. It is zero while focus is on
+    /// the wall, and at most the height of the header over `VIEWPORT_TOP`.
+    pub lift: f32,
+    /// How far the wall has scrolled down inside its region.
+    pub offset: f32,
+}
+
+// Whether focus is on a row under the seasons: a franchise strip, a
+// stripe of people, the More from strip, or a studio of the foot. The
+// header shows no episode while one of them holds focus, so the page
+// scrolls the header away to give the rows the frame.
+fn under_the_seasons(focus: Focus) -> bool {
+    matches!(
+        focus,
+        Focus::Franchise(..) | Focus::Stripe(..) | Focus::More(..) | Focus::Studio(..)
+    )
 }
 
 /// The whole wall: the cell the stills draw in, one band for each season,
@@ -271,61 +326,85 @@ impl Layout {
         }
     }
 
-    /// How far the wall has scrolled with focus on this still. The wall
-    /// stands at its top until the focused row would leave the foot of the
-    /// region, and the header above the region never moves.
-    pub fn scroll(&self, focus: Focus, seasons: &[Season], height: f32) -> f32 {
-        let (region, tail) = match focus {
+    /// Where the page rests with focus here, in a frame this tall. While
+    /// focus is on the wall, the header holds and the wall scrolls in the
+    /// region under it. While focus is on a row under the seasons, the
+    /// page scrolls as one stack, the way a movie's page does: the header
+    /// leaves the top of the frame first, and the wall scrolls once the
+    /// foot of the header has reached `VIEWPORT_TOP`.
+    pub fn rest(&self, focus: Focus, seasons: &[Season], height: f32) -> Rest {
+        let Some((block, tail)) = self.block(focus, seasons) else {
+            return Rest::default();
+        };
+        if !under_the_seasons(focus) {
+            let offset = stack::offset(block, tail, self.content, height - head());
+            return Rest { lift: 0.0, offset };
+        }
+        // The page's own space starts at the top of the header, and the
+        // part of the frame it scrolls in starts at the strip's line, so
+        // a block never rests above that line.
+        let over = head() - VIEWPORT_TOP;
+        let page = stack::offset(
+            area(0.0, over + block.y, 0.0, block.height),
+            tail,
+            over + self.content,
+            height - VIEWPORT_TOP,
+        );
+        let lift = page.min(over);
+        Rest {
+            lift,
+            offset: page - lift,
+        }
+    }
+
+    // The block focus is on, in the wall's own space, and the height of
+    // what follows it that the scroll keeps in view with it. A focus that
+    // stands in the header, or on the rail, keeps the wall at its top.
+    fn block(&self, focus: Focus, seasons: &[Season]) -> Option<(Rectangle, f32)> {
+        match focus {
             // The page passes the still a bar's select lands on instead
             // of the bar, because the layout does not read the rail.
-            Focus::Rail(..) => return 0.0,
-            // The button row is in the header, which never scrolls, so
-            // the wall stays at its top while the row holds focus.
-            Focus::Buttons(..) => return 0.0,
-            Focus::Franchise(strip, _) => match self.franchises.get(strip) {
-                Some(top) => {
-                    // A franchise strip is never the last block, because
-                    // the stripes and the foot follow it, so it pulls
-                    // the gap under it into view and no more.
-                    let below = self.content - top - strip_height();
-                    (area(0.0, *top, 0.0, strip_height()), STRIPE_GAP.min(below))
-                }
-                None => return 0.0,
-            },
-            Focus::Stripe(stripe, _) => match self.stripes.get(stripe) {
-                Some(top) => {
-                    // The last stripe pulls everything under it into view,
-                    // so the studios under it show before focus reaches
-                    // them.
-                    let below = self.content - top - people::HEIGHT;
-                    let tail = match stripe + 1 == self.stripes.len() {
-                        true => below,
-                        false => STRIPE_GAP.min(below),
-                    };
-                    (area(0.0, *top, 0.0, people::HEIGHT), tail)
-                }
-                None => return 0.0,
-            },
+            Focus::Rail(..) => None,
+            // The button row is in the header, which holds while it has
+            // focus, so the wall stays at its top.
+            Focus::Buttons(..) => None,
+            Focus::Franchise(strip, _) => {
+                let top = self.franchises.get(strip)?;
+                // A franchise strip is never the last block, because the
+                // stripes and the foot follow it, so it pulls the gap
+                // under it into view and no more.
+                let below = self.content - top - strip_height();
+                Some((area(0.0, *top, 0.0, strip_height()), STRIPE_GAP.min(below)))
+            }
+            Focus::Stripe(stripe, _) => {
+                let top = self.stripes.get(stripe)?;
+                // The last stripe pulls everything under it into view, so
+                // the studios under it show before focus reaches them.
+                let below = self.content - top - people::HEIGHT;
+                let tail = match stripe + 1 == self.stripes.len() {
+                    true => below,
+                    false => STRIPE_GAP.min(below),
+                };
+                Some((area(0.0, *top, 0.0, people::HEIGHT), tail))
+            }
             // The More from strip is the last row, so it pulls the foot
             // under it into view, as the last stripe does.
-            Focus::More(..) => match self.more {
-                Some(top) => (
+            Focus::More(..) => {
+                let top = self.more?;
+                Some((
                     area(0.0, top, 0.0, strip_height()),
                     self.content - top - strip_height(),
-                ),
-                None => return 0.0,
-            },
+                ))
+            }
             // The foot is the last block, so a studio pulls the page's end
             // into view.
-            Focus::Studio(..) => (area(0.0, self.foot, 0.0, 0.0), self.content - self.foot),
+            Focus::Studio(..) => Some((area(0.0, self.foot, 0.0, 0.0), self.content - self.foot)),
             // The episode's own row and its marks are in the header too,
             // and the wall stands at the still they were opened from.
             Focus::Still(index) | Focus::Episode(index, _) | Focus::EpisodeMark(index, _) => {
-                let Some(band) = self.band(index, seasons) else {
-                    return 0.0;
-                };
+                let band = self.band(index, seasons)?;
                 let row = (index - seasons[band].run.first) / COLUMNS;
-                (
+                Some((
                     area(
                         0.0,
                         self.bands[band].rows_top + row as f32 * self.cells.height,
@@ -333,10 +412,9 @@ impl Layout {
                         self.cells.height,
                     ),
                     TRAIL * self.cells.height,
-                )
+                ))
             }
-        };
-        stack::offset(region, tail, self.content, height)
+        }
     }
 
     // The band that holds this still, or nothing on a page with no
