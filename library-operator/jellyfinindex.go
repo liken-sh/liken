@@ -30,6 +30,13 @@ const (
 	jellyfinIndexFloor    = time.Minute
 )
 
+// The wait after one read that failed. A failed read installs nothing, so
+// it does not count as a read under the floor: a Jellyfin that refused the
+// read at the role's start is read again after this wait, which is shorter
+// than one pass of the write loop. Each failure in a row doubles the wait,
+// up to the floor.
+const jellyfinIndexRetry = 5 * time.Second
+
 // The time one whole build may take, over every page of both listings.
 // A build past it fails and installs nothing, so the index stays as it
 // was. The budget is many times what a build needs. It bounds a server
@@ -48,8 +55,8 @@ type jellyfinIndex struct {
 	episodes  map[string]string
 	series    map[string]map[string]string
 	users     map[string]string
-	itemsRead time.Time
-	usersRead time.Time
+	itemsRead jellyfinReads
+	usersRead jellyfinReads
 }
 
 // newJellyfinIndex builds an empty index. Nothing is read until a caller
@@ -186,24 +193,85 @@ func (i *jellyfinIndex) seriesAliases(ctx context.Context, series string) map[st
 // refreshItems reads the listing and replaces the index, unless the last read
 // is younger than the age the caller states. It answers whether it replaced
 // the index, so a caller knows a second lookup is worth making.
-// The read time is stamped before the call, so a Jellyfin that is down is
-// asked once per age and not once per lookup.
+// A read that fails waits out jellyfinReads' retry and not the age, so a
+// Jellyfin that is down at the role's start is read again within seconds.
 func (i *jellyfinIndex) refreshItems(ctx context.Context, age time.Duration) bool {
 	i.mutex.Lock()
-	if !i.itemsRead.IsZero() && i.now().Sub(i.itemsRead) < age {
+	if !i.itemsRead.begin(i.now(), age) {
 		i.mutex.Unlock()
 		return false
 	}
-	i.itemsRead = i.now()
 	i.mutex.Unlock()
 
 	built, err := i.build(ctx)
+	i.mutex.Lock()
+	i.itemsRead.end(i.now(), err == nil)
+	i.mutex.Unlock()
 	if err != nil {
 		i.logf("could not read the items of jellyfin: %v", err)
 		return false
 	}
 	i.hold(built)
 	return true
+}
+
+// When one of the index's two reads last ran and how it ended. The floor
+// counts from the start of the last read that succeeded. A read that fails
+// installs nothing, so it does not count: the next read may start once the
+// retry wait has run, and each failure in a row doubles that wait up to the
+// floor. So a Jellyfin that refuses every read is asked at most once a
+// minute after a few failures, and never in a loop.
+//
+// A read in flight holds off every other caller, so two lookups at once make
+// one request and not two.
+type jellyfinReads struct {
+	read     time.Time
+	started  time.Time
+	running  bool
+	failures int
+	retryAt  time.Time
+}
+
+// begin answers whether a read may start now, for a caller that accepts a
+// read as old as age, and marks the read in flight when it may. The caller
+// holds the index's mutex.
+func (r *jellyfinReads) begin(now time.Time, age time.Duration) bool {
+	switch {
+	case r.running:
+		return false
+	case r.failures > 0 && now.Before(r.retryAt):
+		return false
+	case r.failures == 0 && !r.read.IsZero() && now.Sub(r.read) < age:
+		return false
+	}
+	r.running, r.started = true, now
+	return true
+}
+
+// end records how the read that begin started ended. The caller holds the
+// index's mutex.
+func (r *jellyfinReads) end(now time.Time, succeeded bool) {
+	r.running = false
+	if succeeded {
+		r.read, r.failures = r.started, 0
+		return
+	}
+	r.failures++
+	r.retryAt = now.Add(jellyfinRetryWait(r.failures))
+}
+
+// jellyfinRetryWait is the wait after this many failed reads in a row: the
+// retry wait, doubled for each failure after the first, and never past the
+// floor.
+func jellyfinRetryWait(failures int) time.Duration {
+	wait := jellyfinIndexRetry
+	for range failures - 1 {
+		if wait >= jellyfinIndexFloor {
+			break
+		}
+		wait *= 2
+	}
+	return min(wait, jellyfinIndexFloor)
 }
 
 // The three lookups one build makes. A build fills these rather than the maps
@@ -281,18 +349,20 @@ func (i *jellyfinIndex) hold(built jellyfinLookups) {
 	i.movies, i.episodes, i.series = built.movies, built.episodes, built.series
 }
 
-// refreshUsers reads the users and replaces the map, under the same floor the
-// listing takes.
+// refreshUsers reads the users and replaces the map, under the same floor and
+// the same retry the listing takes.
 func (i *jellyfinIndex) refreshUsers(ctx context.Context, age time.Duration) bool {
 	i.mutex.Lock()
-	if !i.usersRead.IsZero() && i.now().Sub(i.usersRead) < age {
+	if !i.usersRead.begin(i.now(), age) {
 		i.mutex.Unlock()
 		return false
 	}
-	i.usersRead = i.now()
 	i.mutex.Unlock()
 
 	users, err := i.api.users(ctx)
+	i.mutex.Lock()
+	i.usersRead.end(i.now(), err == nil)
+	i.mutex.Unlock()
 	if err != nil {
 		i.logf("could not read the users of jellyfin: %v", err)
 		return false
