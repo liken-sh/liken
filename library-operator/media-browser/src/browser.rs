@@ -911,6 +911,9 @@ impl<S: Source, A: Art> Browser<S, A> {
                 }
                 true
             }
+            // A search wall with no hit and no grid has nowhere under the
+            // field for focus to go, so down moves nothing there.
+            ("down", _) if self.top().bare_search() => false,
             ("down", _) => {
                 self.leave_strip();
                 true

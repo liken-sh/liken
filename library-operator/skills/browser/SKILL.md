@@ -459,8 +459,11 @@ it and enter types the focused cell. Down off the bottom row closes
 the grid and puts focus on the first hit, which is how a remote with
 no keyboard accepts the text. Back over the grid closes it and keeps
 the text. Back over the wall with the grid closed clears the text, and
-back over an empty search leaves the wall. Up from the first row of
-hits puts focus on the strip, and enter there opens the grid again.
+back over an empty search leaves the wall. Back on the field in the
+strip does the same as back on the hits. Up from the first row of
+hits puts focus on the field, and enter there opens the grid again.
+While the grid is closed and the wall holds no hit, because the field
+is empty or the text matches nothing, focus stays on the field.
 
 ## 6. Marking a title watched or clearing it
 

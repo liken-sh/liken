@@ -101,7 +101,11 @@ impl<S: Source, A: Art> Browser<S, A> {
         match name {
             // Escape on the strip gives focus back to the screen and pops
             // nothing, because the strip is over the stack and not on it.
-            "escape" if self.on_strip => self.leave_strip(),
+            // The field on a search wall belongs to the wall, so escape
+            // there takes the wall's own back below: a press that only
+            // moved focus off the field would cost the person a press and
+            // could land focus on a wall with no hit, where nothing shows it.
+            "escape" if self.on_strip && !self.top().searching() => self.leave_strip(),
             // The screen on top is asked first, because a search wall
             // reads backspace as a deleted character, and escape as the
             // grid closed or the text cleared. Every other screen takes
@@ -145,6 +149,13 @@ impl<S: Source, A: Art> Browser<S, A> {
             }
             _ if self.on_strip => changed = self.on_strip(name),
             _ => changed = self.on_screen(name),
+        }
+        // A search wall with no hit and no grid has nothing on the wall
+        // that focus can land on, so the field holds it. Without this, a
+        // cleared field or a search that matched nothing leaves focus on
+        // an empty wall, and the screen shows no focus at all.
+        if self.top().bare_search() {
+            self.enter_strip();
         }
         // Every press starts the rest again, so the store decodes the
         // backdrop of the item a person stopped on and not of every item

@@ -160,6 +160,14 @@ impl Screen {
         matches!(self, Self::Wall(screen) if screen.search.is_some())
     }
 
+    /// Whether this screen is a search wall with no hit and no grid, so
+    /// the field in the browser's strip is the one place focus can show.
+    pub fn bare_search(&self) -> bool {
+        matches!(self, Self::Wall(screen)
+            if screen.slots.items.is_empty()
+                && screen.search.as_ref().is_some_and(|search| search.keyboard.is_none()))
+    }
+
     /// The search wall's field, which the browser's strip draws, or
     /// nothing on every other screen.
     pub fn field(&self) -> Option<&TextField> {

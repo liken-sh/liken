@@ -235,16 +235,58 @@ fn a_letter_on_the_strip_over_a_search_wall_types_and_gives_the_focus_back() {
 }
 
 #[test]
-fn escape_on_the_strip_gives_the_focus_back_and_pops_no_screen() {
+fn escape_on_the_strip_over_a_page_gives_the_focus_back_and_pops_no_screen() {
     let mut browser = sampled();
-    browser.key("s");
+    browser.key("enter");
     browser.key("up");
+    assert!(browser.on_strip);
 
     browser.key("escape");
 
     assert!(!browser.on_strip);
     assert_eq!(browser.stack.len(), 1);
-    assert_eq!(typed(&browser), "s");
+}
+
+// Whether the screen shows where focus is: on the field, on the shown
+// grid, on a hit of the wall, or on a screen that is not a search wall.
+fn focus_shown(browser: &Browser<Catalog, NoArt>) -> bool {
+    match browser.top() {
+        screens::Screen::Wall(wall) if wall.search.is_some() => {
+            browser.on_strip || grid(browser) || (wall.marks(true) && !wall.slots.items.is_empty())
+        }
+        _ => true,
+    }
+}
+
+// Where a person stands on the search wall before pressing back, and
+// what each back press then leaves: the text the field holds, or
+// nothing once the wall is gone. Back closes a shown grid first, clears
+// the text second, and leaves the wall third, and from the field it
+// does the same as from the hits, because the field belongs to the wall.
+const BACKS: [(&[&str], &[Option<&str>]); 4] = [
+    (&["s", "e", "down"], &[Some(""), None]),
+    (&["s", "e", "up"], &[Some(""), None]),
+    (&["search", "enter"], &[Some("a"), Some(""), None]),
+    (&["q", "x", "z", "q"], &[Some(""), None]),
+];
+
+#[test]
+fn each_back_press_on_the_search_wall_does_one_thing_the_screen_shows() {
+    for (presses, backs) in BACKS {
+        let mut browser = sampled();
+        for press in presses {
+            browser.key(press);
+        }
+        assert!(focus_shown(&browser), "{presses:?} before back");
+
+        for (index, left) in backs.iter().enumerate() {
+            browser.key("escape");
+
+            let held = browser.top().field().map(|field| field.text().to_string());
+            assert_eq!(held.as_deref(), *left, "{presses:?} back {index}");
+            assert!(focus_shown(&browser), "{presses:?} back {index}");
+        }
+    }
 }
 
 #[test]
@@ -361,4 +403,17 @@ fn backspace_on_the_shown_grid_takes_one_character_back_and_keeps_the_grid() {
     assert_eq!(typed(&browser), "s");
     assert!(grid(&browser));
     assert_eq!(browser.stack.len(), 1);
+}
+
+#[test]
+fn down_from_the_field_over_a_search_with_no_hit_moves_nothing() {
+    let mut browser = sampled();
+    for press in ["q", "x", "z", "q"] {
+        browser.key(press);
+    }
+    assert!(browser.on_strip);
+
+    assert!(!browser.key("down"));
+
+    assert!(browser.on_strip);
 }
