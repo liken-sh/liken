@@ -3,6 +3,7 @@ mod draw;
 mod franchises;
 mod identity;
 mod lists;
+mod logos;
 mod pages;
 mod people;
 mod plans;

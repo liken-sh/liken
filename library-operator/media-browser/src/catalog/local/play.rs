@@ -67,6 +67,35 @@ fn spans_file(path: &str) -> String {
     }
 }
 
+// The logo file of one title, the same file its page draws at its head,
+// or empty where the title holds none. The player's header draws it in
+// place of the title.
+fn logo(connection: &Connection, library: &str, id: &str) -> rusqlite::Result<String> {
+    let files = item::art(connection, library, id)?;
+    Ok(files
+        .into_iter()
+        .find_map(|(role, path)| (role == "logo").then_some(path))
+        .unwrap_or_default())
+}
+
+// Every item of a play list with the logo of one title: a film's own,
+// a trailer's title's, and an episode's series'.
+fn logoed(
+    connection: &Connection,
+    library: &str,
+    id: &str,
+    mut items: Vec<PlayItem>,
+) -> rusqlite::Result<Vec<PlayItem>> {
+    if items.is_empty() {
+        return Ok(items);
+    }
+    let logo = logo(connection, library, id)?;
+    for item in &mut items {
+        item.presentation.logo = logo.clone();
+    }
+    Ok(items)
+}
+
 // A play list with the marks of each item's main file, so the display can
 // skip an intro and place the credits, with the spans of a file the
 // appearances fact found faces in, so the display can show who is on
@@ -114,6 +143,7 @@ pub fn movie(connection: &Connection, library: &str, id: &str) -> rusqlite::Resu
             },
         })
     })?;
+    let items = logoed(connection, library, id, items)?;
     marked(connection, library, items)
 }
 
@@ -139,7 +169,7 @@ pub fn trailer(
          WHERE item.library = ? AND item.id = ? GROUP BY item.id",
         video("trailer")
     );
-    collect(connection, &sql, &[&library, &id], |row| {
+    let items = collect(connection, &sql, &[&library, &id], |row| {
         let released: String = row.get(1)?;
         Ok(PlayItem {
             path: row.get(3)?,
@@ -154,7 +184,8 @@ pub fn trailer(
                 ..Presentation::default()
             },
         })
-    })
+    })?;
+    logoed(connection, library, id, items)
 }
 
 /// The chosen episode alone. What follows it is the `Play`'s own next
@@ -209,6 +240,7 @@ pub fn episodes(
             })
         },
     )?;
+    let items = logoed(connection, library, series, items)?;
     marked(connection, library, items)
 }
 

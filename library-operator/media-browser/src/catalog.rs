@@ -777,6 +777,10 @@ pub struct Presentation {
     pub date: String,
     /// The art path, relative to the library root.
     pub art: String,
+    /// The title's logo file, relative to the library root: a film's own,
+    /// and an episode's series'. The player's header draws it in place
+    /// of the title, and the title as text where this is empty.
+    pub logo: String,
     /// The trickplay path, relative to the library root.
     pub trickplay: String,
     /// The spans file the appearances fact wrote for the main file, and

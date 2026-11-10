@@ -180,6 +180,22 @@ func TestTheArtAndTheTrickplayAreStampedOntoTheSameClaim(t *testing.T) {
 	}
 }
 
+// The logo joins the same claim as the film, so the player's header draws
+// the title's logo in place of its name.
+func TestTheLogoIsStampedOntoTheSameClaim(t *testing.T) {
+	operator, cluster := playingHouse(t)
+	item := film(testFilmPath)
+	item.Presentation.Logo = "Some Film (1999)/clearlogo.png"
+	publishPlay(operator, filmRequest(item))
+
+	operator.pass()
+
+	presentation := cluster.heldPlays()[0].Spec.Items[0].Presentation
+	if want := "claim://house/movies//movies/" + item.Presentation.Logo; presentation.Logo != want {
+		t.Errorf("logo = %q, want %q", presentation.Logo, want)
+	}
+}
+
 // The spans file and the .contributors directory join the same claim as the
 // film, so the display reads the spans and the portraits they name.
 func TestTheAppearancesAndTheirPortraitsAreStampedOntoTheSameClaim(t *testing.T) {

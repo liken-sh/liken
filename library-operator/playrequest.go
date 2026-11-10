@@ -415,9 +415,9 @@ func (r playRequest) libraryNamed(libraries []Library, key string) *Library {
 }
 
 // stamped is one item with its paths joined to the library's claim.
-// The main file must be there. The art, the trickplay, the spans file,
-// and the .contributors directory are joined only where the request
-// names them, and an item with none of them carries none.
+// The main file must be there. The art, the logo, the trickplay, the
+// spans file, and the .contributors directory are joined only where the
+// request names them, and an item with none of them carries none.
 func (i playRequestItem) stamped(library *Library) (PlayItem, error) {
 	uri, err := reference(library, i.Path)
 	if err != nil {
@@ -430,7 +430,7 @@ func (i playRequestItem) stamped(library *Library) (PlayItem, error) {
 
 	presentation := *i.Presentation
 	for _, beside := range []*string{
-		&presentation.Art, &presentation.Trickplay,
+		&presentation.Art, &presentation.Logo, &presentation.Trickplay,
 		&presentation.Appearances, &presentation.Contributors,
 	} {
 		if *beside == "" {

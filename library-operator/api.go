@@ -796,7 +796,11 @@ type PlayPresentation struct {
 	Year         int    `json:"year,omitempty"`
 	Date         string `json:"date,omitempty"`
 	Art          string `json:"art,omitempty"`
-	Trickplay    string `json:"trickplay,omitempty"`
+	// Logo is the title's logo art. The display draws it in the header
+	// in place of the title, and draws the title as text where it is
+	// absent.
+	Logo      string `json:"logo,omitempty"`
+	Trickplay string `json:"trickplay,omitempty"`
 	// Appearances is the spans file the appearances fact wrote for the item's
 	// file, and Contributors is the library's .contributors directory, which
 	// the spans file names each portrait under. The display reads both when

@@ -106,6 +106,7 @@ fn presentation(presentation: &Presentation) -> Value {
         ("episodeTitle", &presentation.episode_title),
         ("date", &presentation.date),
         ("art", &presentation.art),
+        ("logo", &presentation.logo),
         ("trickplay", &presentation.trickplay),
         ("appearances", &presentation.appearances),
         ("contributors", &presentation.contributors),
@@ -237,6 +238,17 @@ mod tests {
             "Some Film (1999)/.liken/appearances/Some Film (1999).mkv.spans.json"
         );
         assert_eq!(presentation["contributors"], ".contributors");
+    }
+
+    /// A title with a logo names it as a path under the root, so the
+    /// player's header draws the logo in place of the title. The
+    /// movie above has none, and its request carries no `logo` key.
+    #[test]
+    fn a_request_carries_the_logo() {
+        let mut item = movie();
+        item.presentation.logo = "Some Film (1999)/clearlogo.png".into();
+        let presentation = &decoded("default/films", &[item])["items"][0]["presentation"];
+        assert_eq!(presentation["logo"], "Some Film (1999)/clearlogo.png");
     }
 
     /// A trailer names the part it plays in the work, and the request
