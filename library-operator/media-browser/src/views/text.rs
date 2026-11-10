@@ -309,7 +309,7 @@ pub fn faced(
     if content.is_empty() {
         return;
     }
-    frame.with_clip(band, |frame| {
+    crate::views::clip::within(frame, band, |frame| {
         crate::views::ink::ink(
             frame,
             canvas::Text {
@@ -442,7 +442,7 @@ pub fn block_in(
     // The lines are broken already, so the shaper draws them as they
     // stand and wraps none of them again. The clip keeps a word wider
     // than the column inside the space the page gave the block.
-    frame.with_clip(block, |frame| {
+    crate::views::clip::within(frame, block, |frame| {
         let mut text = label(
             &kept,
             at,

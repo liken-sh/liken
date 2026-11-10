@@ -41,6 +41,7 @@ pub mod band;
 pub mod banner;
 pub mod buttons;
 pub mod card;
+pub mod clip;
 pub mod clock;
 pub mod curtain;
 pub mod divider;

@@ -153,7 +153,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         let offset = person.row_at(bounds, self.at);
         let region = row.region;
         let clip = area(region.x - 1.0, region.y, region.width + 2.0, region.height);
-        frame.with_clip(clip, |frame| {
+        crate::views::clip::within(&mut frame, clip, |frame| {
             row::draw(frame, store, &person.credits, &row, offset, self.faces);
         });
 

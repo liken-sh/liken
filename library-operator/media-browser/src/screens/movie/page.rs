@@ -298,7 +298,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         // because a line of text keeps the clip of its own band.
         let shown = shown(bounds, offset);
         ink::under(shown.y, || {
-            frame.with_clip(shown, |frame| {
+            crate::views::clip::within(&mut frame, shown, |frame| {
                 self.blocks(frame, bounds, &blocks, offset);
             });
         });

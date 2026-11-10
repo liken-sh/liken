@@ -41,7 +41,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Ground<'_, A> {
         let home = self.home;
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let (layout, offset, clip) = home.drawn(bounds, self.at);
-        frame.with_clip(clip, |frame| {
+        crate::views::clip::within(&mut frame, clip, |frame| {
             let store = &mut *self.store.borrow_mut();
             for (index, block) in home.blocks.iter().enumerate() {
                 let Block::Banner(banner) = block else {
@@ -86,7 +86,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
         let home = self.home;
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let (layout, offset, clip) = home.drawn(bounds, self.at);
-        frame.with_clip(clip, |frame| {
+        crate::views::clip::within(&mut frame, clip, |frame| {
             let store = &mut *self.store.borrow_mut();
             for (index, block) in home.blocks.iter().enumerate() {
                 let Some(region) = layout.region(home, index, offset, bounds) else {

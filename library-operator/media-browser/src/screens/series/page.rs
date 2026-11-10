@@ -102,7 +102,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
         // header.
         let under_dividers = layout::stills(region);
         ink::under(under_dividers.y, || {
-            frame.with_clip(under_dividers, |frame| {
+            crate::views::clip::within(&mut frame, under_dividers, |frame| {
                 for (season, band) in bands.iter().enumerate() {
                     if band.shows(offset, region.height) {
                         wall::draw(frame, store, &stills(series, &wall, season, offset, focus));
@@ -113,7 +113,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
 
         let dividers = area(region.x + inset, region.y, width, region.height);
         ink::under(region.y, || {
-            frame.with_clip(region, |frame| {
+            crate::views::clip::within(&mut frame, region, |frame| {
                 for (season, band) in series.seasons.iter().zip(bands) {
                     if !band.shows(offset, region.height) {
                         continue;
@@ -142,7 +142,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             })
         });
 
-        frame.with_clip(layout::rail_clip(whole), |frame| {
+        crate::views::clip::within(&mut frame, layout::rail_clip(whole), |frame| {
             let focus = match focus {
                 Some(Focus::Rail(bar)) => Some(bar),
                 _ => None,

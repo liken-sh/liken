@@ -104,7 +104,7 @@ impl<A: Art> Page<'_, A> {
         let mut stack = Stack::new(Point::new(region.x, region.y + layout::TOP), layout::GAP);
 
         let title = area(stack.at().x, stack.at().y, column, layout::LOGO_HEIGHT);
-        frame.with_clip(title, |frame| {
+        crate::views::clip::within(frame, title, |frame| {
             header::title(
                 frame,
                 store,

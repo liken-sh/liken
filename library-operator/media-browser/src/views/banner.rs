@@ -153,7 +153,7 @@ pub fn draw<A: Art>(frame: &mut canvas::Frame<Renderer>, store: &mut A, banner: 
     let column = region.width * COLUMN;
     let mut stack = Stack::new(Point::new(region.x + INSET, region.y + TOP), GAP);
     let head = area(stack.at().x, stack.at().y, column, LOGO_HEIGHT);
-    let taken = frame.with_clip(head, |frame| {
+    let taken = crate::views::clip::within(frame, head, |frame| {
         header::title(
             frame,
             store,

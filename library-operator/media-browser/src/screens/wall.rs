@@ -370,7 +370,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Program<'_, A> {
         );
         // The clip reaches past the region by the gap and the outline's
         // whole stroke, so a bar's fill at the region's edge draws whole.
-        frame.with_clip(clip_marked(whole), |frame| {
+        crate::views::clip::within(&mut frame, clip_marked(whole), |frame| {
             rail::draw(
                 frame,
                 whole,

@@ -109,7 +109,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             held,
         } = layout(page, bounds, self.at);
 
-        frame.with_clip(region, |frame| {
+        crate::views::clip::within(&mut frame, region, |frame| {
             times(
                 frame,
                 page,
@@ -123,11 +123,11 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             // row that has scrolled up draws nothing over the time labels
             // beside it, and the rows are clipped under the held line.
             let cells = wall::clipped(columned);
-            frame.with_clip(cells, |frame| {
+            crate::views::clip::within(frame, cells, |frame| {
                 metro::draw(frame, strip, &page.runs, rows, &page.headings, &tops, down);
             });
             let cells = wall::clipped(wall::under(cards, held.is_some()));
-            frame.with_clip(cells, |frame| {
+            crate::views::clip::within(frame, cells, |frame| {
                 for (index, row) in rows.iter().enumerate() {
                     let bounds = wall::cell_box(cards, index, &page.headings, &tops, down);
                     if outside(bounds, cells) {
@@ -156,7 +156,7 @@ impl<A: Art> canvas::Program<Infallible, Theme, Renderer> for Page<'_, A> {
             // stands to the left of the rows' clip.
             if people.width > 0.0 {
                 let column = wall::clipped(wall::under(people, held.is_some()));
-                frame.with_clip(column, |frame| {
+                crate::views::clip::within(frame, column, |frame| {
                     for (viewer, at) in
                         circles::drawn(people, &page.marks, &page.headings, &tops, down)
                     {
@@ -230,7 +230,7 @@ impl canvas::Program<Infallible, Theme, Renderer> for Held<'_> {
         if let Some(line) = &held {
             let band = wall::band(cards, true);
             let ground = area(band.x - REACH, band.y, band.width + REACH, band.height);
-            frame.with_clip(ground, |frame| {
+            crate::views::clip::within(&mut frame, ground, |frame| {
                 frame.fill_rectangle(ground.position(), extent(ground), look::BACKGROUND);
                 divider::two(frame, band, line, wall::bright(line));
             });
@@ -361,7 +361,7 @@ fn times(
     down: f32,
     column: Rectangle,
 ) {
-    frame.with_clip(column, |frame| {
+    crate::views::clip::within(frame, column, |frame| {
         for index in 0..page.rows.len() {
             let label = wall::time_box(wall, page.time, index, &page.headings, tops, down);
             if label.y + label.height < column.y || label.y > column.y + column.height {
@@ -562,7 +562,7 @@ fn ground<A: Art>(
         return;
     };
     frame.fill_rectangle(bounds.position(), extent(bounds), look::BACKGROUND);
-    frame.with_clip(clip, |frame| {
+    crate::views::clip::within(frame, clip, |frame| {
         for (band, handle) in tiny.bands(card::covering(bounds, ratio)) {
             frame.draw_image(
                 band,
