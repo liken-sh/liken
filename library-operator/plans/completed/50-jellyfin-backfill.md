@@ -153,3 +153,32 @@ The pass also read `status.jellyfin` from a store copy that could be older
 than its own `Finished` write, and could create the `Job` a second time after
 the finished one was deleted. Plan 70 says how the pass reads the `Catalog`
 now.
+
+## Played rows at position 0, 2026-11-10
+
+On 2026-11-10 an audit of a home cluster found 1,488 Jellyfin rows that
+the store held as ended at position 0. The backfill wrote them before
+commit f549383e, which gives a played item its duration as its
+position. Before that commit, the backfill wrote every played item at
+position 0 with `ended` set. The media browser reads a position of 0 or
+less as not started, so the screens showed those films as unwatched.
+
+The reconcile at each start of the jellyfin role publishes every played
+item again, with the corrected position. It did not repair these rows,
+because each row's `recorded` was equal to Jellyfin's last played time,
+which is the `at` that the reconcile sends. `recordOutside` wrote a
+message only when its `at` was after the row's `recorded`, so a message
+at the same second wrote nothing. All 1,488 rows had `recorded` equal to
+that time and a duration greater than 0.
+
+`recordOutside` now keeps a newer `at` and refuses an older one, as
+before, and decides a message at the same second by what it says. The
+message wins when it says more than the row: `ended` over a row that is
+not ended, and with the same ended state a larger `position`. A message
+that says the same writes nothing. The rule moves in one direction, so
+two publishers that send different values for one second cannot
+overwrite each other in turn. The next start of the jellyfin role
+repairs each of these rows, because the reconcile's message is ended at
+the duration, and the row is ended at 0.
+`TestAnOutsidePlayAtTheSameSecondWinsWhenItSaysMore` and
+`TestTheReconcileRepairsAPlayedRowAtTheStart` hold the rule.

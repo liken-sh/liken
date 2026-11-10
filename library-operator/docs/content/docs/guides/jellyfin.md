@@ -75,7 +75,10 @@ must encode the template field the same way.
 A post from Jellyfin becomes one message on the media bus, and the
 progress store records the position and the person against the title.
 The newer timestamp wins, so a screen resumes from the last place
-anything played.
+anything played. When a message carries the same second as the row, the
+message wins only when it says more: an ended play wins over one that
+still plays, and then the larger position wins. A message that says the
+same writes nothing.
 
 A `Play` on a screen goes the other way. The role writes each person's
 position to Jellyfin every ten seconds while the position moves, and
@@ -167,7 +170,10 @@ role's webhook listener is up, the role reads every user's played and
 resumable items once. It publishes each item as a play dated at
 Jellyfin's last played date for it. The progress store keeps the newer
 timestamp, so an item that did not change writes nothing, and a toggle
-made while a role was down arrives. A start of either role runs one
+made while a role was down arrives. A reconcile sends each item at the
+same second on every start, so a row at that second takes the item's
+position where the item says more, such as a played film at its end over
+a row at the start of the film. A start of either role runs one
 reconcile. The pod log has one line for each, with the users read and
 the items published and skipped.
 
@@ -201,7 +207,8 @@ and skipped. The backfill makes no `Person`: a Jellyfin user with no
 
 A rerun is safe. The store keeps the newer timestamp, so a backfilled
 row never overwrites a newer play, and a row the backfill writes twice
-is the same row.
+is the same row. At the same timestamp the store keeps the message that
+says more, by the rule in [what crosses](#3-what-crosses).
 
 The reconcile reads the same two lists at every start. The backfill
 keeps one job of its own: it waits until every durable copy of the

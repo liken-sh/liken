@@ -129,16 +129,33 @@ func (s *progressStore) recordAudience(ctx context.Context, play string, audienc
 // outside this cluster, or a mark a person set at the media browser. It
 // writes the audience, the position, and the time of the event as the
 // recorded time.
-// The read of the recorded time comes first, because the newer at wins and a
-// Corrosion transaction cannot branch.
-// The row names no Library, because no Play of this cluster wrote it.
+//
+// A message with a newer time than the row wins, and an older one writes
+// nothing, so a post that arrives late never moves a position backward.
+// At the same second the message wins only when it says more than the row,
+// by outsideSaysMore. A reconcile dates each play at Jellyfin's last played
+// time, so it sends the same second again on every run, and this rule lets
+// a corrected position replace the row.
+//
+// The read of the row comes first, because a Corrosion transaction cannot
+// branch. The row names no Library, because no Play of this cluster wrote
+// it.
 func (s *progressStore) recordOutside(ctx context.Context, play string, outside outsidePlay) error {
-	cells, err := s.row(ctx, `SELECT recorded FROM plays WHERE play = ? LIMIT 1`, []any{play})
+	cells, err := s.row(ctx, `SELECT recorded, ended, position FROM plays WHERE play = ? LIMIT 1`, []any{play})
 	if err != nil {
 		return err
 	}
-	if len(cells) > 0 && int64(cellInt(cells[0])) >= outside.At {
-		return nil
+	if len(cells) > 0 && len(cells) < 3 {
+		return fmt.Errorf("the progress store: %d cells for the 3 columns of the row of %s", len(cells), play)
+	}
+	if len(cells) > 0 {
+		recorded := int64(cellInt(cells[0]))
+		if recorded > outside.At {
+			return nil
+		}
+		if recorded == outside.At && !outsideSaysMore(outside, cellInt(cells[1]) != 0, cellInt(cells[2])) {
+			return nil
+		}
 	}
 
 	at := time.Unix(outside.At, 0).UTC()
@@ -172,6 +189,21 @@ func (s *progressStore) recordOutside(ctx context.Context, play string, outside 
 		})
 	}
 	return s.apply(ctx, statements)
+}
+
+// outsideSaysMore answers whether a message at the row's own second says
+// more than the row: an ended play over one still running, and with the
+// same ended state a larger position. The same ended state and the same
+// position say nothing more, so a message delivered again writes nothing.
+//
+// The order moves one way. A message that wins here leaves a row that the
+// message it replaced cannot win against, so two publishers that disagree
+// at one second never overwrite each other in turn.
+func outsideSaysMore(outside outsidePlay, ended bool, position int) bool {
+	if outside.Ended != ended {
+		return outside.Ended
+	}
+	return outside.Position > position
 }
 
 // recordFinal writes the last status of a Play and marks the row ended.

@@ -160,6 +160,21 @@ func TestTheStoreAnswersAnErrorEvent(t *testing.T) {
 	}
 }
 
+// A row with fewer cells than the read names is a failure, and never a
+// row that is absent, which would let the message overwrite it.
+func TestTheStoreRefusesAShortRow(t *testing.T) {
+	server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"row":[1,[1757300000]]}`+"\n")
+	}))
+	store := newProgressStore(apiservertest.Host, server.Client())
+
+	err := store.recordOutside(t.Context(), "play-1", outsidePlay{})
+
+	if err == nil || !strings.Contains(err.Error(), "1 cells") {
+		t.Errorf("err = %v, want the short row named", err)
+	}
+}
+
 // The agent answers one result per statement. A short answer is a
 // failure and never a batch that applied.
 func TestTheStoreRefusesAShortAnswer(t *testing.T) {

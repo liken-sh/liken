@@ -416,7 +416,7 @@ backfill all write that spelling, so the three name one row.
 | `season`, `episode` | integers | The numbers of an episode, and 0 for a work that has neither. |
 | `position`, `duration` | integers | The position and the length, in seconds. |
 | `ended` | boolean | True on a stop, which marks the row ended. |
-| `at` | integer | The Unix time of the event, which the store writes as the recorded time. A newer `at` wins over what the row holds. |
+| `at` | integer | The Unix time of the event, which the store writes as the recorded time. A newer `at` wins over what the row holds. An `at` equal to the row's recorded time wins only when the message says more: `ended` true over a row still running, and with the same ended state a larger `position`. |
 
 A work Jellyfin reports as played carries a `position` at the end of
 the work, whatever resume point Jellyfin holds. A mark a person set by
@@ -460,8 +460,10 @@ The `{name}` segment is not a `Play`. It is `mark-{player}-{at}`, so
 each press is one topic and one row. The browser moves a second press
 within the same second to the next second, so no two marks of one
 screen share a name. The progress role writes a row only when the
-store holds no row of that name recorded at `at` or later, so a mark
-delivered again never changes a row.
+store holds no row of that name recorded after `at`, and no row
+recorded at `at` that says as much as the mark: ended, at the same
+position or later. A mark delivered again says the same as the row it
+wrote, so it never changes a row.
 
 The browser takes the branch of the tree from `LIBRARY_PLAYS_TOPIC`,
 `{base}/plays/{namespace}`, which the operator sets on the browser

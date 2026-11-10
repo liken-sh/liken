@@ -160,3 +160,30 @@ func (m *jellyfinMessages) count() int {
 	defer m.mutex.Unlock()
 	return len(m.held)
 }
+
+// A row that an earlier backfill wrote for a played film at position 0,
+// at the film's last played time, reads as not started on a screen. The
+// next reconcile publishes the same play at the same time with the film's
+// duration as its position, and the progress role takes it, because at the
+// same second the message that says more wins.
+func TestTheReconcileRepairsAPlayedRowAtTheStart(t *testing.T) {
+	role, messages := standReconcileRole(t, toggledWhileDown())
+	progress, db := recordingProgress(t)
+	lastPlayed := time.Date(2026, 9, 8, 19, 30, 0, 0, time.UTC).Unix()
+	if err := progress.store.recordOutside(t.Context(), "jellyfin-user-a-item-film", outsidePlay{
+		Player: jellyfinPlayerName, People: []string{"Person-A"}, Aliases: map[string]string{"tmdb": "1101"},
+		Position: 0, Duration: 8160, Ended: true, At: lastPlayed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	role.reconcile(t.Context())
+	for _, message := range messages.held {
+		progress.onMessage(message.topic, message.payload)
+	}
+
+	row := heldPlay(t, db, "jellyfin-user-a-item-film")
+	if row.Position != 8160 || row.Ended == 0 || row.Recorded != lastPlayed {
+		t.Errorf("row = %+v, want the film ended at its end, recorded at its last play", row)
+	}
+}

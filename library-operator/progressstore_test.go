@@ -242,9 +242,11 @@ func TestAnOutsidePlayWritesTheWholeRow(t *testing.T) {
 	}
 }
 
-// The newer event wins. A message whose time is not past the time the row
+// The newer event wins. A message whose time is before the time the row
 // holds writes nothing, so a post that arrives late never moves a position
-// backward.
+// backward. A message at the same second with a smaller position writes
+// nothing too, and progressoutsidetie_test.go holds the rest of the rule
+// for the same second.
 func TestTheNewerOutsidePlayWins(t *testing.T) {
 	cases := []struct {
 		name     string
