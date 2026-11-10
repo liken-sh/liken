@@ -335,6 +335,17 @@ creators are the `<creator>` elements of `tvshow.nfo`, which the
 `overview` fact writes, as
 [The write rule](/docs/guides/enrichment/#the-write-rule) describes.
 
+The content rating comes from the `<mpaa>` or `<certification>`
+element of the `.nfo` file, and the program that wrote the file chose
+its spelling. Every card and page draws a US rating in one form, the
+one the MPA and the TV Parental Guidelines print, so `TV14`,
+`US:TV-14`, and `Rated PG-13` draw as `TV-14` and `PG-13`. A bare `14`
+on a series draws as `TV-14`. `NR`, `Not Rated`, `Unrated`, and `N/A`
+state that the title has no rating, and the facts line leaves the
+rating out. Any other value, such as another country's `16+` or
+`MA15+`, draws as the file holds it. The browser does not change the
+file.
+
 Under the header, the page shows its seasons as a wall of episode stills. A series
 whose folder holds no file with an episode number in its name, as
 [Scanning](/docs/guides/scanning/) describes, shows a line that says so

@@ -5,6 +5,8 @@
 
 use crate::catalog::franchise::SERIES;
 
+pub mod rating;
+
 // The separator between two facts on one line.
 const BETWEEN: &str = " · ";
 
@@ -179,8 +181,11 @@ pub struct Work<'a> {
     pub seasons: i64,
     /// The running time in seconds.
     pub duration: i64,
-    /// The content rating. A strip of one set's films passes none, because
-    /// every member of a set carries much the same rating.
+    /// The content rating as the .nfo file spells it, which the line draws
+    /// through [`rating::canonical`]. A strip of one set's films passes
+    /// none, because every member of a set carries much the same rating.
+    /// The line reads a work with seasons as a series, so a series whose
+    /// episodes have not landed draws its rating as a film's would.
     pub rating: &'a str,
 }
 
@@ -210,7 +215,7 @@ pub fn work_facts(work: &Work, released: Released) -> Vec<String> {
         when,
         seasons,
         runtime(work.duration),
-        work.rating.to_string(),
+        rating::canonical(work.rating, work.seasons > 0),
     ]
     .into_iter()
     .filter(|fact| !fact.is_empty())
@@ -333,6 +338,36 @@ mod tests {
         ];
         for (work, released, want) in cases {
             assert_eq!(work_line(&work, released), want, "{want}");
+        }
+    }
+
+    #[test]
+    fn a_works_rating_draws_in_its_one_form() {
+        let series = Work {
+            released: "2024-06-04",
+            seasons: 1,
+            duration: 0,
+            rating: "14",
+        };
+        let cases = [
+            (series, "2024 · 1 season · TV-14"),
+            (
+                Work {
+                    rating: "Not Rated",
+                    ..film()
+                },
+                "1973 · 1h 37m",
+            ),
+            (
+                Work {
+                    rating: "Rated PG",
+                    ..film()
+                },
+                "1973 · 1h 37m · PG",
+            ),
+        ];
+        for (work, want) in cases {
+            assert_eq!(work_line(&work, Released::Year), want, "{want}");
         }
     }
 
