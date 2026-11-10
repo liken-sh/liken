@@ -209,12 +209,20 @@ func outsideSaysMore(outside outsidePlay, ended bool, position int) bool {
 // recordFinal writes the last status of a Play and marks the row ended.
 // The operator reads that mark back off the bus before it releases the
 // Play, so a Play is never deleted before its last position is here.
+//
+// The update names ended = 0, so a final for a row that is already ended
+// changes nothing. The broker delivers a retained final again on each
+// subscription, and the operator publishes it again when a deleting Play
+// outlives the release of its progress finalizer. A second write would
+// move the row's recorded time to the time of that delivery, past a mark
+// a person pressed after the Play ended, and the browser would show the
+// Play's position again in place of the mark.
 func (s *progressStore) recordFinal(ctx context.Context, play string, final playFinal, position, duration int, at time.Time) error {
 	return s.apply(ctx, []statement{
 		startPlay(play, at),
 		{
 			sql: `UPDATE plays SET phase = ?, item = ?, position = ?, duration = ?,` +
-				` ended = ?, recorded = ? WHERE play = ?`,
+				` ended = ?, recorded = ? WHERE play = ? AND ended = 0`,
 			params: []any{final.Phase, final.Item, position, duration, at.Unix(), at.Unix(), play},
 		},
 	})

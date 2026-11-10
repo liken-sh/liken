@@ -174,6 +174,28 @@ func TestTheFinalMarksTheRowEnded(t *testing.T) {
 	}
 }
 
+// A final that arrives for a row that is already ended changes no column.
+// The operator publishes a Play's final again when the Play outlives the
+// release of its progress finalizer, and the row keeps the time the Play
+// ended, so a mark a person pressed between the two stays the newest row.
+func TestASecondFinalLeavesTheEndedRowAlone(t *testing.T) {
+	store, db := newSQLiteProgressStore(t)
+	final := playFinal{Phase: playPhaseFinished, Item: 1}
+	if err := store.recordFinal(t.Context(), "play-1", final, 472, 7200, testRecordedAt); err != nil {
+		t.Fatal(err)
+	}
+
+	later := testRecordedAt.Add(5 * time.Minute)
+	if err := store.recordFinal(t.Context(), "play-1", final, 472, 7200, later); err != nil {
+		t.Fatal(err)
+	}
+
+	row := heldPlay(t, db, "play-1")
+	if row.Ended != testRecordedAt.Unix() || row.Recorded != testRecordedAt.Unix() {
+		t.Errorf("row = %+v, want the time of the first final", row)
+	}
+}
+
 // A position that arrives after the final changes no column and says
 // it wrote nothing.
 func TestAPositionAfterTheFinalWritesNothing(t *testing.T) {

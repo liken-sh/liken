@@ -132,6 +132,30 @@ func TestAMarkDeliveredAgainLeavesTheRowAlone(t *testing.T) {
 	}
 }
 
+// A mark pressed after a Play ended stays the newest row when the Play's
+// final arrives again. media-operator deletes a finished Play five minutes
+// after it ended, and the operator can publish the final once more then.
+// The second final leaves the Play's row at the time the Play ended, so the
+// browser still reads the mark.
+func TestAMarkStaysNewerThanAPlayWhoseFinalArrivesAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		role, db := recordingProgress(t)
+		final, _ := json.Marshal(playFinal{Phase: playPhaseFinished, Item: 1, Position: "0:51:17", Duration: "1:40:00"})
+		role.onMessage(playFinalTopic(defaultTopicBase, "house", "play-1"), final)
+		time.Sleep(time.Minute)
+		role.onMessage(playMarkTopic(defaultTopicBase, "house", "mark-den-1"), markPayload(t, markCleared, 0, 0))
+		time.Sleep(4 * time.Minute)
+
+		role.onMessage(playFinalTopic(defaultTopicBase, "house", "play-1"), final)
+
+		play, mark := heldPlay(t, db, "play-1"), heldPlay(t, db, "mark-den-1")
+		if play.Recorded >= mark.Recorded {
+			t.Errorf("the Play's row is recorded at %d and the mark's at %d, want the mark newer",
+				play.Recorded, mark.Recorded)
+		}
+	})
+}
+
 // An empty payload is the clear, and a payload that is no mark names
 // nothing to record. Neither writes a row.
 func TestAMarkThatSaysNothingWritesNothing(t *testing.T) {
