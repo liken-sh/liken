@@ -212,9 +212,9 @@ impl<S: Screen> Ready<S> {
     ///
     /// The loop sleeps until the earliest second anything is due, so a screen
     /// at rest builds one frame a change rather than one a display refresh. A
-    /// second the screen has already named holds until the clock reaches it,
-    /// because a fresh answer after the clock arrived would name the change
-    /// after it, and the frame would never be drawn.
+    /// second the screen has already named holds until the clock reaches it.
+    /// The screen is asked for its next change after the frame on the glass,
+    /// and not after the clock, for the reason [`screen_due`] gives.
     pub(crate) fn pace(&mut self, event_loop: &ActiveEventLoop) {
         // Before the first frame there is no clock to schedule against, and
         // the first frame is what starts it.
@@ -229,11 +229,7 @@ impl<S: Screen> Ready<S> {
         // glass does not wake the loop: a frame under the cover reaches
         // nobody. The script, the deadline, and the captures still do.
         let covered = self.screen.covered();
-        let screen_next = match self.scheduled {
-            _ if covered => None,
-            Some(scheduled) => Some(scheduled),
-            None => self.screen.next_frame(at),
-        };
+        let screen_next = screen_due(&self.screen, self.scheduled, covered, self.drawn);
         self.scheduled = None;
 
         // The wake is the earliest second anything is due: a stale frame is
@@ -312,5 +308,85 @@ impl<S: Screen> Ready<S> {
         if let Some(path) = &self.stats_path {
             self.stats.write(path);
         }
+    }
+}
+
+/// The second the screen next changes after the frame on the glass,
+/// which drew at `drawn`, for the pace of the loop. A second the screen
+/// already named holds, and a covered screen names none.
+///
+/// The loop asks after the work of a frame, so the clock reads later than
+/// `drawn`, and a motion can end in between. Asked at the clock, the
+/// screen answers that nothing moves, and the glass keeps the frame that
+/// drew the motion short of its end until the next second the screen
+/// schedules, such as the breath of the focus outline three seconds
+/// later. Asked at `drawn`, the screen answers that the frame on the
+/// glass is still in motion, and the loop draws one more frame, at or
+/// after the end.
+pub(crate) fn screen_due<S: Screen>(
+    screen: &S,
+    scheduled: Option<f64>,
+    covered: bool,
+    drawn: f64,
+) -> Option<f64> {
+    match scheduled {
+        _ if covered => None,
+        Some(scheduled) => Some(scheduled),
+        None => screen.next_frame(drawn),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced_wgpu::Renderer;
+    use iced_winit::core::Element;
+
+    // A screen with one motion that runs until `ends`. It asks for every
+    // frame while the motion runs and for none after it, the way the
+    // browser's outline does.
+    struct Moving {
+        ends: f64,
+    }
+
+    impl Screen for Moving {
+        type Message = ();
+
+        fn key(&mut self, _name: &str) -> bool {
+            true
+        }
+
+        fn tick(&mut self, _at: f64) {}
+
+        fn view(&self) -> Element<'_, (), Theme, Renderer> {
+            iced_widget::Space::new().into()
+        }
+
+        fn next_frame(&self, at: f64) -> Option<f64> {
+            (at < self.ends).then_some(at)
+        }
+    }
+
+    // The loop asks for the next frame after the work of the last one, so
+    // the clock can pass the end of a motion while that frame is drawn.
+    // The frame on the glass then shows the motion short of its end, so a
+    // frame drawn before the end is due another, whatever the clock reads
+    // when the loop asks. A frame drawn at the end or after it shows the
+    // motion whole.
+    #[test]
+    fn a_frame_drawn_before_a_motion_ends_is_due_another() {
+        let moving = Moving { ends: 1.01 };
+        let cases = [(1.0, Some(1.0)), (1.01, None), (1.03, None)];
+        for (drawn, due) in cases {
+            assert_eq!(screen_due(&moving, None, false, drawn), due, "{drawn}");
+        }
+    }
+
+    #[test]
+    fn a_named_second_holds_and_a_covered_screen_names_none() {
+        let moving = Moving { ends: 1.01 };
+        assert_eq!(screen_due(&moving, Some(4.0), false, 1.0), Some(4.0));
+        assert_eq!(screen_due(&moving, Some(4.0), true, 1.0), None);
+        assert_eq!(screen_due(&moving, None, true, 1.0), None);
     }
 }

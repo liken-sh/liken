@@ -325,3 +325,6 @@ fn a_press_on_the_picker_moves_the_outline_to_the_next_tile() {
 
 // The outline on the pages a wall or a strip opens.
 mod pages;
+
+// The last frame of each motion on every screen, which must show its rest.
+mod rests;
