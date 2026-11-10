@@ -148,7 +148,8 @@ func (r *walkResult) dropEarlierOutputs(identities fileIdentities) {
 		if !isStill(*row) {
 			continue
 		}
-		row.Items = slices.DeleteFunc(row.Items, func(item string) bool {
+		row.Items = slices.DeleteFunc(row.Items, func(link fileItem) bool {
+			item := link.Item
 			if earlier := earlierOf[item]; earlier > 0 && row.Modified < earlier {
 				if dropped[item] == nil {
 					dropped[item] = map[string]bool{}
@@ -205,7 +206,7 @@ func (r *walkResult) outputsOnVolume() folderOutputs {
 		}
 		if isStill(row) {
 			for _, item := range row.Items {
-				outputs.stills[item] = true
+				outputs.stills[item.Item] = true
 			}
 		}
 		if row.Role == fileRoleTrailer {

@@ -206,7 +206,28 @@ type fileRow struct {
 	// The start of the final faceless run of a video's detections record,
 	// from the appearances ledger, and zero for none.
 	FacelessTailMs int64
-	Items          []string
+	Items          []fileItem
+}
+
+// fileItem is one item a file holds, with the item's place in the file.
+// Part counts from 1 in the order of the file name's range marker, and
+// Parts is how many episodes the file holds, so a read can split one
+// position in the file into a position in each episode. Both are 0 for a
+// file that holds the whole of each item it names, such as a movie, its
+// poster, or the subtitle beside a double.
+type fileItem struct {
+	Item  string
+	Part  int
+	Parts int
+}
+
+// wholeItems links a file to items that each hold all of the file.
+func wholeItems(ids ...string) []fileItem {
+	items := make([]fileItem, len(ids))
+	for i, id := range ids {
+		items[i] = fileItem{Item: id}
+	}
+	return items
 }
 
 // fileItemKey names one row of the link table: the file's path, and the id of

@@ -56,6 +56,19 @@ func TestAPostBecomesAnOutsidePlay(t *testing.T) {
 				Season:  3, Episode: 5, Position: 600, Duration: 1320, At: at},
 		},
 		{
+			// Jellyfin holds a double as one item that names its first
+			// episode, and the progress read covers every later episode of
+			// the file from the file position.
+			name: "a double past its midpoint, under its first episode and at the file position",
+			event: jellyfinEvent{Event: jellyfinProgressEvent, User: "person-a", UserID: "u1", ItemID: "i3",
+				ItemType: "Episode", SeriesID: "item-series", Season: "3", Episode: "5",
+				PositionTicks: "18000000000", RunTimeTicks: "26400000000", Tmdb: "998"},
+			play: "jellyfin-u1-i3",
+			want: outsidePlay{Player: "jellyfin", People: []string{"person-a"},
+				Aliases: map[string]string{"tmdb": "2101", "tvdb": "3101"},
+				Season:  3, Episode: 5, Position: 1800, Duration: 2640, At: at},
+		},
+		{
 			name: "a stop, which marks the row ended",
 			event: jellyfinEvent{Event: jellyfinStopEvent, User: "person-a", UserID: "u1", ItemID: "i1",
 				ItemType: "Movie", PositionTicks: "81600000000", RunTimeTicks: "81600000000",

@@ -769,14 +769,29 @@ impl<S: Source, A: Art> Browser<S, A> {
         next: Option<&Next>,
     ) -> bool {
         let people = self.audience.current(self.clock).to_vec();
+        self.did(format!("asked to play {}", selection.named()));
+        let items = self.source.play(library, selection);
+        // Every step carries its start in the chosen work's own seconds, and
+        // the request names a second of the file, so the start of the work
+        // in its file is added here, in one place. A later episode of a file
+        // of several starts at its own share of the file.
+        let begins = items.first().and_then(|item| item.start);
+        let start = match begins {
+            Some(0) | None => start,
+            Some(begins) => Some(start.unwrap_or(0) + begins),
+        };
         let asked = format!(
             "play {} in {library} {} for {}",
             selection.named(),
             lines::start(start),
             lines::people(&people)
         );
-        self.did(format!("asked to play {}", selection.named()));
-        let items = self.source.play(library, selection);
+        if !items.is_empty() && begins.is_none() {
+            self.log.line(format!(
+                "{asked}: starts at the beginning of the file, because the file holds \
+                 several episodes and has no duration to split"
+            ));
+        }
         if items.is_empty() {
             self.log.line(format!(
                 "{asked}: sent nothing, because the catalog holds no file to play"

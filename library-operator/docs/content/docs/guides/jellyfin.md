@@ -161,6 +161,50 @@ A person's Jellyfin user name must be their `Person` name. A Jellyfin
 user with no `Person` of that name still records a row, and no screen
 shows it, because no `Person` claims it.
 
+### A file of several episodes
+
+Jellyfin holds a file such as `Show - S01E01-E02.mkv` as one item, with
+its first episode in `IndexNumber` and its last in `IndexNumberEnd`,
+one position over the whole file, and one played flag. The catalog
+holds one episode for each number, and the
+[scan](/docs/guides/scanning/#series) splits the file evenly between
+them. So in a file of 2,640 seconds, the second episode starts at
+1,320 seconds.
+
+The role finds the item for each episode the file holds. A play in
+Jellyfin, and a `Play` on a screen of either episode, crosses as the
+position in the file, and the media browser shows each episode's
+progress from that position. A play in Jellyfin to 1,800 seconds shows
+the first episode watched and the second at 480 of 1,320 seconds. The
+role sets the item played only when the whole file passes the watched
+rule, because the flag covers the whole item. A person who stops at the
+end of the first episode leaves the item resumable at 1,320 seconds in
+Jellyfin.
+
+A mark from the media browser names one episode, so the role writes it
+at that episode's seconds in the file:
+
+* Watched on an episode before the last moves the item's position to
+  the start of the next episode, and leaves the played flag as
+  Jellyfin holds it.
+* Watched on the last episode sets the item played at the end of the
+  file.
+* Cleared on the first episode sets the item unplayed at position 0.
+* Cleared on a later episode sets the item unplayed at that episode's
+  start.
+
+The file's length is the item's run time in Jellyfin, or the mark's
+length of one episode times the episodes where Jellyfin holds no run
+time. A Pick up here press that names several episodes of one item
+makes one write for that item: the furthest watched episode sets the
+position, and with no watched episode, the first cleared one does.
+
+An item that Jellyfin holds with no `IndexNumberEnd`, or with a range
+of more than four episodes, which the scan reads as one episode, is
+found only for its first episode. A play or a mark of a later episode
+then finds no item, and the role logs that Jellyfin holds no item for
+it.
+
 ### The reconcile at start
 
 The webhook's posts are not retained. A toggle or a play in Jellyfin

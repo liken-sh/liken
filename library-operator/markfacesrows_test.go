@@ -25,7 +25,7 @@ func seedFacelessFilms(t *testing.T, catalog *Catalog) {
 	film := func(id, path string) (movieRow, fileRow) {
 		return movieRow{Id: id, Library: facesLibrary, Kind: libraryKindMovies, Path: path},
 			fileRow{Path: path, Library: facesLibrary, Present: true, Type: fileTypeVideo, Role: fileRolePrimary,
-				DurationMs: 6000000, FacelessTailMs: facelessStart, Items: []string{id}}
+				DurationMs: 6000000, FacelessTailMs: facelessStart, Items: wholeItems(id)}
 	}
 	live, liveFile := film("movie:tmdb:1", liveFilm)
 	drawn, drawnFile := film("movie:tmdb:2", drawnFilm)

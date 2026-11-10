@@ -340,6 +340,7 @@ impl Source for Catalog {
         vec![PlayItem {
             path: files::played(&title.title),
             slug: format!("specimen-{number:04}"),
+            start: Some(0),
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "movie".into(),

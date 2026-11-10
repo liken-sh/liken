@@ -4,6 +4,7 @@ package main
 // and the range in its name together number the episodes the file holds.
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -83,5 +84,103 @@ func TestWalkSeriesTakesTheFirstNumberFromAnNFOThatDisagreesWithTheName(t *testi
 	}
 	if !reflect.DeepEqual(titles, want) {
 		t.Errorf("episodes = %v, want %v", titles, want)
+	}
+}
+
+// The parts the walk reads from a file of several episodes: the link of
+// each episode and the runtime of each episode.
+type episodePart struct {
+	Part     int
+	Parts    int
+	Duration int64
+}
+
+// partsOfVideo walks a season folder that holds one video and reads, for
+// each episode the walk found, the place its link from that video gives
+// it and its runtime.
+func partsOfVideo(t *testing.T, root, video string) map[string]episodePart {
+	t.Helper()
+	result := walkSeries(root, "house/series", nil)
+	row := fileRowAt(t, result, filepath.Join("Coastline", "Season 04", video))
+	episodes := episodesByID(result)
+	parts := map[string]episodePart{}
+	for _, item := range row.Items {
+		parts[item.Item] = episodePart{Part: item.Part, Parts: item.Parts, Duration: episodes[item.Item].Duration}
+	}
+	return parts
+}
+
+// A file of several episodes splits its probed duration evenly, so each
+// episode's link records its place in the file and each episode's runtime
+// is its share of the file. A number of the range that names no episode,
+// such as E00, still counts in the parts, because its seconds are still in
+// the file.
+func TestWalkSeriesRecordsEachEpisodesPlaceInItsFile(t *testing.T) {
+	cases := []struct {
+		name     string
+		video    string
+		duration float64
+		want     map[string]episodePart
+	}{
+		{
+			name: "a single", video: "Coastline - S04E10.mkv", duration: 1320,
+			want: map[string]episodePart{
+				"episode:tvdb:7:s04e10": {Part: 1, Parts: 1, Duration: 1320},
+			},
+		},
+		{
+			name: "a double", video: "Coastline - S04E10-E11.mkv", duration: 2640.5,
+			want: map[string]episodePart{
+				"episode:tvdb:7:s04e10": {Part: 1, Parts: 2, Duration: 1320},
+				"episode:tvdb:7:s04e11": {Part: 2, Parts: 2, Duration: 1320},
+			},
+		},
+		{
+			name: "a triple", video: "Coastline - S04E10-E12.mkv", duration: 3960,
+			want: map[string]episodePart{
+				"episode:tvdb:7:s04e10": {Part: 1, Parts: 3, Duration: 1320},
+				"episode:tvdb:7:s04e11": {Part: 2, Parts: 3, Duration: 1320},
+				"episode:tvdb:7:s04e12": {Part: 3, Parts: 3, Duration: 1320},
+			},
+		},
+		{
+			name: "a first number with no episode", video: "Coastline - S04E00-E01.mkv", duration: 2640,
+			want: map[string]episodePart{
+				"episode:tvdb:7:s04e01": {Part: 2, Parts: 2, Duration: 1320},
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			root := t.TempDir()
+			season := doubleEpisodeVolume(t, root, testCase.video, "")
+			writeProbeLedger(t, season, probedFile{
+				Path: testCase.video, Modified: modifiedOf(t, filepath.Join(season, testCase.video)),
+				Duration: testCase.duration,
+			})
+
+			if got := partsOfVideo(t, root, testCase.video); !reflect.DeepEqual(got, testCase.want) {
+				t.Errorf("parts = %+v, want %+v", got, testCase.want)
+			}
+		})
+	}
+}
+
+// A file that no probe has read and whose .nfo file gives no stream
+// duration has no duration to split, so each episode keeps the runtime its
+// own .nfo block gives.
+func TestWalkSeriesKeepsTheNFORuntimeOfAFileWithNoDuration(t *testing.T) {
+	root := t.TempDir()
+	video := "Coastline - S04E10-E11.mkv"
+	doubleEpisodeVolume(t, root, video,
+		`<episodedetails><season>4</season><episode>10</episode><runtime>25</runtime></episodedetails>`+
+			`<episodedetails><season>4</season><episode>11</episode><runtime>20</runtime></episodedetails>`)
+
+	want := map[string]episodePart{
+		"episode:tvdb:7:s04e10": {Part: 1, Parts: 2, Duration: 1500},
+		"episode:tvdb:7:s04e11": {Part: 2, Parts: 2, Duration: 1200},
+	}
+	if got := partsOfVideo(t, root, video); !reflect.DeepEqual(got, want) {
+		t.Errorf("parts = %+v, want %+v", got, want)
 	}
 }

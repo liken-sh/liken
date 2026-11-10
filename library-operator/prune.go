@@ -194,7 +194,7 @@ func markKeys(result *walkResult) []string {
 	for _, row := range result.files {
 		add(seenFile, row.Path)
 		for _, item := range row.Items {
-			add(seenLink, row.Path+linkKeySeparator+item)
+			add(seenLink, row.Path+linkKeySeparator+item.Item)
 		}
 	}
 	for _, row := range result.aliases {

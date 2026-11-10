@@ -5,7 +5,7 @@
 
 use rusqlite::Connection;
 
-use super::{collect, item, subtitles};
+use super::{collect, item, place, subtitles};
 use crate::catalog::{Mark, PlayItem, Presentation, art};
 
 // The join from an item to one of its video files. A title with a
@@ -132,6 +132,7 @@ pub fn movie(connection: &Connection, library: &str, id: &str) -> rusqlite::Resu
         Ok(PlayItem {
             path: row.get(3)?,
             slug: row.get(5)?,
+            start: Some(0),
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "movie".into(),
@@ -174,6 +175,7 @@ pub fn trailer(
         Ok(PlayItem {
             path: row.get(3)?,
             slug: row.get(4)?,
+            start: Some(0),
             presentation: Presentation {
                 kind: "video".into(),
                 hint: hint.into(),
@@ -190,7 +192,8 @@ pub fn trailer(
 
 /// The chosen episode alone. What follows it is the `Play`'s own next
 /// block, so the list holds one work, and a list of several files is left
-/// for an album.
+/// for an album. The item starts at the episode's part of its file, so a
+/// play of the second episode of a double starts at the file's midpoint.
 /// An episode with no main file resolves to nothing. The series row
 /// carries the art an episode with no still of its own is presented
 /// with.
@@ -236,10 +239,16 @@ pub fn episodes(
             Ok(PlayItem {
                 path: row.get(5)?,
                 slug: row.get(7)?,
+                start: Some(0),
                 presentation,
             })
         },
     )?;
+    let start = place::place(connection, library, series, (season, chosen))?.start();
+    let items = items
+        .into_iter()
+        .map(|item| PlayItem { start, ..item })
+        .collect();
     let items = logoed(connection, library, series, items)?;
     marked(connection, library, items)
 }

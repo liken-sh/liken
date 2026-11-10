@@ -3,11 +3,13 @@
 
 mod arrivals;
 mod credits;
+mod doubles;
 mod store;
 mod touched;
 mod work;
 
 use super::*;
+use crate::catalog::progress::Origin;
 use crate::catalog::{Progress, Resume, Work};
 
 // The progress store's own schema, the one file every agent of the progress

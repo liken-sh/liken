@@ -382,6 +382,18 @@ them, and the bar and the status line under it. Down from
 the row puts focus on the marks, down from the marks returns to the
 still, and back closes the row.
 
+Some files hold more than one episode, such as `Show - S01E01-E02.mkv`.
+The episodes split such a file evenly, as
+[Scanning](https://liken.sh/library/docs/guides/scanning/) describes, so each episode has its
+own bar, status line, and Resume. Play and Start over on a later
+episode start the file at that episode's share of it, which is the
+midpoint for the second episode of a double, and Resume starts at that
+share plus where the people at the screen stopped in the episode. One
+play runs from the chosen episode to the end of the file. As it passes
+the end of an episode, the browser shows that episode as finished and
+the next episode of the file as in progress. The display's header names
+the chosen episode for the whole play.
+
 Pick up here follows the playback buttons on an episode's row. It marks
 every earlier episode of the series watched and clears every later
 episode, for the people at the screen, and plays the episode from the
@@ -559,6 +571,14 @@ with each item's path as a claim reference, and `media-operator` runs
 it. The `Play` is named after the title, so `kubectl get plays` reads
 like a listing. When the `Play` ends, the browser is shown again
 on the page it left.
+
+A play of an episode of a file of several episodes asks for the second
+of the file where the episode starts, and plays to the end of the file.
+So the offer of what comes next names the work after the file's last
+episode: a play of the first episode of a double offers the episode
+after the double. When the file has no duration to split, the play
+starts at the beginning of the file, and the browser's log has a line
+that says so.
 
 ## Every screen shows every library
 

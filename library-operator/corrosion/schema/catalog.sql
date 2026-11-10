@@ -352,16 +352,32 @@ CREATE TABLE marks (
 
 -- The many-to-many link between a file and the items it holds, within
 -- one library: a multi-episode file names more than one item, and an
--- item with a second encoding holds more than one file. All three
--- columns are the primary key, so the row carries nothing to update
--- and a repeat write is a no-op.
+-- item with a second encoding holds more than one file. The library, the
+-- path, and the item are the primary key.
+--
+-- part and parts place an episode in a file of several episodes, so a
+-- read can split one position in the file into a position in each
+-- episode. part is the episode's place in the file, counted from 1 in the
+-- order of the file name's range marker, and parts is how many episodes
+-- the file holds. The episodes split the file's duration evenly. 0 in
+-- both is a movie, or a link that no scan has written since the columns
+-- were added, and a reader reads it as a file of one work. The columns
+-- are on the link and not on the episode, because an episode with a
+-- second encoding has two files, and only one of them can hold several
+-- episodes. The scanner updates them only where they differ, so a repeat
+-- write changes no row.
 --
 -- A join from the item column to an item id must match the library as
 -- well, because an id names one row only inside its own library.
+--
+-- The columns after item came later. Corrosion adds a column to a table
+-- that exists at its end, so a new column always goes last here.
 CREATE TABLE file_items (
     library TEXT NOT NULL DEFAULT '',
     path TEXT NOT NULL DEFAULT '',
     item TEXT NOT NULL DEFAULT '',
+    part INTEGER NOT NULL DEFAULT 0,
+    parts INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (library, path, item)
 );
 

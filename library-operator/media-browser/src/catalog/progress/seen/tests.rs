@@ -234,3 +234,58 @@ fn each_person_finishes_by_their_own_plays_after_their_clear() {
     assert_eq!(reach.finish("second"), Some(Finish::Marked));
     assert_eq!(reach.finish("third"), None);
 }
+
+// One play of the double S01E01-E02 of 2,640 seconds that names `named`
+// and reached `position` in the file, as the read splits it.
+fn double(play: &str, named: i64, position: i64, recorded: i64) -> Vec<Seen> {
+    let file = crate::catalog::progress::parts::File {
+        parts: 2,
+        part: named,
+        duration: 2_640,
+        episodes: vec![(1, 1, 1), (2, 1, 2)],
+        credits: Vec::new(),
+    };
+    let row = episode(play, &["first"], (1, named), recorded);
+    let progress = Progress {
+        position,
+        duration: 2_640,
+        ..row.resume.progress.clone()
+    };
+    crate::catalog::progress::parts::split(progress, &file)
+        .into_iter()
+        .map(|progress| Seen {
+            resume: Resume {
+                progress,
+                ..row.resume.clone()
+            },
+            ..row.clone()
+        })
+        .collect()
+}
+
+// The episode wall takes the latest row of each episode, so a later play
+// of the second episode alone stands over the part an earlier play of the
+// whole double reached.
+#[test]
+fn the_wall_takes_the_latest_row_of_each_part() {
+    let seen = [
+        double("night-one", 1, 1_800, 10),
+        double("night-two", 2, 2_000, 20),
+    ]
+    .concat();
+
+    let reached: Vec<(i64, i64, bool)> = episodes(&seen, SHOWS, "show", &names(&["first"]))
+        .iter()
+        .map(|row| (row.episode, row.position, row.finished))
+        .collect();
+    assert_eq!(reached, [(1, 1_320, true), (2, 680, false)]);
+}
+
+// The bars of who has seen a film read films only, so the rows of a
+// double never reach them.
+#[test]
+fn the_rows_of_a_double_reach_no_film() {
+    let seen = double("night-one", 1, 2_640, 10);
+
+    assert!(films(&seen, &names(&["first"])).is_empty());
+}

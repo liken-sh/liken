@@ -25,10 +25,10 @@ func seedTitle(t *testing.T, catalog *Catalog, library, id, path string) {
 	if _, err := catalog.UpsertMovies(ctx, []movieRow{{Id: id, Library: library, Path: path, Title: id}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := catalog.UpsertFiles(ctx, []fileRow{{Path: path + "/movie.mkv", Library: library, Present: true, Items: []string{id}}}); err != nil {
+	if _, err := catalog.UpsertFiles(ctx, []fileRow{{Path: path + "/movie.mkv", Library: library, Present: true, Items: wholeItems(id)}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := catalog.UpsertFileItems(ctx, []fileRow{{Path: path + "/movie.mkv", Library: library, Items: []string{id}}}); err != nil {
+	if _, err := catalog.UpsertFileItems(ctx, []fileRow{{Path: path + "/movie.mkv", Library: library, Items: wholeItems(id)}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := catalog.UpsertAliases(ctx, []aliasRow{{Alias: id, Library: library, Item: id, Source: aliasSourceProvider}}); err != nil {
@@ -191,7 +191,7 @@ func TestMarkKeysReadsEveryIdPathAndAliasInItsOwnKeySpace(t *testing.T) {
 		movies:   []movieRow{{Id: "movie:tmdb:1"}},
 		series:   []seriesRow{{Id: "series:tvdb:1"}},
 		episodes: []episodeRow{{Id: "episode:tvdb:1:s01e01"}},
-		files:    []fileRow{{Path: "one.mkv", Items: []string{"movie:tmdb:1"}}},
+		files:    []fileRow{{Path: "one.mkv", Items: wholeItems("movie:tmdb:1")}},
 		aliases:  []aliasRow{{Alias: "movie:imdb:tt1"}, {Alias: "movie:tmdb:1"}},
 	}
 	keys := markKeys(result)
@@ -734,7 +734,7 @@ func TestPruneLibraryDeletesALinkWhoseItemIsAlreadyGone(t *testing.T) {
 
 	// The file also links to an item no table holds, the shape an earlier
 	// release left behind.
-	stranded := fileRow{Path: "One/movie.mkv", Library: "house/movies", Items: []string{"movie:path:one"}}
+	stranded := fileRow{Path: "One/movie.mkv", Library: "house/movies", Items: wholeItems("movie:path:one")}
 	if _, err := catalog.UpsertFileItems(ctx, []fileRow{stranded}); err != nil {
 		t.Fatal(err)
 	}
@@ -777,7 +777,7 @@ func TestPruneLibraryKeepsEveryMarkedLinkOfAFile(t *testing.T) {
 	if _, err := catalog.UpsertEpisodes(ctx, episodes); err != nil {
 		t.Fatal(err)
 	}
-	double := []fileRow{{Path: path, Library: "house/series", Present: true, Items: []string{first, second}}}
+	double := []fileRow{{Path: path, Library: "house/series", Present: true, Items: wholeItems(first, second)}}
 	if _, err := catalog.UpsertFiles(ctx, double); err != nil {
 		t.Fatal(err)
 	}
@@ -822,7 +822,7 @@ func TestPruneLibraryDeletesTheLinksOfADepartedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedTitle(t, catalog, "house/movies", "movie:tmdb:1", "One")
-	extra := []fileRow{{Path: "One/extra.mkv", Library: "house/movies", Present: true, Items: []string{"movie:tmdb:1"}}}
+	extra := []fileRow{{Path: "One/extra.mkv", Library: "house/movies", Present: true, Items: wholeItems("movie:tmdb:1")}}
 	if _, err := catalog.UpsertFiles(ctx, extra); err != nil {
 		t.Fatal(err)
 	}
@@ -901,7 +901,7 @@ func TestPruneLibraryDeletesAStaleLinkWhileTheFileAndItemStand(t *testing.T) {
 
 	// The first title's file once read as both titles, the shape two folders
 	// that derived one id leave behind.
-	stale := []fileRow{{Path: "One/movie.mkv", Library: "house/movies", Items: []string{"movie:tmdb:2"}}}
+	stale := []fileRow{{Path: "One/movie.mkv", Library: "house/movies", Items: wholeItems("movie:tmdb:2")}}
 	if _, err := catalog.UpsertFileItems(ctx, stale); err != nil {
 		t.Fatal(err)
 	}
@@ -945,7 +945,7 @@ func TestPruneScopeDeletesOnlyTheNamedFoldersLinks(t *testing.T) {
 
 	// The rescan re-read the first folder and found its file under a new
 	// item, so the old link is unmarked and the new one is marked.
-	moved := []fileRow{{Path: "Action/One/movie.mkv", Library: "house/movies", Items: []string{"movie:tmdb:3"}}}
+	moved := []fileRow{{Path: "Action/One/movie.mkv", Library: "house/movies", Items: wholeItems("movie:tmdb:3")}}
 	if _, err := catalog.UpsertFileItems(ctx, moved); err != nil {
 		t.Fatal(err)
 	}

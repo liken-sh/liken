@@ -178,6 +178,7 @@ mod tests {
         PlayItem {
             path: "Some Film (1999)/Some Film (1999).mkv".into(),
             slug: "some-film-1999".into(),
+            start: Some(0),
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "movie".into(),
@@ -277,6 +278,7 @@ mod tests {
         let item = PlayItem {
             path: "Show/S01/Show S01E02.mkv".into(),
             slug: "show-s01e02".into(),
+            start: Some(0),
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "series".into(),
@@ -382,6 +384,7 @@ mod tests {
                 &[PlayItem {
                     path: "film.mkv".into(),
                     slug: String::new(),
+                    start: Some(0),
                     presentation: Presentation::default(),
                 }]
             )["items"][0]["presentation"],

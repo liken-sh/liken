@@ -27,6 +27,7 @@ fn a_movie_plays_its_primary_video_file() {
         vec![PlayItem {
             path: "The Lantern/The Lantern.mkv".into(),
             slug: "lantern-1999".into(),
+            start: Some(0),
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "movie".into(),
@@ -433,6 +434,7 @@ fn a_trailer_plays_the_trailer_file_and_carries_no_trickplay() {
         vec![PlayItem {
             path: "Film one/trailer.mkv".into(),
             slug: "film-one".into(),
+            start: Some(0),
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "movie".into(),
@@ -471,6 +473,7 @@ fn a_series_trailer_plays_the_trailer_file_under_the_series_row() {
         vec![PlayItem {
             path: "Serial one/trailers/one.mkv".into(),
             slug: "serial-series:tvdb:1".into(),
+            start: Some(0),
             presentation: Presentation {
                 kind: "video".into(),
                 hint: "series".into(),

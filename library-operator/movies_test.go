@@ -26,7 +26,7 @@ func moviesByTitle(result *walkResult) map[string]movieRow {
 func fileByItem(result *walkResult, item string) (fileRow, bool) {
 	for _, row := range result.files {
 		for _, held := range row.Items {
-			if held == item {
+			if held.Item == item {
 				return row, true
 			}
 		}
@@ -78,7 +78,7 @@ func TestWalkMoviesReadsEveryFileTheTitleCarries(t *testing.T) {
 				t.Errorf("class = %s/%s/%s, want %s/%s/%s",
 					row.Type, row.Role, row.Language, testCase.wantType, testCase.wantRole, testCase.wantLanguage)
 			}
-			if row.Items[0] != "movie:tmdb:1001" {
+			if row.Items[0].Item != "movie:tmdb:1001" {
 				t.Errorf("items = %v, want the movie the folder holds", row.Items)
 			}
 			if row.Library != "house/movies" || !row.Present {

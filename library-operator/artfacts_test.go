@@ -114,7 +114,7 @@ func TestATitleWithTheArtFileHasNoGap(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	seedArtMovie(t, catalog, "Some Film (2014)", fileRow{
 		Path: "Some Film (2014)/poster.jpg", Library: artLibrary, Present: true,
-		Type: fileTypeImage, Role: fileRolePoster, Items: []string{"movie:tmdb:1001"},
+		Type: fileTypeImage, Role: fileRolePoster, Items: wholeItems("movie:tmdb:1001"),
 	})
 
 	if gaps := artGapsOf(t, catalog, factPoster); len(gaps) != 0 {
@@ -230,7 +230,7 @@ func TestAnEpisodeWithAnImageOfItsOwnHasNoThumbGap(t *testing.T) {
 	thumb := filepath.Join("Quiet Harbor (2008)", "Season 01", "Quiet Harbor - S01E05-thumb.jpg")
 	seedArtSeries(t, catalog, "Quiet Harbor (2008)", []int{1}, fileRow{
 		Path: thumb, Library: artLibrary, Present: true, Type: fileTypeImage,
-		Role: fileRoleThumb, Items: []string{episodeID("series:tvdb:800001", 1, 5)},
+		Role: fileRoleThumb, Items: wholeItems(episodeID("series:tvdb:800001", 1, 5)),
 	})
 
 	if gaps := artGapsOf(t, catalog, factEpisodeThumb); len(gaps) != 0 {
@@ -390,7 +390,7 @@ func TestARefreshOpensTheArtGap(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			seedArtMovie(t, catalog, "Some Film (2014)", fileRow{
 				Path: "Some Film (2014)/poster.jpg", Library: artLibrary, Present: true,
-				Type: fileTypeImage, Role: fileRolePoster, Items: []string{"movie:tmdb:1001"},
+				Type: fileTypeImage, Role: fileRolePoster, Items: wholeItems("movie:tmdb:1001"),
 			})
 			if _, err := catalog.UpsertAttempts(t.Context(), []attemptRow{{
 				Library: artLibrary, Item: "Some Film (2014)/poster.jpg", Fact: factPoster,

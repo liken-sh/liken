@@ -70,7 +70,7 @@ pub use alike::Alike;
 pub use franchise::{Calendar, Entry, Era, Franchise, Held, Membership};
 pub use identity::Identity;
 pub use mark::Mark;
-pub use progress::{Played, Progress, Reach, Resume, Seen, Touched, Work};
+pub use progress::{Place, Played, Progress, Reach, Resume, Seen, Touched, Work};
 pub use query::{Answer, Counts, Fold, GenreSort, InSeries, Order, Query, Slot, Sort};
 pub use studio::Studio;
 pub use subtitle::{Subtitle, Track};
@@ -590,6 +590,15 @@ pub trait Source {
     /// A choice whose own main file is missing resolves to nothing.
     fn play(&mut self, library: &str, selection: &Selection) -> Vec<PlayItem>;
 
+    /// Where one episode is in its main file: its part, the file's parts and
+    /// duration, and the file's last episode. A play of an episode runs to
+    /// the end of its file, so the offer after it and the seconds it runs
+    /// read this place. A source with no files answers an episode that is
+    /// the whole of its file.
+    fn place(&mut self, _library: &str, _series: &str, numbers: (i64, i64)) -> Place {
+        Place::whole(numbers)
+    }
+
     /// One title's credited people, split by part and in billing
     /// order within a part.
     fn credits(&mut self, library: &str, id: &str) -> Credits;
@@ -743,6 +752,12 @@ pub struct PlayItem {
     /// operator folds the chosen item's slug into the `Play`'s name, so
     /// `kubectl get plays` reads as titles.
     pub slug: String,
+    /// The second of the file where the chosen work starts: 0 for a film,
+    /// a trailer, and an episode alone in its file, and the start of the
+    /// episode's part for an episode of a file of several. Nothing for an
+    /// episode of a file of several that has no duration to split, which a
+    /// play starts at the beginning of the file.
+    pub start: Option<i64>,
     /// The presentation the operator passes through to the `Play`.
     pub presentation: Presentation,
 }

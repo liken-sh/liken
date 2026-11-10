@@ -113,7 +113,7 @@ func (f folderFiles) row(name string, class fileClass) (fileRow, []streamRow, er
 		streams = f.probes.fill(&row, entry, absolute, f.identities)
 	}
 	if items := f.item(name); len(items) > 0 {
-		row.Items = items
+		row.Items = wholeItems(items...)
 	}
 	return row, streams, nil
 }

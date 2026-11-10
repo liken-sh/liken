@@ -24,7 +24,7 @@ func walkOfOneEpisode(library, series, episode, path string) *walkResult {
 		}},
 		files: []fileRow{{
 			Path: file, Library: library, Present: true, Type: fileTypeVideo,
-			Role: fileRolePrimary, Items: []string{episode},
+			Role: fileRolePrimary, Items: wholeItems(episode),
 		}},
 		aliases: []aliasRow{
 			{Alias: series, Library: library, Item: series, Source: aliasSourceProvider},

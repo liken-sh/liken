@@ -6,6 +6,7 @@ mod lists;
 mod logos;
 mod pages;
 mod people;
+mod places;
 mod plans;
 mod plays;
 mod progress;

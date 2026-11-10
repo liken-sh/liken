@@ -250,8 +250,8 @@ operator's log and dropped, because the screen has no way to answer.
 | `aliases` | map of strings | no | The work's ids by provider, such as `{"tmdb": "1000001", "imdb": "tt0000001"}`. They become the `Play`'s `library.liken.sh/alias.{provider}` annotations, and they are the identity the progress store keys on. |
 | `season` | integer | no | The season number of an episode. It becomes the `library.liken.sh/season` annotation. |
 | `episode` | integer | no | The episode number of an episode. It becomes the `library.liken.sh/episode` annotation. |
-| `start` | string | no | Where the first item begins, as a decimal count of seconds. It reaches the `Play`'s `spec.start` unchanged, because the player parses it and the operator does not. Omit it to start at the beginning. |
-| `next` | object | no | The work that follows this one, which the player offers on its scrubber. It carries the three lines of the offer card, `reason`, `title`, and `detail`, spelled the way the continue-watching row spells them, except that `detail` leaves out an episode's number, which `title` carries, and the runtime, which the player draws from `remaining_seconds`; `art`, a path relative to the root of `next.library`; `remaining_seconds`, how long a play of the next work runs from where it starts, which is the duration of its file in the catalog less the position where these `people` stopped in it before, and which is left out where the catalog holds no duration; `library`, the `namespace/name` of the next work's own `Library`, which may differ from `library` above; and `request`, an object the operator copies onto the `Play` unread. The operator joins `art` to the claim of `next.library` the way it joins an item's art, and the player publishes `request` back on the `Player`'s commands topic when a person takes the offer. The operator copies `remaining_seconds` onto the `Play` as `remainingSeconds`, and the player's card adds it to the wall clock to draw the time the next work would end. |
+| `start` | string | no | Where the first item begins, as a decimal count of seconds from the start of its file. It reaches the `Play`'s `spec.start` unchanged, because the player parses it and the operator does not. Omit it to start at the beginning. A request for a later episode of a file of several episodes carries the second where that episode starts in the file, plus where the people stopped in the episode for a resume. |
+| `next` | object | no | The work that follows this one, which the player offers on its scrubber. It carries the three lines of the offer card, `reason`, `title`, and `detail`, spelled the way the continue-watching row spells them, except that `detail` leaves out an episode's number, which `title` carries, and the runtime, which the player draws from `remaining_seconds`; `art`, a path relative to the root of `next.library`; `remaining_seconds`, how long a play of the next work runs from where it starts, which is the duration of its file in the catalog less the position where these `people` stopped in it before, and which is left out where the catalog holds no duration. For a next work that is a later episode of a file of several episodes, the duration counts from that episode's start to the end of the file, because its `Play` runs that far; `library`, the `namespace/name` of the next work's own `Library`, which may differ from `library` above; and `request`, an object the operator copies onto the `Play` unread. The operator joins `art` to the claim of `next.library` the way it joins an item's art, and the player publishes `request` back on the `Player`'s commands topic when a person takes the offer. The operator copies `remaining_seconds` onto the `Play` as `remainingSeconds`, and the player's card adds it to the wall clock to draw the time the next work would end. |
 
 The project's browser publishes one item, the film or the chosen
 episode, leaves out every empty field, sends `start` only for a
@@ -259,7 +259,11 @@ resume, and sends `next` only where the page the person started from
 names a natural successor: the next episode of a series, the next film
 of a set, or the next member of a franchise. A series continues
 through `next` and not through the item list, so every episode is its
-own `Play` and its own row of progress.
+own `Play` and its own row of progress. The one exception is a file of
+several episodes, which is one `Play` and one row of progress from the
+chosen episode to the end of the file. Its `next` names the work after
+the file's last episode, and the browser reads each episode's progress
+from the one row.
 
     {
       "library": "den/movies",
@@ -477,7 +481,7 @@ container, and the `Player`'s name from `MEDIA_PLAYER_NAME`.
 | `aliases` | map of strings | The work's ids by provider, as a play request names them. An episode carries the series' ids. |
 | `season`, `episode` | integers | The numbers of an episode, and 0 for a work that has neither. |
 | `position` | integer | The duration for `watched`, and 0 for `cleared`, in seconds. |
-| `duration` | integer | The length of the work in seconds: the duration of the audience's play of the work where one exists, and the catalog's running time where none does. |
+| `duration` | integer | The length of the work in seconds: the duration of the audience's play of the work where one exists, and the catalog's running time where none does. For an episode of a file of several episodes, the `position` and the `duration` are the episode's own and not the file's, and the jellyfin role converts them to seconds of the file. |
 | `at` | integer | The Unix time of the press, which the store writes as the recorded time. The row stands over every play recorded before it, and a later play replaces it. |
 
 The row is ended at `at`, with the phase `Finished`, because no `Play`

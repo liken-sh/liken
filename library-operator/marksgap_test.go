@@ -33,7 +33,7 @@ func seedMarksAttempt(t *testing.T, catalog *Catalog, releases []string, result 
 		seed.episodes = append(seed.episodes, episodeRow{Id: id, Library: marksLibrary,
 			Kind: libraryKindSeries, Path: marksGapPath, Series: series, Season: 1, Episode: 2 + at,
 			Released: released})
-		file.Items = append(file.Items, id)
+		file.Items = append(file.Items, fileItem{Item: id})
 	}
 	seed.files = []fileRow{file}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {

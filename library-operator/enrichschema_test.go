@@ -123,8 +123,8 @@ func TestEveryGapQueryRunsAgainstTheRealSchema(t *testing.T) {
 			{Id: "series:path:show", Library: "house/movies", Kind: libraryKindSeries, Path: "Show", Title: "Show"},
 		},
 		files: []fileRow{
-			{Path: "One (2001)/one.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, Modified: ledgerTime.Unix(), Items: []string{"movie:path:one-2001"}},
-			{Path: "Two (2002)/two.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, DurationMs: 6540000, Modified: ledgerTime.Unix(), Probed: ledgerTime.Unix(), Items: []string{"movie:tmdb:2"}},
+			{Path: "One (2001)/one.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, Modified: ledgerTime.Unix(), Items: wholeItems("movie:path:one-2001")},
+			{Path: "Two (2002)/two.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, DurationMs: 6540000, Modified: ledgerTime.Unix(), Probed: ledgerTime.Unix(), Items: wholeItems("movie:tmdb:2")},
 		},
 		aliases: []aliasRow{
 			{Alias: "movie:tmdb:2", Library: "house/movies", Item: "movie:tmdb:2", Source: aliasSourceProvider},
@@ -153,7 +153,7 @@ func TestAnAttemptClosesItsOwnGapAgainstTheRealSchema(t *testing.T) {
 
 	seed := &walkResult{
 		movies: []movieRow{{Id: "movie:path:one-2001", Library: "house/movies", Kind: libraryKindMovies, Path: "One (2001)", Title: "One"}},
-		files:  []fileRow{{Path: "One (2001)/one.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, Modified: ledgerTime.Unix(), Items: []string{"movie:path:one-2001"}}},
+		files:  []fileRow{{Path: "One (2001)/one.mkv", Library: "house/movies", Present: true, Type: fileTypeVideo, Modified: ledgerTime.Unix(), Items: wholeItems("movie:path:one-2001")}},
 		attempts: []attemptRow{
 			{Library: "house/movies", Item: "movie:path:one-2001", Fact: factIdentity, At: ledgerTime.Unix(), Result: attemptCandidates},
 			{Library: "house/movies", Item: "One (2001)/one.mkv", Fact: factProbe, At: ledgerTime.Unix(), Result: attemptFound},

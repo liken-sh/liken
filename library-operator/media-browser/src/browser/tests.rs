@@ -10,6 +10,7 @@ mod audience;
 mod banner;
 mod cleared;
 mod clock;
+mod doubles;
 mod faces;
 mod home;
 mod identity;
@@ -50,8 +51,8 @@ use crate::catalog::pool::Candidate;
 use crate::catalog::{
     Answer, Change, Credit, CreditSlot, Credits, Entry, Episode, FileFacts, Fold, Franchise,
     FranchiseEntry, GenreEntry, GenreSort, Held, Identity, InSeries, LibraryEntry, Membership,
-    MovieDetails, MovieSet, Order, Person, PlayItem, Presentation, Progress, Query, Reach, Resume,
-    SeriesDetails, Slot, Title, Touched, Work,
+    MovieDetails, MovieSet, Order, Person, Place, PlayItem, Presentation, Progress, Query, Reach,
+    Resume, SeriesDetails, Slot, Title, Touched, Work,
 };
 use crate::screens::home::Home;
 use crate::screens::movie::Focus;
@@ -141,6 +142,9 @@ struct Fake {
     // them.
     reached: HashMap<(String, String), Progress>,
     episodes_reached: Vec<Progress>,
+    // Where each episode of the fake serial is in its file, by its numbers.
+    // An episode not named here is the whole of its file.
+    places: Vec<((i64, i64), Place)>,
     // The people the last of the three progress reads named.
     watching: Vec<String>,
 }
@@ -655,6 +659,13 @@ impl Source for Fake {
         self.items.clone()
     }
 
+    fn place(&mut self, _library: &str, _series: &str, numbers: (i64, i64)) -> Place {
+        self.places
+            .iter()
+            .find(|(at, _)| *at == numbers)
+            .map_or(Place::whole(numbers), |(_, place)| *place)
+    }
+
     fn identity(&mut self, _library: &str, _selection: &Selection) -> Identity {
         self.identity.clone()
     }
@@ -982,6 +993,7 @@ fn one_item() -> PlayItem {
     PlayItem {
         path: "Some Film (1999)/Some Film (1999).mkv".into(),
         slug: "some-film-1999".into(),
+        start: Some(0),
         presentation: Presentation {
             kind: "video".into(),
             hint: "movie".into(),

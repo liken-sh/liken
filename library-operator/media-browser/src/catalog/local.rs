@@ -16,9 +16,9 @@ use crate::catalog::recency::DRAWN;
 use crate::catalog::stream::Tracks;
 use crate::catalog::{
     Alike, Answer, Change, Credits, Episode, FileFacts, Franchise, FranchiseEntry, GenreEntry,
-    Identity, LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person, PlayItem, Progress,
-    Query, Reach, Resume, Seen, Selection, SeriesDetails, Slot, Sort, Source, Studio, TILES,
-    Touched, Work, library_name, recency,
+    Identity, LibraryEntry, Membership, MovieDetails, MovieSet, Order, Person, Place, PlayItem,
+    Progress, Query, Reach, Resume, Seen, Selection, SeriesDetails, Slot, Sort, Source, Studio,
+    TILES, Touched, Work, library_name, recency,
 };
 use crate::harness::Waker;
 use crate::tracks::Preferences;
@@ -31,6 +31,7 @@ mod genres;
 mod identity;
 mod item;
 mod people;
+mod place;
 mod play;
 mod pool;
 mod progress;
@@ -526,6 +527,11 @@ impl Source for LocalCatalog {
             } => self
                 .read(|connection| play::episodes(connection, library, series, *season, *episode)),
         }
+    }
+
+    fn place(&mut self, library: &str, series: &str, numbers: (i64, i64)) -> Place {
+        self.read_result(|connection| place::place(connection, library, series, numbers))
+            .unwrap_or_else(|_| Place::whole(numbers))
     }
 
     fn identity(&mut self, library: &str, selection: &Selection) -> Identity {

@@ -319,18 +319,21 @@ func (c *Catalog) UpsertFiles(ctx context.Context, rows []fileRow) (int, error) 
 }
 
 // UpsertFileItems writes the many-to-many link, one row per (file, item) pair a
-// file carries.
+// file carries, with the item's place in the file.
 //
-// Every column of file_items is a primary-key column, so the row
-// carries nothing to update and the upsert does nothing on a conflict.
-// A repeat write changes no row and broadcasts nothing.
+// Every walk writes every link, so the update on a conflict runs only where
+// the part or the parts differ. A repeat write changes no row and
+// broadcasts nothing, and the first walk after the columns were added
+// records them on every link of a file of several episodes.
 func (c *Catalog) UpsertFileItems(ctx context.Context, rows []fileRow) (int, error) {
 	var statements []statement
 	for _, row := range rows {
 		for _, item := range row.Items {
 			statements = append(statements, statement{
-				sql:    `INSERT INTO file_items (library, path, item) VALUES (?, ?, ?) ON CONFLICT (library, path, item) DO NOTHING`,
-				params: []any{row.Library, row.Path, item},
+				sql: `INSERT INTO file_items (library, path, item, part, parts) VALUES (?, ?, ?, ?, ?) ` +
+					`ON CONFLICT (library, path, item) DO UPDATE SET part = excluded.part, parts = excluded.parts ` +
+					`WHERE file_items.part IS NOT excluded.part OR file_items.parts IS NOT excluded.parts`,
+				params: []any{row.Library, row.Path, item.Item, item.Part, item.Parts},
 			})
 		}
 	}

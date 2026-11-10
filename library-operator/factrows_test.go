@@ -274,7 +274,7 @@ func TestARatingFactWritesTheScoreIntoTheBody(t *testing.T) {
 func TestAFactReportsTheRowsItsCatalogRefused(t *testing.T) {
 	video := []fileRow{{
 		Path: "One (2001)/one.mkv", Library: contributorLibrary, Type: fileTypeVideo,
-		Role: fileRolePrimary, Present: true, Items: []string{"movie:tmdb:1"},
+		Role: fileRolePrimary, Present: true, Items: wholeItems("movie:tmdb:1"),
 	}}
 	title := []movieRow{{
 		Id: "movie:tmdb:1", Library: contributorLibrary, Kind: libraryKindMovies,
@@ -308,7 +308,7 @@ func TestAFactReportsTheRowsItsCatalogRefused(t *testing.T) {
 			files: []fileRow{{
 				Path: "One (2001)/poster.jpg", Library: contributorLibrary,
 				Type: fileTypeImage, Role: fileRolePoster, Present: true,
-				Items: []string{"movie:tmdb:1"},
+				Items: wholeItems("movie:tmdb:1"),
 			}},
 		}},
 		{"a contributor fact's own columns", factContributorIDs, &walkResult{

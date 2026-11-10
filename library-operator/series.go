@@ -332,8 +332,18 @@ func collectEpisodeFiles(seriesDir string, ignore ignoreSet) ([]episodeFile, err
 // scanEpisode reads one episode file into an item per episode it holds and one
 // file row for the file itself, and reports the item ids. The file is one file,
 // and its path is the primary key of the files table, so a double episode is
-// two items and one row. Both items play the file from the start, because
-// nothing on the volume says where the second episode begins.
+// two items and one row.
+//
+// Nothing on the volume says where the second episode of a double begins, so
+// the episodes split the file evenly. The link from the file to each episode
+// records the episode's place in the order of the name's range marker and how
+// many episodes the file holds, and a read splits a position in the file
+// with those two numbers. An episode the scanner leaves out for having no
+// number still counts, because its seconds are still in the file. When the
+// file's duration is known, each episode's runtime is its share of that
+// duration, so the runtime under a still and the length of a mark are one
+// episode's length. A file with no duration keeps the runtime of each .nfo
+// block.
 //
 // The season and episode numbers come from the
 // episode .nfo beside the file where there is one, and from the season folder and
@@ -353,7 +363,9 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fi
 	result.noteReadError(err)
 
 	var episodeItemIDs []string
-	for _, meta := range metas {
+	var links []fileItem
+	var episodes []episodeRow
+	for index, meta := range metas {
 		if meta.Episode <= 0 {
 			continue
 		}
@@ -369,7 +381,7 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fi
 			arts = []string{thumb}
 		}
 
-		result.episodes = append(result.episodes, episodeRow{
+		episodes = append(episodes, episodeRow{
 			Id:       episodeItemID,
 			Library:  library,
 			Kind:     libraryKindSeries,
@@ -390,6 +402,7 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fi
 		})
 		result.aliases = append(result.aliases, aliasRowsForItem(library, scopeEpisode, meta.ProviderIDs, "", episodeItemID)...)
 		episodeItemIDs = append(episodeItemIDs, episodeItemID)
+		links = append(links, fileItem{Item: episodeItemID, Part: index + 1, Parts: len(metas)})
 	}
 	if len(episodeItemIDs) == 0 {
 		return nil
@@ -403,6 +416,7 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fi
 	size, modified, err := statFile(absolute)
 	if err != nil {
 		result.noteReadError(err)
+		result.episodes = append(result.episodes, episodes...)
 		return episodeItemIDs
 	}
 	class := classifyFile(episode.file, filePlace{kind: libraryKindSeries, season: true})
@@ -422,9 +436,15 @@ func scanEpisode(root, library, seriesID string, episode episodeFile, arrival fi
 		Role:       class.Role,
 		Modified:   modified,
 		Arrived:    arrival.arrived,
-		Items:      episodeItemIDs,
+		Items:      links,
 	}
 	result.streams = append(result.streams, probes.fill(&row, episode.file, absolute, result.fileIdentities())...)
 	result.files = append(result.files, row)
+	if row.DurationMs > 0 {
+		for i := range episodes {
+			episodes[i].Duration = row.DurationMs / 1000 / int64(len(metas))
+		}
+	}
+	result.episodes = append(result.episodes, episodes...)
 	return episodeItemIDs
 }

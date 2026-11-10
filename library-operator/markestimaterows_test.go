@@ -32,9 +32,9 @@ func seedEstimateSeries(t *testing.T, catalog *Catalog, chapter int64) {
 		},
 		files: []fileRow{
 			{Path: firstEpisode, Library: estimateLibrary, Present: true, Type: fileTypeVideo,
-				Role: fileRolePrimary, DurationMs: 3000000, CreditsChapterMs: chapter, Items: []string{"episode:tvdb:1:1:1"}},
+				Role: fileRolePrimary, DurationMs: 3000000, CreditsChapterMs: chapter, Items: wholeItems("episode:tvdb:1:1:1")},
 			{Path: secondEpisode, Library: estimateLibrary, Present: true, Type: fileTypeVideo,
-				Role: fileRolePrimary, DurationMs: 3000000, Items: []string{"episode:tvdb:1:1:2"}},
+				Role: fileRolePrimary, DurationMs: 3000000, Items: wholeItems("episode:tvdb:1:1:2")},
 		},
 	}
 	if err := upsertWalk(t.Context(), catalog, result); err != nil {
@@ -179,7 +179,7 @@ func seedSubtitle(t *testing.T, catalog *Catalog, name, language, role string, d
 	t.Helper()
 	row := fileRow{Path: "Show/Season 01/" + name, Library: estimateLibrary, Present: true,
 		Type: fileTypeSubtitle, Role: role, Language: language, Dialogue: dialogue.column(),
-		Items: []string{"episode:tvdb:1:1:2"}}
+		Items: wholeItems("episode:tvdb:1:1:2")}
 	if err := upsertWalk(t.Context(), catalog, &walkResult{files: []fileRow{row}}); err != nil {
 		t.Fatal(err)
 	}

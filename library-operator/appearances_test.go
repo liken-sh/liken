@@ -180,7 +180,7 @@ func TestTheAppearancesGapAgainstTheRealSchema(t *testing.T) {
 	catalog, _ := newSQLiteCatalog(t)
 	video := func(path string, items ...string) fileRow {
 		return fileRow{Path: path, Library: appearancesLibrary, Present: true, Type: fileTypeVideo,
-			Role: fileRolePrimary, DurationMs: 6000000, VideoCodec: "h264", SizeBytes: 4096, Items: items}
+			Role: fileRolePrimary, DurationMs: 6000000, VideoCodec: "h264", SizeBytes: 4096, Items: wholeItems(items...)}
 	}
 	trailer := video("A/trailers/Official Trailer.mp4", "movie:tmdb:1")
 	trailer.Role = fileRoleTrailer
@@ -249,7 +249,7 @@ func TestAnAppearancesAttemptHoldsItsFileOutOfTheGap(t *testing.T) {
 			catalog, _ := newSQLiteCatalog(t)
 			seed := &walkResult{
 				files: []fileRow{{Path: "A/a.mkv", Library: appearancesLibrary, Present: true, Type: fileTypeVideo,
-					Role: fileRolePrimary, DurationMs: 6000000, VideoCodec: "h264", Items: []string{"movie:tmdb:1"}}},
+					Role: fileRolePrimary, DurationMs: 6000000, VideoCodec: "h264", Items: wholeItems("movie:tmdb:1")}},
 				credits: []creditRow{{Library: appearancesLibrary, Item: "movie:tmdb:1",
 					Contributor: ".contributors/ad/ada-quill", Part: creditPartActor}},
 				contributors: []contributorRow{{Library: appearancesLibrary, Path: ".contributors/ad/ada-quill",

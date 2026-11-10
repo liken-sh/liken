@@ -47,7 +47,7 @@ func seedProbeGap(t *testing.T, catalog *Catalog, root, folder, file string) {
 		movies: []movieRow{{Id: "movie:path:x", Library: "house/movies", Kind: libraryKindMovies, Path: folder, Title: folder}},
 		files: []fileRow{{
 			Path: path, Library: "house/movies", Present: true, Type: fileTypeVideo,
-			Modified: modifiedOf(t, filepath.Join(root, path)), Items: []string{"movie:path:x"},
+			Modified: modifiedOf(t, filepath.Join(root, path)), Items: wholeItems("movie:path:x"),
 		}},
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {

@@ -333,7 +333,8 @@ func TestUpsertFileItemsExpandsEveryPair(t *testing.T) {
 	rec := &catalogRecorder{}
 	catalog := testCatalog(t, rec)
 
-	rows := []fileRow{{Path: "s01e01e02.mkv", Items: []string{"episode:tvdb:800001:s01e01", "episode:tvdb:800001:s01e02"}}}
+	rows := []fileRow{{Path: "s01e01e02.mkv", Items: []fileItem{
+		{Item: "episode:tvdb:800001:s01e01", Part: 1, Parts: 2}, {Item: "episode:tvdb:800001:s01e02", Part: 2, Parts: 2}}}}
 	applied, err := catalog.UpsertFileItems(context.Background(), rows)
 	if err != nil {
 		t.Fatal(err)
@@ -345,14 +346,12 @@ func TestUpsertFileItemsExpandsEveryPair(t *testing.T) {
 	if len(statements) != 2 {
 		t.Fatalf("statements = %d, want 2", len(statements))
 	}
-	// Every column of file_items is a key column, so the write has
-	// nothing to update and a repeat changes no row.
-	if !strings.Contains(statements[0].sql, "INSERT INTO file_items") ||
-		!strings.Contains(statements[0].sql, "ON CONFLICT (library, path, item) DO NOTHING") {
-		t.Errorf("sql = %q, want an insert on file_items that does nothing on a conflict", statements[0].sql)
+	if !strings.Contains(statements[0].sql, "INSERT INTO file_items") {
+		t.Errorf("sql = %q, want an insert on file_items", statements[0].sql)
 	}
-	if statements[0].params[1] != "s01e01e02.mkv" || statements[1].params[2] != "episode:tvdb:800001:s01e02" {
-		t.Errorf("params = %v / %v, want the path and each item", statements[0].params, statements[1].params)
+	if statements[0].params[1] != "s01e01e02.mkv" || statements[1].params[2] != "episode:tvdb:800001:s01e02" ||
+		statements[1].params[3] != float64(2) || statements[1].params[4] != float64(2) {
+		t.Errorf("params = %v / %v, want the path, each item, and its part", statements[0].params, statements[1].params)
 	}
 }
 

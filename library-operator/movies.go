@@ -232,7 +232,7 @@ func movieFileRow(root, dir, file, library, itemID string, stream *streamInfo, a
 		Role:       class.Role,
 		Modified:   modified,
 		Arrived:    arrived,
-		Items:      []string{itemID},
+		Items:      wholeItems(itemID),
 	}, nil
 }
 

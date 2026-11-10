@@ -59,7 +59,7 @@ func seedMarkedMovie(t *testing.T, catalog *Catalog, root, folder, id string, du
 	seed := &walkResult{
 		movies: []movieRow{{Id: id, Library: marksLibrary, Kind: libraryKindMovies, Path: folder, Title: "Some Film"}},
 		files: []fileRow{{Library: marksLibrary, Path: video, Type: fileTypeVideo, Role: fileRolePrimary,
-			Present: true, DurationMs: duration, Items: []string{id}}},
+			Present: true, DurationMs: duration, Items: wholeItems(id)}},
 		aliases: []aliasRow{
 			{Alias: id, Library: marksLibrary, Item: id, Source: aliasSourceProvider},
 			{Alias: "movie:imdb:tt9000001", Library: marksLibrary, Item: id, Source: aliasSourceProvider},
@@ -153,7 +153,7 @@ func TestTheMarksGapHoldsTheMainVideosOfIdentifiedWorks(t *testing.T) {
 				movies: []movieRow{{Id: test.id, Library: marksLibrary, Kind: libraryKindMovies,
 					Path: "Some Film (1999)", Title: "Some Film"}},
 				files: []fileRow{{Library: marksLibrary, Path: path, Type: fileTypeVideo, Role: test.role,
-					Present: true, DurationMs: test.duration, Items: []string{test.id}}},
+					Present: true, DurationMs: test.duration, Items: wholeItems(test.id)}},
 			}
 			if test.attempt != nil {
 				attempt := *test.attempt
@@ -208,7 +208,7 @@ func TestAMarkFileNamesTheWorkItsProviderKeysOn(t *testing.T) {
 				id := episodeID(series, 1, number)
 				seed.episodes = append(seed.episodes, episodeRow{Id: id, Library: marksLibrary,
 					Kind: libraryKindSeries, Path: path, Series: series, Season: 1, Episode: number})
-				file.Items = append(file.Items, id)
+				file.Items = append(file.Items, fileItem{Item: id})
 			}
 			seed.files = []fileRow{file}
 			if err := upsertWalk(t.Context(), catalog, seed); err != nil {

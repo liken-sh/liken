@@ -53,6 +53,7 @@ type jellyfinIndex struct {
 	mutex     sync.Mutex
 	movies    map[string]string
 	episodes  map[string]string
+	spans     map[string]jellyfinSpan
 	series    map[string]map[string]string
 	users     map[string]string
 	itemsRead jellyfinReads
@@ -68,6 +69,7 @@ func newJellyfinIndex(api *jellyfinAPI, now func() time.Time, log io.Writer) *je
 		log:      log,
 		movies:   map[string]string{},
 		episodes: map[string]string{},
+		spans:    map[string]jellyfinSpan{},
 		series:   map[string]map[string]string{},
 		users:    map[string]string{},
 	}
@@ -281,7 +283,27 @@ func jellyfinRetryWait(failures int) time.Duration {
 type jellyfinLookups struct {
 	movies   map[string]string
 	episodes map[string]string
+	spans    map[string]jellyfinSpan
 	series   map[string]map[string]string
+}
+
+// The episodes one item of several episodes holds, and the run time of the
+// whole item in seconds. Jellyfin holds one position and one played flag for
+// the item, so a mark on one of its episodes is written at that episode's
+// seconds in the file, and the marks read the span to find them. An item of
+// one episode holds no span, and its zero value reads as one work.
+type jellyfinSpan struct {
+	first, last int
+	runTime     int
+}
+
+// The place of one episode in the item that holds it, counted from 1, and
+// how many episodes the item holds. An item of one episode is part 1 of 1.
+func (s jellyfinSpan) partOf(episode int) (part, parts int) {
+	if s.last <= s.first || episode < s.first || episode > s.last {
+		return 1, 1
+	}
+	return episode - s.first + 1, s.last - s.first + 1
 }
 
 // build reads the two listings and folds each item as it arrives. The series
@@ -294,6 +316,7 @@ func (i *jellyfinIndex) build(ctx context.Context) (jellyfinLookups, error) {
 	built := jellyfinLookups{
 		movies:   map[string]string{},
 		episodes: map[string]string{},
+		spans:    map[string]jellyfinSpan{},
 		series:   map[string]map[string]string{},
 	}
 	if err := i.api.items(budget, jellyfinSeriesListing, func(item jellyfinItem) {
@@ -327,7 +350,8 @@ func jellyfinBuildBudget(ctx context.Context) (context.Context, context.CancelFu
 
 // fold adds one item to the lookups under its keys. A movie is keyed on
 // every provider id it has, and an episode on its series' provider ids plus
-// the season and episode numbers.
+// the season and each episode number the item holds, so a double answers
+// for both of its episodes.
 func (l jellyfinLookups) fold(item jellyfinItem) {
 	switch {
 	case strings.EqualFold(item.Type, jellyfinMovieType):
@@ -335,18 +359,45 @@ func (l jellyfinLookups) fold(item jellyfinItem) {
 			l.movies[jellyfinAlias(provider, id)] = item.ID
 		}
 	case strings.EqualFold(item.Type, jellyfinEpisodeType):
+		last := jellyfinLastEpisode(item)
 		for provider, id := range l.series[item.SeriesID] {
-			l.episodes[jellyfinEpisodeAlias(jellyfinAlias(provider, id),
-				item.ParentIndexNumber, item.IndexNumber)] = item.ID
+			for episode := item.IndexNumber; episode <= last; episode++ {
+				l.episodes[jellyfinEpisodeAlias(jellyfinAlias(provider, id),
+					item.ParentIndexNumber, episode)] = item.ID
+			}
+		}
+		if last > item.IndexNumber {
+			l.spans[item.ID] = jellyfinSpan{first: item.IndexNumber, last: last,
+				runTime: jellyfinSeconds(item.RunTimeTicks)}
 		}
 	}
+}
+
+// The last episode one item holds. An item with no IndexNumberEnd, or one
+// that is not after IndexNumber, holds its first episode alone. A range
+// longer than maxRangeEpisodes holds its first episode alone too, because
+// the scanner reads a file name with such a range as one episode, and the
+// catalog and Jellyfin must agree on which episodes share one file.
+func jellyfinLastEpisode(item jellyfinItem) int {
+	if item.IndexNumberEnd <= item.IndexNumber || item.IndexNumberEnd-item.IndexNumber+1 > maxRangeEpisodes {
+		return item.IndexNumber
+	}
+	return item.IndexNumberEnd
+}
+
+// spanOf answers the span of one item of several episodes, and the zero
+// span for an item of one episode or an item the index does not hold.
+func (i *jellyfinIndex) spanOf(item string) jellyfinSpan {
+	i.mutex.Lock()
+	defer i.mutex.Unlock()
+	return i.spans[item]
 }
 
 // hold puts one finished build in place of the index the role was reading.
 func (i *jellyfinIndex) hold(built jellyfinLookups) {
 	i.mutex.Lock()
 	defer i.mutex.Unlock()
-	i.movies, i.episodes, i.series = built.movies, built.episodes, built.series
+	i.movies, i.episodes, i.spans, i.series = built.movies, built.episodes, built.spans, built.series
 }
 
 // refreshUsers reads the users and replaces the map, under the same floor and

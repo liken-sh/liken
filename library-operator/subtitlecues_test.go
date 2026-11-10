@@ -75,7 +75,7 @@ func TestTheProbeRecordsTheDialogueOfASubtitleFile(t *testing.T) {
 	writeFile(t, filepath.Join(root, subtitle), episodeSRT)
 	seed := &walkResult{files: []fileRow{{
 		Path: subtitle, Library: "house/movies", Present: true, Type: fileTypeSubtitle, Role: fileRoleFull,
-		Language: "en", Modified: modifiedOf(t, filepath.Join(root, subtitle)), Items: []string{"movie:path:x"},
+		Language: "en", Modified: modifiedOf(t, filepath.Join(root, subtitle)), Items: wholeItems("movie:path:x"),
 	}}}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
 		t.Fatal(err)

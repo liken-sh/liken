@@ -24,7 +24,7 @@ func seedArrivalGap(t *testing.T, catalog *Catalog, root, folder, file string) {
 	seed := &walkResult{
 		movies: []movieRow{{Id: id, Library: arrivalLibrary, Kind: libraryKindMovies, Path: folder, Title: folder}},
 		files: []fileRow{{Path: filepath.Join(folder, file), Library: arrivalLibrary, Present: true,
-			Type: fileTypeVideo, Items: []string{id}}},
+			Type: fileTypeVideo, Items: wholeItems(id)}},
 	}
 	if err := upsertWalk(t.Context(), catalog, seed); err != nil {
 		t.Fatal(err)

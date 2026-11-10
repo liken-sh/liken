@@ -192,7 +192,7 @@ func featureRow() fileRow {
 	return fileRow{
 		Library: trailerFileLibrary, Path: trailerFileFolder + "/" + trailerFileFolder + ".mkv",
 		Present: true, Type: fileTypeVideo, Role: fileRolePrimary, Height: 2160,
-		Items: []string{trailerFileItem},
+		Items: wholeItems(trailerFileItem),
 	}
 }
 
@@ -201,7 +201,7 @@ func trailerFileRow(path string) fileRow {
 	return fileRow{
 		Library: trailerFileLibrary, Path: trailerFileFolder + "/" + path,
 		Present: true, Type: fileTypeVideo, Role: fileRoleTrailer,
-		Items: []string{trailerFileItem},
+		Items: wholeItems(trailerFileItem),
 	}
 }
 
@@ -351,10 +351,10 @@ func seedTrailerFileSiblings(t *testing.T, catalog *Catalog, folder, sibling str
 		files: []fileRow{
 			{Library: trailerFileLibrary, Path: sibling + "/" + sibling + ".mkv", Present: true,
 				Type: fileTypeVideo, Role: fileRolePrimary, Height: 2160,
-				Items: []string{"movie:tmdb:2"}},
+				Items: wholeItems("movie:tmdb:2")},
 			{Library: trailerFileLibrary, Path: sibling + "/" + sibling + "-trailer.mkv",
 				Present: true, Type: fileTypeVideo, Role: fileRoleTrailer,
-				Items: []string{"movie:tmdb:2"}},
+				Items: wholeItems("movie:tmdb:2")},
 		},
 	}
 	for _, item := range []string{"movie:tmdb:1", "movie:tmdb:2"} {
@@ -461,7 +461,7 @@ func TestTheFeatureHeightOfATitle(t *testing.T) {
 			name: "a feature the probe has not read",
 			files: []fileRow{{
 				Library: trailerFileLibrary, Path: trailerFileFolder + "/One.mkv", Present: true,
-				Type: fileTypeVideo, Role: fileRolePrimary, Items: []string{trailerFileItem},
+				Type: fileTypeVideo, Role: fileRolePrimary, Items: wholeItems(trailerFileItem),
 			}},
 			want: trailerFeatureHeight,
 		},

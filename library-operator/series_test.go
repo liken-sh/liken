@@ -119,7 +119,7 @@ func TestWalkSeriesReadsEveryFileTheSeriesCarries(t *testing.T) {
 				t.Errorf("class = %s/%s/%s, want %s/%s/%s",
 					row.Type, row.Role, row.Language, testCase.wantType, testCase.wantRole, testCase.wantLanguage)
 			}
-			if row.Items[0] != testCase.wantItem {
+			if row.Items[0].Item != testCase.wantItem {
 				t.Errorf("items = %v, want %q", row.Items, testCase.wantItem)
 			}
 			if row.Modified == 0 {
@@ -146,7 +146,7 @@ func TestWalkSeriesReadsAnExtrasFolder(t *testing.T) {
 	if row.Type != fileTypeVideo || row.Role != fileRoleTrailer {
 		t.Errorf("class = %s/%s, want a video trailer", row.Type, row.Role)
 	}
-	if row.Items[0] != "series:tvdb:9" {
+	if row.Items[0].Item != "series:tvdb:9" {
 		t.Errorf("items = %v, want the series", row.Items)
 	}
 }
@@ -166,7 +166,7 @@ func TestWalkSeriesCatalogsAnUnnumberedVideoUnderTheSeries(t *testing.T) {
 	if !held {
 		t.Fatal("the walk read no row for the unnumbered video")
 	}
-	if row.Items[0] != "series:tvdb:9" {
+	if row.Items[0].Item != "series:tvdb:9" {
 		t.Errorf("items = %v, want the series, because no episode claims it", row.Items)
 	}
 }
@@ -311,7 +311,7 @@ func TestWalkSeriesReadsADoubleEpisodeFile(t *testing.T) {
 			if rows != 1 {
 				t.Fatalf("file rows = %d, want the one file the two episodes play", rows)
 			}
-			want := []string{"episode:tvdb:7:s04e10", "episode:tvdb:7:s04e11"}
+			want := []fileItem{{Item: "episode:tvdb:7:s04e10", Part: 1, Parts: 2}, {Item: "episode:tvdb:7:s04e11", Part: 2, Parts: 2}}
 			if items := filesByPath(result)[path].Items; !reflect.DeepEqual(items, want) {
 				t.Errorf("items = %v, want %v", items, want)
 			}
@@ -399,7 +399,7 @@ func TestWalkSeriesLinksASubtitleToBothEpisodes(t *testing.T) {
 	if !held {
 		t.Fatal("the walk read no row for the subtitle")
 	}
-	want := []string{"episode:tvdb:7:s04e10", "episode:tvdb:7:s04e11"}
+	want := wholeItems("episode:tvdb:7:s04e10", "episode:tvdb:7:s04e11")
 	if !reflect.DeepEqual(row.Items, want) {
 		t.Errorf("items = %v, want %v", row.Items, want)
 	}
@@ -626,7 +626,7 @@ func TestWalkSeriesReadsNoSeriesOrSeasonFromAnExtrasFolder(t *testing.T) {
 	if !held {
 		t.Fatalf("the walk read no row for the series' trailer: %v", files)
 	}
-	if row.Role != fileRoleTrailer || row.Items[0] != "series:tvdb:9" {
+	if row.Role != fileRoleTrailer || row.Items[0].Item != "series:tvdb:9" {
 		t.Errorf("row = %s/%v, want a trailer of the series", row.Role, row.Items)
 	}
 }

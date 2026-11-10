@@ -62,7 +62,7 @@ func postedWith(recorder *catalogRecorder, value string) bool {
 func oneMovie(id, path string) *walkResult {
 	return &walkResult{
 		movies:  []movieRow{{Id: id, Library: "house/movies", Kind: libraryKindMovies, Path: path, Title: "T"}},
-		files:   []fileRow{{Path: path + "/movie.mkv", Library: "house/movies", Present: true, Items: []string{id}}},
+		files:   []fileRow{{Path: path + "/movie.mkv", Library: "house/movies", Present: true, Items: wholeItems(id)}},
 		aliases: []aliasRow{{Alias: id, Item: id, Source: aliasSourceProvider}},
 		titles:  1,
 	}

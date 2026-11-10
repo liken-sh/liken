@@ -433,7 +433,7 @@ func walkOfOneTitle(library, id, path, folderKey string) *walkResult {
 		}},
 		files: []fileRow{{
 			Path: file, Library: library, Present: true, Type: fileTypeVideo,
-			Role: fileRolePrimary, Items: []string{id},
+			Role: fileRolePrimary, Items: wholeItems(id),
 		}},
 		aliases: []aliasRow{
 			{Alias: id, Library: library, Item: id, Source: aliasSourceProvider},

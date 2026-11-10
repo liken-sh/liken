@@ -137,10 +137,14 @@ type jellyfinUser struct {
 
 // One item of the listing. The provider ids are the identity the catalog
 // shares with Jellyfin; an episode carries its own ids and its series' id,
-// and the season and episode numbers beside them.
-// the run time and the user data are the two fields the backfill reads and
-// the index does not. A listing that names no user carries no user data, and
-// both read as zero there.
+// and the season and episode numbers beside them. A file of several
+// episodes is one item, with its first episode in IndexNumber and its last
+// in IndexNumberEnd, and an item of one episode carries no IndexNumberEnd,
+// which reads as 0. Jellyfin returns IndexNumberEnd with every item that
+// has one, so the listings ask for no field to get it.
+// The user data is the field the backfill reads and the index does not. A
+// listing that names no user carries no user data, and it reads as zero
+// there.
 type jellyfinItem struct {
 	ID                string            `json:"Id"`
 	Type              string            `json:"Type"`
@@ -148,6 +152,7 @@ type jellyfinItem struct {
 	SeriesID          string            `json:"SeriesId"`
 	ParentIndexNumber int               `json:"ParentIndexNumber"`
 	IndexNumber       int               `json:"IndexNumber"`
+	IndexNumberEnd    int               `json:"IndexNumberEnd"`
 	RunTimeTicks      int64             `json:"RunTimeTicks"`
 	UserData          jellyfinUserData  `json:"UserData"`
 }

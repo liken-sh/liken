@@ -322,6 +322,51 @@ mod tests {
         assert_eq!(walk(6, &plays).map(|offer| offer.leaf), Some(1));
     }
 
+    // The leaves of one play of the double S01E01-E02 of 2,640 seconds at
+    // this position, as the read splits it, followed by S01E03. Every part
+    // takes the play's recorded time, so the tie on the name decides.
+    fn double_at(position: i64) -> Vec<Play> {
+        let file = super::super::parts::File {
+            parts: 2,
+            part: 1,
+            duration: 2_640,
+            episodes: vec![(1, 1, 1), (2, 1, 2)],
+            credits: Vec::new(),
+        };
+        let row = Progress {
+            play: "den".into(),
+            position,
+            duration: 2_640,
+            recorded: 10,
+            season: 1,
+            episode: 1,
+            ..Progress::default()
+        };
+        super::super::parts::split(row, &file)
+            .into_iter()
+            .map(|progress| Play {
+                leaf: (progress.episode - 1) as usize,
+                progress,
+                exact: true,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_rows_of_one_play_stand_the_thread_on_the_part_in_progress() {
+        let cases = [
+            (600, Some((0, Some(600)))),
+            (1_300, Some((1, None))),
+            (1_800, Some((1, Some(480)))),
+            (2_640, Some((2, None))),
+        ];
+        for (position, want) in cases {
+            let offer = walk(3, &double_at(position))
+                .map(|offer| (offer.leaf, offer.progress.map(|played| played.position)));
+            assert_eq!(offer, want, "{position}");
+        }
+    }
+
     #[test]
     fn an_empty_container_offers_nothing() {
         assert_eq!(walk(0, &plays(&[(0, "A", 1, true)], "A")), None);

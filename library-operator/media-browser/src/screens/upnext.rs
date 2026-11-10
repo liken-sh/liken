@@ -19,7 +19,9 @@ pub struct Next {
     pub art: String,
     /// The seconds a play of the next work runs, which the player's display
     /// adds to the wall clock to say when that work would end. The page that
-    /// builds the offer sets the duration of the work's file, and the
+    /// builds the offer sets the duration of the work's file, or, for a
+    /// later episode of a file of several, the seconds from that episode's
+    /// start to the end of the file, which its `Play` runs to. The
     /// browser subtracts the second a play of it starts at in [`resumed`]
     /// when it sends the offer, because only the browser holds the people
     /// whose progress places that second. Nothing where the catalog holds no
@@ -149,7 +151,9 @@ fn film_start(source: &mut dyn Source, library: &str, id: &str, people: &[String
 
 /// What follows one episode: the next leaf of the franchise the page was
 /// reached through, or the next episode in aired order where the page was
-/// reached any other way.
+/// reached any other way. A play of an episode runs to the end of its file,
+/// so the leaf it follows is the file's last episode, and a play of the
+/// first episode of a double offers the episode after the double.
 pub fn after_episode(
     source: &mut dyn Source,
     library: &str,
@@ -166,6 +170,7 @@ pub fn after_episode(
             title: title.to_string(),
         },
     };
+    let numbers = source.place(library, series, numbers).last;
     offered(
         source,
         &container,
@@ -253,7 +258,22 @@ fn offered(source: &mut dyn Source, container: &Container, here: &Here) -> Optio
     let leaf = leaves.get(at + 1)?;
     let title = containers::title(source, container)?;
     let reason = resume::next_in(container, leaf.member, title);
-    Some(spelled(&leaf.slot, &reason))
+    let next = spelled(&leaf.slot, &reason);
+    Some(Next {
+        remaining_seconds: runs(source, &leaf.slot).or(next.remaining_seconds),
+        ..next
+    })
+}
+
+// The seconds a play of one episode leaf runs where the episode is a part
+// of a file of several: from the part's start to the end of the file,
+// because its `Play` runs that far. Nothing for a film and for an episode
+// alone in its file, whose own duration is the run.
+fn runs(source: &mut dyn Source, slot: &Slot) -> Option<i64> {
+    let place = slot.episode.as_ref()?;
+    source
+        .place(&slot.library, &place.series, (place.season, place.episode))
+        .runs()
 }
 
 // One leaf as the offer, with every line built by the speller that builds

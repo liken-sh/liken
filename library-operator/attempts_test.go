@@ -236,7 +236,7 @@ func TestEveryAttemptKindGatesTheProbeAndIdentityGapsAgainstTheRealSchema(t *tes
 				files: []fileRow{{
 					Path: "One (2001)/one.mkv", Library: "house/movies", Present: true,
 					Type: fileTypeVideo, Modified: ledgerTime.Unix(),
-					Items: []string{"movie:path:one-2001"},
+					Items: wholeItems("movie:path:one-2001"),
 				}},
 				attempts: []attemptRow{
 					{

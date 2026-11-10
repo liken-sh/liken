@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use super::super::{alike, details, files, item, people, progress, series, studios};
+use super::super::{alike, details, files, item, people, place, progress, series, studios};
 use super::SCHEMA;
 use super::progress::PROGRESS_SCHEMA;
 
@@ -61,6 +61,15 @@ fn the_files_read_requires_the_shipped_item_index() {
     });
 }
 
+// A press on an episode reads its place in its file, through the item
+// index for the same reason the art read takes it.
+#[test]
+fn the_place_read_requires_the_shipped_item_index() {
+    requires_index("file_items_library_item", |connection| {
+        place::place(connection, "test/shows", "series:1", (1, 2)).map(|_| ())
+    });
+}
+
 // The shipped schema with the progress store's schema attached beside it,
 // the way the source opens the two files.
 fn with_progress(dir: &tempfile::TempDir) -> Connection {
@@ -117,6 +126,24 @@ fn the_progress_read_walks_no_table_of_the_store() {
             .all(|line| line.contains(" named") || line.contains(" works")),
         "{plan:#?}"
     );
+}
+
+// The split of an episode play reads every episode of its main file. The
+// read finds them by the file's own key and each episode by its id, so a
+// double costs two lookups more than a file of one episode.
+#[test]
+fn the_progress_read_finds_a_files_episodes_by_their_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let connection = with_progress(&dir);
+
+    let plan = progress::plan(&connection, &["someone".to_string()]).unwrap();
+
+    for wanted in [
+        "SEARCH mate USING INDEX sqlite_autoindex_file_items_1 (library=? AND path=?)",
+        "SEARCH mates USING INDEX sqlite_autoindex_episodes_1 (library=? AND id=?)",
+    ] {
+        assert!(plan.iter().any(|line| line == wanted), "{plan:#?}");
+    }
 }
 
 // The continue-watching row lists the episodes of every series the

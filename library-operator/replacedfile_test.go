@@ -142,7 +142,7 @@ func liftedFacts(result *walkResult, path string) []string {
 }
 
 // linkedTo reports whether a file row links to any item.
-func linkedTo(result *walkResult, path string) []string {
+func linkedTo(result *walkResult, path string) []fileItem {
 	for _, row := range result.files {
 		if row.Path == path {
 			return row.Items

@@ -68,10 +68,17 @@ in the series folder and in its season folders, one level down:
 
 `Season NN` is season N, and `Specials` is season 0. An episode's
 number comes from a marker in its file name, `s02e05` or `2x05`, and a
-range such as `s04e10-e11` names two episodes in one file. Both play
-the file from the start, because nothing on the volume marks where the
-second begins. The season comes from the folder first, then from the
-marker. The `.nfo` beside a file of two episodes can hold one
+range such as `s04e10-e11` names two episodes in one file. Nothing on
+the volume marks where the second episode begins, so the episodes
+split the file evenly: in a file of 2,640 seconds that holds two
+episodes, the second episode starts at 1,320 seconds. Each episode's
+runtime is its share of the file's duration, and Play on a later
+episode starts the file at that episode's share. When no probe and no
+`.nfo` `<fileinfo>` gives the file a duration, each episode keeps the
+runtime of its `.nfo` block, and every episode plays from the start of
+the file. A file whose episodes are not the same length marks an
+episode watched early or late. The season comes from the folder first,
+then from the marker. The `.nfo` beside a file of two episodes can hold one
 `<episodedetails>` block or one for each episode, in any order. Each
 block gives its title and plot to the episode that its `<episode>`
 number names, and an episode with no block shows as `S04E11`.
