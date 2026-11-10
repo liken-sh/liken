@@ -93,6 +93,7 @@ pub(super) fn crowded(focus: Focus) -> Movie {
             &Preferences::default(),
         ),
         progress: None,
+        group: None,
         finish: None,
         people: Vec::new(),
         via: None,

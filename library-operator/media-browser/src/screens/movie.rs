@@ -175,10 +175,15 @@ pub struct Movie {
     // a play from here follows. It is nothing where the page was reached
     // any other way.
     pub via: Option<InFranchise>,
-    /// Where the audience reached in the film, or nothing where no play of
-    /// theirs names it. It decides the playback row, the bar under it,
-    /// and the status and the marks on the line under the bar.
+    /// Where the audience's thread stands in the film, by the rule of the
+    /// continue-watching row, or nothing where they have no thread. It
+    /// decides the playback row and the second Resume starts at.
     pub progress: Option<Progress>,
+    /// Where the audience stands together in the film, or nothing where
+    /// they have not started it together. It decides the bar under the
+    /// playback row and the status and the marks on the line under the
+    /// bar. With one person or nobody at the screen it is `progress`.
+    pub group: Option<Progress>,
     /// How the audience finished the film, which the status line names,
     /// and nothing where they have not.
     pub finish: Option<Finish>,
@@ -237,6 +242,7 @@ impl Movie {
             more,
             via: None,
             progress: None,
+            group: None,
             finish: None,
             people: Vec::new(),
             focus: Focus::Buttons(0),
@@ -254,6 +260,7 @@ impl Movie {
             return;
         };
         fresh.progress = self.progress.clone();
+        fresh.group = self.group.clone();
         fresh.finish = self.finish;
         fresh.people = std::mem::take(&mut self.people);
         fresh.via = self.via.clone();
@@ -268,10 +275,15 @@ impl Movie {
     /// at every open and at every re-read, because only the browser holds
     /// the audience.
     // The film is a container of one leaf, and the thread rule over its
-    // plays says where the audience stands, so the page and the
-    // continue-watching row agree. A film with no play that names exactly
-    // these people, or one they cleared to 0, carries no progress. A film
-    // they finished carries its finished play, so the row offers the clear.
+    // plays says where the playback row resumes, so the row and the
+    // continue-watching card agree. A film with no play that names exactly
+    // these people, or one they cleared to 0, carries no progress.
+    //
+    // The status line answers whether the people at the screen watched the
+    // film together, and a night with a guest is a night they all watched.
+    // So with two or more at the screen, the line reads the newest play
+    // that names every one of them, whoever else it names. A film they
+    // finished carries its finished play, so the line offers the clear.
     // Each person's words come from the answer the posters read their
     // faces from, so the line and a poster of the film never disagree.
     pub fn read_progress(
@@ -304,16 +316,22 @@ impl Movie {
         let together: Vec<&Progress> = resumes.iter().map(|play| &play.progress).collect();
         self.finish = progress::finish::finish(&progress::seen::since_clear(&together));
         let plays: Vec<thread::Play> = resumes
-            .into_iter()
+            .iter()
             .map(|play| thread::Play {
                 leaf: 0,
-                progress: play.progress,
+                progress: play.progress.clone(),
                 exact: play.exact,
             })
             .collect();
         self.progress = thread::standing(1, &plays)
             .map(|play| play.progress.clone())
             .filter(|progress| row::started(Some(progress)));
+        self.group = match people.len() > 1 {
+            true => progress::seen::newest(&resumes)
+                .filter(|progress| row::started(Some(progress)))
+                .cloned(),
+            false => self.progress.clone(),
+        };
         self.focus = self.hold(self.focus);
     }
 
@@ -327,7 +345,7 @@ impl Movie {
 
     /// The marks the status line offers under the playback row.
     pub fn marks(&self) -> Vec<watch::Mark> {
-        watch::marks(self.progress.as_ref())
+        watch::marks(self.group.as_ref())
     }
 
     /// When a press on the playback row's first button would end, read at
@@ -341,9 +359,9 @@ impl Movie {
     /// the duration a mark would state.
     pub fn status(&self) -> watch::Status {
         watch::status(
-            self.progress.as_ref(),
+            self.group.as_ref(),
             self.finish,
-            marked_duration(self.progress.as_ref(), self.duration),
+            marked_duration(self.group.as_ref(), self.duration),
             self.people.len() > 1,
         )
     }
@@ -796,7 +814,7 @@ impl Movie {
             library: self.library.clone(),
             selection,
             mark,
-            duration: marked_duration(self.progress.as_ref(), self.duration),
+            duration: marked_duration(self.group.as_ref(), self.duration),
         }
     }
 

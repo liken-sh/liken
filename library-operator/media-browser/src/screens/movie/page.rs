@@ -115,7 +115,7 @@ pub(super) fn status_line<'a>(
     focus: Option<usize>,
 ) -> line::Line<'a> {
     line::Line {
-        share: watch::share(movie.progress.as_ref()),
+        share: watch::share(movie.group.as_ref()),
         status: &status.words,
         finished: status.finished,
         people: &movie.people,

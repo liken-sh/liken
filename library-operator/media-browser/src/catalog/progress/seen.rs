@@ -87,6 +87,22 @@ pub fn every(seen: &[Seen], people: &[String], work: Option<(&str, &str)>) -> Ve
     plays
 }
 
+/// Where an audience of two or more stands together in one film: the newest
+/// of these plays, which are the plays [`every`] answers, each one naming
+/// every person of the audience. A play that also names someone else
+/// counts, because everyone at the screen saw what it played. A play that
+/// misses one of them never reaches this rule. The newest play is taken
+/// over the furthest, so a film the audience finished and then started
+/// again reads where the second play stopped, and a clear they sent reads
+/// as not started. Of two plays recorded in the same second, the one whose
+/// name sorts last stands, as in the thread rule.
+pub fn newest(plays: &[Resume]) -> Option<&Progress> {
+    plays
+        .iter()
+        .map(|play| &play.progress)
+        .max_by(|one, other| (one.recorded, &one.play).cmp(&(other.recorded, &other.play)))
+}
+
 /// Where this audience reached in each episode of one series: the latest
 /// play of each episode, in aired order. An episode is in the answer only
 /// when every person of the audience has a play of it, in any group.

@@ -262,6 +262,20 @@ shares are the ones the faces on the film's poster come from, so the
 page explains a poster that shows two faces on a film the status calls
 not started.
 
+The status, the bar, and the marks read the newest play that named
+every person at the screen. A play that also named someone else
+counts, because everyone at the screen saw it. A play without one of
+them does not count. So two people who each finished the film on a
+different night read `Not started together`, with `watched` beside
+both faces. When you finish a film together and later start it again
+together, the status gives where the second play stopped. The playback
+row resumes by the rule of the continue-watching row, which starts at a
+play that named exactly the people at the screen. So a film that two
+people stopped part way through with a guest reads as part watched
+together, and the row still offers Play from the beginning. With one
+person at the screen, the status reads by the rule of the
+continue-watching row too.
+
 The position has hours in a title an hour or longer, as in `0:13:07`,
 and minutes and seconds in a shorter one, as in `21:40`. Down from the
 playback row puts focus on the first mark, left and right move between

@@ -92,6 +92,23 @@ fn every_of_one_work_leaves_the_other_works_out() {
 }
 
 #[test]
+fn newest_takes_the_latest_play_and_of_a_tie_the_name_that_sorts_last() {
+    let seen = [
+        film("finished", &["first", "second"], 5950, 10),
+        film("b-again", &["first", "second", "third"], 600, 20),
+        film("a-again", &["first", "second"], 900, 20),
+    ];
+
+    let answer = every(&seen, &names(&["first", "second"]), None);
+
+    assert_eq!(
+        newest(&answer).map(|play| play.play.as_str()),
+        Some("b-again")
+    );
+    assert_eq!(newest(&[]), None);
+}
+
+#[test]
 fn an_episode_is_kept_only_when_every_person_has_a_play_of_it() {
     let seen = [
         episode("one-first", &["first"], (1, 1), 10),

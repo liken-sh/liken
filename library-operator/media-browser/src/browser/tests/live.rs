@@ -66,7 +66,7 @@ fn assert_finished(browser: &Browser<Fake, NoArt>) {
     assert_eq!(page.marks(), [Mark::Cleared]);
     assert_eq!(page.status().words, "Watched");
     assert_eq!(
-        crate::screens::movie::watch::share(page.progress.as_ref()),
+        crate::screens::movie::watch::share(page.group.as_ref()),
         1.0
     );
 }
@@ -93,7 +93,7 @@ fn a_position_recorded_under_the_films_page_moves_its_bar_and_status_with_no_pre
     let page = showing_page(&browser);
     assert_eq!(page.status().words, "0:45:00 watched · 45m remaining");
     assert_eq!(
-        crate::screens::movie::watch::share(page.progress.as_ref()),
+        crate::screens::movie::watch::share(page.group.as_ref()),
         0.5
     );
 }
