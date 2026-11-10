@@ -155,8 +155,10 @@ impl<S: Source, A: Art> Browser<S, A> {
     }
 
     // One press on the person picker. A press that answers takes the
-    // answer; one that changes who is chosen names the people now chosen,
-    // by their `Person` name.
+    // answer. A press on a tile chooses that one person or takes them out
+    // of the choice, so its line names that person by their `Person` name
+    // and says which of the two the press did. A line of everyone still
+    // chosen would name the people the press left alone.
     fn on_picker(&mut self, name: &str) {
         let Some(picker) = &mut self.picker else {
             return;
@@ -166,10 +168,17 @@ impl<S: Source, A: Art> Browser<S, A> {
             Some(chosen) => self.answered(chosen),
             None => {
                 let after = picked(picker);
-                if after != before {
-                    let names = self.names(&after);
+                let added = after.iter().find(|index| !before.contains(index));
+                let removed = before.iter().find(|index| !after.contains(index));
+                let line = match (added, removed) {
+                    (Some(index), _) => Some(("added", *index, "to")),
+                    (None, Some(index)) => Some(("removed", *index, "from")),
+                    (None, None) => None,
+                };
+                if let Some((verb, index, preposition)) = line {
+                    let names = self.names(&[index]);
                     self.did(format!(
-                        "chose {} in the person picker",
+                        "{verb} {} {preposition} the people chosen in the person picker",
                         lines::people(&names)
                     ));
                 }

@@ -236,13 +236,57 @@ fn an_answer_in_the_picker_names_the_people_and_the_topic() {
         *lines.borrow(),
         [
             "press right: raised the person picker, because nobody has said who is watching",
-            "press enter: chose person-a in the person picker",
+            "press enter: added person-a to the people chosen in the person picker",
             "press down: moved focus",
             &format!(
                 "press enter: answered who is watching with person-a, and sent it on {AUDIENCE_TOPIC}"
             ),
         ]
     );
+}
+
+// Presses on a picker of two people, after the first press raised it,
+// and the line the last press printed. Each line names the person the
+// press changed, and whether the press chose them or took them out of
+// the choice, and never the person whose tile it left alone.
+const TOGGLES: [(&[&str], &str); 3] = [
+    (
+        &["enter"],
+        "press enter: added person-a to the people chosen in the person picker",
+    ),
+    (
+        &["enter", "right", "enter", "left", "enter"],
+        "press enter: removed person-a from the people chosen in the person picker",
+    ),
+    (
+        &["right", "enter", "enter"],
+        "press enter: removed person-b from the people chosen in the person picker",
+    ),
+];
+
+#[test]
+fn a_press_in_the_picker_names_the_person_it_added_or_removed() {
+    for (presses, last) in TOGGLES {
+        let (browser, _bus) = playing(vec![one_item()]);
+        let people = ["person-a", "person-b"].map(|name| crate::audience::Person {
+            name: name.into(),
+            display_name: name.to_uppercase(),
+            thumbnail: None,
+        });
+        let mut browser = browser.with_audience(people.to_vec(), Vec::new());
+        browser.key("right");
+        let lines = kept(&mut browser);
+
+        for press in presses {
+            browser.key(press);
+        }
+
+        assert_eq!(
+            lines.borrow().last().map(String::as_str),
+            Some(last),
+            "{presses:?}"
+        );
+    }
 }
 
 #[test]
