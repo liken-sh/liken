@@ -9,8 +9,8 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/liken-sh/equipment-operator/denon"
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/denon"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // showAsk is the ask the media operator writes for a home press.

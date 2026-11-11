@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // cecSystemAudioWait is how long the adapter waits for the receiver's

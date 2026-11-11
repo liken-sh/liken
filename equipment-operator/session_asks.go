@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // seenAsks holds the at of the last ask of each kind the unit has

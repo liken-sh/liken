@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/brand/linkcheck"
+	"github.com/liken-sh/liken/brand/linkcheck"
 )
 
 // The golden test is the contract: one small document that exercises

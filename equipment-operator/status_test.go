@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/denon"
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/denon"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // The moment every status test stamps, and one from before it.

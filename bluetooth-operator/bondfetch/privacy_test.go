@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
 // The Secret that holds the test radio's identity file.

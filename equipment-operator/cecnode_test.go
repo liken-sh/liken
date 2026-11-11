@@ -12,8 +12,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/cec"
-	"github.com/liken-sh/equipment-operator/cec/cectest"
+	"github.com/liken-sh/liken/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
 // A room's CEC wire: a TV and a receiver. The values are invented.

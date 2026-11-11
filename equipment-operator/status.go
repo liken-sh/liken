@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/denon"
-	"github.com/liken-sh/equipment-operator/equipment"
-	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/equipment-operator/denon"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
 // reachableWords is the reason and the message each verdict carries.

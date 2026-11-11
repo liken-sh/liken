@@ -12,8 +12,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/liken-sh/equipment-operator/upnp"
-	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/equipment-operator/upnp"
+	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
 // judge reads the description of each device in one search that has no

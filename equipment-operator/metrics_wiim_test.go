@@ -6,7 +6,7 @@ package main
 import (
 	"testing"
 
-	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
 func number(value int) *int { return &value }

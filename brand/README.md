@@ -18,7 +18,7 @@ the tree of the same repository:
   public files every site serves (`static/`), and the nav entries
   (`data/nav.yaml`).
 * **Go programs** that build pages outside Hugo import it as the
-  module `github.com/liken-sh/brand`, with a `replace` directive to
+  module `github.com/liken-sh/liken/brand`, with a `replace` directive to
   this directory. The package embeds the
   stylesheet and the mark, so a page builder such as `liken`'s
   release channel inlines them with no file to copy.

@@ -20,7 +20,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/liken-sh/bluetooth-operator/bluetoothd/mgmt"
+	"github.com/liken-sh/liken/bluetooth-operator/bluetoothd/mgmt"
 )
 
 // monitorChannel is the monitor socket. Each Read returns one packet

@@ -3,7 +3,7 @@
 // follows the same build discipline: a static binary, no cgo. The
 // capabilities agent also builds with no cgo, and it is the one program
 // that is not static: it loads libva when it runs (capabilities/libva.go).
-module github.com/liken-sh/media-operator
+module github.com/liken-sh/liken/media-operator
 
 go 1.27.4
 

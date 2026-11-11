@@ -1,4 +1,4 @@
-module github.com/liken-sh/equipment-operator
+module github.com/liken-sh/liken/equipment-operator
 
 go 1.27.4
 

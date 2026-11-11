@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 

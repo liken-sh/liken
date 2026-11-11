@@ -8,7 +8,7 @@ package main
 // fact for a dashboard or an alert at no cost to the API server.
 
 import (
-	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/equipment-operator/wiim"
 	"github.com/prometheus/client_golang/prometheus"
 )
 

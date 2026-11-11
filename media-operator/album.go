@@ -13,7 +13,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/liken-sh/media-operator/edl"
+	"github.com/liken-sh/liken/media-operator/edl"
 )
 
 // The two block values that mark an album. An item needs both, because the

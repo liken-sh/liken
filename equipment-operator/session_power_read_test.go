@@ -12,7 +12,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // answering marks the lounge Television as the Deployment derives it

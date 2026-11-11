@@ -4,7 +4,7 @@ package main
 // any press sends, and the show, which a home press sends. They arrive
 // in status.session.inputAsk (session_asks.go).
 
-import "github.com/liken-sh/equipment-operator/equipment"
+import "github.com/liken-sh/liken/equipment-operator/equipment"
 
 // show asks the room's TV to show the session's Display, and then asks
 // the receiver for the session's input the way the ensure does. A home

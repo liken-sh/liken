@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // withdraw sends the TV Inactive Source for the Display's physical

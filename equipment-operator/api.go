@@ -3,9 +3,9 @@ package main
 import (
 	"math"
 
-	"github.com/liken-sh/equipment-operator/denon"
-	"github.com/liken-sh/equipment-operator/equipment"
-	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/equipment-operator/denon"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/wiim"
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 

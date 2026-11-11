@@ -19,7 +19,7 @@ import (
 
 	"k8s.io/client-go/dynamic"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/informer"
 	"github.com/liken-sh/liken/kubernetes/memo"

@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // foldedInto is the state before the receiver has said anything, with

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/liken-sh/equipment-operator/cec"
-	"github.com/liken-sh/equipment-operator/cec/cectest"
+	"github.com/liken-sh/liken/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
 // audioRoom is the room with a receiver that implements System Audio

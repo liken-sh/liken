@@ -15,8 +15,8 @@ import (
 	"context"
 	"net"
 
-	"github.com/liken-sh/equipment-operator/equipment"
-	"github.com/liken-sh/equipment-operator/upnp"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/upnp"
 )
 
 // The port and the path of the AIOS description.

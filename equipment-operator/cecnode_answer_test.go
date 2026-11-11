@@ -14,8 +14,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/cec"
-	"github.com/liken-sh/equipment-operator/cec/cectest"
+	"github.com/liken-sh/liken/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
 // askForTheSource puts a Request Active Source from the TV on the wire.

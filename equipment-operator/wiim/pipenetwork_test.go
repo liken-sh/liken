@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // pipeNetwork hands each dial to an address a listener holds one end of

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
 // testAdapter is the radio these tests pair against. It is the adapter

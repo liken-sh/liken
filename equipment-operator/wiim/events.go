@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // The UPnP MediaRenderer's port and the two services that push. The

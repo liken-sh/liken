@@ -9,19 +9,19 @@
 // separate Hugo install, and no drift between a workstation's Hugo
 // and CI's. This is the standard Hugo build, pure Go, because the
 // site uses none of the extended build's SCSS pipeline.
-module github.com/liken-sh/display-operator/docs
+module github.com/liken-sh/liken/display-operator/docs
 
 go 1.27.4
 
 tool (
 	github.com/gohugoio/hugo
-	github.com/liken-sh/brand/apiref
-	github.com/liken-sh/brand/coverage
-	github.com/liken-sh/brand/crdref
-	github.com/liken-sh/brand/skills
+	github.com/liken-sh/liken/brand/apiref
+	github.com/liken-sh/liken/brand/coverage
+	github.com/liken-sh/liken/brand/crdref
+	github.com/liken-sh/liken/brand/skills
 )
 
-require github.com/liken-sh/brand v0.0.0
+require github.com/liken-sh/liken/brand v0.0.0
 
 require (
 	cel.dev/expr v0.25.3 // indirect
@@ -212,4 +212,4 @@ require (
 
 // brand is a component in this repository, so every consumer builds
 // against the tree beside it and never against a published version.
-replace github.com/liken-sh/brand => ../../brand
+replace github.com/liken-sh/liken/brand => ../../brand

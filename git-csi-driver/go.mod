@@ -1,7 +1,7 @@
 // One module, one package, one program. The driver ships as one
 // binary in one image, so nothing here versions or releases on its
 // own.
-module github.com/liken-sh/git-csi-driver
+module github.com/liken-sh/liken/git-csi-driver
 
 go 1.27.4
 

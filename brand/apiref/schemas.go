@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/liken-sh/brand/linkcheck"
+	"github.com/liken-sh/liken/brand/linkcheck"
 )
 
 // componentPrefix is the pointer every $ref in these documents

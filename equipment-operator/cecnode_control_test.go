@@ -9,8 +9,8 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/liken-sh/equipment-operator/cec"
-	"github.com/liken-sh/equipment-operator/cec/cectest"
+	"github.com/liken-sh/liken/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
 func TestAControllingAdapterJoinsAndScans(t *testing.T) {

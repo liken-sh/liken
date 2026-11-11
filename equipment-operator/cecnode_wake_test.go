@@ -14,8 +14,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/cec"
-	"github.com/liken-sh/equipment-operator/cec/cectest"
+	"github.com/liken-sh/liken/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec/cectest"
 )
 
 // wokeNow is the session a Receiver's session writes when it wakes the

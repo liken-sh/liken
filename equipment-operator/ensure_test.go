@@ -12,8 +12,8 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/liken-sh/equipment-operator/denon"
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/denon"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // ensureAsk is the ask the media operator writes for any press.

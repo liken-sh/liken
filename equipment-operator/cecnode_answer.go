@@ -58,7 +58,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // routeState is where the bus's routing messages last sent the TV's

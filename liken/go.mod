@@ -22,7 +22,7 @@ require (
 	github.com/google/go-containerregistry v0.22.1
 	github.com/insomniacslk/dhcp v0.0.0-20261014062924-c6bb46ad3f3a
 	github.com/klauspost/compress v1.20.3
-	github.com/liken-sh/brand v0.0.0
+	github.com/liken-sh/liken/brand v0.0.0
 	// The client, the watch, and the cache that liken's operators share
 	// with the other operators. The module is in this repository, and the
 	// replace below builds against the copy in the tree, so no version of
@@ -196,7 +196,7 @@ tool (
 
 // brand is a component in this repository, so every consumer builds
 // against the tree beside it and never against a published version.
-replace github.com/liken-sh/brand => ../brand
+replace github.com/liken-sh/liken/brand => ../brand
 
 replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 

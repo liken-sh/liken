@@ -1,4 +1,4 @@
-module github.com/liken-sh/people-operator
+module github.com/liken-sh/liken/people-operator
 
 go 1.27.4
 

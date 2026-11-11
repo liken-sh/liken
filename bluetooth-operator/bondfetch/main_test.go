@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 

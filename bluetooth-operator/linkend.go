@@ -26,7 +26,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
 // The reasons Disconnected carries (doc/org.bluez.Device.rst in BlueZ).

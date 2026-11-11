@@ -8,7 +8,7 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // aiosDescription is the root of a receiver's AIOS description, cut to

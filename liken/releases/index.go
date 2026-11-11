@@ -40,7 +40,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/liken-sh/brand"
+	"github.com/liken-sh/liken/brand"
 
 	"github.com/liken-sh/liken/liken/api"
 	"github.com/liken-sh/liken/liken/machine"

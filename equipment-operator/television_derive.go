@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // televisionDerived is what the Deployment writes for one Television.

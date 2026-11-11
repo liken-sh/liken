@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // A declared control the receiver has not reported is skipped, so an

@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/upnp"
-	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/equipment-operator/upnp"
+	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
 // discover is wiim.Discover. It is a variable so a test replaces the

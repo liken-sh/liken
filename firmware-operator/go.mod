@@ -1,4 +1,4 @@
-module github.com/liken-sh/firmware-operator
+module github.com/liken-sh/liken/firmware-operator
 
 go 1.27.4
 

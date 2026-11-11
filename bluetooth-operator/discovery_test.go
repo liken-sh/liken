@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
 // fakeHID describes one HID device to build into a fake sysfs tree.

@@ -8,7 +8,7 @@ package docs
 import (
 	"testing"
 
-	"github.com/liken-sh/brand/linkcheck"
+	"github.com/liken-sh/liken/brand/linkcheck"
 )
 
 // exceptions are the absolute links no content file answers for.

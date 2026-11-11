@@ -6,7 +6,7 @@
 // against, because the two drivers serve the same kubelet on the same
 // node and speak the same DRA protocol version to it. The Go version
 // matches liken's for the same reason.
-module github.com/liken-sh/display-operator
+module github.com/liken-sh/liken/display-operator
 
 go 1.27.4
 

@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // onSessionInput answers whether a zone reports the session's input.

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/bluetooth-operator/bluetoothd/mgmt"
+	"github.com/liken-sh/liken/bluetooth-operator/bluetoothd/mgmt"
 )
 
 // fakeManagement answers the two management commands the way the

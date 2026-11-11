@@ -13,7 +13,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/denon"
+	"github.com/liken-sh/liken/equipment-operator/denon"
 )
 
 // settledOperator starts a controller for the receiver, waits for the

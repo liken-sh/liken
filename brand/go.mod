@@ -1,4 +1,4 @@
-module github.com/liken-sh/brand
+module github.com/liken-sh/liken/brand
 
 go 1.27.4
 

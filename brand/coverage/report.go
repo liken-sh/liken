@@ -13,7 +13,7 @@ import (
 	"html/template"
 	"strings"
 
-	"github.com/liken-sh/brand"
+	"github.com/liken-sh/liken/brand"
 )
 
 //go:embed report.css

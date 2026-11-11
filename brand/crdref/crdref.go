@@ -17,7 +17,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/liken-sh/brand/linkcheck"
+	"github.com/liken-sh/liken/brand/linkcheck"
 )
 
 // Options are the per-page choices the command line makes. Kind

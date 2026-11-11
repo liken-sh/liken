@@ -3,7 +3,7 @@ package cec_test
 import (
 	"testing"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // peerAfter folds one message into a directory for an adapter at

@@ -21,7 +21,7 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // ReceiverCECStatus is the bus's audio system, from the device at

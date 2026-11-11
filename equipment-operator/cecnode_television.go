@@ -14,7 +14,7 @@ import (
 	"os"
 	"slices"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // readPower reads the TV's power into the directory, and asks the loop

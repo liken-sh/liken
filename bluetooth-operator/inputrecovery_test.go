@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
 // testRemote is a Low Energy remote, HID over GATT through bluetoothd

@@ -13,7 +13,7 @@ package linkcheck
 import (
 	"testing"
 
-	"github.com/liken-sh/brand/linkcheck"
+	"github.com/liken-sh/liken/brand/linkcheck"
 )
 
 // The content tree, relative to this package. The two generated

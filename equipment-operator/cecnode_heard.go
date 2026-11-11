@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // logHeard writes one line for a message a person notices, whoever

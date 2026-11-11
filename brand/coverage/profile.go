@@ -16,7 +16,7 @@ import (
 // A profile row is one basic block: where it starts, where it ends,
 // how many statements it holds, and how many times the tests ran it.
 //
-//	github.com/liken-sh/media-operator/edl/album.go:40.13,43.22 3 0
+//	github.com/liken-sh/liken/media-operator/edl/album.go:40.13,43.22 3 0
 var profileRow = regexp.MustCompile(`^(.+):(\d+)\.\d+,(\d+)\.\d+ (\d+) (\d+)$`)
 
 // readProfile counts statements, not lines. That is what the Go

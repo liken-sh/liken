@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // foldTranscript reads one captured transcript and folds every line

@@ -10,7 +10,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
 // unstubbedDiscover stands in for wiim.Discover in a test that did not

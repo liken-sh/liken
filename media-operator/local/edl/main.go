@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/liken-sh/media-operator/edl"
+	"github.com/liken-sh/liken/media-operator/edl"
 )
 
 // The presentation block this tool prints. The field order here sets the

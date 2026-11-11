@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/liken-sh/bluetooth-operator/bluetoothd/mgmt"
+	"github.com/liken-sh/liken/bluetooth-operator/bluetoothd/mgmt"
 )
 
 // The HCI commands and events the program reads, from the Bluetooth

@@ -14,7 +14,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
 // windowState adds the properties an adapter has while a pairing

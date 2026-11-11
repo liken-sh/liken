@@ -42,11 +42,11 @@ func depsFixture(t *testing.T, operatorDepends string) DepsChecker {
 		GoList: func(dir string) ([]goModule, error) {
 			switch filepath.Base(dir) {
 			case "docs":
-				return []goModule{{Path: "x/docs", Dir: dir}, {Path: "github.com/liken-sh/brand", Dir: filepath.Join(abs, "brand")}}, nil
+				return []goModule{{Path: "x/docs", Dir: dir}, {Path: "github.com/liken-sh/liken/brand", Dir: filepath.Join(abs, "brand")}}, nil
 			case "operator":
 				return []goModule{
 					{Path: "x", Dir: dir},
-					{Path: "github.com/liken-sh/brand", Dir: filepath.Join(abs, "brand")},
+					{Path: "github.com/liken-sh/liken/brand", Dir: filepath.Join(abs, "brand")},
 					{Path: "github.com/liken-sh/base", Dir: filepath.Join(abs, "base")},
 					{Path: "k8s.io/client-go", Dir: "/home/x/go/pkg/mod/k8s.io/client-go@v0.36.3"},
 				}, nil
@@ -93,7 +93,7 @@ func TestAnUndeclaredUseIsFound(t *testing.T) {
 		got = append(got, f.String())
 	}
 	want := []string{
-		"operator uses brand, and its package.toml does not name it in [depends]: operator/go.mod imports github.com/liken-sh/brand",
+		"operator uses brand, and its package.toml does not name it in [depends]: operator/go.mod imports github.com/liken-sh/liken/brand",
 		"operator uses base, and its package.toml does not name it in [depends]: operator/go.mod imports github.com/liken-sh/base",
 		"operator uses base, and its package.toml does not name it in [depends]: operator/Cargo.toml depends on the crate base-crate",
 		"operator uses brand, and its package.toml does not name it in [depends]: the image operator takes brand as its build context brand",
@@ -109,13 +109,13 @@ func TestAnUndeclaredUseIsFound(t *testing.T) {
 func TestAProjectModuleFromTheProxyIsFound(t *testing.T) {
 	d := depsFixture(t, `"brand", "base"`)
 	d.GoList = func(dir string) ([]goModule, error) {
-		return []goModule{{Path: "github.com/liken-sh/brand", Dir: "/home/x/go/pkg/mod/github.com/liken-sh/brand@v0.0.0"}}, nil
+		return []goModule{{Path: "github.com/liken-sh/liken/brand", Dir: "/home/x/go/pkg/mod/github.com/liken-sh/liken/brand@v0.0.0"}}, nil
 	}
 	findings, err := d.Check()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 2 || !strings.Contains(findings[0].String(), "reads github.com/liken-sh/brand from the module proxy") {
+	if len(findings) != 2 || !strings.Contains(findings[0].String(), "reads github.com/liken-sh/liken/brand from the module proxy") {
 		t.Errorf("findings %v", findings)
 	}
 }
@@ -128,7 +128,7 @@ func TestAProjectCrateFromGitIsFound(t *testing.T) {
 			Name   string `json:"name"`
 			Source string `json:"source"`
 			Path   string `json:"path"`
-		}{Name: "media-screen", Source: "git+https://github.com/liken-sh/media-operator?rev=abc"})
+		}{Name: "media-screen", Source: "git+https://github.com/liken-sh/liken?rev=abc"})
 		return []cargoPackage{p}, nil
 	}
 	findings, err := d.Check()

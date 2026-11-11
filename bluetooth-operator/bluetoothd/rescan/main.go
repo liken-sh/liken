@@ -135,7 +135,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/liken-sh/bluetooth-operator/bluetoothd/mgmt"
+	"github.com/liken-sh/liken/bluetooth-operator/bluetoothd/mgmt"
 )
 
 // rescanSettle is how long the program waits after a failed attempt

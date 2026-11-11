@@ -9,8 +9,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/equipment"
-	"github.com/liken-sh/equipment-operator/upnp"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/upnp"
 )
 
 // descriptionPath is where a LinkPlay device serves its description on

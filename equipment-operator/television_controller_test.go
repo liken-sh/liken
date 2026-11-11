@@ -13,7 +13,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
 // scannedBus is a bus in Control whose adapter on node-1 reported a

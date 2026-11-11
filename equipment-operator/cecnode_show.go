@@ -29,7 +29,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // showMemory is what the node workload holds about the home presses it

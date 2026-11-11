@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
 // testAddress is the adapter address of the machine this design was

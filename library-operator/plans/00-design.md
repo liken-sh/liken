@@ -3,7 +3,7 @@
 The library operator is the media library layer of a
 [`liken`](https://liken.sh/) cluster, expressed as Kubernetes resources.
 It runs above
-[`media-operator`](https://github.com/liken-sh/media-operator), which
+[`media-operator`](https://liken.sh/media/), which
 owns the players, the plays, and the remotes, and above the hardware
 operators, which publish each screen, speaker, and controller as a
 claimable device. Those layers answer what plays where and who drives

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // The bound on every wait in these tests. The tests wait on the fake

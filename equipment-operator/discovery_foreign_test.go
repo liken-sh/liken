@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
 // foreignDiscovery is a discovery that found the first device and was

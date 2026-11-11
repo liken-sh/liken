@@ -34,7 +34,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/liken-sh/bluetooth-operator/bluetoothd/mgmt"
+	"github.com/liken-sh/liken/bluetooth-operator/bluetoothd/mgmt"
 )
 
 // execFunc has the signature of syscall.Exec, so a test can see what

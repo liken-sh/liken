@@ -7,7 +7,7 @@ package denon
 import (
 	"testing"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 func TestDimmerWordReadsEverySetting(t *testing.T) {

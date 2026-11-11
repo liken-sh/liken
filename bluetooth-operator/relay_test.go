@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
 // waitFor runs a condition until it holds or the deadline passes. The

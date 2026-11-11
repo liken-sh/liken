@@ -48,7 +48,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
 // draSysfsRoot is the sysfs mount this driver reads: this walk reads

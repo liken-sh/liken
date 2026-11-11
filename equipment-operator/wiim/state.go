@@ -7,7 +7,7 @@
 package wiim
 
 import (
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // Status is what one WiiM reports that a person or a controller acts

@@ -21,7 +21,7 @@ import (
 	"os"
 	"reflect"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/kubernetes/informer"

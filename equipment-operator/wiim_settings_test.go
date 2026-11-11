@@ -14,8 +14,8 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/liken-sh/equipment-operator/equipment"
-	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
 // fakeWiim is a small stateful amp: the reads answer what the setters

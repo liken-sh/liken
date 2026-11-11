@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/liken-sh/media-operator/edl"
-	"github.com/liken-sh/media-operator/edl/edltest"
+	"github.com/liken-sh/liken/media-operator/edl"
+	"github.com/liken-sh/liken/media-operator/edl/edltest"
 )
 
 func mustSucceed(t *testing.T, err error) {

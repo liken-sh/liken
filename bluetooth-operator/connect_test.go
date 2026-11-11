@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/bluetooth-operator/bonds"
+	"github.com/liken-sh/liken/bluetooth-operator/bonds"
 )
 
 // testSpeaker is the A2DP speaker these tests page. It stays paired,

@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/equipment"
-	"github.com/liken-sh/equipment-operator/upnp"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/upnp"
 )
 
 // These bound one request and the wait between polls. A failed poll

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 func TestIsWiiMComparesTheNamePrefixWithoutCase(t *testing.T) {

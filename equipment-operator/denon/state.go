@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // The zone names beyond the main zone. A line names one with its

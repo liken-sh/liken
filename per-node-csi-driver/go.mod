@@ -1,6 +1,6 @@
 // One module, one package, one program. The driver ships as one binary
 // in one image, so nothing here versions or releases on its own.
-module github.com/liken-sh/per-node-csi-driver
+module github.com/liken-sh/liken/per-node-csi-driver
 
 go 1.27.4
 

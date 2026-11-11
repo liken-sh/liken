@@ -11,7 +11,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/liken-sh/bluetooth-operator/bluetoothd/mgmt"
+	"github.com/liken-sh/liken/bluetooth-operator/bluetoothd/mgmt"
 )
 
 // watcher holds one radio for each adapter the monitor channel names.

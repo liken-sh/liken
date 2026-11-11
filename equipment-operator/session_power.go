@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/cec"
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // power runs one power ask from status.session.powerAsk. The remote's

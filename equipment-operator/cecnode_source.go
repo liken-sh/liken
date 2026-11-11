@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // noteSource records the physical address of an Active Source the

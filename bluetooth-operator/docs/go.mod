@@ -10,18 +10,18 @@
 // This is the standard Hugo build, in pure Go. The extended build
 // needs cgo for its Sass compiler, and the brand theme uses plain
 // CSS, so nothing here needs it.
-module github.com/liken-sh/bluetooth-operator/docs
+module github.com/liken-sh/liken/bluetooth-operator/docs
 
 go 1.27.4
 
 tool (
 	github.com/gohugoio/hugo
-	github.com/liken-sh/brand/coverage
-	github.com/liken-sh/brand/crdref
-	github.com/liken-sh/brand/skills
+	github.com/liken-sh/liken/brand/coverage
+	github.com/liken-sh/liken/brand/crdref
+	github.com/liken-sh/liken/brand/skills
 )
 
-require github.com/liken-sh/brand v0.0.0
+require github.com/liken-sh/liken/brand v0.0.0
 
 require (
 	cel.dev/expr v0.25.3 // indirect
@@ -212,4 +212,4 @@ require (
 
 // brand is a component in this repository, so every consumer builds
 // against the tree beside it and never against a published version.
-replace github.com/liken-sh/brand => ../../brand
+replace github.com/liken-sh/liken/brand => ../../brand

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/liken-sh/media-operator/edl"
-	"github.com/liken-sh/media-operator/edl/edltest"
+	"github.com/liken-sh/liken/media-operator/edl"
+	"github.com/liken-sh/liken/media-operator/edl/edltest"
 )
 
 // useAlbumDir moves the directory the shim writes timelines into for the

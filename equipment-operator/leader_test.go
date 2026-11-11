@@ -23,8 +23,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/election"
 	"github.com/liken-sh/liken/kubernetes/election/electiontest"
 
-	"github.com/liken-sh/equipment-operator/equipment"
-	"github.com/liken-sh/equipment-operator/wiim"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/wiim"
 )
 
 const testLeaseNamespace = "liken-system"

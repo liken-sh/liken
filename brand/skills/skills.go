@@ -21,7 +21,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/liken-sh/brand/linkcheck"
+	"github.com/liken-sh/liken/brand/linkcheck"
 )
 
 // preamble opens every skill. It names where the guide lives on the

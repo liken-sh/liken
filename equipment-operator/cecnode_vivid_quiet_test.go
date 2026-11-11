@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // playCountingTV plays the TV like playTV, and answers a count of the

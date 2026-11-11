@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/denon"
+	"github.com/liken-sh/liken/equipment-operator/denon"
 )
 
 // The lines the real receiver volunteered after the queries, which this

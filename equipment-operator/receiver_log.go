@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // How long a command's line waits for the receiver to report the

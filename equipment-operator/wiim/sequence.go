@@ -13,7 +13,7 @@
 
 package wiim
 
-import "github.com/liken-sh/equipment-operator/equipment"
+import "github.com/liken-sh/liken/equipment-operator/equipment"
 
 // fieldWrites holds the number of the last write to each field.
 type fieldWrites struct {

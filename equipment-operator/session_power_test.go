@@ -11,7 +11,7 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/liken-sh/equipment-operator/denon"
+	"github.com/liken-sh/liken/equipment-operator/denon"
 )
 
 // askPower starts an idle session, with the receiver on or in standby,

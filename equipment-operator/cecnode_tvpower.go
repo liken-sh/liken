@@ -9,7 +9,7 @@ package main
 import (
 	"sync"
 
-	"github.com/liken-sh/equipment-operator/cec"
+	"github.com/liken-sh/liken/equipment-operator/cec"
 )
 
 // tvPowerFlight holds the one read of the TV's power in flight.

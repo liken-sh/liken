@@ -14,7 +14,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/liken-sh/equipment-operator/equipment"
+	"github.com/liken-sh/liken/equipment-operator/equipment"
 )
 
 // fakeEvents is a device's UPnP event side: it takes a SUBSCRIBE, keeps
