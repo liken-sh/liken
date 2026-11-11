@@ -137,7 +137,8 @@ the release does not ship them. `liken`'s CI runs the same scan on
 each release with those components left out, and the repository's
 [code scanning alerts](https://github.com/liken-sh/liken/security/code-scanning)
 show the findings of the newest release under the category
-`grype/liken`.
+`grype/liken-release`, and the findings of the newest commit on `main`
+under `grype/liken`.
 
 Either scanner reads an image's SBOM:
 

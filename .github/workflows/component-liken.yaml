@@ -361,6 +361,16 @@ jobs:
     if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'build') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 120
+    # security-events: write uploads the grype scan of what the job
+    # built, because upload-sarif writes the results with the job's
+    # token. No other check job of the workflow holds it. A job's
+    # permissions replace the workflow's, so the job also names the
+    # workflow's own: packages: write lets the build push the userland
+    # that it compiles on main to ghcr.io/liken-sh/userland.
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
     defaults:
       run:
         working-directory: liken
@@ -380,6 +390,23 @@ jobs:
           make all
           make smoke-uefi
           make smoke-bios
+          make vulnerabilities SARIF="$GITHUB_WORKSPACE/grype/liken.sarif" || echo "::warning::the grype scan of the build failed, and the build goes on"
+
+      # The findings go under the category grype/liken. Code scanning
+      # keeps the results of each category on each ref, and it closes an
+      # alert only when a later upload in the same category on the same
+      # ref no longer reports it. So each upload replaces the results of
+      # the upload before it in grype/liken. The build job of the
+      # OS uploads the scan of the tree under grype/<component>, and the
+      # scans of a published release upload under
+      # grype/<component>-release, so neither set closes the alerts of
+      # the other. The step runs when the scan wrote its file.
+      - if: ${{ !cancelled() && hashFiles('grype/liken.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: grype/liken.sarif
+          category: grype/liken
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.go-build-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -558,19 +585,23 @@ jobs:
         continue-on-error: true
         timeout-minutes: 15
         working-directory: liken
-        run: releases/sbom/vulnerabilities.sh "releases/dist/${{ inputs.version }}/sbom.cdx.json" "${{ github.workspace }}/grype/liken.sarif"
+        run: releases/sbom/vulnerabilities.sh "releases/dist/${{ inputs.version }}/sbom.cdx.json" "${{ github.workspace }}/grype/liken-release.sarif"
 
-      # The findings go under the category grype/liken. Code scanning
-      # closes an alert only when a later upload in the same category no
-      # longer reports it, so the scan of each release replaces the
-      # results of the scan before it. The step runs when the scan wrote
-      # its file.
-      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('grype/liken.sarif') != '' }}
+      # The findings go under the category grype/liken-release. Code scanning
+      # keeps the results of each category on each ref, and it closes an
+      # alert only when a later upload in the same category on the same
+      # ref no longer reports it. So each upload replaces the results of
+      # the upload before it in grype/liken-release. The build job of the
+      # OS uploads the scan of the tree under grype/<component>, and the
+      # scans of a published release upload under
+      # grype/<component>-release, so neither set closes the alerts of
+      # the other. The step runs when the scan wrote its file.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('grype/liken-release.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
-          sarif_file: grype/liken.sarif
-          category: grype/liken
+          sarif_file: grype/liken-release.sarif
+          category: grype/liken-release
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.go-build-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

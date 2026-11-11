@@ -530,18 +530,31 @@ scanning, and no finding fails a run.
   `ci/trivy.go`, on each image that it pushes, and uploads the
   findings that have a fixed version under the category
   `trivy/<image>`.
-* **Each OS release.** The OS publishes no image, and no package
+* **The OS.** The OS publishes no image, and no package
   database records its kernel, bootloaders, microcode, or k3s. Each of
   those `pin.toml` entries states the CPE that NVD lists the upstream
   under, and `liken/releases/sbom/vulnerabilities.sh` runs grype,
-  pinned in `toolchains/images.toml`, over the release's
-  `sbom.cdx.json`. Trivy matches no component by its CPE, so this scan
+  pinned in `toolchains/images.toml`, over an SBOM of the OS. Trivy matches no component by its CPE, so this scan
   alone runs grype. The script leaves out each component with the
   scope `excluded`, keeps each finding that has a fixed version, and
   reads `grype.yaml` beside it, which names each finding that is false
-  for every release with the reason. The step "scan the release's
-  SBOM" of the OS's publish job uploads under the category
-  `grype/liken`.
+  for every release with the reason.
+* **Each build of the OS.** The OS's `build` job runs
+  `make vulnerabilities` after the smoke drills. The target writes the
+  SBOM of what the commit built, with the syft scan that a release
+  runs, and scans it. The job's entry in `liken/package.toml` states
+  `grype = true`, which makes the generated job upload the file
+  `grype/liken.sarif` that its command writes, and `ci` refuses a job
+  that states the field and writes no such file. The upload goes under
+  the category `grype/liken`, so that category holds the findings of the tree at
+  `main`, and a finding that a bump can clear shows before a release
+  ships it.
+* **Each published release.** The step "scan the release's SBOM" of
+  the OS's publish job uploads under the category
+  `grype/liken-release`. The findings of the tree and of the newest
+  release have a category each, because code scanning keeps one set
+  of results for a category, and an upload replaces the set before
+  it.
 * **Every third day.** `.github/workflows/scan.yaml`, which `ci/`
   generates from `ci/templates/scan.yaml.tmpl`, runs at 04:43 UTC on
   the 1st, 4th, and each third day of a month to the 31st, and on a
@@ -549,7 +562,8 @@ scanning, and no finding fails a run.
   the version that a cluster pulls and the newest OS release on the
   channel. The `trivy` job scans each image, and the `liken` job
   fetches the release's SBOM with `liken sbom -json`, which checks its
-  signature, and scans it with grype. The timer is a backstop: a
+  signature, scans it with grype, and uploads under
+  `grype/liken-release`. The timer is a backstop: a
   vulnerability that is recorded after a publish reaches no alert
   until a later scan, and the vulnerability databases publish no event
   that a workflow can subscribe to.
@@ -559,10 +573,12 @@ scanning, and no finding fails a run.
   gives the images and the versions for this scan and for the
   scheduled one.
 
-To scan a release on a workstation, with docker and `jq`:
+To scan on a workstation, with docker and `jq`: the tree, after
+`make all`, and then a release.
 
 ```sh
 cd liken
+make vulnerabilities
 go run ./cli sbom -json 2026.11.10-001 >sbom.cdx.json
 releases/sbom/vulnerabilities.sh sbom.cdx.json
 ```

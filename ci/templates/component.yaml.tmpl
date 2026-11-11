@@ -99,6 +99,16 @@ jobs:{% range .Jobs %}
     timeout-minutes: {% .Timeout %}{% if eq .Toolchain "codeql" %}
     permissions:
       contents: read
+      security-events: write{% end %}{% if .Grype %}
+    # security-events: write uploads the grype scan of what the job
+    # built, because upload-sarif writes the results with the job's
+    # token. No other check job of the workflow holds it. A job's
+    # permissions replace the workflow's, so the job also names the
+    # workflow's own: packages: write lets the build push the userland
+    # that it compiles on main to ghcr.io/liken-sh/userland.
+    permissions:
+      contents: read
+      packages: write
       security-events: write{% end %}
     defaults:
       run:
@@ -180,7 +190,8 @@ jobs:{% range .Jobs %}
       - run: {% .Run %}{% else %}
 
       - run: |{% range $lines %}
-          {% . %}{% end %}{% end %}{% if eq .Toolchain "codeql" %}{% template "codeql-analyze" . %}{% end %}{% end %}{% if eq .Toolchain "os" %}{% template "os-go-save" %}{% template "userland-ccache-save" %}{% end %}{% if .Go %}{% template "go-save" .Cache %}{% end %}{% if eq .Toolchain "hugo" %}
+          {% . %}{% end %}{% end %}{% if eq .Toolchain "codeql" %}{% template "codeql-analyze" . %}{% end %}{% end %}{% if .Grype %}
+{% template "grype-upload" (grypeUpload .Component false) %}{% end %}{% if eq .Toolchain "os" %}{% template "os-go-save" %}{% template "userland-ccache-save" %}{% end %}{% if .Go %}{% template "go-save" .Cache %}{% end %}{% if eq .Toolchain "hugo" %}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.hugo-cache.outputs.cache-hit != 'true' }}
         uses: {% action "actions/cache/save" %}
@@ -421,8 +432,8 @@ jobs:{% range .Jobs %}
         continue-on-error: true
         timeout-minutes: 15
         working-directory: {% .Dir %}
-        run: releases/sbom/vulnerabilities.sh "releases/dist/${{ inputs.version }}/sbom.cdx.json" "${{ github.workspace }}/grype/{% .Name %}.sarif"
-{% template "grype-upload" (grypeUpload .Name true) %}{% template "os-go-save" %}{% template "userland-ccache-save" %}{% else %}
+        run: releases/sbom/vulnerabilities.sh "releases/dist/${{ inputs.version }}/sbom.cdx.json" "${{ github.workspace }}/grype/{% .Name %}-release.sarif"
+{% template "grype-upload" (grypeUpload (printf "%s-release" .Name) true) %}{% template "os-go-save" %}{% template "userland-ccache-save" %}{% else %}
 {% template "go-restore" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}{% if .Images %}
 
 {% template "buildx" . %}{% end %}

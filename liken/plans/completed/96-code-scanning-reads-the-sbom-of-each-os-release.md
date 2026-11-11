@@ -151,6 +151,13 @@ the name that NVD lists the kernel under.
    every published image. `go run . scans` in `ci/` plans it, and
    `Planner.PublishedImages` in `ci/rescan.go` gives the images for it
    and for the rescan after a change to the Trivy configuration.
+   A second commit of the same day added the scan of each build:
+   the OS's `build` job runs `make vulnerabilities`, which writes the
+   SBOM of what the commit built with the syft scan and scans it, and
+   uploads under `grype/liken`. The two scans of a release moved to
+   the category `grype/liken-release`. The maintainer's reason: a
+   finding that a bump can clear must show on `main`, and not only
+   after a release ships it.
 4. **The manual.** The verify guide and its skill give the grype
    command for a release and say what Trivy does not match. The
    release channel reference, the root `AGENTS.md`, and the `releases`

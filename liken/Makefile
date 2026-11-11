@@ -643,6 +643,20 @@ install-gitops: $(GITOPS_IMAGE_DIR)/install.cpio
 release: kernel k3s xtables trust userland open-iscsi hwdata linux-firmware microcode
 	$(MAKE) -C releases release
 
+# This target scans what `make all` built for known vulnerabilities,
+# so a finding that a bump can clear shows on the commit that built
+# it, and not only after a release. It writes the SBOM of the staged
+# root filesystem and the toolkit with the syft scan that a release
+# runs, because the lab's SBOM leaves that scan out, and most findings
+# are in the Go modules that only syft lists. Then grype matches the
+# SBOM. releases/sbom/vulnerabilities.sh gives the scan, and SARIF
+# names the file that CI uploads to code scanning. A finding does not
+# fail the target.
+SARIF ?= image/dist/vulnerabilities.sarif
+vulnerabilities: image cli
+	releases/sbom/scan.sh $(LAB_VERSION) image/dist/sbom.cdx.json image/dist/root cli/dist/liken
+	releases/sbom/vulnerabilities.sh image/dist/sbom.cdx.json $(SARIF)
+
 # This target serves the release channel to the lab over HTTP. The
 # guests reach it at http://10.0.2.2:8017, the source URL that the
 # dev cluster's Cluster document declares. This is the lab's
@@ -804,4 +818,4 @@ clean:
 	rm -rf $(HW_IMAGE_DIR)
 	rm -rf $(EMMC_IMAGE_DIR)
 
-.PHONY: versions all kernel k3s xtables trust userland open-iscsi systemd-boot grub hwdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage registry registry-stop release serve docs test test-go coverage-profile coverage-report test-docs clean
+.PHONY: versions all kernel k3s xtables trust userland open-iscsi systemd-boot grub hwdata linux-firmware microcode licensing init mount machine-operator cluster-operator logs cli identity kubeconfig kubeconfig-gitops image run run-once run-gitops smoke-uefi smoke-bios smoke-hardware smoke-emmc install install-stick install-gitops storage registry registry-stop release vulnerabilities serve docs test test-go coverage-profile coverage-report test-docs clean

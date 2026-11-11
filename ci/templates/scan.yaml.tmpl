@@ -106,6 +106,6 @@ jobs:
       # downloads its database on each run.
       - name: scan the SBOM
         working-directory: {% .Dir %}
-        run: releases/sbom/vulnerabilities.sh "${{ github.workspace }}/grype/sbom.cdx.json" "${{ github.workspace }}/grype/{% .Name %}.sarif"
-{% template "grype-upload" (grypeUpload .Name false) %}
+        run: releases/sbom/vulnerabilities.sh "${{ github.workspace }}/grype/sbom.cdx.json" "${{ github.workspace }}/grype/{% .Name %}-release.sarif"
+{% template "grype-upload" (grypeUpload (printf "%s-release" .Name) false) %}
 {% end %}

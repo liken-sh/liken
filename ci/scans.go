@@ -92,8 +92,9 @@ const scanFile = ".github/workflows/scan.yaml"
 
 // scanChannel is the data of the scheduled scan's job for the
 // component that publishes to the channel: its name, which names the
-// job and the category grype/<name>, its directory, and the Go cache
-// of its module, which the toolkit builds from.
+// job and the category grype/<name>-release of a published release's
+// scan, its directory, and the Go cache of its module, which the
+// toolkit builds from.
 type scanChannel struct {
 	Name, Dir string
 	Cache     goCache

@@ -123,7 +123,8 @@ func TestEveryJobOfTheScanWorkflowHasATimeoutAndItsOwnPermissions(t *testing.T) 
 
 // The OS's job of the scheduled scan fetches the newest release's SBOM
 // with the toolkit, which checks the release's signature, scans it with
-// grype, and uploads the findings under grype/<component>. It runs only
+// grype, and uploads the findings under grype/<component>-release. It
+// runs only
 // when the channel holds a release, and it never fails the run.
 func TestTheScanWorkflowScansTheSBOMOfTheNewestRelease(t *testing.T) {
 	_, jobs := scanWorkflow(t, scanFixture(t)[".github/workflows/scan.yaml"])
@@ -144,8 +145,8 @@ func TestTheScanWorkflowScansTheSBOMOfTheNewestRelease(t *testing.T) {
 	}
 	want := []string{
 		"sbom ${{ needs.plan.outputs.release }} in os",
-		`releases/sbom/vulnerabilities.sh "${{ github.workspace }}/grype/sbom.cdx.json" "${{ github.workspace }}/grype/os.sarif" in os`,
-		"upload grype/os.sarif grype/os if ${{ !cancelled() && hashFiles('grype/os.sarif') != '' }}",
+		`releases/sbom/vulnerabilities.sh "${{ github.workspace }}/grype/sbom.cdx.json" "${{ github.workspace }}/grype/os-release.sarif" in os`,
+		"upload grype/os-release.sarif grype/os-release if ${{ !cancelled() && hashFiles('grype/os-release.sarif') != '' }}",
 	}
 	if !reflect.DeepEqual(order, want) {
 		t.Errorf("the steps:\n%s\nwant\n%s", strings.Join(order, "\n"), strings.Join(want, "\n"))
@@ -153,8 +154,9 @@ func TestTheScanWorkflowScansTheSBOMOfTheNewestRelease(t *testing.T) {
 }
 
 // The OS's publish job scans the release that it just published and
-// uploads under the category of the scheduled scan, so the new
-// release's findings replace the old release's. A dry run scans
+// uploads under grype/<component>-release, the category of the
+// scheduled scan, so the new release's findings replace the old
+// release's. A dry run scans
 // nothing, and a scan never fails the publish.
 func TestTheChannelPublishScansTheReleaseAfterItUploads(t *testing.T) {
 	_, jobs := scanWorkflow(t, scanFixture(t)[".github/workflows/component-os.yaml"])
@@ -178,8 +180,8 @@ func TestTheChannelPublishScansTheReleaseAfterItUploads(t *testing.T) {
 	}
 	want := []string{
 		"publish",
-		`releases/sbom/vulnerabilities.sh "releases/dist/${{ inputs.version }}/sbom.cdx.json" "${{ github.workspace }}/grype/os.sarif" in os`,
-		"upload grype/os.sarif grype/os if ${{ !cancelled() && !inputs.dryrun && hashFiles('grype/os.sarif') != '' }}",
+		`releases/sbom/vulnerabilities.sh "releases/dist/${{ inputs.version }}/sbom.cdx.json" "${{ github.workspace }}/grype/os-release.sarif" in os`,
+		"upload grype/os-release.sarif grype/os-release if ${{ !cancelled() && !inputs.dryrun && hashFiles('grype/os-release.sarif') != '' }}",
 	}
 	if !reflect.DeepEqual(order, want) {
 		t.Errorf("the steps:\n%s\nwant\n%s", strings.Join(order, "\n"), strings.Join(want, "\n"))
@@ -203,6 +205,57 @@ func TestBothCallsOfTheOSWorkflowGrantSecurityEvents(t *testing.T) {
 
 // A repository with no component that publishes to a channel has no
 // release to scan, and its scheduled scan has no job for one.
+// grypeTree is the workflows of an OS whose build job scans what it
+// built and a check job that scans nothing.
+func grypeTree(t *testing.T) map[string][]byte {
+	t.Helper()
+	root := writeTree(t, map[string]string{
+		"os/package.toml": "[package]\nname = \"os\"\n[[jobs]]\nname = \"build\"\ntoolchain = \"os\"\ngrype = true\n" +
+			"run = \"\"\"\nmake all\nmake vulnerabilities SARIF=\"$GITHUB_WORKSPACE/grype/os.sarif\"\n\"\"\"\n" +
+			"[[jobs]]\nname = \"go\"\ntoolchain = \"go\"\nrun = \"make test\"\n[outputs]\nchannel = true\n",
+		"toolchains/images.toml": fixtureBuildKitImages,
+	})
+	components, err := LoadComponents(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Workflows(root, components)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+// A job with grype = true uploads the scan that its command writes,
+// under grype/<component>, on every ref that it runs on, and only that
+// job may write to code scanning. The build job keeps packages: write,
+// because on main it pushes the userland that it compiled.
+func TestAJobThatScansItsBuildUploadsTheScan(t *testing.T) {
+	_, jobs := scanWorkflow(t, grypeTree(t)[".github/workflows/component-os.yaml"])
+	cases := []struct {
+		job         string
+		permissions map[string]string
+		uploads     []string
+	}{
+		{"build", map[string]string{"contents": "read", "packages": "write", "security-events": "write"},
+			[]string{"grype/os.sarif grype/os if ${{ !cancelled() && hashFiles('grype/os.sarif') != '' }}"}},
+		{"go", nil, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.job, func(t *testing.T) {
+			var uploads []string
+			for _, step := range jobs[c.job].Steps {
+				if strings.HasPrefix(step.Uses, "github/codeql-action/upload-sarif@") {
+					uploads = append(uploads, step.With["sarif_file"]+" "+step.With["category"]+" if "+step.If)
+				}
+			}
+			if !reflect.DeepEqual(jobs[c.job].Permissions, c.permissions) || !reflect.DeepEqual(uploads, c.uploads) {
+				t.Errorf("permissions %v, uploads %v", jobs[c.job].Permissions, uploads)
+			}
+		})
+	}
+}
+
 func TestAScanWorkflowWithNoChannelScansOnlyImages(t *testing.T) {
 	_, jobs := scanWorkflow(t, trivyFixture(t)[".github/workflows/scan.yaml"])
 	if len(jobs) != 3 {

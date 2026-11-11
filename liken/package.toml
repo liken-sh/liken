@@ -60,14 +60,25 @@ run = "make test-docs"
 # when the drill passes: a healthy boot is the baseline for the next
 # unhealthy one. qemu.log holds the failure when QEMU never reaches a
 # console.
+#
+# After the drills, `make vulnerabilities` scans what `make all` built
+# with grype, so a vulnerability that a bump can fix shows on the
+# commit that built it, and not only after a release. grype = true
+# makes the workflow upload the file to code scanning under the
+# category grype/liken, and ci refuses a run command that names no
+# such file. The scan reports and does not gate: a finding passes the
+# target, and a scanner that fails prints a warning and the build
+# passes.
 [[jobs]]
 name = "build"
 toolchain = "os"
 timeout = 120
+grype = true
 run = """
 make all
 make smoke-uefi
 make smoke-bios
+make vulnerabilities SARIF="$GITHUB_WORKSPACE/grype/liken.sarif" || echo "::warning::the grype scan of the build failed, and the build goes on"
 """
 artifacts = ["dev-cluster/guests/node-1/*.log"]
 

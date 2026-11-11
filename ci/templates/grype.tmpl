@@ -1,9 +1,13 @@
 {% define "grype-upload" %}
       # The findings go under the category grype/{% .Name %}. Code scanning
-      # closes an alert only when a later upload in the same category no
-      # longer reports it, so the scan of each release replaces the
-      # results of the scan before it. The step runs when the scan wrote
-      # its file.
+      # keeps the results of each category on each ref, and it closes an
+      # alert only when a later upload in the same category on the same
+      # ref no longer reports it. So each upload replaces the results of
+      # the upload before it in grype/{% .Name %}. The build job of the
+      # OS uploads the scan of the tree under grype/<component>, and the
+      # scans of a published release upload under
+      # grype/<component>-release, so neither set closes the alerts of
+      # the other. The step runs when the scan wrote its file.
       - if: ${{ !cancelled(){% if .Dry %} && !inputs.dryrun{% end %} && hashFiles('grype/{% .Name %}.sarif') != '' }}
         continue-on-error: true
         uses: {% action "github/codeql-action/upload-sarif" %}

@@ -127,9 +127,11 @@ type rootComponent struct {
 	// SecurityEvents is true when a job of the component's workflow
 	// uploads to code scanning: a CodeQL job, or the publish job, which
 	// uploads the Trivy scan of each image it pushes or the grype scan
-	// of the release it publishes to the channel. GitHub checks the
-	// permissions of every job in a called workflow against the call,
-	// including a job that the call skips, so both calls grant it.
+	// of the release it publishes to the channel, or a job with
+	// grype = true, which uploads the grype scan of what it built.
+	// GitHub checks the permissions of every job in a called workflow
+	// against the call, including a job that the call skips, so both
+	// calls grant it.
 	SecurityEvents bool
 }
 
@@ -157,7 +159,7 @@ func rootData(components map[string]*Component) map[string]any {
 			Images:       len(c.Outputs.Images) > 0,
 			Publishes:    c.HasOutputs(),
 			SecurityEvents: len(c.Outputs.Images) > 0 || c.Outputs.Channel ||
-				slices.ContainsFunc(c.Jobs, func(j Job) bool { return j.Toolchain == "codeql" }),
+				slices.ContainsFunc(c.Jobs, func(j Job) bool { return j.Toolchain == "codeql" || j.Grype }),
 		})
 		for _, job := range c.Jobs {
 			if len(job.Coverage) > 0 {

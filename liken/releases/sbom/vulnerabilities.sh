@@ -6,10 +6,12 @@
 #   releases/sbom/vulnerabilities.sh <sbom> [<sarif>]
 #
 # The script prints a table of the findings. With a second argument it
-# also writes them as SARIF, which the OS's publish job and the
-# scheduled scan upload to code scanning under the category
-# grype/liken. A finding does not fail the script: the scan reports,
-# and a person decides what to bump.
+# also writes them as SARIF, which CI uploads to code scanning: the
+# OS's build job under the category grype/liken, for the SBOM of what
+# a commit built, and the OS's publish job and the scheduled scan
+# under grype/liken-release, for the SBOM of a release. A finding does
+# not fail the script: the scan reports, and a person decides what to
+# bump.
 #
 # Trivy scans each container image that CI publishes, and the OS
 # publishes no image. Its kernel, bootloaders, firmware, and k3s come

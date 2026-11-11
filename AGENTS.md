@@ -546,10 +546,15 @@ settings in `grype.yaml` beside it: it leaves out each component with
 the scope `excluded`, keeps each finding that has a fixed version, and
 drops each finding that `grype.yaml` names with its reason. Trivy
 scans every image, and it matches no component by its CPE, so this
-one scan runs grype. The OS's publish job scans the release that it
-publishes, and the `liken` job of `.github/workflows/scan.yaml` scans
-the newest release on the channel every third day. Both upload to
-code scanning under the category `grype/liken`. The same workflow
+one scan runs grype. The OS's `build` job runs `make vulnerabilities`
+on each build, which scans what the commit built, and uploads under
+the category `grype/liken`, so a finding that a bump can clear shows
+on `main` before a release ships it. The OS's publish job scans the
+release that it publishes, and the `liken` job of
+`.github/workflows/scan.yaml` scans the newest release on the channel
+every third day. Both upload under `grype/liken-release`, so the
+findings of the tree and of the newest release do not replace each
+other. The same workflow
 scans every published image again with Trivy, because a vulnerability
 that is recorded after a publish reaches no alert until a later scan,
 and the vulnerability databases publish no event that a workflow can

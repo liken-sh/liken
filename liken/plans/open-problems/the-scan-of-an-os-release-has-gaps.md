@@ -3,7 +3,8 @@
 Open problem.
 [Milestone 96](../completed/96-code-scanning-reads-the-sbom-of-each-os-release.md)
 scans the SBOM of each OS release with grype and uploads the findings
-to code scanning under the category `grype/liken`. The items below are
+to code scanning, the tree's under the category `grype/liken` and a
+release's under `grype/liken-release`. The items below are
 what the scan does not match, what it reports that no bump of today
 clears, and what is not proven until the workflows run on GitHub. Each
 item is independent.
@@ -65,6 +66,7 @@ Seen on 2026-11-11 against the lab release `2026.11.11-901`:
 A push to `main` that changes `ci/trivy.go` or
 `ci/templates/trivy.tmpl` scans every published image again. A change
 to `vulnerabilities.sh`, to `grype.yaml`, or to the `grype` entry of
-`toolchains/images.toml` scans nothing, so `grype/liken` holds the
-findings of the old settings until the next scheduled scan, at most
-three days later.
+`toolchains/images.toml` scans no release, so `grype/liken-release`
+holds the findings of the old settings until the next scheduled scan,
+at most three days later. `grype/liken` takes the new settings at the
+next build of the OS.

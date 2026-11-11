@@ -411,16 +411,20 @@ jobs:
       # downloads its database on each run.
       - name: scan the SBOM
         working-directory: liken
-        run: releases/sbom/vulnerabilities.sh "${{ github.workspace }}/grype/sbom.cdx.json" "${{ github.workspace }}/grype/liken.sarif"
+        run: releases/sbom/vulnerabilities.sh "${{ github.workspace }}/grype/sbom.cdx.json" "${{ github.workspace }}/grype/liken-release.sarif"
 
-      # The findings go under the category grype/liken. Code scanning
-      # closes an alert only when a later upload in the same category no
-      # longer reports it, so the scan of each release replaces the
-      # results of the scan before it. The step runs when the scan wrote
-      # its file.
-      - if: ${{ !cancelled() && hashFiles('grype/liken.sarif') != '' }}
+      # The findings go under the category grype/liken-release. Code scanning
+      # keeps the results of each category on each ref, and it closes an
+      # alert only when a later upload in the same category on the same
+      # ref no longer reports it. So each upload replaces the results of
+      # the upload before it in grype/liken-release. The build job of the
+      # OS uploads the scan of the tree under grype/<component>, and the
+      # scans of a published release upload under
+      # grype/<component>-release, so neither set closes the alerts of
+      # the other. The step runs when the scan wrote its file.
+      - if: ${{ !cancelled() && hashFiles('grype/liken-release.sarif') != '' }}
         continue-on-error: true
         uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
-          sarif_file: grype/liken.sarif
-          category: grype/liken
+          sarif_file: grype/liken-release.sarif
+          category: grype/liken-release
