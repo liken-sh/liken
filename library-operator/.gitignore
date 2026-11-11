@@ -4,6 +4,7 @@
 /bin/
 /media-browser/target/
 /appearances/target/
+/titles/target/
 
 # Hugo's build output, once the site exists.
 /docs/dist/

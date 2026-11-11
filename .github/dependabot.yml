@@ -468,6 +468,16 @@ updates:
         patterns:
           - "*"
   - package-ecosystem: cargo
+    directory: /library-operator/titles
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+  - package-ecosystem: cargo
     directory: /media-operator
     schedule:
       interval: monthly
