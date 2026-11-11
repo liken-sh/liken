@@ -54,6 +54,17 @@ run = "make test"
 timeout = 30
 env = { CARGO_INCREMENTAL = "0" }
 
+# `titles`, the tool that finds where the end titles of a video start.
+# Its unit tests load no model and decode no video, so the job needs no
+# OpenVINO and no ffmpeg. The crate has no coverage floor yet.
+[[jobs]]
+name = "rust-titles"
+toolchain = "rust"
+dir = "titles"
+run = "make test"
+timeout = 30
+env = { CARGO_INCREMENTAL = "0" }
+
 # The hooks in .pre-commit-config.yaml: the formatters, the linters,
 # and the hygiene checks. The jobs above run the tests and the
 # coverage gates.

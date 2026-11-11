@@ -1,0 +1,30 @@
+[package]
+name = "titles"
+version = "0.1.0"
+edition = "2024"
+
+# The crate is a library with one binary over it, so the box finder, the
+# text decoder, the trees, and the placement have unit tests that load no
+# model and decode no video.
+[lib]
+name = "titles"
+path = "src/lib.rs"
+
+[[bin]]
+name = "titles"
+path = "src/main.rs"
+
+# Every version is exact, so a build from this manifest resolves the same
+# crates the lock file names. The versions match the appearances crate's,
+# because `ci pins` fails when two copies of a crate version disagree.
+[dependencies]
+# runtime-linking opens libopenvino_c.so when the program starts, not when
+# it links. The build needs no OpenVINO installation, and train and place
+# run with no OpenVINO at all.
+openvino = { version = "=0.11.1", features = ["runtime-linking"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+# The credits fact writes .liken/credits.yaml, which names the people that
+# place looks for in the text.
+serde_yaml_ng = "=0.10.0"
+sha2 = "=0.11.1"

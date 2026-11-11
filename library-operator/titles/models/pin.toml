@@ -1,0 +1,40 @@
+# The two text models that `titles read` runs, and the list of the
+# characters that the reader writes. `read` finds each by its name in
+# the directory that --models names. The models are PP-OCR models of
+# PaddleOCR, as two projects publish them in ONNX, with no conversion
+# here. The files come from one commit of each project, so no
+# latest.sh moves them, and NVD lists no CPE for any of them.
+
+# The text detector: PP-OCRv3's English detection model, a DBNet,
+# which OpenCV Zoo publishes in models/text_detection_ppocr/. The
+# LICENSE of that directory is the Apache License 2.0.
+[text_detection_en_ppocrv3]
+version = "2023may"
+url = "https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/text_detection_ppocr/text_detection_en_ppocrv3_2023may.onnx"
+sha256 = "03f550c6b406fda8bf54bd8327815f6c7e2edd98cea02348c93d879254366587"
+purl = "pkg:generic/text_detection_en_ppocrv3@2023may?download_url=https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/text_detection_ppocr/text_detection_en_ppocrv3_2023may.onnx&checksum=sha256:03f550c6b406fda8bf54bd8327815f6c7e2edd98cea02348c93d879254366587"
+license = "Apache-2.0"
+type = "machine-learning-model"
+
+# The text reader: PP-OCRv4's recognition model for Chinese and
+# English, which RapidOCR converted to ONNX and publishes. `read`
+# names the file text_recognition_ch_ppocrv4.onnx. PaddleOCR and
+# RapidOCR are both under the Apache License 2.0.
+[text_recognition_ch_ppocrv4]
+version = "v4"
+url = "https://huggingface.co/SWHL/RapidOCR/resolve/1cfba2e90fc938db55889873735088de210cc173/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx"
+sha256 = "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b"
+purl = "pkg:generic/text_recognition_ch_ppocrv4@v4?download_url=https://huggingface.co/SWHL/RapidOCR/resolve/1cfba2e90fc938db55889873735088de210cc173/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx&checksum=sha256:48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b"
+license = "Apache-2.0"
+type = "machine-learning-model"
+
+# The reader's characters, one a line, in the order of its outputs:
+# PaddleOCR's ppocr/utils/ppocr_keys_v1.txt. `read` names the file
+# text_recognition_ch_ppocrv4.txt.
+[text_recognition_ch_ppocrv4_characters]
+version = "v1"
+url = "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/dab3fe35379033fdcb2d0e9572fac0b36c9a9ebf/ppocr/utils/ppocr_keys_v1.txt"
+sha256 = "a1c84d9bdb9ab29043c58896224d32941783eb821629618416dcb08f12886492"
+purl = "pkg:generic/ppocr_keys@v1?download_url=https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/dab3fe35379033fdcb2d0e9572fac0b36c9a9ebf/ppocr/utils/ppocr_keys_v1.txt&checksum=sha256:a1c84d9bdb9ab29043c58896224d32941783eb821629618416dcb08f12886492"
+license = "Apache-2.0"
+type = "machine-learning-model"

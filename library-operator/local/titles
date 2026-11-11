@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# Local/titles runs the titles tool on this workstation, on real videos and
+# on the marks of a copy of a catalog, so a change to the reading or to the
+# model shows its effect on the placements without a cluster. It does what
+# the operator will do in a cluster: it writes the labels file from the
+# catalog's marks, reads each video, fits the model, and places.
+#
+# Usage:
+#   local/titles setup
+#       download the two text models and OpenVINO into local/state/titles
+#   local/titles labels <catalog database> <library>=<directory>...
+#       write labels.tsv: every present video of the named libraries that
+#       has a mark for its end titles from a database. <library> is the
+#       namespace and name of a Library, as in media/movies, and
+#       <directory> is where its root is on this workstation
+#   local/titles read [first] [last]
+#       read the videos of lines first to last of labels.tsv, JOBS at a
+#       time (4 by default); a video with a current reading is skipped
+#   local/titles train
+#       fit model.json on the readings, and print the held-out score
+#   local/titles place <video>...
+#       print the placement of each video
+#
+# Every file the script writes is under local/state/titles: the models, the
+# readings, the labels, and the model. The library is only read.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(cd "$here/.." && pwd)"
+state="$here/state/titles"
+tool="$repo/titles/target/release/titles"
+# shellcheck source-path=SCRIPTDIR source=../../toolchains/pin.sh
+source "$repo/../toolchains/pin.sh"
+
+usage() {
+  sed -n '8,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+# The tool opens libopenvino_c.so when `read` starts, from the archive that
+# setup unpacks. train and place load no OpenVINO.
+export TITLES_MODELS="$state/models"
+export LD_LIBRARY_PATH="$state/openvino/runtime/lib/intel64:$state/openvino/runtime/3rdparty/tbb/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+build() {
+  (cd "$repo/titles" && cargo build --release) >&2
+}
+
+# The models and OpenVINO come from the same pins that the images are
+# built from, so a reading made here is the reading a worker makes.
+setup() {
+  require_tools tar
+  mkdir -p "$state/models" "$state/openvino"
+  local models="$repo/titles/models/pin.toml"
+  fetch_pinned text_detection_en_ppocrv3 2023may "$state/models/text_detection_en_ppocrv3_2023may.onnx" "$models"
+  fetch_pinned text_recognition_ch_ppocrv4 v4 "$state/models/text_recognition_ch_ppocrv4.onnx" "$models"
+  fetch_pinned text_recognition_ch_ppocrv4_characters v1 "$state/models/text_recognition_ch_ppocrv4.txt" "$models"
+  local version
+  version="$(pin_value openvino version "$repo/pin.toml")"
+  fetch_pinned openvino "$version" "$state/openvino.tgz" "$repo/pin.toml"
+  tar -xzf "$state/openvino.tgz" -C "$state/openvino" --strip-components=1
+  build
+}
+
+# The catalog is a SQLite database, and python3 reads it with its standard
+# library, opened read-only and immutable so that a copy of a running
+# agent's database is never written. Each line is a video, the second its
+# end titles start, its film or series, and the seconds of its end to
+# read: 900 for a film and 360 for an episode. A video with a mark from
+# both databases takes TheIntroDB's, which is matched by the file's
+# duration.
+labels() {
+  local database="$1"
+  shift
+  mkdir -p "$state"
+  python3 - "$database" "$@" >"$state/labels.tsv" <<'PYTHON'
+import sqlite3, sys
+from pathlib import PurePosixPath
+
+database, roots = sys.argv[1], dict(pair.split("=", 1) for pair in sys.argv[2:])
+catalog = sqlite3.connect(f"file:{database}?mode=ro&immutable=1", uri=True)
+best = {}
+for library, path, start, source in catalog.execute(
+    "SELECT m.library, m.path, m.start_ms, m.source FROM marks m "
+    "JOIN files f ON f.library = m.library AND f.path = m.path "
+    "WHERE m.kind = 'credits' AND m.source IN ('theintrodb', 'introdb') "
+    "AND f.present = 1 AND f.duration_ms > 0 AND m.start_ms > 0 AND m.start_ms < f.duration_ms"
+):
+    rank = (source != "theintrodb", start)
+    if library in roots and ((library, path) not in best or rank < best[library, path]):
+        best[library, path] = rank
+for (library, path), (_, start) in sorted(best.items()):
+    parts = PurePosixPath(path).parts
+    # A series is Series/Season/file, and a film is Genre/Film/file or
+    # Film/file.
+    episode = len(parts) >= 3 and parts[-2].lower().startswith(("season", "specials"))
+    group = parts[-3] if episode else parts[-2]
+    print(f"{roots[library]}/{path}\t{start / 1000:.3f}\t{group}\t{360 if episode else 900}")
+PYTHON
+  echo "$(wc -l <"$state/labels.tsv") labels in $state/labels.tsv" >&2
+}
+
+# One read of one video. VA-API decodes where the workstation has a render
+# node, and the tool decodes in software where the GPU fails.
+read_one() {
+  local video="$1" window="$2" hwaccel=()
+  [[ -e /dev/dri/renderD128 ]] && hwaccel=(--hwaccel vaapi)
+  "$tool" read "$video" --window "$window" --threads 2 "${hwaccel[@]}" --records "$state/records" ||
+    echo "failed: $video" >&2
+}
+
+read_all() {
+  [[ -x "$tool" ]] || build
+  local first="${1:-1}" last="${2:-\$}"
+  export -f read_one
+  export tool state
+  sed -n "${first},${last}p" "$state/labels.tsv" | cut -f 1,4 | tr '\t' '\n' |
+    xargs -d '\n' -n 2 -P "${JOBS:-4}" bash -c 'read_one "$@"' _
+}
+
+case "${1:-}" in
+setup) setup ;;
+labels)
+  [[ $# -ge 3 ]] || usage
+  labels "${@:2}"
+  ;;
+read) read_all "${@:2}" ;;
+train)
+  [[ -x "$tool" ]] || build
+  "$tool" train --labels "$state/labels.tsv" --records "$state/records" \
+    --out "$state/model.json" --placements "$state/placements.tsv"
+  ;;
+place)
+  [[ $# -ge 2 ]] || usage
+  "$tool" place "${@:2}" --model "$state/model.json" --records "$state/records"
+  ;;
+*) usage ;;
+esac
