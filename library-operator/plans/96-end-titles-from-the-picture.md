@@ -245,6 +245,24 @@ second, and at 32 bits it wrote the same reading as the CPU, in the
 same time as two CPU threads. So `read` runs its networks on the CPU,
 and a GPU is for the decode.
 
+**The whole run matches the experiment on the same videos.** The
+experiment's extractor and `titles read` both read 107 videos. Second
+by second, the two agreed on whether the frame holds text for 99.4% of
+the seconds at the median and 91.7% for the worst video, and the share
+of the frame that text covers correlated at 0.997. For the 53 videos
+with a checked start, placed three ways:
+
+| | Within 3 s | Within 10 s | Within 30 s | Worst |
+|---|---|---|---|---|
+| The experiment: scikit-learn on its own records, 213 videos | 60% | 91% | 100% | 30 s |
+| `titles train` on the experiment's records, 213 videos | 58% | 89% | 94% | 103 s |
+| `titles read`, `train`, and `place`, 421 videos | 68% | 92% | 96% | 67 s |
+| The databases' marks | 58% | 81% | 89% | 349 s |
+
+The production run placed 94% of the 53 within 10 seconds of where the
+experiment placed them. It is closer at 3 seconds and it has two videos
+over 30 seconds where the experiment had none.
+
 **The cost of a read.** With VA-API decode and two inference threads,
 the last 15 minutes of a 1080p film took 44 seconds and 540 MB, and one
 thread took 79 seconds. The workstation read the videos over a wireless
