@@ -479,8 +479,10 @@ each module and each workspace.
    install each one into the session's scratch directory with
    `GOBIN=<dir> go install <module>@latest`. Report each finding that
    remains, with its fixed version or the reason no bump reaches it.
-   Root plan 87 holds the design of a check in CI that fails on a
-   finding a bump can reach.
+   The open problem
+   `plans/open-problems/what-a-vulnerability-finding-does-to-a-build.md`
+   holds the findings that no bump reaches and the idea of a check
+   in CI that fails on a finding a bump can reach.
 7. Run `cd ci && go run . pins -root ..`, then `make test` in each
    changed component and the `run` of each `[[jobs]]` entry that names
    a `dir` in its `package.toml`. A component's `make test` does not

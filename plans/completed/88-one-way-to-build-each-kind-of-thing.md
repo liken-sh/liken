@@ -111,4 +111,4 @@ Each image puts its program at `/<name>`.
 
 Renovate replaces Dependabot only if finishing Dependabot's pull
 requests by hand keeps costing too much
-([plan 87](../87-vulnerability-follow-ups.md)).
+([plan 87](../open-problems/what-a-vulnerability-finding-does-to-a-build.md)).
