@@ -98,8 +98,12 @@ much, how many lines, how centered, how high, and how spread they are,
 how dark and how bright the frame is and how much it changed, and from
 the reader the count of lines, of the names of the video's people, and
 of the words that name a job, such as "directed by" and "gaffer". The
-names come from the `.liken/credits.yaml` of the video's folder or of
-the folder above it.
+names come from two records of the `credits` fact, in the video's folder
+or in the folder above it: `.liken/credits.yaml`, with the people a
+screen shows, and `.liken/billing.yaml`, with every person the provider
+credited. The cards of a designed title sequence name the producers,
+the composer, the cinematographer, and the editor, who are only in the
+billing.
 
 The model is 200 small decision trees, fitted by gradient boosting in
 [`src/trees.rs`](src/trees.rs). The start is then the one second that

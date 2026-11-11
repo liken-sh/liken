@@ -245,11 +245,13 @@ func tmdbCrew(members []tmdbCrewMember, takes func(tmdbCrewMember) bool) []credi
 }
 
 // The people one title's credits name: the billed cast, cut to the limit, and
-// the crew, which has no cut because a title names few of them.
+// the crew, which has no cut because a title names few of them. Billing is
+// every person the provider credited, which billing.go writes beside them.
 type titleCredits struct {
 	Cast      []creditedActor
 	Directors []creditedPerson
 	Writers   []creditedPerson
+	Billing   []billedPerson
 }
 
 func (c *tmdbClient) credits(ctx context.Context, kind string, id int) (titleCredits, error) {
@@ -283,6 +285,7 @@ func (c *tmdbClient) credits(ctx context.Context, kind string, id int) (titleCre
 		Cast:      cast,
 		Directors: tmdbCrew(answer.Crew, tmdbCrewMember.directs),
 		Writers:   tmdbCrew(answer.Crew, tmdbCrewMember.writes),
+		Billing:   tmdbBilling(answer),
 	}, nil
 }
 
@@ -384,7 +387,8 @@ func (a tmdbAnswerer) credits(ctx context.Context, kind string, id int) (factAns
 	if err != nil {
 		return factAnswer{}, false, err
 	}
-	answer := factAnswer{Cast: credits.Cast, Directors: credits.Directors, Writers: credits.Writers}
+	answer := factAnswer{Cast: credits.Cast, Directors: credits.Directors, Writers: credits.Writers,
+		Billing: credits.Billing}
 	held := len(credits.Cast) > 0 || len(credits.Directors) > 0 || len(credits.Writers) > 0
 	return answer, held, nil
 }

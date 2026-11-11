@@ -838,6 +838,27 @@ When no id finds an entry, the credit uses the entry at the slug of
 the name. A second person of the same name gets the slug with an id,
 such as `nora-vance-tmdb-992`.
 
+`credits.yaml` holds the people a screen shows: the billed cast, the
+directors, and the writers. When TMDb answers the fact, the fact also
+writes `.liken/billing.yaml` beside it, with every person TMDb credits
+for the title and each person's department and job:
+
+```yaml
+billing:
+    - name: Nora Vance
+      department: Acting
+      job: Actor
+    - name: Bo Vance
+      department: Camera
+      job: Director of Photography
+```
+
+No screen and no table of the catalog reads `billing.yaml`, and the
+people in it get no entry in `.contributors/`. The file is for a
+program that looks for a title's people by name. IMDb's datasets and
+TVmaze state no crew to the fact, so an answer from one of them leaves
+the file as it is.
+
 A credit from IMDb's datasets names a person by the IMDb id alone. So
 it finds the entry a TMDb credit wrote for the same person by that id,
 or through the TMDb id that TMDb's find call gives for it, and the

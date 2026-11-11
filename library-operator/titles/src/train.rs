@@ -99,7 +99,7 @@ fn fold(group: &str) -> usize {
 
 fn matrix_of(label: &Label, records: Option<&Path>) -> Option<(signals::Matrix, f64)> {
     let reading = reading::load(&reading::path(&label.video, records)).ok()?;
-    let names = signals::people(&label.video, None).unwrap_or_default();
+    let names = signals::people(&label.video, None, records).unwrap_or_default();
     (reading.seconds.len() >= 60)
         .then(|| (signals::matrix(&reading, &names), reading.header.duration))
 }

@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use titles::{Error, place, read, train, trees};
 
 const USAGE: &str = "usage:
-  titles read <video>... [--models DIR] [--device auto|cpu|gpu] [--threads N] [--cache DIR]
+  titles read <video>... [--models DIR] [--device cpu|gpu|auto] [--threads N] [--cache DIR]
                          [--hwaccel vaapi] [--decode-threads N] [--window SECONDS] [--records DIR]
 
   titles train --labels FILE --out FILE [--records DIR] [--placements FILE] [--threads N]
@@ -28,8 +28,8 @@ of its folder or of the folder above it, or from the file --credits names. --mar
 of the labels' form. A video in it takes its mark as a prior, so the picture sets the second
 where the two agree and overrules the mark where they do not.
 
---models defaults to $TITLES_MODELS. --device defaults to auto, which takes an Intel GPU when
-OpenVINO finds one. --threads sets the CPU's inference threads and defaults to 1.";
+--models defaults to $TITLES_MODELS. --device defaults to cpu. --threads sets the CPU's inference
+threads and defaults to 1. --hwaccel vaapi decodes on the GPU.";
 
 struct Args {
     flags: Vec<(String, String)>,
@@ -88,7 +88,7 @@ fn run() -> Result<(), Error> {
         "read" => {
             let settings = read::Settings {
                 models: args.models()?,
-                device: args.get("device").unwrap_or("auto").to_string(),
+                device: args.get("device").unwrap_or("cpu").to_string(),
                 threads: args.number("threads", 1)?,
                 cache: args.path("cache"),
                 hwaccel: args.get("hwaccel").map(String::from),

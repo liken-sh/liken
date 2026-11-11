@@ -271,6 +271,7 @@ func (e *enricher) writeCredits(folder string, answer factAnswer) {
 	if err != nil {
 		e.logf("could not write the credits at %s: %v", e.named(folder), err)
 	}
+	e.writeBilling(folder, answer.Billing)
 }
 
 // The directory of one credited person. Where the store cannot be read or
