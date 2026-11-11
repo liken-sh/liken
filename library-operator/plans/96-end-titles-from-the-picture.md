@@ -228,9 +228,86 @@ crew to the fact, so a title that only they answer has no billing.
 subtitles with Tesseract. The reader here is PP-OCR on OpenVINO, and a
 build of plan 91 can weigh it against Tesseract.
 
+## The tool, measured
+
+The tool ran on a workstation on 2026-11-11, through
+[`local/titles`](../local/titles), against the videos of a home library
+and the marks of a copy of its catalog. It read 421 videos that a
+database has a mark for: all 172 films with one, and 249 episodes of 98
+series. Each got a `billing.yaml` from the key crew of IMDb's
+`title.principals`, in place of the crew that the `credits` fact now
+keeps from TMDb.
+
+**The read matches the experiment.** On one film, the new box finder on
+the CPU found text in 42.1% of the seconds, and OpenCV's found it in
+41.2%. An Intel GPU at its default of 16-bit floats found text in every
+second, and at 32 bits it wrote the same reading as the CPU, in the
+same time as two CPU threads. So `read` runs its networks on the CPU,
+and a GPU is for the decode.
+
+**The cost of a read.** With VA-API decode and two inference threads,
+the last 15 minutes of a 1080p film took 44 seconds and 540 MB, and one
+thread took 79 seconds. The workstation read the videos over a wireless
+link at 9 to 12 MB a second, which set the pace of the run, not the
+tool.
+
+**The cost of the model.** `train` on the 421 readings took 5 minutes
+16 seconds on four threads and 104 MB: eleven fits of 200 trees. The
+model file is 228 KB.
+
+**The placements.** Each video was placed by a model fitted without its
+film or series. A person checked the start of 76 of the videos frame by
+frame: 53 from the experiment, and 23 picked at random from the rest.
+
+| | Within 3 s | Within 10 s | Within 30 s | Worst |
+|---|---|---|---|---|
+| The model | 63% | 93% | 96% | 67 s |
+| The model, with the video's mark as a prior | 70% | 93% | 96% | 67 s |
+| The databases' marks | 61% | 82% | 91% | 349 s |
+
+By kind, the model placed 94% of the 35 films and 93% of the 41
+episodes within 10 seconds, and the marks 83% and 80%. The 23 videos
+picked at random are the fairer sample, because the 53 were chosen
+before any model existed and half of their starts came from a language
+model's labels: there the model placed 96% within 10 seconds and the
+marks 83%, and the marks were the closer of the two at 3 seconds, 65%
+against 52%. A mark that is right is right to the second, which is why
+`place` takes the video's mark as a prior.
+
+**Where the model and a mark disagree.** An earlier model, fitted on
+144 videos, placed 22 videos more than 30 seconds from their mark. A
+person looked at the frames of ten of them. The model was right in
+eight: five marks were in the middle of the story, two were 48 and 130
+seconds into the titles, and one was after a scene that follows the
+titles. The mark was right in one, a film with drawn titles that the
+model placed 52 seconds late. One could not be called, an episode with
+a feature about its making between its last scene and its credits.
+
+**What the model still misses.** Three of the 76 are more than 30
+seconds late. Two have designed titles over a drawn or a moving
+picture, and nobody has looked at the frames of the third. The
+confidence separates good placements from bad ones: the placements with a confidence of 0.8 or more were
+within 10 seconds of their mark for 78% of 219 videos, and those under
+0.5 for none of 9.
+
+**Three corrections to the fit** came from the checked starts:
+
+- The fit left out the 5 seconds each side of every mark, because a
+  mark is seldom exact. Without those seconds the model was a median 3
+  seconds late, and it placed 46% of the checked videos within 3
+  seconds. With them it placed 63%.
+- `train` measures the lag that remains, the median of placement less
+  mark, and `place` takes it from each start. On this library it is
+  0.0 seconds.
+- The names of the whole crew, which
+  [the section above](#the-names-of-the-whole-crew) measures.
+
 ## What is built
 
-The crate `library-operator/titles`, with a CI job, `rust-titles`:
+The `credits` fact writes `.liken/billing.yaml`, and
+[`local/titles`](../local/titles) runs the tool on a workstation
+against a copy of a catalog. The rest is the crate
+`library-operator/titles`, with a CI job, `rust-titles`:
 
 - `titles read`, `titles train`, and `titles place`.
 - The text detector's box finder and the reader's text decoder, which
@@ -256,6 +333,11 @@ The crate `library-operator/titles`, with a CI job, `rust-titles`:
    `end-titles` in `library-operator`, `media-operator`, the media
    browser, the stored ledgers, and the manuals.
 6. **The manual.** The enrichment guide's section for the fact.
+7. **Billing from the other sources.** The IMDb datasets and TVmaze
+   still pass only the cast, the directors, and the writers. A title
+   that TMDb credited before this plan has no `billing.yaml` until the
+   `credits` fact asks again, which a `spec.refresh` of `credits`
+   starts.
 
 ## Open questions
 
