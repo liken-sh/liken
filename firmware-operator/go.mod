@@ -1,6 +1,6 @@
 module github.com/liken-sh/firmware-operator
 
-go 1.27.3
+go 1.27.4
 
 replace github.com/liken-sh/liken/kubernetes => ../kubernetes
 

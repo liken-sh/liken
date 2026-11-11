@@ -1,8 +1,9 @@
 # The bare drivers, built against the libindi of the indi images. The
 # build installs from the same dated snapshots as indi/Dockerfile, with
-# the same keys and the same CA bundle, so the captures describe the
-# libindi that the images ship. VERSION is the date in
-# indi/package.toml, and the make target passes it.
+# the same keys, the same CA bundle, and the same InRelease digests, so
+# the captures describe the libindi that the images ship. snapshot.sh
+# reads the digests from snapshot.sha256 beside it. VERSION is the date
+# in indi/package.toml, and the make target passes it.
 #
 # The image runs on a workstation only, to capture the drivers, and is
 # never published. It keeps the compiler and the headers, because it
@@ -11,7 +12,7 @@ FROM ubuntu
 ARG VERSION
 COPY --from=trust / /
 COPY --from=indi mutlaqja.asc pch.asc /etc/apt/trusted.gpg.d/
-COPY --from=indi snapshot.sh /snapshot.sh
+COPY --from=indi snapshot.sh snapshot.sha256 /
 # libindi-dev does not depend on the headers that its own headers
 # include: libastro.h includes libnova, and indiccdchip.h includes
 # fitsio.h. /etc/indi-versions records the package the drivers link,

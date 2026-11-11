@@ -1,4 +1,4 @@
-<setSwitchVector device="Dust Cover Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-11-01T15:51:34">
+<setSwitchVector device="Dust Cover Simulator" name="CONNECTION" state="Idle" timeout="60" timestamp="2026-11-11T21:18:51">
     <oneSwitch name="CONNECT">
 Off
     </oneSwitch>
@@ -6,5 +6,5 @@ Off
 On
     </oneSwitch>
 </setSwitchVector>
-<delProperty device="Dust Cover Simulator" name="OPERATION_DURATION" timestamp="2026-11-01T15:51:34"/>
-<delProperty device="Dust Cover Simulator" name="CAP_PARK" timestamp="2026-11-01T15:51:34"/>
+<delProperty device="Dust Cover Simulator" name="OPERATION_DURATION" timestamp="2026-11-11T21:18:51"/>
+<delProperty device="Dust Cover Simulator" name="CAP_PARK" timestamp="2026-11-11T21:18:51"/>

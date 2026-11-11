@@ -7,7 +7,7 @@
 # none of the page, so no line here changes the schema. A person
 # decides what each line means.
 #
-# indilib/docs commit: d34c43f4eb6e93a48b8b423dd8c4a496dceb3ce7
+# indilib/docs commit: 872b5f5606855af1e26a43bf40ec59ed5d13fc7f
 CCD_ABORT_EXPOSURE: the standard properties page gives the type "Number", and the capture of ccd gives "Switch"
 CCD_FILE_PATH: the standard properties page lists it for ccd, and no source defines it
 CCD_ROTATION: the standard properties page lists it for ccd, and no source defines it

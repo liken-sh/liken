@@ -1,4 +1,4 @@
-<setSwitchVector device="CCD Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-11-01T15:49:41">
+<setSwitchVector device="CCD Simulator" name="CONNECTION" state="Ok" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneSwitch name="CONNECT">
 On
     </oneSwitch>
@@ -6,17 +6,17 @@ On
 Off
     </oneSwitch>
 </setSwitchVector>
-<defNumberVector device="CCD Simulator" name="CCD_EXPOSURE" label="Expose" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="CCD_EXPOSURE" label="Expose" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="CCD_EXPOSURE_VALUE" label="Duration (s)" format="%5.2f" min="0.010000000000000000208" max="3600" step="1">
 1
     </defNumber>
 </defNumberVector>
-<defSwitchVector device="CCD Simulator" name="CCD_ABORT_EXPOSURE" label="Abort" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_ABORT_EXPOSURE" label="Abort" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="ABORT" label="Abort">
 Off
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="CCD Simulator" name="CCD_FRAME" label="Frame" group="Image Settings" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="CCD_FRAME" label="Frame" group="Image Settings" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="X" label="Left " format="%4.0f" min="0" max="0" step="0">
 0
     </defNumber>
@@ -30,12 +30,12 @@ Off
 0
     </defNumber>
 </defNumberVector>
-<defSwitchVector device="CCD Simulator" name="CCD_FRAME_RESET" label="Frame Values" group="Image Settings" state="Idle" perm="wo" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_FRAME_RESET" label="Frame Values" group="Image Settings" state="Idle" perm="wo" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:16:54">
     <defSwitch name="RESET" label="Reset">
 Off
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="CCD Simulator" name="CCD_BINNING" label="Binning" group="Image Settings" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="CCD_BINNING" label="Binning" group="Image Settings" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="HOR_BIN" label="X" format="%2.0f" min="1" max="4" step="1">
 1
     </defNumber>
@@ -43,22 +43,22 @@ Off
 1
     </defNumber>
 </defNumberVector>
-<defTextVector device="CCD Simulator" name="FITS_HEADER" label="FITS Header" group="General Info" state="Idle" perm="wo" timeout="60" timestamp="2026-11-01T15:49:41">
+<defTextVector device="CCD Simulator" name="FITS_HEADER" label="FITS Header" group="General Info" state="Idle" perm="wo" timeout="60" timestamp="2026-11-11T21:16:54">
     <defText name="KEYWORD_NAME" label="Name"/>
     <defText name="KEYWORD_VALUE" label="Value"/>
     <defText name="KEYWORD_COMMENT" label="Comment"/>
 </defTextVector>
-<defNumberVector device="CCD Simulator" name="GUIDER_EXPOSURE" label="Guide Head" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="GUIDER_EXPOSURE" label="Guide Head" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="GUIDER_EXPOSURE_VALUE" label="Duration (s)" format="%5.2f" min="0.010000000000000000208" max="3600" step="1">
 1
     </defNumber>
 </defNumberVector>
-<defSwitchVector device="CCD Simulator" name="GUIDER_ABORT_EXPOSURE" label="Abort" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="GUIDER_ABORT_EXPOSURE" label="Abort" group="Main Control" state="Idle" perm="rw" rule="AtMostOne" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="ABORT" label="Abort">
 Off
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="CCD Simulator" name="GUIDER_FRAME" label="Frame" group="Guider Head" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="GUIDER_FRAME" label="Frame" group="Guider Head" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="X" label="Left " format="%4.0f" min="0" max="0" step="0">
 0
     </defNumber>
@@ -72,12 +72,12 @@ Off
 0
     </defNumber>
 </defNumberVector>
-<defNumberVector device="CCD Simulator" name="CCD_TEMPERATURE" label="Temperature" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="CCD_TEMPERATURE" label="Temperature" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="CCD_TEMPERATURE_VALUE" label="Temperature (C)" format="%5.2f" min="-15" max="25" step="0">
 0
     </defNumber>
 </defNumberVector>
-<defNumberVector device="CCD Simulator" name="CCD_TEMP_RAMP" label="Temp. Ramp" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="CCD_TEMP_RAMP" label="Temp. Ramp" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="RAMP_SLOPE" label="Max. dT (C/min)" format="%.f" min="0" max="30" step="1">
 0
     </defNumber>
@@ -85,7 +85,7 @@ Off
 0.2000000000000000111
     </defNumber>
 </defNumberVector>
-<defSwitchVector device="CCD Simulator" name="CCD_CAPTURE_FORMAT" label="Format" group="Image Settings" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_CAPTURE_FORMAT" label="Format" group="Image Settings" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="INDI_MONO" label="Mono">
 On
     </defSwitch>
@@ -93,7 +93,7 @@ On
 Off
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="CCD Simulator" name="CCD_TRANSFER_FORMAT" label="Encode" group="Image Settings" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_TRANSFER_FORMAT" label="Encode" group="Image Settings" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="FORMAT_FITS" label="FITS">
 On
     </defSwitch>
@@ -104,7 +104,7 @@ Off
 Off
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="CCD Simulator" name="CCD_INFO" label="CCD Information" group="Image Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="CCD_INFO" label="CCD Information" group="Image Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="CCD_MAX_X" label="Max. Width" format="%.f" min="1" max="16000" step="0">
 0
     </defNumber>
@@ -124,7 +124,7 @@ Off
 0
     </defNumber>
 </defNumberVector>
-<defNumberVector device="CCD Simulator" name="GUIDER_INFO" label="Info" group="Image Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="GUIDER_INFO" label="Info" group="Image Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="CCD_MAX_X" label="Max. Width" format="%4.0f" min="1" max="16000" step="0">
 0
     </defNumber>
@@ -144,7 +144,7 @@ Off
 0
     </defNumber>
 </defNumberVector>
-<defNumberVector device="CCD Simulator" name="GUIDER_BINNING" label="Binning" group="Guider Head" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="GUIDER_BINNING" label="Binning" group="Guider Head" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="HOR_BIN" label="X" format="%2.0f" min="1" max="4" step="1">
 1
     </defNumber>
@@ -152,7 +152,7 @@ Off
 1
     </defNumber>
 </defNumberVector>
-<defSwitchVector device="CCD Simulator" name="CCD_COMPRESSION" label="Compression" group="Image Settings" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_COMPRESSION" label="Compression" group="Image Settings" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="INDI_ENABLED" label="Enabled">
 Off
     </defSwitch>
@@ -160,10 +160,10 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defBLOBVector device="CCD Simulator" name="CCD1" label="Image Data" group="Image Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-01T15:49:41">
+<defBLOBVector device="CCD Simulator" name="CCD1" label="Image Data" group="Image Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-11T21:16:54">
     <defBLOB name="CCD1" label="Image"/>
 </defBLOBVector>
-<defSwitchVector device="CCD Simulator" name="GUIDER_COMPRESSION" label="Compression" group="Guider Head" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="GUIDER_COMPRESSION" label="Compression" group="Guider Head" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="INDI_ENABLED" label="Enabled">
 Off
     </defSwitch>
@@ -171,10 +171,10 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defBLOBVector device="CCD Simulator" name="CCD2" label="Image Data" group="Image Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-01T15:49:41">
+<defBLOBVector device="CCD Simulator" name="CCD2" label="Image Data" group="Image Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-11T21:16:54">
     <defBLOB name="CCD2" label="Guider Image"/>
 </defBLOBVector>
-<defNumberVector device="CCD Simulator" name="TELESCOPE_TIMED_GUIDE_NS" label="Guide N/S" group="Guider Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="TELESCOPE_TIMED_GUIDE_NS" label="Guide N/S" group="Guider Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="TIMED_GUIDE_N" label="North (ms)" format="%.f" min="0" max="60000" step="100">
 0
     </defNumber>
@@ -182,7 +182,7 @@ On
 0
     </defNumber>
 </defNumberVector>
-<defNumberVector device="CCD Simulator" name="TELESCOPE_TIMED_GUIDE_WE" label="Guide E/W" group="Guider Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="TELESCOPE_TIMED_GUIDE_WE" label="Guide E/W" group="Guider Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="TIMED_GUIDE_W" label="West (ms)" format="%.f" min="0" max="60000" step="100">
 0
     </defNumber>
@@ -190,7 +190,7 @@ On
 0
     </defNumber>
 </defNumberVector>
-<defSwitchVector device="CCD Simulator" name="CCD_FRAME_TYPE" label="Type" group="Image Settings" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_FRAME_TYPE" label="Type" group="Image Settings" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="FRAME_LIGHT" label="Light">
 On
     </defSwitch>
@@ -204,7 +204,7 @@ Off
 Off
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="CCD Simulator" name="GUIDER_FRAME_TYPE" label="Type" group="Guider Head" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="GUIDER_FRAME_TYPE" label="Type" group="Guider Head" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="FRAME_LIGHT" label="Light">
 On
     </defSwitch>
@@ -218,7 +218,7 @@ Off
 Off
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="CCD Simulator" name="SCOPE_INFO" label="Scope" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="SCOPE_INFO" label="Scope" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="FOCAL_LENGTH" label="Focal Length (mm)" format="%g" min="0" max="10000" step="1">
 0
     </defNumber>
@@ -226,7 +226,7 @@ Off
 0
     </defNumber>
 </defNumberVector>
-<defSwitchVector device="CCD Simulator" name="WCS_CONTROL" label="WCS" group="WCS" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="WCS_CONTROL" label="WCS" group="WCS" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:16:54">
     <defSwitch name="WCS_ENABLE" label="Enable">
 Off
     </defSwitch>
@@ -234,7 +234,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="CCD Simulator" name="UPLOAD_MODE" label="Upload" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="UPLOAD_MODE" label="Upload" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:16:54">
     <defSwitch name="UPLOAD_CLIENT" label="Client">
 On
     </defSwitch>
@@ -245,7 +245,7 @@ Off
 Off
     </defSwitch>
 </defSwitchVector>
-<defTextVector device="CCD Simulator" name="UPLOAD_SETTINGS" label="Upload Settings" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defTextVector device="CCD Simulator" name="UPLOAD_SETTINGS" label="Upload Settings" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defText name="UPLOAD_DIR" label="Dir">
 /tmp
     </defText>
@@ -253,7 +253,7 @@ Off
 IMAGE_XXX
     </defText>
 </defTextVector>
-<defSwitchVector device="CCD Simulator" name="CCD_FAST_TOGGLE" label="Fast Exposure" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_FAST_TOGGLE" label="Fast Exposure" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:16:54">
     <defSwitch name="INDI_ENABLED" label="Enabled">
 Off
     </defSwitch>
@@ -261,12 +261,12 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="CCD Simulator" name="CCD_FAST_COUNT" label="Fast Count" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="CCD_FAST_COUNT" label="Fast Count" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-11-11T21:16:54">
     <defNumber name="FRAMES" label="Frames" format="%.f" min="0" max="100000" step="1">
 1
     </defNumber>
 </defNumberVector>
-<defSwitchVector device="CCD Simulator" name="CCD_VIDEO_STREAM" label="Video Stream" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_VIDEO_STREAM" label="Video Stream" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:16:54">
     <defSwitch name="STREAM_ON" label="Stream On">
 Off
     </defSwitch>
@@ -274,7 +274,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="CCD Simulator" name="STREAM_FULL_DEPTH" label="Stream Depth" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="STREAM_FULL_DEPTH" label="Stream Depth" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:16:54">
     <defSwitch name="FULL_DEPTH_8BIT" label="8-bit">
 On
     </defSwitch>
@@ -282,12 +282,12 @@ On
 Off
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="CCD Simulator" name="STREAM_DELAY" label="Video Stream Delay" group="Streaming" state="Idle" perm="ro" timeout="0" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="STREAM_DELAY" label="Video Stream Delay" group="Streaming" state="Idle" perm="ro" timeout="0" timestamp="2026-11-11T21:16:54">
     <defNumber name="STREAM_DELAY_TIME" label="Delay (s)" format="%.3f" min="0" max="60" step="0.0010000000000000000208">
 0
     </defNumber>
 </defNumberVector>
-<defNumberVector device="CCD Simulator" name="STREAMING_EXPOSURE" label="Expose" group="Streaming" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="STREAMING_EXPOSURE" label="Expose" group="Streaming" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="STREAMING_EXPOSURE_VALUE" label="Duration (s)" format="%.6f" min="9.9999999999999995475e-07" max="60" step="0.10000000000000000555">
 0.10000000000000000555
     </defNumber>
@@ -295,7 +295,7 @@ Off
 1
     </defNumber>
 </defNumberVector>
-<defNumberVector device="CCD Simulator" name="FPS" label="FPS" group="Streaming" state="Idle" perm="ro" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="FPS" label="FPS" group="Streaming" state="Idle" perm="ro" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="EST_FPS" label="Instant." format="%.2f" min="0" max="999" step="0">
 30
     </defNumber>
@@ -303,7 +303,7 @@ Off
 30
     </defNumber>
 </defNumberVector>
-<defSwitchVector device="CCD Simulator" name="RECORD_STREAM" label="Video Record" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="RECORD_STREAM" label="Video Record" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:16:54">
     <defSwitch name="RECORD_ON" label="Record On">
 Off
     </defSwitch>
@@ -317,7 +317,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defTextVector device="CCD Simulator" name="RECORD_FILE" label="Record File" group="Streaming" state="Idle" perm="rw" timeout="0" timestamp="2026-11-01T15:49:41">
+<defTextVector device="CCD Simulator" name="RECORD_FILE" label="Record File" group="Streaming" state="Idle" perm="rw" timeout="0" timestamp="2026-11-11T21:16:54">
     <defText name="RECORD_FILE_DIR" label="Dir.">
 /tmp/Videos/indi__D_
     </defText>
@@ -325,7 +325,7 @@ On
 indi_record__T_
     </defText>
 </defTextVector>
-<defNumberVector device="CCD Simulator" name="RECORD_OPTIONS" label="Record Options" group="Streaming" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="RECORD_OPTIONS" label="Record Options" group="Streaming" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="RECORD_DURATION" label="Duration (sec)" format="%.3f" min="0.0010000000000000000208" max="999999" step="0">
 1
     </defNumber>
@@ -333,7 +333,7 @@ indi_record__T_
 30
     </defNumber>
 </defNumberVector>
-<defNumberVector device="CCD Simulator" name="CCD_STREAM_FRAME" label="Frame" group="Streaming" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="CCD_STREAM_FRAME" label="Frame" group="Streaming" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="X" label="Left" format="%.f" min="0" max="0" step="0">
 0
     </defNumber>
@@ -347,7 +347,7 @@ indi_record__T_
 0
     </defNumber>
 </defNumberVector>
-<defSwitchVector device="CCD Simulator" name="CCD_STREAM_ENCODER" label="Encoder" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_STREAM_ENCODER" label="Encoder" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:16:54">
     <defSwitch name="RAW" label="RAW">
 On
     </defSwitch>
@@ -355,12 +355,12 @@ On
 Off
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="CCD Simulator" name="CCD_STREAM_RECORDER" label="Recorder" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_STREAM_RECORDER" label="Recorder" group="Streaming" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:16:54">
     <defSwitch name="SER" label="SER">
 On
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="CCD Simulator" name="LIMITS" label="Limits" group="Streaming" state="Idle" perm="rw" timeout="0" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="LIMITS" label="Limits" group="Streaming" state="Idle" perm="rw" timeout="0" timestamp="2026-11-11T21:16:54">
     <defNumber name="LIMITS_BUFFER_MAX" label="Maximum Buffer Size (MB)" format="%.0f" min="1" max="65536" step="1">
 512
     </defNumber>
@@ -368,7 +368,7 @@ On
 10
     </defNumber>
 </defNumberVector>
-<defSwitchVector device="CCD Simulator" name="DSP_ACTIVATE_CONVOLUTION" label="Convolution" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="DSP_ACTIVATE_CONVOLUTION" label="Convolution" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="DSP_ACTIVATE_ON" label="On">
 Off
     </defSwitch>
@@ -376,7 +376,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="CCD Simulator" name="DSP_ACTIVATE_DFT" label="DFT" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="DSP_ACTIVATE_DFT" label="DFT" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="DSP_ACTIVATE_ON" label="On">
 Off
     </defSwitch>
@@ -384,7 +384,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="CCD Simulator" name="DSP_ACTIVATE_IDFT" label="IDFT" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="DSP_ACTIVATE_IDFT" label="IDFT" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="DSP_ACTIVATE_ON" label="On">
 Off
     </defSwitch>
@@ -392,7 +392,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="CCD Simulator" name="DSP_ACTIVATE_SPECTRUM" label="Spectrum" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="DSP_ACTIVATE_SPECTRUM" label="Spectrum" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="DSP_ACTIVATE_ON" label="On">
 Off
     </defSwitch>
@@ -400,7 +400,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="CCD Simulator" name="DSP_ACTIVATE_HISTOGRAM" label="Histogram" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="DSP_ACTIVATE_HISTOGRAM" label="Histogram" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="DSP_ACTIVATE_ON" label="On">
 Off
     </defSwitch>
@@ -408,7 +408,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="CCD Simulator" name="DSP_ACTIVATE_WAVELETS" label="Wavelets" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="DSP_ACTIVATE_WAVELETS" label="Wavelets" group="Signal Processing" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="DSP_ACTIVATE_ON" label="On">
 Off
     </defSwitch>
@@ -416,7 +416,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="CCD Simulator" name="CCD_COOLER" label="Cooler" group="Main Control" state="Idle" perm="wo" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_COOLER" label="Cooler" group="Main Control" state="Idle" perm="wo" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:16:54">
     <defSwitch name="COOLER_ON" label="ON">
 Off
     </defSwitch>
@@ -424,22 +424,22 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="CCD Simulator" name="CCD_GAIN" label="Gain" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="CCD_GAIN" label="Gain" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="GAIN" label="value" format="%.f" min="0" max="300" step="10">
 90
     </defNumber>
 </defNumberVector>
-<defNumberVector device="CCD Simulator" name="CCD_OFFSET" label="Offset" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="CCD_OFFSET" label="Offset" group="Main Control" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="OFFSET" label="value" format="%.f" min="0" max="6000" step="500">
 0
     </defNumber>
 </defNumberVector>
-<defTextVector device="CCD Simulator" name="CCD_DIRECTORY_LOCATION" label="Directory" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defTextVector device="CCD Simulator" name="CCD_DIRECTORY_LOCATION" label="Directory" group="Simulator Config" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defText name="LOCATION" label="Location">
 /tmp
     </defText>
 </defTextVector>
-<defSwitchVector device="CCD Simulator" name="CCD_DIRECTORY_TOGGLE" label="Use Dir." group="Simulator Config" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_DIRECTORY_TOGGLE" label="Use Dir." group="Simulator Config" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="INDI_ENABLED" label="Enabled">
 Off
     </defSwitch>
@@ -447,7 +447,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="CCD Simulator" name="CCD_RESOLUTION" label="Resolution" group="Simulator Config" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:49:41">
+<defSwitchVector device="CCD Simulator" name="CCD_RESOLUTION" label="Resolution" group="Simulator Config" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:16:54">
     <defSwitch name="1280 x 1024" label="1280 x 1024">
 On
     </defSwitch>
@@ -458,7 +458,7 @@ Off
 Off
     </defSwitch>
 </defSwitchVector>
-<setNumberVector device="CCD Simulator" name="CCD_INFO" state="Idle" timeout="60" timestamp="2026-11-01T15:49:41">
+<setNumberVector device="CCD Simulator" name="CCD_INFO" state="Idle" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneNumber name="CCD_MAX_X">
 1280
     </oneNumber>
@@ -478,7 +478,7 @@ Off
 0
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="CCD Simulator" name="CCD_FRAME" state="Idle" timeout="60" timestamp="2026-11-01T15:49:41">
+<setNumberVector device="CCD Simulator" name="CCD_FRAME" state="Idle" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneNumber name="X" min="0" max="1279" step="0">
 0
     </oneNumber>
@@ -492,7 +492,7 @@ Off
 0
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="CCD Simulator" name="CCD_FRAME" state="Idle" timeout="60" timestamp="2026-11-01T15:49:41">
+<setNumberVector device="CCD Simulator" name="CCD_FRAME" state="Idle" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneNumber name="X">
 0
     </oneNumber>
@@ -506,7 +506,7 @@ Off
 1024
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="CCD Simulator" name="CCD_BINNING" state="Idle" timeout="60" timestamp="2026-11-01T15:49:41">
+<setNumberVector device="CCD Simulator" name="CCD_BINNING" state="Idle" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneNumber name="HOR_BIN">
 1
     </oneNumber>
@@ -514,7 +514,7 @@ Off
 1
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="CCD Simulator" name="CCD_INFO" state="Idle" timeout="60" timestamp="2026-11-01T15:49:41">
+<setNumberVector device="CCD Simulator" name="CCD_INFO" state="Idle" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneNumber name="CCD_MAX_X">
 1280
     </oneNumber>
@@ -534,7 +534,7 @@ Off
 0
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="CCD Simulator" name="CCD_INFO" state="Idle" timeout="60" timestamp="2026-11-01T15:49:41">
+<setNumberVector device="CCD Simulator" name="CCD_INFO" state="Idle" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneNumber name="CCD_MAX_X">
 1280
     </oneNumber>
@@ -554,7 +554,7 @@ Off
 16
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="CCD Simulator" name="CCD_STREAM_FRAME" state="Ok" timeout="60" timestamp="2026-11-01T15:49:41">
+<setNumberVector device="CCD Simulator" name="CCD_STREAM_FRAME" state="Ok" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneNumber name="X" min="0" max="1279" step="0">
 0
     </oneNumber>
@@ -568,7 +568,7 @@ Off
 1024
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="CCD Simulator" name="GUIDER_INFO" state="Idle" timeout="60" timestamp="2026-11-01T15:49:41">
+<setNumberVector device="CCD Simulator" name="GUIDER_INFO" state="Idle" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneNumber name="CCD_MAX_X">
 500
     </oneNumber>
@@ -588,7 +588,7 @@ Off
 0
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="CCD Simulator" name="GUIDER_FRAME" state="Idle" timeout="60" timestamp="2026-11-01T15:49:41">
+<setNumberVector device="CCD Simulator" name="GUIDER_FRAME" state="Idle" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneNumber name="X" min="0" max="499" step="0">
 0
     </oneNumber>
@@ -602,7 +602,7 @@ Off
 0
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="CCD Simulator" name="GUIDER_FRAME" state="Idle" timeout="60" timestamp="2026-11-01T15:49:41">
+<setNumberVector device="CCD Simulator" name="GUIDER_FRAME" state="Idle" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneNumber name="X">
 0
     </oneNumber>
@@ -616,7 +616,7 @@ Off
 290
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="CCD Simulator" name="GUIDER_INFO" state="Idle" timeout="60" timestamp="2026-11-01T15:49:41">
+<setNumberVector device="CCD Simulator" name="GUIDER_INFO" state="Idle" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneNumber name="CCD_MAX_X">
 500
     </oneNumber>
@@ -636,7 +636,7 @@ Off
 0
     </oneNumber>
 </setNumberVector>
-<setNumberVector device="CCD Simulator" name="GUIDER_INFO" state="Idle" timeout="60" timestamp="2026-11-01T15:49:41">
+<setNumberVector device="CCD Simulator" name="GUIDER_INFO" state="Idle" timeout="60" timestamp="2026-11-11T21:16:54">
     <oneNumber name="CCD_MAX_X">
 500
     </oneNumber>
@@ -656,12 +656,12 @@ Off
 16
     </oneNumber>
 </setNumberVector>
-<defNumberVector device="CCD Simulator" name="FILTER_SLOT" label="Filter Slot" group="Filter Wheel" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:49:41">
+<defNumberVector device="CCD Simulator" name="FILTER_SLOT" label="Filter Slot" group="Filter Wheel" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:16:54">
     <defNumber name="FILTER_SLOT_VALUE" label="Filter" format="%.f" min="1" max="8" step="1">
 1
     </defNumber>
 </defNumberVector>
-<defTextVector device="CCD Simulator" name="FILTER_NAME" label="Filter" group="Filter Wheel" state="Idle" perm="rw" timeout="0" timestamp="2026-11-01T15:49:41">
+<defTextVector device="CCD Simulator" name="FILTER_NAME" label="Filter" group="Filter Wheel" state="Idle" perm="rw" timeout="0" timestamp="2026-11-11T21:16:54">
     <defText name="FILTER_SLOT_NAME_1" label="Filter#1">
 Red
     </defText>

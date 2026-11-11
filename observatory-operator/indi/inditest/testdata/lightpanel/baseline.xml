@@ -1,4 +1,4 @@
-<defSwitchVector device="Light Panel Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:51:40">
+<defSwitchVector device="Light Panel Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:18:57">
     <defSwitch name="CONNECT" label="Connect">
 Off
     </defSwitch>
@@ -6,7 +6,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defTextVector device="Light Panel Simulator" name="DRIVER_INFO" label="Driver Info" group="General Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-01T15:51:40">
+<defTextVector device="Light Panel Simulator" name="DRIVER_INFO" label="Driver Info" group="General Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-11T21:18:57">
     <defText name="DRIVER_NAME" label="Name">
 Light Panel Simulator
     </defText>
@@ -20,7 +20,7 @@ indi_simulator_lightpanel
 33792
     </defText>
 </defTextVector>
-<defSwitchVector device="Light Panel Simulator" name="DEBUG" label="Debug" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:51:40">
+<defSwitchVector device="Light Panel Simulator" name="DEBUG" label="Debug" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:18:57">
     <defSwitch name="ENABLE" label="Enable">
 Off
     </defSwitch>
@@ -28,7 +28,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="Light Panel Simulator" name="SIMULATION" label="Simulation" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:51:40">
+<defSwitchVector device="Light Panel Simulator" name="SIMULATION" label="Simulation" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:18:57">
     <defSwitch name="ENABLE" label="Enable">
 Off
     </defSwitch>
@@ -36,7 +36,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="Light Panel Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-11-01T15:51:40">
+<defSwitchVector device="Light Panel Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-11-11T21:18:57">
     <defSwitch name="CONFIG_LOAD" label="Load">
 Off
     </defSwitch>
@@ -50,17 +50,17 @@ Off
 Off
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="Light Panel Simulator" name="POLLING_PERIOD" label="Polling" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-11-01T15:51:40">
+<defNumberVector device="Light Panel Simulator" name="POLLING_PERIOD" label="Polling" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-11-11T21:18:57">
     <defNumber name="PERIOD_MS" label="Period (ms)" format="%.f" min="10" max="600000" step="1000">
 1000
     </defNumber>
 </defNumberVector>
-<defTextVector device="Light Panel Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:51:40">
+<defTextVector device="Light Panel Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:18:57">
     <defText name="ACTIVE_FILTER" label="Filter">
 Filter Simulator
     </defText>
 </defTextVector>
-<defTextVector device="Light Panel Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-11-01T15:51:40">
+<defTextVector device="Light Panel Simulator" name="ACTIVE_DEVICES" label="Snoop devices" group="Options" state="Idle" perm="rw" timeout="60" timestamp="2026-11-11T21:18:57">
     <defText name="ACTIVE_FILTER" label="Filter">
 Filter Simulator
     </defText>

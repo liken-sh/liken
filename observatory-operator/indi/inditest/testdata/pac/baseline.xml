@@ -1,4 +1,4 @@
-<defSwitchVector device="Alignment Correction Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-01T15:52:05">
+<defSwitchVector device="Alignment Correction Simulator" name="CONNECTION" label="Connection" group="Main Control" state="Idle" perm="rw" rule="OneOfMany" timeout="60" timestamp="2026-11-11T21:19:22">
     <defSwitch name="CONNECT" label="Connect">
 Off
     </defSwitch>
@@ -6,7 +6,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defTextVector device="Alignment Correction Simulator" name="DRIVER_INFO" label="Driver Info" group="General Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-01T15:52:05">
+<defTextVector device="Alignment Correction Simulator" name="DRIVER_INFO" label="Driver Info" group="General Info" state="Idle" perm="ro" timeout="60" timestamp="2026-11-11T21:19:22">
     <defText name="DRIVER_NAME" label="Name">
 Alignment Correction Simulator
     </defText>
@@ -20,7 +20,7 @@ indi_simulator_pac
 1081344
     </defText>
 </defTextVector>
-<defSwitchVector device="Alignment Correction Simulator" name="DEBUG" label="Debug" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:52:05">
+<defSwitchVector device="Alignment Correction Simulator" name="DEBUG" label="Debug" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:19:22">
     <defSwitch name="ENABLE" label="Enable">
 Off
     </defSwitch>
@@ -28,7 +28,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="Alignment Correction Simulator" name="SIMULATION" label="Simulation" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-01T15:52:05">
+<defSwitchVector device="Alignment Correction Simulator" name="SIMULATION" label="Simulation" group="Options" state="Idle" perm="rw" rule="OneOfMany" timeout="0" timestamp="2026-11-11T21:19:22">
     <defSwitch name="ENABLE" label="Enable">
 Off
     </defSwitch>
@@ -36,7 +36,7 @@ Off
 On
     </defSwitch>
 </defSwitchVector>
-<defSwitchVector device="Alignment Correction Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-11-01T15:52:05">
+<defSwitchVector device="Alignment Correction Simulator" name="CONFIG_PROCESS" label="Configuration" group="Options" state="Idle" perm="rw" rule="AtMostOne" timeout="0" timestamp="2026-11-11T21:19:22">
     <defSwitch name="CONFIG_LOAD" label="Load">
 Off
     </defSwitch>
@@ -50,7 +50,7 @@ Off
 Off
     </defSwitch>
 </defSwitchVector>
-<defNumberVector device="Alignment Correction Simulator" name="POLLING_PERIOD" label="Polling" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-11-01T15:52:05">
+<defNumberVector device="Alignment Correction Simulator" name="POLLING_PERIOD" label="Polling" group="Options" state="Idle" perm="rw" timeout="0" timestamp="2026-11-11T21:19:22">
     <defNumber name="PERIOD_MS" label="Period (ms)" format="%.f" min="10" max="600000" step="1000">
 1000
     </defNumber>

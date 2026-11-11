@@ -12,7 +12,7 @@
 // required.
 module github.com/liken-sh/liken/liken
 
-go 1.27.3
+go 1.27.4
 
 require (
 	// verify's test reads the trusted root's pin.toml with it, the
