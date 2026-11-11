@@ -6,7 +6,7 @@
 // answer depends more on what follows the second than on the second
 // itself: a credit roll is text on a dark frame that goes on to the end.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Deserialize;
 
@@ -179,33 +179,63 @@ struct Credit {
     name: String,
 }
 
-// The names of the people the video credits, from the credits fact's
-// record. A film's record is in the film's folder. An episode's is in the
+#[derive(Deserialize)]
+struct BillingFile {
+    #[serde(default)]
+    billing: Vec<Credit>,
+}
+
+// The names of the people the video credits, from two records of the
+// credits fact. `credits.yaml` holds the people a screen shows: the billed
+// cast, the directors, and the writers. `billing.yaml` holds every person
+// the provider credited, with the producers, the composer, the
+// cinematographer, and the rest of the crew, who are the names on most
+// cards of a title sequence. The names of both count.
+//
+// A film's records are in the film's folder. An episode's are in the
 // series' folder, one above the season's, because the credits fact
-// credits a series and not each episode. A video with no record has no
-// names, and the model then works from the job words and the picture.
-pub fn people(video: &Path, credits: Option<&Path>) -> Result<Vec<String>, Error> {
-    let found: Option<PathBuf> = match credits {
+// credits a series and not each episode. With `records`, a billing record
+// under that directory counts too, for a library that only reads. A video
+// with no record has no names, and the model then works from the job
+// words and the picture.
+pub fn people(
+    video: &Path,
+    credits: Option<&Path>,
+    records: Option<&Path>,
+) -> Result<Vec<String>, Error> {
+    let folders: Vec<&Path> = video.ancestors().skip(1).take(2).collect();
+    let read =
+        |file: &Path| std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()));
+    let mut names = Vec::new();
+    let credits = match credits {
         Some(file) => Some(file.to_path_buf()),
-        None => video
-            .ancestors()
-            .skip(1)
-            .take(2)
+        None => folders
+            .iter()
             .map(|folder| folder.join(".liken").join("credits.yaml"))
             .find(|file| file.exists()),
     };
-    let Some(file) = found else {
-        return Ok(Vec::new());
-    };
-    let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-    let parsed: CreditsFile = serde_yaml_ng::from_str(&text)?;
-    Ok(words::names(
-        &parsed
-            .credits
+    if let Some(file) = credits {
+        let parsed: CreditsFile = serde_yaml_ng::from_str(&read(&file)?)?;
+        names.extend(parsed.credits.into_iter().map(|credit| credit.name));
+    }
+    for folder in &folders {
+        let beside = folder.join(".liken").join("billing.yaml");
+        let kept = records.map(|records| {
+            records
+                .join(folder.strip_prefix("/").unwrap_or(folder))
+                .join(".liken")
+                .join("billing.yaml")
+        });
+        for file in [Some(beside), kept]
             .into_iter()
-            .map(|c| c.name)
-            .collect::<Vec<_>>(),
-    ))
+            .flatten()
+            .filter(|file| file.exists())
+        {
+            let parsed: BillingFile = serde_yaml_ng::from_str(&read(&file)?)?;
+            names.extend(parsed.billing.into_iter().map(|credit| credit.name));
+        }
+    }
+    Ok(words::names(&names))
 }
 
 #[cfg(test)]
@@ -313,9 +343,44 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            people(&season.join("e1.mkv"), None).unwrap(),
+            people(&season.join("e1.mkv"), None, None).unwrap(),
             vec!["eva green"]
         );
-        assert!(people(&folder.join("film.mkv"), None).unwrap().is_empty());
+        assert!(
+            people(&folder.join("film.mkv"), None, None)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn people_adds_the_billing_beside_the_video_and_under_the_records() {
+        let folder = scratch("billing");
+        let film = folder.join("Film");
+        let records = folder.join("records");
+        let kept = records.join(film.strip_prefix("/").unwrap()).join(".liken");
+        std::fs::create_dir_all(film.join(".liken")).unwrap();
+        std::fs::create_dir_all(&kept).unwrap();
+        std::fs::write(
+            film.join(".liken").join("credits.yaml"),
+            "credits:\n  - name: Eva Green\n",
+        )
+        .unwrap();
+        let beside = "billing:\n  - name: Eva Green\n    job: actress\n  - name: Steven Price\n    job: composer\n";
+        std::fs::write(film.join(".liken").join("billing.yaml"), beside).unwrap();
+        std::fs::write(
+            kept.join("billing.yaml"),
+            "billing:\n  - name: Steve Arnold\n",
+        )
+        .unwrap();
+        let video = film.join("film.mkv");
+        assert_eq!(
+            people(&video, None, None).unwrap(),
+            vec!["eva green", "steven price"]
+        );
+        assert_eq!(
+            people(&video, None, Some(&records)).unwrap(),
+            vec!["eva green", "steve arnold", "steven price"]
+        );
     }
 }

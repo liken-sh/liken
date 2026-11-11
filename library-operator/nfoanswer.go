@@ -76,6 +76,9 @@ type factAnswer struct {
 	Cast           []creditedActor
 	Directors      []creditedPerson
 	Writers        []creditedPerson
+	// Every person the provider credited, which the credits fact writes to
+	// billing.yaml and no screen reads.
+	Billing []billedPerson
 }
 
 // One provider block, asked for one fact of one title. It answers false where
@@ -179,6 +182,7 @@ func mergeCredits(merged *factAnswer, held providerAnswer, note func(string)) {
 	directors, addedDirector := unionPeople(merged.Directors, held.answer.Directors)
 	writers, addedWriter := unionPeople(merged.Writers, held.answer.Writers)
 	merged.Directors, merged.Writers = directors, writers
+	merged.Billing = unionBilling(merged.Billing, held.answer.Billing)
 	if addedDirector || addedWriter {
 		note(held.block)
 	}

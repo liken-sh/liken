@@ -38,7 +38,7 @@ impl Item {
         model: &Model,
     ) -> Result<Item, Error> {
         let reading = reading::load(&reading::path(video, records))?;
-        let names = signals::people(video, credits)?;
+        let names = signals::people(video, credits, records)?;
         let matrix = signals::matrix(&reading, &names);
         let probabilities: Vec<f32> = (0..matrix.times.len())
             .map(|index| model.forest.probability(matrix.row(index)))

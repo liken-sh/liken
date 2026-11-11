@@ -181,6 +181,36 @@ high is one of the [open questions](#open-questions). It replaces the
 becomes the fallback for a video with an `appearances` record and no
 reading.
 
+### The names of the whole crew
+
+The `credits` fact kept the billed cast, the directors, and the writers
+of what TMDb returns, and dropped the rest of the crew. A designed
+title sequence shows one or two people a card, and most are the people
+that were dropped: the producers, the composer, the cinematographer,
+the editor, the production designer. On three videos with such a
+sequence, the model waited for the plain crawl and was 101 to 115
+seconds late.
+
+So the `credits` fact now also writes `.liken/billing.yaml`, with every
+person TMDb credits and each person's department and job. The catalog
+does not read it, so the tables and the screens stay as they are, and
+`titles` reads its names with those of `credits.yaml`. The file keeps
+the department and the job, so `titles` can later count some
+departments and not others with no new ask of TMDb.
+
+The measurement used the key crew of IMDb's `title.principals` in
+place of TMDb's crew, about 25 people a film, on 362 videos with a
+reading. Against 76 videos whose start a person checked:
+
+| | Films within 10 s | Films within 30 s | Worst film |
+|---|---|---|---|
+| The model, with the names of `credits.yaml` | 77% | 89% | 107 s |
+| The model, with the billing's names too | 86% | 97% | 54 s |
+| The databases' marks | 86% | 91% | 349 s |
+
+The episodes changed by one video. IMDb's datasets and TVmaze state no
+crew to the fact, so a title that only they answer has no billing.
+
 ### What it does not read
 
 - **Faces.** The `appearances` record is not an input, so `titles`
