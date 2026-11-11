@@ -73,12 +73,12 @@ struct Video {
 }
 
 const FOLDS: usize = 5;
-// The model is not fitted on the seconds this close to a mark. A mark is
-// seldom exact to the second, so the label of those seconds is a guess.
-const MARGIN: f64 = 5.0;
 // The fit takes one second in this many, and every second within a
 // minute of the mark. Neighboring seconds are nearly the same row, so the
-// rest add time to the fit and little to the model.
+// rest add time to the fit and little to the model. It takes the seconds
+// next to the mark too, though a mark is seldom exact to the second: a
+// fit without the 5 seconds each side of every mark placed 46% of 76
+// checked videos within 3 seconds, and a fit with them placed 63%.
 const THIN: usize = 3;
 // A mark is suspect when a model that did not see the video places the
 // titles more than this many seconds from it, with at least this
@@ -168,8 +168,7 @@ impl Set {
             for (index, time) in times.iter().enumerate() {
                 let distance = (time - label.start).abs();
                 set.started.push(*time >= label.start);
-                set.fitted
-                    .push(distance >= MARGIN && (distance <= 60.0 || index % THIN == 0));
+                set.fitted.push(distance <= 60.0 || index % THIN == 0);
             }
             set.videos.push(Video {
                 label: label.clone(),
@@ -215,6 +214,7 @@ impl Set {
             duration: video.duration,
             times: video.times.clone(),
             probabilities,
+            mark: None,
         }
     }
 
@@ -251,6 +251,7 @@ impl Set {
                     duration: video.duration,
                     times: video.times.clone(),
                     probabilities: vec![0.5; video.times.len()],
+                    mark: None,
                 })
             })
             .collect()
@@ -274,7 +275,7 @@ impl Set {
 // seconds of its mark and to 0 for the others.
 fn temperature(set: &Set, items: &[Item]) -> f64 {
     let miss = |temperature: f64| -> f64 {
-        let placed = place::place(items, temperature);
+        let placed = place::place(items, temperature, 0.0);
         set.errors(&placed)
             .iter()
             .zip(&placed)
@@ -287,6 +288,27 @@ fn temperature(set: &Set, items: &[Item]) -> f64 {
         .expect("the list is not empty")
 }
 
+// How many seconds the placements are behind the marks: the median of
+// placement less mark, over the placements within 30 seconds of their
+// mark. The marks are a second or two from the cut that starts the
+// titles as often early as late, so the median distance from them is the
+// model's own lag. A placement far from its mark says the mark or the
+// model is wrong, and neither tells the lag.
+fn lag(set: &Set, placed: &[Placement]) -> f64 {
+    let mut near: Vec<f64> = set
+        .videos
+        .iter()
+        .zip(placed)
+        .filter_map(|(video, placement)| Some(placement.start? - video.label.start))
+        .filter(|distance| distance.abs() <= FAR)
+        .collect();
+    if near.is_empty() {
+        return 0.0;
+    }
+    near.sort_by(f64::total_cmp);
+    (near[near.len() / 2] * 10.0).round() / 10.0
+}
+
 pub fn run(labels: &[Label], settings: &Settings) -> Result<Model, Error> {
     let set = Set::load(labels, settings.records.as_deref(), settings.trees.threads)?;
     eprintln!(
@@ -296,7 +318,7 @@ pub fn run(labels: &[Label], settings: &Settings) -> Result<Model, Error> {
     );
 
     let first = set.held_out(&HashSet::new(), &settings.trees);
-    let placed = place::place(&first, FIRST_TEMPERATURE);
+    let placed = place::place(&first, FIRST_TEMPERATURE, 0.0);
     let left_out: HashSet<usize> = set
         .videos
         .iter()
@@ -311,20 +333,30 @@ pub fn run(labels: &[Label], settings: &Settings) -> Result<Model, Error> {
         left_out.len()
     );
 
-    let second = set.held_out(&left_out, &settings.trees);
+    let mut second = set.held_out(&left_out, &settings.trees);
     let temperature = temperature(&set, &second);
-    let placed = place::place(&second, temperature);
+    let lag = lag(&set, &place::place(&second, temperature, 0.0));
+    let placed = place::place(&second, temperature, lag);
     let errors = set.errors(&placed);
     let held_out = Score::of(&errors);
+    // The same placements with each video's own mark as a prior, which is
+    // how the operator places a video that has a mark. They are no
+    // measure of the model against the marks, so they go only to the
+    // placements file, for a person to compare with starts they checked.
+    for (item, video) in second.iter_mut().zip(&set.videos) {
+        item.mark = Some(video.label.start);
+    }
+    let with_marks = place::place(&second, temperature, lag);
     if let Some(path) = &settings.placements {
         let lines: Vec<String> = set
             .videos
             .iter()
-            .zip(&placed)
-            .map(|(video, placement)| {
+            .zip(placed.iter().zip(&with_marks))
+            .map(|(video, (placement, with_mark))| {
                 let start = placement.start.unwrap_or(video.duration);
+                let with_mark = with_mark.start.unwrap_or(video.duration);
                 format!(
-                    "{}\t{}\t{start}\t{:.3}\n",
+                    "{}\t{}\t{start}\t{:.3}\t{with_mark}\n",
                     video.label.video.display(),
                     video.label.start,
                     placement.confidence
@@ -351,6 +383,7 @@ pub fn run(labels: &[Label], settings: &Settings) -> Result<Model, Error> {
         },
         held_out,
         temperature,
+        lag,
         columns: signals::columns(),
         forest,
     };

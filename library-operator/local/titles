@@ -19,7 +19,8 @@
 #   local/titles train
 #       fit model.json on the readings, and print the held-out score
 #   local/titles place <video>...
-#       print the placement of each video
+#       print the placement of each video, with its mark in labels.tsv,
+#       when it has one, as a prior
 #
 # Every file the script writes is under local/state/titles: the models, the
 # readings, the labels, and the model. The library is only read.
@@ -33,7 +34,7 @@ tool="$repo/titles/target/release/titles"
 source "$repo/../toolchains/pin.sh"
 
 usage() {
-  sed -n '8,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  sed -n '8,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -132,7 +133,8 @@ train)
   ;;
 place)
   [[ $# -ge 2 ]] || usage
-  "$tool" place "${@:2}" --model "$state/model.json" --records "$state/records"
+  "$tool" place "${@:2}" --model "$state/model.json" --records "$state/records" \
+    --marks "$state/labels.tsv"
   ;;
 *) usage ;;
 esac

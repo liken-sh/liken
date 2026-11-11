@@ -25,6 +25,9 @@ pub struct Item {
     pub duration: f64,
     pub times: Vec<f64>,
     pub probabilities: Vec<f32>,
+    // The second a database's mark gives for the start, when the video
+    // has one.
+    pub mark: Option<f64>,
 }
 
 impl Item {
@@ -37,7 +40,7 @@ impl Item {
         let reading = reading::load(&reading::path(video, records))?;
         let names = signals::people(video, credits)?;
         let matrix = signals::matrix(&reading, &names);
-        let probabilities = (0..matrix.times.len())
+        let probabilities: Vec<f32> = (0..matrix.times.len())
             .map(|index| model.forest.probability(matrix.row(index)))
             .collect();
         Ok(Item {
@@ -45,6 +48,7 @@ impl Item {
             duration: reading.header.duration,
             times: matrix.times,
             probabilities,
+            mark: None,
         })
     }
 }
@@ -54,11 +58,19 @@ impl Item {
 const NEIGHBORS: usize = 3;
 const SURE: f64 = 0.8;
 
-// The placement of each item, in the items' order.
-pub fn place(items: &[Item], temperature: f64) -> Vec<Placement> {
+// The placement of each item, in the items' order. An item's mark is a
+// prior on its start: the marks are within 3 seconds of the start for
+// most videos and wrong by minutes for some, which is the shape of
+// `Prior`, so a mark that the picture agrees with sets the second, and a
+// mark that the picture contradicts costs the placement a fixed amount.
+pub fn place(items: &[Item], temperature: f64, lag: f64) -> Vec<Placement> {
+    let marked = |item: &Item| item.mark.map(|center| Prior { center });
     let alone: Vec<Placement> = items
         .iter()
-        .map(|item| changepoint::place(&item.times, &item.probabilities, temperature, None))
+        .map(|item| {
+            let priors: Vec<Prior> = marked(item).into_iter().collect();
+            changepoint::place(&item.times, &item.probabilities, temperature, lag, &priors)
+        })
         .collect();
     let mut folders: HashMap<&Path, Vec<usize>> = HashMap::new();
     for (index, item) in items.iter().enumerate() {
@@ -83,12 +95,13 @@ pub fn place(items: &[Item], temperature: f64) -> Vec<Placement> {
                 continue;
             }
             lengths.sort_by(f64::total_cmp);
-            let prior = Prior {
-                center: items[index].duration - lengths[lengths.len() / 2],
-            };
             let item = &items[index];
+            let mut priors = vec![Prior {
+                center: item.duration - lengths[lengths.len() / 2],
+            }];
+            priors.extend(marked(item));
             placed[index] =
-                changepoint::place(&item.times, &item.probabilities, temperature, Some(prior));
+                changepoint::place(&item.times, &item.probabilities, temperature, lag, &priors);
         }
     }
     placed
@@ -108,24 +121,30 @@ pub struct Answer {
     pub duration: f64,
 }
 
+// `marks` holds the videos that a database has a mark for, with the
+// second each mark gives.
 pub fn run(
     videos: &[PathBuf],
     model: &Path,
     records: Option<&Path>,
     credits: Option<&Path>,
+    marks: &HashMap<PathBuf, f64>,
 ) -> Result<Vec<Answer>, Error> {
     let model = Model::load(model)?;
-    let items = videos
+    let mut items = videos
         .iter()
         .map(|video| Item::new(video, records, credits, &model))
         .collect::<Result<Vec<Item>, Error>>()?;
-    let placed = place(&items, model.temperature);
+    for item in &mut items {
+        item.mark = marks.get(&item.video).copied();
+    }
+    let placed = place(&items, model.temperature, model.lag);
     Ok(items
         .iter()
         .zip(placed)
         .map(|(item, placement)| Answer {
             video: item.video.to_string_lossy().into(),
-            start: placement.start,
+            start: placement.start.map(|start| (start * 10.0).round() / 10.0),
             confidence: (placement.confidence * 1000.0).round() / 1000.0,
             from: item.times.first().copied().unwrap_or(item.duration),
             duration: item.duration,
@@ -158,6 +177,7 @@ mod tests {
             duration: 400.0,
             times,
             probabilities,
+            mark: None,
         }
     }
 
@@ -169,7 +189,7 @@ mod tests {
             episode("e3", 62, true),
             episode("e4", 0, false),
         ];
-        let placed = place(&items, 1.0);
+        let placed = place(&items, 1.0, 0.0);
         assert_eq!(placed[0].start, Some(340.0));
         assert_eq!(placed[3].start, Some(340.0));
     }
@@ -182,7 +202,7 @@ mod tests {
             episode("e3", 60, true),
             episode("e4", 120, true),
         ];
-        assert_eq!(place(&items, 1.0)[3].start, Some(280.0));
+        assert_eq!(place(&items, 1.0, 0.0)[3].start, Some(280.0));
     }
 
     #[test]
@@ -192,8 +212,18 @@ mod tests {
             episode("e2", 60, true),
             episode("e4", 0, false),
         ];
-        let alone = changepoint::place(&items[2].times, &items[2].probabilities, 1.0, None);
-        assert_eq!(place(&items, 1.0)[2], alone);
+        let alone = changepoint::place(&items[2].times, &items[2].probabilities, 1.0, 0.0, &[]);
+        assert_eq!(place(&items, 1.0, 0.0)[2], alone);
+    }
+
+    #[test]
+    fn a_mark_sets_the_second_of_an_unsure_placement_only() {
+        let mut items = [episode("e1", 0, false), episode("e2", 60, true)];
+        items[0].mark = Some(300.0);
+        items[1].mark = Some(200.0);
+        let placed = place(&items, 1.0, 0.0);
+        assert_eq!(placed[0].start, Some(300.0));
+        assert_eq!(placed[1].start, Some(340.0));
     }
 
     #[test]
@@ -211,7 +241,14 @@ mod tests {
         writer.land().unwrap();
         let path = folder.join("model.json");
         model().save(&path).unwrap();
-        let answers = run(std::slice::from_ref(&video), &path, None, None).unwrap();
+        let answers = run(
+            std::slice::from_ref(&video),
+            &path,
+            None,
+            None,
+            &HashMap::new(),
+        )
+        .unwrap();
         assert_eq!(answers[0].start, Some(70.0));
         assert_eq!((answers[0].from, answers[0].duration), (40.0, 100.0));
         assert_eq!(answers[0].video, video.to_string_lossy());

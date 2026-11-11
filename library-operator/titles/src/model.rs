@@ -21,6 +21,9 @@ pub struct Model {
     pub trained: Trained,
     pub held_out: Score,
     pub temperature: f64,
+    // How many seconds the forest's placements are behind the marks, at
+    // the median. `place` takes it from each start.
+    pub lag: f64,
     pub columns: Vec<String>,
     pub forest: Forest,
 }
@@ -111,6 +114,7 @@ pub mod tests {
             trained: Trained::default(),
             held_out: Score::default(),
             temperature: 1.0,
+            lag: 0.0,
             columns,
             forest: Forest {
                 base: 0.0,

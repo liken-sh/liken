@@ -116,6 +116,12 @@ three other videos of the folder were placed with a confidence of 0.8
 or more. The prior has a floor, so an episode whose titles are clearly
 somewhere else keeps its own start.
 
+`--marks FILE` names a file of the form of the labels file below. A
+video in it takes its mark as a second prior of the same shape. The
+marks are within 3 seconds of the start for most videos and wrong by
+minutes for some, so a mark that the picture agrees with sets the
+second, and a mark that the picture contradicts is overruled.
+
 ## Training
 
 `train` reads a file of labels, one video a line: the video's path, the
@@ -129,14 +135,16 @@ the two databases gave. `train` then:
 2. Leaves out the videos whose mark is more than 30 seconds from a
    placement the model was sure of. A mark is a time a person typed
    into a database, and some are wrong by minutes.
-3. Fits five models again without those videos, and chooses the
-   temperature that makes the confidence match how often a placement is
-   within 10 seconds of its mark.
+3. Fits five models again without those videos. From their placements
+   it chooses the temperature that makes the confidence match how often
+   a placement is within 10 seconds of its mark, and it measures the
+   lag: the median of placement less mark, over the placements within
+   30 seconds of their mark. `place` takes the lag from each start.
 4. Fits the model on every video it did not leave out, and writes the
    model file.
 
 The model file is JSON in the format `liken.sh/titles/model/v1`. Beside
-the trees it holds `trained`, the count of the videos, the groups, and
+the trees, the temperature, and the lag, it holds `trained`, the count of the videos, the groups, and
 the seconds it was fitted on, and `held_out`, the share of the
 placements of step 3 within 3, 10, and 30 seconds of their marks. The
 score is against the marks and not against the truth, so a model that
