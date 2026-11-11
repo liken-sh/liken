@@ -8,11 +8,12 @@
 # from it, which is iptables, under the GPL version 2 that iptables'
 # COPYING gives, linked with musl, whose license is MIT.
 [k3s-root-xtables]
-version = "v0.15.2"
-url = "https://github.com/k3s-io/k3s-root/releases/download/v0.15.2/k3s-root-xtables-amd64.tar"
-sha256 = "1272950a6dd969ced16f36eed91f3cc3feb552edbb7d6dcfbfc9b04930d9ba3f"
-purl = "pkg:github/k3s-io/k3s-root@v0.15.2"
+version = "v0.15.3"
+url = "https://github.com/k3s-io/k3s-root/releases/download/v0.15.3/k3s-root-xtables-amd64.tar"
+sha256 = "b615039d1196a80b374dff031a3f89c3c1d91f67cb08acc54d8d0276a6e7b933"
+purl = "pkg:github/k3s-io/k3s-root@v0.15.3"
 license = "GPL-2.0-only AND MIT"
+type = "application"
 
 # The next three are the corresponding source of the netfilter tools,
 # and of the GPL-licensed userland that k3s embeds from the same
@@ -22,10 +23,10 @@ license = "GPL-2.0-only AND MIT"
 # k3s-root's recipe at the release's tag, under k3s-root's Apache-2.0
 # LICENSE.
 [k3s-root-source]
-version = "v0.15.2"
-url = "https://github.com/k3s-io/k3s-root/archive/refs/tags/v0.15.2.tar.gz"
-sha256 = "ab4ddff445f4aa19add06f1a53d9f1c8194b65f5e31ca54ab2abb67036bf442f"
-purl = "pkg:github/k3s-io/k3s-root@v0.15.2"
+version = "v0.15.3"
+url = "https://github.com/k3s-io/k3s-root/archive/refs/tags/v0.15.3.tar.gz"
+sha256 = "e0f04c1b7747a2637babd95fc8683a95ca8bee940b4058dc7b474638b4e9a621"
+purl = "pkg:github/k3s-io/k3s-root@v0.15.3"
 license = "Apache-2.0"
 scope = "excluded"
 
@@ -44,9 +45,9 @@ scope = "excluded"
 # recipe builds. buildroot's COPYING gives the GPL version 2 or later,
 # except for the files that state their own license.
 [buildroot-source]
-version = "2025.02.14"
-url = "https://github.com/buildroot/buildroot/archive/refs/tags/2025.02.14.tar.gz"
-sha256 = "8133a06142f6eb0177726b54a948b46289ebe48f9cbcaac5403cffd1a3cc9f36"
-purl = "pkg:github/buildroot/buildroot@2025.02.14"
+version = "2025.02.18"
+url = "https://github.com/buildroot/buildroot/archive/refs/tags/2025.02.18.tar.gz"
+sha256 = "9a0f33022512709eb876db2c27943b0e2acfe2d67616cd3882e0d8ce251cd8d1"
+purl = "pkg:github/buildroot/buildroot@2025.02.18"
 license = "GPL-2.0-or-later"
 scope = "excluded"

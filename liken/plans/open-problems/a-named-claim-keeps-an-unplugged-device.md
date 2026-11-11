@@ -36,6 +36,12 @@ person or GitOps owns, and that option was rejected.
   device that keeps the scheduler from reserving the claim for a new
   pod, or that allocates the claim again. Whether the device-taint
   enhancement (KEP 5055) names this case was not checked.
+  Kubernetes 1.37.2 does not change this case. Its one change to
+  device taints, pull request 142492, makes a `NoExecute` taint also
+  evict a pod that received its device through an extended resource,
+  and it does not change how the scheduler reserves an allocated
+  claim. Checked on 2026-11-11 against the pull request's text, and
+  not by a drill.
 - The workload moves its claim into a `ResourceClaimTemplate`, which
   milestone 89 already repairs. `observatory-operator` makes each
   device's claim from a template, for this reason. The reader pod of a

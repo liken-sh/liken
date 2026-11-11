@@ -6,12 +6,19 @@
 # file gives GRUB's code the GPL version 3 or later.
 
 # The BIOS build: boot.img and the modules that the core image links.
+#
+# The cpe is the name that a vulnerability scanner matches the entry
+# by, and the type is one that a scanner keeps. NVD lists GRUB 2 as
+# gnu:grub2, at the upstream version without Ubuntu's revision.
+# grub/latest.sh --bump writes the cpe with the version.
 [grub-pc-bin]
 version = "2.14-2ubuntu3"
 url = "http://archive.ubuntu.com/ubuntu/pool/main/g/grub2/grub-pc-bin_2.14-2ubuntu3_amd64.deb"
 sha256 = "187f86d4c802a250d417f9f0d2a4095c2e3995ea5194f55a6d9ec27fd16f5055"
 purl = "pkg:deb/ubuntu/grub-pc-bin@2.14-2ubuntu3?arch=amd64"
 license = "GPL-3.0-or-later"
+type = "application"
+cpe = "cpe:2.3:a:gnu:grub2:2.14:*:*:*:*:*:*:*"
 
 # grub-mkimage, which links the core image at build time. No release
 # ships it, so its scope is excluded.

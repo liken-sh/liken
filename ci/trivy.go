@@ -9,7 +9,8 @@ import (
 // This file and ci/templates/trivy.tmpl are the Trivy configuration:
 // the Trivy version, the arguments of each scan, the steps that install
 // Trivy, restore its database, and upload each scan, and the root
-// workflow's trivy-db and trivy jobs. A change to either file can
+// workflow's trivy-db and trivy jobs, which the scheduled scan in
+// .github/workflows/scan.yaml runs too. A change to either file can
 // change what a scan reports, so the plan of a push to main that
 // changes one of them scans every published image again. See
 // Planner.Rescan.
@@ -64,3 +65,10 @@ type trivyUpload struct {
 	Image, Present string
 	Dry            bool
 }
+
+// trivyCache is the Go cache of the trivy job, in the root workflow and
+// in the scheduled scan. The job restores the modules of the ci module,
+// which the ci module's go job saves, and keeps no build cache: each of
+// its jobs scans one image, and the many jobs of one run would each try
+// to save the same entry.
+var trivyCache = goCache{Mod: "ci/go.mod", Keys: []string{"ci/go.sum"}, Family: "ci"}

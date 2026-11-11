@@ -533,6 +533,30 @@ SBOM keeps the manifest's or buildroot's component, with its purl and
 license. The property `liken:source` of each component names its
 source, and the `compositions` state which lists are complete.
 
+A known vulnerability in a file that the OS takes from an upstream
+release reaches the repository's Security tab only when a scanner can
+match the file's name, and no package database records the kernel,
+the bootloaders, the microcode, or k3s. So each of those entries of a
+`pin.toml` states the `cpe` that NVD lists the upstream under, at the
+upstream's own version, and a `type` that a scanner keeps, and its
+`latest.sh --bump` writes the CPE with `cpe_version`.
+`liken/releases/sbom/vulnerabilities.sh` runs grype, which
+`toolchains/images.toml` pins, over a release's SBOM, with the
+settings in `grype.yaml` beside it: it leaves out each component with
+the scope `excluded`, keeps each finding that has a fixed version, and
+drops each finding that `grype.yaml` names with its reason. Trivy
+scans every image, and it matches no component by its CPE, so this
+one scan runs grype. The OS's publish job scans the release that it
+publishes, and the `liken` job of `.github/workflows/scan.yaml` scans
+the newest release on the channel every third day. Both upload to
+code scanning under the category `grype/liken`. The same workflow
+scans every published image again with Trivy, because a vulnerability
+that is recorded after a publish reaches no alert until a later scan,
+and the vulnerability databases publish no event that a workflow can
+subscribe to. `linux-firmware` has no name in NVD, and the iptables
+programs of `k3s-root-xtables` have no CPE, so the scan matches
+neither.
+
 The OS's publish job signs each file of the release, `release.yaml`
 and every artifact that it names, keyless with the same pinned cosign,
 and publishes the Sigstore bundle `<file>.sigstore.json` beside each

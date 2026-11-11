@@ -12,12 +12,19 @@
 # that the kernel's COPYING states.
 
 # The kernel image.
+#
+# The cpe is the name that a vulnerability scanner matches the entry
+# by, and the type is one that a scanner keeps. NVD lists the kernel
+# as the operating system linux:linux_kernel. kernel/latest.sh --bump
+# writes the cpe with the version.
 [linux-image-unsigned]
 version = "7.3.1"
 url = "https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-image-unsigned-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb"
 sha256 = "93c7c059e51cd81d7aa817f0cb0d2a7e94c5b04642a8e20de8b4ab4628b6a357"
 purl = "pkg:generic/linux-image-unsigned@7.3.1?download_url=https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-image-unsigned-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb&checksum=sha256:93c7c059e51cd81d7aa817f0cb0d2a7e94c5b04642a8e20de8b4ab4628b6a357"
 license = "GPL-2.0-only WITH Linux-syscall-note"
+type = "application"
+cpe = "cpe:2.3:o:linux:linux_kernel:7.3.1:*:*:*:*:*:*:*"
 
 # The modules, the build's configuration, and its System.map.
 [linux-modules]

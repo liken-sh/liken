@@ -248,7 +248,24 @@ jobs:
       - uses: {% action "github/codeql-action/analyze" %}
         with:
           category: codeql/actions
-{% template "trivy-db" %}{% template "trivy-rescan" .TrivyCache %}{% range .Components %}
+{% template "trivy-db" %}
+  # Trivy scans each published image again when the Trivy configuration
+  # changes. The configuration is two files: ci/trivy.go, which holds
+  # the Trivy version and the arguments of a scan, and
+  # ci/templates/trivy.tmpl, which holds the trivy job, the trivy-db
+  # job, and the steps that install Trivy, restore its database, and
+  # upload each scan. A publish scans only the images that it pushes, so
+  # without this job a new version or a new argument would reach an
+  # image only at its next publish or at the next scheduled scan in
+  # scan.yaml, and the Security tab would show the results of the old
+  # configuration until then.
+  #
+  # The plan leaves out each component that publishes in this run,
+  # because that component's publish job scans the images it pushes.
+  # In this workflow, only a push to main scans again, when one of the
+  # two files changed since the newest main run that passed, or when
+  # every job runs. Planner.Rescan in ci/rescan.go gives the rule.
+  #{% template "trivy-rescan" .TrivyCache %}{% range .Components %}
   {% .Name %}:
     needs: [plan{% range .Needs %}, {% . %}{% end %}]
     if: ${{ !failure() && !cancelled() && fromJSON(needs.plan.outputs.components)['{% .Name %}'].check }}

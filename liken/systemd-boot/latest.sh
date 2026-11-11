@@ -94,7 +94,8 @@ sources="$(ubuntu_source_files systemd main "$target")"
 
 echo "$target" >"$here/VERSION"
 set_pin systemd-boot-efi "$target" "$pool/systemd-boot-efi_${target}_amd64.deb" "$digest" \
-    "$(deb_purl ubuntu systemd-boot-efi "$target")"
+    "$(deb_purl ubuntu systemd-boot-efi "$target")" \
+    "cpe:2.3:a:systemd_project:systemd:$(cpe_version "$target"):*:*:*:*:*:*:*"
 set_ubuntu_source_pins systemd-source systemd "$target" "$sources"
 bumped systemd-boot "$pinned" "$target"
 echo "the digests came from the Packages and Sources indexes, checked against InRelease, signed by Ubuntu's archive key"

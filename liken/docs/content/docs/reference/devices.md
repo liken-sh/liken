@@ -573,6 +573,16 @@ refuses a different one after it, so a change to it in `spec.sysctls`
 takes effect at the next boot. Until then, the Machine's
 `SysctlsApplied` condition reports the refused write.
 
+A pod that reaches its guest opens a socket of the family `AF_VSOCK`.
+The default seccomp profile of containerd, from containerd 2.3.7,
+which k3s v1.37.2 ships, admits only the socket families that it
+lists, and `AF_VSOCK` is not one of them. So a pod whose
+`securityContext` sets `seccompProfile.type` to `RuntimeDefault`
+cannot open that socket. A pod that sets no profile runs with none,
+and opens it. A pod that needs a profile and a vsock socket names its
+own with the type `Localhost`. QEMU's use of `/dev/vhost-vsock` opens
+no such socket, so the claim itself needs no change.
+
 ## An unplugged device evicts its pods
 
 Kubernetes allocates a claim once, and does not allocate it again

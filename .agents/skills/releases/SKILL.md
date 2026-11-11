@@ -1,6 +1,6 @@
 ---
 name: releases
-description: How the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes, the development builds on main, the pinned base images, each image's SBOM, provenance, and cosign signature and how to verify them, the OS release's SBOM and the signature of each of its files and how to verify them, pinning a development build, and the liken OS channel publish. Use when tagging, publishing an image, verifying a published image, pinning a development build, or reasoning about a component's version.
+description: How the components of the liken repository version and release. Covers the CalVer scheme, the one release tag, which components a tag publishes, the development builds on main, the pinned base images, each image's SBOM, provenance, and cosign signature and how to verify them, the OS release's SBOM and the signature of each of its files and how to verify them, the vulnerability scans of each image and each OS release and the scheduled scan, pinning a development build, and the liken OS channel publish. Use when tagging, publishing an image, verifying a published image, reading or changing a vulnerability scan, pinning a development build, or reasoning about a component's version.
 ---
 
 # Releases and development builds
@@ -520,6 +520,56 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$key:/k:ro" -v "$PWD
   verify-blob --key /k/cosign.pub --insecure-ignore-tlog --bundle sbom.cdx.json.sigstore.json sbom.cdx.json
 rm -rf "$key"
 ```
+
+## Vulnerability scans
+
+Every finding is in the repository's Security tab, under code
+scanning, and no finding fails a run.
+
+* **Each image.** The publish job of a component runs Trivy, pinned in
+  `ci/trivy.go`, on each image that it pushes, and uploads the
+  findings that have a fixed version under the category
+  `trivy/<image>`.
+* **Each OS release.** The OS publishes no image, and no package
+  database records its kernel, bootloaders, microcode, or k3s. Each of
+  those `pin.toml` entries states the CPE that NVD lists the upstream
+  under, and `liken/releases/sbom/vulnerabilities.sh` runs grype,
+  pinned in `toolchains/images.toml`, over the release's
+  `sbom.cdx.json`. Trivy matches no component by its CPE, so this scan
+  alone runs grype. The script leaves out each component with the
+  scope `excluded`, keeps each finding that has a fixed version, and
+  reads `grype.yaml` beside it, which names each finding that is false
+  for every release with the reason. The step "scan the release's
+  SBOM" of the OS's publish job uploads under the category
+  `grype/liken`.
+* **Every third day.** `.github/workflows/scan.yaml`, which `ci/`
+  generates from `ci/templates/scan.yaml.tmpl`, runs at 04:43 UTC on
+  the 1st, 4th, and each third day of a month to the 31st, and on a
+  dispatch. `go run . scans` in `ci/` lists every published image at
+  the version that a cluster pulls and the newest OS release on the
+  channel. The `trivy` job scans each image, and the `liken` job
+  fetches the release's SBOM with `liken sbom -json`, which checks its
+  signature, and scans it with grype. The timer is a backstop: a
+  vulnerability that is recorded after a publish reaches no alert
+  until a later scan, and the vulnerability databases publish no event
+  that a workflow can subscribe to.
+* **A change to the Trivy configuration.** A push to `main` that
+  changes `ci/trivy.go` or `ci/templates/trivy.tmpl` scans every
+  published image again. `Planner.PublishedImages` in `ci/rescan.go`
+  gives the images and the versions for this scan and for the
+  scheduled one.
+
+To scan a release on a workstation, with docker and `jq`:
+
+```sh
+cd liken
+go run ./cli sbom -json 2026.11.10-001 >sbom.cdx.json
+releases/sbom/vulnerabilities.sh sbom.cdx.json
+```
+
+The scan does not match `linux-firmware`, which NVD does not list,
+or the iptables programs of `k3s-root-xtables`, whose entry states
+k3s-root's version.
 
 ## Rules
 

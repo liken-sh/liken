@@ -14,6 +14,7 @@ url = "https://cdn.kernel.org/pub/linux/kernel/firmware/linux-firmware-20261019.
 sha256 = "a10d1ab5baf2c74ba92e8c7cf313e691696c26bddfa6df00db795e48d70cd4ca"
 purl = "pkg:generic/linux-firmware@20261019?download_url=https://cdn.kernel.org/pub/linux/kernel/firmware/linux-firmware-20261019.tar.xz&checksum=sha256:a10d1ab5baf2c74ba92e8c7cf313e691696c26bddfa6df00db795e48d70cd4ca"
 license = "LicenseRef-linux-firmware"
+type = "firmware"
 
 # The regulatory database, a pin of its own inside this domain. No
 # VERSION file names it, so this entry holds its version for the
@@ -25,3 +26,4 @@ url = "https://mirrors.edge.kernel.org/pub/software/network/wireless-regdb/wirel
 sha256 = "b22e0901227b820cd1c280abe681a15b773a5103a5e10dc442e94ebb34cbf58d"
 purl = "pkg:generic/wireless-regdb@2026.09.03?download_url=https://mirrors.edge.kernel.org/pub/software/network/wireless-regdb/wireless-regdb-2026.09.03.tar.xz&checksum=sha256:b22e0901227b820cd1c280abe681a15b773a5103a5e10dc442e94ebb34cbf58d"
 license = "ISC"
+type = "data"

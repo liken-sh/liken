@@ -70,7 +70,8 @@ digest="$(fetch_text "$manifest" | awk '$2 == "k3s" { print $1 }')" || digest=""
 [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || fail "$manifest lists no k3s binary"
 
 echo "$latest" >"$here/VERSION"
-set_pin k3s "$latest" "$base/k3s" "$digest" "$(github_purl k3s-io/k3s "$latest")"
+set_pin k3s "$latest" "$base/k3s" "$digest" "$(github_purl k3s-io/k3s "$latest")" \
+    "cpe:2.3:a:k3s:k3s:$(cpe_version "$latest"):*:*:*:*:*:*:*"
 bumped k3s "$pinned" "$latest"
 echo "the digest came from the release's sha256 manifest"
 if [[ "${pinned%%+*}" != "${latest%%+*}" ]] &&

@@ -48,13 +48,13 @@ require (
 	// through kubernetes/election, which uses client-go's leaderelection.
 	// Both follow the same minor as the API server they talk to, the
 	// Kubernetes version k3s/VERSION names.
-	k8s.io/apimachinery v0.37.1
-	k8s.io/client-go v0.37.1
+	k8s.io/apimachinery v0.37.2
+	k8s.io/client-go v0.37.2
 	// The DRA plugin API that the node's kubelet calls. This side of a
 	// gRPC contract must not lead the side that answers it, so the pin
 	// follows the Kubernetes version k3s ships: k3s/VERSION names
 	// v1.36.3+k3s1, so kubelet stays on v0.36.3.
-	k8s.io/kubelet v0.37.1
+	k8s.io/kubelet v0.37.2
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -180,7 +180,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 	honnef.co/go/tools v0.8.2 // indirect
-	k8s.io/api v0.37.1 // indirect
+	k8s.io/api v0.37.2 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd // indirect

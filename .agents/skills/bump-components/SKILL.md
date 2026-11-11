@@ -638,6 +638,16 @@ the rule: `weston/pin.toml`, `library-operator/pin.toml`, and
 `library-operator/appearances/models/pin.toml`, whose models no bump
 moves.
 
+An entry of the OS that NVD lists states a `cpe` and a `type` that a
+scanner keeps too: the kernel, k3s, GRUB, systemd-boot, and the Intel
+microcode. The scan of each release's SBOM matches those files by the
+CPE alone, and "Vulnerability scans" in the `releases` skill gives the
+scan. NVD lists an upstream at its own version, so the bump writes the
+CPE with `cpe_version`, which prints `1.37.2` for `v1.37.2+k3s1` and
+`2.14` for `2.14-2ubuntu3`, and `ci pins` accepts a CPE at the entry's
+version or at that part of it. A new pin of the OS gets the same two
+fields when NVD lists its upstream.
+
 To list the purl of every pin that a release ships:
 
 ```sh

@@ -351,9 +351,13 @@ jobs:{% range .Jobs %}
     # packages: write lets the build push the userland that it compiles
     # on main to ghcr.io/liken-sh/userland, as the build job does.
     # liken/userland/artifact.sh gives the details.
+    # security-events: write uploads the grype scan of the release's
+    # SBOM to code scanning, because upload-sarif writes the results
+    # with the job's token.
     permissions:
       contents: read
       packages: write
+      security-events: write
       id-token: write
     # The channel's key comes from the repository secrets that
     # liken.sh/terraform.tf keeps delivered.
@@ -403,7 +407,22 @@ jobs:{% range .Jobs %}
       - name: publish to the channel
         if: ${{ !inputs.dryrun }}
         working-directory: {% .Dir %}
-        run: releases/publish.sh "${{ inputs.version }}"{% template "os-go-save" %}{% template "userland-ccache-save" %}{% else %}
+        run: releases/publish.sh "${{ inputs.version }}"
+
+      # grype scans the SBOM of the release that this job just
+      # published, so the Security tab shows the new release's findings
+      # at once, and not at the next scheduled scan in scan.yaml. The
+      # scan runs after the upload, and it continues on an error, so a
+      # finding, a failed scan, or a scan that passes its limit never
+      # holds back or fails the publish. releases/sbom/vulnerabilities.sh
+      # gives the details. A dry run publishes nothing and scans nothing.
+      - name: scan the release's SBOM
+        if: ${{ !inputs.dryrun }}
+        continue-on-error: true
+        timeout-minutes: 15
+        working-directory: {% .Dir %}
+        run: releases/sbom/vulnerabilities.sh "releases/dist/${{ inputs.version }}/sbom.cdx.json" "${{ github.workspace }}/grype/{% .Name %}.sarif"
+{% template "grype-upload" (grypeUpload .Name true) %}{% template "os-go-save" %}{% template "userland-ccache-save" %}{% else %}
 {% template "go-restore" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}{% if .Images %}
 
 {% template "buildx" . %}{% end %}

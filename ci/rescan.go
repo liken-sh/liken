@@ -12,8 +12,9 @@ import (
 // scan, and scan the published images again in ci/templates/trivy.tmpl.
 var trivyConfig = []string{"ci/trivy.go", "ci/templates/trivy.tmpl"}
 
-// A ScanRun is one entry of the matrix of the root workflow's trivy
-// job: an image and the published version that it scans.
+// A ScanRun is one entry of the matrix of a trivy job, in the root
+// workflow or in the scheduled scan: an image and the published
+// version that it scans.
 type ScanRun struct {
 	Image   string `json:"image"`
 	Version string `json:"version"`
@@ -37,13 +38,10 @@ type ScanRun struct {
 // file scans nothing again: the images did not change, and the
 // configuration that scanned them did not either.
 //
-// The version that a tracked component's images are scanned at is its
-// newest published version, a release or a development build, because
-// a cluster that follows the newest version pulls it. A pinned
-// component's images are scanned at its published tag. A component
-// that publishes in this run is left out, because its publish job
-// scans the images it pushes, with the new configuration. A component
-// with nothing published has nothing to scan.
+// A component that publishes in this run is left out, because its
+// publish job scans the images it pushes, with the new configuration.
+// A pinned component whose tag publishes in this run is left out for
+// the same reason. PublishedImages gives the version of each image.
 func (p Planner) Rescan(e Event, decisions map[string]Decision) ([]ScanRun, string, error) {
 	if !e.Main() {
 		return nil, "only a push to main scans the published images again", nil
@@ -61,20 +59,46 @@ func (p Planner) Rescan(e Event, decisions map[string]Decision) ([]ScanRun, stri
 		}
 		why = "changed: " + diff.Files[i]
 	}
+	runs, err := p.PublishedImages(func(c *Component) (bool, error) {
+		d := decisions[c.Name()]
+		return d.Publish == publishNone && !(c.Pinned() && d.Changed), nil
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	if len(runs) == 0 {
+		why += ", and each image publishes in this run or has no published version"
+	}
+	return runs, why, nil
+}
+
+// PublishedImages lists each published image of the components that
+// include takes, at the version that a cluster pulls. Both the root
+// workflow's trivy job and the scheduled scan scan this list.
+//
+// A tracked component's images are at its newest published version, a
+// release or a development build, because a cluster that follows the
+// newest version pulls it. A pinned component's images are at its
+// published tag. A component with nothing published has nothing to
+// scan, and the OS publishes no image.
+func (p Planner) PublishedImages(include func(*Component) (bool, error)) ([]ScanRun, error) {
 	var runs []ScanRun
 	for _, c := range sortedComponents(p.Components) {
-		d := decisions[c.Name()]
-		if len(c.Outputs.Images) == 0 || c.Outputs.Channel || d.Publish != publishNone {
+		if len(c.Outputs.Images) == 0 || c.Outputs.Channel {
 			continue
 		}
-		if c.Pinned() && d.Changed {
+		ok, err := include(c)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", c.Name(), err)
+		}
+		if !ok {
 			continue
 		}
 		version := c.PinnedTag()
 		if !c.Pinned() {
 			versions, err := p.Versions(c)
 			if err != nil {
-				return nil, "", fmt.Errorf("%s: %w", c.Name(), err)
+				return nil, fmt.Errorf("%s: %w", c.Name(), err)
 			}
 			if version = NewestPublished(versions); version == "" {
 				continue
@@ -84,10 +108,7 @@ func (p Planner) Rescan(e Event, decisions map[string]Decision) ([]ScanRun, stri
 			runs = append(runs, ScanRun{Image: image.Name, Version: version})
 		}
 	}
-	if len(runs) == 0 {
-		why += ", and each image publishes in this run or has no published version"
-	}
-	return runs, why, nil
+	return runs, nil
 }
 
 // ScansImages is true when a job of the run scans an image: the trivy

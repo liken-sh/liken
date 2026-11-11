@@ -15,6 +15,7 @@
 //	go run ./ci publish ...         push one component's outputs
 //	go run ./ci scan -image I -version V -sarif DIR
 //	                                scan one published image with Trivy
+//	go run ./ci scans               list every published image and the newest OS release, for the scheduled scan
 //	go run ./ci record -tag T       write the GitHub release for a tag
 //	go run ./ci sites               list each manual's directory and prefix
 //	go run ./ci reports -site URL -dest DIR
@@ -71,7 +72,7 @@ type World struct {
 func (w World) run(args []string) error {
 	stdout := w.Stdout
 	if len(args) == 0 {
-		return fmt.Errorf("name a command: generate, plan, bases, deps, pins, namespaces, selectors, publish, scan, record, sites, reports, or profile")
+		return fmt.Errorf("name a command: generate, plan, bases, deps, pins, namespaces, selectors, publish, scan, scans, record, sites, reports, or profile")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	root := flags.String("root", ".", "the repository root")
@@ -125,6 +126,8 @@ func (w World) run(args []string) error {
 		return p.Publish(c, *version, *mode)
 	case "scan":
 		return w.scan(*root, components, *image, *version, *sarif)
+	case "scans":
+		return w.scans(components)
 	case "record":
 		return w.record(*root, components, *tag)
 	case "reports":

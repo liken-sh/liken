@@ -1,0 +1,40 @@
+# The settings of the grype scan of an OS release's SBOM, which
+# vulnerabilities.sh runs.
+
+# grype matches a Debian or Ubuntu package only against the
+# advisories of its distribution, and it reads the distribution from
+# a package database. The SBOM names GRUB and systemd-boot as packages
+# of Ubuntu's archive with no database beside them, so without this
+# setting grype matches neither. With it, grype also matches each by
+# the CPE that its pin.toml entry states.
+match:
+  dpkg:
+    using-cpes: true
+
+# A finding that is false for every release. Each entry gives the
+# reason, because code scanning shows no finding that this file drops.
+ignore:
+  # NVD's record gives one of its version ranges no upper limit, "from
+  # 4.4.249", so it matches every later kernel. The fix is in every
+  # series from 5.10.4 on.
+  - vulnerability: CVE-2020-27815
+    reason: NVD's record has a version range with no upper limit
+  # The stack protector of GCC on AArch64. liken builds for x86-64
+  # only. NVD's record gives a date as the fixed version, so no GCC
+  # version clears it.
+  - vulnerability: CVE-2023-4039
+    reason: applies to AArch64 only, and liken builds for x86-64
+  # GO-2026-5932 records that the package golang.org/x/crypto/openpgp
+  # is deprecated and unsafe. grype matches the module, and the
+  # programs that liken builds link golang.org/x/crypto for its ssh
+  # package only. `go list -deps ./...` in liken/ names no openpgp
+  # package. The entries name liken's own programs by their paths in
+  # the SBOM, so the finding stays for a program of another project.
+  - vulnerability: GO-2026-5932
+    package:
+      location: "liken"
+    reason: liken's programs do not link golang.org/x/crypto/openpgp
+  - vulnerability: GO-2026-5932
+    package:
+      location: "/liken-*"
+    reason: liken's programs do not link golang.org/x/crypto/openpgp

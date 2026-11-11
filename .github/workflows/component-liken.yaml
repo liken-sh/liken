@@ -488,9 +488,13 @@ jobs:
     # packages: write lets the build push the userland that it compiles
     # on main to ghcr.io/liken-sh/userland, as the build job does.
     # liken/userland/artifact.sh gives the details.
+    # security-events: write uploads the grype scan of the release's
+    # SBOM to code scanning, because upload-sarif writes the results
+    # with the job's token.
     permissions:
       contents: read
       packages: write
+      security-events: write
       id-token: write
     # The channel's key comes from the repository secrets that
     # liken.sh/terraform.tf keeps delivered.
@@ -541,6 +545,32 @@ jobs:
         if: ${{ !inputs.dryrun }}
         working-directory: liken
         run: releases/publish.sh "${{ inputs.version }}"
+
+      # grype scans the SBOM of the release that this job just
+      # published, so the Security tab shows the new release's findings
+      # at once, and not at the next scheduled scan in scan.yaml. The
+      # scan runs after the upload, and it continues on an error, so a
+      # finding, a failed scan, or a scan that passes its limit never
+      # holds back or fails the publish. releases/sbom/vulnerabilities.sh
+      # gives the details. A dry run publishes nothing and scans nothing.
+      - name: scan the release's SBOM
+        if: ${{ !inputs.dryrun }}
+        continue-on-error: true
+        timeout-minutes: 15
+        working-directory: liken
+        run: releases/sbom/vulnerabilities.sh "releases/dist/${{ inputs.version }}/sbom.cdx.json" "${{ github.workspace }}/grype/liken.sarif"
+
+      # The findings go under the category grype/liken. Code scanning
+      # closes an alert only when a later upload in the same category no
+      # longer reports it, so the scan of each release replaces the
+      # results of the scan before it. The step runs when the scan wrote
+      # its file.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('grype/liken.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: grype/liken.sarif
+          category: grype/liken
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.build-setup.outputs.go-build-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

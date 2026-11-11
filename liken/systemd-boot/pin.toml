@@ -9,12 +9,20 @@
 # src/boot and src/fundamental that build it state their licenses by
 # SPDX identifier: most are LGPL-2.1-or-later, the CHID code is
 # BSD-3-Clause, and the SHA-1 code is public domain.
+#
+# The cpe is the name that a vulnerability scanner matches the entry
+# by, and the type is one that a scanner keeps. NVD lists systemd as
+# systemd_project:systemd, at the upstream version without Ubuntu's
+# revision. systemd-boot/latest.sh --bump writes the cpe with the
+# version.
 [systemd-boot-efi]
 version = "261.3-0ubuntu3"
 url = "http://archive.ubuntu.com/ubuntu/pool/universe/s/systemd/systemd-boot-efi_261.3-0ubuntu3_amd64.deb"
 sha256 = "128d8a69e4274dee41fcbd5d74e2c55ec4d67b1726005cce9b41c20a3ea453e6"
 purl = "pkg:deb/ubuntu/systemd-boot-efi@261.3-0ubuntu3?arch=amd64"
 license = "LGPL-2.1-or-later AND BSD-3-Clause AND LicenseRef-alg-sha1-public-domain"
+type = "application"
+cpe = "cpe:2.3:a:systemd_project:systemd:261.3:*:*:*:*:*:*:*"
 
 # The next three are the corresponding source: the files of the systemd
 # source package that built the package above. They are the upstream

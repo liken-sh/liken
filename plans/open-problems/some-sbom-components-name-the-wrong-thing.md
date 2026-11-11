@@ -15,6 +15,10 @@ real advisory or report a false one.
   `framework`, `library`, `machine-learning-model`, and `firmware`, so
   syft drops k3s, the kernel, and every other such pin when it reads
   the release SBOM back. Whether Trivy drops them too was not checked.
+  grype reads an SBOM through the same decoder and dropped them on
+  2026-11-11.
+  [`liken` milestone 96](../../liken/plans/96-code-scanning-reads-the-sbom-of-each-os-release.md)
+  holds the fix for the pins of the OS.
 - **A CPE that names another project.** buildroot gives its
   `linux-headers` package the CPE of the Linux kernel, so the record
   in the `bluetoothd` image (written by `image-sbom` from buildroot's

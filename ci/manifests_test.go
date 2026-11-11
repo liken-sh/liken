@@ -274,6 +274,29 @@ func TestAManifestThatBreaksARuleIsFound(t *testing.T) {
 	}
 }
 
+// A release tag or a package version holds more than the upstream's
+// version: k3s tags v1.37.1+k3s1, and Ubuntu packages GRUB 2.14 as
+// 2.14-2ubuntu3. NVD lists each upstream under its own version, so a
+// CPE names that part of the entry's version.
+func TestACPENamesTheEntrysVersionOrItsUpstreamPart(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cpe, version string
+		findings     int
+	}{
+		"the version":                     {"cpe:2.3:o:linux:linux_kernel:7.3.1:*:*:*:*:*:*:*", "7.3.1", 0},
+		"a tag with a v and a build":      {"cpe:2.3:a:k3s:k3s:1.37.1:*:*:*:*:*:*:*", "v1.37.1+k3s1", 0},
+		"a package revision":              {"cpe:2.3:a:gnu:grub2:2.14:*:*:*:*:*:*:*", "2.14-2ubuntu3", 0},
+		"another upstream version":        {"cpe:2.3:a:gnu:grub2:2.12:*:*:*:*:*:*:*", "2.14-2ubuntu3", 1},
+		"a longer version than the entry": {"cpe:2.3:a:k3s:k3s:1.37.10:*:*:*:*:*:*:*", "v1.37.1+k3s1", 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := cpeFindings("pin.toml", "entry", tc.cpe, tc.version); len(got) != tc.findings {
+				t.Errorf("cpeFindings(%q, %q) = %q, want %d findings", tc.cpe, tc.version, got, tc.findings)
+			}
+		})
+	}
+}
+
 func TestAManifestThatDoesNotParseIsAnError(t *testing.T) {
 	_, err := checkManifests(manifestsTree(t, map[string]string{"liken/k3s/pin.toml": "[k3s\n"}))
 	if err == nil {

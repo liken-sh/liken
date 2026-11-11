@@ -113,8 +113,8 @@ own Cluster.
 ## The SBOM
 
 `<version>/sbom.cdx.json` is a CycloneDX SBOM of the release. Give it
-to a scanner such as Trivy or Grype to learn which advisories apply
-to a release before a fleet adopts it. It lists:
+to Grype to learn which advisories apply to a release before a fleet
+adopts it, as [the verify guide](/docs/guides/verify/) shows. It lists:
 
 * each file that the release takes from another project, such as the
   kernel, k3s, and the firmware, with its version, purl, sha256,

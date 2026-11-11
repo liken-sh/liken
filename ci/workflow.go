@@ -56,6 +56,9 @@ var templates = template.Must(template.New("").
 		"trivyUpload": func(image, present string, dry bool) trivyUpload {
 			return trivyUpload{Image: image, Present: present, Dry: dry}
 		},
+		"grypeUpload": func(name string, dry bool) grypeUpload {
+			return grypeUpload{Name: name, Dry: dry}
+		},
 		"join":  strings.Join,
 		"hcl":   hclString,
 		"lines": func(s string) []string { return strings.Split(strings.TrimSpace(s), "\n") },
@@ -64,37 +67,6 @@ var templates = template.Must(template.New("").
 		},
 	}).
 	ParseFS(templateFiles, "templates/*.tmpl"))
-
-// goCache is the data of the go-restore and go-save templates: the
-// go.mod that names the Go version, the files whose hash keys the
-// cache, with `go.sum` first, and the family whose entries a restore
-// falls back to. Build is true when the job keeps a build cache of its
-// own, beside the modules. SavesModules is true when the job saves the
-// family's modules entry.
-type goCache struct {
-	Mod, Family         string
-	Keys                []string
-	Build, SavesModules bool
-}
-
-// HashFiles is the GitHub expression that hashes the key files.
-func (g goCache) HashFiles() string {
-	return hashFiles(g.Keys)
-}
-
-// SumHashFiles is the GitHub expression that hashes `go.sum` alone, the
-// key of the modules entry.
-func (g goCache) SumHashFiles() string {
-	return hashFiles(g.Keys[:1])
-}
-
-func hashFiles(files []string) string {
-	quoted := make([]string, len(files))
-	for i, file := range files {
-		quoted[i] = "'" + file + "'"
-	}
-	return "hashFiles(" + strings.Join(quoted, ", ") + ")"
-}
 
 // Workflows renders every generated workflow, keyed by its path from
 // the repository root.
@@ -105,6 +77,9 @@ func Workflows(root string, components map[string]*Component) (map[string][]byte
 		return nil, err
 	}
 	files[".github/workflows/ci.yaml"] = top
+	if files[scanFile], err = render("scan.yaml.tmpl", scanData(components)); err != nil {
+		return nil, err
+	}
 	for _, c := range sortedComponents(components) {
 		data, err := componentData(root, c)
 		if err != nil {
@@ -151,7 +126,8 @@ type rootComponent struct {
 	Channel, Images, Publishes bool
 	// SecurityEvents is true when a job of the component's workflow
 	// uploads to code scanning: a CodeQL job, or the publish job, which
-	// uploads the Trivy scan of each image it pushes. GitHub checks the
+	// uploads the Trivy scan of each image it pushes or the grype scan
+	// of the release it publishes to the channel. GitHub checks the
 	// permissions of every job in a called workflow against the call,
 	// including a job that the call skips, so both calls grant it.
 	SecurityEvents bool
@@ -180,7 +156,7 @@ func rootData(components map[string]*Component) map[string]any {
 			Channel:      c.Outputs.Channel,
 			Images:       len(c.Outputs.Images) > 0,
 			Publishes:    c.HasOutputs(),
-			SecurityEvents: len(c.Outputs.Images) > 0 ||
+			SecurityEvents: len(c.Outputs.Images) > 0 || c.Outputs.Channel ||
 				slices.ContainsFunc(c.Jobs, func(j Job) bool { return j.Toolchain == "codeql" }),
 		})
 		for _, job := range c.Jobs {
@@ -192,11 +168,6 @@ func rootData(components map[string]*Component) map[string]any {
 			sites = append(sites, site{c.Name(), c.Docs.Prefix})
 		}
 	}
-	// The trivy job restores the modules of the ci module, which the ci
-	// module's go job saves, and keeps no build cache: each of its jobs
-	// scans one image, and the many jobs of one run would each try to
-	// save the same entry.
-	trivyCache := goCache{Mod: "ci/go.mod", Keys: []string{"ci/go.sum"}, Family: "ci"}
 	return map[string]any{"Components": list, "Coverage": coverage, "Sites": sites, "TrivyCache": trivyCache}
 }
 
@@ -374,29 +345,6 @@ func hooksRunGo(root string, c *Component, skip []string) (bool, error) {
 	return false, nil
 }
 
-// jobCache is the Go cache of one job. The repository's Actions cache
-// holds 10 GB, and GitHub evicts the oldest entries when the caches
-// pass that limit, so the downloaded modules are stored once for each
-// module and each `go.sum`, not once for each job and each commit.
-//
-// Every manual reads the same modules, so the hugo jobs share one
-// modules entry, keyed on `go.sum`, and each hugo job saves it when the
-// key misses. Any other job restores the modules entry of its own
-// module, and only the `go` job saves it: that job runs the module's
-// tests, so it reads every module that the other jobs of the module
-// read.
-//
-// Any job other than a hugo job also keeps a build cache of its own.
-// Its key holds the hash of go.sum and of the files that choose what
-// the job compiles and with which flags: the Makefile where the job
-// runs, the component's package.toml, which holds the job's command,
-// and its hooks, which a prek job runs. The key holds no commit, so
-// main saves an entry only when one of those files or the Go version
-// changes. A key with the commit saved an entry of compiled output for
-// each job on each push to main, and those entries filled the 10 GB.
-// The entry holds every dependency compiled, and a run compiles again
-// and tests again only the packages of its module that changed since
-// the entry was saved.
 // shardsName names the matrix job of a sharded job. The name starts
 // with shard- and not with the job's name, because the job's build
 // cache restores every key that begins with its name and a dash
@@ -435,27 +383,6 @@ func shardsOf(d jobData) jobData {
 	shards.Env["SHARDS"] = strconv.Itoa(d.Shards)
 	shards.Artifacts = nil
 	return shards
-}
-
-func jobCache(c *Component, d jobData) goCache {
-	sum := path.Join(d.ModuleDir, "go.sum")
-	if d.Toolchain == "hugo" {
-		return goCache{Mod: path.Join(d.ModuleDir, "go.mod"), Keys: []string{sum}, Family: "manuals", SavesModules: true}
-	}
-	// A CodeQL job restores the modules entry of the go job of the same
-	// module, and keeps no build cache, so the build that CodeQL traces
-	// compiles every package of the module and does not take one from an
-	// earlier build.
-	if d.Toolchain == "codeql" {
-		return goCache{Mod: path.Join(d.ModuleDir, "go.mod"), Keys: []string{sum}, Family: d.ModuleDir}
-	}
-	return goCache{Mod: path.Join(d.ModuleDir, "go.mod"), Family: d.ModuleDir, Build: true,
-		SavesModules: d.Toolchain == "go", Keys: []string{
-			sum,
-			path.Join(d.WorkDir, "Makefile"),
-			path.Join(c.Dir, "package.toml"),
-			path.Join(c.Dir, ".pre-commit-config.yaml"),
-		}}
 }
 
 // WriteWorkflows writes the generated workflows under root, and

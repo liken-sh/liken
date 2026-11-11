@@ -113,12 +113,32 @@ names where it came from, as [the release
 channel](/docs/reference/release-channel/#the-sbom) describes.
 
 `-json` prints the document itself: CycloneDX for a release, and SPDX
-for an image. Save it and give it to a vulnerability scanner, such as
-Trivy or Grype, to learn which advisories apply before you adopt a
-release or deploy an image:
+for an image. Save it and give it to a vulnerability scanner to learn
+which advisories apply before you adopt a release or deploy an image.
+
+Scan a release with Grype. A release takes its kernel, its
+bootloaders, its microcode, and k3s from upstream releases that no
+package database records, so its SBOM names each of them by the CPE
+that NVD lists it under. Grype matches a component by its CPE, and
+Trivy does not, so Trivy reports only the Go modules of a release:
 
     liken sbom -json 2026.11.01-001 >liken-2026.11.01-001.cdx.json
-    trivy sbom liken-2026.11.01-001.cdx.json
+    GRYPE_MATCH_DPKG_USING_CPES=true grype sbom:liken-2026.11.01-001.cdx.json --only-fixed
+
+`GRYPE_MATCH_DPKG_USING_CPES=true` lets Grype match GRUB and
+systemd-boot, which the SBOM names as packages of Ubuntu's archive, by
+their CPEs. `--only-fixed` keeps the findings that a newer version
+fixes. Without it, the report holds many old kernel records that NVD
+gives no upper version, and each of those matches every kernel. Grype
+does not read a component's scope, so it also reports the compiler and
+the host tools of the build, which have the scope `excluded` because
+the release does not ship them. `liken`'s CI runs the same scan on
+each release with those components left out, and the repository's
+[code scanning alerts](https://github.com/liken-sh/liken/security/code-scanning)
+show the findings of the newest release under the category
+`grype/liken`.
+
+Either scanner reads an image's SBOM:
 
     liken sbom -json ghcr.io/liken-sh/bluetoothd:2026.11.01-001 >bluetoothd.spdx.json
     grype sbom:bluetoothd.spdx.json

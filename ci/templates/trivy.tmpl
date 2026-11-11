@@ -53,7 +53,9 @@
   # The repository's Actions cache holds 10 GB, and each entry of the
   # database takes about 140 MB of it. A save deletes every older entry,
   # so the cache holds one at a time. The plan runs this job only when
-  # the run scans an image: ScansImages in ci/rescan.go gives the rule.
+  # the run scans an image: ScansImages in ci/rescan.go gives the rule
+  # of the root workflow, and the scheduled scan runs it when its matrix
+  # names an image.
   trivy-db:
     needs: plan
     if: ${{ needs.plan.outputs.trivy-db == 'true' }}
@@ -105,27 +107,13 @@
             done
 {% end %}
 {% define "trivy-rescan" %}
-  # Trivy scans each published image again when the Trivy configuration
-  # changes. The configuration is two files: ci/trivy.go, which holds
-  # the Trivy version and the arguments of a scan, and
-  # ci/templates/trivy.tmpl, which holds this job, the trivy-db job,
-  # and the steps that install Trivy, restore its database, and upload
-  # each scan. A publish scans only the images that it pushes, so
-  # without this job a new version or a new argument would reach an
-  # image only at its next publish, and the Security tab would show the
-  # results of the old configuration until then. This job pushes
-  # nothing, so a change to the scanner gives no component a new
-  # version, and no cluster that follows the development builds
-  # restarts a pod for it.
-  #
-  # The plan names each image and the version to scan: the newest
-  # release or development build of a tracked component on ghcr.io, and
-  # the published tag of a pinned component. It leaves out each
-  # component that publishes in this run, because that component's
-  # publish job scans the images it pushes. Only a push to main scans
-  # again, when one of the two files changed since the newest main run
-  # that passed, or when every job runs. Planner.Rescan in ci/rescan.go
-  # gives the rule.
+  # The trivy job scans each published image that the plan names,
+  # at the version that the plan names: the newest release or
+  # development build of a tracked component on ghcr.io, and the
+  # published tag of a pinned component. PublishedImages in
+  # ci/rescan.go gives the rule. This job pushes nothing, so a scan
+  # gives no component a new version, and no cluster that follows the
+  # development builds restarts a pod for it.
   #
   # A scan reports and never fails the run, so the job continues on an
   # error, and the run's result does not depend on it.

@@ -346,6 +346,18 @@ set_pin() {
     fi
 }
 
+# cpe_version <version>: print the part of a release tag or a package
+# version that is the upstream's own version: the text after a leading
+# v and before the first + or -. NVD lists k3s v1.37.1+k3s1 as 1.37.1
+# and Ubuntu's GRUB 2.14-2ubuntu3 as 2.14, and a scanner matches a CPE
+# only at the version that NVD's records name. upstreamVersion in
+# ci/manifests.go is the same rule for the check.
+cpe_version() {
+    local version="${1#v}"
+    version="${version%%[+-]*}"
+    echo "$version"
+}
+
 # purl_escape <text>: percent-encode text for the version of a package
 # URL, so the + of v1.37.1+k3s1 reads %2B. jq's @uri keeps the
 # characters that the purl specification leaves bare.

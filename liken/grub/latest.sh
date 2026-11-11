@@ -96,7 +96,8 @@ sources="$(ubuntu_source_files grub2 main "$target")"
 
 echo "$target" >"$here/VERSION"
 set_pin grub-pc-bin "$target" "$pool/grub-pc-bin_${target}_amd64.deb" "$pc_bin" \
-    "$(deb_purl ubuntu grub-pc-bin "$target")"
+    "$(deb_purl ubuntu grub-pc-bin "$target")" \
+    "cpe:2.3:a:gnu:grub2:$(cpe_version "$target"):*:*:*:*:*:*:*"
 set_pin grub2-common "$target" "$pool/grub2-common_${target}_amd64.deb" "$common" \
     "$(deb_purl ubuntu grub2-common "$target")"
 set_ubuntu_source_pins grub2-source grub2 "$target" "$sources"

@@ -100,11 +100,11 @@ modules="$(grep -E '^[0-9a-f]{64}  linux-modules-.*-generic_.*_amd64\.deb$' <<<"
 [[ -n "$image" && -n "$modules" ]] ||
     fail "the CHECKSUMS file of $latest lists no image or no modules package"
 
-# pin_package <entry> <"<sha256>  <file name>">: write one package of
-# the CHECKSUMS file into its entry of pin.toml.
+# pin_package <entry> <"<sha256>  <file name>"> [<cpe>]: write one
+# package of the CHECKSUMS file into its entry of pin.toml.
 pin_package() {
     local digest="${2%% *}" url="${index}v$latest/amd64/${2##* }"
-    set_pin "$1" "$latest" "$url" "$digest" "$(generic_purl "$1" "$latest" "$url" "$digest")"
+    set_pin "$1" "$latest" "$url" "$digest" "$(generic_purl "$1" "$latest" "$url" "$digest")" "${3:-}"
 }
 
 # licensing/sources.sh mirrors kernel.org's tarball of the release as
@@ -117,7 +117,7 @@ source_digest="$("$here/../../trust/keys/kernel-org-digest.sh" \
     "$source_dir/sha256sums.asc" "linux-$latest.tar.xz")"
 
 echo "$latest" >"$here/VERSION"
-pin_package linux-image-unsigned "$image"
+pin_package linux-image-unsigned "$image" "cpe:2.3:o:linux:linux_kernel:$latest:*:*:*:*:*:*:*"
 pin_package linux-modules "$modules"
 set_pin linux-source "$latest" "$source_url" "$source_digest" \
     "$(generic_purl linux "$latest" "$source_url" "$source_digest")"

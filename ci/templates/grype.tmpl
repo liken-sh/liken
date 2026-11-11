@@ -1,0 +1,12 @@
+{% define "grype-upload" %}
+      # The findings go under the category grype/{% .Name %}. Code scanning
+      # closes an alert only when a later upload in the same category no
+      # longer reports it, so the scan of each release replaces the
+      # results of the scan before it. The step runs when the scan wrote
+      # its file.
+      - if: ${{ !cancelled(){% if .Dry %} && !inputs.dryrun{% end %} && hashFiles('grype/{% .Name %}.sarif') != '' }}
+        continue-on-error: true
+        uses: {% action "github/codeql-action/upload-sarif" %}
+        with:
+          sarif_file: grype/{% .Name %}.sarif
+          category: grype/{% .Name %}{% end %}

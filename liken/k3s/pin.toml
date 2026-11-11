@@ -5,9 +5,16 @@
 # The k3s binary. Its license is the k3s repository's LICENSE. The
 # components that k3s compiles in carry their own licenses, and k3s
 # lists them in its release notes.
+#
+# The cpe is the name that a vulnerability scanner matches the entry
+# by, and the type is one that a scanner keeps. NVD lists k3s under
+# the vendor k3s, at the version without the leading v and the +k3s1.
+# k3s/latest.sh --bump writes the cpe with the version.
 [k3s]
-version = "v1.37.1+k3s1"
-url = "https://github.com/k3s-io/k3s/releases/download/v1.37.1%2Bk3s1/k3s"
-sha256 = "92b94582eb7b34a8cf532e6006842b9ed215a6783cf56a3dd6271fd35243b2c0"
-purl = "pkg:github/k3s-io/k3s@v1.37.1%2Bk3s1"
+version = "v1.37.2+k3s1"
+url = "https://github.com/k3s-io/k3s/releases/download/v1.37.2%2Bk3s1/k3s"
+sha256 = "265b3ee6a3198ef14033c63ef46cbb32370d83795199fb6d1b01f21575eddbda"
+purl = "pkg:github/k3s-io/k3s@v1.37.2%2Bk3s1"
 license = "Apache-2.0"
+type = "application"
+cpe = "cpe:2.3:a:k3s:k3s:1.37.2:*:*:*:*:*:*:*"

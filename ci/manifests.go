@@ -356,15 +356,34 @@ func mirrorFindings(text string) []string {
 // not a CPE 2.3 formatted string of 13 parts, or a version other than
 // the entry's. A CPE quotes some characters with a backslash, which
 // the comparison removes.
+//
+// NVD lists an upstream under the upstream's own version, and an
+// entry's version can hold more: the tag v1.37.1+k3s1 is k3s 1.37.1,
+// and Ubuntu's package 2.14-2ubuntu3 is GRUB 2.14. So a CPE names the
+// entry's version or the upstream part of it, which upstreamVersion
+// gives. A scanner compares a CPE's version with the ranges of NVD's
+// records, and it matches none of them at v1.37.1+k3s1.
 func cpeFindings(manifest, name, cpe, version string) []string {
 	parts := strings.Split(cpe, ":")
 	if len(parts) != 13 || parts[0] != "cpe" || parts[1] != "2.3" {
 		return []string{fmt.Sprintf("%s: [%s] has the CPE %q, which is not a CPE 2.3 name of 13 parts", manifest, name, cpe)}
 	}
-	if got := strings.ReplaceAll(parts[5], `\`, ""); got != version {
+	if got := strings.ReplaceAll(parts[5], `\`, ""); got != version && got != upstreamVersion(version) {
 		return []string{fmt.Sprintf("%s: [%s] has a CPE at %s, and its version is %s", manifest, name, got, version)}
 	}
 	return nil
+}
+
+// upstreamVersion is the part of a release tag or a package version
+// that is the upstream's own version: the text after a leading v and
+// before the first + or -. cpe_version in toolchains/pin.sh is the same
+// rule for a bump.
+func upstreamVersion(version string) string {
+	version = strings.TrimPrefix(version, "v")
+	if i := strings.IndexAny(version, "+-"); i >= 0 {
+		version = version[:i]
+	}
+	return version
 }
 
 // imageFindings lists each ADD of a Dockerfile that fetches a URL by

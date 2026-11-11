@@ -1,0 +1,426 @@
+# This file is generated. Do not edit it: edit the templates in
+# ci/templates/, then run `make workflows` at the top of the
+# repository. The root workflow's graph job fails when this file
+# differs from what the generator writes.
+#
+# This workflow scans what the repository has already published: each
+# image on ghcr.io with Trivy, at the version that a cluster pulls, and
+# the SBOM of the newest OS release on the channel with grype. A
+# publish scans what it pushes, so the Security tab holds the findings
+# of each image and release on the day that it was published. A
+# vulnerability that a database records after that day reaches the
+# Security tab only at the next scan. Each scan here uploads under the
+# category that the publish uploads under, so its findings replace the
+# findings of the scan before it.
+#
+# Nothing builds or pushes, so no component gets a new version, and no
+# cluster restarts a pod for a scan. A scan reports and never gates:
+# a finding or a failed scan leaves the run green.
+name: scan
+
+on:
+  # The vulnerability databases publish no event that a workflow can
+  # subscribe to, so a timer starts the scan. The timer is a backstop
+  # for one failure: without it, a vulnerability that NVD, GitHub, or a
+  # distribution records after an image or a release was published
+  # stays out of the Security tab until that component publishes again.
+  # The scan runs at 04:43 UTC on every third day of the month, the
+  # 1st, the 4th, and so on to the 31st, so two runs are one to three
+  # days apart. GitHub's load is highest at the start of each hour, and
+  # a scheduled run can then start late or not at all, so the minute is
+  # off the hour.
+  schedule:
+    - cron: "43 4 */3 * *"
+  # A run by hand scans at once, as after a published vulnerability
+  # that needs an answer before the next run.
+  workflow_dispatch:
+
+# Two runs at once would upload the same categories in either order.
+concurrency:
+  group: scan
+
+permissions:
+  contents: read
+
+# The same value as the root workflow's, for the same reason: `go`
+# fetches a module from its origin after any error of the proxy.
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
+jobs:
+  # The plan names each published image and its version, and the newest
+  # OS release on the channel. `ci scans` in ci/scans.go gives the
+  # rule. It reads ghcr.io and the channel without a token, as the root
+  # workflow's plan does.
+  plan:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      trivy: ${{ steps.plan.outputs.trivy }}
+      trivy-db: ${{ steps.plan.outputs.trivy-db }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: setup-go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ci/go.mod
+          cache: false
+
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #
+      # The downloaded modules are one entry for each Go module, which
+      # every job of the module restores. The key follows the hash of
+      # `go.sum` alone, so the entry changes only when `go.sum` changes,
+      # and a push to main that does not change `go.sum` saves no
+      # modules. The
+      # module's `go` job saves the entry, because it runs the module's
+      # tests and reads every module that this job reads.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same module, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ hashFiles('ci/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-
+
+      # The build cache holds Go's test results and the compiled
+      # packages of the dependencies and of the job's own module. The
+      # key holds the Go version and the hash of these files:
+      #
+      #   ci/go.sum
+      #
+      # The key holds no commit, so main saves an entry only when one
+      # of these inputs changes, and the entry stays until the next
+      # change. A key that held the commit saved a new entry of several
+      # hundred megabytes for each job on each push to main, and those
+      # entries filled the repository's 10 GB. A run restores the entry
+      # of its inputs, which holds every dependency compiled. The
+      # packages of the module that changed since that entry compile
+      # again, and their tests run again.
+      #
+      # When no entry has the key, as on a branch that changes one of
+      # the files, the restore takes the newest entry of the same job.
+      # Each job has entries of its own: a job that builds less would
+      # save an entry without the packages that the other job
+      # compiles, and the other job would restore it and compile them
+      # again.
+      - id: go-build
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
+
+      - id: plan
+        working-directory: ci
+        run: go run . scans -root ..
+
+  # Each scan needs Trivy's vulnerability database, about 140 MB to
+  # download and 1.7 GB on disk. Trivy builds it every 6 hours, and the
+  # database's metadata says it is current for 24 hours. A run can scan
+  # dozens of images, in the trivy job's matrix and in each publish job,
+  # and a download in each of them would meet the registry's rate limit.
+  # So this job downloads the database once a day, and saves it to the
+  # Actions cache under trivy-db-<day>. The trivy job and each publish
+  # job that scans wait for this job, and restore the newest entry.
+  #
+  # Trivy reads the metadata of the restored database, and it downloads
+  # nothing while the database is current. When a restore fails, or
+  # restores a database that is no longer current, Trivy downloads its
+  # own, so a scan never depends on this job. Every step continues on
+  # an error, and the job never fails the run.
+  #
+  # The repository's Actions cache holds 10 GB, and each entry of the
+  # database takes about 140 MB of it. A save deletes every older entry,
+  # so the cache holds one at a time. The plan runs this job only when
+  # the run scans an image: ScansImages in ci/rescan.go gives the rule
+  # of the root workflow, and the scheduled scan runs it when its matrix
+  # names an image.
+  trivy-db:
+    needs: plan
+    if: ${{ needs.plan.outputs.trivy-db == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    # actions: write deletes the older entries of the cache.
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - id: day
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      # The lookup reads only whether today's entry exists, and
+      # downloads nothing.
+      - id: lookup
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy/db
+          key: trivy-db-${{ steps.day.outputs.day }}
+          lookup-only: true
+
+      # Trivy installs only when today's entry is missing.
+      # The step installs Trivy from its release archive, and checks the
+      # archive against trivySHA256 in ci/trivy.go before it unpacks the
+      # binary, so a release that changed after the bump fails here.
+      - if: ${{ steps.lookup.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        env:
+          TRIVY_VERSION: 0.76.1
+          TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+        run: |
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/$archive"
+          echo "$TRIVY_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict -
+          mkdir -p "$RUNNER_TEMP/trivy-bin"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/trivy-bin" trivy
+          echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
+
+      # Trivy writes the database under ~/.cache/trivy, the directory
+      # that every scan reads by default.
+      - id: download
+        if: ${{ steps.lookup.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        run: trivy image --download-db-only --cache-dir ~/.cache/trivy
+
+      - if: ${{ steps.download.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy/db
+          key: trivy-db-${{ steps.day.outputs.day }}
+
+      - if: ${{ steps.download.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: trivy-db-${{ steps.day.outputs.day }}
+        run: |
+          gh cache list --repo "$GITHUB_REPOSITORY" --key trivy-db- --limit 100 --json key --jq '.[].key' |
+            sort -u | { grep -vx "$KEEP" || true; } | while read -r key; do
+              gh cache delete "$key" --repo "$GITHUB_REPOSITORY"
+            done
+
+  # The trivy job scans each published image that the plan names,
+  # at the version that the plan names: the newest release or
+  # development build of a tracked component on ghcr.io, and the
+  # published tag of a pinned component. PublishedImages in
+  # ci/rescan.go gives the rule. This job pushes nothing, so a scan
+  # gives no component a new version, and no cluster that follows the
+  # development builds restarts a pod for it.
+  #
+  # A scan reports and never fails the run, so the job continues on an
+  # error, and the run's result does not depend on it.
+  trivy:
+    name: trivy ${{ matrix.image }}
+    needs: [plan, trivy-db]
+    if: ${{ !cancelled() && fromJSON(needs.plan.outputs.trivy)[0] != null }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    continue-on-error: true
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.trivy) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: setup-go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ci/go.mod
+          cache: false
+
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #
+      # The downloaded modules are the entry of the module `ci`,
+      # whose `go` job saves it. This job keeps no build cache.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same family, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ hashFiles('ci/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-
+
+      # The scan reads the image from ghcr.io. The login lets it read a
+      # package that is not public, and a login that fails leaves the
+      # scan to read the image without one.
+      - continue-on-error: true
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # The database that the trivy-db job saved.
+      - id: trivy-day
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy/db
+          key: trivy-db-${{ steps.trivy-day.outputs.day }}
+          restore-keys: trivy-db-
+
+      # A scan reports and does not gate. An install that fails here
+      # makes the scan fail, and the scan prints a warning and the job
+      # goes on.
+      # The step installs Trivy from its release archive, and checks the
+      # archive against trivySHA256 in ci/trivy.go before it unpacks the
+      # binary, so a release that changed after the bump fails here.
+      - continue-on-error: true
+        env:
+          TRIVY_VERSION: 0.76.1
+          TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+        run: |
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/$archive"
+          echo "$TRIVY_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict -
+          mkdir -p "$RUNNER_TEMP/trivy-bin"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/trivy-bin" trivy
+          echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
+
+      - name: scan
+        working-directory: ci
+        env:
+          IMAGE: ${{ matrix.image }}
+          VERSION: ${{ matrix.version }}
+        run: go run . scan -root .. -image "$IMAGE" -version "$VERSION" -sarif "${{ github.workspace }}/trivy"
+
+      # The upload goes under the category that the image's publish
+      # uploads under, so it replaces the results of the image's last
+      # scan. The step runs when the scan wrote its file.
+      - if: ${{ !cancelled() && hashFiles('trivy/*.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy/${{ matrix.image }}.sarif
+          category: trivy/${{ matrix.image }}
+
+  # The OS publishes no image, so Trivy has nothing to scan. grype
+  # matches the packages of the release's CycloneDX SBOM against the
+  # vulnerability databases, by the CPE and the package URL of each
+  # component. releases/sbom/vulnerabilities.sh gives the details.
+  #
+  # The toolkit, built from this commit, downloads release.yaml and the
+  # SBOM, and checks the Sigstore bundle of each against the signer of
+  # the OS's publish job at a release tag, and the SBOM against the
+  # digest that release.yaml names. So the scan reads the SBOM that the
+  # release published, and a changed file on the channel fails the job.
+  # A scan reports and never fails the run, so the job continues on an
+  # error.
+  liken:
+    needs: plan
+    if: ${{ needs.plan.outputs.release != '' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: setup-go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: liken/go.mod
+          cache: false
+
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #
+      # The downloaded modules are the entry of the module `liken`,
+      # whose `go` job saves it. This job keeps no build cache.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same family, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-${{ hashFiles('liken/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-liken-
+
+      - name: fetch the release's SBOM
+        working-directory: liken
+        env:
+          VERSION: ${{ needs.plan.outputs.release }}
+        run: |
+          mkdir -p "${{ github.workspace }}/grype"
+          go run ./cli sbom -json "$VERSION" > "${{ github.workspace }}/grype/sbom.cdx.json"
+
+      # grype runs from the image that toolchains/images.toml pins, and
+      # downloads its database on each run.
+      - name: scan the SBOM
+        working-directory: liken
+        run: releases/sbom/vulnerabilities.sh "${{ github.workspace }}/grype/sbom.cdx.json" "${{ github.workspace }}/grype/liken.sarif"
+
+      # The findings go under the category grype/liken. Code scanning
+      # closes an alert only when a later upload in the same category no
+      # longer reports it, so the scan of each release replaces the
+      # results of the scan before it. The step runs when the scan wrote
+      # its file.
+      - if: ${{ !cancelled() && hashFiles('grype/liken.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: grype/liken.sarif
+          category: grype/liken

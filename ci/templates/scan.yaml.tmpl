@@ -1,0 +1,111 @@
+# This file is generated. Do not edit it: edit the templates in
+# ci/templates/, then run `make workflows` at the top of the
+# repository. The root workflow's graph job fails when this file
+# differs from what the generator writes.
+#
+# This workflow scans what the repository has already published: each
+# image on ghcr.io with Trivy, at the version that a cluster pulls, and
+# the SBOM of the newest OS release on the channel with grype. A
+# publish scans what it pushes, so the Security tab holds the findings
+# of each image and release on the day that it was published. A
+# vulnerability that a database records after that day reaches the
+# Security tab only at the next scan. Each scan here uploads under the
+# category that the publish uploads under, so its findings replace the
+# findings of the scan before it.
+#
+# Nothing builds or pushes, so no component gets a new version, and no
+# cluster restarts a pod for a scan. A scan reports and never gates:
+# a finding or a failed scan leaves the run green.
+name: scan
+
+on:
+  # The vulnerability databases publish no event that a workflow can
+  # subscribe to, so a timer starts the scan. The timer is a backstop
+  # for one failure: without it, a vulnerability that NVD, GitHub, or a
+  # distribution records after an image or a release was published
+  # stays out of the Security tab until that component publishes again.
+  # The scan runs at 04:43 UTC on every third day of the month, the
+  # 1st, the 4th, and so on to the 31st, so two runs are one to three
+  # days apart. GitHub's load is highest at the start of each hour, and
+  # a scheduled run can then start late or not at all, so the minute is
+  # off the hour.
+  schedule:
+    - cron: "43 4 */3 * *"
+  # A run by hand scans at once, as after a published vulnerability
+  # that needs an answer before the next run.
+  workflow_dispatch:
+
+# Two runs at once would upload the same categories in either order.
+concurrency:
+  group: scan
+
+permissions:
+  contents: read
+
+# The same value as the root workflow's, for the same reason: `go`
+# fetches a module from its origin after any error of the proxy.
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
+jobs:
+  # The plan names each published image and its version, and the newest
+  # OS release on the channel. `ci scans` in ci/scans.go gives the
+  # rule. It reads ghcr.io and the channel without a token, as the root
+  # workflow's plan does.
+  plan:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      trivy: ${{ steps.plan.outputs.trivy }}
+      trivy-db: ${{ steps.plan.outputs.trivy-db }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - uses: {% action "actions/checkout" %}
+{% template "go-restore" (goCache "ci/go.mod" "ci/go.sum" "ci" true) %}
+
+      - id: plan
+        working-directory: ci
+        run: go run . scans -root ..
+{% template "trivy-db" %}{% template "trivy-rescan" .TrivyCache %}{% with .Channel %}
+  # The OS publishes no image, so Trivy has nothing to scan. grype
+  # matches the packages of the release's CycloneDX SBOM against the
+  # vulnerability databases, by the CPE and the package URL of each
+  # component. releases/sbom/vulnerabilities.sh gives the details.
+  #
+  # The toolkit, built from this commit, downloads release.yaml and the
+  # SBOM, and checks the Sigstore bundle of each against the signer of
+  # the OS's publish job at a release tag, and the SBOM against the
+  # digest that release.yaml names. So the scan reads the SBOM that the
+  # release published, and a changed file on the channel fails the job.
+  # A scan reports and never fails the run, so the job continues on an
+  # error.
+  {% .Name %}:
+    needs: plan
+    if: ${{ needs.plan.outputs.release != '' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    continue-on-error: true
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: {% action "actions/checkout" %}
+{% template "go-restore" .Cache %}
+
+      - name: fetch the release's SBOM
+        working-directory: {% .Dir %}
+        env:
+          VERSION: ${{ needs.plan.outputs.release }}
+        run: |
+          mkdir -p "${{ github.workspace }}/grype"
+          go run ./cli sbom -json "$VERSION" > "${{ github.workspace }}/grype/sbom.cdx.json"
+
+      # grype runs from the image that toolchains/images.toml pins, and
+      # downloads its database on each run.
+      - name: scan the SBOM
+        working-directory: {% .Dir %}
+        run: releases/sbom/vulnerabilities.sh "${{ github.workspace }}/grype/sbom.cdx.json" "${{ github.workspace }}/grype/{% .Name %}.sarif"
+{% template "grype-upload" (grypeUpload .Name false) %}
+{% end %}

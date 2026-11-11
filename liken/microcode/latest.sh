@@ -48,7 +48,8 @@ digest="$(digest_of_url "$url")"
 
 echo "$latest" >"$here/VERSION"
 set_pin intel-microcode "$latest" "$url" "$digest" \
-    "$(github_purl intel/Intel-Linux-Processor-Microcode-Data-Files "microcode-$latest")"
+    "$(github_purl intel/Intel-Linux-Processor-Microcode-Data-Files "microcode-$latest")" \
+    "cpe:2.3:o:intel:microcode:$latest:*:*:*:*:*:*:*"
 bumped microcode "$pinned" "$latest"
 echo "the digest came from this download; nothing upstream signs it"
 next_step "make -C .. microcode"

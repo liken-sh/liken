@@ -466,7 +466,9 @@ A pod with `hostUsers: false` cannot open these nodes, because the
 runtime mounts the machine's own node, mode `0600`, into a user
 namespace. The
 [device reference](/docs/reference/devices/#virtualization-devices)
-gives the detail, and how each pod gets vsock addresses of its own.
+gives the detail, how each pod gets vsock addresses of its own, and
+why a pod that opens a vsock socket to its guest must not run under
+the `RuntimeDefault` seccomp profile.
 
 ## When a claim does not schedule
 
