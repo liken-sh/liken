@@ -32,3 +32,6 @@ any work still unbuilt becomes a new plan or an open problem.
 [`open-problems/`](open-problems/) holds the questions this operator
 owes an answer to. Those documents have no number, because nobody has
 decided yet what work they become.
+
+[`open-problems/`](open-problems/) holds the unresolved bugs and design
+questions.
