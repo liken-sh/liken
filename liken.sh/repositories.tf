@@ -9,10 +9,6 @@
 # always match by name.
 # The zone's records for the sites are in terraform.tf, so the DNS
 # half and the Pages half of every site read from the same directory.
-# The archived repositories keep their Pages sites and their custom
-# domains, because GitHub refuses every change to an archived
-# repository. The zone has no records for those names, so their Pages
-# sites answer only at the github.io address.
 #
 # One thing stays outside this file on purpose. GitHub issues and
 # renews each Pages certificate on its own, so there is nothing to
@@ -24,84 +20,16 @@ locals {
   # the resource below builds the pages block and the homepage link
   # from it. A repository with no site states its homepage directly, or
   # none at all.
-  #
-  # An archived repository moved into liken as a directory of the same
-  # name, with its history. It stays in this map because it still
-  # exists, read-only, with its Pages site. The zone has no record for
-  # the site's old name, so the site answers only at the github.io
-  # address. GitHub refuses every change to an archived repository, so
-  # its entry must not change after the archive.
   repositories = {
     liken = {
       description = "Linux + Kubernetes"
       cname       = "liken.sh"
       topics      = ["liken", "kubernetes", "k3s", "linux", "linux-distribution", "dynamic-resource-allocation"]
     }
-    audio-operator = {
-      description = "Publishes audio outputs as DRA devices on liken clusters"
-      cname       = "audio.liken.sh"
-      topics      = ["liken", "kubernetes", "kubernetes-operator", "dynamic-resource-allocation", "audio", "pipewire"]
-      archived    = true
-    }
-    display-operator = {
-      description = "Publishes monitor outputs as DRA devices on liken clusters"
-      cname       = "display.liken.sh"
-      topics      = ["liken", "kubernetes", "kubernetes-operator", "dynamic-resource-allocation", "drm", "ddc"]
-      archived    = true
-    }
-    bluetooth-operator = {
-      description = "Publishes paired Bluetooth controllers as DRA devices on liken clusters"
-      cname       = "bluetooth.liken.sh"
-      topics      = ["liken", "kubernetes", "kubernetes-operator", "dynamic-resource-allocation", "bluetooth", "bluez"]
-      archived    = true
-    }
-    media-operator = {
-      description = "Routing and control of media playback on liken clusters"
-      cname       = "media.liken.sh"
-      topics      = ["liken", "kubernetes", "kubernetes-operator", "dynamic-resource-allocation", "mqtt", "mpv", "media"]
-      archived    = true
-    }
-    library-operator = {
-      description = "Media libraries, their catalog, and a browser for every screen on liken clusters"
-      cname       = "library.liken.sh"
-      topics      = ["liken", "kubernetes", "kubernetes-operator", "media", "sqlite", "corrosion", "iced"]
-      archived    = true
-    }
-    git-csi-driver = {
-      description = "Mounts git repositories as volumes on liken clusters"
-      cname       = "git.liken.sh"
-      topics      = ["liken", "kubernetes", "csi", "csi-driver", "git"]
-      archived    = true
-    }
-    people-operator = {
-      description = "People as a fact of liken clusters: the Person CRD"
-      cname       = "people.liken.sh"
-      topics      = ["liken", "kubernetes", "crd", "identity"]
-      archived    = true
-    }
-    per-node-csi-driver = {
-      description = "Volumes with one copy on every node, for replicated stores and caches on liken clusters"
-      cname       = "per-node.liken.sh"
-      topics      = ["liken", "kubernetes", "csi", "csi-driver", "storage"]
-      archived    = true
-    }
-    equipment-operator = {
-      description = "Receivers and other A/V equipment on the network, as resources of liken clusters"
-      cname       = "equipment.liken.sh"
-      topics      = ["liken", "kubernetes", "kubernetes-operator", "denon", "home-theater"]
-      archived    = true
-    }
     log = {
       description = "The liken devlog"
       cname       = "log.liken.sh"
       topics      = ["liken", "devlog"]
-    }
-    brand = {
-      description = "The liken brand assets"
-      cname       = null
-      homepage    = "https://liken.sh"
-      topics      = ["liken", "hugo-theme"]
-      archived    = true
     }
     liken-dev-cluster = {
       description = "Dev fleet repository for liken GitOps drills"
@@ -135,7 +63,7 @@ locals {
 locals {
   merge_defaults = {
     for name, repo in local.repositories :
-    name => lookup(repo, "archived", false) || lookup(repo, "merge_defaults", false)
+    name => lookup(repo, "merge_defaults", false)
   }
 }
 
@@ -152,8 +80,6 @@ resource "github_repository" "repositories" {
 
   topics = each.value.topics
 
-  archived = lookup(each.value, "archived", false)
-
   # The settings every repository shares, stated so an apply never
   # writes a provider default over a value someone chose.
   has_issues                  = lookup(each.value, "has_issues", true)
@@ -169,10 +95,8 @@ resource "github_repository" "repositories" {
 
   # A squash merge takes the pull request's title and body as its
   # commit message, and a pull request offers to update its branch
-  # from the base. An archived repository keeps GitHub's defaults,
-  # the values it had when it was archived, because GitHub refuses
-  # every change to it. merge_defaults keeps them on a repository that
-  # is not archived.
+  # from the base. merge_defaults keeps GitHub's defaults on a
+  # repository that asks for them.
   allow_update_branch         = !local.merge_defaults[each.key]
   squash_merge_commit_title   = local.merge_defaults[each.key] ? "COMMIT_OR_PR_TITLE" : "PR_TITLE"
   squash_merge_commit_message = local.merge_defaults[each.key] ? "COMMIT_MESSAGES" : "PR_BODY"
