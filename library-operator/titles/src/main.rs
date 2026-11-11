@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -9,7 +10,7 @@ const USAGE: &str = "usage:
 
   titles train --labels FILE --out FILE [--records DIR] [--placements FILE] [--threads N]
                          [--trees N]
-  titles place <video>... --model FILE [--records DIR] [--credits FILE]
+  titles place <video>... --model FILE [--records DIR] [--credits FILE] [--marks FILE]
 
 read decodes the last --window seconds of each video (900 by default), and writes the text it
 finds in each second to .liken/titles/<video>.jsonl beside the video. --records names a
@@ -23,7 +24,9 @@ writes the model to --out. --placements names a file for the placement of each o
 place prints, for each video, the second its end titles start and how sure the model is, as a
 line of JSON. The videos of one folder are placed together, with the usual length of the
 folder's end titles as a prior. The names of a video's people come from the .liken/credits.yaml
-of its folder or of the folder above it, or from the file --credits names.
+of its folder or of the folder above it, or from the file --credits names. --marks names a file
+of the labels' form. A video in it takes its mark as a prior, so the picture sets the second
+where the two agree and overrules the mark where they do not.
 
 --models defaults to $TITLES_MODELS. --device defaults to auto, which takes an Intel GPU when
 OpenVINO finds one. --threads sets the CPU's inference threads and defaults to 1.";
@@ -124,7 +127,24 @@ fn run() -> Result<(), Error> {
                 .path("model")
                 .ok_or("name the model file with --model")?;
             let (records, credits) = (args.path("records"), args.path("credits"));
-            for answer in place::run(&args.paths, &model, records.as_deref(), credits.as_deref())? {
+            let marks = match args.path("marks") {
+                Some(file) => {
+                    let text = std::fs::read_to_string(&file)
+                        .map_err(|e| format!("{}: {e}", file.display()))?;
+                    train::labels(&text)?
+                        .into_iter()
+                        .map(|label| (label.video, label.start))
+                        .collect()
+                }
+                None => HashMap::new(),
+            };
+            for answer in place::run(
+                &args.paths,
+                &model,
+                records.as_deref(),
+                credits.as_deref(),
+                &marks,
+            )? {
                 println!("{}", serde_json::to_string(&answer)?);
             }
         }

@@ -16,7 +16,7 @@
 // few seconds, and possibly nowhere near it. The floor is what keeps a
 // wrong opinion from overruling the picture: however far the start is
 // from the center, the prior costs it a fixed amount and no more.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Prior {
     pub center: f64,
 }
@@ -59,11 +59,17 @@ const NEAR: usize = 5;
 // about the number of seconds that share their evidence. `train` chooses
 // the temperature that makes the confidence match how often the placement
 // is right.
+//
+// `lag` is how many seconds the best split is behind the true start, which
+// `train` measures too. The model answers "started" a second or two after
+// the first line of text is on screen, and the titles start at the cut
+// before it. Each candidate's time is earlier by the lag.
 pub fn place(
     times: &[f64],
     probabilities: &[f32],
     temperature: f64,
-    prior: Option<Prior>,
+    lag: f64,
+    priors: &[Prior],
 ) -> Placement {
     let count = times.len();
     if count == 0 {
@@ -83,17 +89,19 @@ pub fn place(
     }
     let span = count as f64;
     let end = times[count - 1] + 1.0;
+    let time_of = |candidate: usize| {
+        if candidate < count {
+            times[candidate] - lag
+        } else {
+            end
+        }
+    };
     let mut scores = Vec::with_capacity(count + 1);
     let mut before = 0f64;
     for candidate in 0..=count {
-        let time = if candidate < count {
-            times[candidate]
-        } else {
-            end
-        };
         let mut score = (before + after[candidate]) / temperature;
-        if let Some(prior) = prior {
-            score += prior.log(time, span);
+        for prior in priors {
+            score += prior.log(time_of(candidate), span);
         }
         scores.push(score);
         if candidate < count {
@@ -111,7 +119,7 @@ pub fn place(
         .iter()
         .sum();
     Placement {
-        start: (best < count).then(|| times[best]),
+        start: (best < count).then(|| time_of(best)),
         confidence: near / weights.iter().sum::<f64>(),
     }
 }
@@ -140,39 +148,65 @@ mod tests {
 
     #[test]
     fn place_finds_the_step() {
-        let placed = place(&seconds(60), &answers(60, 40, &[]), 1.0, None);
+        let placed = place(&seconds(60), &answers(60, 40, &[]), 1.0, 0.0, &[]);
         assert_eq!(placed.start, Some(140.0));
         assert!(placed.confidence > 0.99);
     }
 
     #[test]
     fn place_is_not_moved_by_a_few_wrong_seconds() {
-        let placed = place(&seconds(60), &answers(60, 40, &[5, 6, 20, 50]), 1.0, None);
+        let placed = place(
+            &seconds(60),
+            &answers(60, 40, &[5, 6, 20, 50]),
+            1.0,
+            0.0,
+            &[],
+        );
         assert_eq!(placed.start, Some(140.0));
     }
 
     #[test]
     fn place_finds_no_titles_in_a_reading_of_story() {
-        let placed = place(&seconds(60), &answers(60, 60, &[]), 1.0, None);
+        let placed = place(&seconds(60), &answers(60, 60, &[]), 1.0, 0.0, &[]);
         assert_eq!(placed.start, None);
     }
 
     #[test]
     fn place_is_unsure_of_a_slow_change() {
         let slow: Vec<f32> = (0..60).map(|i| 0.3 + 0.4 * i as f32 / 59.0).collect();
-        let sure = place(&seconds(60), &answers(60, 30, &[]), 4.0, None);
-        let unsure = place(&seconds(60), &slow, 4.0, None);
+        let sure = place(&seconds(60), &answers(60, 30, &[]), 4.0, 0.0, &[]);
+        let unsure = place(&seconds(60), &slow, 4.0, 0.0, &[]);
         assert!(unsure.confidence < 0.5 && sure.confidence > 0.9);
     }
 
     #[test]
+    fn place_takes_the_lag_from_the_start() {
+        let placed = place(&seconds(60), &answers(60, 40, &[]), 1.0, 2.5, &[]);
+        assert_eq!(placed.start, Some(137.5));
+    }
+
+    #[test]
+    fn two_priors_that_agree_outweigh_the_picture_less_than_they_differ() {
+        let priors = [Prior { center: 125.0 }, Prior { center: 150.0 }];
+        let mut unsure = answers(60, 30, &[]);
+        unsure[20..55].fill(0.5);
+        let placed = place(&seconds(60), &unsure, 1.0, 0.0, &priors[..1]);
+        assert_eq!(placed.start, Some(125.0));
+        let placed = place(&seconds(60), &unsure, 1.0, 0.0, &[priors[1], priors[1]]);
+        assert_eq!(placed.start, Some(150.0));
+    }
+
+    #[test]
     fn a_prior_moves_an_unsure_placement_and_not_a_sure_one() {
-        let prior = Some(Prior { center: 145.0 });
+        let prior = [Prior { center: 145.0 }];
         let mut unsure = answers(60, 30, &[]);
         unsure[30..50].fill(0.5);
-        assert_eq!(place(&seconds(60), &unsure, 1.0, prior).start, Some(145.0));
         assert_eq!(
-            place(&seconds(60), &answers(60, 20, &[]), 1.0, prior).start,
+            place(&seconds(60), &unsure, 1.0, 0.0, &prior).start,
+            Some(145.0)
+        );
+        assert_eq!(
+            place(&seconds(60), &answers(60, 20, &[]), 1.0, 0.0, &prior).start,
             Some(120.0)
         );
     }
