@@ -27,8 +27,8 @@
 #                   computes the digest from its own download.
 #   e2fsprogs,      kernel.org's checksum autosigner clearsigns the
 #   nfs-utils,      sha256sums.asc file of each release directory, and
-#   kmod, bluez     trust/keys/kernel-org-digest.sh verifies it before
-#                   it prints the digest.
+#   util-linux,     trust/keys/kernel-org-digest.sh verifies it before
+#   kmod, bluez     it prints the digest.
 #   open-iscsi      Nothing upstream checksums a GitHub source archive,
 #                   so the bump computes the digest from its own
 #                   download.
@@ -71,10 +71,11 @@ versions="$here/versions.mk"
 # packages of this tree's own recipes, under iscsi/ and bluetooth/,
 # hold their version in their recipe. Every other package takes the
 # version of buildroot's recipe, or the one that versions.mk sets.
-programs=(e2fsprogs nfs-utils open-iscsi kmod wpa-supplicant tzdata bluez dbus)
+programs=(e2fsprogs nfs-utils util-linux open-iscsi kmod wpa-supplicant tzdata bluez dbus)
 declare -A package=(
     [e2fsprogs]=e2fsprogs
     [nfs-utils]=nfs-utils
+    [util-linux]=util-linux
     [open-iscsi]=open-iscsi-static
     [kmod]=libkmod-static
     [wpa-supplicant]=wpa_supplicant
@@ -90,10 +91,17 @@ dockerfile="$here/../../bluetooth-operator/bluetoothd/Dockerfile"
 variable() { echo "$1" | tr '[:lower:]-' '[:upper:]_' | sed 's/$/_VERSION/'; }
 
 # recipe_version <commit> <package> prints the version that buildroot's
-# recipe names at a commit.
+# recipe names at a commit. The recipe of util-linux names its series
+# in a variable of its own, UTIL_LINUX_VERSION_MAJOR, and writes the
+# version as $(UTIL_LINUX_VERSION_MAJOR).5, so the function puts the
+# series in place of that reference.
 recipe_version() {
-    fetch_text "https://raw.githubusercontent.com/buildroot/buildroot/$1/package/$2/$2.mk" |
-        sed -n "s/^$(variable "$2") = \([^ ]*\)$/\1/p"
+    local mk var version major
+    mk="$(fetch_text "https://raw.githubusercontent.com/buildroot/buildroot/$1/package/$2/$2.mk")" || return
+    var="$(variable "$2")"
+    version="$(sed -n "s/^$var = \([^ ]*\)$/\1/p" <<<"$mk")"
+    major="$(sed -n "s/^${var}_MAJOR = \([^ ]*\)$/\1/p" <<<"$mk")"
+    echo "${version/\$(${var}_MAJOR)/$major}"
 }
 
 # recipe_of <package> prints the path of this tree's recipe of the
@@ -126,6 +134,17 @@ upstream() {
         fetch_text "https://www.kernel.org/pub/linux/utils/nfs-utils/" |
             grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' |
             sed -e 's|href="||' -e 's|/"$||' | sort -V | tail -1
+        ;;
+    util-linux)
+        # kernel.org keeps one directory for each series, named
+        # v<series>, and a release candidate's name ends in -rc<n>.
+        local series
+        series="$(fetch_text "https://www.kernel.org/pub/linux/utils/util-linux/" |
+            grep -oE 'href="v[0-9]+\.[0-9]+/"' |
+            sed -e 's|href="v||' -e 's|/"$||' | sort -V | tail -1)"
+        fetch_text "https://www.kernel.org/pub/linux/utils/util-linux/v$series/" |
+            grep -oE 'util-linux-[0-9]+(\.[0-9]+)+\.tar\.xz' |
+            sed -e 's|^util-linux-||' -e 's|\.tar\.xz$||' | sort -uV | tail -1
         ;;
     wpa-supplicant)
         # hostap publishes one tarball for each release in one directory.
@@ -236,7 +255,7 @@ drop_overrides() {
         recipe="$(recipe_version "$(cat "$here/VERSION")" "$pkg")"
         [[ -n "$recipe" ]] || fail "buildroot has no recipe for $pkg"
         if [[ "$(printf '%s\n%s\n' "$version" "$recipe" | sort -V | tail -1)" == "$recipe" ]]; then
-            grep -v "^override $(variable "$pkg") = " "$versions" >"$versions.pin"
+            grep -vE "^override $(variable "$pkg")(_MAJOR)? = " "$versions" >"$versions.pin"
             cat "$versions.pin" >"$versions"
             rm "$versions.pin"
             rm -rf "${here:?}/patches/$pkg/$version"
@@ -290,6 +309,27 @@ e2fsprogs | nfs-utils)
     bumped "$program" "${used[$program]}" "$latest"
     echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
     next_step "make -C .. userland"
+    ;;
+util-linux)
+    # buildroot's recipe downloads from the directory of the series,
+    # which it names in UTIL_LINUX_VERSION_MAJOR, so the bump sets that
+    # variable with the version.
+    latest="$(upstream util-linux)"
+    bump_needed util-linux "${used[util-linux]}" "$latest" || exit 0
+    series="$(cut -d. -f1,2 <<<"$latest")"
+    file="util-linux-$latest.tar.xz"
+    digest="$("$here/../../trust/keys/kernel-org-digest.sh" \
+        "https://www.kernel.org/pub/linux/utils/util-linux/v$series/sha256sums.asc" "$file")"
+    write_override util-linux "$latest" "$file" "$digest" \
+        "The digest came from sha256sums.asc, signed by kernel.org's checksum autosigner."
+    if grep -q '^override UTIL_LINUX_VERSION_MAJOR = ' "$versions"; then
+        set_line "$versions" '^override UTIL_LINUX_VERSION_MAJOR = ' "override UTIL_LINUX_VERSION_MAJOR = $series"
+    else
+        echo "override UTIL_LINUX_VERSION_MAJOR = $series" >>"$versions"
+    fi
+    bumped util-linux "${used[util-linux]}" "$latest"
+    echo "the digest came from sha256sums.asc, signed by kernel.org's checksum autosigner"
+    next_step "make -C .. userland; write patches/util-linux/$latest/held with each patch of buildroot's recipe that $latest holds"
     ;;
 open-iscsi)
     latest="$(upstream open-iscsi)"

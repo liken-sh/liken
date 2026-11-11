@@ -91,7 +91,19 @@ in one background task. These rules matter:
    takes a named bump, such as `userland/latest.sh --bump tzdata`. For
    a program of buildroot's own recipes, the bump sets the newer
    version in `versions.mk` and writes its `.hash` file under
-   `userland/patches/`. For open-iscsi, kmod, and BlueZ, whose recipes
+   `userland/patches/`. buildroot's recipe holds patches for the
+   version that it names, and buildroot applies them to the version
+   that `versions.mk` sets too. A patch whose change the new release
+   already holds does not apply, and the build stops at the package's
+   patch step. Check each patch of the recipe against the source of
+   the new version, and write the file name of each one that the
+   release holds into `userland/patches/<package>/<version>/held`,
+   with a comment line that says where the release holds it.
+   `userland/buildroot.sh` keeps buildroot from applying a held patch,
+   and still applies every other one, as `zic` needs. Report each
+   patch that the bump drops. The report also has a row
+   for util-linux, a library that `mke2fs` and `mount.nfs` link, and
+   `--bump util-linux` sets its version and its series. For open-iscsi, kmod, and BlueZ, whose recipes
    are in `userland/iscsi/` and `userland/bluetooth/`, it writes the
    version into the recipe and the tarball's line into the recipe's
    `.hash` file. When the `buildroot` row of

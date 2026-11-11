@@ -184,8 +184,14 @@ Of the 23 findings that remain, 20 are in the programs that k3s ships
 modules `golang.org/x/crypto` v0.54.0, `golang.org/x/net` v0.60.0,
 `github.com/cilium/ebpf`, `runc` v1.4.2, and five others. A k3s
 release with newer modules clears them. Two are in util-linux 2.41.5
-and one is in libevent 2.1.13, and the open problem named above holds
-both.
+and one is in libevent 2.1.13.
+
+A later commit of the same day moved util-linux to 2.42.4, which
+cleared its two findings, and a build of that tree scans at 21
+findings and boots to `Ready`. buildroot's recipe applies three
+patches to util-linux, and 2.42.4 holds the change of each, so
+`liken/userland/patches/util-linux/2.42.4/held` names them and
+`buildroot.sh` keeps buildroot from applying them.
 
 With the kernel's version set to 7.2.6 in a copy of the SBOM, the scan
 reported CVE-2026-98432, the vulnerability of milestone 90. Against

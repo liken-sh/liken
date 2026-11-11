@@ -1,0 +1,2 @@
+# The tarball of the version that versions.mk sets. The digest came from sha256sums.asc, signed by kernel.org's checksum autosigner.
+sha256  fbd62a100ab7bb8746ba0661255c3c48185b1e9021507c624da01fbc696330ec  util-linux-2.42.4.tar.xz

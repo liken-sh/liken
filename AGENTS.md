@@ -423,6 +423,12 @@ form, and `cd ci && go run . pins -root ..` fails on an `apk add`.
   packages an older release than upstream,
   `liken/userland/versions.mk` sets the newer version, and
   `patches/<package>/<version>/<package>.hash` pins its tarball.
+  buildroot's recipe holds patches for the version that it names, and
+  a later release can already hold their changes. The file
+  `patches/<package>/<version>/held` names each patch of the recipe
+  that the release holds, and `liken/userland/buildroot.sh` keeps
+  buildroot from applying it. A patch is a debt: when a release holds
+  a patch's change, take the release and drop the patch.
 
 ## Releases and development builds
 

@@ -1,0 +1,9 @@
+# The patches of buildroot's recipe of util-linux that 2.42.4 already
+# holds. buildroot.sh keeps buildroot from applying them.
+#
+# include/mountutils.h tests LSMT_ROOT with #ifndef.
+0001-include-mount-api-utils.h-fix-LSMT_ROOT-definition.patch
+# libuuid/uuid.pc.in lists @PTHREAD_LIBS@ in Libs.private.
+0002-autotools-optionally-add-libpthread-to-uuid.pc.patch
+# The fix of CVE-2026-27456, which 2.42 released.
+0003-loopdev-use-openat2-RESOLVE_NO_SYMLINKS-for-backing-.patch

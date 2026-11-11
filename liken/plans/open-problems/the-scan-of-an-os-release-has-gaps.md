@@ -30,21 +30,9 @@ item is independent.
 
 ## What the scan reports that no bump clears today
 
-Seen on 2026-11-11 against the lab release `2026.11.11-901`:
+Seen on 2026-11-11 against a build of the tree with util-linux
+2.42.4, which reported 21 findings:
 
-- **util-linux 2.41.5**, which buildroot builds for `libblkid`,
-  `libmount`, and `libuuid`. CVE-2026-13595, a use-after-free in
-  `libblkid`, is fixed in 2.42.2 and in no 2.41 release.
-  CVE-2026-76642 is in `mount(8)`, which `liken` does not ship, and
-  is fixed in 2.41.6 and 2.42.3. buildroot's `master` packages 2.41.5
-  at commit `9e2cc9b2d185`. A `versions.mk` override to 2.42.4 fails
-  at the patch step: buildroot applies three patches to util-linux,
-  and 2.42.4 already holds all three. The release notes of 2.42
-  through 2.42.4 name no change to the API or the build of the three
-  libraries. `libmount` reads filesystem information from udevd
-  first from 2.42 on, and falls back to `libblkid`. A remedy needs a
-  way to leave out buildroot's patches for an overridden version, such
-  as a hook in `userland/external.mk`. This needs a design decision.
 - **libevent 2.1.13.** CVE-2026-63380 is fixed only in 2.2.2-alpha,
   and libevent has no stable release with the fix.
 - **20 findings in the programs that k3s ships.** `liken` ships k3s's
