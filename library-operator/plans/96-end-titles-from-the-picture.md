@@ -187,9 +187,7 @@ The `credits` fact kept the billed cast, the directors, and the writers
 of what TMDb returns, and dropped the rest of the crew. A designed
 title sequence shows one or two people a card, and most are the people
 that were dropped: the producers, the composer, the cinematographer,
-the editor, the production designer. On three videos with such a
-sequence, the model waited for the plain crawl and was 101 to 115
-seconds late.
+the editor, the production designer.
 
 So the `credits` fact now also writes `.liken/billing.yaml`, with every
 person TMDb credits and each person's department and job. The catalog
@@ -198,18 +196,36 @@ does not read it, so the tables and the screens stay as they are, and
 the department and the job, so `titles` can later count some
 departments and not others with no new ask of TMDb.
 
+`titles` also looks for a name in the letters of a whole frame, with no
+spaces, and with the name's words in either order. A card often sets
+the first name over the last in two boxes, and a match line by line
+found neither "CHRIS" nor "ROCK".
+
 The measurement used the key crew of IMDb's `title.principals` in
-place of TMDb's crew, about 25 people a film, on 362 videos with a
-reading. Against 76 videos whose start a person checked:
+place of TMDb's crew, which gave a film 55 names at the median in place
+of 48, and a series 159 in place of 83. Over the frames that `read`
+read of 436 videos, with the two changes together:
 
-| | Films within 10 s | Films within 30 s | Worst film |
-|---|---|---|---|
-| The model, with the names of `credits.yaml` | 77% | 89% | 107 s |
-| The model, with the billing's names too | 86% | 97% | 54 s |
-| The databases' marks | 86% | 91% | 349 s |
+| Frames that hold a known name | Before | After |
+|---|---|---|
+| Films, in the end titles (8,251 frames) | 14.4% | 19.9% |
+| Films, in the story (4,796 frames) | 1.4% | 2.4% |
+| Episodes, in the end titles (2,126 frames) | 12.3% | 22.4% |
+| Episodes, in the story (4,452 frames) | 1.0% | 1.4% |
 
-The episodes changed by one video. IMDb's datasets and TVmaze state no
-crew to the fact, so a title that only they answer has no billing.
+A frame counted as story when it was more than 30 seconds before the
+video's mark, so the story rows include the titles of every video
+whose mark is late.
+
+The effect on the placements is smaller than the checked videos can
+show. With and without the two changes, the placements of 16 of the
+436 videos differed by more than 10 seconds. A person looked at the
+frames of all 16: the changes placed 9 closer to the start, 6 farther
+from it, and 1 was wrong both ways. Of the films, 7 were closer and 1
+farther, and of the episodes 2 and 5. The films include three with a
+designed sequence that the model had placed 100 seconds or more late.
+Nine against six is no proof, and the split by kind is from too few
+videos to trust.
 
 ### What it does not read
 
@@ -232,36 +248,35 @@ build of plan 91 can weigh it against Tesseract.
 
 The tool ran on a workstation on 2026-11-11, through
 [`local/titles`](../local/titles), against the videos of a home library
-and the marks of a copy of its catalog. It read 421 videos that a
-database has a mark for: all 172 films with one, and 249 episodes of 98
-series. Each got a `billing.yaml` from the key crew of IMDb's
-`title.principals`, in place of the crew that the `credits` fact now
-keeps from TMDb.
+and the marks of a copy of its catalog. It read 436 videos that a
+database has a mark for: all 173 films with one whose file is present,
+and 263 episodes of 102 series. Each got a `billing.yaml` from the key
+crew of IMDb's `title.principals`, in place of the crew that the
+`credits` fact now keeps from TMDb.
 
-**The read matches the experiment.** On one film, the new box finder on
-the CPU found text in 42.1% of the seconds, and OpenCV's found it in
-41.2%. An Intel GPU at its default of 16-bit floats found text in every
-second, and at 32 bits it wrote the same reading as the CPU, in the
-same time as two CPU threads. So `read` runs its networks on the CPU,
-and a GPU is for the decode.
+**The read matches the experiment.** The experiment's extractor and
+`titles read` both read 107 videos. Second by second, the two agreed on
+whether the frame holds text for 99.4% of the seconds at the median and
+91.7% for the worst video, and the share of the frame that text covers
+correlated at 0.997. An Intel GPU at its default of 16-bit floats found
+text in every second of a film where the CPU found it in 42%. At 32
+bits it wrote the same reading as the CPU, in the same time as two CPU
+threads. So `read` runs its networks on the CPU, and a GPU is for the
+decode.
 
-**The whole run matches the experiment on the same videos.** The
-experiment's extractor and `titles read` both read 107 videos. Second
-by second, the two agreed on whether the frame holds text for 99.4% of
-the seconds at the median and 91.7% for the worst video, and the share
-of the frame that text covers correlated at 0.997. For the 53 videos
-with a checked start, placed three ways:
+**The placements match it too.** For the 53 videos with a checked start
+from the experiment, placed three ways:
 
 | | Within 3 s | Within 10 s | Within 30 s | Worst |
 |---|---|---|---|---|
 | The experiment: scikit-learn on its own records, 213 videos | 60% | 91% | 100% | 30 s |
 | `titles train` on the experiment's records, 213 videos | 58% | 89% | 94% | 103 s |
-| `titles read`, `train`, and `place`, 421 videos | 68% | 92% | 96% | 67 s |
+| `titles read`, `train`, and `place`, 436 videos | 75% | 92% | 98% | 79 s |
 | The databases' marks | 58% | 81% | 89% | 349 s |
 
-The production run placed 94% of the 53 within 10 seconds of where the
-experiment placed them. It is closer at 3 seconds and it has two videos
-over 30 seconds where the experiment had none.
+The tool placed 96% of the 53 within 10 seconds of where the experiment
+placed them. It has one video over 30 seconds where the experiment had
+none.
 
 **The cost of a read.** With VA-API decode and two inference threads,
 the last 15 minutes of a 1080p film took 44 seconds and 540 MB, and one
@@ -269,28 +284,33 @@ thread took 79 seconds. The workstation read the videos over a wireless
 link at 9 to 12 MB a second, which set the pace of the run, not the
 tool.
 
-**The cost of the model.** `train` on the 421 readings took 5 minutes
-16 seconds on four threads and 104 MB: eleven fits of 200 trees. The
-model file is 228 KB.
+**The cost of the model.** `train` on the 436 readings took 4 minutes
+12 seconds on six threads and 108 MB. The model file is 908 KB. Two
+trainings on the same readings give the same model, on four threads and
+on six.
 
-**The placements.** Each video was placed by a model fitted without its
-film or series. A person checked the start of 76 of the videos frame by
-frame: 53 from the experiment, and 23 picked at random from the rest.
+**Against checked starts.** Each video was placed by a model fitted
+without its film or series. A person checked the start of 76 of the
+videos frame by frame: the 53 of the experiment, and 23 picked at
+random from the rest.
 
 | | Within 3 s | Within 10 s | Within 30 s | Worst |
 |---|---|---|---|---|
-| The model | 63% | 93% | 96% | 67 s |
-| The model, with the video's mark as a prior | 70% | 93% | 96% | 67 s |
+| The model | 71% | 89% | 97% | 79 s |
+| The model, with the video's mark as a prior | 68% | 88% | 96% | 119 s |
 | The databases' marks | 61% | 82% | 91% | 349 s |
 
-By kind, the model placed 94% of the 35 films and 93% of the 41
-episodes within 10 seconds, and the marks 83% and 80%. The 23 videos
-picked at random are the fairer sample, because the 53 were chosen
-before any model existed and half of their starts came from a language
-model's labels: there the model placed 96% within 10 seconds and the
-marks 83%, and the marks were the closer of the two at 3 seconds, 65%
-against 52%. A mark that is right is right to the second, which is why
-`place` takes the video's mark as a prior.
+By kind, the model placed 91% of the 35 films and 88% of the 41
+episodes within 10 seconds, and every film within 30. The marks placed
+83% and 80%. One video is 1.3 points of 76, so the first two rows do
+not differ.
+
+The 23 videos picked at random are the fairer sample, because the 53
+were chosen before any model existed, and half of their starts came
+first from a language model's labels. There the model and the marks
+were level: 83% within 10 seconds and 96% within 30 for both, and 61%
+against 65% within 3. So on a video whose mark is right, the model is
+as close as the mark, and its gain is the videos whose mark is wrong.
 
 **Where the model and a mark disagree.** An earlier model, fitted on
 144 videos, placed 22 videos more than 30 seconds from their mark. A
@@ -301,14 +321,20 @@ titles. The mark was right in one, a film with drawn titles that the
 model placed 52 seconds late. One could not be called, an episode with
 a feature about its making between its last scene and its credits.
 
-**What the model still misses.** Three of the 76 are more than 30
-seconds late. Two have designed titles over a drawn or a moving
-picture, and nobody has looked at the frames of the third. The
-confidence separates good placements from bad ones: the placements with a confidence of 0.8 or more were
-within 10 seconds of their mark for 78% of 219 videos, and those under
-0.5 for none of 9.
+**What the model still misses.** Two of the 76 are more than 30 seconds
+late, both episodes with designed titles over a drawn or a moving
+picture, and `place` gave them a confidence of 0.33 and 0.20. Of the 436
+videos, the 39 with a confidence under 0.5 were within 10 seconds of
+their mark for 36%, and the 397 others for 74%.
 
-**Three corrections to the fit** came from the checked starts:
+**The model is sensitive on a few videos.** A change to its inputs
+moves most placements by nothing and a few by a minute:
+[the names of the whole crew](#the-names-of-the-whole-crew) moved 16
+of 436. The 76 checked videos hold several of those few, so a
+difference of two or three videos between two fits of this plan is not
+evidence for either.
+
+**Four corrections to the fit** came from the checked starts:
 
 - The fit left out the 5 seconds each side of every mark, because a
   mark is seldom exact. Without those seconds the model was a median 3
@@ -317,8 +343,12 @@ within 10 seconds of their mark for 78% of 219 videos, and those under
 - `train` measures the lag that remains, the median of placement less
   mark, and `place` takes it from each start. On this library it is
   0.0 seconds.
-- The names of the whole crew, which
-  [the section above](#the-names-of-the-whole-crew) measures.
+- The names of the whole crew, and a name looked for across the lines
+  of a frame.
+- The model is the mean of four forests, each fitted on its own 70% of
+  the videos, so that one video in the fit moves it less. On the
+  checked videos it placed 71%, 89%, and 97% within 3, 10, and 30
+  seconds, where one forest placed 63%, 91%, and 96%.
 
 ## What is built
 

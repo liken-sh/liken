@@ -69,6 +69,27 @@ impl Forest {
     }
 }
 
+// One forest in place of several: its answer is the mean of their log
+// odds. A forest fitted on a few hundred videos changes its mind about a
+// hard video when a few of the others change, and the mean of forests
+// fitted on different videos changes it less.
+pub fn mean(forests: Vec<Forest>) -> Forest {
+    let count = forests.len().max(1) as f32;
+    let base = forests.iter().map(|forest| forest.base).sum::<f32>() / count;
+    let mut trees = Vec::new();
+    for forest in forests {
+        for mut tree in forest.trees {
+            for node in &mut tree {
+                if let Node::Leaf { value } = node {
+                    *value /= count;
+                }
+            }
+            trees.push(tree);
+        }
+    }
+    Forest { base, trees }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Settings {
     pub trees: usize,
@@ -450,6 +471,18 @@ mod tests {
     fn fit_learns_a_rule_that_needs_both_columns() {
         let (forest, values, labels) = fitted(|a, b| (a > 0.5) != (b > 0.5));
         assert!(accuracy(&forest, &values, &labels) > 0.97);
+    }
+
+    #[test]
+    fn the_mean_of_forests_answers_with_the_mean_of_their_log_odds() {
+        let leaf = |value: f32| Forest {
+            base: value,
+            trees: vec![vec![Node::Leaf { value }]],
+        };
+        let mean = mean(vec![leaf(1.0), leaf(3.0)]);
+        // The two forests answer 2 and 6 in log odds, and the mean is 4.
+        let expected = 1.0 / (1.0 + (-4.0f32).exp());
+        assert!((mean.probability(&[]) - expected).abs() < 1e-6);
     }
 
     #[test]
