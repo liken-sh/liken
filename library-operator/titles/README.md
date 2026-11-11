@@ -103,10 +103,15 @@ or in the folder above it: `.liken/credits.yaml`, with the people a
 screen shows, and `.liken/billing.yaml`, with every person the provider
 credited. The cards of a designed title sequence name the producers,
 the composer, the cinematographer, and the editor, who are only in the
-billing.
+billing. A name counts when its letters are in the letters of the
+frame's lines, with no spaces and with its words in either order,
+because a card often sets the first name over the last.
 
-The model is 200 small decision trees, fitted by gradient boosting in
-[`src/trees.rs`](src/trees.rs). The start is then the one second that
+The model is the mean of four forests of 200 small decision trees, each
+fitted by gradient boosting in [`src/trees.rs`](src/trees.rs) on its
+own 70% of the videos. A forest fitted on a few hundred videos changes
+its mind about a hard video when a few of the others change, and the
+mean changes it less. The start is then the one second that
 best splits the reading into "not yet" before it and "started" from it
 to the end ([`src/changepoint.rs`](src/changepoint.rs)), so a few
 seconds that the trees get wrong do not move it. The scores of all the

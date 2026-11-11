@@ -73,6 +73,10 @@ struct Video {
 }
 
 const FOLDS: usize = 5;
+// The model is the mean of this many forests, each fitted on this share,
+// in hundredths, of the videos.
+const BAGS: usize = 4;
+const BAG_SHARE: u64 = 70;
 // The fit takes one second in this many, and every second within a
 // minute of the mark. Neighboring seconds are nearly the same row, so the
 // rest add time to the fit and little to the model. It takes the seconds
@@ -192,6 +196,25 @@ impl Set {
             .collect()
     }
 
+    // The mean of BAGS forests, each fitted on its own share of the videos
+    // that `keep` names. A video is in a forest's share or out of it by a
+    // hash of its place and the forest's number, so two trainings on the
+    // same videos fit the same forests.
+    fn fit(&self, keep: impl Fn(&Video) -> bool, settings: &trees::Settings) -> Forest {
+        let forests = (0..BAGS)
+            .map(|bag| {
+                let rows = self.rows(|video| {
+                    let draw = (video.first_row as u64 ^ (bag as u64) << 40)
+                        .wrapping_mul(0x9e3779b97f4a7c15)
+                        >> 33;
+                    keep(video) && (BAGS == 1 || draw % 100 < BAG_SHARE)
+                });
+                trees::fit(&self.bins, &self.edges, &self.started, &rows, settings)
+            })
+            .collect();
+        trees::mean(forests)
+    }
+
     // The model's answers for one video. A forest splits on a column's
     // edges, so the upper edge of a value's bin goes down the same
     // branches as the value did.
@@ -228,7 +251,10 @@ impl Set {
             if rows.is_empty() {
                 continue;
             }
-            let forest = trees::fit(&self.bins, &self.edges, &self.started, &rows, settings);
+            let forest = self.fit(
+                |video| video.fold != fold && !left_out.contains(&video.first_row),
+                settings,
+            );
             for (index, video) in self.videos.iter().enumerate() {
                 if video.fold == fold {
                     items[index] = Some(self.item(video, &forest));
@@ -367,7 +393,10 @@ pub fn run(labels: &[Label], settings: &Settings) -> Result<Model, Error> {
     }
 
     let rows = set.rows(|video| !left_out.contains(&video.first_row));
-    let forest = trees::fit(&set.bins, &set.edges, &set.started, &rows, &settings.trees);
+    let forest = set.fit(
+        |video| !left_out.contains(&video.first_row),
+        &settings.trees,
+    );
     let groups: BTreeSet<&str> = set
         .videos
         .iter()

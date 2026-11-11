@@ -81,35 +81,48 @@ pub fn roles(lines: &[String]) -> usize {
         .count()
 }
 
-// A name is worth a match when it is at least this long and has two words.
-// A short name or a single word is in ordinary dialogue and signs too
-// often.
-const SHORTEST_NAME: usize = 7;
+// A name is worth a match when it has two words and at least this many
+// letters. A short name or a single word is in ordinary dialogue and signs
+// too often.
+const FEWEST_LETTERS: usize = 8;
+
+fn letters(text: &str) -> String {
+    text.chars().filter(|character| *character != ' ').collect()
+}
 
 // The plain forms of the names that are specific enough to look for.
 pub fn names(people: &[String]) -> Vec<String> {
     let mut names: Vec<String> = people
         .iter()
         .map(|name| plain(name))
-        .filter(|name| name.len() >= SHORTEST_NAME && name.contains(' '))
+        .filter(|name| name.contains(' ') && letters(name).len() >= FEWEST_LETTERS)
         .collect();
     names.sort();
     names.dedup();
     names
 }
 
-// How many of the names are in any of the lines.
+// How many of the names are in the text of one frame. A card of a title
+// sequence often sets the first name over the last, each in a box of its
+// own, and the reader drops the space of "EVA GREEN" in one frame and
+// keeps it in the next. So a name is looked for in the letters of every
+// line of the frame, run together with no spaces, in the order the reader
+// gives the lines and with the name's words in either order, because two
+// boxes at one height come in no fixed order.
 pub fn named(lines: &[String], names: &[String]) -> usize {
+    let text: String = lines.iter().map(|line| letters(line)).collect();
     names
         .iter()
-        .filter(|name| lines.iter().any(|line| holds(line, name)))
+        .filter(|name| {
+            let turned: Vec<&str> = name.split(' ').rev().collect();
+            holds(&text, &letters(name)) || holds(&text, &turned.concat())
+        })
         .count()
 }
 
 // True when the line holds the name with at most one wrong letter in ten.
-// The reader drops the space of "EVA GREEN" in one frame and reads an l as
-// an I in the next, so an exact match misses names that a person reads at
-// once. This is Sellers' algorithm: the edit distance from the name to the
+// The reader takes an l for an I and an E for an F, so an exact match
+// misses names that a person reads at once. This is Sellers' algorithm: the edit distance from the name to the
 // closest substring of the line.
 fn holds(line: &str, name: &str) -> bool {
     let (line, name) = (line.as_bytes(), name.as_bytes());
@@ -172,5 +185,14 @@ mod tests {
             named(&lines(&["Vesper Lynd EVA GREEN", "MADS MIKKELSEN"]), &known),
             2
         );
+    }
+
+    #[test]
+    fn named_finds_a_name_set_over_two_lines_or_with_no_space() {
+        let known = names(&["Chris Rock".into(), "Clyde Phillips".into()]);
+        assert_eq!(named(&lines(&["CHRIS", "ROCK"]), &known), 1);
+        assert_eq!(named(&lines(&["ROCK", "CHRIS"]), &known), 1);
+        assert_eq!(named(&lines(&["DEVELOPED BY", "CLYDEPHILLIPS"]), &known), 1);
+        assert_eq!(named(&lines(&["CHRIS", "a rock in the road"]), &known), 0);
     }
 }
