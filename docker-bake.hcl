@@ -220,11 +220,11 @@ target "trust" {
   args = {
     VERSION = "20261020"
   }
-  tags       = ["ghcr.io/liken-sh/trust:20261020-4"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache", "type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20261020-4"]
+  tags       = ["ghcr.io/liken-sh/trust:20261020-5"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache", "type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20261020-5"]
   cache-to = concat(
     CACHE_WRITE == "trust" ? ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "trust" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20261020-4,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "trust" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/trust:buildcache-20261020-5,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -617,11 +617,11 @@ target "weston" {
   args = {
     VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/weston:20261101-3"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261101-3"]
+  tags       = ["ghcr.io/liken-sh/weston:20261101-4"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache", "type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261101-4"]
   cache-to = concat(
     CACHE_WRITE == "weston" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261101-3,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "weston" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/weston:buildcache-20261101-4,mode=max,ignore-error=true"] : [],
   )
 }
 
@@ -1159,11 +1159,11 @@ target "mpv" {
   args = {
     VERSION = "20261101"
   }
-  tags       = ["ghcr.io/liken-sh/mpv:20261101-3"]
-  cache-from = ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache", "type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261101-3"]
+  tags       = ["ghcr.io/liken-sh/mpv:20261101-4"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache", "type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261101-4"]
   cache-to = concat(
     CACHE_WRITE == "mpv" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache,mode=max,ignore-error=true"] : [],
-    BRANCH_CACHE == "mpv" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261101-3,mode=max,ignore-error=true"] : [],
+    BRANCH_CACHE == "mpv" && CACHE_WRITE == "" ? ["type=registry,ref=ghcr.io/liken-sh/mpv:buildcache-20261101-4,mode=max,ignore-error=true"] : [],
   )
 }
 
