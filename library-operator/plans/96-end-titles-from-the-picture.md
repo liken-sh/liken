@@ -169,6 +169,58 @@ the operator fits the model in the cluster:
 Until a library has a model, it uses the databases' marks as it does
 today. A small library may never have one.
 
+On 2026-11-12 the design of these steps was agreed in more detail.
+None of it is built.
+
+- **What a person declares.** One block on a `Library`, `spec.titles`,
+  with `enabled`, `parallelism`, and `gpuResourceClaimTemplate`, as
+  `spec.appearances` has. Nothing in it names the model or the fit.
+- **When the first fit starts.** When 100 videos of 30 films and series
+  have a reading and a mark. A model of that size was 3 points under
+  the full one within 10 seconds
+  ([How many videos a model needs](#the-tool-measured)). The floor
+  counts films and series because the episodes of one series show one
+  style of titles, and a worker can read one long series first.
+- **When a fit starts again.** When the count of videos with a reading
+  and a mark has grown by half since the last fit, and when a new
+  version of the tool changes the model's columns, because `place`
+  refuses a model of other columns. The score stopped rising at about
+  300 videos, so the later fits cost minutes and change little.
+- **The numbers are constants in one place,** each with a comment that
+  names its measurement, so a person who has measured another library
+  can change them.
+- **What rejects a model.** A floor on its held-out score, not a
+  comparison with the model before it. The held-out score is against
+  the marks, and it was 70% to 78% within 10 seconds for every model
+  that worked, so it cannot rank two of them.
+- **What a person reads.** The status holds a list with one entry for
+  each kind of titles, and each entry holds the videos and the films
+  and series of the fit, the marks left out, the share within 3, 10,
+  and 30 seconds, and the time. A condition for the kind,
+  `EndTitlesModel`, gives the state, an `Event` records each fit with
+  its score, and a metric holds the score so that it has a history.
+- **A placement is a fact.** It goes into a ledger beside the video,
+  and the walk copies it into the catalog, as it does for the faceless
+  end that the `appearances` worker records. A catalog that is built
+  again from the volume then holds every placement.
+- **Room for the main titles.** The first build reads the end of each
+  video and fits one model. A reading's header lists the parts of the
+  video that it holds, and a model file names its kind, so a reading of
+  the start of a video and a model of the main titles are additions.
+
+One question is open: whether a model belongs to a `Library` or to
+every `Library` of a `Catalog`. Every `Job` of the operator belongs to
+one `Library` and mounts its one volume, and a worker's pod reads no
+catalog. So a model for each `Library` can be a file at the library's
+root, the fit is one more `Job` of the `Library`, and the worker that
+reads a video can place it. A model for the `Catalog` needs a `Job`
+that mounts every volume, and a way to give the model to those pods.
+Measured on 2026-11-12: a model of the 173 films and a model of the
+1,124 episodes together placed 66%, 90%, and 97% of the 120 checked
+videos within 3, 10, and 30 seconds, and the one model of all of them
+placed 73%, 92%, and 97%. So a model for each `Library` is level at 10
+and 30 seconds and 8 videos behind at 3.
+
 ### Where a placement goes
 
 A placement is a mark of the kind `end-titles` with the source
@@ -404,7 +456,8 @@ The `credits` fact writes `.liken/billing.yaml`, and
 against a copy of a catalog. The rest is the crate
 `library-operator/titles`, with a CI job, `rust-titles`:
 
-- `titles read`, `titles train`, and `titles place`.
+- `titles read`, `titles train`, and `titles place`. A reading lists
+  the parts of the video that it holds, and a model names its kind.
 - The text detector's box finder and the reader's text decoder, which
   PP-OCR ships in C++ and Python that no runtime here can call.
 - The gradient-boosted trees, their trainer, and the placement.
