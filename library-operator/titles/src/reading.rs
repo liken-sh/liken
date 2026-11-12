@@ -1,4 +1,4 @@
-// The reading of one video: for each second of the end of the video, where
+// The reading of one video: for each second of a part of the video, where
 // text is on screen, how dark the frame is, how much it changed, and, for
 // some seconds, what the text says. `read` writes it once, because it
 // costs a decode. `train` and `place` read it as often as the model
@@ -37,15 +37,31 @@ pub struct Header {
     // A file of another size under the same name is another video.
     pub video: String,
     pub size: u64,
-    // The video's length and the second the reading starts at.
+    // The video's length, and the parts of it that the reading holds a
+    // line for each second of, in the order of their seconds. `read`
+    // reads one part, the end of the video, which is where the end titles
+    // are. The list leaves room for the start of the video, where the
+    // main titles are, in the same file.
     pub duration: f64,
-    pub start: f64,
+    pub ranges: Vec<Range>,
     pub detector: Model,
     pub reader: Model,
     pub device: String,
     // The size of the decoded frames. The detector read each at half this.
     pub width: usize,
     pub height: usize,
+}
+
+// One part of a video, from its first second to its last.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Range(pub f64, pub f64);
+
+impl Header {
+    // The second that the reading of the end of the video starts at: the
+    // start of the last part. A reading with no part starts at the end.
+    pub fn end_start(&self) -> f64 {
+        self.ranges.last().map_or(self.duration, |range| range.0)
+    }
 }
 
 // One line of text that the reader read: the text, the reader's
@@ -236,7 +252,7 @@ pub mod tests {
             video: "film.mkv".into(),
             size: 10,
             duration: 100.0,
-            start: 40.0,
+            ranges: vec![Range(40.0, 100.0)],
             detector: Model {
                 name: "detector".into(),
                 sha256: "aa".into(),
@@ -290,6 +306,15 @@ pub mod tests {
         let loaded = load(&target).unwrap();
         assert_eq!(loaded.header, header());
         assert_eq!(loaded.seconds, vec![second(40.0), read]);
+    }
+
+    #[test]
+    fn the_end_starts_at_the_last_part() {
+        let mut both = header();
+        both.ranges = vec![Range(0.0, 20.0), Range(40.0, 100.0)];
+        assert_eq!(both.end_start(), 40.0);
+        both.ranges.clear();
+        assert_eq!(both.end_start(), 100.0);
     }
 
     #[test]

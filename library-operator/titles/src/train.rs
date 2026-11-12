@@ -404,6 +404,7 @@ pub fn run(labels: &[Label], settings: &Settings) -> Result<Model, Error> {
         .collect();
     let model = Model {
         format: model::FORMAT.into(),
+        kind: model::END_TITLES.into(),
         trained: Trained {
             videos: set.videos.len() - left_out.len(),
             groups: groups.len(),
@@ -424,7 +425,7 @@ pub fn run(labels: &[Label], settings: &Settings) -> Result<Model, Error> {
 mod tests {
     use super::*;
     use crate::reading::tests::{header, scratch, second};
-    use crate::reading::{Header, Writer};
+    use crate::reading::{Header, Range, Writer};
     use crate::textboxes::TextBox;
 
     #[test]
@@ -458,7 +459,7 @@ mod tests {
                 let start = 150 + (n * 7) % 100;
                 let header = Header {
                     duration: 300.0,
-                    start: 0.0,
+                    ranges: vec![Range(0.0, 300.0)],
                     ..header()
                 };
                 let mut writer = Writer::create(&reading::path(&video, None), &header).unwrap();
