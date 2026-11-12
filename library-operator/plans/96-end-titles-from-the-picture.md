@@ -248,8 +248,8 @@ build of plan 91 can weigh it against Tesseract.
 
 The tool ran on a workstation on 2026-11-11, through
 [`local/titles`](../local/titles), against the videos of a home library
-and the marks of a copy of its catalog. It read 436 videos that a
-database has a mark for: all 173 films with one whose file is present,
+and the marks of a copy of its catalog. Its first run read 436 videos
+that a database has a mark for: all 173 films with one whose file is present,
 and 263 episodes of 102 series. Each got a `billing.yaml` from the key
 crew of IMDb's `title.principals`, in place of the crew that the
 `credits` fact now keeps from TMDb.
@@ -289,28 +289,68 @@ tool.
 trainings on the same readings give the same model, on four threads and
 on six.
 
+**The full run.** The workstation then read more marked episodes, and
+`train` ran again on 1,297 readings: the 173 films, and 1,124 episodes
+of 134 series. It took 6 minutes 30
+seconds on twelve threads and 188 MB, and the model file is 908 KB. It
+left out 144 marks as wrong, 11% of them. The figures from here on are
+this run's.
+
 **Against checked starts.** Each video was placed by a model fitted
-without its film or series. A person checked the start of 76 of the
-videos frame by frame: the 53 of the experiment, and 23 picked at
+without its film or series. A person checked the start of 120 of the
+videos frame by frame: the 53 of the experiment, and 67 picked at
 random from the rest.
 
 | | Within 3 s | Within 10 s | Within 30 s | Worst |
 |---|---|---|---|---|
-| The model | 71% | 89% | 97% | 79 s |
-| The model, with the video's mark as a prior | 68% | 88% | 96% | 119 s |
-| The databases' marks | 61% | 82% | 91% | 349 s |
+| The model | 73% | 92% | 97% | 85 s |
+| The model, with the video's mark as a prior | 72% | 93% | 96% | 85 s |
+| The databases' marks | 58% | 77% | 87% | 349 s |
 
-By kind, the model placed 91% of the 35 films and 88% of the 41
+By kind, the model placed 94% of the 35 films and 91% of the 85
 episodes within 10 seconds, and every film within 30. The marks placed
-83% and 80%. One video is 1.3 points of 76, so the first two rows do
+83% and 74%. One video is 0.8 points of 120, so the first two rows do
 not differ.
 
-The 23 videos picked at random are the fairer sample, because the 53
+The 67 videos picked at random are the fairer sample, because the 53
 were chosen before any model existed, and half of their starts came
-first from a language model's labels. There the model and the marks
-were level: 83% within 10 seconds and 96% within 30 for both, and 61%
-against 65% within 3. So on a video whose mark is right, the model is
-as close as the mark, and its gain is the videos whose mark is wrong.
+first from a language model's labels. There the model placed 75%, 93%,
+and 97% within 3, 10, and 30 seconds, and the marks 58%, 73%, and 85%.
+The first 23 of the 67 came from the films and the 263 episodes of the
+first run, and there the model and the marks were level at 83% within
+10 seconds. The other 44 are episodes, and the marks of episodes are
+wrong more often.
+
+**More videos did not change the score.** On the 96 videos that were
+checked before the full run, the model of 436 videos placed 71%, 91%,
+and 98% within 3, 10, and 30 seconds, and the model of 1,297 placed
+70%, 91%, and 97%.
+
+**How many videos a model needs.** The 96 checked videos were split in
+three by their film or series. For each third, `train` ran on a share
+of the other films and series, and the model placed the third. So each
+row scores the same 96 videos, each by a model that has none of its
+film or series. The count of videos and of films and series is the
+mean of the three fits.
+
+| Videos | Films and series | Within 3 s | Within 10 s | Within 30 s | Worst |
+|---|---|---|---|---|---|
+| 48 | 16 | 69% | 84% | 96% | 122 s |
+| 107 | 32 | 68% | 89% | 98% | 69 s |
+| 293 | 64 | 60% | 92% | 98% | 67 s |
+| 519 | 129 | 65% | 91% | 95% | 118 s |
+| 728 | 193 | 62% | 91% | 98% | 65 s |
+| 926 | 257 | 69% | 92% | 98% | 67 s |
+
+The score within 10 seconds stops rising at about 300 videos of 64
+films and series, and a model of 107 videos of 32 is 3 points under
+it. The films gain the most from more videos: 74% of the 35 within 10
+seconds at the first row, 86% to 89% in the middle rows, and 94% at
+the last. The episodes are at 90% to 93% in every row. The trainer's
+own held-out score, which is against the marks, was 70% to 78% within
+10 seconds in every row and shows no trend, because a share of the
+marks are wrong. So that score can show that a model is broken, but it
+cannot rank two models that work.
 
 **Where the model and a mark disagree.** An earlier model, fitted on
 144 videos, placed 22 videos more than 30 seconds from their mark. A
@@ -321,18 +361,25 @@ titles. The mark was right in one, a film with drawn titles that the
 model placed 52 seconds late. One could not be called, an episode with
 a feature about its making between its last scene and its credits.
 
-**What the model still misses.** Two of the 76 are more than 30 seconds
-late, both episodes with designed titles over a drawn or a moving
-picture, and `place` gave them a confidence of 0.33 and 0.20. Of the 436
-videos, the 39 with a confidence under 0.5 were within 10 seconds of
-their mark for 36%, and the 397 others for 74%.
+**What the model still misses.** Four of the 120 are more than 30
+seconds late, all episodes, and three of them have designed titles
+over a drawn or a moving picture. `place` gave the four a confidence
+of 0.24, 0.33, 0.38, and 0.53.
+
+**The confidence separates them.** Of the 120 checked videos, 105 have
+a confidence of 0.6 or more. The model placed 98% of those within 10
+seconds and all of them within 30, where the marks of the same 105
+placed 77% and 88%. It placed 5 of the 8 from 0.5 to 0.6 within 10
+seconds, and 2 of the 7 under 0.5. Against the marks of all 1,292
+placed videos, the 35 under 0.5 were within 10 seconds for 29%, and
+the others for 73%.
 
 **The model is sensitive on a few videos.** A change to its inputs
 moves most placements by nothing and a few by a minute:
 [the names of the whole crew](#the-names-of-the-whole-crew) moved 16
-of 436. The 76 checked videos hold several of those few, so a
-difference of two or three videos between two fits of this plan is not
-evidence for either.
+of 436. The checked videos hold several of those few, so a difference
+of two or three videos between two fits of this plan is not evidence
+for either.
 
 **Four corrections to the fit** came from the checked starts:
 
@@ -347,8 +394,8 @@ evidence for either.
   of a frame.
 - The model is the mean of four forests, each fitted on its own 70% of
   the videos, so that one video in the fit moves it less. On the
-  checked videos it placed 71%, 89%, and 97% within 3, 10, and 30
-  seconds, where one forest placed 63%, 91%, and 96%.
+  76 videos checked at the time it placed 71%, 89%, and 97% within 3,
+  10, and 30 seconds, where one forest placed 63%, 91%, and 96%.
 
 ## What is built
 
@@ -396,7 +443,9 @@ against a copy of a catalog. The rest is the crate
   question stands for the operator of a cluster.
 - **The confidence that counts.** The placement's confidence separates
   good placements from bad ones. The threshold over which a placement
-  outranks a database's mark is not chosen.
+  outranks a database's mark is not chosen. On the 120 checked videos,
+  the placements of 0.6 or more were within 10 seconds for 98%, and
+  the marks of the same videos for 77%.
 - **A scene after the titles.** The placement assumes that the end
   titles run to the end of the file. A film with a scene after them
   breaks that, and how often it moves the start is not measured.
@@ -404,4 +453,6 @@ against a copy of a catalog. The rest is the crate
   file.
 - **A model for a small library.** A library with too few marked
   videos never fits a model. Whether a release should carry one is not
-  decided.
+  decided. Neither is the count that is enough. On this library a
+  model of about 100 videos of 32 films and series was 3 points under
+  the full one, but nobody has measured the count on another library.
