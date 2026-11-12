@@ -12,7 +12,7 @@ use crate::engine::Engine;
 use crate::frames::{self, Frames};
 use crate::networks::{self, Detector, Reader};
 use crate::picture;
-use crate::reading::{self, Header, Line, Second, Writer};
+use crate::reading::{self, Header, Line, Range, Second, Writer};
 
 pub struct Settings {
     pub models: PathBuf,
@@ -83,7 +83,7 @@ pub fn run(video: &Path, settings: &Settings) -> Result<PathBuf, Error> {
             .into(),
         size,
         duration: probe.duration,
-        start,
+        ranges: vec![Range(start, probe.duration)],
         detector: detector_model,
         reader: reader_model,
         device: engine.device.name().into(),

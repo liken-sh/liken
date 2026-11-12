@@ -157,7 +157,7 @@ pub fn matrix(reading: &Reading, names: &[String]) -> Matrix {
         }
     }
     let header = &reading.header;
-    let window = (header.duration - header.start) as f32;
+    let window = (header.duration - header.end_start()) as f32;
     for (index, second) in reading.seconds.iter().enumerate() {
         values[index * WIDTH + WIDTH - 2] = (header.duration - second.t) as f32;
         values[index * WIDTH + WIDTH - 1] = window;

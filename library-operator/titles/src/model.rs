@@ -15,9 +15,15 @@ use crate::trees::Forest;
 
 pub const FORMAT: &str = "liken.sh/titles/model/v1";
 
+// The titles that a model places, in the word the marks use for them. The
+// tool fits one kind. A model of the main titles would be a second file
+// with its own columns, so each file names its kind.
+pub const END_TITLES: &str = "end-titles";
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Model {
     pub format: String,
+    pub kind: String,
     pub trained: Trained,
     pub held_out: Score,
     pub temperature: f64,
@@ -79,6 +85,9 @@ impl Model {
         if model.format != FORMAT {
             return Err(format!("{}: the format is {}", path.display(), model.format).into());
         }
+        if model.kind != END_TITLES {
+            return Err(format!("{}: the model places {}", path.display(), model.kind).into());
+        }
         if model.columns != signals::columns() {
             return Err(
                 format!("{}: the model was fitted on other columns", path.display()).into(),
@@ -111,6 +120,7 @@ pub mod tests {
         let column = columns.iter().position(|c| c == "text").unwrap();
         Model {
             format: FORMAT.into(),
+            kind: END_TITLES.into(),
             trained: Trained::default(),
             held_out: Score::default(),
             temperature: 1.0,
@@ -165,6 +175,20 @@ pub mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("other columns")
+        );
+    }
+
+    #[test]
+    fn load_refuses_a_model_of_another_kind() {
+        let path = scratch("model-kind").join("model.json");
+        let mut other = model();
+        other.kind = "main-titles".into();
+        other.save(&path).unwrap();
+        assert!(
+            Model::load(&path)
+                .unwrap_err()
+                .to_string()
+                .contains("places main-titles")
         );
     }
 }
