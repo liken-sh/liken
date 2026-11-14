@@ -390,15 +390,40 @@ func (w *volumeWriter) removeMergedEntry(dir string) error {
 
 // The remove of the .liken directory at one library root, and of nothing
 // else: the path is built here from the root, so no caller can name another
-// directory. A root with no such directory is success.
+// directory. The titles directory stays, with the model and the candidate of
+// a fit that may be running, and the .liken directory stays around it. A root
+// with nothing to remove is success, and the result says whether anything
+// was removed.
 func (w *volumeWriter) removeRootLiken(root string) (bool, error) {
 	liken := filepath.Join(root, likenDirectory)
-	if _, err := os.Lstat(liken); errors.Is(err, fs.ErrNotExist) {
+	info, err := os.Lstat(liken)
+	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	} else if err != nil {
 		return false, err
 	}
-	return true, os.RemoveAll(liken)
+	if !info.IsDir() {
+		return true, os.Remove(liken)
+	}
+	entries, err := os.ReadDir(liken)
+	if err != nil {
+		return false, err
+	}
+	removed, kept := false, false
+	for _, entry := range entries {
+		if entry.Name() == titlesRecordsDirectory && entry.IsDir() {
+			kept = true
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(liken, entry.Name())); err != nil {
+			return removed, err
+		}
+		removed = true
+	}
+	if !kept {
+		return true, os.Remove(liken)
+	}
+	return removed, nil
 }
 
 // The suffix of the one file name replaceEarlierFile takes: an episode's

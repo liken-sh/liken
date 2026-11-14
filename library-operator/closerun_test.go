@@ -296,7 +296,43 @@ func TestTheCloseContainerRemovesTheLikenDirectoryAtTheRoot(t *testing.T) {
 		if _, err := os.Stat(titleLedger); err != nil {
 			t.Errorf("the title's ledger is gone: %v", err)
 		}
-		if !strings.Contains(log.String(), "removed the .liken directory at the library root") {
+		if !strings.Contains(log.String(), "removed the files of the .liken directory at the library root") {
+			t.Errorf("log = %q, want the line that names the remove", log)
+		}
+	})
+}
+
+// The titles model belongs to the Library and not to a title, so the close
+// container keeps the root's .liken/titles directory: the model, and the
+// candidate of a fit that runs while the close does. It removes every other
+// file of the root's .liken directory.
+func TestTheCloseContainerKeepsTheTitlesModelAtTheRoot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		run, log := closingJob(t, catalog)
+		rootLiken := filepath.Join(run.root, likenDirectory)
+		model := filepath.Join(rootLiken, titlesRecordsDirectory, titlesModelName)
+		candidate := filepath.Join(rootLiken, titlesRecordsDirectory, "."+titlesModelName+likenTempMark+"movies-titles-fit-1")
+		stray := filepath.Join(rootLiken, likenLedgerName(factIdentity))
+		writeFile(t, model, "{}\n")
+		writeFile(t, candidate, "half a model")
+		writeFile(t, stray, "attempts: []\n")
+		done := make(chan error, 1)
+		go func() { done <- run.runJob(t.Context()) }()
+		confirmTheRun(t, catalog, workerEnrich, run.job)
+		if err := <-done; err != nil {
+			t.Fatalf("the job failed: %v", err)
+		}
+
+		for _, kept := range []string{model, candidate} {
+			if _, err := os.Stat(kept); err != nil {
+				t.Errorf("%s is gone: %v", filepath.Base(kept), err)
+			}
+		}
+		if _, err := os.Lstat(stray); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("the root's ledger is still there: %v", err)
+		}
+		if !strings.Contains(log.String(), "kept the titles model") {
 			t.Errorf("log = %q, want the line that names the remove", log)
 		}
 	})

@@ -482,7 +482,9 @@ In the operator:
   the counts above (`titlesfitjob.go`), and the `Job` reads the readings
   and the marks ledgers from the volume, runs `train`, and lands
   `.liken/titles/model.json` under the root unless the model is under
-  the floor (`titlesfitrun.go`). Its result goes over the bus into
+  the floor (`titlesfitrun.go`). The close container of every library
+  `Job` removes the other files of the root's `.liken/` and keeps
+  `.liken/titles/` (`rootliken.go`). Its result goes over the bus into
   `status.titlesModels`, the `EndTitlesModel` condition, and two gauges.
   On 2026-11-14 the `Job`'s program ran from the image on the readings
   of the 173 films, with a broker: it fitted in 3 minutes 15 seconds on

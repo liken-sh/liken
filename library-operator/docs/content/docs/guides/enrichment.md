@@ -713,7 +713,8 @@ show one style of titles. It starts another fit each time the count
 has grown by half. The `Job` is one pod on the same image. It reads the
 readings and the marks ledgers from the volume, runs `titles train`,
 and writes the model to `.liken/titles/model.json` under the library's
-root. `train` leaves out the marks that a first model placed far from
+root. The model belongs to the whole `Library`, so the close container
+that removes the other files of the root's `.liken/` keeps it. `train` leaves out the marks that a first model placed far from
 and was sure about, because a share of the providers' marks is wrong.
 It scores the model on videos it was not fitted on, each without its
 film or series, and a model that places under 60% of them within 30

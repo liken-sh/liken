@@ -159,9 +159,11 @@ removes each file and logs one line for it. The longest writer, the
 appearances tool's detect pass, stops after 6 hours and changes its file as
 it writes, so the walk never names a file that a live writer holds.
 
-The library root holds no title, so no fact writes a `.liken/`
-directory there. The close container of every `Library` `Job` removes
-a `.liken/` directory at the root, with every file in it.
+The library root holds no title, so no fact of a title writes a
+`.liken/` directory there. The close container of every `Library`
+`Job` removes every file of a `.liken/` directory at the root except
+`.liken/titles/`, which holds the `Library`'s titles model. The
+[enrichment guide](https://liken.sh/library/docs/guides/enrichment/#the-model) describes the model.
 
 ### `.contributors/`
 
