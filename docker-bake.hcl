@@ -154,6 +154,7 @@ group "default" {
     "library-operator-ffmpeg",
     "library-operator-media-browser",
     "library-operator-appearances",
+    "library-operator-titles",
     "library-operator-corrosion",
     "library-operator-cli",
     "mpv",
@@ -1106,6 +1107,31 @@ target "library-operator-appearances" {
   tags       = ["ghcr.io/liken-sh/library-operator-appearances:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-appearances:buildcache"]
   cache-to   = CACHE_WRITE == "library-operator-appearances" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-appearances:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "library-operator-titles" {
+  description = "The titles tool, OpenVINO, and two text models on the ffmpeg image, for the Job that reads the text at the end of each video."
+  context    = "library-operator"
+  dockerfile = "Dockerfile.titles"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
+    "ffmpeg" = PUBLISHED_FFMPEG != "" ? "docker-image://${PUBLISHED_FFMPEG}" : "target:ffmpeg"
+    "golang" = "docker-image://golang:1.27.3-trixie@sha256:c65ecfe613b539ac74c62a4c3b2c27e8f8a6076384c8f27e8a3c0f3be17cc385"
+    "kubernetes" = "kubernetes"
+    "manifest" = "toolchains/manifest"
+    "notices" = "notices"
+    "oras" = "docker-image://ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb"
+    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
+    "titles" = "library-operator/titles"
+    "toolchains" = "toolchains"
+  }
+  args = {
+    VERSION = VERSION
+  }
+  tags       = ["ghcr.io/liken-sh/library-operator-titles:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/library-operator-titles:buildcache"]
+  cache-to   = CACHE_WRITE == "library-operator-titles" ? ["type=registry,ref=ghcr.io/liken-sh/library-operator-titles:buildcache,mode=max,ignore-error=true"] : []
 }
 
 target "library-operator-corrosion" {

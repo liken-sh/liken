@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #
 # Report the inference runtime that the appearances image installs,
-# and the newest release of each upstream.
+# and the newest release of each upstream. The titles image installs
+# the first of the four pins, OpenVINO, from the same archive, and
+# Dockerfile.titles holds a copy of its URL and checksum.
 #
 # Dockerfile.appearances fetches four pins with ADD and checks each
 # file against its --checksum:
@@ -25,7 +27,7 @@
 # A bump reads each checksum from the file or release text that
 # upstream publishes beside the bytes, and writes the URL and the
 # checksum into Dockerfile.appearances. The OpenVINO bump also writes
-# them, with the purl and the CPE, into pin.toml, which the image's
+# them into Dockerfile.titles and, with the purl and the CPE, into pin.toml, which the image's
 # SBOM record reads. Intel's Debian packages need no entry, because the
 # image holds their dpkg records. Intel signs none of these
 # files: storage.openvinotoolkit.org publishes each archive with a
@@ -51,6 +53,9 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source-path=SCRIPTDIR source=../toolchains/pin.sh
 source "$here/../toolchains/pin.sh"
 dockerfile="$here/Dockerfile.appearances"
+# The titles image fetches the same OpenVINO archive, and none of
+# Intel's packages, so a bump of OpenVINO writes this file too.
+titles_dockerfile="$here/Dockerfile.titles"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -110,9 +115,10 @@ row '  igc' "$igc" "$igc_latest" - - - \
 [[ "${1:-}" == "--bump" ]] || exit 0
 
 # pin replaces the ADD source old with new, and the --checksum on the
-# line above it with sha256.
+# line above it with sha256, in one Dockerfile: Dockerfile.appearances
+# unless a fourth argument names another.
 pin() {
-    local old="$1" new="$2" sha256="$3"
+    local old="$1" new="$2" sha256="$3" dockerfile="${4:-$dockerfile}"
     [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || fail "no checksum for ${new##*/}"
     awk -v old="$old" -v new="$new" -v sum="$sha256" '
         index($0, old) {
@@ -144,6 +150,7 @@ openvino)
     # its SHA-256, for a workstation that unpacks it by hand.
     old_sha256="$(grep -B1 -F "$openvino_url" "$dockerfile" | sed -nE 's/.*--checksum=sha256:([0-9a-f]{64}).*/\1/p')"
     pin "$openvino_url" "$new" "$sha256"
+    pin "$openvino_url" "$new" "$sha256" "$titles_dockerfile"
     set_pin openvino "$openvino_latest" "$new" "$sha256" \
         "$(generic_purl openvino "$openvino_latest" "$new" "$sha256")" \
         "cpe:2.3:a:intel:openvino:$openvino_latest:*:*:*:*:*:*:*"
@@ -152,7 +159,7 @@ openvino)
     bumped openvino "$openvino ($channel)" "$openvino_latest ($newest_channel)"
     echo "the release's .sha256 file stands behind these bytes; Intel signs neither file"
     next_step "move the libopenvino and libtbb file names in appearances/inference-closure.sh,"
-    echo "then docker buildx bake library-operator-appearances at the top of the repository"
+    echo "then docker buildx bake library-operator-appearances library-operator-titles at the top of the repository"
     ;;
 compute-runtime)
     bump_needed compute-runtime "$runtime" "$runtime_latest" || exit 0

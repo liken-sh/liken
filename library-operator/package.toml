@@ -117,6 +117,17 @@ file = "Dockerfile.appearances"
 contexts = { kubernetes = "kubernetes", appearances = "library-operator/appearances", notices = "notices", toolchains = "toolchains", manifest = "toolchains/manifest" }
 smoke = "library-operator/smoke/library-operator-appearances.sh"
 
+# The image of `titles` builds on the ffmpeg base and pulls the text
+# models as an OCI artifact by digest, as the image of `appearances`
+# does. It carries the pod program beside the tool, and takes the
+# crate's directory as a named context.
+[[outputs.images]]
+name = "library-operator-titles"
+description = "The titles tool, OpenVINO, and two text models on the ffmpeg image, for the Job that reads the text at the end of each video."
+file = "Dockerfile.titles"
+contexts = { kubernetes = "kubernetes", titles = "library-operator/titles", notices = "notices", toolchains = "toolchains", manifest = "toolchains/manifest" }
+smoke = "library-operator/smoke/library-operator-titles.sh"
+
 [[outputs.images]]
 name = "library-operator-corrosion"
 description = "Corrosion, from liken's fork, which replicates the catalog and the progress store to each scanner and media browser."

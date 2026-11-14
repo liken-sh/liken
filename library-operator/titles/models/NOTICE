@@ -1,0 +1,39 @@
+The text models of `titles`
+
+This artifact holds two ONNX models of PaddleOCR and the list of the
+characters that one of them writes, as two projects publish them, with
+no conversion. `liken` did not train or change either model. Each file
+keeps its own license, and the license file beside each model is the
+one its project publishes.
+
+text_detection_en_ppocrv3_2023may.onnx
+
+  The English text detection model of PP-OCRv3, a DBNet, by the
+  PaddlePaddle authors (https://github.com/PaddlePaddle/PaddleOCR).
+  OpenCV Zoo converted it to ONNX and publishes it in
+  models/text_detection_ppocr/ of
+  https://github.com/opencv/opencv_zoo at commit
+  47534e27c9851bb1128ccc0102f1145e27f23f98.
+  License: Apache 2.0, in text_detection_en_ppocrv3_2023may.LICENSE,
+  which is the LICENSE of that directory.
+  Copyright (c) 2016 PaddlePaddle Authors.
+
+text_recognition_ch_ppocrv4.onnx
+
+  The text recognition model of PP-OCRv4 for Chinese and English, by
+  the PaddlePaddle authors. RapidOCR (https://github.com/RapidAI/RapidOCR)
+  converted it to ONNX and publishes it as
+  PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx of
+  https://huggingface.co/SWHL/RapidOCR at commit
+  1cfba2e90fc938db55889873735088de210cc173, which states the Apache 2.0
+  license.
+  License: Apache 2.0, in text_recognition_ch_ppocrv4.LICENSE, which is
+  the LICENSE of PaddleOCR at commit
+  dab3fe35379033fdcb2d0e9572fac0b36c9a9ebf.
+  Copyright (c) 2016 PaddlePaddle Authors.
+
+text_recognition_ch_ppocrv4.txt
+
+  The characters that the recognition model writes, one a line, in the
+  order of its outputs: ppocr/utils/ppocr_keys_v1.txt of PaddleOCR at
+  the same commit, under the same license.
