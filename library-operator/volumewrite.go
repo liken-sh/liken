@@ -166,7 +166,7 @@ func (w *volumeWriter) removeToolPartial(path, host string) error {
 // a .liken directory, of any writer, on any host. The age is what proves that
 // no writer still holds the file: a writer changes its partial file as it
 // writes, and stalePartialAge is longer than any writer runs. The remove
-// refuses a name with neither the temporary mark nor the appearances tool's
+// refuses a name with neither the temporary mark nor the tools'
 // partial mark, a path outside a .liken directory, and a file younger than
 // that age. The answer says whether this call removed the file.
 func (w *volumeWriter) removeStalePartial(path string, now time.Time) (bool, error) {

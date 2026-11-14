@@ -42,7 +42,7 @@ type factWorker struct {
 }
 
 // The heavy facts, in the order the operator considers them.
-var factWorkers = []factWorker{trickplayWorker, appearancesWorker}
+var factWorkers = []factWorker{trickplayWorker, appearancesWorker, titlesWorker}
 
 // The worker of one fact, or false where the fact runs in the library Job.
 func factWorkerOf(fact string) (factWorker, bool) {

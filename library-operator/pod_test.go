@@ -21,6 +21,7 @@ const (
 	testBrowserImage     = "ghcr.io/liken-sh/library-operator-media-browser:test"
 	testFFmpegImage      = "ghcr.io/liken-sh/library-operator-ffmpeg:test"
 	testAppearancesImage = "ghcr.io/liken-sh/library-operator-appearances:test"
+	testTitlesImage      = "ghcr.io/liken-sh/library-operator-titles:test"
 	testBusAddress       = "bus.liken-system.svc:1883"
 )
 

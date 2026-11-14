@@ -84,6 +84,7 @@ type jobImages struct {
 	ffmpeg      string
 	corrosion   string
 	appearances string
+	titles      string
 }
 
 // The Job's name: the Library, the mode, and the creation time in base 36,

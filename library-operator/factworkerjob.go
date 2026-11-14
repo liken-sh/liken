@@ -181,7 +181,7 @@ func workerParallelism(library *Library, worker factWorker, count int) int32 {
 // The images every Job of this operator runs.
 func (o *operator) jobImages() jobImages {
 	return jobImages{operator: o.scannerImage, ffmpeg: o.ffmpegImage, corrosion: o.corrosionImage,
-		appearances: o.appearancesImage}
+		appearances: o.appearancesImage, titles: o.titlesImage}
 }
 
 // The broker every Job of this operator that reads or writes a work list

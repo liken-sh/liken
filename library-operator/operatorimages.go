@@ -8,7 +8,7 @@ package main
 // library-operator-ffmpeg, and library-operator-appearances beside it.
 // So one pin in a kustomization moves every image together, and no
 // manifest names a version twice. SCANNER_IMAGE, CORROSION_IMAGE,
-// BROWSER_IMAGE, FFMPEG_IMAGE, and APPEARANCES_IMAGE still win when set, for a test or for a cluster whose pod names its image
+// BROWSER_IMAGE, FFMPEG_IMAGE, APPEARANCES_IMAGE, and TITLES_IMAGE still win when set, for a test or for a cluster whose pod names its image
 // by digest, which has no tag to share.
 
 import (
@@ -29,7 +29,7 @@ const (
 	operatorContainer = "operator"
 )
 
-// The five images the operator stamps into the pods and Jobs it creates, and
+// The six images the operator stamps into the pods and Jobs it creates, and
 // the tag they share. Version feeds liken_build_info, the gauge every process
 // in the organization carries, so a cluster's dashboard shows this operator's
 // release without a second source for it. It is empty where every image
@@ -45,7 +45,10 @@ type images struct {
 	// The image the appearances worker runs on, which carries the
 	// appearances tool, OpenVINO, and the face models beside ffmpeg.
 	appearances string
-	version     string
+	// The image the titles worker runs on, which carries the titles tool,
+	// OpenVINO, and the two text models beside ffmpeg.
+	titles  string
+	version string
 }
 
 // operatorImages settles each companion image. A variable that is
@@ -60,9 +63,10 @@ func operatorImages(ctx context.Context, client *apiclient.Client, namespace str
 		browser:     os.Getenv(browserImageVariable),
 		ffmpeg:      os.Getenv(ffmpegImageVariable),
 		appearances: os.Getenv(appearancesImageVariable),
+		titles:      os.Getenv(titlesImageVariable),
 	}
 	if named.scanner != "" && named.corrosion != "" && named.browser != "" && named.ffmpeg != "" &&
-		named.appearances != "" {
+		named.appearances != "" && named.titles != "" {
 		return named, nil
 	}
 	name := os.Getenv(podNameVariable)
@@ -96,6 +100,9 @@ func operatorImages(ctx context.Context, client *apiclient.Client, namespace str
 	if named.appearances != "" {
 		derived.appearances = named.appearances
 	}
+	if named.titles != "" {
+		derived.titles = named.titles
+	}
 	return derived, nil
 }
 
@@ -126,6 +133,7 @@ func deriveImages(reference string) (images, error) {
 		browser:     repository + "-media-browser:" + tag,
 		ffmpeg:      repository + "-ffmpeg:" + tag,
 		appearances: repository + "-appearances:" + tag,
+		titles:      repository + "-titles:" + tag,
 		version:     tag,
 	}, nil
 }

@@ -24,7 +24,7 @@ import (
 // file keeps its arrival.
 var fileFacts = map[string]bool{
 	factProbe: true, factTrickplay: true, factEpisodeThumb: true, factMarks: true,
-	factAppearances: true,
+	factAppearances: true, factTitles: true,
 }
 
 // What one folder read reopened: the files replaced at their paths, and the

@@ -212,10 +212,10 @@ images, `trailer`, which records where each title's trailers are,
 `contributors`, which fills the people, and, where the `Library` turns
 it on, `trailer-files`. A phase runs only where a Ready source of the
 `Library` serves one of its facts. `probe` and `arrival` ask no
-provider, so they always run. The trickplay and appearances facts are
-no phases: each runs in a worker `Job` of its own, which the
-[trickplay](#trickplay) and [appearances](#appearances) sections
-describe.
+provider, so they always run. The trickplay, appearances, and titles
+facts are no phases: each runs in a worker `Job` of its own, which the
+[trickplay](#trickplay), [appearances](#appearances), and
+[titles](#titles) sections describe.
 
 All the phases start together, and each one reads its gap again
 whenever the rows it reads change. So a phase works on a title as soon
@@ -420,9 +420,9 @@ same name.
 
 At the default parallelism, the worker decodes one video at a time. A
 large library can decode several videos at once, on several nodes'
-GPUs, with `spec.trickplay.parallelism` or
-`spec.appearances.parallelism`, the number of pods the worker `Job`
-runs at once, from 1 to 16:
+GPUs, with `spec.trickplay.parallelism`,
+`spec.appearances.parallelism`, or `spec.titles.parallelism`, the
+number of pods the worker `Job` runs at once, from 1 to 16:
 
 ```yaml
 spec:
@@ -656,6 +656,69 @@ with no pass over the video. For an episode, run the match on the
 season folder and name the series' credits:
 
     appearances match "Series/Example Show/Season 01" --credits "Series/Example Show/.liken/credits.yaml"
+
+### Titles
+
+The `titles` fact reads the text on screen in the last minutes of each
+video, so that the second the end titles start can be placed from the
+video's own picture. It runs where `spec.titles.enabled` is set:
+
+```yaml
+spec:
+  titles:
+    enabled: true
+    parallelism: 2
+    gpuResourceClaimTemplate: decode
+```
+
+The fact asks no provider. A first pass decodes the last 15 minutes of
+every film and the last 6 minutes of every episode, so the fact runs
+in a worker `Job` of its own, named `<library>-titles-<suffix>`, in the
+same way as the [trickplay](#trickplay) worker. The `Job` that walks
+the `Library` publishes the titles gap on the bus under
+`missing/titles`, and each pod of the worker reads one video, checks
+it again before it opens it, and asks the operator to rescan its title
+folder when it is done. `spec.titles.parallelism` runs the worker on
+several nodes at once, as
+[a worker on several nodes](#a-worker-on-several-nodes) describes.
+
+A video is in the gap when it is the main video of a title and the
+probe gave it a length. A database's mark for the video is not needed.
+
+For each video, the worker runs `titles read`. The tool decodes the end
+of the video with `ffmpeg` at one frame a second. A text detector finds
+the text in each frame, and a text reader reads the lines of every
+eighth frame. The tool writes the reading to
+`.liken/titles/<file>.jsonl` beside the video: a header with the file's
+size, the part of the video that it read, and the two models, and then
+one line for each second, with the share of the frame that text
+covers, how dark the frame is, how much it changed, and the lines that
+the reader read. The worker writes its attempt to `.liken/titles.yaml`.
+A reading stays until the file at its path is replaced. A read that
+fails is asked again after a day, and its attempt holds the tool's own
+error.
+
+The operator does not use the reading yet. Plan 96 in
+`library-operator/plans/` holds the steps that place the end titles
+from it, and the measurements of the tool.
+
+    kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=titles
+
+The worker runs on the `library-operator-titles` image, which carries
+the tool, Intel's OpenVINO runtime, and two models of
+[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) under the Apache
+2.0 license: the PP-OCRv3 text detector and the PP-OCRv4 text reader.
+The operator names the image at its own tag, and `TITLES_IMAGE` on the
+operator's `Deployment` names another. The container requests one core
+of CPU and may take `1536Mi` of memory. The worker allows each read
+one hour.
+
+The text models run on the CPU. With no template, `ffmpeg` decodes in
+software too. `spec.titles.gpuResourceClaimTemplate` names a
+`ResourceClaimTemplate`, as [A worker on a GPU](#a-worker-on-a-gpu)
+describes, and with the claim `ffmpeg` decodes and scales the video on
+the render node through VA-API. The tool decodes a video that the
+render node refuses again in software.
 
 ### Identification
 
@@ -1339,6 +1402,6 @@ the operator starts a `Job` that fills gaps with the phases whose counts
 are above zero, once a refresh time or a source provider that turned
 `Ready` has given them work since the last `Job` started. `trailer-files`
 runs in such a `Job` while its count is above zero, because each run
-stops at its time limit. The `trickplay` and `appearances` counts
-start no `Job` that fills gaps: each starts its fact's worker when a
+stops at its time limit. The `trickplay`, `appearances`, and `titles`
+counts start no `Job` that fills gaps: each starts its fact's worker when a
 `Job` of the `Library` ends.

@@ -167,7 +167,7 @@ var likenFacts = []string{factProbe, factArrival, factTrickplay, factIdentity,
 	factCredits, factCreditsMove, factAlternateTitles,
 	factPoster, factBackdrop, factLogo, factClearart, factBanner,
 	factLandscape, factDiscart, factSeasonPoster, factSeasonBanner, factEpisodeThumb,
-	factTrailer, factTrailerFile, factMarks, factAppearances}
+	factTrailer, factTrailerFile, factMarks, factAppearances, factTitles}
 
 // The rows one folder's trailer ledger becomes: one per trailer the providers
 // hold, keyed on the item its own entry names.
@@ -250,8 +250,10 @@ func (s likenDir) read(now time.Time) (likenRows, error) {
 		listed[entry.Name()] = true
 	}
 	held.stale = stalePartialsIn(liken, entries, now)
-	if listed[appearancesRecordsDirectory] {
-		held.stale = append(held.stale, staleRecordPartials(liken, now)...)
+	for _, directory := range toolRecordsDirectories {
+		if listed[directory] {
+			held.stale = append(held.stale, staleRecordPartials(liken, directory, now)...)
+		}
 	}
 	for _, fact := range s.ledgerFacts() {
 		if !listed[likenLedgerName(fact)] {
@@ -308,7 +310,7 @@ func unixOrZero(at time.Time) int64 {
 // item fact names the title the folder holds.
 func (s likenDir) itemOf(fact, path string) string {
 	if _, art := artTypes[fact]; fact == factProbe || fact == factArrival || fact == factTrickplay ||
-		fact == factMarks || fact == factAppearances || art {
+		fact == factMarks || fact == factAppearances || fact == factTitles || art {
 		return relativePath(s.root, filepath.Join(s.dir, path))
 	}
 	if path == likenSelfPath || path == "" {

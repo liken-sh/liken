@@ -3,8 +3,8 @@ package main
 // stalepartials.go removes the partial files that stopped writers leave under
 // a title's .liken directory. Every writer there writes a file beside its
 // final name and renames it into place: the operator's own temporaries carry
-// likenTempMark, and the appearances tool names its partial file
-// <name>.partial-<host>-<pid>. A writer that is killed before the rename
+// likenTempMark, and the appearances tool and the titles tool name a partial
+// file <name>.partial-<host>-<pid>. A writer that is killed before the rename
 // leaves its partial file, and a killed detect pass can leave several
 // megabytes. Nothing else removes it, because a run removes only the partial
 // files of its own pod.
@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -34,9 +35,15 @@ import (
 // never removes a file that a live writer still holds.
 const stalePartialAge = 24 * time.Hour
 
-// The directory under .liken where the appearances tool writes its detections
-// records and their partial files.
-const appearancesRecordsDirectory = "appearances"
+// The directories under .liken where a tool writes its records and their
+// partial files: the appearances tool its detections records, and the titles
+// tool its readings. Both tools name a partial file the same way.
+const (
+	appearancesRecordsDirectory = "appearances"
+	titlesRecordsDirectory      = "titles"
+)
+
+var toolRecordsDirectories = []string{appearancesRecordsDirectory, titlesRecordsDirectory}
 
 // The note the scan writes on the phases volume: the paths of the stale
 // partial files, relative to the root, as one JSON array.
@@ -47,7 +54,7 @@ func isPartialName(name string) bool {
 	return strings.Contains(name, likenTempMark) || isToolPartialName(name)
 }
 
-// Whether a name ends in the appearances tool's partial mark: .partial-, a
+// Whether a name ends in the tools' partial mark: .partial-, a
 // host name, a hyphen, and a process id. A host name holds hyphens, so the
 // process id is what follows the last one.
 func isToolPartialName(name string) bool {
@@ -62,10 +69,10 @@ func isToolPartialName(name string) bool {
 	return allDigits(mark[at+1:])
 }
 
-// Whether a directory is a .liken directory or the appearances directory
-// under one, which are the two directories the sweep reads.
+// Whether a directory is a .liken directory or a tool's records directory
+// under one, which are the directories the sweep reads.
 func isUnderLiken(dir string) bool {
-	if filepath.Base(dir) == appearancesRecordsDirectory {
+	if slices.Contains(toolRecordsDirectories, filepath.Base(dir)) {
 		dir = filepath.Dir(dir)
 	}
 	return filepath.Base(dir) == likenDirectory
@@ -95,13 +102,13 @@ func stalePartialsIn(dir string, entries []os.DirEntry, now time.Time) []string 
 	return stale
 }
 
-// The stale partial files of the appearances directory under one .liken
-// directory. This is the one extra directory read of the sweep, and only a
-// title the appearances fact has worked holds the directory. A listing that
-// fails finds nothing, because a missed partial file waits for the next walk
-// and is no reason to mark the walk incomplete.
-func staleRecordPartials(liken string, now time.Time) []string {
-	records := filepath.Join(liken, appearancesRecordsDirectory)
+// The stale partial files of one tool's records directory under one .liken
+// directory. Each is one extra directory read of the sweep, and only a title
+// the tool's fact has worked holds the directory. A listing that fails finds
+// nothing, because a missed partial file waits for the next walk and is no
+// reason to mark the walk incomplete.
+func staleRecordPartials(liken, directory string, now time.Time) []string {
+	records := filepath.Join(liken, directory)
 	entries, err := os.ReadDir(records)
 	if err != nil {
 		return nil
