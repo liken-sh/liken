@@ -76,6 +76,10 @@ type libraryReport struct {
 	// group it writes, with the .contributors/ entries a merge left because a
 	// person edited one of them. The operator folds it into Library status.
 	Fights int `json:"fights"`
+	// The videos of this library with a reading and a provider's mark of
+	// their end titles, which a fit of the titles model learns from
+	// (titlesfit.go).
+	TitlesMarked titlesMarked `json:"titlesMarked,omitzero"`
 	// The counts the Jobs raised inside containers that have exited. The
 	// operator turns them into Prometheus counters.
 	Tallies []libraryTally `json:"tallies,omitempty"`
@@ -149,6 +153,9 @@ func actsOn(before, after libraryReport) bool {
 	}
 	if !maps.Equal(before.OldestAttempts, after.OldestAttempts) ||
 		!maps.Equal(before.OldestMisses, after.OldestMisses) {
+		return true
+	}
+	if before.TitlesMarked.step() != after.TitlesMarked.step() {
 		return true
 	}
 	return !maps.Equal(openGaps(before), openGaps(after))

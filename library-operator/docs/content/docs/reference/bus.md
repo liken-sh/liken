@@ -116,6 +116,7 @@ catalog pod holds every row the `Job` wrote.
 | `waiting` | integer | How many titles the identity fact left as candidates for a person to choose from. |
 | `unresolved` | integer | How many titles no provider could name. |
 | `fights` | integer | How many titles a fact left because another writer holds the elements it writes. |
+| `titlesMarked` | object | `videos`, how many videos of the library have a reading from the `titles` fact and a provider's mark of the start of their end titles, and `groups`, how many films and series those videos are of. Absent where both are zero. |
 
 Each entry of `runs` carries `worker`, `job`, `started`, and
 `finished`, plus `unidentified`, `removed`, and `failure` where the
@@ -178,7 +179,8 @@ that has work left starts its work from such a report too.
 
 The videos a heavy fact still needs, for the fact's worker `Job`. The
 close container of the library `Job` named `{job}` reads the gap of
-each heavy fact the `Library` turns on, `trickplay` or `appearances`,
+each heavy fact the `Library` turns on, `trickplay`, `appearances`, or
+`titles`,
 from its copy of the catalog. It publishes each video as one retained
 message, numbered from 0 in the order of the video's path, and then the
 count, retained:
