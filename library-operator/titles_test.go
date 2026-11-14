@@ -227,7 +227,7 @@ func TestTheReasonOfATitlesFailure(t *testing.T) {
 	}{
 		{name: "the tool's words", err: &titlesFailure{err: os.ErrInvalid, stderr: "titles: no video\n"}, want: "titles: no video"},
 		{name: "a long stderr", err: &titlesFailure{err: os.ErrInvalid, stderr: long}, want: long[len(long)-titlesReasonLimit:]},
-		{name: "no stderr", err: &titlesFailure{err: os.ErrInvalid}, want: "titles read: invalid argument: "},
+		{name: "no stderr", err: &titlesFailure{pass: "read", err: os.ErrInvalid}, want: "titles read: invalid argument: "},
 		{name: "another error", err: os.ErrNotExist, want: "file does not exist"},
 	}
 	for _, test := range cases {

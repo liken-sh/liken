@@ -85,6 +85,11 @@ type metrics struct {
 	// factGap is the rows each fact has left to fill, from the same gap
 	// counts the operator schedules the enricher on.
 	factGap *prometheus.GaugeVec
+	// titlesModel is the score of each Library's titles model, and
+	// titlesModelVideos the videos it was fitted on, so the score of each
+	// fit has a history where the status holds the last one.
+	titlesModel       *prometheus.GaugeVec
+	titlesModelVideos *prometheus.GaugeVec
 	// tallyCounters is the counters the Jobs' own counts feed, by tally
 	// metric name.
 	tallyCounters map[string]*prometheus.CounterVec
@@ -156,6 +161,14 @@ func newMetrics(version string) *metrics {
 			Name: "library_fact_gap",
 			Help: "Rows one fact has left to fill in a library.",
 		}, []string{"library", "fact"}),
+		titlesModel: factory.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "library_titles_model_within_ratio",
+			Help: "The share of held-out videos a library's titles model placed within a number of seconds of their marks.",
+		}, []string{"library", "kind", "seconds"}),
+		titlesModelVideos: factory.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "library_titles_model_videos",
+			Help: "The videos a library's titles model was fitted on.",
+		}, []string{"library", "kind"}),
 		tallyCounters: newTallyCounters(factory),
 		lastRun:       map[runKey]time.Time{},
 		lastTally:     map[tallyStateKey]float64{},
@@ -182,6 +195,28 @@ func (m *metrics) recordWatchRestart(kind string) {
 		return
 	}
 	m.watchRestarts.WithLabelValues(kind).Inc()
+}
+
+// observeTitlesModels publishes the score of each titles model a Library's
+// status holds. A Library with no model, or one that turned the fact off,
+// publishes none, and the series it had are deleted.
+func (m *metrics) observeTitlesModels(library *Library) {
+	if m == nil || library == nil {
+		return
+	}
+	name := library.Metadata.Name
+	held := prometheus.Labels{"library": name}
+	m.titlesModel.DeletePartialMatch(held)
+	m.titlesModelVideos.DeletePartialMatch(held)
+	for _, model := range library.Status.TitlesModels {
+		if model.Fitted.IsZero() {
+			continue
+		}
+		m.titlesModelVideos.WithLabelValues(name, model.Kind).Set(float64(model.Videos))
+		for seconds, percent := range map[string]int{"3": model.Within3, "10": model.Within10, "30": model.Within30} {
+			m.titlesModel.WithLabelValues(name, model.Kind, seconds).Set(float64(percent) / 100)
+		}
+	}
 }
 
 // observeLibraryReport folds the newest report a Library's namespace
@@ -270,6 +305,8 @@ func (m *metrics) dropLibrary(library string) {
 	m.runLastSuccess.DeletePartialMatch(held)
 	m.items.DeletePartialMatch(held)
 	m.factGap.DeletePartialMatch(held)
+	m.titlesModel.DeletePartialMatch(held)
+	m.titlesModelVideos.DeletePartialMatch(held)
 	for _, counter := range m.tallyCounters {
 		counter.DeletePartialMatch(held)
 	}

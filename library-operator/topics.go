@@ -40,6 +40,7 @@ const (
 	libraryStatusKind       = "status"
 	libraryAvailabilityKind = "availability"
 	libraryRefreshKind      = "refresh"
+	libraryTitlesFitKind    = "titles-fit"
 )
 
 // Carries one Library's report: its counts, the folders no
@@ -48,6 +49,18 @@ const (
 // current counts back from the broker without waiting for a walk.
 func libraryStatusTopic(base, namespace, name string) string {
 	return base + "/libraries/" + namespace + "/" + name + "/" + libraryStatusKind
+}
+
+// Carries what the last fit of one Library's titles model left
+// (titlesfitrun.go). The fit Job publishes it retained, so an operator that
+// restarts reads the last fit back from the broker.
+func titlesFitTopic(base, namespace, name string) string {
+	return base + "/libraries/" + namespace + "/" + name + "/" + libraryTitlesFitKind
+}
+
+// The operator's subscription to the last fit of every Library.
+func titlesFitFilter(base string) string {
+	return base + "/libraries/+/+/" + libraryTitlesFitKind
 }
 
 // The per-Library availability topic. No pod publishes it any more,
@@ -184,7 +197,8 @@ func parseLibraryTopic(base, topic string) (namespace, name, kind string, ok boo
 	if namespace == "" || name == "" {
 		return "", "", "", false
 	}
-	if kind != libraryStatusKind && kind != libraryAvailabilityKind && kind != libraryRefreshKind {
+	if kind != libraryStatusKind && kind != libraryAvailabilityKind && kind != libraryRefreshKind &&
+		kind != libraryTitlesFitKind {
 		return "", "", "", false
 	}
 	return namespace, name, kind, true

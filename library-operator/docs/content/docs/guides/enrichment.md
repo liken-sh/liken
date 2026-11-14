@@ -698,9 +698,50 @@ A reading stays until the file at its path is replaced. A read that
 fails is asked again after a day, and its attempt holds the tool's own
 error.
 
-The operator does not use the reading yet. Plan 96 in
-`library-operator/plans/` holds the steps that place the end titles
-from it, and the measurements of the tool.
+#### The model
+
+The library fits a model of its own on the readings. A video is a
+lesson for the model when it has a reading and a provider's mark of
+where its end titles start, from the [marks](#intro-and-credits-marks)
+fact. No model comes with the operator, and no video of one library
+reaches another library's model.
+
+The operator starts a fit `Job`, named `<library>-titles-fit-<suffix>`,
+when the library holds 100 such videos of 30 films and series. The
+count of films and series is there because the episodes of one series
+show one style of titles. It starts another fit each time the count
+has grown by half. The `Job` is one pod on the same image. It reads the
+readings and the marks ledgers from the volume, runs `titles train`,
+and writes the model to `.liken/titles/model.json` under the library's
+root. `train` leaves out the marks that a first model placed far from
+and was sure about, because a share of the providers' marks is wrong.
+It scores the model on videos it was not fitted on, each without its
+film or series, and a model that places under 60% of them within 30
+seconds of their marks is rejected, so the library keeps the model it
+has. Plan 96 in `library-operator/plans/` holds the measurements that
+each of these numbers comes from.
+
+The `EndTitlesModel` condition of the `Library` reports the model:
+
+| Status | Reason | Meaning |
+|---|---|---|
+| `True` | `Fitted` | The library has a model, and the message gives its score. |
+| `False` | `WaitingForMarks` | Too few videos have a reading and a mark, and the message gives the count. |
+| `False` | `Fitting` | The first fit runs. |
+| `False` | `Rejected` | The last fit gave a model under the floor, and the library has no model. |
+| `False` | `FitFailed` | The last fit failed, and the message holds the tool's own error. |
+
+`status.titlesModels` holds the score: the videos the model was fitted
+on, the marks left out, and the percent of the scored videos placed
+within 3, 10, and 30 seconds of their marks. A share of the marks is
+wrong, so a model that works does not reach 100. The gauges
+`library_titles_model_within_ratio` and `library_titles_model_videos`
+hold the same numbers, so the score of each fit has a history.
+
+    kubectl -n media get library movies -o jsonpath='{.status.titlesModels}'
+
+The operator does not place the end titles from the model yet. Plan 96
+holds the steps that remain.
 
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=titles
 

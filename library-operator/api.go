@@ -453,7 +453,11 @@ type LibraryStatus struct {
 	// in the form 6/6, which the SOURCES printer column reads.
 	Sources        []librarySource `json:"sources,omitempty"`
 	SourcesSummary string          `json:"sourcesSummary,omitempty"`
-	Conditions     []Condition     `json:"conditions,omitempty"`
+	// One entry for each kind of titles a model places, on a Library that
+	// turns the titles fact on: the model's score and the last fit
+	// (titlesfitjob.go).
+	TitlesModels []titlesModelStatus `json:"titlesModels,omitempty"`
+	Conditions   []Condition         `json:"conditions,omitempty"`
 }
 
 // LibraryVolume is the PersistentVolume the claim is bound to,
@@ -874,6 +878,9 @@ const (
 	// GPUClaimTemplates reports the ResourceClaimTemplates that the
 	// Library's enabled workers name.
 	conditionGPUClaimTemplates = "GPUClaimTemplates"
+	// EndTitlesModel reports the model that places the Library's end
+	// titles, on a Library that turns the titles fact on (titlesfitjob.go).
+	conditionEndTitlesModel = "EndTitlesModel"
 )
 
 // The reasons each condition takes. A reason is one CamelCase word a
@@ -888,6 +895,16 @@ const (
 	// a template does not exist in the Library's namespace.
 	reasonClaimTemplatesFound   = "ClaimTemplatesFound"
 	reasonClaimTemplateNotFound = "ClaimTemplateNotFound"
+
+	// The EndTitlesModel condition's reasons: the Library has a model, its
+	// first fit runs, its last fit left no model because the model was under
+	// the floor or because the fit failed, and it has too few videos with a
+	// reading and a mark for a first fit.
+	reasonModelFitted     = "Fitted"
+	reasonModelFitting    = "Fitting"
+	reasonModelRejected   = "Rejected"
+	reasonModelFitFailed  = "FitFailed"
+	reasonWaitingForMarks = "WaitingForMarks"
 
 	reasonReady        = "Ready"
 	reasonNotBound     = "NotBound"

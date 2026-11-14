@@ -54,11 +54,12 @@ func factWorkerOf(fact string) (factWorker, bool) {
 	return factWorker{}, false
 }
 
-// Whether a Job's worker label names a heavy fact. Such a Job runs no catalog
-// agent, so it holds no gate that the Library's catalog claim needs.
+// Whether a Job's worker label names a heavy fact, or the fit of the titles
+// model. Such a Job runs no catalog agent, so it holds no gate that the
+// Library's catalog claim needs.
 func isFactWorker(worker string) bool {
 	_, held := factWorkerOf(worker)
-	return held
+	return held || worker == titlesFitMode
 }
 
 // The count of videos at once a Library's block asks for. A Library the API

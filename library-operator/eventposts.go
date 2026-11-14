@@ -64,6 +64,9 @@ var warningReasons = map[string]bool{
 	reasonProviderNotReady:      true,
 	reasonFactNotServed:         true,
 	reasonClaimTemplateNotFound: true,
+	// Library: EndTitlesModel.
+	reasonModelRejected:  true,
+	reasonModelFitFailed: true,
 	// Library: Departing.
 	reasonBlocked: true,
 	// Catalog: Ready.

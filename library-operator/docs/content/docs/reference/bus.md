@@ -146,6 +146,29 @@ is empty for a run that finished its work.
       "fights": 0
     }
 
+## The fit of a titles model
+
+`libraries/{namespace}/{name}/titles-fit`
+
+What the last fit of one library's titles model left. The fit `Job` of
+the `Library` publishes it retained when it ends, and the operator
+writes it into `status.titlesModels` and the `EndTitlesModel`
+condition.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `kind` | string | The titles the model places: `end-titles`. |
+| `result` | string | `fitted` for a model that the library now places with, `rejected` for a model under the floor, and `failed` for a fit that wrote none. |
+| `reason` | string | Why the fit was rejected or failed. Absent for `fitted`. |
+| `job` | string | The `Job` that ran the fit. |
+| `at` | RFC 3339 time | When the fit ended. |
+| `marked` | object | `videos`, the videos with a reading and a provider's mark that the fit found, and `groups`, their films and series. |
+| `videos` | integer | The videos the model was fitted on. |
+| `leftOut` | integer | The marks the fit left out as wrong. |
+| `heldOut` | integer | The videos the model was scored on, which it was not fitted on. |
+| `within3`, `within10`, `within30` | number | The share of the scored videos placed within that many seconds of their marks, from 0 to 1. |
+| `median` | number | The median distance from a placement to its mark, in seconds. |
+
 ## The refresh times
 
 `libraries/{namespace}/{name}/refresh`

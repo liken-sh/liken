@@ -48,6 +48,9 @@ func main() {
 		case workerMode:
 			runWorker()
 			return
+		case titlesFitMode:
+			runTitlesFit()
+			return
 		case progressMode:
 			runProgress()
 			return

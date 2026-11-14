@@ -31,10 +31,11 @@ const titlesReadTimeout = time.Hour
 // is the part to keep.
 const titlesReasonLimit = 4096
 
-// One run of the tool that failed: the exit, and the tool's stderr word for
-// word. The error's text ends with the last line of stderr, which is the
+// One run of the tool that failed: the pass, the exit, and the tool's stderr
+// word for word. The error's text ends with the last line of stderr, which is the
 // tool's own error.
 type titlesFailure struct {
+	pass   string
 	err    error
 	stderr string
 }
@@ -44,7 +45,7 @@ func (f *titlesFailure) Error() string {
 	if at := strings.LastIndexByte(text, '\n'); at >= 0 {
 		text = text[at+1:]
 	}
-	return fmt.Sprintf("titles read: %v: %s", f.err, text)
+	return fmt.Sprintf("titles %s: %v: %s", f.pass, f.err, text)
 }
 
 // The text an attempt records for a failure: the tool's stderr, or the error
@@ -61,15 +62,21 @@ func titlesReason(err error) string {
 	return text
 }
 
-// One run of the tool, and a failure that carries its stderr.
+// One read, and a failure that carries the tool's stderr.
 func runTitles(ctx context.Context, args ...string) error {
 	timed, cancel := context.WithTimeout(ctx, titlesReadTimeout)
 	defer cancel()
+	return runTitlesTool(timed, args...)
+}
+
+// One run of the tool, and a failure that carries its stderr. The caller's
+// context bounds the run.
+func runTitlesTool(ctx context.Context, args ...string) error {
 	var stderr bytes.Buffer
-	command := exec.CommandContext(timed, titlesBinary, args...)
+	command := exec.CommandContext(ctx, titlesBinary, args...)
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
-		return &titlesFailure{err: err, stderr: stderr.String()}
+		return &titlesFailure{pass: args[0], err: err, stderr: stderr.String()}
 	}
 	return nil
 }

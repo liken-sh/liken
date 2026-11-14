@@ -48,6 +48,9 @@ type libraryObservation struct {
 	// The GPU claim templates the Library's enabled workers name, and
 	// whether each one exists.
 	gpuTemplates gpuClaimTemplates
+	// The last fit of the Library's titles model that the broker holds, or
+	// nil.
+	titlesFit *titlesFit
 }
 
 // deriveLibraryStatus builds the whole status of one Library from one
@@ -113,6 +116,22 @@ func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Tim
 		conditions = SetCondition(conditions, templates, now)
 	} else {
 		conditions = slices.DeleteFunc(conditions, func(c Condition) bool { return c.Type == conditionGPUClaimTemplates })
+	}
+	// The titles models are the one part of the status that the status
+	// itself carries from pass to pass: a fit's result is retained on a
+	// broker that keeps nothing across a restart, and the fit is not run
+	// again to learn its score.
+	status.TitlesModels = titlesModelsStatus(library, seen.titlesFit)
+	var marked titlesMarked
+	if seen.report != nil {
+		marked = seen.report.TitlesMarked
+	}
+	model, runs := endTitlesModelCondition(library, status.TitlesModels, marked, titlesFitRuns(library, seen.jobs),
+		generation)
+	if runs {
+		conditions = SetCondition(conditions, model, now)
+	} else {
+		conditions = slices.DeleteFunc(conditions, func(c Condition) bool { return c.Type == conditionEndTitlesModel })
 	}
 	status.Conditions = conditions
 	status.Phase = libraryPhase(ready, library, seen)

@@ -633,6 +633,56 @@ spec:
                 sourcesSummary:
                   type: string
                   description: "How many of the sources are ready against how many names spec.sources holds, in the form 6/6. The SOURCES column of kubectl get reads this field."
+                titlesModels:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [kind]
+                  description: "One entry for each kind of titles a model places, on a library that sets spec.titles.enabled. The library fits its own model on its videos that have a reading and a provider's mark of where their end titles start, and the entry holds the score of that model and the last fit."
+                  items:
+                    type: object
+                    required: [kind]
+                    properties:
+                      kind:
+                        type: string
+                        description: "The titles the model places: end-titles."
+                      fitted:
+                        type: string
+                        format: date-time
+                        description: "When the model the library places with was fitted. Absent while the library has no model."
+                      videos:
+                        type: integer
+                        description: "How many videos the model was fitted on."
+                      leftOut:
+                        type: integer
+                        description: "How many marks the fit left out, because a first model placed the end titles of their videos far from them and was sure of it."
+                      heldOut:
+                        type: integer
+                        description: "How many videos the model was scored on. Each was placed by a model that was fitted without its film or series."
+                      within3:
+                        type: integer
+                        description: "The percent of the scored videos that the model placed within 3 seconds of their marks. A share of the providers' marks is wrong, so a model that works does not reach 100."
+                      within10:
+                        type: integer
+                        description: "The percent of the scored videos that the model placed within 10 seconds of their marks."
+                      within30:
+                        type: integer
+                        description: "The percent of the scored videos that the model placed within 30 seconds of their marks. A fit whose model is under 60 here is rejected, and the library keeps the model it has."
+                      lastFit:
+                        type: string
+                        format: date-time
+                        description: "When the last fit ended."
+                      lastResult:
+                        type: string
+                        description: "What the last fit left: fitted for a model the library now places with, rejected for a model under the floor, and failed for a fit that wrote no model."
+                      lastReason:
+                        type: string
+                        description: "Why the last fit was rejected or failed, in a sentence."
+                      markedVideos:
+                        type: integer
+                        description: "How many videos with a reading and a provider's mark the last fit found. The next fit starts when the library holds half as many again."
+                      markedGroups:
+                        type: integer
+                        description: "How many films and series those videos are of."
                 webhook:
                   type: string
                   description: "The address you give to Radarr, Sonarr, or Jellyfin so that an import rescans that one folder at once; it names the operator's own Service and this Library, so it holds for the life of the Library, and it is reported once the storage is bound and the namespace holds one Catalog."
@@ -678,7 +728,17 @@ spec:
                     ClaimTemplateNotFound when one does not, which
                     holds that worker back. A library whose enabled
                     workers name no template carries no
-                    GPUClaimTemplates condition.
+                    GPUClaimTemplates condition. EndTitlesModel
+                    reports the model that places the library's end
+                    titles, on a library that sets spec.titles.enabled:
+                    True with the reason Fitted when the library has a
+                    model, and False with the reason WaitingForMarks
+                    while too few videos have a reading and a
+                    provider's mark for a first fit, Fitting while the
+                    first fit runs, Rejected when the last fit gave a
+                    model under the floor, or FitFailed when the last
+                    fit failed. A library that leaves spec.titles off
+                    carries no EndTitlesModel condition.
                   # A conditions array is a map with one entry per
                   # type. This declaration (list-type map, keyed by
                   # type) lets the API server refuse duplicate types.

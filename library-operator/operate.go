@@ -206,6 +206,9 @@ type operator struct {
 	// The count of every work list the broker retains (worklistdesk.go).
 	workLists *workLists
 
+	// The last fit of each Library's titles model (titlesfitjob.go).
+	titlesFits *titlesFits
+
 	// The library Job whose list each heavy fact's last worker took, keyed
 	// by the Library and the fact (factworkerjob.go).
 	workListsTaken map[string]string
@@ -272,6 +275,7 @@ func newOperator(client *apiclient.Client, stamped images,
 		plays:            newPlayRequests(wake),
 		marks:            newStoreMarks(wake),
 		workLists:        newWorkLists(wake),
+		titlesFits:       newTitlesFits(wake),
 		published:        map[string]string{},
 		unsent:           map[string]struct{}{},
 		mediaTopicBase:   defaultMediaTopicBase,
@@ -303,6 +307,9 @@ func newOperator(client *apiclient.Client, stamped images,
 	// The count of every work list, which says a library Job has published
 	// a heavy fact's gap for its worker.
 	library.bus.Subscribe(workCountFilter(topicBase))
+	// The last fit of every Library's titles model, which the fit Job
+	// publishes when it ends.
+	library.bus.Subscribe(titlesFitFilter(topicBase))
 	return library
 }
 
@@ -576,7 +583,19 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 	// carries nothing to fold. The operator subscribes to the topics it
 	// clears, so its own clears come back to it, and folding one would
 	// put back the desk state the pass just dropped.
-	if len(payload) == 0 || kind != libraryStatusKind {
+	if len(payload) == 0 {
+		return
+	}
+	if kind == libraryTitlesFitKind {
+		var fit titlesFit
+		if err := json.Unmarshal(payload, &fit); err != nil {
+			fmt.Fprintf(os.Stderr, "reading the titles fit on %s: %v\n", topic, err)
+			return
+		}
+		o.titlesFits.fold(namespace, name, fit)
+		return
+	}
+	if kind != libraryStatusKind {
 		return
 	}
 	var report libraryReport

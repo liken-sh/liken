@@ -528,6 +528,7 @@ func TestTheOperatorSubscribesToEveryTopicItActsOn(t *testing.T) {
 			catalogAvailabilityFilter(defaultTopicBase),
 			workCountFilter(defaultTopicBase),
 			libraryStatusFilter(defaultTopicBase),
+			titlesFitFilter(defaultTopicBase),
 			personForgottenFilter(defaultTopicBase),
 			playRequestFilter(defaultTopicBase),
 			playRecordedFilter(defaultTopicBase),

@@ -135,6 +135,12 @@ name none.
 [A worker on a GPU](https://liken.sh/library/docs/guides/enrichment/#a-worker-on-a-gpu)
 describes the templates.
 
+A sixth condition, `EndTitlesModel`, does not change the phase either.
+It reports the model that places the library's end titles, on a
+library that sets `spec.titles.enabled`, and
+[the titles section](https://liken.sh/library/docs/guides/enrichment/#titles) of the
+enrichment guide gives its reasons.
+
 `status.runs` holds the last run of each worker, with its `Job`, its
 times, and its failure if it had one. `scan` is a full walk, `rescan`
 is a walk of the folders webhooks named, `enrich` is the phases of a

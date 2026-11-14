@@ -66,6 +66,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 	o.publishMark(libraryRefreshTopic(o.topicBase, namespace, name), factReopenTimes(library))
 	report := o.reports.latestFor(namespace, name)
 	o.metrics.observeLibraryReport(library, report)
+	o.metrics.observeTitlesModels(library)
 
 	// A Library with no volume, or in a namespace with no single
 	// Catalog, gets no Job. There would be nothing to mount, or no
@@ -83,6 +84,11 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		// A worker runs no catalog agent and waits for no source, so it
 		// starts whatever the gate of the library Job says.
 		if err := o.runFactWorkers(ctx, library, report, jobs, templates, now); err != nil {
+			return err
+		}
+		// The fit of the titles model is a worker of the same kind: one pod
+		// on the volume, with no catalog agent.
+		if err := o.runTitlesFit(ctx, library, report, jobs, now); err != nil {
 			return err
 		}
 		// No Job of this Library is built while any source it names has no
@@ -107,6 +113,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		resolved:          resolveSources(library, providers),
 		online:            o.reporters.onlineFor(namespace),
 		gpuTemplates:      templates,
+		titlesFit:         o.titlesFits.latestFor(namespace, name),
 		operatorNamespace: o.namespace,
 		fault:             o.observeJobFault(ctx, jobs, pods, report, namespace, name, now),
 	}
