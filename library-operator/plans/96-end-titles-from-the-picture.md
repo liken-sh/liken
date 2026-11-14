@@ -8,8 +8,8 @@ model that each cluster fits on its own library.
 Status on 2026-11-14: the tool is built, in
 [`titles/`](../titles/README.md), with its three commands and their
 tests, and a `Library` that sets `spec.titles.enabled` runs a worker
-that reads each video. The operator fits no model and places no end
-titles yet. [What is not built](#what-is-not-built) lists the steps
+that reads each video and a `Job` that fits the Library's model. The
+operator places no end titles with the model yet. [What is not built](#what-is-not-built) lists the steps
 that remain.
 
 ## The problem
@@ -477,13 +477,24 @@ In the operator:
 - **The image.** `library-operator-titles`, from `Dockerfile.titles`,
   with the tool, OpenVINO's CPU plugin, the pod program, and the models
   as an OCI artifact that `titles/models/push.sh` pushes.
+- **The fit.** The reporter counts the videos with a reading and a
+  provider's mark (`titlesfit.go`), the operator starts a fit `Job` at
+  the counts above (`titlesfitjob.go`), and the `Job` reads the readings
+  and the marks ledgers from the volume, runs `train`, and lands
+  `.liken/titles/model.json` under the root unless the model is under
+  the floor (`titlesfitrun.go`). Its result goes over the bus into
+  `status.titlesModels`, the `EndTitlesModel` condition, and two gauges.
+  On 2026-11-14 the `Job`'s program ran from the image on the readings
+  of the 173 films, with a broker: it fitted in 3 minutes 15 seconds on
+  four threads, placed 77% of the held-out films within 30 seconds of
+  their marks, and published the result.
 - **The manual.** The enrichment guide's section for the fact.
 
 ## What is not built
 
-1. **The training `Job`,** its trigger, the guard, and the status
-   fields, with a model for each `Library` at
-   `.liken/titles/model.json` under its root.
+1. **A fit when the tool's columns change.** A release of the tool
+   with other columns refuses the model a Library has, and nothing
+   starts a fit for that until the Library's count has grown by half.
 2. **The placement.** The worker's `place` of each video it reads, the
    placement in the ledger, the walk that copies it into the catalog,
    and the estimate's use of it.
