@@ -51,6 +51,11 @@ const titlesFitThreads = 4
 // cannot rank two models that work.
 const titlesFitFloor = 0.60
 
+// The emptyDir the fit writes its labels file in. The image is a closure on
+// scratch and holds no temporary directory, and the labels are no fact of
+// the Library, so they do not go on the volume.
+const titlesFitScratch = "/var/cache/titles-fit"
+
 // The model's file, in .liken/titles/ under the Library's root.
 const titlesModelName = "model.json"
 
@@ -145,7 +150,7 @@ func runTitlesFit() {
 		log:       os.Stdout,
 		base:      bus.base,
 		dial:      bus.dial,
-		scratch:   os.TempDir(),
+		scratch:   titlesFitScratch,
 	}
 	if err := run.fit(stopped, time.Now().UTC()); err != nil {
 		run.logf("the titles fit failed: %v", err)

@@ -71,6 +71,12 @@ func TestThePassStartsAFitWhenTheCountIsDue(t *testing.T) {
 	if container.Resources.Limits["memory"] != titlesFitMemoryLimit {
 		t.Errorf("memory limit = %q, want %s", container.Resources.Limits["memory"], titlesFitMemoryLimit)
 	}
+	volumes := job.Spec.Template.Spec.Volumes
+	if len(volumes) != 2 || volumes[1].EmptyDir == nil || len(container.VolumeMounts) != 2 ||
+		container.VolumeMounts[1].MountPath != titlesFitScratch {
+		t.Errorf("volumes = %+v mounted at %+v, want the scratch emptyDir at %s", volumes,
+			container.VolumeMounts, titlesFitScratch)
+	}
 }
 
 func TestWhenThePassStartsNoFit(t *testing.T) {

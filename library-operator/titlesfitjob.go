@@ -266,7 +266,8 @@ func (o *operator) runTitlesFit(ctx context.Context, library *Library, report *l
 // takes it with the Library. It is one pod on the titles image, on the
 // volume the phases write. The pod holds no catalog and no Kubernetes
 // credential: it reads the readings and the marks from the volume, and
-// publishes its result on the bus.
+// publishes its result on the bus. An emptyDir holds the labels file that
+// the run writes for the tool.
 func buildTitlesFitJob(library *Library, images jobImages, bus busEndpoint, marked titlesMarked,
 	created time.Time) *Job {
 	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
@@ -306,13 +307,16 @@ func buildTitlesFitJob(library *Library, images jobImages, bus busEndpoint, mark
 					RestartPolicy:                 "Never",
 					TerminationGracePeriodSeconds: &grace,
 					AutomountServiceAccountToken:  &noToken,
-					Volumes:                       []Volume{factWorkerVolume(library)},
+					Volumes: []Volume{factWorkerVolume(library),
+						{Name: scratchVolumeName, EmptyDir: &EmptyDirVolumeSource{}}},
 					Containers: []Container{{
-						Name:         titlesFitMode,
-						Image:        images.titles,
-						Command:      []string{podBinary, titlesFitMode},
-						Env:          append(env, bus.env()...),
-						VolumeMounts: []VolumeMount{{Name: phaseVolumeOf(library), MountPath: libraryMountPath}},
+						Name:    titlesFitMode,
+						Image:   images.titles,
+						Command: []string{podBinary, titlesFitMode},
+						Env:     append(env, bus.env()...),
+						VolumeMounts: []VolumeMount{
+							{Name: phaseVolumeOf(library), MountPath: libraryMountPath},
+							{Name: scratchVolumeName, MountPath: titlesFitScratch}},
 						Resources: ResourceRequirements{
 							Requests: map[string]string{"cpu": titlesFitCPURequest, "memory": scannerMemoryRequest},
 							Limits:   map[string]string{"memory": titlesFitMemoryLimit},
