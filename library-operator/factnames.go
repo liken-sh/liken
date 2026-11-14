@@ -58,6 +58,12 @@ const (
 	// workerRefreshFacts says.
 	factAppearances = "appearances"
 
+	// The titles fact reads the text on screen in the last minutes of a
+	// video, which is what the end titles are placed from (plan 96). It runs
+	// in a worker Job of its own and asks no provider, so it is out of
+	// factVocabulary.
+	factTitles = "titles"
+
 	factContributorIDs       = "contributor.ids"
 	factContributorBiography = "contributor.biography"
 	factContributorHeadshot  = "contributor.headshot"

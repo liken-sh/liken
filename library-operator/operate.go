@@ -37,6 +37,7 @@ const (
 	browserImageVariable     = "BROWSER_IMAGE"
 	ffmpegImageVariable      = "FFMPEG_IMAGE"
 	appearancesImageVariable = "APPEARANCES_IMAGE"
+	titlesImageVariable      = "TITLES_IMAGE"
 )
 
 // The name this operator answers to as an idle controller. A Player
@@ -103,6 +104,8 @@ type operator struct {
 	ffmpegImage string
 	// The image the appearances worker runs on.
 	appearancesImage string
+	// The image the titles worker runs on.
+	titlesImage string
 	// The household defaults the pass read last, or nil where the cluster
 	// states none. Every screen pod the pass stands carries the zone as TZ,
 	// and the language preferences resolved under its Player's own.
@@ -258,6 +261,7 @@ func newOperator(client *apiclient.Client, stamped images,
 		browserImage:     stamped.browser,
 		ffmpegImage:      stamped.ffmpeg,
 		appearancesImage: stamped.appearances,
+		titlesImage:      stamped.titles,
 		busAddress:       busAddress,
 		topicBase:        topicBase,
 		namespace:        namespace,

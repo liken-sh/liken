@@ -142,6 +142,17 @@ pub fn current(path: &Path, size: u64, detector: &Model, reader: &Model) -> bool
     })
 }
 
+// The name a file has while it is written: its own name, then the host
+// and the process that write it. The operator removes a partial file that
+// a killed run left by this mark, and a pod's host name is its own, so the
+// mark says which run wrote the file.
+pub fn partial(path: &Path) -> PathBuf {
+    let host = std::env::var("HOSTNAME").unwrap_or_default();
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".partial-{host}-{}", std::process::id()));
+    path.with_file_name(name)
+}
+
 // A reading as it is written. The lines go to a partial file, which takes
 // the reading's name only when `land` is called, so no reader finds half a
 // reading under the name.
@@ -155,8 +166,7 @@ impl Writer {
     pub fn create(path: &Path, header: &Header) -> Result<Writer, Error> {
         let folder = path.parent().ok_or("the reading has no folder")?;
         fs::create_dir_all(folder)?;
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        let partial = folder.join(format!(".partial-{}-{name}", std::process::id()));
+        let partial = partial(path);
         let mut out = BufWriter::new(File::create(&partial)?);
         writeln!(out, "{}", serde_json::to_string(header)?)?;
         Ok(Writer {

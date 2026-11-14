@@ -20,6 +20,7 @@ func TestDerivingTheCompanionImages(t *testing.T) {
 		browser     string
 		ffmpeg      string
 		appearances string
+		titles      string
 		version     string
 	}{
 		{name: "a release tag",
@@ -28,6 +29,7 @@ func TestDerivingTheCompanionImages(t *testing.T) {
 			browser:     "ghcr.io/liken-sh/library-operator-media-browser:2026.09.03-007",
 			ffmpeg:      "ghcr.io/liken-sh/library-operator-ffmpeg:2026.09.03-007",
 			appearances: "ghcr.io/liken-sh/library-operator-appearances:2026.09.03-007",
+			titles:      "ghcr.io/liken-sh/library-operator-titles:2026.09.03-007",
 			version:     "2026.09.03-007"},
 		{name: "a development build",
 			reference:   "ghcr.io/liken-sh/library-operator:2026.09.03-007-dev-003-abcdef01",
@@ -35,6 +37,7 @@ func TestDerivingTheCompanionImages(t *testing.T) {
 			browser:     "ghcr.io/liken-sh/library-operator-media-browser:2026.09.03-007-dev-003-abcdef01",
 			ffmpeg:      "ghcr.io/liken-sh/library-operator-ffmpeg:2026.09.03-007-dev-003-abcdef01",
 			appearances: "ghcr.io/liken-sh/library-operator-appearances:2026.09.03-007-dev-003-abcdef01",
+			titles:      "ghcr.io/liken-sh/library-operator-titles:2026.09.03-007-dev-003-abcdef01",
 			version:     "2026.09.03-007-dev-003-abcdef01"},
 		{name: "a registry with a port",
 			reference:   "registry:5000/liken-sh/library-operator:2026.09.03-007",
@@ -42,6 +45,7 @@ func TestDerivingTheCompanionImages(t *testing.T) {
 			browser:     "registry:5000/liken-sh/library-operator-media-browser:2026.09.03-007",
 			ffmpeg:      "registry:5000/liken-sh/library-operator-ffmpeg:2026.09.03-007",
 			appearances: "registry:5000/liken-sh/library-operator-appearances:2026.09.03-007",
+			titles:      "registry:5000/liken-sh/library-operator-titles:2026.09.03-007",
 			version:     "2026.09.03-007"},
 		{name: "no registry",
 			reference:   "library-operator:2026.09.03-007",
@@ -49,6 +53,7 @@ func TestDerivingTheCompanionImages(t *testing.T) {
 			browser:     "library-operator-media-browser:2026.09.03-007",
 			ffmpeg:      "library-operator-ffmpeg:2026.09.03-007",
 			appearances: "library-operator-appearances:2026.09.03-007",
+			titles:      "library-operator-titles:2026.09.03-007",
 			version:     "2026.09.03-007"},
 	}
 	for _, one := range cases {
@@ -59,7 +64,7 @@ func TestDerivingTheCompanionImages(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := images{scanner: one.reference, corrosion: one.corrosion, browser: one.browser,
-				ffmpeg: one.ffmpeg, appearances: one.appearances, version: one.version}
+				ffmpeg: one.ffmpeg, appearances: one.appearances, titles: one.titles, version: one.version}
 			if derived != want {
 				t.Errorf("images = %+v, want %+v", derived, want)
 			}
@@ -136,6 +141,7 @@ func TestTheImagesComeFromTheOperatorsOwnPod(t *testing.T) {
 		browser:     "ghcr.io/liken-sh/library-operator-media-browser:2026.09.03-007",
 		ffmpeg:      "ghcr.io/liken-sh/library-operator-ffmpeg:2026.09.03-007",
 		appearances: "ghcr.io/liken-sh/library-operator-appearances:2026.09.03-007",
+		titles:      "ghcr.io/liken-sh/library-operator-titles:2026.09.03-007",
 		version:     "2026.09.03-007",
 	}
 	if got != want {
@@ -162,6 +168,7 @@ func TestOneImageVariableWinsAndTheRestDerive(t *testing.T) {
 		browser:     "ghcr.io/liken-sh/library-operator-media-browser:mine",
 		ffmpeg:      "ghcr.io/liken-sh/library-operator-ffmpeg:mine",
 		appearances: "ghcr.io/liken-sh/library-operator-appearances:mine",
+		titles:      "ghcr.io/liken-sh/library-operator-titles:2026.09.03-007",
 		version:     "2026.09.03-007",
 	}
 	if got != want {
@@ -177,6 +184,7 @@ func TestEveryImageVariableSetReadsNoPod(t *testing.T) {
 	t.Setenv(browserImageVariable, testBrowserImage)
 	t.Setenv(ffmpegImageVariable, testFFmpegImage)
 	t.Setenv(appearancesImageVariable, testAppearancesImage)
+	t.Setenv(titlesImageVariable, testTitlesImage)
 	t.Setenv(podNameVariable, "")
 
 	got, err := operatorImages(context.Background(), client, testOperatorNamespace)
@@ -185,7 +193,8 @@ func TestEveryImageVariableSetReadsNoPod(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := images{scanner: testScannerImage, corrosion: testCorrosionImage,
-		browser: testBrowserImage, ffmpeg: testFFmpegImage, appearances: testAppearancesImage}
+		browser: testBrowserImage, ffmpeg: testFFmpegImage, appearances: testAppearancesImage,
+		titles: testTitlesImage}
 	if got != want {
 		t.Errorf("images = %+v, want %+v", got, want)
 	}

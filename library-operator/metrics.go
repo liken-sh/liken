@@ -217,7 +217,7 @@ func (m *metrics) observeLibraryReport(library *Library, report *libraryReport) 
 }
 
 // libraryRunsFact reports whether the Library runs the Job that fills one
-// fact. The trickplay sheets, the trailer files, and the appearances each have
+// fact. The trickplay sheets, the trailer files, the appearances, and the titles each have
 // a switch of their own, and every other fact runs in the enricher, which every Library runs.
 func libraryRunsFact(library *Library, fact string) bool {
 	switch fact {
@@ -227,6 +227,8 @@ func libraryRunsFact(library *Library, fact string) bool {
 		return library.Spec.Trailers.Enabled
 	case factAppearances:
 		return library.Spec.Appearances.Enabled
+	case factTitles:
+		return library.Spec.Titles.Enabled
 	}
 	return true
 }

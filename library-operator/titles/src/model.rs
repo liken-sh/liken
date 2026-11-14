@@ -99,8 +99,7 @@ impl Model {
     // Writes the model under its name in one rename, so a `place` that
     // starts during a `train` reads the old model or the new one.
     pub fn save(&self, path: &Path) -> Result<(), Error> {
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        let partial = path.with_file_name(format!(".partial-{}-{name}", std::process::id()));
+        let partial = crate::reading::partial(path);
         fs::write(&partial, serde_json::to_string(self)?)?;
         fs::rename(&partial, path)?;
         Ok(())

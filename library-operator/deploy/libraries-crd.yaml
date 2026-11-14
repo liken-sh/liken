@@ -350,6 +350,25 @@ spec:
                       maximum: 16
                       default: 1
                       description: "How many features the appearances worker Job works at once, one pod each. A change reaches a appearances worker that runs, and the Job controller starts or stops pods to match it. The worker is an Indexed Job with one index per feature of the list, and the Job controller starts the next index when a pod ends. Each pod claims its own GPU from the template that gpuResourceClaimTemplate names. The pods prefer different nodes and share a node when no other node can take them. A failed pod is retried on its own feature, up to twice, and the other pods keep their work. The cap of 16 keeps one typing error from starting hundreds of pods at once."
+                titles:
+                  type: object
+                  default: {}
+                  description: "The text on screen in each second of the end of each video, written to .liken/titles/ beside the video. The second that a video's end titles start is placed from this reading. The fact asks no provider. It runs the titles tool, which carries the PP-OCRv3 text detector and the PP-OCRv4 text reader, on the library-operator-titles image."
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                      description: "Off by default, because a first pass decodes the last 15 minutes of every film and the last 6 minutes of every episode in the library. A video needs this fact when it is the main video of a title and the probe gave it a length. Turned on, the operator starts a titles worker Job when a Job of this library ends with videos that still need this fact. The Job that ends publishes the videos on the bus, one message per video, and the worker is an Indexed Job with one pod per video, so no walk or webhook rescan waits for it. Each pod reads the end of its own video, writes the reading, writes the attempt to the ledger, and asks the operator to rescan the title's folder. A result stays until the file at its path is replaced. Turned off while a titles worker runs, the operator deletes the worker and its pods, and the videos it did not reach wait for the next list after the fact is turned on again."
+                    gpuResourceClaimTemplate:
+                      type: string
+                      minLength: 1
+                      description: "The name of a ResourceClaimTemplate in the Library's namespace. The titles worker's pod claims a render node from it, and ffmpeg decodes and scales on the node through VA-API. The text models run on the CPU. A file the render node will not decode is decoded again in software. The cluster owner writes the template, and the operator reads only whether it exists. While it does not exist, the operator starts no titles worker, and the GPUClaimTemplates condition names the template. Unset, the worker carries no claim and decodes in software."
+                    parallelism:
+                      type: integer
+                      minimum: 1
+                      maximum: 16
+                      default: 1
+                      description: "How many videos the titles worker Job works at once, one pod each. A change reaches a titles worker that runs, and the Job controller starts or stops pods to match it. The worker is an Indexed Job with one index per video of the list, and the Job controller starts the next index when a pod ends. Each pod claims its own render node from the template that gpuResourceClaimTemplate names. The pods prefer different nodes and share a node when no other node can take them. A failed pod is retried on its own video, up to twice, and the other pods keep their work. The cap of 16 keeps one typing error from starting hundreds of pods at once."
                 languages:
                   type: array
                   x-kubernetes-list-type: atomic

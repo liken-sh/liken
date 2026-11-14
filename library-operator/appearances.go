@@ -185,13 +185,19 @@ func (w *factWorkerRun) failAppearances(ctx context.Context, absolute, folder, e
 		return
 	}
 	w.logf("stopped in the middle of %s, which stays for the next worker", w.named(absolute))
+	w.removeOwnPartials(filepath.Dir(detectionsPath(absolute)))
+}
+
+// removeOwnPartials removes the partial files in one records directory that
+// a tool this pod ran left when it was killed. Each tool names a partial
+// file for its host, and a pod's host name is its own.
+func (w *factWorkerRun) removeOwnPartials(records string) {
 	host := os.Getenv("HOSTNAME")
 	if host == "" {
 		return
 	}
 	// A title folder's name holds brackets, such as "Film [1992]", which a
 	// glob reads as a pattern, so the directory is read and each name tested.
-	records := filepath.Dir(detectionsPath(absolute))
 	names, _ := os.ReadDir(records)
 	for _, name := range names {
 		if !strings.Contains(name.Name(), ".partial-"+host+"-") {

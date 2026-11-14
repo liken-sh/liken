@@ -342,6 +342,8 @@ var gapQueries = map[string]string{
 	factMarks: marksGapQuery(),
 	// A feature with a length whose cast has a headshot, and no answer yet.
 	factAppearances: appearancesGapSQL(),
+	// A main video with a length and no reading yet.
+	factTitles: titlesGapSQL(),
 
 	factContributorIDs:       contributorIDsGapSQL(),
 	factContributorBiography: contributorFileGapSQL(factContributorBiography, "biography"),

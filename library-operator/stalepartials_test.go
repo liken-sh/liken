@@ -48,6 +48,8 @@ func TestTheStalePartialRemoveTakesOnlyAnOldMarkedFileUnderLiken(t *testing.T) {
 	}{
 		{name: "an old temporary of this operator", path: staleTemporary, age: staleAge, removed: true},
 		{name: "an old partial file of the appearances tool", path: staleToolRecord, age: staleAge, removed: true},
+		{name: "an old partial file of the titles tool", age: staleAge, removed: true,
+			path: filepath.Join("Film (1999)", likenDirectory, "titles", "Film (1999).mkv.jsonl.partial-movies-titles-a1-41")},
 		{name: "a fresh temporary", path: staleTemporary, age: freshAge},
 		{name: "a fresh partial file", path: staleToolRecord, age: freshAge},
 		{name: "an old ledger with no mark", path: filepath.Join("Film (1999)", likenDirectory, "identity.yaml"),

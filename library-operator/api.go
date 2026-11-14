@@ -221,6 +221,10 @@ type LibrarySpec struct {
 	// Whether this library finds which credited people are on screen at each
 	// second of its features, which decodes every frame of every feature once.
 	Appearances LibraryAppearances `json:"appearances,omitzero"`
+
+	// Whether this library reads the text on screen in the last minutes of
+	// each video, which decodes those minutes of every video once.
+	Titles LibraryTitles `json:"titles,omitzero"`
 }
 
 // The trailers block of the spec, off unless the owner turns it on.
@@ -254,6 +258,21 @@ type LibraryAppearances struct {
 
 	// How many pods the appearances worker runs at once, each on its own
 	// share of the list. The CRD defaults it to 1.
+	Parallelism int `json:"parallelism,omitempty"`
+}
+
+// The titles block of the spec, off unless the owner turns it on.
+type LibraryTitles struct {
+	Enabled bool `json:"enabled,omitempty"`
+
+	// The ResourceClaimTemplate in the Library's namespace that the titles
+	// worker's pod claims its render node from, to decode the video
+	// (gpuclaim.go). Unset, the worker carries no claim and decodes in
+	// software. The text models run on the CPU with or without it.
+	GPUResourceClaimTemplate string `json:"gpuResourceClaimTemplate,omitempty"`
+
+	// How many pods the titles worker runs at once, each on its own share
+	// of the list. The CRD defaults it to 1.
 	Parallelism int `json:"parallelism,omitempty"`
 }
 
