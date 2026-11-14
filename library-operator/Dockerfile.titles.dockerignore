@@ -1,0 +1,22 @@
+# The titles image builds the pod program from the Go sources, as
+# the Go images do, and writes its SBOM record from pin.toml, which
+# .dockerignore keeps out of every other build. So this file leaves out
+# what .dockerignore leaves out, except pin.toml. Every entry below
+# repeats one of .dockerignore, which says why each one stays out.
+deploy
+docs
+plans
+testdata
+local
+media-browser
+appearances
+titles
+corrosion
+skills
+smoke
+coverage.out
+coverage-media-browser.xml
+README.md
+LICENSE
+/library-operator
+latest.sh

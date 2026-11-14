@@ -2,7 +2,7 @@
 # and cli/, and nothing else. Everything below is documentation, plans,
 # manifests, test data, smoke scripts, generated skills, a workstation's
 # build output, or the source of an image with its own context (the
-# media browser's Rust tree, `appearances`, and Corrosion). Sending any
+# media browser's Rust tree, `appearances`, `titles`, and Corrosion). Sending any
 # of it to the daemon costs the build time and no Go build reads it. A
 # change to any of it must not rebuild the Go images, and CI selects
 # images by what this file leaves in. The cargo target directory is the
@@ -14,6 +14,7 @@ testdata
 local
 media-browser
 appearances
+titles
 corrosion
 skills
 smoke
@@ -22,10 +23,10 @@ coverage-media-browser.xml
 README.md
 LICENSE
 /library-operator
-# The report of the appearances image's pins, which runs on a
-# workstation and never in a build.
+# The report of the pins of the appearances image and the titles image,
+# which runs on a workstation and never in a build.
 latest.sh
-# The manifest of the appearances image's pins. Only that image reads
-# it, through Dockerfile.appearances.dockerignore, so a bump of
-# OpenVINO rebuilds no Go image.
+# The manifest of those two images' pins. Only they read it, through
+# Dockerfile.appearances.dockerignore and Dockerfile.titles.dockerignore,
+# so a bump of OpenVINO rebuilds no Go image.
 pin.toml

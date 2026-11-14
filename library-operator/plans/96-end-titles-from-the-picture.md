@@ -5,10 +5,12 @@ of a video start from the video's own picture: the text on screen in
 its last minutes, read by a new tool, `titles`, and placed by a small
 model that each cluster fits on its own library.
 
-Status on 2026-11-11: the tool is built, in
+Status on 2026-11-14: the tool is built, in
 [`titles/`](../titles/README.md), with its three commands and their
-tests. The operator does not run it yet.
-[What is not built](#what-is-not-built) lists the steps that remain.
+tests, and a `Library` that sets `spec.titles.enabled` runs a worker
+that reads each video. The operator fits no model and places no end
+titles yet. [What is not built](#what-is-not-built) lists the steps
+that remain.
 
 ## The problem
 
@@ -208,8 +210,9 @@ None of it is built.
   video that it holds, and a model file names its kind, so a reading of
   the start of a video and a model of the main titles are additions.
 
-One question is open: whether a model belongs to a `Library` or to
-every `Library` of a `Catalog`. Every `Job` of the operator belongs to
+One question was open, whether a model belongs to a `Library` or to
+every `Library` of a `Catalog`, and on 2026-11-14 it was decided for
+the `Library`, as every other fact of the operator works. Every `Job` of the operator belongs to
 one `Library` and mounts its one volume, and a worker's pod reads no
 catalog. So a model for each `Library` can be a file at the library's
 root, the fit is one more `Job` of the `Library`, and the worker that
@@ -465,23 +468,29 @@ against a copy of a catalog. The rest is the crate
   the SHA-256, and the license of the two models and the reader's
   character list.
 
+In the operator:
+
+- **The worker.** `titlesWorker` in `factworkers.go`, its gap of every
+  main video with a length and no reading, the `spec.titles` block with
+  `enabled`, `parallelism`, and a GPU claim template for the decode,
+  and the attempt in `.liken/titles.yaml`.
+- **The image.** `library-operator-titles`, from `Dockerfile.titles`,
+  with the tool, OpenVINO's CPU plugin, the pod program, and the models
+  as an OCI artifact that `titles/models/push.sh` pushes.
+- **The manual.** The enrichment guide's section for the fact.
+
 ## What is not built
 
-1. **The image.** A `library-operator-titles` image with the tool,
-   OpenVINO's CPU plugin, `ffmpeg`, and the models as an OCI artifact,
-   as `Dockerfile.appearances` builds its image.
-2. **The worker.** A `titlesWorker` in `factworkers.go`, its gap query,
-   its `spec.titles` block with `parallelism` and a GPU claim template
-   for the decode, and its ledger.
-3. **The training `Job`,** its trigger, the guard, and the status
-   fields.
-4. **The rows.** The walk that copies a placement into the `marks`
-   table, and the estimate's use of it.
-5. **The rename** of `intro` and `credits` to `main-titles` and
+1. **The training `Job`,** its trigger, the guard, and the status
+   fields, with a model for each `Library` at
+   `.liken/titles/model.json` under its root.
+2. **The placement.** The worker's `place` of each video it reads, the
+   placement in the ledger, the walk that copies it into the catalog,
+   and the estimate's use of it.
+3. **The rename** of `intro` and `credits` to `main-titles` and
    `end-titles` in `library-operator`, `media-operator`, the media
    browser, the stored ledgers, and the manuals.
-6. **The manual.** The enrichment guide's section for the fact.
-7. **Billing from the other sources.** The IMDb datasets and TVmaze
+4. **Billing from the other sources.** The IMDb datasets and TVmaze
    still pass only the cast, the directors, and the writers. A title
    that TMDb credited before this plan has no `billing.yaml` until the
    `credits` fact asks again, which a `spec.refresh` of `credits`

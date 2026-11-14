@@ -1,0 +1,153 @@
+# The image of `titles`, the tool that reads the text on screen at the
+# end of a video. It holds the tool, OpenVINO's runtime for the CPU, and
+# the two text models, on liken's ffmpeg base, which carries the ffmpeg
+# and ffprobe that the tool runs to decode the video. The titles worker
+# Job runs on this image: its container runs the operator's pod program,
+# which runs the tool on each video of the work list and writes the
+# ledger.
+#
+# The build context is this component's directory, as for
+# Dockerfile.ffmpeg, so the pod program builds from the module's Go
+# files. The crate comes in as the named context titles, because the
+# component's .dockerignore keeps it out of every Go build. The bake
+# file at the top of the repository gives this build the ffmpeg image of
+# the same commit as the named context ffmpeg, and the shared kubernetes
+# module as the named context kubernetes. Every file that comes from
+# outside the repository is pinned: the Go, Rust, Debian, and oras
+# images by the digests that toolchains/images.toml gives, OpenVINO by
+# sha256, and the models by the digest of their OCI artifact.
+
+# The pod program, built the way Dockerfile.ffmpeg builds it, which says
+# why each step is there.
+FROM golang AS pod
+ENV GOPROXY="https://proxy.golang.org|direct"
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY --from=kubernetes go.mod go.sum /kubernetes/
+RUN go mod download
+COPY --from=kubernetes . /kubernetes/
+COPY *.go ./
+RUN CGO_ENABLED=0 go build -trimpath -tags pod -ldflags "-s -w" -o /library-operator-pod .
+# The license files of the Go standard library and of each module that
+# the binary links. notices/go.sh says why the image needs them.
+COPY --from=notices go.sh /
+RUN CGO_ENABLED=0 GOFLAGS=-tags=pod sh /go.sh /notices .
+
+FROM rust AS build
+WORKDIR /src
+
+# The manifest, the lock file, and the toolchain pin come first, so a
+# source edit reuses the cached dependency layer. A stub library and a
+# stub binary give cargo something to compile the dependencies against.
+COPY --from=titles Cargo.toml Cargo.lock rust-toolchain.toml ./
+RUN mkdir src \
+    && echo 'fn main() {}' > src/main.rs \
+    && : > src/lib.rs
+
+# cargo-auditable records the crate graph of the build in the binary's
+# `.dep-v0` section, so syft and Trivy list the crates from the image.
+# toolchains/cargo-auditable/fetch.sh pins the tool and says why. Every
+# build below runs through it, the stub build too, so the dependencies
+# compile once under the same wrapper that the real build uses.
+COPY --from=toolchains pin.sh /toolchains/
+COPY --from=toolchains cargo-auditable/fetch.sh /toolchains/cargo-auditable/
+RUN bash /toolchains/cargo-auditable/fetch.sh /usr/local/cargo/bin
+
+# The cache mounts hold the crate registry and the git checkouts between
+# builds, so a rebuild on a workstation downloads no crate a second time.
+# --locked builds the versions the lock file names and never rewrites it.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo auditable build --release --locked
+
+COPY --from=titles src/ ./src/
+
+COPY --from=notices cargo.sh /
+# The touch marks the crate's own sources newer than the stub build, so
+# cargo compiles them again and leaves the dependencies as they are. Then
+# cargo.sh copies the license files of the standard library and of each
+# crate that the binary links, which notices/cargo.sh says the image
+# needs. It runs here because the crate sources are in the registry
+# cache, which only this RUN mounts.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    touch src/main.rs src/lib.rs \
+    && cargo auditable build --release --locked \
+    && sh /cargo.sh /notices
+
+# The inference runtime. The binary opens libopenvino_c.so when `read`
+# starts, so the build above needs no OpenVINO, and this stage collects
+# the runtime that the image loads. The builder is the same Debian image
+# as the bases', and the closure script checks that its glibc is the
+# base's.
+FROM debian AS runtime
+
+# OpenVINO's runtime archive, from Intel, for the newest Ubuntu release
+# that Intel builds it for. It is the archive that Dockerfile.appearances
+# fetches, and latest.sh beside this file reports the pin and moves it,
+# in both files and in pin.toml.
+ADD --checksum=sha256:148fbc5c8f213718861a85e323b5c137c53674b878596413cb2b402dc4caab7e \
+    https://storage.openvinotoolkit.org/repositories/openvino/packages/2026.4.1/linux/openvino_toolkit_ubuntu26_2026.4.1.22982.07f9c262b05_x86_64.tgz \
+    /openvino.tgz
+
+# The tree of the ffmpeg image, so the closure can check that every
+# library it adds loads against the base's own libraries.
+COPY --from=ffmpeg / /base/
+COPY --from=titles inference-closure.sh /
+RUN sh /inference-closure.sh /out /base /openvino.tgz
+
+# The models. Their weights are not in the repository, so a workstation
+# pushes them to a registry as an OCI artifact with models/push.sh, and
+# this stage pulls the artifact by the digest in models/digest. A pull
+# by digest fails when any byte differs, and the sums in
+# models/models.sha256 check each file by name. MODELS_REPOSITORY and
+# MODELS_PLAIN_HTTP point a test build at another registry that holds
+# the same artifact. The digest is the same on every registry.
+FROM oras AS models
+ARG MODELS_REPOSITORY=ghcr.io/liken-sh/library-operator-titles-models
+ARG MODELS_PLAIN_HTTP=false
+COPY --from=titles models/digest models/models.sha256 /pin/
+RUN oras pull --plain-http="$MODELS_PLAIN_HTTP" --output /models \
+        "$MODELS_REPOSITORY@$(cat /pin/digest)" \
+    && cd /models \
+    && sha256sum -c /pin/models.sha256 \
+    && test "$(ls | wc -l)" -eq "$(wc -l < /pin/models.sha256)"
+
+# syft finds no package in OpenVINO's archive or in a model file, so the
+# image carries a CycloneDX record of both that image-sbom writes from
+# pin.toml beside this file and the one beside the models, and syft
+# copies its components into the image's SBOM. The build context
+# manifest is toolchains/manifest, the reader of the pin manifests.
+FROM golang AS record
+WORKDIR /src
+COPY --from=manifest . ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /image-sbom ./image-sbom
+COPY pin.toml /pins/openvino.toml
+COPY --from=titles models/pin.toml /pins/models.toml
+RUN /image-sbom -out /library-operator-titles.cdx.json /pins/openvino.toml /pins/models.toml
+
+# The ffmpeg base is a closure on scratch, with no shell, so every
+# layer below is a copy.
+FROM ffmpeg
+COPY --from=runtime /out /
+# The license files and the notice travel with the weights.
+COPY --from=models /models /usr/share/titles/models
+COPY --from=record /library-operator-titles.cdx.json /usr/share/doc/liken/library-operator-titles.cdx.json
+COPY --from=build /src/target/release/titles /titles
+COPY --from=build /notices /
+# The worker makes one kind of request, the rescan, over plain HTTP to the
+# operator's service inside the cluster, so the image needs no trust store.
+COPY --from=pod /library-operator-pod /library-operator-pod
+COPY --from=pod /notices /
+
+# The OpenVINO runtime is outside the directories that the loader
+# searches, and the binary searches LD_LIBRARY_PATH for
+# libopenvino_c.so. The tool runs ffmpeg and ffprobe by name, and a
+# scratch image carries no PATH. The tool reads TITLES_MODELS for the
+# directory of its models.
+ENV LD_LIBRARY_PATH=/opt/openvino/lib \
+    TITLES_MODELS=/usr/share/titles/models \
+    PATH=/usr/bin
+# The entrypoint is the tool, so a person runs it from the image with no
+# other argument. The worker Job names the pod program as its command.
+ENTRYPOINT ["/titles"]
