@@ -423,6 +423,14 @@ func (o *operator) pass() {
 	// The succeeded Jobs of every namespace go first, so what a person sees in
 	// kubectl get pods is what runs now and what failed.
 	o.retireSucceededJobs(ctx, jobs.Items, now)
+	// The finished pods of the worker Jobs go too, once their Job has
+	// counted them. A failed read deletes nothing this pass, and the next
+	// pass reads the pods again.
+	if workerPods, err := o.watched.readWorkerPods(); err != nil {
+		fmt.Fprintf(os.Stderr, "reading the worker pods: %v\n", err)
+	} else {
+		o.deleteCountedWorkerPods(ctx, workerPods.Items)
+	}
 	checked := o.checkProviders(ctx, providers.Items, now)
 
 	live := make(map[string]bool, len(libraries.Items))
@@ -649,6 +657,7 @@ type collections interface {
 	readStoodPods() (*PodList, error)
 	readProgressMembers() (*PodList, error)
 	readWorkerJobs(ctx context.Context) (*JobList, error)
+	readWorkerPods() (*PodList, error)
 	readNodes() (*NodeList, error)
 
 	// The objects of which the pass stands one by name, and writes only

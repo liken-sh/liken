@@ -88,6 +88,10 @@ func (r listReads) readWorkerJobs(ctx context.Context) (*JobList, error) {
 	return readListWith[JobList](ctx, r.client, jobsAllPath+"?labelSelector="+url.QueryEscape(workerJobsSelector))
 }
 
+func (r listReads) readWorkerPods() (*PodList, error) {
+	return readList[PodList](r.client, podsAllPath+"?labelSelector="+url.QueryEscape(indexedWorkerPodsSelector))
+}
+
 func (r listReads) readNodes() (*NodeList, error) {
 	return readList[NodeList](r.client, nodesPath)
 }

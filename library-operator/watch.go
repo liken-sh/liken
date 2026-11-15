@@ -109,6 +109,17 @@ type watches struct {
 	configMaps      *collection[ConfigMap]
 	claimTemplates  *collection[ResourceClaimTemplate]
 
+	// The pods of the Indexed worker Jobs, which the pass deletes once their
+	// Job has counted them (workerpods.go). A change to one of these pods
+	// wakes no pass. The Job controller raises the Job's status.succeeded
+	// each time it counts a pod, and the watch of the worker Jobs wakes the
+	// pass for that change. A pod the pass misses because this watch had not
+	// delivered it yet is deleted by the pass that the next change of a Job
+	// wakes. The pods of the Job's last indexes go with the Job, which the
+	// pass deletes once it has succeeded and Kubernetes deletes at its
+	// ttlSecondsAfterFinished.
+	workerPods *collection[Pod]
+
 	// The client and the memos objectcache.go reads the Libraries, the
 	// Catalogs, and the MetadataProviders with. The memos are the
 	// operator's own, because the operator's writes note them.
@@ -191,6 +202,8 @@ func startWatches(ctx context.Context, client dynamic.Interface, wake chan<- str
 		// it.
 		claimTemplates: newCollection(ctx, client, wake, m, "claim templates", kindClaimTemplate,
 			claimTemplateResource, "", addedOrRemoved[ResourceClaimTemplate]),
+		workerPods: newCollection[Pod](ctx, client, nil, m, "worker pods", kindPod, podResource,
+			indexedWorkerPodsSelector, nil),
 	}
 	for _, one := range w.all() {
 		w.group.Go(one.wait)
@@ -203,7 +216,7 @@ func (w *watches) all() []oneWatch {
 	return []oneWatch{w.libraries, w.catalogs, w.memberPods,
 		w.claims, w.volumes, w.stoodPods, w.workerJobs,
 		w.players, w.mediaPreferences, w.metadataProviders, w.plays, w.people,
-		w.progressMembers, w.nodes, w.services, w.endpointSlices, w.configMaps, w.claimTemplates}
+		w.progressMembers, w.nodes, w.services, w.endpointSlices, w.configMaps, w.claimTemplates, w.workerPods}
 }
 
 // required is how many of all() the operator must read before its first
@@ -225,7 +238,9 @@ func (w *watches) wait() { w.group.Wait() }
 // MetadataProviders, the Plays, and the people belong to operators a
 // cluster may not run, and a collection nobody serves reads as empty
 // until its informer reads it. The rest cost a pass one step when they
-// have not been read, as a failed read of them always has.
+// have not been read, as a failed read of them always has. A pass before
+// the first read of the worker pods deletes no pod, and a later pass
+// deletes them.
 func (w *watches) settle(ctx context.Context) error {
 	for index, one := range w.all() {
 		err := one.settledOrEnded(ctx)
@@ -353,6 +368,11 @@ func currentJobs(ctx context.Context, c *apiclient.Client, held informer.Held) (
 	return &JobList{Items: items}, nil
 }
 
+func (w *watches) readWorkerPods() (*PodList, error) {
+	items, err := w.workerPods.items()
+	return &PodList{Items: items}, err
+}
+
 func (w *watches) readNodes() (*NodeList, error) {
 	items, err := w.nodes.items()
 	return &NodeList{Items: items}, err
@@ -405,11 +425,19 @@ type collection[T any] struct {
 // objects that carry that label. The watch of a namespaced resource
 // covers every namespace. Every watch the API server accepts after the
 // first counts as a restart.
+//
+// A nil wake starts a collection whose changes wake no pass, and whose
+// changed rule is not used. The pass still reads its store, and the
+// informer still reports each object that does not convert.
 func newCollection[T any](ctx context.Context, client dynamic.Interface, wake chan<- struct{}, m *metrics,
 	what, kind string, resource schema.GroupVersionResource, selector string,
 	changed func(before, after T) bool) *collection[T] {
 	c := &collection[T]{what: what, changed: changed, settled: make(chan struct{})}
 	signal := func() { poke(wake) }
+	if wake == nil {
+		signal = func() {}
+		c.changed = func(T, T) bool { return false }
+	}
 	c.watch = informer.Start(ctx, client, informer.Source{Resource: resource, LabelSelector: selector}, informer.Options{
 		Handler: cache.ResourceEventHandlerFuncs{
 			AddFunc:    func(object any) { c.added(object, signal) },

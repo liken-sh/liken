@@ -129,6 +129,10 @@ func TestEachWatchAnswersThePassWithItsCollection(t *testing.T) {
 			list, err := watched.readPeople()
 			return joined(list.Items, func(p Person) string { return p.Spec.DisplayName }), err
 		}},
+		{name: "worker pods", want: "movies-titles-0", read: func(_ context.Context, watched *watches) (string, error) {
+			list, err := watched.readWorkerPods()
+			return joined(list.Items, func(p Pod) string { return p.Metadata.Name }), err
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -143,6 +147,10 @@ func TestEachWatchAnswersThePassWithItsCollection(t *testing.T) {
 				cluster.providers["tmdb"] = &MetadataProvider{Metadata: ObjectMeta{Name: "tmdb", Namespace: "house"}}
 				cluster.plays = []Play{{Metadata: ObjectMeta{Name: "den-b2k9x", Namespace: "house"}}}
 				cluster.people["person-a"] = &Person{Metadata: ObjectMeta{Name: "person-a"}, Spec: PersonSpec{DisplayName: "Person A"}}
+				// The worker pods are the pods of an Indexed worker Job, and
+				// not the one pod of the titles fit.
+				cluster.pods["movies-titles-0"] = workerPod("movies-titles-0")
+				cluster.pods["movies-titles-fit"] = workerPod("movies-titles-fit", notIndexed)
 				watched, _ := watchedCluster(t, cluster, nil)
 
 				got, err := c.read(t.Context(), watched)
@@ -236,6 +244,15 @@ func TestAWatchWakesThePassOnlyForAChangeItActsOn(t *testing.T) {
 		{name: "a new label on a ResourceClaimTemplate", wakes: false, change: func(cluster *fakeCluster) {
 			cluster.claimTemplates["house/trickplay-gpu"].Metadata.Labels = map[string]string{"team": "media"}
 		}},
+		{name: "a new worker pod", wakes: false, change: func(cluster *fakeCluster) {
+			cluster.pods["movies-titles-1"] = workerPod("movies-titles-1", notCounted)
+		}},
+		{name: "a worker pod that the Job counts", wakes: false, change: func(cluster *fakeCluster) {
+			cluster.pods["movies-titles-0"].Metadata.Finalizers = nil
+		}},
+		{name: "a worker pod that is deleted", wakes: false, change: func(cluster *fakeCluster) {
+			delete(cluster.pods, "movies-titles-0")
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -250,6 +267,7 @@ func TestAWatchWakesThePassOnlyForAChangeItActsOn(t *testing.T) {
 					Labels: map[string]string{scannerLabelKey: workerLabelValue}}}
 				cluster.services["house/catalog"] = buildCatalogService("house", nil)
 				cluster.claimTemplates["house/trickplay-gpu"] = ownersTemplate("trickplay-gpu")
+				cluster.pods["movies-titles-0"] = workerPod("movies-titles-0", notCounted)
 				_, wake := watchedCluster(t, cluster, nil)
 
 				cluster.mutex.Lock()

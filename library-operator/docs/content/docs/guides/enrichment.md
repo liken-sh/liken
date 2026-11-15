@@ -300,6 +300,16 @@ pod has its own log:
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=trickplay
     kubectl -n media get pods -l library.liken.sh/library=movies,library.liken.sh/worker=trickplay
 
+The operator deletes each pod of a worker that succeeded, as soon as the
+`Job` has counted the pod's index as complete, and the pod's GPU claim
+goes with it. The `Job` keeps the count, so `kubectl get job` still
+shows every completed index. So the pods that you see are the ones that
+run now and the ones that failed. A failed pod stays until the `Job` is
+deleted, so you can read its log. The operator deletes finished pods
+because Kubernetes keeps every pod of a `Job` until the `Job` itself is
+deleted, and a worker with thousands of finished pods, each with a GPU
+claim, can slow the scheduling of the new pods.
+
 The worker decodes on a GPU when `spec.trickplay.gpuResourceClaimTemplate`
 names a `ResourceClaimTemplate`, as the next section describes.
 `ffmpeg` decodes through VA-API, and it stops at the first frame the
