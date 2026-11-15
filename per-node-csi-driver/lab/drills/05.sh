@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Drill 05: the driver reports its bytes. The kubelet's summary carries
 # the copy's used bytes, because the driver answers NodeGetVolumeStats,
-# and the plugin's metrics port answers per_node_copy_bytes for the
+# and the plugin's metrics port answers per_node_csi_copy_bytes for the
 # same volume.
 set -euo pipefail
 
@@ -131,13 +131,13 @@ echo "drill 05: the plugin's metrics port answers"
 plugin="$(kube get pods -n "$DRIVER_NAMESPACE" -l app=per-node-csi-driver-node \
 	-o jsonpath='{.items[0].metadata.name}')"
 metrics="$(kube get --raw \
-	"/api/v1/namespaces/$DRIVER_NAMESPACE/pods/$plugin:9808/proxy/metrics")"
-if ! echo "$metrics" | grep -q "per_node_copy_bytes{volume=\"$HANDLE\"}"; then
+	"/api/v1/namespaces/$DRIVER_NAMESPACE/pods/$plugin:9200/proxy/metrics")"
+if ! echo "$metrics" | grep -q "per_node_csi_copy_bytes{volume=\"$HANDLE\"}"; then
 	echo "drill 05: the metrics port carries no gauge for $HANDLE" >&2
-	echo "$metrics" | grep per_node_copy_bytes >&2 || true
+	echo "$metrics" | grep per_node_csi_copy_bytes >&2 || true
 	echo "drill 05: FAIL" >&2
 	exit 1
 fi
-echo "$metrics" | grep "per_node_copy_bytes{volume=\"$HANDLE\"}"
+echo "$metrics" | grep "per_node_csi_copy_bytes{volume=\"$HANDLE\"}"
 
 echo "drill 05: PASS"

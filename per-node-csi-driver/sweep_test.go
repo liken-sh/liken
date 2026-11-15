@@ -281,3 +281,12 @@ func waitForCopies(t *testing.T, answering *driver, want ...string) {
 		t.Fatalf("the store holds %v, want %v", got, want)
 	}
 }
+
+func TestAWakeOfAPassAlreadyWaitingIsDropped(t *testing.T) {
+	pass := make(chan struct{}, 1)
+	wake(pass)
+	wake(pass)
+	if len(pass) != 1 {
+		t.Errorf("the channel holds %d wakes, want 1", len(pass))
+	}
+}

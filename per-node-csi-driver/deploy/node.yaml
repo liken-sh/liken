@@ -124,7 +124,7 @@ spec:
             path: /var/lib/kubelet/pods
             type: DirectoryOrCreate
         # The store: one copy per handle under copies/ and one hold per
-        # held handle under holds/. On liken, /var/lib/liken/pod-storage
+        # published target under holds/. On liken, /var/lib/liken/pod-storage
         # is the partition that holds pod volumes, so a copy is a tenant
         # of the same disk as every other volume on the node.
         - name: store

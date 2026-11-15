@@ -24,7 +24,10 @@ No process keeps cache copies in agreement, and a cache does not need
 agreement. An item made on one node is not on the next, and a pod on the
 next node makes it again. A single-pod cache therefore needs no
 anti-affinity. With several pods, each pod warms the copy on its own
-node.
+node, and pods on the same node share that node's copy. Two pods that
+make the same item at once must not write over each other, so write
+each item to a temporary file and rename it into place, or take a lock
+on the item with `flock`.
 
 The driver keeps no size budget. A cache grows until the workload trims
 it or the filesystem that holds the store fills. Every copy shares that

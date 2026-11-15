@@ -1,9 +1,11 @@
 package main
 
 // store.go holds the driver's two directories on the node: one copy per
-// handle under copies/, and one hold per held handle under holds/.
+// handle under copies/, and one hold per published target under holds/.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 
@@ -11,8 +13,8 @@ import (
 )
 
 // copiesDirectory holds one directory per handle, the copy.
-// holdsDirectory holds one file per held handle, the record of the pod
-// that holds it.
+// holdsDirectory holds one directory per held handle, with one file in
+// it for each target a pod published the handle at.
 const (
 	copiesDirectory = "copies"
 	holdsDirectory  = "holds"
@@ -37,10 +39,17 @@ func (s *store) copyPath(handle string) string {
 	return filepath.Join(s.root, copiesDirectory, handle)
 }
 
-// holdPath is the file that records which pod holds the handle on this
-// node.
-func (s *store) holdPath(handle string) string {
+// holdsPath is the directory of the handle's holds on this node.
+func (s *store) holdsPath(handle string) string {
 	return filepath.Join(s.root, holdsDirectory, handle)
+}
+
+// holdPath is the file that records the pod that published the handle
+// at the target. The file is named by a hash of the target, because a
+// target is a path, and a path is not a file name.
+func (s *store) holdPath(handle, target string) string {
+	sum := sha256.Sum256([]byte(target))
+	return filepath.Join(s.holdsPath(handle), hex.EncodeToString(sum[:16]))
 }
 
 // makeCopy creates the handle's directory when it is absent. It sets

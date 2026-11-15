@@ -15,13 +15,11 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// These three reasons identify each refusal a person has to
-// read: a handle the driver cannot put under the store, a handle
-// another pod on the node holds, and a copy or target the driver could
-// not make or bind.
+// These two reasons identify each refusal a person has to read: a
+// handle the driver cannot put under the store, and a copy or target the
+// driver could not make or bind.
 const (
 	reasonRefused     = "PerNodeVolumeRefused"
-	reasonHeld        = "PerNodeVolumeHeld"
 	reasonMountFailed = "PerNodeMountFailed"
 )
 

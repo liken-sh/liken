@@ -28,8 +28,8 @@ The driver has no controller and provisions nothing. You write a
 `PersistentVolumeClaim` that binds to it. Use the access mode
 `ReadWriteMany` for a volume that pods on many nodes mount, because
 each node writes only its own copy, or `ReadWriteOncePod` for a volume
-that one pod at a time mounts. The driver allows one pod on each node
-to mount a volume. Each copy is kept under
+that one pod at a time mounts. Every pod on a node that mounts a
+volume shares that node's copy. Each copy is kept under
 `/var/lib/liken/pod-storage`, on the partition that the node's
 `Machine` declares for pod storage. A machine that declares no such
 partition keeps it in memory, so the copy is lost when the machine

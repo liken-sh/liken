@@ -67,8 +67,10 @@ spec:
         app: store
     spec:
       # Required anti-affinity allows at most one store pod on each
-      # node. The driver refuses a second pod that asks for a handle
-      # another pod on the same node holds.
+      # node, so each pod has a copy of its own. Two pods on one node
+      # would share that node's copy. The scheduler counts a
+      # terminating pod until it is gone, so a replacement pod does not
+      # start on a node where the old pod still writes the copy.
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:

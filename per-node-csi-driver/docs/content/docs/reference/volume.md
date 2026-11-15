@@ -61,8 +61,15 @@ event on the pod.
 
 Use `ReadWriteMany` for a volume that pods on many nodes mount. Many
 nodes do mount one volume read-write, and each node holds its own copy.
-The driver enforces one pod per node per volume itself, and refuses a
-second pod on the same node with a `PerNodeVolumeHeld` event.
+Every pod on one node that mounts the volume gets that node's copy, so
+two pods on one node read and write the same files. When the pods of a
+workload must each have a copy of their own, keep them on different
+nodes with required pod anti-affinity, as a
+[replicated store](../../guides/replicated-store/) does. The scheduler
+counts a terminating pod against the anti-affinity until the pod is
+gone, so a replacement pod never mounts a copy while the old pod still
+runs on it. A topology spread constraint is not enough, because the
+scheduler does not count a terminating pod against it.
 
 Use `ReadWriteOncePod` for a volume that only one pod in the whole
 cluster may mount, such as a database with one writer. Set it on the
@@ -99,18 +106,19 @@ nothing: the copy outlives its pod.
 ## Events
 
 The driver posts a Warning event on the pod for every refusal, so
-`kubectl describe pod` says why a mount did not happen.
+`kubectl describe pod` says why a mount did not happen. The driver
+never refuses a pod because another pod on the node mounts the same
+volume.
 
 The kubelet retries a refused mount with a backoff that grows to about
 two minutes. Each retry that the driver refuses for the same reason,
 with the same message, within 10 minutes of the last one, increases the
-count of the event already posted and posts no new one. So a pod that
-waits an hour for a handle that another pod holds carries one line,
-such as `(x37 over 1h)`. The API server deletes an event one hour after
+count of the event already posted and posts no new one. So a pod
+whose mount fails for an hour carries one line, such as
+`(x37 over 1h)`. The API server deletes an event one hour after
 its last change.
 
 | Reason | When |
 |---|---|
 | `PerNodeVolumeRefused` | The handle is not a name the driver can put under the store. The message says which rule it broke. |
-| `PerNodeVolumeHeld` | Another pod on this node holds the handle. The message names that pod. |
 | `PerNodeMountFailed` | The driver could not make the copy, could not make the target, or could not bind one onto the other. The message carries the error. |

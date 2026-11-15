@@ -14,6 +14,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 	kevents "github.com/liken-sh/liken/kubernetes/events"
 	"github.com/liken-sh/liken/kubernetes/events/eventstest"
+	"golang.org/x/sys/unix"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd/api"
 )
@@ -34,7 +35,7 @@ func postingTo(t *testing.T, logger *slog.Logger) (*events, *eventstest.Events) 
 func TestAnEventLandsOnThePodTheKubeletNamed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		posting, posted := postingTo(t, quietLogger())
-		posting.refuse(aPod("reader", "pod-uid-1"), reasonHeld, "some-cache is held by pod example/other")
+		posting.refuse(aPod("reader", "pod-uid-1"), reasonRefused, "volume_id: Bad/Handle is not a name the driver can use")
 		synctest.Wait()
 
 		held := posted.About("Pod", "reader")
@@ -45,8 +46,8 @@ func TestAnEventLandsOnThePodTheKubeletNamed(t *testing.T) {
 		if event.InvolvedObject.Namespace != "example" || event.InvolvedObject.UID != "pod-uid-1" {
 			t.Errorf("the Event names %+v, want the pod example/reader", event.InvolvedObject)
 		}
-		if event.Type != kevents.TypeWarning || event.Reason != reasonHeld ||
-			event.Message != "some-cache is held by pod example/other" {
+		if event.Type != kevents.TypeWarning || event.Reason != reasonRefused ||
+			event.Message != "volume_id: Bad/Handle is not a name the driver can use" {
 			t.Errorf("the Event reads %s %s %q, want the Warning as posted",
 				event.Type, event.Reason, event.Message)
 		}
@@ -80,30 +81,27 @@ func TestAPodTheKubeletDidNotNameCarriesNoEvent(t *testing.T) {
 }
 
 // The kubelet retries a refused mount with a backoff that grows to
-// about two minutes, so a pod that waits an hour for a handle another
-// pod holds is refused about 37 times. The recorder folds each refusal
-// into the first Event, so the pod carries one Event with the count.
+// about two minutes, so a pod whose publish fails for an hour is refused
+// about 37 times. The recorder folds each refusal into the first Event,
+// so the pod carries one Event with the count.
 func TestAnHourOfRefusalsIsOneEventWithACount(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		answering := testDriver(t)
-		if _, err := answering.NodePublishVolume(t.Context(),
-			publishing("example-store", filepath.Join(t.TempDir(), "first"),
-				aPod("first", "pod-uid-1"))); err != nil {
-			t.Fatalf("NodePublishVolume: %v", err)
-		}
-		waiting := publishing("example-store", filepath.Join(t.TempDir(), "second"),
-			aPod("second", "pod-uid-2"))
+		answering.mounts.mountErr = unix.EPERM
+		retried := publishing("example-store", filepath.Join(t.TempDir(), "mount"),
+			aPod("reader", "pod-uid-1"))
 		for range 37 {
-			if _, err := answering.NodePublishVolume(t.Context(), waiting); err == nil {
-				t.Fatal("NodePublishVolume mounted a handle another pod holds")
+			answering.mounts.failAt = len(answering.mounts.mounts) + 1
+			if _, err := answering.NodePublishVolume(t.Context(), retried); err == nil {
+				t.Fatal("NodePublishVolume answered no error for a bind that failed")
 			}
 			time.Sleep(97 * time.Second)
 		}
 		synctest.Wait()
 
-		held := answering.posted.About("Pod", "second")
-		if len(held) != 1 || held[0].Reason != reasonHeld || held[0].Count != 37 {
-			t.Errorf("the pod carries %+v, want one %s Event with a count of 37", held, reasonHeld)
+		refused := answering.posted.About("Pod", "reader")
+		if len(refused) != 1 || refused[0].Reason != reasonMountFailed || refused[0].Count != 37 {
+			t.Errorf("the pod carries %+v, want one %s Event with a count of 37", refused, reasonMountFailed)
 		}
 	})
 }

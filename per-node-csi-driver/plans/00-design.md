@@ -66,10 +66,14 @@ over.
    PersistentVolumes of this driver. A directory whose handle no
    PersistentVolume names is removed, once the watch has synced and
    only while no pod holds it.
-4. **One pod per node per volume.** A second pod on the same node that
-   asks for a handle another pod holds is refused with an event on the
-   pod. The scheduler's anti-affinity prevents this; the driver
-   enforces it.
+4. **The access mode decides who mounts a copy.** Every pod on a node
+   that publishes a handle gets the node's copy, and the driver refuses
+   no second pod. Kubernetes enforces the access mode:
+   `ReadWriteOncePod` admits one pod in the cluster, and
+   `ReadWriteMany` admits any number of pods on each node. A workload
+   whose pods must each have a copy of their own keeps them on
+   different nodes with required pod anti-affinity, which the
+   scheduler applies to a terminating pod until it is gone.
 5. **The access mode is `ReadWriteMany` for a volume that many nodes
    mount.** Many nodes do mount one volume read-write. Every page of
    the manual that shows a claim also says that each node has its own
@@ -146,10 +150,10 @@ does, so a pod that runs as any user can write it. `fsGroupPolicy` is
 `None`, because a recursive chown of a large database on every start
 is the wrong cost.
 
-The plugin keeps its records of held handles beside the copies, under
-`holds/<handle>`, so a restart of the plugin
-recovers which pod holds which copy from the kubelet's target paths
-and never from memory alone.
+The plugin keeps a record of each published target beside the copies,
+under `holds/<handle>/<hash of the target>`, so a restart of the plugin
+recovers which pods hold which copy from the kubelet's target paths
+and never from memory alone. A copy stays while any target holds it.
 
 ## What the driver reports
 
@@ -157,8 +161,8 @@ and never from memory alone.
   bytes, so `kubelet_volume_stats_*` carries them.
 - A Prometheus gauge, `per_node_csi_copy_bytes{volume}`, per copy on this
   node, on a port named `metrics`.
-- An event on the pod for every refusal: a bad handle, a held handle,
-  a failed mount.
+- An event on the pod for every refusal: a bad handle or a failed
+  mount.
 
 ## Deployment
 

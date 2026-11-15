@@ -237,8 +237,12 @@ registry-stop:
 
 # image builds this checkout and pushes it to the host's registry under
 # the tag the deploy target pins.
+# image builds through the repository's bake file, because the
+# Dockerfile names its builder and the kubernetes and notices
+# components as build contexts that only bake supplies.
 image: registry
-	docker build -t $(REGISTRY_PUSH)/per-node-csi-driver:$(IMAGE_TAG) ..
+	cd ../.. && docker buildx bake per-node-csi-driver --load \
+		--set 'per-node-csi-driver.tags=$(REGISTRY_PUSH)/per-node-csi-driver:$(IMAGE_TAG)'
 	docker push $(REGISTRY_PUSH)/per-node-csi-driver:$(IMAGE_TAG)
 
 # deploy applies this repository's deploy/ with the image pinned and the

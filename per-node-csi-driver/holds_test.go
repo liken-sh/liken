@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // mountTableWith writes a mount table that lists the targets, which is
@@ -36,62 +39,186 @@ func loggingDriver(t *testing.T) (*driver, *bytes.Buffer) {
 	return answering, written
 }
 
-func TestAHoldSurvivesARestartWhileItsTargetIsStillAMount(t *testing.T) {
-	answering := testDriver(t)
-	target := filepath.Join(t.TempDir(), "mount")
-	if _, err := answering.NodePublishVolume(t.Context(),
-		publishing("example-store", target, aPod("reader", "pod-uid-1"))); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
+// publishedAt publishes the handle once for each pod, each at its own
+// target, and returns the targets in the order of the pods.
+func publishedAt(t *testing.T, answering *driver, handle string, pods ...podReference) []string {
+	t.Helper()
+	targets := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		target := filepath.Join(t.TempDir(), pod.name)
+		if _, err := answering.NodePublishVolume(t.Context(),
+			publishing(handle, target, pod)); err != nil {
+			t.Fatalf("NodePublishVolume for %s: %v", pod.name, err)
+		}
+		targets = append(targets, target)
 	}
+	return targets
+}
+
+func TestEveryHoldSurvivesARestartWhileItsTargetIsStillAMount(t *testing.T) {
+	answering := testDriver(t)
+	targets := publishedAt(t, answering, "example-store",
+		aPod("first", "pod-uid-1"), aPod("second", "pod-uid-2"))
 
 	restarted := driverIn(t, answering.store.root)
-	restarted.mountinfo = mountTableWith(t, target)
+	restarted.mountinfo = mountTableWith(t, targets...)
 	restarted.resume(t.Context())
 
-	standing, held := restarted.holder("example-store")
-	if !held {
-		t.Fatal("the restarted driver holds nothing, want the hold back")
+	held := restarted.holdsOf("example-store")
+	if len(held) != 2 {
+		t.Fatalf("the restarted driver has holds %+v, want both back", held)
 	}
-	if standing.PodUID != "pod-uid-1" || standing.Target != target {
-		t.Errorf("the hold names %+v, want pod-uid-1 at %s", standing, target)
+	if held[0].PodUID != "pod-uid-1" || held[0].Target != targets[0] ||
+		held[1].PodUID != "pod-uid-2" || held[1].Target != targets[1] {
+		t.Errorf("the holds name %+v, want pod-uid-1 at %s and pod-uid-2 at %s",
+			held, targets[0], targets[1])
 	}
 }
 
-func TestAHoldWhoseTargetIsNoLongerAMountIsGivenUp(t *testing.T) {
+func TestARestartGivesUpOnlyTheHoldsWhoseTargetsAreNoLongerMounts(t *testing.T) {
 	answering := testDriver(t)
-	if _, err := answering.NodePublishVolume(t.Context(),
-		publishing("example-store", filepath.Join(t.TempDir(), "mount"),
-			aPod("reader", "pod-uid-1"))); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
+	targets := publishedAt(t, answering, "example-store",
+		aPod("first", "pod-uid-1"), aPod("second", "pod-uid-2"))
+
+	restarted := driverIn(t, answering.store.root)
+	restarted.mountinfo = mountTableWith(t, targets[1])
+	restarted.resume(t.Context())
+
+	held := restarted.holdsOf("example-store")
+	if len(held) != 1 || held[0].Target != targets[1] {
+		t.Errorf("the restarted driver has holds %+v, want the one at %s alone", held, targets[1])
 	}
+	if _, err := os.Stat(restarted.store.holdPath("example-store", targets[0])); !os.IsNotExist(err) {
+		t.Errorf("the hold file of the unmounted target answered %v, want it removed", err)
+	}
+}
+
+func TestARestartWithNoMountsLeftRemovesTheHandlesHolds(t *testing.T) {
+	answering := testDriver(t)
+	publishedAt(t, answering, "example-store", aPod("reader", "pod-uid-1"))
 
 	restarted := driverIn(t, answering.store.root)
 	restarted.resume(t.Context())
 
-	if _, held := restarted.holder("example-store"); held {
-		t.Error("the restarted driver took the hold back, want it given up")
+	if held := restarted.holdsOf("example-store"); len(held) != 0 {
+		t.Errorf("the restarted driver has holds %+v, want none", held)
 	}
-	if _, err := os.Stat(restarted.store.holdPath("example-store")); !os.IsNotExist(err) {
+	if _, err := os.Stat(restarted.store.holdsPath("example-store")); !os.IsNotExist(err) {
+		t.Errorf("the handle's holds directory answered %v, want it removed", err)
+	}
+}
+
+// singleFileHold writes a hold as one file at holds/<handle>, the layout
+// in which a driver that refused a second pod recorded its one hold.
+func singleFileHold(t *testing.T, root, handle string, taken hold) {
+	t.Helper()
+	content, err := json.Marshal(taken)
+	if err != nil {
+		t.Fatalf("encoding the hold: %v", err)
+	}
+	holds := filepath.Join(root, holdsDirectory)
+	if err := os.MkdirAll(holds, 0o755); err != nil {
+		t.Fatalf("making the holds directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(holds, handle), content, 0o600); err != nil {
+		t.Fatalf("writing the hold: %v", err)
+	}
+}
+
+func TestAHoldWrittenAsOneFilePerHandleSurvivesARestart(t *testing.T) {
+	answering := testDriver(t)
+	target := filepath.Join(t.TempDir(), "mount")
+	singleFileHold(t, answering.store.root, "example-store",
+		hold{PodUID: "pod-uid-1", PodName: "reader", PodNamespace: "example", Target: target})
+	answering.mountinfo = mountTableWith(t, target)
+	answering.resume(t.Context())
+
+	held := answering.holdsOf("example-store")
+	if len(held) != 1 || held[0].PodUID != "pod-uid-1" || held[0].Target != target {
+		t.Fatalf("the driver has holds %+v, want pod-uid-1 at %s", held, target)
+	}
+	restarted := driverIn(t, answering.store.root)
+	restarted.mountinfo = mountTableWith(t, target)
+	restarted.resume(t.Context())
+	if held := restarted.holdsOf("example-store"); len(held) != 1 {
+		t.Errorf("a second restart has holds %+v, want the hold kept on the disk", held)
+	}
+}
+
+func TestAHoldWrittenAsOneFilePerHandleIsGivenUpWithItsMount(t *testing.T) {
+	answering := testDriver(t)
+	singleFileHold(t, answering.store.root, "example-store",
+		hold{PodUID: "pod-uid-1", Target: filepath.Join(t.TempDir(), "mount")})
+	answering.resume(t.Context())
+
+	if held := answering.holdsOf("example-store"); len(held) != 0 {
+		t.Errorf("the driver has holds %+v, want none", held)
+	}
+	if _, err := os.Stat(answering.store.holdsPath("example-store")); !os.IsNotExist(err) {
 		t.Errorf("the hold file answered %v, want it removed", err)
 	}
 }
 
 func TestAHoldTheDriverCannotReadIsGivenUp(t *testing.T) {
 	answering, written := loggingDriver(t)
+	holds := answering.store.holdsPath("example-store")
+	if err := os.MkdirAll(holds, 0o755); err != nil {
+		t.Fatalf("making the holds directory: %v", err)
+	}
+	unreadable := filepath.Join(holds, "0123456789abcdef0123456789abcdef")
+	if err := os.WriteFile(unreadable, []byte("not json\n"), 0o600); err != nil {
+		t.Fatalf("writing the hold: %v", err)
+	}
+	answering.resume(t.Context())
+	if held := answering.holdsOf("example-store"); len(held) != 0 {
+		t.Errorf("the driver took a hold it could not read: %+v", held)
+	}
+	if _, err := os.Stat(unreadable); !os.IsNotExist(err) {
+		t.Errorf("the hold file answered %v, want it removed", err)
+	}
+	if !strings.Contains(written.String(), "the hold was not read") {
+		t.Errorf("the log reads %q, want it to say the hold was not read", written)
+	}
+}
+
+func TestAHandlesHoldsTheDriverCannotListAreLogged(t *testing.T) {
+	answering, written := loggingDriver(t)
+	holds := answering.store.holdsPath("example-store")
+	if err := os.MkdirAll(holds, 0o755); err != nil {
+		t.Fatalf("making the holds directory: %v", err)
+	}
+	if err := os.Chmod(holds, 0); err != nil {
+		t.Fatalf("closing the holds directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(holds, 0o755) })
+	answering.resume(t.Context())
+	if !strings.Contains(written.String(), "the holds were not read") {
+		t.Errorf("the log reads %q, want it to say the holds were not read", written)
+	}
+}
+
+func TestASingleFileHoldTheDriverCannotReadOrRemoveIsLogged(t *testing.T) {
+	answering, written := loggingDriver(t)
 	holds := filepath.Join(answering.store.root, holdsDirectory)
 	if err := os.MkdirAll(holds, 0o755); err != nil {
 		t.Fatalf("making the holds directory: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(holds, "example-store"),
-		[]byte("not json\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(holds, "example-store"), []byte("not json\n"), 0o600); err != nil {
 		t.Fatalf("writing the hold: %v", err)
 	}
-	answering.resume(t.Context())
-	if _, held := answering.holder("example-store"); held {
-		t.Error("the driver took a hold it could not read, want it given up")
+	// A directory the driver cannot write is a removal the kernel refuses.
+	if err := os.Chmod(holds, 0o555); err != nil {
+		t.Fatalf("closing the holds directory: %v", err)
 	}
-	if !strings.Contains(written.String(), "the hold was not read") {
-		t.Errorf("the log reads %q, want it to say the hold was not read", written)
+	t.Cleanup(func() { _ = os.Chmod(holds, 0o755) })
+	answering.resume(t.Context())
+	if held := answering.holdsOf("example-store"); len(held) != 0 {
+		t.Errorf("the driver took a hold it could not read: %+v", held)
+	}
+	for _, line := range []string{"the hold was not read", "the hold was not removed"} {
+		if !strings.Contains(written.String(), line) {
+			t.Errorf("the log reads %q, want it to say %s", written, line)
+		}
 	}
 }
 
@@ -105,17 +232,17 @@ func TestAStoreWithNoHoldsResumesNothing(t *testing.T) {
 
 func TestAHoldTheDriverCannotWriteIsLoggedAndTheMountStands(t *testing.T) {
 	answering, written := loggingDriver(t)
+	target := filepath.Join(t.TempDir(), "mount")
 	// A directory where the hold file goes is a write the kernel refuses.
-	if err := os.MkdirAll(answering.store.holdPath("example-store"), 0o755); err != nil {
+	if err := os.MkdirAll(answering.store.holdPath("example-store", target), 0o755); err != nil {
 		t.Fatalf("making the directory: %v", err)
 	}
 	if _, err := answering.NodePublishVolume(t.Context(),
-		publishing("example-store", filepath.Join(t.TempDir(), "mount"),
-			aPod("reader", "pod-uid-1"))); err != nil {
+		publishing("example-store", target, aPod("reader", "pod-uid-1"))); err != nil {
 		t.Fatalf("NodePublishVolume: %v", err)
 	}
-	if _, held := answering.holder("example-store"); !held {
-		t.Error("the driver holds nothing, want the hold in memory")
+	if held := answering.holdsOf("example-store"); len(held) != 1 {
+		t.Errorf("the driver has holds %+v, want the hold in memory", held)
 	}
 	if !strings.Contains(written.String(), "the hold was not written") {
 		t.Errorf("the log reads %q, want it to say the hold was not written", written)
@@ -124,11 +251,12 @@ func TestAHoldTheDriverCannotWriteIsLoggedAndTheMountStands(t *testing.T) {
 
 func TestAHoldTheDriverCannotRemoveIsLogged(t *testing.T) {
 	answering, written := loggingDriver(t)
-	if err := os.MkdirAll(filepath.Join(answering.store.holdPath("example-store"), "inner"),
+	target := filepath.Join(t.TempDir(), "mount")
+	if err := os.MkdirAll(filepath.Join(answering.store.holdPath("example-store", target), "inner"),
 		0o755); err != nil {
 		t.Fatalf("making the directory: %v", err)
 	}
-	answering.dropHold(t.Context(), "example-store")
+	answering.dropHold(t.Context(), "example-store", target)
 	if !strings.Contains(written.String(), "the hold was not removed") {
 		t.Errorf("the log reads %q, want it to say the hold was not removed", written)
 	}
@@ -136,14 +264,21 @@ func TestAHoldTheDriverCannotRemoveIsLogged(t *testing.T) {
 
 func TestTheHeldHandlesAreTheOnesAPodHolds(t *testing.T) {
 	answering := testDriver(t)
-	if _, err := answering.NodePublishVolume(t.Context(),
-		publishing("example-store", filepath.Join(t.TempDir(), "mount"),
-			aPod("reader", "pod-uid-1"))); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
-	}
+	publishedAt(t, answering, "example-store",
+		aPod("first", "pod-uid-1"), aPod("second", "pod-uid-2"))
 	held := answering.heldHandles()
 	if len(held) != 1 || !held["example-store"] {
 		t.Errorf("the driver holds %v, want example-store alone", held)
+	}
+}
+
+func TestTheVolumesGaugeCountsAHandleOnceForAllThePodsThatHoldIt(t *testing.T) {
+	answering := testDriver(t)
+	publishedAt(t, answering, "example-store",
+		aPod("first", "pod-uid-1"), aPod("second", "pod-uid-2"))
+	publishedAt(t, answering, "some-cache", aPod("third", "pod-uid-3"))
+	if got := testutil.ToFloat64(answering.readings.volumes); got != 2 {
+		t.Errorf("per_node_csi_volumes reads %v, want 2", got)
 	}
 }
 

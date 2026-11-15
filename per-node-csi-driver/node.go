@@ -35,8 +35,11 @@ type node struct {
 	// whose kernel refused the reading.
 	space func(string) (int64, int64, error)
 
+	// holds maps each handle to the holds on it, by target. A pod's
+	// target is unique to the pod, because the kubelet puts the pod's
+	// UID in the path.
 	mu    sync.Mutex
-	holds map[string]hold
+	holds map[string]map[string]hold
 }
 
 // newNode builds the Node service around the store the flags named,
@@ -51,7 +54,7 @@ func newNode(cfg *config, posting *events, readings *metrics, logger *slog.Logge
 		logger:    logger,
 		mountinfo: mountTable,
 		space:     spaceOf,
-		holds:     map[string]hold{},
+		holds:     map[string]map[string]hold{},
 	}
 	answering.mounted = func(path string) bool { return mountedNow(answering.mountinfo, path) }
 	return answering
@@ -74,8 +77,8 @@ func (n *node) NodeGetInfo(
 // SINGLE_NODE_SINGLE_WRITER for a ReadWriteOncePod claim, where it
 // otherwise sends SINGLE_NODE_WRITER. NodePublishVolume reads no access
 // mode, so every mode gets the same bind of this node's copy. The
-// scheduler, not the driver, keeps a ReadWriteOncePod claim to one pod
-// in the cluster.
+// scheduler and the kubelet, not the driver, keep a ReadWriteOncePod
+// claim to one pod in the cluster.
 func (n *node) NodeGetCapabilities(
 	context.Context, *csi.NodeGetCapabilitiesRequest,
 ) (*csi.NodeGetCapabilitiesResponse, error) {
@@ -98,10 +101,14 @@ func rpcCapability(kind csi.NodeServiceCapability_RPC_Type) *csi.NodeServiceCapa
 }
 
 // NodePublishVolume gives the pod this node's copy of the handle, and
-// makes the directory on the first publish on this node. A second pod
-// that asks for a handle another pod holds is refused. The pod that
-// holds the handle can publish the same target repeatedly as the kubelet
-// retries, and it can publish the copy at a new target.
+// makes the directory on the first publish on this node. Every pod on
+// the node that publishes the handle gets the same copy. The driver
+// reads no access mode and refuses no second pod, because Kubernetes
+// already enforces the mode: ReadWriteOncePod admits one pod in the
+// cluster, and ReadWriteOnce and ReadWriteMany admit any number of pods
+// on a node. A workload whose pods must not share a copy keeps them on
+// different nodes with required pod anti-affinity. The kubelet retries
+// a publish of the same target, and a retry mounts nothing again.
 func (n *node) NodePublishVolume(
 	ctx context.Context, request *csi.NodePublishVolumeRequest,
 ) (*csi.NodePublishVolumeResponse, error) {
@@ -118,16 +125,7 @@ func (n *node) NodePublishVolume(
 		return nil, status.Error(codes.InvalidArgument, "target_path: the call names no path")
 	}
 
-	standing, held := n.holder(handle)
-	if held && standing.PodUID != pod.uid {
-		err := status.Errorf(codes.FailedPrecondition,
-			"volume_id: %s is held on %s by pod %s/%s",
-			handle, n.nodeID, standing.PodNamespace, standing.PodName)
-		n.events.refuse(pod, reasonHeld,
-			status.Convert(err).Message())
-		return nil, err
-	}
-	if held && standing.Target == target {
+	if n.holding(handle, target) {
 		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
@@ -169,8 +167,9 @@ func (n *node) mount(
 	return nil
 }
 
-// NodeUnpublishVolume removes the mount and releases the hold. It
-// removes nothing under copies/, because the copy outlives its pod.
+// NodeUnpublishVolume removes the mount and releases the hold at its
+// target. Every other pod's hold on the handle stays. It removes nothing
+// under copies/, because the copy outlives its pods.
 func (n *node) NodeUnpublishVolume(
 	ctx context.Context, request *csi.NodeUnpublishVolumeRequest,
 ) (*csi.NodeUnpublishVolumeResponse, error) {
@@ -194,17 +193,13 @@ func (n *node) NodeUnpublishVolume(
 	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	// The hold goes only when it names this target. When the kubelet
-	// takes a refused pod down it unpublishes that pod's target too, and
-	// that call must not give up the copy the holding pod still uses.
-	if standing, held := n.holder(handle); held && standing.Target != target {
-		n.logger.InfoContext(ctx, "unpublished a target the hold does not name",
-			"volume", handle, "target", target, "held", standing.Target)
-		return &csi.NodeUnpublishVolumeResponse{}, nil
+	// The copy's bytes leave the gauge only with the last hold, because
+	// NodeGetVolumeStats keeps reading the copy for every pod that still
+	// mounts it.
+	if n.dropHold(ctx, handle, target) {
+		n.readings.forget(handle)
 	}
-	n.dropHold(ctx, handle)
-	n.readings.forget(handle)
-	n.logger.InfoContext(ctx, "unpublished", "volume", handle)
+	n.logger.InfoContext(ctx, "unpublished", "volume", handle, "target", target)
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
 

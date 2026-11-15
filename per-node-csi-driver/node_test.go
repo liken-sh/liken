@@ -183,24 +183,27 @@ func TestPublishRefusesACallWithNoTargetPath(t *testing.T) {
 	}
 }
 
-func TestPublishRefusesAHandleAnotherPodOnThisNodeHolds(t *testing.T) {
+func TestPublishGivesASecondPodOnThisNodeTheSameCopy(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		answering := testDriver(t)
-		if _, err := answering.NodePublishVolume(t.Context(),
-			publishing("example-store", filepath.Join(t.TempDir(), "first"),
-				aPod("first", "pod-uid-1"))); err != nil {
-			t.Fatalf("NodePublishVolume: %v", err)
+		for _, pod := range []podReference{aPod("first", "pod-uid-1"), aPod("second", "pod-uid-2")} {
+			if _, err := answering.NodePublishVolume(t.Context(),
+				publishing("example-store", filepath.Join(t.TempDir(), pod.name), pod)); err != nil {
+				t.Fatalf("NodePublishVolume for %s: %v", pod.name, err)
+			}
 		}
-		_, err := answering.NodePublishVolume(t.Context(),
-			publishing("example-store", filepath.Join(t.TempDir(), "second"),
-				aPod("second", "pod-uid-2")))
-		if status.Code(err) != codes.FailedPrecondition {
-			t.Fatalf("NodePublishVolume answered %v, want FailedPrecondition", err)
+		copied := answering.store.copyPath("example-store")
+		if len(answering.mounts.mounts) != 2 ||
+			answering.mounts.mounts[0].source != copied || answering.mounts.mounts[1].source != copied {
+			t.Errorf("the driver made %v, want two binds of %s", answering.mounts.mounts, copied)
 		}
-		if message := status.Convert(err).Message(); !strings.Contains(message, "first") {
-			t.Errorf("the refusal reads %q, want it to name the pod that holds the copy", message)
+		if held := answering.holdsOf("example-store"); len(held) != 2 {
+			t.Errorf("the handle has holds %+v, want one for each pod", held)
 		}
-		onlyReason(t, answering.posted, reasonHeld)
+		synctest.Wait()
+		if posted := answering.posted.List(); len(posted) != 0 {
+			t.Errorf("the pods carry %+v, want no Event", posted)
+		}
 	})
 }
 
@@ -218,19 +221,20 @@ func TestPublishRepeatedForTheSamePodAndTargetMountsOnce(t *testing.T) {
 	}
 }
 
-func TestPublishMovesTheHoldWhenTheSamePodTakesANewTarget(t *testing.T) {
+func TestPublishHoldsEveryTargetTheSamePodTakes(t *testing.T) {
 	answering := testDriver(t)
 	pod := aPod("reader", "pod-uid-1")
+	first := filepath.Join(t.TempDir(), "first")
 	second := filepath.Join(t.TempDir(), "second")
-	for _, target := range []string{filepath.Join(t.TempDir(), "first"), second} {
+	for _, target := range []string{first, second} {
 		if _, err := answering.NodePublishVolume(t.Context(),
 			publishing("example-store", target, pod)); err != nil {
 			t.Fatalf("NodePublishVolume: %v", err)
 		}
 	}
-	standing, held := answering.holder("example-store")
-	if !held || standing.Target != second {
-		t.Errorf("the hold names %q, want %q", standing.Target, second)
+	held := answering.holdsOf("example-store")
+	if len(held) != 2 || held[0].Target != first || held[1].Target != second {
+		t.Errorf("the handle has holds %+v, want %s and %s", held, first, second)
 	}
 }
 
@@ -305,8 +309,8 @@ func TestUnpublishTakesTheMountAwayAndLeavesTheCopy(t *testing.T) {
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Errorf("the target answered %v, want it gone", err)
 	}
-	if _, held := answering.holder("example-store"); held {
-		t.Error("the handle is still held, want it given up")
+	if held := answering.holdsOf("example-store"); len(held) != 0 {
+		t.Errorf("the handle has holds %+v, want none", held)
 	}
 }
 
@@ -402,40 +406,50 @@ func TestUnpublishRefusesATargetThatStillHoldsTheCopysFiles(t *testing.T) {
 	}
 }
 
-func TestUnpublishingARefusedPodsTargetLeavesTheHoldStanding(t *testing.T) {
+func TestUnpublishOfOnePodLeavesTheCopyHeldForTheOther(t *testing.T) {
 	answering := testDriver(t)
-	// The kernel holds no mount at the refused pod's target, and an
-	// unmount of a path that is not a mount answers EINVAL.
-	answering.mounts.unmountErr = unix.EINVAL
 	first := filepath.Join(t.TempDir(), "first")
 	second := filepath.Join(t.TempDir(), "second")
-
-	if _, err := answering.NodePublishVolume(t.Context(),
-		publishing("example-store", first, aPod("first", "pod-uid-1"))); err != nil {
-		t.Fatalf("NodePublishVolume: %v", err)
+	for target, pod := range map[string]podReference{
+		first: aPod("first", "pod-uid-1"), second: aPod("second", "pod-uid-2"),
+	} {
+		if _, err := answering.NodePublishVolume(t.Context(),
+			publishing("example-store", target, pod)); err != nil {
+			t.Fatalf("NodePublishVolume: %v", err)
+		}
 	}
-	if _, err := answering.NodePublishVolume(t.Context(),
-		publishing("example-store", second, aPod("second", "pod-uid-2"))); err == nil {
-		t.Fatal("NodePublishVolume answered no error for the second pod, want one")
-	}
-	if _, err := answering.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
-		VolumeId: "example-store", TargetPath: second,
-	}); err != nil {
-		t.Fatalf("NodeUnpublishVolume: %v", err)
-	}
-
-	standing, held := answering.holder("example-store")
-	if !held || standing.Target != first {
-		t.Fatalf("the hold names %+v, want the first pod at %s", standing, first)
-	}
-
 	if _, err := answering.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
 		VolumeId: "example-store", TargetPath: first,
 	}); err != nil {
 		t.Fatalf("NodeUnpublishVolume: %v", err)
 	}
-	if _, held := answering.holder("example-store"); held {
-		t.Error("the handle is still held, want it given up")
+	held := answering.holdsOf("example-store")
+	if len(held) != 1 || held[0].Target != second {
+		t.Errorf("the handle has holds %+v, want the second pod's alone", held)
+	}
+	if !answering.heldHandles()["example-store"] {
+		t.Error("the sweep would take the copy, want it kept for the second pod")
+	}
+}
+
+func TestUnpublishOfATargetThatHoldsNothingLeavesTheHoldsStanding(t *testing.T) {
+	answering := testDriver(t)
+	// The kubelet unpublishes the target of a publish that failed, and
+	// the kernel holds no mount there, so the unmount answers EINVAL.
+	answering.mounts.unmountErr = unix.EINVAL
+	held := filepath.Join(t.TempDir(), "held")
+	if _, err := answering.NodePublishVolume(t.Context(),
+		publishing("example-store", held, aPod("first", "pod-uid-1"))); err != nil {
+		t.Fatalf("NodePublishVolume: %v", err)
+	}
+	if _, err := answering.NodeUnpublishVolume(t.Context(), &csi.NodeUnpublishVolumeRequest{
+		VolumeId: "example-store", TargetPath: filepath.Join(t.TempDir(), "failed"),
+	}); err != nil {
+		t.Fatalf("NodeUnpublishVolume: %v", err)
+	}
+	standing := answering.holdsOf("example-store")
+	if len(standing) != 1 || standing[0].Target != held {
+		t.Errorf("the handle has holds %+v, want the one at %s", standing, held)
 	}
 }
 
