@@ -666,7 +666,7 @@ spec:
                         description: "The percent of the scored videos that the model placed within 10 seconds of their marks."
                       within30:
                         type: integer
-                        description: "The percent of the scored videos that the model placed within 30 seconds of their marks. A fit whose model is under 60 here is rejected, and the library keeps the model it has."
+                        description: "The percent of the scored videos that the model placed within 30 seconds of their marks. A fit whose model is under 30 here is rejected, and the library keeps the model it has."
                       lastFit:
                         type: string
                         format: date-time

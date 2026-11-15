@@ -224,6 +224,17 @@ videos within 3, 10, and 30 seconds, and the one model of all of them
 placed 73%, 92%, and 97%. So a model for each `Library` is level at 10
 and 30 seconds and 8 videos behind at 3.
 
+On 2026-11-15 the floor moved from 60% to 30% within 30 seconds. The
+crowd-sourced marks were looser than credit starts checked by hand: one
+model placed 64% of the held-out videos within 10 seconds of their
+marks, and placed 92% of 88 hand-checked episodes within 10 seconds of
+the real start. So a floor of 60% can reject a good model only because
+a library's marks are loose. The working models scored 75% within 30
+seconds on films, in the minimum fit of 100 videos, and 84% on
+episodes, and a broken fit scores near zero. The floor of 30% is there
+to catch a broken fit, a fault in the readings, the marks, or the
+trainer, and not loose marks.
+
 ### Where a placement goes
 
 A placement is a mark of the kind `end-titles` with the source

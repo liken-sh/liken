@@ -229,7 +229,7 @@ One entry for each kind of titles a model places, on a library that sets spec.ti
 | <span id="statustitlesmodels--heldout"></span>`heldOut` | integer | no | How many videos the model was scored on. Each was placed by a model that was fitted without its film or series. |
 | <span id="statustitlesmodels--within3"></span>`within3` | integer | no | The percent of the scored videos that the model placed within 3 seconds of their marks. A share of the providers' marks is wrong, so a model that works does not reach 100. |
 | <span id="statustitlesmodels--within10"></span>`within10` | integer | no | The percent of the scored videos that the model placed within 10 seconds of their marks. |
-| <span id="statustitlesmodels--within30"></span>`within30` | integer | no | The percent of the scored videos that the model placed within 30 seconds of their marks. A fit whose model is under 60 here is rejected, and the library keeps the model it has. |
+| <span id="statustitlesmodels--within30"></span>`within30` | integer | no | The percent of the scored videos that the model placed within 30 seconds of their marks. A fit whose model is under 30 here is rejected, and the library keeps the model it has. |
 | <span id="statustitlesmodels--lastfit"></span>`lastFit` | string | no | When the last fit ended. |
 | <span id="statustitlesmodels--lastresult"></span>`lastResult` | string | no | What the last fit left: fitted for a model the library now places with, rejected for a model under the floor, and failed for a fit that wrote no model. |
 | <span id="statustitlesmodels--lastreason"></span>`lastReason` | string | no | Why the last fit was rejected or failed, in a sentence. |

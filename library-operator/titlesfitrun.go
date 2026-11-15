@@ -42,14 +42,21 @@ const titlesFitTimeout = 6 * time.Hour
 const titlesFitThreads = 4
 
 // The share of the held-out videos that a model must place within 30 seconds
-// of their mark, or the run leaves the model the Library has. The score is
-// against the providers' marks, and a share of those is wrong, so a model
-// that works never scores near 1: in plan 96 every such model placed 77% to
-// 88% within 30 seconds, at every count of videos from 48 to 1,297. The
-// floor is under all of them and over a model that learned nothing. It is a
-// floor and not a comparison with the model before, because the score
-// cannot rank two models that work.
-const titlesFitFloor = 0.60
+// of their mark, or the run leaves the model the Library has. The held-out
+// videos are the ones the fit did not train on, and the score compares the
+// model's placement with the providers' marks.
+//
+// The floor catches a broken fit: a bug in the readings, in the marks, or in
+// the trainer. A model from a broken fit places almost no video near its
+// mark. The floor is not there to catch loose marks. The providers' marks
+// are often looser than the real start of the credits, so a model that
+// works can score low against them and still place the credits well. So the
+// floor of 30% is far under what a working model scores against loose marks,
+// and far over what a broken model scores. Plan 96 holds the measurements.
+//
+// It is a floor and not a comparison with the model before, because the
+// score cannot rank two models that work.
+const titlesFitFloor = 0.30
 
 // The emptyDir the fit writes its labels file in. The image is a closure on
 // scratch and holds no temporary directory, and the labels are no fact of

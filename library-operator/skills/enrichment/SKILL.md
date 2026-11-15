@@ -728,9 +728,11 @@ root. The model belongs to the whole `Library`, so the close container
 that removes the other files of the root's `.liken/` keeps it. `train` leaves out the marks that a first model placed far from
 and was sure about, because a share of the providers' marks is wrong.
 It scores the model on videos it was not fitted on, each without its
-film or series, and a model that places under 60% of them within 30
+film or series, and a model that places under 30% of them within 30
 seconds of their marks is rejected, so the library keeps the model it
-has. Plan 96 in `library-operator/plans/` holds the measurements that
+has. The floor catches a broken fit, such as a fault in the readings or
+the marks. It does not reject a model because a library's marks are
+loose: a model that works scores far over 30% even against loose marks. Plan 96 in `library-operator/plans/` holds the measurements that
 each of these numbers comes from.
 
 The `EndTitlesModel` condition of the `Library` reports the model:

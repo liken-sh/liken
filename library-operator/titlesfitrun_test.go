@@ -146,7 +146,7 @@ func TestAFitThatGivesNoModelLeavesTheOldOne(t *testing.T) {
 		result string
 		reason string
 	}{
-		{name: "under the floor", model: trainedModel(0.4), result: titlesFitRejected, reason: "under the floor of 60%"},
+		{name: "under the floor", model: trainedModel(0.2), result: titlesFitRejected, reason: "under the floor of 30%"},
 		{name: "the tool fails", result: titlesFitFailed, reason: "too few videos have a reading"},
 		{name: "the tool writes no JSON", model: "model", result: titlesFitFailed, reason: "reading the model the fit wrote"},
 	}
