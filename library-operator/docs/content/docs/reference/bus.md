@@ -91,7 +91,10 @@ dropped topic again on its next pass, which runs within ten seconds.
 
 The reporter publishes one report per `Library`, retained, and
 rebuilds it whenever the catalog's runs table changes and while any
-replicated table keeps changing. The operator folds each report into
+replicated table keeps changing. A reporter that starts publishes its
+first report of a `Library` when its copy of the catalog holds the
+newest confirmed run that the retained report names, or after ten
+minutes. The operator folds each report into
 that `Library`'s status, so the fields are the ones
 [the `Library` status](/docs/reference/libraries/#status) carries. The
 close container of a `Library`'s `Job` writes the `enrich` run as the

@@ -45,6 +45,14 @@ const (
 // report a second and not one report a row.
 const reportDebounce = time.Second
 
+// How long the reporter waits for its copy of the catalog to hold the write
+// that the broker's report of a library names, before it reports what the
+// copy holds. The copy of a catalog pod that just started syncs with its
+// peers in seconds. The bound is for a catalog that was built again, which
+// never holds a write of the catalog before it, and it is the time a Job
+// gives its own copy.
+const reportSyncBound = defaultSyncTimeout
+
 // How long the reporter holds the bus open after it publishes the
 // closing offline, so the writer goroutine sends it before the process
 // exits.
@@ -60,8 +68,15 @@ type reporter struct {
 	bus               *Bus
 	log               io.Writer
 
+	// Reads the message the broker retains on one topic, and whether it
+	// retains one.
+	retained func(ctx context.Context, topic string) ([]byte, bool, error)
+
 	mutex     sync.Mutex
 	published map[string]libraryReport
+	// The libraries this process has published no report of yet, because
+	// its copy of the catalog may be behind the report the broker retains.
+	waiting map[string]reportWait
 	// The refresh and retry times of each Library, by library key, as the
 	// operator last published them. A Library with no entry counts its gaps
 	// with neither.
@@ -70,6 +85,17 @@ type reporter struct {
 	// raises and the republish loop answers, because the handler runs on the
 	// bus reader and must not wait on a catalog read.
 	changed chan struct{}
+}
+
+// The wait of one library's first report: the write the copy must hold,
+// which is the newest confirmed run that the broker's report names, whether
+// the broker's report was read, when the wait began, and when the reporter
+// looks at the copy again.
+type reportWait struct {
+	target  syncTarget
+	read    bool
+	since   time.Time
+	recheck time.Time
 }
 
 // runReport is the report role's whole program: read the environment,
@@ -107,6 +133,17 @@ func newReporter(log io.Writer) *reporter {
 		catalog:   NewCatalog(api, &http.Client{}),
 		log:       log,
 		published: map[string]libraryReport{},
+	}
+	endpoint := busEndpointOf(os.Getenv(busAddressVariable), base)
+	report.retained = func(ctx context.Context, topic string) ([]byte, bool, error) {
+		ctx, cancel := context.WithTimeout(ctx, workItemTimeout)
+		defer cancel()
+		session, err := openBusSession(ctx, endpoint.dial, "catalog-"+namespace+"-retained")
+		if err != nil {
+			return nil, false, err
+		}
+		defer session.close()
+		return session.readRetained(topic)
 	}
 	report.bus = newBus(os.Getenv(busAddressVariable), "catalog-"+namespace,
 		&busWill{Topic: report.availabilityTopic, Payload: []byte(availabilityOffline), Retained: true},
@@ -228,11 +265,15 @@ func markChanged(changed chan<- struct{}) {
 
 // Publishes a report for every library the reporter has already
 // published one for, which is every library the catalog held when the
-// reporter started and every library a run has named since.
+// reporter started and every library a run has named since, and for
+// every library whose first report waits for the copy.
 func (r *reporter) publishKnownLibraries(ctx context.Context) {
 	r.mutex.Lock()
-	libraries := make([]string, 0, len(r.published))
+	libraries := make([]string, 0, len(r.published)+len(r.waiting))
 	for library := range r.published {
+		libraries = append(libraries, library)
+	}
+	for library := range r.waiting {
 		libraries = append(libraries, library)
 	}
 	r.mutex.Unlock()
@@ -266,12 +307,18 @@ func (r *reporter) publishEveryLibrary(ctx context.Context) {
 // empty library.
 func (r *reporter) publishLibrary(ctx context.Context, library string) {
 	namespace, name, ok := splitLibraryKey(library)
-	if !ok {
+	// A reporter that is stopping publishes no more, so a library that
+	// waits for the copy stops looking at it.
+	if !ok || ctx.Err() != nil {
 		return
 	}
 	read, cancel := context.WithTimeout(ctx, reportReadTimeout)
 	defer cancel()
 
+	topic := libraryStatusTopic(r.topicBase, namespace, name)
+	if !r.copyReached(read, library, topic, func() { r.publishLibrary(ctx, library) }) {
+		return
+	}
 	report, err := r.buildReport(read, library)
 	if err != nil {
 		r.logf("could not build the report of %s: %v", library, err)
@@ -279,10 +326,82 @@ func (r *reporter) publishLibrary(ctx context.Context, library string) {
 	}
 	r.mutex.Lock()
 	r.published[library] = report
+	delete(r.waiting, library)
 	r.mutex.Unlock()
 
 	payload, _ := json.Marshal(report)
-	r.bus.Publish(libraryStatusTopic(r.topicBase, namespace, name), payload, true)
+	r.bus.Publish(topic, payload, true)
+}
+
+// Whether this process may publish a report of one library. It may once it
+// has published one, and before that once its copy of the catalog holds the
+// newest confirmed run that the broker's report of the library names.
+//
+// A catalog pod can start on a copy that is behind its peers: each node
+// keeps a copy of its own, and a pod that starts on another node than
+// before reads that node's older copy until it has synced. The broker
+// retains the last report of the reporter before this one, which was true.
+// A report from the older copy would replace it with counts that are too
+// low, and the operator would start Jobs to fill gaps that are not open
+// and to place end titles that are placed. So the first report of a
+// library waits for the copy, and the broker's report stands until then.
+//
+// While a library waits, the reporter looks at the copy again once a
+// second, as a Job that waits for its own copy does, because a sync that
+// brings only the versions of another writer changes no table the reporter
+// follows. again is that look: the publish of this one library, so the
+// wait of one library builds no report of another. A library the broker
+// holds no report of waits for nothing. After reportSyncBound the reporter
+// publishes what the copy holds and says so.
+func (r *reporter) copyReached(ctx context.Context, library, topic string, again func()) bool {
+	now := time.Now()
+	r.mutex.Lock()
+	_, published := r.published[library]
+	wait, waiting := r.waiting[library]
+	r.mutex.Unlock()
+	if published {
+		return true
+	}
+	if !waiting {
+		wait = reportWait{since: now}
+	}
+	if !wait.read {
+		payload, held, err := r.retained(ctx, topic)
+		if err != nil {
+			r.logf("could not read the report the broker retains of %s: %v", library, err)
+		} else {
+			wait.read = true
+			var before libraryReport
+			if held && json.Unmarshal(payload, &before) == nil {
+				wait.target = syncTargetFor(before.Runs)
+			}
+		}
+	}
+	if wait.read {
+		synced, err := catalogSynced(ctx, r.catalog, wait.target)
+		if err != nil {
+			r.logf("could not read how far the copy of %s is: %v", library, err)
+		}
+		if synced {
+			return true
+		}
+	}
+	if now.Sub(wait.since) >= reportSyncBound {
+		r.logf("reporting %s from a copy that did not reach version %d of %s within %s",
+			library, wait.target.version, wait.target.actor, reportSyncBound)
+		return true
+	}
+	if !now.Before(wait.recheck) {
+		wait.recheck = now.Add(catalogSyncInterval)
+		time.AfterFunc(catalogSyncInterval, again)
+	}
+	r.mutex.Lock()
+	if r.waiting == nil {
+		r.waiting = map[string]reportWait{}
+	}
+	r.waiting[library] = wait
+	r.mutex.Unlock()
+	return false
 }
 
 // buildReport reads one library's counts, runs, and gaps. The scan run is

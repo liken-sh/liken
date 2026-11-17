@@ -110,6 +110,15 @@ publishes on the bus, so an edit of either field changes the gaps with no
 restart of the catalog pod. The reporter has no Kubernetes credential.
 The operator alone writes status.
 
+A catalog pod that starts on another node than before reads that
+node's older copy of the catalog until it has synced with the other
+replicas. So a reporter that starts publishes a `Library`'s first
+report only when its copy holds the newest confirmed run that the
+report on the bus names, and the earlier report stands until then. It
+waits at most ten minutes, and then reports what its copy holds, which
+is how a catalog that was built again reports. A `Library` with no
+report on the bus is reported at once.
+
 All durable replicas mount the same claim, named `<catalog>-catalog`
 unless `spec.storage.claimName` names an existing one. With a per-node
 storage class, each node has a separate directory for that claim.

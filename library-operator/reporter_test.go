@@ -59,6 +59,7 @@ func seededReporter(t *testing.T) (*reporter, *Catalog) {
 		catalog:           catalog,
 		log:               io.Discard,
 		published:         map[string]libraryReport{},
+		retained:          noRetainedReport,
 	}
 	return report, catalog
 }
@@ -302,6 +303,17 @@ func TestSplitLibraryKey(t *testing.T) {
 // pipe.
 func servingReporter(t *testing.T, catalog *Catalog) (*reporter, <-chan *fakeBroker, context.CancelFunc) {
 	t.Helper()
+	return servingReporterAfter(t, catalog, noRetainedReport, io.Discard)
+}
+
+// A broker that retains no report, which is a reporter's first start.
+func noRetainedReport(context.Context, string) ([]byte, bool, error) { return nil, false, nil }
+
+// The same reporter where the broker already retains reports, which is a
+// reporter that starts again, with the log the test reads.
+func servingReporterAfter(t *testing.T, catalog *Catalog,
+	retained func(context.Context, string) ([]byte, bool, error), log io.Writer) (*reporter, <-chan *fakeBroker, context.CancelFunc) {
+	t.Helper()
 	dial, accepted := testBroker(t)
 
 	report := &reporter{
@@ -309,8 +321,9 @@ func servingReporter(t *testing.T, catalog *Catalog) (*reporter, <-chan *fakeBro
 		topicBase:         defaultTopicBase,
 		availabilityTopic: catalogAvailabilityTopic(defaultTopicBase, "house"),
 		catalog:           catalog,
-		log:               io.Discard,
+		log:               log,
 		published:         map[string]libraryReport{},
+		retained:          retained,
 	}
 	report.bus = newBus(testBusAddress, "catalog-house",
 		&busWill{Topic: report.availabilityTopic, Payload: []byte(availabilityOffline), Retained: true},
@@ -396,6 +409,91 @@ func TestTheReporterRepublishesOnARun(t *testing.T) {
 					return
 				}
 			}
+		}
+	})
+}
+
+// The agent whose write the broker's report of house/movies names in these
+// tests, and the db version of that write.
+const (
+	laterActor   = "8b3c659e-2f89-472e-a977-5bbdd5c0dc49"
+	laterVersion = 9
+)
+
+// A broker that retains a report of house/movies whose newest confirmed run
+// is a write this catalog pod's copy may not hold yet, and no report of any
+// other library.
+func retainedMoviesReport(_ context.Context, topic string) ([]byte, bool, error) {
+	if topic != libraryStatusTopic(defaultTopicBase, "house", "movies") {
+		return nil, false, nil
+	}
+	payload, err := json.Marshal(libraryReport{Runs: []libraryRun{{Worker: workerEnrich, Job: "movies-walk-9",
+		Started: time.Unix(10, 0), Finished: time.Unix(20, 0), Actor: laterActor, Version: laterVersion}}})
+	return payload, true, err
+}
+
+// The topics of the publishes the broker holds now, without a wait.
+func publishedTopics(broker *fakeBroker) map[string]bool {
+	topics := map[string]bool{}
+	for {
+		select {
+		case published := <-broker.pubs:
+			topics[published.topic] = true
+		default:
+			return topics
+		}
+	}
+}
+
+// A catalog pod can start on a copy that is behind its peers, and it holds
+// the catalog's last writes only after it has synced with them. A report
+// from the copy before then would replace a true report on the broker with
+// an older one, and the operator would start Jobs on counts that are too
+// low. So the reporter publishes a library's report only once its copy
+// holds the newest confirmed run that the broker's report names. A library
+// with no report on the broker is published at once.
+func TestAReporterWhoseCopyIsBehindWaitsToReport(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		catalog, agent := newSQLiteCatalog(t)
+		seedTwoLibrariesInEveryTable(t, catalog)
+		_, accepted, _ := servingReporterAfter(t, catalog, retainedMoviesReport, io.Discard)
+		broker := waitForBroker(t, accepted)
+		movies := libraryStatusTopic(defaultTopicBase, "house", "movies")
+
+		waitForTopic(t, broker, libraryStatusTopic(defaultTopicBase, "house", "series"))
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		if publishedTopics(broker)[movies] {
+			t.Fatal("the reporter published house/movies from a copy that is behind the broker's report")
+		}
+
+		agent.holdVersion(t, laterActor, laterVersion)
+
+		waitForTopic(t, broker, movies)
+	})
+}
+
+// A catalog that was built again never holds the write that the broker's
+// old report names. The wait is bounded, so that such a catalog reports
+// what it holds after the bound, and says so in its log.
+func TestAReporterReportsAfterTheBoundOfTheWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		catalog, _ := newSQLiteCatalog(t)
+		seedTwoLibrariesInEveryTable(t, catalog)
+		var logged syncLog
+		_, accepted, _ := servingReporterAfter(t, catalog, retainedMoviesReport, &logged)
+		broker := waitForBroker(t, accepted)
+		movies := libraryStatusTopic(defaultTopicBase, "house", "movies")
+
+		time.Sleep(reportSyncBound - time.Second)
+		synctest.Wait()
+		if publishedTopics(broker)[movies] {
+			t.Fatal("the reporter published house/movies before the bound of the wait")
+		}
+
+		waitForTopic(t, broker, movies)
+		if !strings.Contains(logged.String(), "house/movies") || !strings.Contains(logged.String(), "did not reach") {
+			t.Errorf("log = %q, want the library and the write its copy did not reach", logged.String())
 		}
 	})
 }
