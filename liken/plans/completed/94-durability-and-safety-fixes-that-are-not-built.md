@@ -30,7 +30,9 @@ that proves it:
 * [An empty device walk deletes the `ResourceSlice`](../open-problems/an-empty-device-walk-deletes-the-resourceslice.md),
   with open question 2.
 * [A reboot skips the drain on any failed Node read](../open-problems/a-reboot-skips-the-drain-on-any-failed-node-read.md).
-* [Conditions this pass did not check are stamped as current](../open-problems/conditions-this-pass-did-not-check-are-stamped-as-current.md).
+* Conditions this pass did not check are stamped as current. Fixed on
+  2026-11-17 in the smaller form: a pass that did not read the Node
+  leaves the `observedGeneration` of the four Node conditions as it was.
 * [The grow-only storage rule runs on status writes](../open-problems/the-grow-only-storage-rule-runs-on-status-writes.md).
 * [CI never fetches the flux seed](../open-problems/ci-never-fetches-the-flux-seed.md).
 * [The release publish drills only one boot chain](../open-problems/the-release-publish-drills-only-one-boot-chain.md),

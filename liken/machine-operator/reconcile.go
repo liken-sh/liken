@@ -462,14 +462,10 @@ func reconcile(r *reader, m *machine.Machine, clusterName string, f *fetcher, mm
 	// own generation stamp, because it is the conductor's verdict,
 	// and this writer must not overwrite it. The status carries the
 	// same stamp at its top, where clients that only ask "has the
-	// operator seen my edit yet" expect to find it.
+	// operator seen my edit yet" expect to find it. A condition that
+	// this pass carried forward keeps its own stamp (observedgeneration.go).
 	status.ObservedGeneration = m.Metadata.Generation
-	for i := range status.Conditions {
-		if status.Conditions[i].Type == machine.RebootApprovedCondition {
-			continue
-		}
-		status.Conditions[i].ObservedGeneration = m.Metadata.Generation
-	}
+	stampObservedGeneration(status.Conditions, m.Metadata.Generation, nodeErr == nil)
 
 	// The phase compresses the conditions into the one word a fleet
 	// listing shows (phase.go).

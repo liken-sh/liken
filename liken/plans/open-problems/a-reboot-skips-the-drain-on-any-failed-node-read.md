@@ -45,11 +45,12 @@ The fix holds the reboot when the Node read fails, unless an explicit,
 expected lifecycle state allows the bypass. A 404 during a demotion
 skips the drain. A bare 404 does not show that demotion caused the
 absence. Any other error stops the reboot, retries the read, and
-reports why through the convergence condition and `NodeObserved`. The
-open problem
-[conditions this pass did not check are stamped as current](conditions-this-pass-did-not-check-are-stamped-as-current.md)
-proposes `NodeObserved`, which does not exist in the code today, so the
-two fixes share it.
+reports why through the convergence condition and `NodeObserved`.
+`NodeObserved` is a condition that says whether this pass read the
+Node, and it does not exist in the code today. The fix of 2026-11-17
+for the conditions that a pass did not check took the smaller form and
+did not add it (`machine-operator/observedgeneration.go`), so this fix
+adds it.
 
 The demotion path keeps its order. `carryOutDemotion`
 (`machine-operator/demotion.go:105`) writes its reboot intent before it
