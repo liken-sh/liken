@@ -72,7 +72,10 @@ the declaration.
 
 Built on 2026-11-17: every Makefile of the repository declares
 `.DELETE_ON_ERROR`, and a test in `ci/makefiles_test.go` fails on one
-that does not.
+that does not. Two Makefiles are excepted, `trust/Makefile` and
+`toolchains/manifest/Makefile`, because each is a part of a pinned
+component's recipe. Each takes the declaration with the next revision
+of those components.
 
 ## What this milestone does not do
 
