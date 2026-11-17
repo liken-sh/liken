@@ -117,7 +117,7 @@ for an image. Save it and give it to a vulnerability scanner to learn
 which advisories apply before you adopt a release or deploy an image.
 
 Scan a release with Grype. A release takes its kernel, its
-bootloaders, its microcode, and k3s from upstream releases that no
+bootloaders, its microcode, k3s, and Flux from upstream releases that no
 package database records, so its SBOM names each of them by the CPE
 that NVD lists it under. Grype matches a component by its CPE, and
 Trivy does not, so Trivy reports only the Go modules of a release:

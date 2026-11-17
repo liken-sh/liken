@@ -84,7 +84,8 @@ digest="$(awk -v f="$tarball" '$2 == f { print $1 }' "$work/checksums.txt")"
 
 echo "$latest" >"$here/VERSION"
 set_pin flux "$latest" "$repository/releases/download/$latest/$tarball" "$digest" \
-    "$(github_purl fluxcd/flux2 "$latest")"
+    "$(github_purl fluxcd/flux2 "$latest")" \
+    "cpe:2.3:a:fluxcd:flux2:$(cpe_version "$latest"):*:*:*:*:*:*:*"
 bumped flux "$pinned" "$latest"
 echo "the digest came from the release's checksums file, signed by flux's release workflow"
 # The publish job pushes each deploy artifact with the flux action at

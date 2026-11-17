@@ -27,12 +27,19 @@ type = "application"
 cpe = "cpe:2.3:o:linux:linux_kernel:7.3.1:*:*:*:*:*:*:*"
 
 # The modules, the build's configuration, and its System.map.
+#
+# The type is one that a scanner keeps, so a scanner that reads the
+# SBOM lists the modules. The entry states no cpe, because the modules
+# are part of the kernel release that linux-image-unsigned names, and a
+# second entry with the kernel's CPE would report each kernel finding
+# twice.
 [linux-modules]
 version = "7.3.1"
 url = "https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-modules-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb"
 sha256 = "7f9a44175036fd63b01ec317ccace29e184261a794d39046902439458fb18c2f"
 purl = "pkg:generic/linux-modules@7.3.1?download_url=https://kernel.ubuntu.com/mainline/v7.3.1/amd64/linux-modules-7.3.1-070301-generic_7.3.1-070301.202610301300_amd64.deb&checksum=sha256:7f9a44175036fd63b01ec317ccace29e184261a794d39046902439458fb18c2f"
 license = "GPL-2.0-only WITH Linux-syscall-note"
+type = "application"
 
 # kernel.org's tarball of the same release, which Canonical's mainline
 # build compiles without changes. No build reads it. licensing/sources.sh

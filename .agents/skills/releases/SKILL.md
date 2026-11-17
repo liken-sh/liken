@@ -531,7 +531,7 @@ scanning, and no finding fails a run.
   findings that have a fixed version under the category
   `trivy/<image>`.
 * **The OS.** The OS publishes no image, and no package
-  database records its kernel, bootloaders, microcode, or k3s. Each of
+  database records its kernel, bootloaders, microcode, k3s, or Flux. Each of
   those `pin.toml` entries states the CPE that NVD lists the upstream
   under, and `liken/releases/sbom/vulnerabilities.sh` runs grype,
   pinned in `toolchains/images.toml`, over an SBOM of the OS. Trivy matches no component by its CPE, so this scan

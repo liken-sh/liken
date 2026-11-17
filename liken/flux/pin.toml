@@ -5,9 +5,17 @@
 # The flux CLI. No release ships the CLI, but the manifests that it
 # renders are the seed in the cluster operator's image, so the SBOM
 # names the release that they come from.
+#
+# The cpe is the name that a vulnerability scanner matches the entry
+# by, and the type is one that a scanner keeps. NVD lists Flux under
+# the vendor fluxcd as flux2, at the version without the leading v, and
+# its records there cover the controllers that the manifests install.
+# flux/latest.sh --bump writes the cpe with the version.
 [flux]
 version = "v2.10.0"
 url = "https://github.com/fluxcd/flux2/releases/download/v2.10.0/flux_2.10.0_linux_amd64.tar.gz"
 sha256 = "208dd7012c04fedeed5b2d0b6e63df3b15b1c34a381527811685c098bc9f8659"
 purl = "pkg:github/fluxcd/flux2@v2.10.0"
 license = "Apache-2.0"
+type = "application"
+cpe = "cpe:2.3:a:fluxcd:flux2:2.10.0:*:*:*:*:*:*:*"

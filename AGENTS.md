@@ -542,7 +542,7 @@ source, and the `compositions` state which lists are complete.
 A known vulnerability in a file that the OS takes from an upstream
 release reaches the repository's Security tab only when a scanner can
 match the file's name, and no package database records the kernel,
-the bootloaders, the microcode, or k3s. So each of those entries of a
+the bootloaders, the microcode, k3s, or Flux. So each of those entries of a
 `pin.toml` states the `cpe` that NVD lists the upstream under, at the
 upstream's own version, and a `type` that a scanner keeps, and its
 `latest.sh --bump` writes the CPE with `cpe_version`.

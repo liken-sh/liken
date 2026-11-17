@@ -8,20 +8,6 @@ real advisory or report a false one.
 
 ## What was seen on 2026-11-01
 
-- **A pin's type.** `toolchains/manifest` gives a `pin.toml` entry
-  with no `type` the CycloneDX type `file` (`defaultType` in
-  `toolchains/manifest/manifest.go`), and the release SBOM keeps it.
-  syft's CycloneDX decoder keeps only the types `application`,
-  `framework`, `library`, `machine-learning-model`, and `firmware`, so
-  syft drops k3s, the kernel, and every other such pin when it reads
-  the release SBOM back. Whether Trivy drops them too was not checked.
-  grype reads an SBOM through the same decoder and dropped them on
-  2026-11-11.
-  [`liken` milestone 96](../../liken/plans/completed/96-code-scanning-reads-the-sbom-of-each-os-release.md)
-  holds the fix for the pins of the OS. On 2026-11-17 every entry of
-  an OS `pin.toml` that a release ships states a `type`, except
-  `[flux]` in `liken/flux/pin.toml` and `[linux-modules]` in
-  `liken/kernel/pin.toml`.
 - **A CPE that names another project.** buildroot gives its
   `linux-headers` package the CPE of the Linux kernel, so the record
   in the `bluetoothd` image (written by `image-sbom` from buildroot's
