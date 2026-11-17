@@ -283,6 +283,7 @@ func TestTheOperatorSubscribesToEveryFilterItReads(t *testing.T) {
 		"liken/media/players/+/+/panel",
 		"liken/media/players/+/+/volume",
 		"liken/media/players/+/+/volume/commands",
+		"liken/media/players/+/+/commands",
 	}
 	mustMatchAll(t, busFilters(base), want)
 }

@@ -29,7 +29,10 @@ func TestAHomePressPublishesTheAskAndThenEndsTheRun(t *testing.T) {
 				ask := waitForPublish(t, broker.pubs)
 				mustMatch(t, ask.topic, c.playerCommandsTopic)
 				mustMatch(t, ask.retained, false)
-				mustMatch(t, string(ask.payload), `{"action":"home"}`)
+				// The ask names the Remote whose press made it, so the
+				// operator, which answered that press from the Remote's
+				// events topic, writes no second ask on the receiver.
+				mustMatch(t, string(ask.payload), `{"action":"home","remote":"`+remoteOfTopic(events)+`"}`)
 				ending := waitForPublish(t, broker.pubs)
 				mustMatch(t, ending.topic, c.statusTopic)
 				mustMatch(t, endedReport(t, ending.payload), playReport{Item: 1, Position: "0:20:00", Ended: true})

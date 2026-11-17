@@ -151,6 +151,34 @@ func (o *operator) ensureInput(namespace, controller string, payload []byte) {
 	o.askInput(trigger, receiver.name, action)
 }
 
+// showForHomeAsk answers one message on a unit's commands topic. A home
+// ask there brings the client to its home page, and a person who asks
+// for home wants the unit on the room's screen, so the ask writes the
+// show that a Remote's home press writes. Without it, a program's home
+// ask left the TV and the receiver on the input they showed.
+//
+// The topic names the unit, so no controller's mark gates the ask. An
+// ask that names a Remote is one the playback pod published for that
+// Remote's home press during a film. The operator read the same press
+// on the Remote's events topic and wrote its show there (ensureInput),
+// so a second show here would send the room's equipment the same ask
+// twice. Every other action on the topic asks the receiver for nothing.
+func (o *operator) showForHomeAsk(namespace, name string, payload []byte) {
+	var ask mediaCommand
+	if err := json.Unmarshal(payload, &ask); err != nil {
+		return
+	}
+	if ask.Action != actionHome || ask.Remote != "" {
+		return
+	}
+	receiver, held := o.ensure.receiverFor(playerKey(namespace, name))
+	if !held {
+		return
+	}
+	trigger := fmt.Sprintf("player %s: a home ask on its commands topic", playerKey(namespace, name))
+	o.askInput(trigger, receiver.name, inputShow)
+}
+
 // askInput writes one input ask on a Receiver.
 func (o *operator) askInput(trigger, receiver, action string) {
 	err := o.sessions.ask(o.client, receiver, func(asks *receiverAsks) {

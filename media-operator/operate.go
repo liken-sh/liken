@@ -833,6 +833,12 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 		o.codes.setCodes(key, codes)
 		return
 	}
+	// A home ask on a unit's commands topic asks the unit's receiver to
+	// show the unit, the way a Remote's home press does.
+	if namespace, name, ok := parsePlayerCommandsTopic(o.topicBase, topic); ok {
+		o.showForHomeAsk(namespace, name, payload)
+		return
+	}
 	// An empty payload is a cleared retained value and not a live
 	// signal, so the desk holds what it had.
 	if namespace, name, ok := parsePlayerPanelTopic(o.topicBase, topic); ok {

@@ -374,7 +374,7 @@ func (c *commander) apply(trigger string, command mediaCommand, quiet bool) {
 	// and then runs the ending path. A stop runs the ending path alone.
 	switch command.Action {
 	case actionHome:
-		c.home(trigger)
+		c.home(trigger, command.Remote)
 		return
 	case actionStop:
 		c.stop(trigger)

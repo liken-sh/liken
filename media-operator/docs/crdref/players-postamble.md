@@ -272,20 +272,24 @@ retained ([why](/docs/reference/bus/#retained-state-and-events)), and
 a controller never sends one directly. A client publishes nothing
 here.
 
-One program writes here. The playback pod's command sidecar publishes
+The playback pod's command sidecar writes here, and any program can
+publish `home` here. The sidecar publishes
 `play-next` when a person takes the up-next offer on the scrubber, and
 its `request` is the `Play`'s own `spec.next.request`, byte for byte.
 The client that wrote the `Play` reads that ask and creates the next
 `Play`. The same sidecar publishes `home` when a person presses home
 during a film, just before the `Play` ends, and the client reads that
-ask as a press of the home key. A power key during a film reaches the
+ask as a press of the home key. That ask names the `Remote` whose
+press made it, or none when a program published `home` on the `Play`'s
+commands topic. A power key during a film reaches the
 operator and not the sidecar, and the operator stops the run when the
 `Player` turns off ([Turning a Player off and on](#turning-a-player-off-and-on)).
 
 | Message | Writer | What it says |
 |---|---|---|
 | `{"action": "play-next", "request": {...}}` | the playback pod | A person took the up-next offer. `request` is the `Play`'s `spec.next.request`. |
-| `{"action": "home"}` | the playback pod | A person pressed home during a film. The `Play` ends after it, and the client reads the ask as a press of the home key. |
+| `{"action": "home", "remote": "<namespace>/<name>"}` | the playback pod | A person pressed home on that `Remote` during a film. The `Play` ends after it, and the client reads the ask as a press of the home key. The operator already asked the unit's `Receiver` to show the unit when it read the press, so it asks nothing more. |
+| `{"action": "home"}` | the playback pod, or any program | A program asked for home, on this topic or on the `Play`'s commands topic during a film. The client reads the ask as a press of the home key, and the operator asks the unit's `Receiver` to show the unit: the receiver on the unit's input, and the room's TV on it when the TV is on. |
 
 ### `power`
 

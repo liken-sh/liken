@@ -269,8 +269,11 @@ func playCommandsTopic(base, namespace, name string) string {
 // reads it as a press of the home key, so it is on its home page when
 // the film ends.
 func playerCommandsTopic(base, namespace, name string) string {
-	return base + "/players/" + namespace + "/" + name + "/commands"
+	return base + "/players/" + namespace + "/" + name + "/" + playerCommandsKind
 }
+
+// playerCommandsKind is the last segment of a Player's commands topic.
+const playerCommandsKind = "commands"
 
 // playerStatusTopic carries one unit's presentable state: its friendly
 // name, what it is doing, the Play it runs, and its parts with the link
@@ -382,6 +385,20 @@ func parsePlayerVolumeCommandsTopic(base, topic string) (namespace, name string,
 	return parsePlayerVolumeTopic(base, strings.TrimSuffix(topic, "/commands"))
 }
 
+// playerCommandsFilter is the operator's one subscription across every
+// unit's commands topic. The operator reads the home asks there, and
+// answers each one that no Remote's press made (ensure.go).
+func playerCommandsFilter(base string) string {
+	return base + "/players/+/+/" + playerCommandsKind
+}
+
+// parsePlayerCommandsTopic maps a commands topic back to the Player it
+// names. A volume ask is one segment deeper, so it matches no commands
+// topic.
+func parsePlayerCommandsTopic(base, topic string) (namespace, name string, ok bool) {
+	return parsePlayerTopic(base, topic, playerCommandsKind)
+}
+
 // busFilters is every subscription the operator makes, in one list.
 // The list is what the operator reads off the bus, so it is readable
 // in one place and a test can check it without a broker.
@@ -397,6 +414,7 @@ func busFilters(base string) []string {
 		playerPanelFilter(base),
 		playerVolumeFilter(base),
 		playerVolumeCommandsFilter(base),
+		playerCommandsFilter(base),
 	}
 }
 

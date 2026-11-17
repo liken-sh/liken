@@ -165,3 +165,53 @@ func TestThePassRecordsTheUnitsReceiver(t *testing.T) {
 	_, stillHeld := media.ensure.receiverFor(playerKey("house", "theater"))
 	mustMatch(t, stillHeld, false)
 }
+
+// command hands the operator one message on the theater's commands topic.
+func command(media *operator, payload string) {
+	media.handleBusMessage(playerCommandsTopic(defaultTopicBase, "house", "theater"), []byte(payload))
+}
+
+// A program that asks a unit for home asks for what a remote's home key
+// asks for: the unit on the room's screen. So the ask on the unit's
+// commands topic writes the same show on the unit's Receiver, with no
+// controller's mark between them, because the topic names the unit.
+func TestAHomeAskOnTheCommandsTopicWritesAShow(t *testing.T) {
+	media, cluster := askOperator(t)
+	selectInput(media, cluster, "True")
+
+	command(media, `{"action":"home"}`)
+
+	mustMatch(t, lastInputAsk(cluster), inputShow)
+}
+
+// A message on the commands topic that asks the Receiver for nothing: an
+// ask the playback pod made for a Remote's home press, which the operator
+// answered from the Remote's events topic, an ask for another action, a
+// payload that does not decode, and an ask for a unit wired to no
+// Receiver.
+func TestAMessageOnTheCommandsTopicThatAsksNothing(t *testing.T) {
+	cases := []struct {
+		name    string
+		shape   func(*operator)
+		payload string
+	}{
+		{name: "a home ask a Remote's press made", payload: `{"action":"home","remote":"house/sofa"}`},
+		{name: "the ask for the next work", payload: `{"action":"play-next"}`},
+		{name: "a payload that does not decode", payload: `home`},
+		{name: "no receiver", payload: `{"action":"home"}`, shape: func(media *operator) {
+			media.ensure.set(playerKey("house", "theater"), unitReceiver{})
+		}},
+	}
+	for _, each := range cases {
+		t.Run(each.name, func(t *testing.T) {
+			media, cluster := askOperator(t)
+			if each.shape != nil {
+				each.shape(media)
+			}
+
+			command(media, each.payload)
+
+			mustMatch(t, lastInputAsk(cluster), "none")
+		})
+	}
+}

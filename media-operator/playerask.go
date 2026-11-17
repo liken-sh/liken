@@ -14,11 +14,11 @@ import (
 // askAndEnd publishes the ask and then runs the ending path, so the ask
 // reaches the broker before the ending does, and the client holds the ask
 // before the unit's status reads Idle.
-func (c *commander) askAndEnd(trigger, action string) {
-	if topic, published := c.publishAsk(action); published {
-		logLine(c.log, "command: %s: %s, published the %s ask to %s, so the run ends", trigger, action, action, topic)
+func (c *commander) askAndEnd(trigger string, ask mediaCommand) {
+	if topic, published := c.publishAsk(ask); published {
+		logLine(c.log, "command: %s: %s, published the %s ask to %s, so the run ends", trigger, ask.Action, ask.Action, topic)
 	} else {
-		logLine(c.log, "command: %s: %s, with no player commands topic to ask on, so the run ends", trigger, action)
+		logLine(c.log, "command: %s: %s, with no player commands topic to ask on, so the run ends", trigger, ask.Action)
 	}
 	c.exit()
 }
@@ -28,13 +28,13 @@ func (c *commander) askAndEnd(trigger, action string) {
 // no Player has no topic to publish on, and a pod with no bus has no
 // broker, so each publishes nothing. The answer names the topic and
 // whether the ask went out.
-func (c *commander) publishAsk(action string) (string, bool) {
+func (c *commander) publishAsk(ask mediaCommand) (string, bool) {
 	if c.playerCommandsTopic == "" || c.bus == nil {
 		return "", false
 	}
-	payload, err := json.Marshal(mediaCommand{Action: action})
+	payload, err := json.Marshal(ask)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "command: %s: %v\n", action, err)
+		fmt.Fprintf(os.Stderr, "command: %s: %v\n", ask.Action, err)
 		return "", false
 	}
 	c.bus.Publish(c.playerCommandsTopic, payload, false)

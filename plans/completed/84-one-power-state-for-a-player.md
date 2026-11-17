@@ -74,5 +74,7 @@ minutes after a power-off. A program also has no way to turn a
 ## Left open
 
 * `equipment-operator/plans/open-problems/a-tv-turned-off-by-its-own-remote-reaches-no-record.md`
-* `media-operator/plans/open-problems/the-home-ask-on-the-commands-topic-switches-no-equipment.md`
+* The home ask on a `Player`'s commands topic, which switched no
+  equipment. `media-operator` now writes the same `show` for it that a
+  remote's home press writes, and the open problem is deleted.
 * `display-operator/plans/open-problems/a-panel-answers-no-ddc.md`

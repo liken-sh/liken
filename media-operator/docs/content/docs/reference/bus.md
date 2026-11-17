@@ -126,7 +126,7 @@ shape.
 | `players/{namespace}/{name}/volume/commands` | any program that is not a remote | the operator | no | [an ask for a step or a mute](/docs/reference/players/#volumecommands) |
 | `players/{namespace}/{name}/panel` | the idle pod, or a delegate's client; the operator clears it | the operator | yes | [the panel desire](/docs/reference/players/#panel) |
 | `players/{namespace}/{name}/power` | the operator | the idle pod, or a delegate's client | no | [a wake or a sleep for the screen](/docs/reference/players/#power) |
-| `players/{namespace}/{name}/commands` | the playback pod | the idle pod, or a delegate's client | no | [the ask for the next work, or for home](/docs/reference/players/#commands) |
+| `players/{namespace}/{name}/commands` | the playback pod, and any program that asks for home | the idle pod or a delegate's client, and the operator | no | [the ask for the next work, or for home](/docs/reference/players/#commands) |
 | `remotes/{namespace}/{name}/events` | the `Remote`'s pod | the playback pod, the idle pod or a delegate's client, and the operator | no | [one key event](/docs/reference/remotes/#events) |
 | `remotes/{namespace}/{name}/keys` | the operator | the `Remote`'s pod | yes | [the compiled key table](/docs/reference/remotes/#keys) |
 | `remotes/{namespace}/{name}/codes` | the `Remote`'s pod | the operator | yes | [the declared code set](/docs/reference/remotes/#codes) |
@@ -134,12 +134,14 @@ shape.
 | `remotes/{namespace}/{name}/focus` | the operator | the playback pod, the idle pod or a delegate's client, and the operator | yes | [the name of a `Player`, or empty](/docs/reference/remotes/#focus-and-focuscycle) |
 | `remotes/{namespace}/{name}/focus/cycle` | the holder of focus | the operator | no | [empty](/docs/reference/remotes/#focus-and-focuscycle) |
 
-The `players` commands topic has one writer. The playback pod
+The playback pod writes both asks of the `players` commands topic. It
 publishes `play-next` when a person takes the up-next offer on the
 scrubber, and the client that wrote the `Play` reads it and creates
 the next `Play`. It publishes `home` when a person presses home during
 a film, just before the `Play` ends, and the client under the film
-reads that ask as a press of the home key.
+reads that ask as a press of the home key. Any other program can
+publish `home` there too, and the operator then asks the unit's
+`Receiver` to show the unit, the way it does for a remote's home key.
 
 "The playback pod" in this table is its command sidecar, the one
 container that connects to the bus. "The idle pod" is the idle screen
@@ -165,6 +167,7 @@ kind it folds into a status or a decision:
 | `players/+/+/panel` | overrides the screen's `Display` from the desire |
 | `players/+/+/volume` | reads its own levels back, so after a restart it publishes no level the broker already holds |
 | `players/+/+/volume/commands` | moves the level the same as a volume key |
+| `players/+/+/commands` | asks the unit's `Receiver` to show the unit for a `home` ask that names no `Remote` |
 
 Most presses never pass through the operator. A key event travels
 from the `Remote`'s pod to the playback pod or the idle client

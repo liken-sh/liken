@@ -94,9 +94,16 @@ type keyEvent struct {
 // from a key name to mpv's words. On a Player's topic it is the
 // playback pod's ask for the work that follows the run. No controller
 // payload carries one.
+//
+// Remote names the Remote whose press made a home ask on a Player's
+// topic, as namespace/name. The operator answers a Remote's home press
+// from the Remote's events topic, and it reads the home asks on a
+// Player's topic too, so the name tells it which asks it has already
+// answered. An ask that a program made names none.
 type mediaCommand struct {
 	Action string `json:"action"`
 	Amount int    `json:"amount,omitempty"`
+	Remote string `json:"remote,omitempty"`
 }
 
 // The two evdev event types a keymap can bind. Buttons arrive as

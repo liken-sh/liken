@@ -110,6 +110,7 @@ func (c *commander) key(topic string, remote playRemote, payload []byte) {
 	if repeat {
 		c.hold(topic, event.Key)
 	}
+	command.Remote = remoteOfTopic(topic)
 	c.apply(trigger, command, repeat)
 }
 
