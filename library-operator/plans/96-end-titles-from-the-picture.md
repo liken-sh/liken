@@ -399,6 +399,39 @@ the catalog agent of a library `Job` (`libraryJobAgent` in `pod.go`)
 and `deriveMarkEstimates`. The shared parts move into one place that
 both `Job`s call, and no copy of a builder or a trigger is made.
 
+**What the build of the estimate and the readers settled,** on
+2026-11-17:
+
+- **The providers' candidates merge in the estimate.** The readers
+  grouped the candidates that overlap and took the median of each
+  group. The estimate now does that, so the providers' answer is one
+  clue, and "the latest clue wins" compares it with a chapter and not
+  with each submission.
+- **A `preview` span is a limit, not a clue.** A preview follows the
+  credits. Under "the earliest clue wins" its start was one more clue.
+  Under "the latest clue wins" it would move the answer past the
+  credits, so the answer starts no later than the preview, and a video
+  with only a preview takes its start.
+- **The scene in a gap becomes a row.** One provider states a scene
+  after the credits as two credits spans with the scene between them,
+  and the display read the second span to hold the up-next card until
+  after the scene. The answer is one credits span, so the estimate
+  writes the gap as a `post-credits` row, the kind that the display
+  already reads a scene from.
+- **The placement has a kind of its own,** `credits-placement`, so a
+  screen that is given every row of the table ignores it.
+- **The readers changed in two queries.** The media browser reads the
+  marks for a `Play` and for its own watched rule from the catalog.
+  Both queries now take the rows below zero for the credits and the
+  intro, and the `Play` carries one credits span and one intro span.
+  The display's code did not change: its merge reads one candidate for
+  those two kinds. Both watched rules lost their merge and take the
+  earliest credits span of the second half, which also reads a `Play`
+  that another client wrote with several spans.
+- **A catalog from before this build** has no answer for a video whose
+  winner was a provider's mark, so a screen falls back to the rule of
+  time for that video until the close of the Library's next `Job`.
+
 **The steps, in the order they ship.**
 
 1. Profile `place`, and give it `--threads`. Built on 2026-11-17.
@@ -406,9 +439,10 @@ both `Job`s call, and no copy of a builder or a trigger is made.
    2026-11-17.
 3. Build the placing `Job`, its trigger, and its result in the status.
 4. Rank the placement in the estimate, change the end titles to "latest
-   wins", and write the credits row for every video with a clue.
-5. Change the three readers and `watched.json` to the estimate's row
-   and the rule of time.
+   wins", and write the credits row for every video with a clue. Built
+   on 2026-11-17.
+5. Change the readers and `watched.json` to the estimate's row and the
+   rule of time. Built on 2026-11-17.
 6. Update the enrichment guide, the `Library` reference, and the skills
    for the placing `Job`, its status, and its `Event`s.
 

@@ -126,9 +126,10 @@ func playAudienceOf(play *Play) playAudience {
 
 // creditsSpans reads every credits mark of the Play's first item. The first
 // item is the work the aliases and the numbers name, so its marks are the
-// ones the watched rule reads. Every candidate travels, with both edges as
-// the Play states them, because the rule merges them the way the display
-// does.
+// ones the watched rule reads. A Play that the browser creates carries the
+// operator's one answer for the file's credits. Every credits mark travels,
+// with both edges as the Play states them, because a Play from another
+// client can carry several.
 func creditsSpans(play *Play) []creditsSpan {
 	if len(play.Spec.Items) == 0 || play.Spec.Items[0].Presentation == nil {
 		return nil

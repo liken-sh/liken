@@ -127,10 +127,23 @@ fn insert_mark(
         .unwrap();
 }
 
-// A movie's item carries every span of its main file in the ledger's
-// order, and no span of another file.
+// One mark as an item carries it, from the source the helper above writes.
+fn mark(kind: &str, start: Option<i64>, end: Option<i64>) -> Mark {
+    Mark {
+        kind: kind.into(),
+        start,
+        end,
+        source: "theintrodb".into(),
+    }
+}
+
+// For the credits and the intro, a movie's item carries the operator's one
+// answer, which has an ordinal below zero, and no provider's candidate. It
+// carries every span of the other kinds, the scene after the credits that
+// the operator derived, and no span of another file. The titles model's
+// placement is a clue of the operator's and does not travel.
 #[test]
-fn a_movie_carries_the_marks_of_its_main_file() {
+fn a_movie_carries_the_answers_and_the_other_marks_of_its_main_file() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir);
     insert_movie(
@@ -146,41 +159,32 @@ fn a_movie_carries_the_marks_of_its_main_file() {
         "The Lantern/The Lantern.mkv",
         "movie:tmdb:7001",
     );
+    let file = "The Lantern/The Lantern.mkv";
+    insert_mark(&path, file, 0, "intro", None, Some(23_000));
+    insert_mark(&path, file, 1, "credits", Some(7_800_000), None);
+    insert_mark(&path, file, 2, "recap", Some(30_000), Some(60_000));
+    insert_mark(&path, file, -1, "credits", Some(7_810_000), None);
+    insert_mark(&path, file, -2, "intro", Some(1_000), Some(23_000));
+    insert_mark(&path, file, -3, "credits-placement", Some(7_805_000), None);
     insert_mark(
         &path,
-        "The Lantern/The Lantern.mkv",
-        1,
-        "credits",
-        Some(7_800_000),
-        None,
+        file,
+        -4,
+        "post-credits",
+        Some(8_000_000),
+        Some(8_100_000),
     );
-    insert_mark(
-        &path,
-        "The Lantern/The Lantern.mkv",
-        0,
-        "intro",
-        None,
-        Some(23_000),
-    );
-    insert_mark(&path, "Elsewhere/other.mkv", 0, "intro", None, Some(1));
+    insert_mark(&path, "Elsewhere/other.mkv", -2, "intro", None, Some(1));
 
     let mut source = LocalCatalog::new(&path, NO_AGENT);
     let items = source.play("default/films", &movie_chosen());
     assert_eq!(
         items[0].presentation.marks,
         vec![
-            Mark {
-                kind: "intro".into(),
-                start: None,
-                end: Some(23_000),
-                source: "theintrodb".into(),
-            },
-            Mark {
-                kind: "credits".into(),
-                start: Some(7_800_000),
-                end: None,
-                source: "theintrodb".into(),
-            },
+            mark("post-credits", Some(8_000_000), Some(8_100_000)),
+            mark("intro", Some(1_000), Some(23_000)),
+            mark("credits", Some(7_810_000), None),
+            mark("recap", Some(30_000), Some(60_000)),
         ]
     );
 }

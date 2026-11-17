@@ -1,9 +1,11 @@
 //! The marks: the spans in the file where the intro, the recap, the credits,
-//! the scene after the credits, and the preview are. The library reads them from community databases, and
-//! a database can return several candidate spans for one kind, from different
-//! submissions or release versions of the file. The library forwards every
-//! candidate, and this module merges them into the spans the skip control and
-//! the up-next card act on.
+//! the scene after the credits, and the preview are. A Play can state
+//! several candidate spans for one kind, because a community database can
+//! return several, from different submissions or release versions of the
+//! file. This module merges the candidates of a kind into the spans the skip
+//! control and the up-next card act on. `library-operator` chooses one
+//! credits span and one intro span for a file before it writes a Play, so
+//! the merge of those two kinds has one candidate to read there.
 
 use serde_json::Value;
 

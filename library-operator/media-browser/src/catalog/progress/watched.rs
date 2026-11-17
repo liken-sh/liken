@@ -11,9 +11,9 @@
 pub const WATCHED_PERCENT: i64 = 5;
 pub const WATCHED_SECONDS: i64 = 300;
 
-/// One credits candidate from the marks of the work's main file, in
-/// seconds from the start of the file. An absent start is the start of
-/// the file, and an absent end is the end of the file.
+/// One credits span of the work's main file, in seconds from the start of
+/// the file. An absent start is the start of the file, and an absent end
+/// is the end of the file.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Credits {
     pub start: Option<f64>,
@@ -24,10 +24,10 @@ pub struct Credits {
 /// never finished, because nothing says how long it is.
 ///
 /// The two amounts above estimate where the credits start, and credits do
-/// not scale with the runtime. So where the file's credits marks place the
-/// credits in the second half of the work, the work counts as finished
-/// from the start of those credits, whatever time is left. [`credits_line`]
-/// finds that start.
+/// not scale with the runtime. So where the catalog holds the operator's
+/// answer for the file's credits, the work counts as finished from the
+/// start of those credits, whatever time is left. [`credits_line`] reads
+/// that start.
 pub fn finished(position: i64, duration: i64, credits: &[Credits]) -> bool {
     if duration <= 0 {
         return false;
@@ -38,61 +38,24 @@ pub fn finished(position: i64, duration: i64, credits: &[Credits]) -> bool {
     }
 }
 
-/// The start of the earliest merged credits span that starts in the
-/// second half of the work, or nothing when no span does. The merge is the
-/// one the up-next card in `media-operator`'s display uses
-/// (`display/src/marks.rs`), so a play counts as finished where the card
-/// rises. Candidates that overlap form one group, and the group becomes one
-/// span from the median start and the median end of its members, so one
-/// candidate that is off moves the line less than a mean would. Groups
-/// that only touch or do not meet stay apart, because a film can carry the
-/// main credits, then a scene, then more credits. A credits span in the
-/// first half is an opening title sequence and moves nothing. A candidate
-/// with a negative edge is dropped, and one that ends where it starts, or
-/// before, marks nothing. [`finished`] calls it only for a positive
-/// duration, so the half of the work is always a real position.
+/// The start of the credits, or nothing when the work has none. The
+/// operator writes one credits span for a file, in the second half of the
+/// work, and the catalog read gives that span alone, so the rule ranks and
+/// merges nothing. `watched.go` reads the spans of a Play, which another
+/// client can write with several, so both sides take the earliest span that
+/// starts in the second half: a credits span in the first half is an
+/// opening title sequence and moves nothing. A span with a negative edge is
+/// dropped, and one that ends where it starts, or before, marks nothing.
+/// [`finished`] calls it only for a positive duration, so the half of the
+/// work is always a real position.
 fn credits_line(duration: i64, credits: &[Credits]) -> Option<f64> {
     let length = duration as f64;
-    let mut spans: Vec<(f64, f64)> = credits
+    credits
         .iter()
         .map(|span| (span.start.unwrap_or(0.0), span.end.unwrap_or(length)))
-        .filter(|&(start, end)| start >= 0.0 && end >= 0.0 && end > start)
-        .collect();
-    // `sort_by` is stable, which keeps the order `watched.go`'s
-    // `sort.SliceStable` keeps.
-    spans.sort_by(|one, other| one.0.total_cmp(&other.0));
-
-    let mut groups: Vec<Vec<(f64, f64)>> = Vec::new();
-    let mut reach = 0.0_f64;
-    for span in spans {
-        match groups.last_mut() {
-            Some(group) if span.0 < reach => group.push(span),
-            _ => groups.push(vec![span]),
-        }
-        reach = reach.max(span.1);
-    }
-
-    groups
-        .iter()
-        .map(|group| {
-            let starts = group.iter().map(|span| span.0).collect();
-            let ends = group.iter().map(|span| span.1).collect();
-            (median(starts), median(ends))
-        })
-        .find(|&(start, end)| end > start && start >= length / 2.0)
+        .filter(|&(start, end)| start >= 0.0 && end > start && start >= length / 2.0)
         .map(|(start, _)| start)
-}
-
-// The middle value, or the mean of the two middle values when the count is
-// even. A group always holds at least one span, so the list is never
-// empty.
-fn median(mut values: Vec<f64>) -> f64 {
-    values.sort_by(f64::total_cmp);
-    let middle = values.len() / 2;
-    match values.len() % 2 {
-        0 => (values[middle - 1] + values[middle]) / 2.0,
-        _ => values[middle],
-    }
+        .min_by(f64::total_cmp)
 }
 
 #[cfg(test)]

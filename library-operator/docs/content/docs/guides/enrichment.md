@@ -1136,30 +1136,37 @@ format, so the fact writes no file other than its ledger.
 
 ### Estimated marks
 
-Many files have no marks from either database, and the player then
-raises the up-next card, and both watched rules count a play as
-finished, by the time left. So at the end of every library `Job`, after
-every phase, the close container estimates one credits start and one
-intro for each main video of a movie or an episode, from every clue the
-catalog holds. It writes each estimate as one more row in the `marks`
-table, with the source `estimate`, beside the providers' rows. The
-player, the browser, and the jellyfin role read it the way they read a
-provider's candidate. Nothing on the volume holds an estimate, so it
-needs no `marks` provider, and a rebuilt catalog gets it again at the
-end of its next `Job`.
+The catalog holds one answer for where each video's credits start and
+one for its intro, and every screen uses that answer as it is. So the
+up-next card, both watched rules, and the skip over the intro agree on
+every screen, and none of them ranks or merges anything while a video
+plays. At the end of every library `Job`, after every phase, the close
+container computes both answers for each main video of a movie or an
+episode, from every clue the catalog holds. It writes each answer as a
+row of the `marks` table with the source `estimate` and an ordinal below
+zero, beside the providers' rows, which have ordinals from zero. A video
+with no clue has no answer, and a screen then raises the up-next card,
+and counts a play as finished, by the time left. Nothing on the volume
+holds an answer, so it needs no `marks` provider, and a rebuilt catalog
+gets it again at the end of its next `Job`.
 
-The clues come in three tiers, and each is read only when the tiers
-above it have nothing:
+A provider can give several candidates for one span, from several
+submissions or release versions of a file. The candidates that overlap
+count as one clue, at the median start and the median end of the group,
+so one submission that is off moves the clue little.
+
+The clues come in tiers, and each is read only when the tiers above it
+have nothing:
 
 | Tier | Credits, in the second half of the file | Intro, in the first half |
 |---|---|---|
-| exact | the providers' credits spans, a chapter whose title names the credits, such as `End Credits` or `Outro`, and the start of a provider's `preview` span | the providers' intro spans, and a chapter whose title names the intro, such as `Intro`, `Opening`, or `Main Titles`, up to the next chapter |
+| placement | where the [titles model](#titles) placed the end titles, when its confidence is 0.6 or more | none |
+| exact | the providers' credits span, and a chapter whose title names the credits, such as `End Credits` or `Outro` | the providers' intro span, and a chapter whose title names the intro, such as `Intro`, `Opening`, or `Main Titles`, up to the next chapter |
 | inferred | for an episode, the median length of the credits of the other episodes of the series, taken from the end of this one | for an episode, the median start and length of the intros of the other episodes of the same season, when at least two of them start within 30 seconds of each other |
 | inferred | in a subtitle file, the end of the last line before 45 seconds or more with no dialogue that runs to the end of the file, or to a scene of up to three minutes that ends it | in a subtitle file, the first 30 to 120 seconds with no dialogue that end in the first ten minutes |
 | faces | for a film whose genres do not include `Animation`, 90 seconds after the start of the [faceless end](#appearances) of its detections record, when the run starts in the last 15% of the film and lasts at least two minutes | none |
 
-An estimate of the faces tier has the source `faces` in place of
-`estimate`, so a reader can tell it apart. The detector finds few drawn
+The detector of the faces tier finds few drawn
 faces, so an animated film can show no face for minutes of its story,
 and the tier skips it. It reads only films, because it was measured on
 films. The estimate starts 90 seconds into the faceless run, because a
@@ -1173,15 +1180,30 @@ early for 5 films, 1.7%, and more than two minutes late for 57, where a
 film's credits open over scenes with actors in them. Plan 92 of
 `library-operator` records the measurement.
 
-In each tier the earliest clue wins, because a card that rises a little
-early costs less than one that rises after the credits have run. A
-provider's intro and an intro chapter that overlap are one intro, and
-the provider's span wins. Where they do not overlap, the earlier wins.
-Where the winning clue is a provider's own span, no estimate is written,
-because that span is in the table already, and a copy would count it
-twice when the player takes the median of the spans that overlap. An
-exact credits estimate ends where the provider's earliest credits span
-ends, so a second run of credits after a scene stays a span of its own.
+Where the clues of one tier differ, the latest one wins for the credits,
+because a card that rises a little late costs less than one that rises
+over the end of the story. A provider's `preview` span is a limit: a
+preview follows the credits, so the answer starts no later than the
+preview does, and a video whose only clue is a preview takes its start.
+A placement that the model gave a confidence under 0.6 is not a clue.
+For the intro, the providers' span and an intro chapter that overlap
+are one intro, and the providers' span wins. Where they do not overlap,
+the earlier wins.
+
+A credits answer from the placement has the source `titles`, and one
+from the faces tier has the source `faces`, so a person can tell where
+an answer came from. The answer ends where the providers end the
+credits, and has no end where they give none. A film can hold the main
+credits, a scene, and more credits. One provider states the scene as a
+span of its own, and another gives two credits spans with the scene in
+the gap. For the second form, the close container writes the gap as a
+`post-credits` row with the source `estimate`, so the player can still
+offer the jump to the scene and hold the up-next card until after it.
+
+A `Play` that the media browser creates carries the answer for the
+credits and the answer for the intro, and no provider's candidate of
+those two kinds. It carries the `recap`, `preview`, and `post-credits`
+spans as the providers gave them, and the player merges those.
 
 The probe reads each video's chapters with `ffprobe -show_chapters`,
 and it reads each `.srt`, `.vtt`, `.ass`, and `.ssa` file beside a video

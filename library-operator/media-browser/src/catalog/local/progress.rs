@@ -53,15 +53,17 @@ const EPISODE_ITEM: &str = "(SELECT episodes.id FROM episodes \
                               AND episodes.season = watched.season \
                               AND episodes.episode = watched.episode)";
 
-// The credits marks of the main file that `main_file` finds, as one text
-// column of `start:end` pairs in milliseconds joined by commas, with an
-// empty side for a null edge, or null when the file has none. The finished
+// The credits of the main file that `main_file` finds, as one text column
+// of `start:end` pairs in milliseconds joined by commas, with an empty side
+// for a null edge, or null when the file has none. The operator writes its
+// one answer for a file's credits as the row with an ordinal below zero, and
+// the column holds that answer and no provider's candidate. The finished
 // rule reads the credits, so each read carries them in the same statement
 // as the play.
 const CREDITS: &str = "(SELECT group_concat(IFNULL(marks.start_ms, '') || ':' || IFNULL(marks.end_ms, ''), ',') \
                         FROM marks \
                         WHERE marks.library = main.library AND marks.kind = 'credits' \
-                          AND marks.path = main.path)";
+                          AND marks.path = main.path AND marks.ordinal < 0)";
 
 // The main file of one item is the one `play.rs` resolves a title to: the
 // least path of the item's `primary` `video` files. `item` is one of the

@@ -328,8 +328,7 @@ CREATE TABLE streams (
 --
 -- A provider can answer several candidates of one kind, from several
 -- submissions or several release versions, and the table holds every one in
--- the order the ledger holds them. No row is chosen over another here. The
--- player reads them all and decides.
+-- the order the ledger holds them.
 --
 -- start_ms and end_ms are milliseconds from the start of the file. A null
 -- start_ms is the start of the file, and a null end_ms is the end of the
@@ -338,9 +337,13 @@ CREATE TABLE streams (
 -- theintrodb.
 --
 -- The rows with an ordinal below zero are not from the ledger. The operator
--- derives them, and the walk's write leaves them in place: the estimate of
--- where the credits start, the estimate of the intro, and where the titles
--- model placed the end titles, which has the kind credits-placement.
+-- derives them, and the walk's write leaves them in place. Three are the
+-- answers a screen acts on: the one credits span and the one intro span the
+-- operator chose for the file from every clue, and a post-credits span for
+-- a scene that the providers state as a gap between two credits spans. A
+-- screen reads those and no provider's candidate of the credits or the
+-- intro. The fourth is a clue: where the titles model placed the end
+-- titles, which has the kind credits-placement.
 -- confidence is how sure the model was of that placement, from 0 to 1, and
 -- it is null on every other row. The column has
 -- no default, so a row from before the column holds a null too.

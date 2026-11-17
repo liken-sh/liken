@@ -23,13 +23,25 @@ fn video(role: &'static str) -> String {
     )
 }
 
-// Every span the marks table holds for one file, in ordinal order, which
-// is the order of the ledger. A null end reads as no end.
+// The marks of one file that a player acts on, in ordinal order. A null
+// end reads as no end.
+//
+// For the credits and the intro, the operator computes one answer for each
+// file from every clue it holds, and writes it as a row with an ordinal
+// below zero. The item carries that answer and no provider's candidate of
+// those two kinds, so every player acts on the same second and ranks
+// nothing. A file with no answer carries no credits, and the player falls
+// back to its rule of time. The spans of the other kinds travel as the
+// providers gave them, with the scene after the credits that the operator
+// derived. The titles model's placement is a clue for the operator's answer
+// and stays in the catalog.
 fn marks(connection: &Connection, library: &str, path: &str) -> rusqlite::Result<Vec<Mark>> {
     collect(
         connection,
         "SELECT kind, start_ms, end_ms, source FROM marks \
-         WHERE library = ? AND path = ? ORDER BY ordinal",
+         WHERE library = ? AND path = ? AND kind != 'credits-placement' \
+           AND (ordinal < 0 OR kind NOT IN ('credits', 'intro')) \
+         ORDER BY ordinal",
         &[&library, &path],
         |row| {
             Ok(Mark {

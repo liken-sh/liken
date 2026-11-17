@@ -104,13 +104,16 @@ func TestTheEstimatesFollowTheProviderMarksThatArrive(t *testing.T) {
 	}
 
 	// TheIntroDB answers for the first episode, earlier than its chapter,
-	// and for the second episode, which now has a clue of its own.
+	// so the estimate keeps the chapter's start and takes the provider's
+	// end. It answers for the second episode too, which now has a clue of
+	// its own.
 	landProviderMarks(t, catalog, firstEpisode, providerCredits(ms(2850000), ms(2990000)))
 	landProviderMarks(t, catalog, secondEpisode, providerPreview(ms(2950000), nil))
 	deriveEstimates(t, catalog)
 
-	if got, want := markRowsOf(t, catalog, firstEpisode, markKindCredits), []string{"0 2850000 2990000 theintrodb"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("first episode = %v, want the provider's candidate alone", got)
+	want := []string{"-1 2900000 2990000 estimate", "0 2850000 2990000 theintrodb"}
+	if got := markRowsOf(t, catalog, firstEpisode, markKindCredits); !reflect.DeepEqual(got, want) {
+		t.Errorf("first episode = %v, want %v", got, want)
 	}
 	if got, want := markRowsOf(t, catalog, secondEpisode, markKindCredits), []string{"-1 2950000  estimate"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("second episode = %v, want %v", got, want)

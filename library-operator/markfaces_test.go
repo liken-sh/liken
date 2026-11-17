@@ -72,9 +72,9 @@ func TestTheFacelessTailIsTheCreditsOnlyWhereNoOtherClueIs(t *testing.T) {
 			want:  []markRow{creditsAt("a.mkv", 5700000, nil)},
 		},
 		{
-			name:  "a provider's credits win and need no row",
+			name:  "a provider's credits win",
 			files: []estimateFile{estimateFilm("a.mkv", 0, providerCredits(ms(5700000), nil)).withFacelessTail(5600000)},
-			want:  nil,
+			want:  []markRow{creditsAt("a.mkv", 5700000, nil)},
 		},
 		{
 			name: "a subtitle file's quiet end wins",

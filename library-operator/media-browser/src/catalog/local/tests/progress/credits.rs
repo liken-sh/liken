@@ -1,11 +1,13 @@
-// The credits marks of a work's main file move the finished line of a
-// play to the start of the credits, where they start in the second half
-// of the work. Each read that answers whole plays reads those marks.
+// The operator's answer for the credits of a work's main file moves the
+// finished line of a play to the start of the credits. The answer is the
+// credits row with an ordinal below zero, and a provider's candidate moves
+// nothing. Each read that answers whole plays reads the answer.
 
 use super::*;
 
-// One span of one file of one library, as the walk writes it off the marks
-// ledger, in milliseconds. An absent edge is a null in the table.
+// One span of one file of one library, in milliseconds. An absent edge is
+// a null in the table. The walk writes a provider's candidate at an ordinal
+// from zero, and the operator writes its answer at one below zero.
 fn insert_mark(
     path: &Path,
     library: &str,
@@ -25,17 +27,19 @@ fn insert_mark(
 }
 
 // The film's main file, whose 9 minutes of credits start at 2:21:00 of a
-// 2:30:00 film, and an intro mark in the second half that is not credits.
+// 2:30:00 film by the operator's answer. A provider's candidate that starts
+// 21 minutes earlier and an intro mark in the second half move nothing.
 fn a_film_with_credits(catalog: &Path) {
     a_film(catalog);
     insert_main_file(catalog, FILMS, "Some Film.mkv", FILM);
     let file = "Some Film.mkv";
     insert_mark(catalog, FILMS, file, 0, "intro", (Some(5_000_000), None));
+    insert_mark(catalog, FILMS, file, 1, "credits", (Some(7_200_000), None));
     insert_mark(
         catalog,
         FILMS,
         file,
-        1,
+        -1,
         "credits",
         (Some(8_460_000), Some(9_000_000)),
     );
@@ -117,7 +121,7 @@ fn a_show_with_credits(catalog: &Path) {
         catalog,
         SHOWS,
         "S01E01.mkv",
-        0,
+        -1,
         "credits",
         (Some(1_290_000), None),
     );

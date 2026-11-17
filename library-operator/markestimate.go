@@ -1,24 +1,35 @@
 package main
 
-// markestimate.go derives one estimate of where each video's credits start
-// and one of where its intro is, from every clue the catalog holds. The
-// up-next card in media-operator's display rises at the credits, both
-// watched rules count a play as finished there, and the display offers its
-// skip over the intro. Many files have no provider marks, and those readers
-// then fall back to a rule of time. So the estimate is written as one more
-// candidate in the marks table, with the source `estimate`, beside the
-// provider marks, and every reader takes it the way it takes a provider's.
+// markestimate.go derives the one answer the catalog holds for where each
+// video's credits start and where its intro is, from every clue the catalog
+// holds. The up-next card in media-operator's display rises at the credits,
+// both watched rules count a play as finished there, and the display offers
+// its skip over the intro. The answer is computed here, when the library
+// changes, and every reader uses it as it is: a reader ranks nothing and
+// merges nothing, so every screen gives the same answer, and a reader with
+// no answer for a video falls back to a rule of time. The answers are rows
+// of the marks table with the source `estimate` and ordinals below zero,
+// beside the clues they come from.
 //
-// The clues come in three tiers. The exact tier is what names the span in the
-// file itself or for the work: the providers' marks, a chapter whose title
-// names the span, and for the credits the start of a `preview` span. The
-// inferred tier is used only where the exact tier has nothing: the span the
-// other episodes of the series have, and the quiet stretches in a subtitle
-// file beside the video. In each tier the earliest clue wins, because a card
-// that rises a little early costs less than one that rises after the
-// credits have run. The third tier, for the credits of a film alone, is the
-// faceless end of the film's detections record (markfaces.go), used only
-// where both tiers above it have nothing.
+// The clues of the credits come in four tiers, and a tier is used only where
+// the tiers above it have nothing:
+//
+//  1. The placement of the titles model, where the model was sure of it. The
+//     model reads the text on screen at the end of the video itself.
+//  2. The exact clues, which name the span in the file itself or for the
+//     work: the providers' marks, and a chapter whose title names the
+//     credits. The start of a `preview` span is a limit and not a clue of
+//     its own kind: a preview follows the credits, so the credits start no
+//     later than it does.
+//  3. The inferred clues: the length of the credits of the other episodes of
+//     the series, and the quiet stretches in a subtitle file beside the
+//     video.
+//  4. For a film alone, the faceless end of the film's detections record
+//     (markfaces.go).
+//
+// Where the clues of one tier differ, the latest one wins for the credits,
+// because a card that rises a little late costs less than one that rises
+// over the end of the story. The earliest one wins for the intro.
 
 import (
 	"math"
@@ -37,7 +48,19 @@ const markSourceEstimate = "estimate"
 const (
 	creditsEstimateOrdinal = -1
 	introEstimateOrdinal   = -2
+	// titlesPlacementOrdinal, in titlesfit.go, is -3.
+	sceneEstimateOrdinal = -4
 )
+
+// The confidence from which the estimate takes a placement of the titles
+// model over every other clue. The model's confidence is the share of its
+// answer within 5 seconds of the start it gives. Of 120 videos whose credits
+// a person checked, the model placed 82 with a confidence of 0.6 or more, and
+// each of those was within 10 seconds of the real start, where the providers'
+// marks of the same 120 videos were within 10 seconds for 92. A placement
+// under the line is no clue at all, because the placements that were minutes
+// late were among them, and the latest clue wins.
+const titlesSureConfidence = 0.6
 
 // One span of a file in milliseconds from its start.
 type timeSpan struct {
@@ -132,8 +155,8 @@ func (f estimateFile) secondHalf(start int64) bool {
 }
 
 // The provider candidates of one kind with a start and an end that mark
-// something. An absent start is the start of the file, and an absent end is
-// the end of the file, as the readers take them.
+// something, in the order of their starts. An absent start is the start of
+// the file, and an absent end is the end of the file.
 func (f estimateFile) candidates(kind string) []timeSpan {
 	var spans []timeSpan
 	for _, mark := range f.marks {
@@ -155,95 +178,154 @@ func (f estimateFile) candidates(kind string) []timeSpan {
 	return spans
 }
 
-// The exact credits clues of one file: the earliest start, whether a
-// provider's candidate starts there, and the provider's earliest candidate
-// in the second half, which the estimate's end follows.
-type creditsClues struct {
-	start    int64
-	held     bool
-	provided bool
-	first    *timeSpan
+// What the providers say of one kind, as one span for each thing they mark.
+// A provider can answer several candidates for one span, from several
+// submissions or release versions of the file. The candidates that overlap
+// are one group, and the group becomes one span from the median start and
+// the median end of its members, so one submission that is off moves the
+// span less than a mean would. Groups that do not overlap stay apart,
+// because a film can hold the main credits, then a scene, then more credits.
+func (f estimateFile) provided(kind string) []timeSpan {
+	var groups [][]timeSpan
+	reach := int64(0)
+	for at, span := range f.candidates(kind) {
+		if at > 0 && span.Start < reach {
+			groups[len(groups)-1] = append(groups[len(groups)-1], span)
+		} else {
+			groups = append(groups, []timeSpan{span})
+		}
+		reach = max(reach, span.End)
+	}
+	var spans []timeSpan
+	for _, group := range groups {
+		starts, ends := make([]int64, len(group)), make([]int64, len(group))
+		for at, span := range group {
+			starts[at], ends[at] = span.Start, span.End
+		}
+		if span := (timeSpan{Start: medianOf(starts), End: medianOf(ends)}); span.End > span.Start {
+			spans = append(spans, span)
+		}
+	}
+	return spans
 }
 
-func (f estimateFile) exactCredits() creditsClues {
-	clues := creditsClues{}
-	// The provider's candidates are taken first, so a chapter or a preview
-	// at the same start leaves the clue the provider's.
-	take := func(start int64, provided bool) {
-		if !f.secondHalf(start) {
-			return
-		}
-		if !clues.held || start < clues.start {
-			clues.start, clues.held, clues.provided = start, true, provided
-		}
-	}
-	for _, span := range f.candidates(markKindCredits) {
-		if f.secondHalf(span.Start) && clues.first == nil {
-			clues.first = &span
-		}
-		take(span.Start, true)
-	}
-	if f.chapter > 0 {
-		take(f.chapter, false)
-	}
-	for _, span := range f.candidates(markKindPreview) {
-		take(span.Start, false)
-	}
-	return clues
+// The providers' credits spans that start in the second half of the file. A
+// credits span in the first half is an opening title sequence.
+func (f estimateFile) providedCredits() []timeSpan {
+	return slices.DeleteFunc(f.provided(markKindCredits), func(span timeSpan) bool { return !f.secondHalf(span.Start) })
 }
 
-// The exact intro clue of one file, and whether the file has one. A
-// provider's candidate and a chapter that overlap mark one intro, and the
-// provider's is the more exact. Where they do not overlap, the earlier one
-// is the intro. Only a chapter is written as an estimate, because the
-// provider's candidate is in the table already.
-type introClue struct {
-	span     timeSpan
-	held     bool
-	provided bool
-}
-
-func (f estimateFile) exactIntro() introClue {
-	var provided []timeSpan
-	for _, span := range f.candidates(markKindIntro) {
-		if f.firstHalf(span.Start) {
-			provided = append(provided, span)
+// Where the titles model placed the end titles, when it was sure of the
+// placement and the placement is in the second half of the file.
+func (f estimateFile) surePlacement() (int64, bool) {
+	for _, mark := range f.marks {
+		if mark.Kind != markKindCreditsPlacement || mark.Start == nil || mark.Confidence == nil {
+			continue
+		}
+		if *mark.Confidence >= titlesSureConfidence && f.secondHalf(*mark.Start) {
+			return *mark.Start, true
 		}
 	}
+	return 0, false
+}
+
+// The credits of one file from the first two tiers: where they start, where
+// the providers end them, and the source the answer's row names.
+type creditsClue struct {
+	start  int64
+	end    *int64
+	source string
+}
+
+func (f estimateFile) exactCredits() (creditsClue, bool) {
+	clue, held := creditsClue{source: markSourceEstimate}, false
+	if start, sure := f.surePlacement(); sure {
+		clue.start, clue.source, held = start, markSourceTitles, true
+	} else {
+		claim := func(start int64) {
+			if f.secondHalf(start) && (!held || start > clue.start) {
+				clue.start, held = start, true
+			}
+		}
+		if provided := f.providedCredits(); len(provided) > 0 {
+			claim(provided[0].Start)
+		}
+		if f.chapter > 0 {
+			claim(f.chapter)
+		}
+		previews := slices.DeleteFunc(f.provided(markKindPreview), func(span timeSpan) bool { return !f.secondHalf(span.Start) })
+		if len(previews) > 0 && (!held || previews[0].Start < clue.start) {
+			clue.start, held = previews[0].Start, true
+		}
+	}
+	// The answer ends where the providers end the first credits span, so a
+	// screen knows that something follows the credits. An end that the
+	// providers left open stays open.
+	if provided := f.providedCredits(); held && len(provided) > 0 {
+		if end := provided[0].End; end > clue.start && end < f.duration {
+			clue.end = &end
+		}
+	}
+	return clue, held
+}
+
+// The scene after the credits that the providers state as a gap: two
+// credits spans in the second half, with the scene between the end of the
+// first and the start of the last. One provider states a scene only this
+// way. The estimate writes the gap as a `post-credits` span, the kind
+// another provider states a scene with, because the answer for the credits
+// is one span and the gap would be lost with the second one.
+func (f estimateFile) sceneEstimate() (markRow, bool) {
+	provided := f.providedCredits()
+	if len(provided) < 2 {
+		return markRow{}, false
+	}
+	start, end := provided[0].End, provided[len(provided)-1].Start
+	if end <= start {
+		return markRow{}, false
+	}
+	return markRow{Path: f.path, Ordinal: sceneEstimateOrdinal, Kind: markKindPostCredits,
+		Start: &start, End: &end, Source: markSourceEstimate}, true
+}
+
+// The exact intro clue of one file, and whether the file has one. The
+// providers' intro and a chapter that overlap mark one intro, and the
+// providers' is the more exact. Where they do not overlap, the earlier one
+// is the intro.
+func (f estimateFile) exactIntro() (timeSpan, bool) {
+	provided := slices.DeleteFunc(f.provided(markKindIntro), func(span timeSpan) bool { return !f.firstHalf(span.Start) })
 	chapter := f.intro.End > f.intro.Start && f.firstHalf(f.intro.Start)
 	switch {
 	case !chapter && len(provided) == 0:
-		return introClue{}
+		return timeSpan{}, false
 	case !chapter:
-		return introClue{span: provided[0], held: true, provided: true}
+		return provided[0], true
 	case len(provided) == 0:
-		return introClue{span: f.intro, held: true}
+		return f.intro, true
 	}
 	overlaps := slices.ContainsFunc(provided, func(span timeSpan) bool {
 		return f.intro.Start < span.End && span.Start < f.intro.End
 	})
 	if overlaps || provided[0].Start <= f.intro.Start {
-		return introClue{span: provided[0], held: true, provided: true}
+		return provided[0], true
 	}
-	return introClue{span: f.intro, held: true}
+	return f.intro, true
 }
 
 // The estimate rows of every file, in path order with the credits before the
-// intro. A file whose earliest clue is a provider's own candidate gets no
-// row of that kind, because a copy would count that submission twice in the
-// readers' median.
+// intro and the scene after both.
 func markEstimates(files []estimateFile) []markRow {
 	lengths := map[string][]int64{}
 	intros := map[string][]timeSpan{}
 	for _, file := range files {
 		if group := file.creditsGroup(); group != "" {
-			if clues := file.exactCredits(); clues.held {
-				lengths[group] = append(lengths[group], file.duration-clues.start)
+			if clue, held := file.exactCredits(); held {
+				lengths[group] = append(lengths[group], file.duration-clue.start)
 			}
 		}
 		if group := file.introGroup(); group != "" {
-			if clue := file.exactIntro(); clue.held {
-				intros[group] = append(intros[group], clue.span)
+			if span, held := file.exactIntro(); held {
+				intros[group] = append(intros[group], span)
 			}
 		}
 	}
@@ -253,6 +335,9 @@ func markEstimates(files []estimateFile) []markRow {
 			rows = append(rows, row)
 		}
 		if row, held := file.introEstimate(intros[file.introGroup()]); held {
+			rows = append(rows, row)
+		}
+		if row, held := file.sceneEstimate(); held {
 			rows = append(rows, row)
 		}
 	}
@@ -265,26 +350,16 @@ func markEstimates(files []estimateFile) []markRow {
 	return rows
 }
 
-// The credits estimate of one file. The exact estimate ends where the
-// provider's earliest candidate ends, so the readers merge it into that
-// candidate's group and keep a later credits span, the second run of credits
-// after a scene, apart. An inferred estimate runs to the end of the file.
+// The credits estimate of one file. An answer from the inferred clues or
+// from the faceless end runs to the end of the file.
 //
-// The siblings' estimate takes the median length of the credits of the other
-// episodes, from their exact clues, and one sibling is enough, because
-// credits change little from episode to episode.
+// The siblings' clue takes the median length of the credits of the other
+// episodes, from their own answers of the first two tiers, and one sibling
+// is enough, because credits change little from episode to episode.
 func (f estimateFile) creditsEstimate(siblings []int64) (markRow, bool) {
 	row := markRow{Path: f.path, Ordinal: creditsEstimateOrdinal, Kind: markKindCredits, Source: markSourceEstimate}
-	if clues := f.exactCredits(); clues.held {
-		if clues.provided {
-			return markRow{}, false
-		}
-		start := clues.start
-		row.Start = &start
-		if clues.first != nil && f.hasEnd(markKindCredits, clues.first.Start) {
-			end := clues.first.End
-			row.End = &end
-		}
+	if clue, held := f.exactCredits(); held {
+		row.Start, row.End, row.Source = &clue.start, clue.end, clue.source
 		return row, true
 	}
 	var inferred []int64
@@ -305,21 +380,9 @@ func (f estimateFile) creditsEstimate(siblings []int64) (markRow, bool) {
 		row.Start, row.Source = &start, markSourceFaces
 		return row, true
 	}
-	start := slices.Min(inferred)
+	start := slices.Max(inferred)
 	row.Start = &start
 	return row, true
-}
-
-// Whether a provider's candidate of the kind that starts at start states its
-// end, so the estimate copies an end the provider gave and leaves an open
-// end open.
-func (f estimateFile) hasEnd(kind string, start int64) bool {
-	for _, mark := range f.marks {
-		if mark.Kind == kind && mark.Start != nil && *mark.Start == start && mark.End != nil {
-			return true
-		}
-	}
-	return false
 }
 
 // The longest spread of the siblings' intro starts that still counts as
@@ -333,11 +396,8 @@ const introSpread = 30000
 // median start for the median length.
 func (f estimateFile) introEstimate(siblings []timeSpan) (markRow, bool) {
 	row := markRow{Path: f.path, Ordinal: introEstimateOrdinal, Kind: markKindIntro, Source: markSourceEstimate}
-	if clue := f.exactIntro(); clue.held {
-		if clue.provided {
-			return markRow{}, false
-		}
-		return f.spanRow(row, clue.span), true
+	if span, held := f.exactIntro(); held {
+		return f.spanRow(row, span), true
 	}
 	var inferred []timeSpan
 	if span, held := siblingIntro(siblings); held && f.series != "" {
@@ -380,11 +440,15 @@ func siblingIntro(spans []timeSpan) (timeSpan, bool) {
 	return timeSpan{Start: start, End: start + medianOf(lengths)}, true
 }
 
-// The median of whole milliseconds, through the readers' own median.
+// The median of whole milliseconds: the middle value, or the mean of the two
+// middle values when the count is even. The caller never passes an empty
+// list.
 func medianOf(values []int64) int64 {
-	floats := make([]float64, len(values))
-	for at, value := range values {
-		floats[at] = float64(value)
+	sorted := slices.Clone(values)
+	slices.Sort(sorted)
+	middle := len(sorted) / 2
+	if len(sorted)%2 == 0 {
+		return int64(math.Round(float64(sorted[middle-1]+sorted[middle]) / 2))
 	}
-	return int64(math.Round(median(floats)))
+	return sorted[middle]
 }

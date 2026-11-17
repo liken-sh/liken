@@ -89,20 +89,19 @@ of the work, and at or under five minutes. The rule takes whichever of
 the two leaves less time. So a short episode is watched near its end,
 and a long film is watched with up to five minutes left.
 
-Where the file's [marks](/docs/guides/enrichment/#intro-and-credits-marks)
-place the credits in the second half of the work, the work counts as
-watched from the start of those credits instead, whatever time is left.
-The marks include the operator's
-[estimate](/docs/guides/enrichment/#estimated-marks) of the credits.
-The role reads the credits marks the way the player's up-next card
-does, and the [media browser](/docs/guides/browser/) reads them the
-same way from its catalog. So a title the role writes as played is a
-title the browser shows as finished. Candidates that overlap become one span, from the median start and
-the median end of the group, so one submission that is off moves the
-line little. Spans that do not overlap stay apart, and the line is the
-start of the earliest span that starts in the second half. A credits
-span in the first half is an opening title sequence and moves nothing.
-Where no span starts in the second half, the rule above applies.
+Where the catalog holds the operator's
+[answer](/docs/guides/enrichment/#estimated-marks) for the credits of
+the file, the work counts as watched from the start of those credits
+instead, whatever time is left. The operator computes that answer from
+the providers' [marks](/docs/guides/enrichment/#intro-and-credits-marks)
+and every other clue it holds, and the player's up-next card rises at
+the same second. The [media browser](/docs/guides/browser/) reads the
+same answer from its catalog, so a title the role writes as played is a
+title the browser shows as finished. A `Play` that another client
+writes can carry several credits spans, and the role then takes the
+earliest one that starts in the second half of the work. A credits span
+in the first half is an opening title sequence and moves nothing. Where
+no span starts in the second half, the rule above applies.
 
 A write of a `Play` sets Jellyfin's played state only when the position
 passes that rule, and never clears it. A write below the line moves the
