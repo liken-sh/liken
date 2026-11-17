@@ -1,7 +1,7 @@
-# Three pins that no report shows as current or behind
+# Pins that no report shows as current or behind
 
 Open problem. `make versions` and `ci pins` cover every pin in the
-repository except three. Each one can fall behind upstream, or away
+repository except four. Each one can fall behind upstream, or away
 from another pin, and no report shows it. The rule that every pin
 stays current is in `AGENTS.md`, under "Every pin stays current".
 
@@ -28,3 +28,12 @@ stays current is in `AGENTS.md`, under "Every pin stays current".
   provider versions of `liken.sh/terraform.tf`, and
   `liken.sh/.terraform.lock.hcl` holds their digests. No check in
   `ci/` fails when the lock and the versions disagree.
+
+## A fourth pin, seen on 2026-11-17
+
+- **The text models.** `library-operator/titles/models/pin.toml` pins
+  the two PP-OCR models of the `library-operator-titles` image, and
+  the list of characters that the reader writes, at one commit of each
+  project that publishes them. No `latest.sh` reports those commits or
+  the models. The question of what "current" means is the same as for
+  the face models.

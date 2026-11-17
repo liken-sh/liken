@@ -32,7 +32,7 @@ wake a sleeping child.
   profile, channels, and layout. The probe reads only the container's
   header, under a bound of one minute for each file
   (`ffprobeTimeout`). A full decode does not fit in it as it is.
-- library-operator's heavy facts, trickplay and appearances, run in
+- library-operator's heavy facts, trickplay, appearances, and titles, run in
   worker Jobs of their own (`library-operator/factworkers.go`), so a
   decode of minutes for each title does not hold the walk.
 - Plan 90 put a per-track fact on each item of the `Play`: the

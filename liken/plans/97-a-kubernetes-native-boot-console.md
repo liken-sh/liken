@@ -69,7 +69,7 @@ that record where it matters:
 - A panic, a failed `switch_root`, and init's refusals still reach a
   screen. A logo or a status that stays up over a machine that
   stopped is worse than the text it replaced.
-- The logs still reach the cluster through the `liken-logs` relay,
+- The logs still reach the cluster through the `machine-logs` relay,
   which reads the ring buffer and not the screen.
 
 ## A starting point for the `status` mode

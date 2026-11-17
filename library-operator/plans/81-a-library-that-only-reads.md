@@ -18,16 +18,17 @@ ledger format that the production release does not read. Both clusters
 also spend the same provider allowances.
 
 A `Library` can drop most writers today: `sources: []` stops every fact
-that asks a provider, and `trickplay`, `appearances`, and `trailers`
-are off by default. These writers remain, and the spec cannot turn them
+that asks a provider, and `trickplay`, `appearances`, `trailers`, and
+`titles` are off by default. These writers remain, and the spec cannot turn them
 off:
 
 * The probe phase writes `.liken/probe.yaml` on every walk.
 * The arrival phase writes `.liken/arrival.yaml` on every walk.
 * The close container of a walk `Job` removes the partial files that a
   stopped writer left behind.
-* The close container also removes the `.liken` directory at the
-  library root (`removeRootLiken` in `library-operator/rootliken.go`).
+* The close container also removes each file of the `.liken`
+  directory at the library root, except the `titles` directory, which
+  holds the Library's titles model (`library-operator/rootliken.go`).
 
 A franchises `Library` also writes the art that its walk fetches onto
 its art claim.
@@ -54,8 +55,8 @@ reader:
 * Is the setting a top-level `spec.readOnly`, or `spec.storage.readOnly`
   beside the claim it describes?
 * Does the API server refuse a read-only `Library` that also turns on
-  `trickplay`, `appearances`, `trailers`, or names `sources`, through a
-  CEL rule? Or does the operator accept it and report a condition?
+  `trickplay`, `appearances`, `trailers`, `titles`, or names `sources`,
+  through a CEL rule? Or does the operator accept it and report a condition?
 * What does the catalog hold for a file that no other writer has probed
   yet? The walk could read the length from the file's container header
   without writing a record, or leave it empty.

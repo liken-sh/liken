@@ -2,7 +2,9 @@
 
 Plan 56. This is a stub from a 2026-09-11 conversation. The progress
 store is the only data in the namespace that no scan rebuilds. Every
-screen has a copy, and the progress pod has the durable copy. While one
+screen has a copy, and the progress pods have the durable copies: one
+by default, and as many as `spec.progress.replicas` of the `Catalog`
+names on a per-node class. While one
 agent is up, a lost claim loses no data. Today there is no way to
 recover when a cluster loses every copy at once. There is also no way
 for a person to export the history off the cluster.
@@ -53,5 +55,5 @@ cluster, and the CRDT merge would accept that state as new.
   rows they need. It contains nothing from the catalog, because a rescan
   rebuilds the catalog.
 
-Until this plan is built, the durable copy is on the progress pod's
+Until this plan is built, each durable copy is on a progress pod's
 claim, and the screens' copies are the redundancy.

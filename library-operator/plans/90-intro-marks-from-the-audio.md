@@ -10,6 +10,13 @@ Status on 2026-11-09: a stub, not designed. Nothing is built. The
 work decodes audio from every episode in its gap, so it needs a design
 session of its own before anyone builds it.
 
+Status on 2026-11-17: nothing is built.
+[Plan 96](completed/96-end-titles-from-the-picture.md) found the end
+titles from the picture and left the main titles to this plan, so
+[A second method, the picture](#a-second-method-the-picture) records
+that method beside the audio, and the design session chooses between
+them.
+
 ## What a person gains
 
 The display offers a skip over the intro only when the `marks` table
@@ -24,16 +31,19 @@ covered series have.
 - The `marks` fact (`theintrodb.go`, `introdb.go`) writes the
   databases' spans to `.liken/marks.yaml` and the `marks` table, with
   the database's name in `source`.
-- `markestimate.go` writes one more intro candidate with the source
-  `estimate`. Its inferred tier already takes the span that the other
-  episodes of the series have, and the quiet stretches that
-  `subtitlecues.go` reads from a text subtitle file beside the video.
-  A span found from the audio would be one more clue for that estimate,
-  or a candidate with a source of its own.
-- `factworkers.go` runs the facts that decode a whole video, trickplay
-  and appearances, as Indexed Jobs of their own, one pod for each
-  video, so a decode never holds the library Job's walks and webhook
-  rescans.
+- `markestimate.go` writes the one answer that every reader uses for
+  a video's intro, as a row with the source `estimate`, from every
+  clue that the catalog holds. Its inferred tier already takes the
+  span that the other episodes of the same season have, and the quiet
+  stretches that `subtitlecues.go` reads from a text subtitle file
+  beside the video. The browser reads only the estimate's row, so a
+  span found from the audio reaches a player only as one more clue
+  for that estimate.
+- `factworkers.go` runs the heavy facts, trickplay, appearances, and
+  titles, as Indexed Jobs of their own, one pod for each video, so a
+  decode never holds the library Job's walks and webhook rescans.
+  Trickplay and appearances decode a whole video, and titles decodes
+  only the end of one.
 - The appearances tool splits its work into a pass for each video
   (`appearances detect`, which writes a record under `.liken/`) and a
   pass for each title folder (`appearances match`). A fingerprint for
@@ -72,6 +82,22 @@ cast has a headshot, so its gap is not this gap. Trickplay decodes
 every video, but it decodes the whole file for pictures, and a shared
 pass would tie the two facts' gaps together.
 
+## A second method, the picture
+
+[Plan 96](completed/96-end-titles-from-the-picture.md) built the
+`titles` tool, which reads the text on screen at the end of each video
+and places the end titles with a model that each cluster fits on its
+own library. Its design says that the same job can read the start of a
+file for the main titles later, and that nothing in the reading or the
+model's inputs is tied to the end. It also records a limit: a title
+sequence shows few of the names that the catalog holds, and the model
+places the end titles by those names.
+
+No reading of the start of a video has run, so there is no measured
+hit rate for the main titles from the picture. The worker, the image,
+the ledger, and the placing `Job` already exist, so this method adds
+no new tool, where the audio method adds Chromaprint.
+
 ## Licenses and terms
 
 - Chromaprint's library is LGPL-2.1-or-later, and Debian packages it.
@@ -85,6 +111,9 @@ pass would tie the two facts' gaps together.
 
 ## What a design session must decide
 
+- Which method finds the intro: the audio that a season's episodes
+  share, the picture read by the `titles` tool, or both as clues of
+  one estimate.
 - Where the work runs: a new heavy fact in `factworkers.go`, or a step
   of an existing pass.
 - How much of each episode to fingerprint, and whether the end of each
@@ -92,7 +121,9 @@ pass would tie the two facts' gaps together.
 - How the comparison runs for each season when each worker pod sees
   one video, and where the fingerprints are kept between the two steps.
 - What a found span is: an exact clue, an inferred clue of
-  `markestimate.go`, or a candidate with its own `source`. Plan 62
+  `markestimate.go`, or a candidate with its own `source`. The browser
+  reads only the estimate's row, so a candidate with its own `source`
+  reaches a player only when the estimate reads it as a clue. Plan 62
   proposed a confidence value and a confirmation by a person before the
   player offers the skip.
 - How the fact handles a season with a cold open, a recap before the

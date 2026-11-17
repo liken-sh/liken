@@ -52,8 +52,10 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
 A scan with no findings uploads a SARIF file with no results, so code
 scanning shows no open Trivy alert under `trivy/<image>` for any image
 on the bases. Plan 86 in `completed/` describes the Security tab as
-the place where every known vulnerability is listed, and plan 87
-builds on that. A reader who opens the tab sees the same state for an
+the place where every known vulnerability is listed, and the open
+question
+[what a vulnerability finding does to a build](what-a-vulnerability-finding-does-to-a-build.md),
+which was plan 87, builds on that. A reader who opens the tab sees the same state for an
 image whose Debian packages hold no known vulnerability and for an
 image that Trivy did not check against Debian's advisories, and has
 no indication of which state applies.

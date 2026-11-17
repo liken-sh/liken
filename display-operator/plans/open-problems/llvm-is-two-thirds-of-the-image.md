@@ -83,8 +83,9 @@ The 42 MB of `libgallium` follows the same list.
 `src/gallium/targets/dri/meson.build` builds one shared library named
 `gallium-<version>` and links every enabled driver into it:
 `driver_swrast, driver_r300, driver_r600, driver_radeonsi,
-driver_nouveau, ... driver_iris, ...`. Debian ships that one file, and
-the fourteen names in the `dri` directory are symlinks to it. So the
+driver_nouveau, ... driver_iris, ...`. Debian ships that one file. The
+names in the `dri` directory are symlinks to `libdril_dri.so`, a small
+library that links it. So the
 driver list sets the size of `libgallium`, and a shorter list makes a
 smaller file. How much smaller is not measured here.
 
@@ -129,8 +130,8 @@ builds use that toolchain. A narrow mesa would be a build of the same
 kind, and it could use the same toolchain.
 
 * **CI time.** The `weston` build spends its time on
-  `apt-get install` today, plus two small `gcc` builds of `liken`'s own
-  modules. A mesa build replaces the `apt-get install`, and neither its duration nor a cache strategy for it
+  `apt-get install` today, plus a meson build of weston and two small
+  `gcc` builds of `liken`'s own modules. A mesa build replaces the `apt-get install`, and neither its duration nor a cache strategy for it
   has been measured.
 * **A mesa version to maintain.** The snapshot date already fixes
   mesa at the version in that snapshot. A source

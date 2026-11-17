@@ -58,7 +58,11 @@ measurement of it.
 ## The shade's fade
 
 Whether the shade, the overlay that covers a sleeping screen, also fades
-in on sleep and out on wake. `media-operator` decides that.
+in on sleep and out on wake. The client that draws a screen draws its
+own shade, so the browser decides this for its screen. Today the
+browser cuts to black (`library-operator/media-browser/src/browser.rs`), and
+`media-operator`'s idle screen fades over 4 seconds on sleep and 0.4
+seconds on wake (`media-operator/idle/src/idle/shade.rs`).
 
 ## The shared durations in `brand/motion.md`
 

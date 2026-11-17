@@ -9,7 +9,7 @@ field for a driver's port. A driver that opens only the port that its
 ## What `liken` and the operator do
 
 [Milestone 77](../../../liken/plans/completed/77-the-machine-operator-hears-the-machine.md)
-built the node side. `refreshCDISpecs` in `machine-operator/cdi.go`
+built the node side. `refreshCDISpecs` in `liken/machine-operator/cdi.go`
 writes a replugged device's new node into the CDI spec of each claim
 the kubelet prepared. A container's device nodes are set when it
 starts, so a running container does not receive the new node.
