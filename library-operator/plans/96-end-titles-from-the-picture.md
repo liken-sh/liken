@@ -436,6 +436,35 @@ both `Job`s call, and no copy of a builder or a trigger is made.
   winner was a provider's mark, so a screen falls back to the rule of
   time for that video until the close of the Library's next `Job`.
 
+**The first placing on a home cluster,** on 2026-11-17, with a
+development build. The placing `Job` of a library of films placed
+1,530 readings in 61 seconds, and that of a library of series placed
+8,065 in 2 minutes 11 seconds, with the catalog's sync and hand-off.
+The model of the films was sure of 242 of its 1,494 placements, and the
+model of the series of 7,357 of its 8,032. Against the starts that a
+person checked:
+
+| | Checked | Within 3 s | Within 10 s | Within 30 s |
+|---|---|---|---|---|
+| The answers for films | 35 | 22 | 28 | 31 |
+| Of them, from a sure placement | 13 | 12 | 12 | 13 |
+| The answers for episodes | 88 | 61 | 82 | 85 |
+| Of them, from a sure placement | 81 | 61 | 79 | 79 |
+
+The answers of the films that are far off, 258 and 349 seconds late,
+are the one crowd mark of each film, where the model was not sure.
+
+One difference from the earlier checks needs a decision. Those checks
+placed only the checked episodes. The `Job` places a whole library, so
+`place` also places each episode again with the usual length of the end
+titles of its folder, and it does that for an episode it was already
+sure of. For 20 of the 88 episodes that moved the start by 2 to 5
+seconds toward the folder's usual length and raised the confidence from
+about 0.8 to about 0.95. Placed alone, 69 of the 88 were within 3
+seconds and 83 within 10. Placed with their folders, 62 and 82. Whether
+an episode that `place` is sure of alone should keep its own start is
+not decided.
+
 **The steps, in the order they ship.**
 
 1. Profile `place`, and give it `--threads`. Built on 2026-11-17.
