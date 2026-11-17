@@ -808,8 +808,9 @@ whose reading holds no end titles gets no row, because a mark with no
 start means "from the start of the file". The `Job` writes only the rows
 that changed, deletes the row of a video that has no placement now, and
 then derives the library's mark estimates again, as the close container
-of a library `Job` does. The estimate does not rank the placements yet.
-Plan 96 holds the steps that remain.
+of a library `Job` does. The estimate takes a placement with a confidence
+of 0.6 or more over every other clue, as
+[Estimated marks](#estimated-marks) describes.
 
 The `Job` publishes its result on the bus, and `status.titlesModels`
 holds the last run under `placed`: when it ended, the time of the model

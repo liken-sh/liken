@@ -8,9 +8,13 @@ model that each cluster fits on its own library.
 Status on 2026-11-14: the tool is built, in
 [`titles/`](../titles/README.md), with its three commands and their
 tests, and a `Library` that sets `spec.titles.enabled` runs a worker
-that reads each video and a `Job` that fits the Library's model. The
-operator places no end titles with the model yet. [What is not built](#what-is-not-built) lists the steps
-that remain.
+that reads each video and a `Job` that fits the Library's model.
+
+Status on 2026-11-17: a placing `Job` places the end titles of every
+reading with the Library's model, and the estimate takes a placement
+that the model was sure of over every other clue, as
+[Placing the end titles](#placing-the-end-titles) gives it.
+[What is not built](#what-is-not-built) lists the steps that remain.
 
 ## The problem
 
@@ -445,7 +449,8 @@ both `Job`s call, and no copy of a builder or a trigger is made.
 5. Change the readers and `watched.json` to the estimate's row and the
    rule of time. Built on 2026-11-17.
 6. Update the enrichment guide, the `Library` reference, and the skills
-   for the placing `Job`, its status, and its `Event`s.
+   for the placing `Job`, its status, and its `Event`s. Built on
+   2026-11-17.
 
 ### The names of the whole crew
 
@@ -708,10 +713,10 @@ In the operator:
 1. **A fit when the tool's columns change.** A release of the tool
    with other columns refuses the model a Library has, and nothing
    starts a fit for that until the Library's count has grown by half.
-2. **The placement.** The placing `Job`, the placements in the
-   catalog, the estimate's use of them, and the readers that use the
-   estimate's row, as [Placing the end titles](#placing-the-end-titles)
-   gives them.
+2. **What the placing leaves behind.** A `Library` that is deleted
+   keeps its retained results of the fit and the placing on the bus,
+   and a `Library` that turns `spec.titles` off keeps its placement
+   rows in the catalog.
 3. **The rename** of `intro` and `credits` to `main-titles` and
    `end-titles` in `library-operator`, `media-operator`, the media
    browser, the stored ledgers, and the manuals.

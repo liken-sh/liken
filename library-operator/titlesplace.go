@@ -29,11 +29,6 @@ import (
 // backfill and a single new episode do not wait for the bound.
 const titlesPlaceReadings = 50
 
-// The confidence at which a placement is sure. Plan 96 chose it from the
-// videos checked by hand, under "The confidence that counts". The result of
-// a run counts the placements at this confidence or more.
-const titlesSureConfidence = 0.6
-
 // The Library's readings and placements, as the reporter counts them in the
 // catalog and the placing run counts them in its copy.
 type titlesReadings struct {

@@ -158,10 +158,11 @@ func TestAPlacingWritesItsAnswersAndPublishesTheCounts(t *testing.T) {
 			*held["E/e.mkv"].Start != 5450000 {
 			t.Errorf("placements = %+v, want A's new placement and E's", held)
 		}
-		estimates, _ := catalog.queryStrings(t.Context(), `SELECT path FROM marks WHERE library = ? AND source = ?`,
-			[]any{titlesLibrary, markSourceEstimate})
-		if len(estimates) != 1 || estimates[0] != "A/a.mkv" {
-			t.Errorf("estimates = %v, want A's, derived after the placing", estimates)
+		estimates, _ := catalog.queryStrings(t.Context(),
+			`SELECT path || ' ' || source FROM marks WHERE library = ? AND ordinal = ?`,
+			[]any{titlesLibrary, creditsEstimateOrdinal})
+		if len(estimates) != 1 || estimates[0] != "A/a.mkv "+markSourceTitles {
+			t.Errorf("estimates = %v, want A's from its sure placement, derived after the placing", estimates)
 		}
 		placing := publishedPlacing(t, broker)
 		want := titlesPlaced{Result: titlesPlacePlaced, Model: placingRunModel, Readings: 4,
