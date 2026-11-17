@@ -356,7 +356,11 @@ its own `runs` row and waits for a catalog pod to confirm it, the way
 every worker `Job` does. After the confirmation, it deletes that row
 too, and waits for a catalog pod to hold the delete, so the catalog
 keeps no row of the departed `Library`. The finalizer clears when the
-cleanup `Job` succeeds.
+cleanup `Job` succeeds. Before it clears, the operator drops the
+library's retained messages from the bus: its status, its
+availability, its refresh, and the results of its titles fit and of
+its placing. So a `Library` that is created again with the same name
+reads none of them.
 
 While this runs, the phase is `Departing`, and the `Departing`
 condition names the step: `ScanRunning` while a walk `Job` runs,

@@ -282,6 +282,58 @@ func TestTheCloseContainerDerivesTheMarkEstimates(t *testing.T) {
 	})
 }
 
+// The close container of one Job of the series library, run to its end.
+func closeTheSeriesJob(t *testing.T, catalog *Catalog, placesTitles bool) {
+	t.Helper()
+	run, _ := closingJob(t, catalog)
+	run.library, run.kind, run.placesTitles = estimateLibrary, libraryKindSeries, placesTitles
+	done := make(chan error, 1)
+	go func() { done <- run.runJob(context.Background()) }()
+	confirmTheRunOf(t, catalog, estimateLibrary, workerEnrich, run.job)
+	if err := <-done; err != nil {
+		t.Fatalf("the job failed: %v", err)
+	}
+}
+
+// A Library that turns the titles fact off keeps no placement: the close
+// container of its next Job deletes the placements, and the estimate then
+// has no placement to take. A Library with the fact on keeps them.
+func TestTheCloseContainerDeletesThePlacementsOfALibraryWithTitlesOff(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		placesTitles bool
+		placements   []string
+		credits      []string
+	}{
+		{name: "titles on", placesTitles: true, placements: []string{"0.90"},
+			credits: []string{"-1 2880000  titles"}},
+		{name: "titles off", placements: []string{}, credits: []string{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				catalog, _ := newSQLiteCatalog(t)
+				seedEstimateSeries(t, catalog, 0)
+				landPlacement(t, catalog, secondEpisode, 2880000, 0.9)
+
+				closeTheSeriesJob(t, catalog, test.placesTitles)
+
+				placements, err := catalog.queryStrings(t.Context(),
+					`SELECT printf('%.2f', confidence) FROM marks WHERE library = ? AND kind = ?`,
+					[]any{estimateLibrary, markKindCreditsPlacement})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Equal(placements, test.placements) {
+					t.Errorf("placements = %v, want %v", placements, test.placements)
+				}
+				if got := markRowsOf(t, catalog, secondEpisode, markKindCredits); !slices.Equal(got, test.credits) {
+					t.Errorf("credits = %v, want %v", got, test.credits)
+				}
+			})
+		})
+	}
+}
+
 // A placement is not an estimate. The derivation deletes an estimate row
 // that it derives no more, and it leaves the placement of a file in place.
 func TestADerivationKeepsThePlacementOfAFile(t *testing.T) {

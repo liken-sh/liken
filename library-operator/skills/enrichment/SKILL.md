@@ -732,7 +732,7 @@ film or series, and a model that places under 30% of them within 30
 seconds of their marks is rejected, so the library keeps the model it
 has. The floor catches a broken fit, such as a fault in the readings or
 the marks. It does not reject a model because a library's marks are
-loose: a model that works scores far over 30% even against loose marks. Plan 96 in `library-operator/plans/` holds the measurements that
+loose: a model that works scores far over 30% even against loose marks. Plan 96 in `library-operator/plans/completed/` holds the measurements that
 each of these numbers comes from.
 
 The `EndTitlesModel` condition of the `Library` reports the model:
@@ -824,6 +824,13 @@ keeps the rows it found. Each run posts one `Event` on the `Library`:
 `EndTitlesPlacingFailed` (`Warning`) with the reason. The gauge
 `library_titles_placements` holds the placements, the sure ones, and
 the readings with no end titles.
+
+A library that turns `spec.titles.enabled` off keeps its readings and
+its model on the volume, and it keeps no placement. The close container
+of the library's next `Job` deletes the placements from the catalog and
+derives the mark estimates again, so each video's credits answer comes
+from its other clues. A library that turns the fact on again gets its
+placements back from the next placing `Job`.
 
     kubectl -n media get library movies -o jsonpath='{.status.titlesModels[0].placed}'
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=titles-place

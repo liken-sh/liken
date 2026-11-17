@@ -183,14 +183,19 @@ func (o *operator) releaseLibrary(ctx context.Context, library *Library, why str
 	return nil
 }
 
-// clearLibraryTopics publishes an empty retained payload on the
-// departed library's three topics, which is how MQTT drops a retained
-// message, so a subscriber that arrives later reads nothing for a
-// Library that is gone.
+// clearLibraryTopics publishes an empty retained payload on each of the
+// departed library's topics, which is how MQTT drops a retained message, so
+// a subscriber that arrives later reads nothing for a Library that is gone.
+// The last two are the results of the Library's titles fit and of its
+// placing, which their Jobs publish. Without the clear, a Library that is
+// created again with the same name would read the model and the placing of
+// the one before it into its status.
 func (o *operator) clearLibraryTopics(namespace, name string) {
 	o.bus.Publish(libraryStatusTopic(o.topicBase, namespace, name), nil, true)
 	o.bus.Publish(libraryAvailabilityTopic(o.topicBase, namespace, name), nil, true)
 	o.clearTopic(libraryRefreshTopic(o.topicBase, namespace, name))
+	o.bus.Publish(titlesFitTopic(o.topicBase, namespace, name), nil, true)
+	o.bus.Publish(titlesPlaceTopic(o.topicBase, namespace, name), nil, true)
 }
 
 // departingStatus keeps the counts and the volume as the last true

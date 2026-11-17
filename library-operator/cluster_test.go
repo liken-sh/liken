@@ -1249,13 +1249,17 @@ func clearedTopics(t *testing.T, broker *fakeBroker, count int) map[string]bool 
 	return cleared
 }
 
-// LibraryTopics names the two retained topics one Library
-// stands on the bus, which is the pair a clear has to cover.
+// LibraryTopics names the retained topics one Library stands on the bus,
+// which are the ones a clear has to cover: the three the operator writes,
+// and the results of the Library's titles fit and of its placing, which
+// their Jobs write.
 func libraryTopics(namespace, name string) []string {
 	return []string{
 		libraryStatusTopic(defaultTopicBase, namespace, name),
 		libraryAvailabilityTopic(defaultTopicBase, namespace, name),
 		libraryRefreshTopic(defaultTopicBase, namespace, name),
+		titlesFitTopic(defaultTopicBase, namespace, name),
+		titlesPlaceTopic(defaultTopicBase, namespace, name),
 	}
 }
 

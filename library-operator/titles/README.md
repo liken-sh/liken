@@ -4,7 +4,7 @@
 up-next card rises there, and a play counts as finished there, so a
 start that is a minute late keeps a person in front of a credit roll,
 and one that is a minute early cuts the last scene. It is the tool of
-[plan 96](../plans/96-end-titles-from-the-picture.md). The tool has
+[plan 96](../plans/completed/96-end-titles-from-the-picture.md). The tool has
 three commands:
 
 - `titles read <video>` decodes the end of the video with `ffmpeg`, one

@@ -593,19 +593,22 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 	if !ok {
 		return
 	}
-	// An empty payload is how a retained topic is cleared, so it
-	// carries nothing to fold. The operator subscribes to the topics it
-	// clears, so its own clears come back to it, and folding one would
-	// put back the desk state the pass just dropped.
-	if len(payload) == 0 {
-		return
-	}
+	// The results of the titles Jobs are read before the empty payloads
+	// are dropped, because a clear of one makes its desk forget the
+	// Library.
 	switch kind {
 	case libraryTitlesFitKind:
 		foldTitlesResult(o.titlesFits, topic, namespace, name, payload)
 		return
 	case libraryTitlesPlaceKind:
 		foldTitlesResult(o.titlesPlacings, topic, namespace, name, payload)
+		return
+	}
+	// An empty payload is how a retained topic is cleared, so it
+	// carries nothing to fold. The operator subscribes to the topics it
+	// clears, so its own clears come back to it, and folding one would
+	// put back the desk state the pass just dropped.
+	if len(payload) == 0 {
 		return
 	}
 	if kind != libraryStatusKind {

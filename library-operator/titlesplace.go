@@ -64,6 +64,20 @@ const titlesReadingsFrom = `FROM files AS f ` +
 var titlesPlacementsWhere = `WHERE library = ?1 AND ordinal = ` + strconv.Itoa(titlesPlacementOrdinal) +
 	` AND kind = '` + markKindCreditsPlacement + `' AND source = '` + markSourceTitles + `'`
 
+// Deletes every placement of one Library. A placement is a clue that the
+// titles fact gives the estimate, so a Library that turns the fact off keeps
+// none: its model is fitted no more, and its placements would go stale while
+// the estimate still took them over every other clue. The close container
+// of each library Job of such a Library calls this before it derives the
+// estimates, so the answers of the Library change in the same Job. A
+// Library that turns the fact on again gets its placements back from the
+// placing Job, which starts where the catalog holds fewer placements than
+// the last placing wrote.
+func (c *Catalog) deleteTitlesPlacements(ctx context.Context, library string) error {
+	_, err := c.apply(ctx, []statement{{sql: `DELETE FROM marks ` + titlesPlacementsWhere, params: []any{library}}})
+	return err
+}
+
 // The counts of one Library's readings and placements.
 func (c *Catalog) titlesReadings(ctx context.Context, library string) (titlesReadings, error) {
 	var counts titlesReadings

@@ -6,7 +6,7 @@ its last minutes, read by a new tool, `titles`, and placed by a small
 model that each cluster fits on its own library.
 
 Status on 2026-11-14: the tool is built, in
-[`titles/`](../titles/README.md), with its three commands and their
+[`titles/`](../../titles/README.md), with its three commands and their
 tests, and a `Library` that sets `spec.titles.enabled` runs a worker
 that reads each video and a `Job` that fits the Library's model.
 
@@ -15,6 +15,22 @@ reading with the Library's model, and the estimate takes a placement
 that the model was sure of over every other clue, as
 [Placing the end titles](#placing-the-end-titles) gives it.
 [What is not built](#what-is-not-built) lists the steps that remain.
+
+Closed on 2026-11-17. The reading, the fit, the placing, and the one
+answer that every screen uses are built, and so is what the placing
+left behind: the operator clears a deleted Library's results of the fit
+and the placing from the bus, and the close container of a library
+`Job` deletes the placements of a `Library` that turns `spec.titles`
+off. The parts that are not built continue as open problems:
+
+- [A titles model with other columns waits for the library to grow](../open-problems/a-titles-model-with-other-columns-waits-for-the-library-to-grow.md)
+- [An episode the model is sure of moves toward its season's usual length](../open-problems/a-sure-episode-moves-toward-its-seasons-usual-length.md)
+- [Intro and credits each name two things](../open-problems/intro-and-credits-each-name-two-things.md)
+- [Only TMDb gives the names of the whole crew](../open-problems/only-tmdb-gives-the-names-of-the-whole-crew.md)
+
+The [open questions](#open-questions) at the end stand as they were
+written, except the confidence that counts, which is 0.6. Plan 90 holds
+the main titles.
 
 ## The problem
 
@@ -29,12 +45,12 @@ from three places today, and each has a limit.
   minutes: against 53 videos whose start a person checked frame by
   frame, the marks of 3 of 24 films and 3 of 29 episodes were more than
   30 seconds away, and the worst was 349 seconds late.
-- **The estimate.** [Plan 84](completed/84-a-larger-up-next-card.md)
+- **The estimate.** [Plan 84](84-a-larger-up-next-card.md)
   infers a start from the other episodes of a season and from the quiet
   stretches of a subtitle file. It needs neighbors with marks, or a
   text subtitle.
 - **The faceless end.**
-  [Plan 92](completed/92-credits-from-the-faceless-end.md) takes the
+  [Plan 92](92-credits-from-the-faceless-end.md) takes the
   start of the final run with no face in the `appearances` record. It
   is 84 seconds late at the median, by design, and it needs the
   `appearances` fact, which decodes the whole film.
@@ -152,7 +168,7 @@ the faces again.
 - **`place`** gives the start and a confidence from a reading and the
   model. It runs again over every reading when the model changes.
 
-[The tool's README](../titles/README.md) holds the reading's format,
+[The tool's README](../../titles/README.md) holds the reading's format,
 the model's inputs, and the training procedure.
 
 ### Each cluster fits its own model
@@ -243,11 +259,11 @@ trainer, and not loose marks.
 
 A placement is a mark of the kind `end-titles` with the source
 `titles`. The estimate of
-[plan 84](completed/84-a-larger-up-next-card.md) takes it as an exact
+[plan 84](84-a-larger-up-next-card.md) takes it as an exact
 clue when its confidence is high, and the confidence that counts as
 high is one of the [open questions](#open-questions). It replaces the
 `faces` tier of
-[plan 92](completed/92-credits-from-the-faceless-end.md), which
+[plan 92](92-credits-from-the-faceless-end.md), which
 becomes the fallback for a video with an `appearances` record and no
 reading.
 
@@ -532,22 +548,22 @@ videos to trust.
 - **Faces.** The `appearances` record is not an input, so `titles`
   does not need that fact.
 - **Subtitles.** The quiet stretches of
-  [plan 84](completed/84-a-larger-up-next-card.md) stay in the
+  [plan 84](84-a-larger-up-next-card.md) stay in the
   estimate, and the model does not read them.
-- **Audio.** [Plan 90](90-intro-marks-from-the-audio.md) asks whether
+- **Audio.** [Plan 90](../90-intro-marks-from-the-audio.md) asks whether
   the end of an episode should be fingerprinted for its credits. This
   plan answers that for the end titles: the picture finds them. Plan 90
   stays open for the main titles, where a title sequence shows few of
   the names the catalog holds.
 
-[Plan 91](91-text-subtitles-from-image-subtitles.md) reads image
+[Plan 91](../91-text-subtitles-from-image-subtitles.md) reads image
 subtitles with Tesseract. The reader here is PP-OCR on OpenVINO, and a
 build of plan 91 can weigh it against Tesseract.
 
 ## The tool, measured
 
 The tool ran on a workstation on 2026-11-11, through
-[`local/titles`](../local/titles), against the videos of a home library
+[`local/titles`](../../local/titles), against the videos of a home library
 and the marks of a copy of its catalog. Its first run read 436 videos
 that a database has a mark for: all 173 films with one whose file is present,
 and 263 episodes of 102 series. Each got a `billing.yaml` from the key
@@ -700,7 +716,7 @@ for either.
 ## What is built
 
 The `credits` fact writes `.liken/billing.yaml`, and
-[`local/titles`](../local/titles) runs the tool on a workstation
+[`local/titles`](../../local/titles) runs the tool on a workstation
 against a copy of a catalog. The rest is the crate
 `library-operator/titles`, with a CI job, `rust-titles`:
 
@@ -709,7 +725,7 @@ against a copy of a catalog. The rest is the crate
 - The text detector's box finder and the reader's text decoder, which
   PP-OCR ships in C++ and Python that no runtime here can call.
 - The gradient-boosted trees, their trainer, and the placement.
-- [`titles/models/pin.toml`](../titles/models/pin.toml), with the URL,
+- [`titles/models/pin.toml`](../../titles/models/pin.toml), with the URL,
   the SHA-256, and the license of the two models and the reader's
   character list.
 
@@ -739,21 +755,24 @@ In the operator:
 
 ## What is not built
 
+On 2026-11-17 this plan closed, and each part below continues as an
+open problem that the list at the top of the plan links to.
+
 1. **A fit when the tool's columns change.** A release of the tool
    with other columns refuses the model a Library has, and nothing
    starts a fit for that until the Library's count has grown by half.
-2. **What the placing leaves behind.** A `Library` that is deleted
-   keeps its retained results of the fit and the placing on the bus,
-   and a `Library` that turns `spec.titles` off keeps its placement
-   rows in the catalog.
-3. **The rename** of `intro` and `credits` to `main-titles` and
+2. **The rename** of `intro` and `credits` to `main-titles` and
    `end-titles` in `library-operator`, `media-operator`, the media
    browser, the stored ledgers, and the manuals.
-4. **Billing from the other sources.** The IMDb datasets and TVmaze
+3. **Billing from the other sources.** The IMDb datasets and TVmaze
    still pass only the cast, the directors, and the writers. A title
    that TMDb credited before this plan has no `billing.yaml` until the
    `credits` fact asks again, which a `spec.refresh` of `credits`
    starts.
+4. **The start of an episode the model is sure of.** Placed with its
+   folder, such an episode moves a few seconds toward the folder's
+   usual length, as
+   [Placing the end titles](#placing-the-end-titles) measured.
 
 ## Open questions
 

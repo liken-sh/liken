@@ -18,6 +18,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -38,6 +39,9 @@ type closeRun struct {
 	*enricher
 	handoffTimeout time.Duration
 	workLists      []string
+	// Whether the Library runs the titles fact. The container deletes the
+	// placements of a Library that does not.
+	placesTitles bool
 	// The household's subtitle languages, which choose the subtitle file
 	// each mark estimate reads.
 	subtitleLanguages []string
@@ -76,6 +80,7 @@ func newCloseRun(log io.Writer) (*closeRun, error) {
 		enricher:          work,
 		handoffTimeout:    handoffTimeout(os.Getenv(handoffTimeoutVariable)),
 		workLists:         commaNames(os.Getenv(libraryWorkListsVariable)),
+		placesTitles:      slices.Contains(commaNames(os.Getenv(libraryWorkListsVariable)), factTitles),
 		subtitleLanguages: commaNames(os.Getenv(librarySubtitleLanguagesVariable)),
 		base:              bus.base,
 		dial:              bus.dial,
@@ -108,6 +113,12 @@ func (r *closeRun) runJob(ctx context.Context) error {
 		if err := deriveLibrarySets(ctx, r.catalog, r.library); err != nil {
 			r.logf("could not derive the sets of %s: %v", r.library, err)
 			failures = append(failures, "the sets: "+err.Error())
+		}
+	}
+	if !r.placesTitles {
+		if err := r.catalog.deleteTitlesPlacements(ctx, r.library); err != nil {
+			r.logf("could not delete the placements of %s: %v", r.library, err)
+			failures = append(failures, "the placements: "+err.Error())
 		}
 	}
 	if err := deriveMarkEstimates(ctx, r.catalog, r.library, r.subtitleLanguages); err != nil {

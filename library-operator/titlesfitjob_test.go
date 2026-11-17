@@ -292,7 +292,6 @@ func TestAFitOnTheBusReachesThePass(t *testing.T) {
 	operator.handleBusMessage(topic, payload)
 	operator.handleBusMessage(topic, payload)
 	operator.handleBusMessage(topic, []byte("not a fit"))
-	operator.handleBusMessage(topic, nil)
 
 	held := operator.titlesFits.latestFor("house", "movies")
 	if held == nil || *held != fit {
@@ -303,6 +302,28 @@ func TestAFitOnTheBusReachesThePass(t *testing.T) {
 	}
 	if strings.Contains(logged.String(), "fit") {
 		t.Errorf("log = %q, want no line for a fit on the bus", logged)
+	}
+}
+
+// An empty retained message is a cleared topic, which is how the operator
+// drops the results of a Library that is gone. The desks forget the result,
+// so a Library that is created again with the same name starts with none.
+func TestAClearedTopicForgetsTheResultOfTheLibrary(t *testing.T) {
+	cluster := newFakeCluster()
+	operator, _ := loggingOperator(t, cluster)
+	fit, _ := json.Marshal(fittedOn(120, testNow))
+	placing, _ := json.Marshal(titlesPlacing{Kind: titlesKindEnd, Job: "movies-titles-place-1"})
+	operator.handleBusMessage(titlesFitTopic(operator.topicBase, "house", "movies"), fit)
+	operator.handleBusMessage(titlesPlaceTopic(operator.topicBase, "house", "movies"), placing)
+
+	operator.handleBusMessage(titlesFitTopic(operator.topicBase, "house", "movies"), nil)
+	operator.handleBusMessage(titlesPlaceTopic(operator.topicBase, "house", "movies"), nil)
+
+	if held := operator.titlesFits.latestFor("house", "movies"); held != nil {
+		t.Errorf("fit = %+v, want none after the topic was cleared", held)
+	}
+	if held := operator.titlesPlacings.latestFor("house", "movies"); held != nil {
+		t.Errorf("placing = %+v, want none after the topic was cleared", held)
 	}
 }
 

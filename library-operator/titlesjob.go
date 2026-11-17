@@ -59,9 +59,27 @@ func (d *titlesResults[T]) latestFor(namespace, name string) *T {
 	return &result
 }
 
-// Reads one retained result off the bus into its desk. A payload that is not
-// a result is reported and dropped, so the desk keeps the last good one.
+// Forgets the result of one Library, and wakes the loop where it held one.
+func (d *titlesResults[T]) forget(namespace, name string) {
+	key := libraryKey(namespace, name)
+	d.mutex.Lock()
+	_, had := d.latest[key]
+	delete(d.latest, key)
+	d.mutex.Unlock()
+	if had {
+		poke(d.wake)
+	}
+}
+
+// Reads one retained result off the bus into its desk. An empty payload is a
+// cleared topic, which the operator publishes for a Library that is gone, so
+// the desk forgets that Library's result. A payload that is not a result is
+// reported and dropped, so the desk keeps the last good one.
 func foldTitlesResult[T comparable](desk *titlesResults[T], topic, namespace, name string, payload []byte) {
+	if len(payload) == 0 {
+		desk.forget(namespace, name)
+		return
+	}
 	var result T
 	if err := json.Unmarshal(payload, &result); err != nil {
 		fmt.Fprintf(os.Stderr, "reading the titles result on %s: %v\n", topic, err)

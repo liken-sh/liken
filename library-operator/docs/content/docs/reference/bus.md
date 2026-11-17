@@ -154,7 +154,8 @@ is empty for a run that finished its work.
 What the last fit of one library's titles model left. The fit `Job` of
 the `Library` publishes it retained when it ends, and the operator
 writes it into `status.titlesModels` and the `EndTitlesModel`
-condition.
+condition. The operator clears the topic when the `Library` is
+deleted.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -177,7 +178,8 @@ condition.
 What the last placing of one library's end titles did. The placing
 `Job` of the `Library` publishes it retained when it ends, after a
 catalog pod has confirmed its rows, and the operator writes it into
-`placed` in `status.titlesModels`.
+`placed` in `status.titlesModels`. The operator clears the topic when
+the `Library` is deleted.
 
 | Field | Type | Meaning |
 |---|---|---|
