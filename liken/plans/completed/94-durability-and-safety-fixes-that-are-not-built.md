@@ -34,7 +34,9 @@ that proves it:
   2026-11-17 in the smaller form: a pass that did not read the Node
   leaves the `observedGeneration` of the four Node conditions as it was.
 * [The grow-only storage rule runs on status writes](../open-problems/the-grow-only-storage-rule-runs-on-status-writes.md).
-* [CI never fetches the flux seed](../open-problems/ci-never-fetches-the-flux-seed.md).
+* CI never fetches the flux seed. Fixed on 2026-11-17: `make test-go`
+  copies the seed before the tests, and the two seed tests fail under
+  CI when it is absent.
 * [The release publish drills only one boot chain](../open-problems/the-release-publish-drills-only-one-boot-chain.md),
   with open question 3.
 * [The certificate workflow runs an unpinned tool with a wide token](../open-problems/the-certificate-workflow-runs-an-unpinned-tool-with-a-wide-token.md).

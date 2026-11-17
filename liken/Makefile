@@ -741,8 +741,18 @@ test-go:
 # publish job often has no profile from a check job of its own run.
 # releases/publish.sh then takes the profile that the site serves, and
 # runs this target only when that profile does not describe the tag.
-coverage-profile:
+#
+# The cluster operator embeds the flux engine seed, which the flux
+# domain renders and no checkout holds. Two tests read the real seed,
+# to catch a Flux bump that adds a kind the operator does not map, and
+# they skip when it is absent. So the seed is a prerequisite of the
+# tests, and CI's go job tests the seed that a release ships.
+coverage-profile: seed
 	go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+.PHONY: seed
+seed:
+	$(MAKE) -C cluster-operator seed/gotk-components.yaml
 
 # The coverage report is the profile as a page: one HTML file that
 # names every package's number and colors every line of source. The

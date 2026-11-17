@@ -205,13 +205,28 @@ func TestSeedCollectionPaths(t *testing.T) {
 // one of its documents must parse and map in the planter's table,
 // and the probe object must be among them. This is the test that
 // fails when a Flux version bump introduces a kind the table does
-// not map. A checkout that has not fetched the flux domain skips,
-// because the embed then holds only the README.
-func TestTheRealSeedParsesAndMapsWhole(t *testing.T) {
+// not map.
+// realSeed is the engine seed that the binary embeds. The flux domain
+// renders it, and `make test-go` copies it into seed/ before the tests
+// run. A plain `go test` in a checkout that has not fetched the flux
+// domain skips, because the embed then holds only the README. Under CI
+// the seed's absence fails the test: CI runs `make test-go`, and a skip
+// there would pass a Flux bump that breaks the seed with no test of it.
+func realSeed(t *testing.T) []byte {
+	t.Helper()
 	seed, err := engineSeed()
-	if err != nil {
-		t.Skip("no seed copied yet; the Makefile supplies it")
+	if err == nil {
+		return seed
 	}
+	if os.Getenv("CI") != "" {
+		t.Fatalf("CI ran the tests with no seed: %v. `make test-go` copies it from the flux domain", err)
+	}
+	t.Skip("no seed copied yet; `make test-go` supplies it")
+	return nil
+}
+
+func TestTheRealSeedParsesAndMapsWhole(t *testing.T) {
+	seed := realSeed(t)
 	objects, err := parseSeed(seed)
 	if err != nil {
 		t.Fatal(err)
@@ -364,10 +379,7 @@ func TestEnsureFluxDeployKeyYieldsToAConcurrentMint(t *testing.T) {
 // bump that adds a CRD fails here until both keep up. Namespaced
 // objects need no entry: the namespace's own deletion sweeps them.
 func TestTheTeardownAndItsRightsCoverTheSeed(t *testing.T) {
-	seed, err := engineSeed()
-	if err != nil {
-		t.Skip("no seed copied yet; the Makefile supplies it")
-	}
+	seed := realSeed(t)
 	objects, err := parseSeed(seed)
 	if err != nil {
 		t.Fatal(err)
