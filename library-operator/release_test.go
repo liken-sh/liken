@@ -16,7 +16,7 @@ func TestDepartReleasesWhenTheCleanupJobSucceeds(t *testing.T) {
 	library := departingMovies(cluster)
 	done := houseJob("movies-cleanup", workerCleanup, JobStatus{Succeeded: 1})
 	cluster.holdJob(&done)
-	operator := testOperator(t, cluster)
+	operator := connectedOperator(t, cluster)
 
 	if err := operator.depart(t.Context(), library, standingCatalog(), []Job{done}); err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestReleaseCarriesOnFromAConflictAndAnAbsentLibrary(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			library := departingMovies(cluster)
-			operator := testOperator(t, cluster)
+			operator := connectedOperator(t, cluster)
 			one.setup(cluster)
 
 			if err := operator.releaseLibrary(t.Context(), library, "the test released it"); err != nil {
@@ -94,7 +94,7 @@ func TestReleaseReportsAFailureToRetireTheCleanupJob(t *testing.T) {
 	cluster.holdJob(&done)
 	cluster.broken["/apis/batch/v1/namespaces/house/jobs/movies-cleanup"] = http.StatusInternalServerError
 
-	err := testOperator(t, cluster).releaseLibrary(t.Context(), library, "the test released it")
+	err := connectedOperator(t, cluster).releaseLibrary(t.Context(), library, "the test released it")
 
 	if err == nil {
 		t.Fatal("err = nil, want the failure the release could not read past")

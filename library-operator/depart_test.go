@@ -59,7 +59,7 @@ func TestReconcileHoldsALibraryAgainstDeletion(t *testing.T) {
 	cluster := newFakeCluster()
 	library := boundHouse(cluster)
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
+	if err := connectedOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -80,7 +80,7 @@ func TestReconcileSwapsTheFormerFinalizer(t *testing.T) {
 	library := boundHouse(cluster)
 	library.Metadata.Finalizers = []string{formerLibraryFinalizer}
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
+	if err := connectedOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,7 +100,7 @@ func TestReconcileDoesNotPatchAFinalizerItAlreadyHolds(t *testing.T) {
 	library := boundHouse(cluster)
 	library.Metadata.Finalizers = []string{libraryFinalizer}
 
-	if err := testOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
+	if err := connectedOperator(t, cluster).reconcile(t.Context(), library, standingCatalog(), nil, nil, nil, testNow); err != nil {
 		t.Fatal(err)
 	}
 
@@ -116,7 +116,7 @@ func TestDepartReleasesWhenTheNamespaceHasNoCatalog(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, singleCatalog(nil), nil); err != nil {
+	if err := connectedOperator(t, cluster).depart(t.Context(), library, singleCatalog(nil), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -135,7 +135,7 @@ func TestDepartReleasesTheFormerFinalizer(t *testing.T) {
 	library := departingMovies(cluster)
 	library.Metadata.Finalizers = []string{formerLibraryFinalizer}
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, singleCatalog(nil), nil); err != nil {
+	if err := connectedOperator(t, cluster).depart(t.Context(), library, singleCatalog(nil), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -154,7 +154,7 @@ func TestDepartBlocksOnANamespaceWithTwoCatalogs(t *testing.T) {
 		{Metadata: ObjectMeta{Name: "two", Namespace: "house"}},
 	})
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, choice, nil); err != nil {
+	if err := connectedOperator(t, cluster).depart(t.Context(), library, choice, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -174,7 +174,7 @@ func TestDepartDeletesTheScheduleOfAnEarlierReleaseFirst(t *testing.T) {
 	library := departingMovies(cluster)
 	cluster.holdCronJob("house", "movies-scan")
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
+	if err := connectedOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -190,7 +190,7 @@ func TestDepartWaitsForARunningScan(t *testing.T) {
 	library := departingMovies(cluster)
 	jobs := []Job{walkJob(JobStatus{Active: 1})}
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), jobs); err != nil {
+	if err := connectedOperator(t, cluster).depart(t.Context(), library, standingCatalog(), jobs); err != nil {
 		t.Fatal(err)
 	}
 
@@ -228,7 +228,7 @@ func TestDepartWaitsForARunningEnricher(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			library := departingMovies(cluster)
-			operator := testOperator(t, cluster)
+			operator := connectedOperator(t, cluster)
 			operator.reports.fold("house", "movies", libraryReport{Runs: one.runs})
 
 			if err := operator.depart(t.Context(), library, standingCatalog(), one.jobs); err != nil {
@@ -250,7 +250,7 @@ func TestDepartWaitsForARunningEnricher(t *testing.T) {
 func TestDepartPassesADeadEnrichRun(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
-	operator := testOperator(t, cluster)
+	operator := connectedOperator(t, cluster)
 	operator.reports.fold("house", "movies", libraryReport{
 		Runs: []libraryRun{{Worker: workerEnrich, Job: "movies-enrich-1", Started: testNow}}})
 
@@ -271,7 +271,7 @@ func TestDepartStandsACatalogClaimTheSweepNeeds(t *testing.T) {
 	library := departingMovies(cluster)
 	delete(cluster.claims, "movies-catalog")
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
+	if err := connectedOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -289,7 +289,7 @@ func TestDepartStandsTheCleanupJob(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
+	if err := connectedOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -315,7 +315,7 @@ func TestTheCleanupJobReadsItsAgentAndNoBroker(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
+	if err := connectedOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -339,7 +339,7 @@ func TestDepartRecreatesACleanupJobThatFailed(t *testing.T) {
 	library := departingMovies(cluster)
 	failed := houseJob("movies-cleanup", workerCleanup, JobStatus{Failed: 3})
 	cluster.holdJob(&failed)
-	operator := testOperator(t, cluster)
+	operator := connectedOperator(t, cluster)
 
 	if err := operator.depart(t.Context(), library, standingCatalog(), []Job{failed}); err != nil {
 		t.Fatal(err)
@@ -372,7 +372,7 @@ func TestDepartLeavesALibraryItDoesNotHold(t *testing.T) {
 	library := departingMovies(cluster)
 	library.Metadata.Finalizers = nil
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
+	if err := connectedOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -402,7 +402,7 @@ func TestDepartReportsAFailureItCannotReadPast(t *testing.T) {
 			cluster.holdCronJob("house", "movies-scan")
 			cluster.broken[one.path] = http.StatusInternalServerError
 
-			err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil)
+			err := connectedOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil)
 
 			if err == nil {
 				t.Fatal("err = nil, want the failure the departure could not read past")
@@ -421,7 +421,7 @@ func TestDepartAnswersACleanupJobAnotherWriterCreated(t *testing.T) {
 	library := departingMovies(cluster)
 	cluster.refuseCreate = true
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
+	if err := connectedOperator(t, cluster).depart(t.Context(), library, standingCatalog(), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -438,7 +438,7 @@ func TestDepartWaitsForACleanupJobThatIsStillGoing(t *testing.T) {
 	going := houseJob("movies-cleanup", workerCleanup, JobStatus{Failed: 1})
 	going.Metadata.DeletionTimestamp = "2026-08-31T12:00:02Z"
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), []Job{going}); err != nil {
+	if err := connectedOperator(t, cluster).depart(t.Context(), library, standingCatalog(), []Job{going}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -452,7 +452,7 @@ func TestDepartWaitsForACleanupJobThatIsStillGoing(t *testing.T) {
 func TestDepartReportsTheSweepWhileTheBackoffHolds(t *testing.T) {
 	cluster := newFakeCluster()
 	library := departingMovies(cluster)
-	operator := testOperator(t, cluster)
+	operator := connectedOperator(t, cluster)
 	operator.cleanupStands["house/movies"] = cleanupStand{count: 4, next: time.Now().Add(time.Hour)}
 
 	if err := operator.depart(t.Context(), library, standingCatalog(), nil); err != nil {
@@ -527,7 +527,7 @@ func TestDepartWaitsForAScanBetweenThePodsOfItsBackoff(t *testing.T) {
 	library := departingMovies(cluster)
 	jobs := []Job{walkJob(JobStatus{Active: 0, Failed: 1})}
 
-	if err := testOperator(t, cluster).depart(t.Context(), library, standingCatalog(), jobs); err != nil {
+	if err := connectedOperator(t, cluster).depart(t.Context(), library, standingCatalog(), jobs); err != nil {
 		t.Fatal(err)
 	}
 

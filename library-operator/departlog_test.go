@@ -4,6 +4,7 @@ package main
 // departure creates, and the release of the finalizer with its reason.
 
 import (
+	"bytes"
 	"testing"
 )
 
@@ -36,7 +37,8 @@ func TestADepartureLeavesOneLinePerStep(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			cluster := newFakeCluster()
 			library := departingMovies(cluster)
-			operator, logged := loggingOperator(t, cluster)
+			operator, logged := connectedOperator(t, cluster), &bytes.Buffer{}
+			operator.log = logged
 
 			if err := operator.depart(t.Context(), library, c.choice, c.jobs); err != nil {
 				t.Fatal(err)

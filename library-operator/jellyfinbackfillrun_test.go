@@ -134,7 +134,7 @@ func standBackfillBus(t *testing.T, backfill *jellyfinBackfill, answering bool) 
 			return nil, ctx.Err()
 		}
 	}
-	backfill.publish = func(topic string, payload []byte, retained bool) { backfill.bus.Publish(topic, payload, retained) }
+	backfill.publish = backfill.bus.PublishWait
 	return broker
 }
 

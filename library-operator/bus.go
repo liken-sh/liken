@@ -14,6 +14,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -26,8 +27,13 @@ import (
 // writer drains. The client sends a PINGREQ once the connection has
 // been idle longer than half the keepalive, so the broker never
 // reaches the keepalive without hearing from the client. The queue is
-// bounded, and a publish that would overflow it is dropped, which is
-// correct at QoS 0.
+// bounded. Publish drops a frame that would overflow it, which is
+// correct at QoS 0 for a caller that publishes again on a later pass,
+// and PublishWait waits for room, for a caller that publishes once.
+//
+// A frame in the queue is lost when the session ends before the writer
+// sends it, so a longer queue loses more frames at each disconnect. A
+// caller that sends a burst waits for room instead.
 const (
 	busKeepalive  = 30
 	busQueueDepth = 64
@@ -58,7 +64,8 @@ type busWill struct {
 // Bus holds the connection's parts and the state that outlives one
 // connection: the remembered subscriptions and the packet identifier
 // counter. out is the current connection's write queue, or nil while
-// disconnected, and the mutex guards both it and the fields around it.
+// disconnected, and ended closes when that connection's session ends.
+// The mutex guards both and the fields around them.
 type Bus struct {
 	clientID  string
 	will      *busWill
@@ -69,6 +76,7 @@ type Bus struct {
 	mutex    sync.Mutex
 	filters  map[string]struct{}
 	out      chan []byte
+	ended    <-chan struct{}
 	packetID uint16
 }
 
@@ -157,11 +165,11 @@ func (b *Bus) runSession(parent context.Context) (connected bool) {
 
 	out := make(chan []byte, busQueueDepth)
 	b.mutex.Lock()
-	b.out = out
+	b.out, b.ended = out, ctx.Done()
 	b.mutex.Unlock()
 	defer func() {
 		b.mutex.Lock()
-		b.out = nil
+		b.out, b.ended = nil, nil
 		b.mutex.Unlock()
 	}()
 
@@ -274,6 +282,63 @@ func (b *Bus) Publish(topic string, payload []byte, retained bool) bool {
 		return false
 	}
 }
+
+// errBusDisconnected is the answer of PublishWait while the client has
+// no session with the broker, and when the session ends during the wait.
+var errBusDisconnected = errors.New("the bus has no connection to the broker")
+
+// PublishWait enqueues a QoS 0 PUBLISH and waits for room in the write
+// queue when the queue is full. It is for a caller that publishes a
+// message once and has no later pass that publishes it again: a play
+// that is not retained, or the clear of a topic whose object is about to
+// go. Publish would drop such a message on a full queue, and nothing
+// would send it again.
+//
+// The wait ends with an error when ctx ends, and at once when the client
+// has no session or the session ends, because the queue of a session
+// that ended is never written. A nil answer says that the frame is in
+// the queue of a live session. The frame is still lost if that session
+// ends before the writer sends it.
+func (b *Bus) PublishWait(ctx context.Context, topic string, payload []byte, retained bool) error {
+	b.mutex.Lock()
+	out, ended := b.out, b.ended
+	b.mutex.Unlock()
+	if out == nil {
+		return errBusDisconnected
+	}
+	frame, err := encodePublish(topic, payload, retained)
+	if err != nil {
+		return fmt.Errorf("publishing to %s: %w", topic, err)
+	}
+	select {
+	case out <- frame:
+		return nil
+	case <-ended:
+		return errBusDisconnected
+	case <-ctx.Done():
+		return fmt.Errorf("the bus's write queue stayed full: %w", ctx.Err())
+	}
+}
+
+// Session answers with a channel that closes when the current session
+// ends, or with a closed channel while the client has no session. A
+// caller that must send a whole run on one session reads it before the
+// run and after it.
+func (b *Bus) Session() <-chan struct{} {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	if b.ended == nil {
+		return closedSession
+	}
+	return b.ended
+}
+
+// closedSession is the answer of Session while the client has no session.
+var closedSession = func() <-chan struct{} {
+	closed := make(chan struct{})
+	close(closed)
+	return closed
+}()
 
 // Subscribe remembers the filter and sends it if the client is
 // connected. The remembered set is what runSession re-sends on every

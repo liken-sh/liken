@@ -82,6 +82,21 @@ func (o *operator) forgetPerson(ctx context.Context, person *Person, stores map[
 		}
 	}
 
+	// The clears go before the release. After the release no pass reads
+	// the Person, so a forget request that the bus did not clear would
+	// stay on the broker, and a store that subscribes later would delete
+	// the progress of a new Person with the same name. A release that
+	// does not land leaves the Person for the next pass, which asks
+	// again and reads the answers that this pass still holds.
+	topics := []string{forget}
+	for _, namespace := range slices.Sorted(maps.Keys(forgotten)) {
+		topics = append(topics, personForgottenTopic(o.topicBase, name, namespace))
+	}
+	if err := o.clearTopics(ctx, topics...); err != nil {
+		fmt.Fprintf(os.Stderr, "holding person %s: %v\n", name, err)
+		return
+	}
+
 	_, err := PatchPersonFinalizers(ctx, o.client, name, person.Metadata.ResourceVersion,
 		person.Metadata.without(progressFinalizer))
 	if errors.Is(err, apiclient.ErrConflict) {
@@ -93,10 +108,6 @@ func (o *operator) forgetPerson(ctx context.Context, person *Person, stores map[
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		fmt.Fprintf(os.Stderr, "releasing person %s: %v\n", name, err)
 		return
-	}
-	o.clearTopic(forget)
-	for _, namespace := range slices.Sorted(maps.Keys(forgotten)) {
-		o.clearTopic(personForgottenTopic(o.topicBase, name, namespace))
 	}
 	o.marks.dropForgotten(name)
 	o.logf("person %s: released the finalizer, because the progress stores of %s forgot the person's progress",

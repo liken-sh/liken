@@ -24,6 +24,27 @@ func operatorOnARetainBroker(t *testing.T, cluster *fakeCluster) (*operator, *re
 	return operator, broker
 }
 
+// connectedOperator is the operator of testOperator with its bus connected
+// to a broker that retains messages and reads every publish. The operator
+// releases an object only after the bus takes the clears of its topics, so
+// a test of a release needs a bus that takes them.
+func connectedOperator(t *testing.T, cluster *fakeCluster) *operator {
+	t.Helper()
+	operator, _ := operatorOnARetainBroker(t, cluster)
+	connected := make(chan *Bus, 1)
+	onConnect := operator.bus.onConnect
+	operator.bus.onConnect = func(bus *Bus) {
+		onConnect(bus)
+		select {
+		case connected <- bus:
+		default:
+		}
+	}
+	go operator.bus.Run(t.Context())
+	waitForConnect(t, connected)
+	return operator
+}
+
 // refreshedHouse is the house Library with a credits refresh, so a pass
 // publishes a refresh mark for it. It answers with the mark's topic.
 func refreshedHouse(cluster *fakeCluster) string {

@@ -56,7 +56,7 @@ func (j *jellyfin) reconcile(ctx context.Context) {
 		api:       j.api,
 		index:     j.index,
 		echoes:    j.out.echoes,
-		publish:   j.publish,
+		publish:   j.publishWait,
 		log:       j.log,
 	}
 	counts, err := read.run(ctx)

@@ -11,12 +11,14 @@ package main
 // nothing on the bus.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
 	"slices"
 	"sync"
+	"time"
 )
 
 // storeMarks holds the newest mark of each kind and the wake the loop
@@ -78,17 +80,18 @@ func (m *storeMarks) recordedFor(namespace, name string) (playRecorded, bool) {
 	return recorded, held
 }
 
-// retainRecorded drops every mark whose Play the pass did not see and
-// answers with the keys it dropped, sorted, because the pass is the
-// only reader that holds the whole Play list and so the only one that
-// can clear the topics of a Play that is gone.
-func (m *storeMarks) retainRecorded(live map[string]bool) []string {
+// goneRecorded answers with the key of every mark whose Play the pass
+// did not see, sorted, because the pass is the only reader that holds
+// the whole Play list and so the only one that can clear the topics of
+// a Play that is gone. The marks stay until dropRecorded, which the
+// pass calls once the bus has taken the clears, so a pass whose clears
+// the bus did not take finds the same Plays on the next pass.
+func (m *storeMarks) goneRecorded(live map[string]bool) []string {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	keys := []string{}
 	for key := range m.recorded {
 		if !live[key] {
-			delete(m.recorded, key)
 			keys = append(keys, key)
 		}
 	}
@@ -226,11 +229,39 @@ func (o *operator) publishStanding(topic string, mark any) {
 	o.publishMark(topic, mark)
 }
 
+// How long one clear waits for room in the bus's write queue. A broker
+// that reads again within this time takes the clear in the same pass,
+// and a broker that does not leaves the object for the next pass.
+const clearWait = 5 * time.Second
+
 // clearTopic drops a retained message with an empty payload, which is
 // how MQTT clears one, so a store that subscribes later reads nothing
 // for a Play or a person that is gone.
-func (o *operator) clearTopic(topic string) {
+//
+// The clear waits for room in the bus's write queue, and the answer is
+// an error when the bus did not take it. A caller clears the topics of
+// an object before it releases the object's finalizer, and holds the
+// object on an error, so the next pass clears again. After the release
+// no pass reads the object, and nothing would publish a dropped clear
+// again.
+func (o *operator) clearTopic(ctx context.Context, topic string) error {
+	ctx, done := context.WithTimeout(ctx, clearWait)
+	defer done()
+	if err := o.bus.PublishWait(ctx, topic, nil, true); err != nil {
+		return fmt.Errorf("clearing %s: %w", topic, err)
+	}
 	delete(o.published, topic)
 	delete(o.unsent, topic)
-	o.bus.Publish(topic, nil, true)
+	return nil
+}
+
+// clearTopics clears each topic in turn and stops at the first one that
+// the bus did not take.
+func (o *operator) clearTopics(ctx context.Context, topics ...string) error {
+	for _, topic := range topics {
+		if err := o.clearTopic(ctx, topic); err != nil {
+			return err
+		}
+	}
+	return nil
 }

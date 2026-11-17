@@ -42,13 +42,15 @@ const jellyfinBackfillFloor = 1
 
 // the three bounds of the run. The connect wait is how long the run waits for
 // the broker before it fails, so a Job with no broker ends and Kubernetes
-// retries it. The pace is the gap between two publishes: the bus drops a
-// publish that overflows its queue, so the run hands the writer one message
-// at a time. The flush is what the run waits after its last publish, so the
-// writer reaches the socket before the connection ends.
+// retries it. The pace is the gap between two publishes, so the run hands
+// the writer one message at a time. The room is how long one publish waits
+// for room in the bus's write queue while the broker reads slower than the
+// pace, before the run fails. The flush is what the run waits after its last
+// publish, so the writer reaches the socket before the connection ends.
 const (
 	jellyfinBackfillConnect = 30 * time.Second
 	jellyfinBackfillPace    = time.Millisecond
+	jellyfinBackfillRoom    = 30 * time.Second
 	jellyfinBackfillFlush   = 2 * time.Second
 )
 
@@ -73,8 +75,11 @@ type jellyfinBackfill struct {
 	// The positions the jellyfin role wrote in the last minutes, when the
 	// role's reconcile runs this code, and nil in the Job, which writes
 	// nothing.
-	echoes  *jellyfinEchoes
-	publish func(topic string, payload []byte, retained bool)
+	echoes *jellyfinEchoes
+	// publish answers nil once the bus has taken the message. A play is
+	// not retained and the run publishes it once, so the publish waits
+	// for room in the bus's write queue instead of dropping the play.
+	publish func(ctx context.Context, topic string, payload []byte, retained bool) error
 	bus     *Bus
 	ready   chan struct{}
 	log     io.Writer
@@ -121,7 +126,7 @@ func newJellyfinBackfill(log io.Writer) *jellyfinBackfill {
 	backfill.ready = ready
 	backfill.bus = newBus(os.Getenv(busAddressVariable), "jellyfin-backfill-"+namespace, nil,
 		func(*Bus) { once.Do(func() { close(ready) }) }, nil)
-	backfill.publish = func(topic string, payload []byte, retained bool) { backfill.bus.Publish(topic, payload, retained) }
+	backfill.publish = backfill.bus.PublishWait
 	return backfill
 }
 
@@ -129,7 +134,7 @@ func newJellyfinBackfill(log io.Writer) *jellyfinBackfill {
 // function a caller already has, so a test drives the whole run with no
 // environment, no broker, and no pod.
 func newJellyfinBackfillOn(namespace, topicBase string, api *jellyfinAPI,
-	publish func(string, []byte, bool), log io.Writer) *jellyfinBackfill {
+	publish func(context.Context, string, []byte, bool) error, log io.Writer) *jellyfinBackfill {
 	return &jellyfinBackfill{
 		namespace: namespace,
 		topicBase: topicBase,
@@ -158,8 +163,17 @@ func (b *jellyfinBackfill) runOnBus(ctx context.Context) (jellyfinBackfillCounts
 	if err := b.await(ctx); err != nil {
 		return jellyfinBackfillCounts{}, err
 	}
+	session := b.bus.Session()
 	counts, err := b.run(ctx)
 	time.Sleep(jellyfinBackfillFlush)
+	// A play in the write queue is lost when the session ends before the
+	// writer sends it, and the run cannot name which. So a session that
+	// ended during the run fails the Job, and the next pass runs it again.
+	select {
+	case <-session:
+		err = errors.Join(err, errors.New("the connection to the broker ended during the run"))
+	default:
+	}
 	return counts, err
 }
 
@@ -182,8 +196,9 @@ func (b *jellyfinBackfill) await(ctx context.Context) error {
 // one run: every user's resumable and played items, each as one outside play
 // on the bus. A user whose items cannot be read is logged and counted, and
 // the run carries on with the next user, so one user's failure does not cost
-// the others their progress. The joined error fails the Job, so the next pass
-// runs it again.
+// the others their progress. A play that the bus does not take ends the run,
+// because the bus takes none of the plays after it either. The joined error
+// fails the Job, so the next pass runs it again.
 func (b *jellyfinBackfill) run(ctx context.Context) (jellyfinBackfillCounts, error) {
 	counts := jellyfinBackfillCounts{}
 	users, err := b.api.users(ctx)
@@ -202,7 +217,9 @@ func (b *jellyfinBackfill) run(ctx context.Context) (jellyfinBackfillCounts, err
 			continue
 		}
 		for _, item := range items {
-			b.carry(ctx, user, item, &counts)
+			if err := b.carry(ctx, user, item, &counts); err != nil {
+				return counts, errors.Join(append(failures, err)...)
+			}
 		}
 	}
 	return counts, errors.Join(failures...)
@@ -210,24 +227,32 @@ func (b *jellyfinBackfill) run(ctx context.Context) (jellyfinBackfillCounts, err
 
 // one item as one message on the play's outside topic, or one skip. The
 // message is not retained, the way the webhook path publishes, and the pace
-// holds the writer's queue short.
+// holds the writer's queue short. A broker that reads slower than the pace
+// fills the queue, and the publish then waits for room, up to
+// jellyfinBackfillRoom. The answer is an error when the bus did not take the
+// play, and the play is then not counted.
 func (b *jellyfinBackfill) carry(ctx context.Context, user jellyfinUser,
-	item jellyfinItem, counts *jellyfinBackfillCounts) {
+	item jellyfinItem, counts *jellyfinBackfillCounts) error {
 	name, play, ok := b.outsideOf(ctx, user, item)
 	if !ok {
 		counts.skipped++
 		b.logf("the jellyfin item %s names no provider ids", item.ID)
-		return
+		return nil
 	}
 	// A position the role wrote is its own write read back, and the Play
 	// that made it already holds a row for it.
 	if b.echoes != nil && b.echoes.echoed(user.ID, item.ID, play.Position) {
-		return
+		return nil
 	}
 	payload, _ := json.Marshal(play)
-	b.publish(playOutsideTopic(b.topicBase, b.namespace, name), payload, false)
+	waiting, done := context.WithTimeout(ctx, jellyfinBackfillRoom)
+	defer done()
+	if err := b.publish(waiting, playOutsideTopic(b.topicBase, b.namespace, name), payload, false); err != nil {
+		return fmt.Errorf("publishing a play of the user %s: %w", user.Name, err)
+	}
 	counts.published++
 	time.Sleep(jellyfinBackfillPace)
+	return nil
 }
 
 // the two reads one user takes, as one list with no item twice. An item that

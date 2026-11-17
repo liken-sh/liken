@@ -498,7 +498,10 @@ func TestAReleaseThatDoesNotLandLeavesTheMarkStanding(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			operator, cluster := playingHouse(t)
+			cluster := newFakeCluster()
+			boundHouse(cluster)
+			seedPlayer(cluster, testPlayer, testLibraryNamespace, screenController)
+			operator := connectedOperator(t, cluster)
 			play := testPlay("den-some-film")
 			play.Metadata.Finalizers = []string{progressFinalizer}
 			play.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"

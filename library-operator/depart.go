@@ -158,7 +158,9 @@ func (o *operator) releaseLibrary(ctx context.Context, library *Library, why str
 	if err := o.retireCleanupJob(ctx, namespace, name); err != nil {
 		return err
 	}
-	o.clearLibraryTopics(namespace, name)
+	if err := o.clearLibraryTopics(ctx, namespace, name); err != nil {
+		return err
+	}
 
 	err := o.versions.libraries.Send(memo.Key(&library.Metadata), func() (string, error) {
 		return PatchLibraryFinalizers(ctx, o.client, namespace, name,
@@ -190,12 +192,17 @@ func (o *operator) releaseLibrary(ctx context.Context, library *Library, why str
 // placing, which their Jobs publish. Without the clear, a Library that is
 // created again with the same name would read the model and the placing of
 // the one before it into its status.
-func (o *operator) clearLibraryTopics(namespace, name string) {
-	o.bus.Publish(libraryStatusTopic(o.topicBase, namespace, name), nil, true)
-	o.bus.Publish(libraryAvailabilityTopic(o.topicBase, namespace, name), nil, true)
-	o.clearTopic(libraryRefreshTopic(o.topicBase, namespace, name))
-	o.bus.Publish(titlesFitTopic(o.topicBase, namespace, name), nil, true)
-	o.bus.Publish(titlesPlaceTopic(o.topicBase, namespace, name), nil, true)
+//
+// The answer is an error when the bus did not take a clear, and the
+// Library then keeps its finalizer until the next pass, because after the
+// release no pass reads the Library and nothing would clear again.
+func (o *operator) clearLibraryTopics(ctx context.Context, namespace, name string) error {
+	return o.clearTopics(ctx,
+		libraryStatusTopic(o.topicBase, namespace, name),
+		libraryAvailabilityTopic(o.topicBase, namespace, name),
+		libraryRefreshTopic(o.topicBase, namespace, name),
+		titlesFitTopic(o.topicBase, namespace, name),
+		titlesPlaceTopic(o.topicBase, namespace, name))
 }
 
 // departingStatus keeps the counts and the volume as the last true

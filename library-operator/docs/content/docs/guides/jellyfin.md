@@ -253,6 +253,13 @@ row never overwrites a newer play, and a row the backfill writes twice
 is the same row. At the same timestamp the store keeps the message that
 says more, by the rule in [what crosses](#3-what-crosses).
 
+The `Job` counts a play only when the bus took it. While the broker
+reads slower than the `Job` publishes, each publish waits for room, up
+to 30 seconds. The `Job` fails when a publish waits longer than that,
+and when its connection to the broker ends during the run, because it
+cannot name the plays that the connection lost. The operator then runs
+the `Job` again.
+
 The reconcile reads the same two lists at every start. The backfill
 keeps one job of its own: it waits until every durable copy of the
 progress store is up, and it reports in `status.jellyfin` that the whole

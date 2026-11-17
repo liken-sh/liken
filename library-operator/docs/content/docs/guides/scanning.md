@@ -359,7 +359,9 @@ cleanup `Job` succeeds. Before it clears, the operator drops the
 library's retained messages from the bus: its status, its
 availability, its refresh, and the results of its titles fit and of
 its placing. So a `Library` that is created again with the same name
-reads none of them.
+reads none of them. While the operator has no connection to the broker,
+the `Library` keeps its finalizer, and the operator releases it on the
+pass after the connection returns.
 
 While this runs, the phase is `Departing`, and the `Departing`
 condition names the step: `ScanRunning` while a walk `Job` runs,

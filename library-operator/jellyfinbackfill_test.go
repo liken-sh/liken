@@ -5,6 +5,7 @@ package main
 // and what one user's failed read costs the run.
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
@@ -77,6 +78,12 @@ func backfillSeries() map[string]jellyfinItem {
 	}
 }
 
+// take records one message as a bus that has room takes it.
+func (m *jellyfinMessages) take(_ context.Context, topic string, payload []byte, retained bool) error {
+	m.publish(topic, payload, retained)
+	return nil
+}
+
 // one backfill over a fake Jellyfin, with a recording publish function and a
 // log the test reads.
 func standBackfill(t *testing.T, fake *fakeBackfillJellyfin) (
@@ -86,7 +93,7 @@ func standBackfill(t *testing.T, fake *fakeBackfillJellyfin) (
 	logged := &strings.Builder{}
 	messages := &jellyfinMessages{}
 	backfill := newJellyfinBackfillOn("house", defaultTopicBase,
-		newJellyfinAPI(apiservertest.Host, "the-key", server.Client()), messages.publish, logged)
+		newJellyfinAPI(apiservertest.Host, "the-key", server.Client()), messages.take, logged)
 	return backfill, messages, logged
 }
 

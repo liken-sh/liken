@@ -85,6 +85,16 @@ drops a publish when its write queue is full, for example while the
 broker falls behind on a burst of many topics. The operator publishes a
 dropped topic again on its next pass, which runs within ten seconds.
 
+A message that a sender publishes once is not dropped on a full queue.
+The publish waits for room: an outside play of the Jellyfin backfill
+and of the jellyfin role's reconcile waits up to 30 seconds, and the
+clear of a topic whose object goes waits up to 5 seconds. The operator
+clears the topics of a `Person` and of a `Library` before it releases
+the object's finalizer, so a `Person` or a `Library` that is deleting
+stays until the broker takes the clears. It clears the topics of a
+`Play` after the release, and clears them again on a later pass while
+the `recorded` mark of a `Play` that is gone still stands.
+
 ## The library report
 
 `libraries/{namespace}/{name}/status`
@@ -662,9 +672,12 @@ own answer when it reads one.
 `people/{person}/forgotten/{namespace}`
 
 One namespace's answer that the person's rows are gone from its store,
-retained, with the time of the sweep. The operator releases the
-`Person` once every namespace that stands a store has answered, then
-clears the request and every answer.
+retained, with the time of the sweep. Once every namespace that stands
+a store has answered, the operator clears the request and every answer,
+and then releases the `Person`. The clears go first, because a request
+that stayed on the broker would delete the progress of a later `Person`
+with the same name. While the operator has no connection to the broker,
+or the broker does not take the clears, the `Person` stays.
 
     {"at": "2026-08-29T21:34:05Z"}
 

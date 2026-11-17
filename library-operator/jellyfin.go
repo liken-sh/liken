@@ -55,8 +55,11 @@ type jellyfin struct {
 	reconciles chan struct{}
 	now        func() time.Time
 	publish    func(topic string, payload []byte, retained bool)
-	bus        *Bus
-	log        io.Writer
+	// The publish of the reconcile, which waits for room in the bus's
+	// write queue (jellyfinbackfill.go says why).
+	publishWait func(ctx context.Context, topic string, payload []byte, retained bool) error
+	bus         *Bus
+	log         io.Writer
 }
 
 // runJellyfin is the role's whole program: read the environment, carry
@@ -102,6 +105,7 @@ func newJellyfin(log io.Writer) *jellyfin {
 func (j *jellyfin) joinBus(address string) {
 	j.bus = newBus(address, "jellyfin-"+j.namespace, nil, func(*Bus) { j.marks.republish() }, j.onMessage)
 	j.publish = func(topic string, payload []byte, retained bool) { j.bus.Publish(topic, payload, retained) }
+	j.publishWait = j.bus.PublishWait
 	j.marks.publish = j.bus.Publish
 }
 
@@ -123,6 +127,13 @@ func newJellyfinOn(namespace, base, mediaBase, listen string, api *jellyfinAPI,
 		publish:    publish,
 		log:        log,
 		reconciles: make(chan struct{}, 1),
+	}
+	// A publish function that a caller gives takes every message, so the
+	// reconcile's publish through it never waits. joinBus puts the bus's
+	// waiting publish in its place.
+	role.publishWait = func(_ context.Context, topic string, payload []byte, retained bool) error {
+		role.publish(topic, payload, retained)
+		return nil
 	}
 	// The marks publish through the role, because newJellyfin puts the bus
 	// in the role's publish only after this returns.

@@ -57,9 +57,13 @@ func (o *operator) reconcilePlays(ctx context.Context, plays []Play, stores map[
 	}
 	// A mark whose Play this pass did not see belongs to a Play that is
 	// gone, and its retained messages are standing on the bus still.
-	for _, key := range o.marks.retainRecorded(live) {
+	for _, key := range o.marks.goneRecorded(live) {
 		namespace, name, _ := strings.Cut(key, "/")
-		o.clearPlayTopics(namespace, name)
+		if err := o.clearPlayTopics(ctx, namespace, name); err != nil {
+			fmt.Fprintf(os.Stderr, "clearing the topics of a Play that is gone: %v\n", err)
+			return
+		}
+		o.marks.dropRecorded(namespace, name)
 	}
 }
 
@@ -166,8 +170,14 @@ func playFinalOf(play *Play) playFinal {
 
 // releasePlay takes the finalizer off a Play the store has recorded, or
 // one no store will record, then drops the three retained messages that
-// stood for it. The finalizer goes first, because the object is what a
-// person is waiting on and the topics are the operator's own to tidy.
+// stood for it. The finalizer goes first, because the store's recorded
+// mark is what releases the Play, and a release that did not land after
+// the clears would wait for a mark that the store does not publish
+// again.
+//
+// The desk keeps the recorded mark when the bus did not take the clears.
+// The next pass then finds a mark whose Play is gone and clears again
+// (reconcilePlays), so a clear that the bus dropped is not lost.
 //
 // The line names the Play by its uid and its work, because its name is
 // minted from the title.
@@ -186,19 +196,27 @@ func (o *operator) releasePlay(ctx context.Context, play *Play, why string) {
 		fmt.Fprintf(os.Stderr, "releasing the Play with uid %s: %s\n", play.Metadata.UID, playError(err, name))
 		return
 	}
-	o.clearPlayTopics(namespace, name)
-	o.marks.dropRecorded(namespace, name)
 	audience := playAudienceOf(play)
 	o.logf("released the Play with uid %s of %s, because %s", play.Metadata.UID,
 		workNamed(audience.Aliases, audience.Season, audience.Episode), why)
+	if err := o.clearPlayTopics(ctx, namespace, name); err != nil {
+		fmt.Fprintf(os.Stderr, "clearing the topics of the Play with uid %s: %s\n", play.Metadata.UID, playError(err, name))
+		return
+	}
+	o.marks.dropRecorded(namespace, name)
 }
 
 // clearPlayTopics drops every retained message one Play stood on the
 // bus: what the operator said about it, and what the store said back.
-func (o *operator) clearPlayTopics(namespace, name string) {
-	o.clearTopic(playAudienceTopic(o.topicBase, namespace, name))
-	o.clearTopic(playFinalTopic(o.topicBase, namespace, name))
-	o.clearTopic(playRecordedTopic(o.topicBase, namespace, name))
+// The store's recorded mark goes last, and the clears stop at the first
+// one that the bus did not take. So while any topic of the Play stands,
+// the recorded mark stands too, and the broker delivers it again at the
+// operator's next subscribe, which leads a pass to clear again.
+func (o *operator) clearPlayTopics(ctx context.Context, namespace, name string) error {
+	return o.clearTopics(ctx,
+		playAudienceTopic(o.topicBase, namespace, name),
+		playFinalTopic(o.topicBase, namespace, name),
+		playRecordedTopic(o.topicBase, namespace, name))
 }
 
 // playError is an API error about one Play as a line may carry it. The

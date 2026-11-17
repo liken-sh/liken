@@ -480,7 +480,12 @@ func (o *operator) pass() {
 	// drops it.
 	for _, key := range o.reports.retain(live) {
 		namespace, name, _ := strings.Cut(key, "/")
-		o.clearLibraryTopics(namespace, name)
+		// The broker delivers a report that this clear leaves standing
+		// again at the next subscribe, and the pass after it clears
+		// again.
+		if err := o.clearLibraryTopics(ctx, namespace, name); err != nil {
+			fmt.Fprintf(os.Stderr, "clearing the topics of the departed library %s/%s: %v\n", namespace, name, err)
+		}
 		o.metrics.dropLibrary(name)
 	}
 	o.paths.retain(live)

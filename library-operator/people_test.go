@@ -196,13 +196,13 @@ func TestAPersonWhoseReleaseDoesNotLandIsHeld(t *testing.T) {
 			person.Metadata.Finalizers = []string{progressFinalizer}
 			person.Metadata.DeletionTimestamp = "2026-09-06T21:14:02Z"
 			cluster.broken[http.MethodPatch+" "+personPath("person-a")] = testCase.status
-			operator := testOperator(t, cluster)
+			operator := connectedOperator(t, cluster)
 			publishForgotten(operator, "person-a", testLibraryNamespace)
 
 			operator.pass()
 
-			if operator.marks.forgottenBy("person-a") == nil {
-				t.Error("the desk dropped the answers about a person the operator still holds")
+			if cluster.heldPerson("person-a") == nil {
+				t.Error("the person is released after a release that did not land")
 			}
 		})
 	}
