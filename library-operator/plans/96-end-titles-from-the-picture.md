@@ -361,17 +361,35 @@ next placing `Job`. The worker does not place. One path writes every
 placement, and the placing `Job`'s small run covers a video that a
 worker reads after the model exists.
 
-**When the placing `Job` runs.** The operator starts it on an event,
-never on a timer, and runs at most one for each `Library` at a time:
+**When the placing `Job` runs.** Every run places every reading of the
+`Library`, and writes only the rows that changed. The first design had
+a small run for the folders with a new reading, and the measurement
+above made it needless: a library of 8,000 videos takes about half a
+minute on four threads. The operator starts a run on an event, never on
+a timer, and runs at most one for each `Library` at a time. The
+reporter counts the Library's readings and its placement rows in the
+catalog, and the last run's result, in the Library's status, holds the
+time of the model it placed with and both counts. A run starts when:
 
-- **A full run** places every reading when the model on the volume is
-  not the model of the last full run. The fit `Job` reports the time of
-  its model in `status.titlesModels`, and the placing `Job` reports the
-  time of the model it placed with, over the bus, as the fit does.
-- **A small run** places only the folders that hold a reading with no
-  placement, when the catalog counts such readings. A reading worker
-  that reads for days then starts one small run after another, each of
-  minutes.
+- the model on the volume is not the model of the last run, which is
+  how a new fit places the whole `Library` again;
+- the catalog holds fewer placement rows than the last run wrote, which
+  is how a catalog that is built again gets its placements back;
+- 50 readings have landed since the last run, so that a reading worker
+  that reads for days does not start a `Job` for each video;
+- or any reading has landed since the last run and no reading worker of
+  the `Library` runs, so that the last videos of a backfill and a
+  single new episode do not wait for 50.
+
+A video whose reading holds no end titles gets no row, because a mark
+with no start means "from the start of the file" to every reader. The
+run counts those videos in its result.
+
+**What a person reads.** The entry of `status.titlesModels` for the end
+titles holds the last run: the time of the model it placed with, the
+readings it placed, the placements it wrote, and how many of them have
+a confidence of 0.6 or more. The run posts one `Event` on the
+`Library`.
 
 **What it reuses.** The placing `Job` takes the parts of the fit `Job`
 in `titlesfitjob.go` and `titlesfitrun.go`: the builder, the trigger
@@ -384,7 +402,8 @@ both `Job`s call, and no copy of a builder or a trigger is made.
 **The steps, in the order they ship.**
 
 1. Profile `place`, and give it `--threads`. Built on 2026-11-17.
-2. Add the `confidence` column to the marks table.
+2. Add the `confidence` column to the marks table. Built on
+   2026-11-17.
 3. Build the placing `Job`, its trigger, and its result in the status.
 4. Rank the placement in the estimate, change the end titles to "latest
    wins", and write the credits row for every video with a clue.

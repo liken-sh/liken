@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"reflect"
+	"slices"
 	"testing"
 	"testing/synctest"
 )
@@ -64,6 +65,17 @@ func landProviderMarks(t *testing.T, catalog *Catalog, path string, marks ...mar
 	}
 	files := []fileRow{{Library: estimateLibrary, Path: path, Type: fileTypeVideo}}
 	if _, err := catalog.UpsertMarks(t.Context(), files, marks); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The titles model's placement of one file's end titles lands the way the
+// placing Job writes it.
+func landPlacement(t *testing.T, catalog *Catalog, path string, start int64, confidence float64) {
+	t.Helper()
+	row := markRow{Library: estimateLibrary, Path: path, Ordinal: titlesPlacementOrdinal, Kind: markKindCredits,
+		Start: &start, Source: markSourceTitles, Confidence: &confidence}
+	if _, err := catalog.UpsertMarks(t.Context(), nil, []markRow{row}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -265,4 +277,18 @@ func TestTheCloseContainerDerivesTheMarkEstimates(t *testing.T) {
 			t.Errorf("second episode = %v, want the series' estimate", got)
 		}
 	})
+}
+
+// A placement is not an estimate. The derivation deletes an estimate row
+// that it derives no more, and it leaves the placement of a file in place.
+func TestADerivationKeepsThePlacementOfAFile(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	seedEstimateSeries(t, catalog, 0)
+	landPlacement(t, catalog, secondEpisode, 2880000, 0.3)
+
+	deriveEstimates(t, catalog)
+
+	if got, want := confidencesOfFile(t, agent, estimateLibrary, secondEpisode), []string{"0.30"}; !slices.Equal(got, want) {
+		t.Errorf("confidences = %v, want the placement kept", got)
+	}
 }

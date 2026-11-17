@@ -78,6 +78,11 @@ const titlesMarkedSQL = `SELECT count(DISTINCT m.path), count(DISTINCT COALESCE(
 // The source of the marks this fact writes: the placements of the model.
 const markSourceTitles = "titles"
 
+// The ordinal of the placement of a file's end titles. Like the estimate's
+// rows, it is below zero, so the walk's write of the marks ledger leaves it
+// in place.
+const titlesPlacementOrdinal = -3
+
 // The count of one Library's videos that a fit can learn from.
 func (c *Catalog) titlesMarked(ctx context.Context, library string) (titlesMarked, error) {
 	var marked titlesMarked

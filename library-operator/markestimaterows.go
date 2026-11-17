@@ -122,16 +122,19 @@ func (c *Catalog) estimateFiles(ctx context.Context, library string) ([]estimate
 	return files, err
 }
 
-// The providers' credits, preview, and intro candidates of every file, and
-// the estimate rows the table holds now, by their key.
+// The providers' credits, preview, and intro candidates of every file with
+// the titles model's placement of the file, and the estimate rows the table
+// holds now, by their key. A placement is an input of the estimate like a
+// provider's candidate, so it is not among the estimate rows, which the
+// derivation deletes when it derives them no more.
 func (c *Catalog) estimateMarks(ctx context.Context, library string) (map[string][]markRow, map[markKey]markRow, error) {
 	provided := map[string][]markRow{}
 	held := map[markKey]markRow{}
-	err := c.stream(ctx, `SELECT path, ordinal, kind, start_ms, end_ms, source FROM marks `+
+	err := c.stream(ctx, `SELECT path, ordinal, kind, start_ms, end_ms, source, confidence FROM marks `+
 		`WHERE library = ? AND (ordinal < 0 OR kind IN ('`+markKindCredits+`', '`+markKindPreview+`', '`+markKindIntro+`')) `+
 		`ORDER BY path, ordinal`,
 		[]any{library}, func(cells []any) error {
-			if len(cells) < 6 {
+			if len(cells) < 7 {
 				return nil
 			}
 			path, _ := cells[0].(string)
@@ -139,7 +142,10 @@ func (c *Catalog) estimateMarks(ctx context.Context, library string) (map[string
 			source, _ := cells[5].(string)
 			row := markRow{Library: library, Path: path, Ordinal: int(cellNumber(cells[1])), Kind: kind,
 				Start: cellMillis(cells[3]), End: cellMillis(cells[4]), Source: source}
-			if row.Ordinal < 0 {
+			if confidence, held := cells[6].(float64); held {
+				row.Confidence = &confidence
+			}
+			if row.Ordinal < 0 && row.Ordinal != titlesPlacementOrdinal {
 				held[markKey{Path: path, Ordinal: row.Ordinal}] = row
 				return nil
 			}

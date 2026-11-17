@@ -42,6 +42,31 @@ func nullText(value sql.NullInt64) string {
 	return time.Duration(value.Int64 * int64(time.Millisecond)).String()
 }
 
+// The confidence of each row of one file in ordinal order, and "null" for a
+// row that holds none.
+func confidencesOfFile(t *testing.T, agent *sqliteAgent, library, path string) []string {
+	t.Helper()
+	rows, err := agent.db.Query(`SELECT confidence FROM marks WHERE library = ? AND path = ? ORDER BY ordinal`,
+		library, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	lines := []string{}
+	for rows.Next() {
+		var confidence sql.NullFloat64
+		if err := rows.Scan(&confidence); err != nil {
+			t.Fatal(err)
+		}
+		if !confidence.Valid {
+			lines = append(lines, "null")
+			continue
+		}
+		lines = append(lines, strconv.FormatFloat(confidence.Float64, 'f', 2, 64))
+	}
+	return lines
+}
+
 // One video file of one library, as the walk reads it.
 func markedVideo(library, path string) fileRow {
 	return fileRow{Library: library, Path: path, Type: fileTypeVideo, Role: fileRolePrimary, Present: true}
@@ -221,5 +246,26 @@ func TestTheWalkReadsTheMarksLedgerOfASeasonFolder(t *testing.T) {
 	}
 	if result.marks[0].Start != nil || *result.marks[0].End != 107000 {
 		t.Errorf("the first span = %+v, want an open start and the end as written", result.marks[0])
+	}
+}
+
+// A placement keeps how sure the model was of it, and a provider's mark
+// keeps a null, because nothing says how sure a submission is.
+func TestUpsertMarksWritesTheConfidenceOfAPlacementOnly(t *testing.T) {
+	catalog, agent := newSQLiteCatalog(t)
+	file := markedVideo("house/series", "Show/Season 01/Show - S01E02.mkv")
+	sure := 0.83
+
+	if _, err := catalog.UpsertMarks(t.Context(), nil, []markRow{
+		{Library: file.Library, Path: file.Path, Ordinal: titlesPlacementOrdinal, Kind: markKindCredits,
+			Start: milliseconds(3251000), Source: markSourceTitles, Confidence: &sure},
+		{Library: file.Library, Path: file.Path, Ordinal: 0, Kind: markKindCredits,
+			Start: milliseconds(3253000), Source: providerBlockTheIntroDB},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := confidencesOfFile(t, agent, file.Library, file.Path), []string{"0.83", "null"}; !slices.Equal(got, want) {
+		t.Errorf("confidences = %v, want %v", got, want)
 	}
 }

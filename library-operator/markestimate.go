@@ -133,11 +133,12 @@ func (f estimateFile) secondHalf(start int64) bool {
 
 // The provider candidates of one kind with a start and an end that mark
 // something. An absent start is the start of the file, and an absent end is
-// the end of the file, as the readers take them.
+// the end of the file, as the readers take them. The titles model's
+// placement is among the file's marks and is no provider's candidate.
 func (f estimateFile) candidates(kind string) []timeSpan {
 	var spans []timeSpan
 	for _, mark := range f.marks {
-		if mark.Kind != kind {
+		if mark.Kind != kind || mark.Source == markSourceTitles {
 			continue
 		}
 		span := timeSpan{Start: 0, End: f.duration}

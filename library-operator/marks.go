@@ -45,6 +45,9 @@ type markRow struct {
 	Start   *int64
 	End     *int64
 	Source  string
+	// How sure the titles model was of a placement, from 0 to 1, and nil on
+	// every other row.
+	Confidence *float64
 }
 
 // The file one marks ask names: the work it holds, by the ids the catalog's

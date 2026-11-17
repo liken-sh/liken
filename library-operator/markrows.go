@@ -37,13 +37,13 @@ func (c *Catalog) UpsertMarks(ctx context.Context, files []fileRow, rows []markR
 	}
 	for _, row := range rows {
 		statements = append(statements, statement{
-			sql: `INSERT INTO marks (library, path, ordinal, kind, start_ms, end_ms, source) ` +
-				`VALUES (?, ?, ?, ?, ?, ?, ?) ` +
+			sql: `INSERT INTO marks (library, path, ordinal, kind, start_ms, end_ms, source, confidence) ` +
+				`VALUES (?, ?, ?, ?, ?, ?, ?, ?) ` +
 				`ON CONFLICT (library, path, ordinal) DO UPDATE SET ` +
 				`kind = excluded.kind, start_ms = excluded.start_ms, end_ms = excluded.end_ms, ` +
-				`source = excluded.source`,
+				`source = excluded.source, confidence = excluded.confidence`,
 			params: []any{row.Library, row.Path, row.Ordinal, row.Kind,
-				markEnd(row.Start), markEnd(row.End), row.Source},
+				markEnd(row.Start), markEnd(row.End), row.Source, markConfidence(row.Confidence)},
 		})
 	}
 	return c.apply(ctx, statements)
@@ -56,6 +56,15 @@ func markEnd(end *int64) any {
 		return nil
 	}
 	return *end
+}
+
+// A row that is no placement binds its confidence as SQL NULL, because
+// nothing says how sure it is, and zero would say "not sure at all".
+func markConfidence(confidence *float64) any {
+	if confidence == nil {
+		return nil
+	}
+	return *confidence
 }
 
 // DeleteMarks removes mark rows by their whole primary key.
