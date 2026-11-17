@@ -37,6 +37,14 @@ import (
 	"time"
 )
 
+// clockAllowance is how long before its minting an admin certificate is
+// valid from. A command sends its first request in the second that it
+// mints the credential, and the API server refuses a certificate whose
+// NotBefore is later than its own clock. So a machine whose clock is
+// behind the workstation's by less than this still accepts the
+// credential.
+const clockAllowance = 5 * time.Minute
+
 // Kubeconfig computes an admin credential from the identity in dir,
 // and writes dir/kubeconfig, pointed at server. The caller resolves
 // server: the CLI reads it from the deployment's cluster.yaml, or
@@ -80,7 +88,7 @@ func Kubeconfig(dir, name, server string, out io.Writer) error {
 			CommonName:   "admin",
 			Organization: []string{"system:masters"},
 		},
-		NotBefore:   now,
+		NotBefore:   now.Add(-clockAllowance),
 		NotAfter:    now.AddDate(0, 0, 365),
 		KeyUsage:    x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},

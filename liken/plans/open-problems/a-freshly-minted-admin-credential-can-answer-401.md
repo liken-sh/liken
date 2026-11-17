@@ -13,8 +13,9 @@ commands in `cli/cluster.go` and `cli/main.go`. It calls
 `identity.Kubeconfig` in `identity/kubeconfig.go`, which makes a new
 P-256 key and signs an `admin` certificate in `system:masters` with the
 client CA, and writes both into `<deployment-dir>/identity/kubeconfig`.
-The certificate's `NotBefore` is `time.Now()` on the workstation, and
-its `NotAfter` is 365 days later. The command then sends its first
+When the failure was seen, the certificate's `NotBefore` was
+`time.Now()` on the workstation, and its `NotAfter` was 365 days later.
+Since 2026-11-17 `NotBefore` is five minutes earlier. The command then sends its first
 request with that credential within the same second.
 
 ## Evidence
@@ -56,10 +57,12 @@ the second, which makes it earlier, not later.
 - A loop that runs `liken plugins list <deployment-dir>` many times and
   records each status, to find out how often it fails.
 
-## A change worth making either way
+## A change made either way
 
 Setting `NotBefore` a few minutes before `time.Now()` is common for a
 certificate that is used at once. It costs nothing, and it removes clock
-difference as a cause on a cluster whose clocks do drift. It would not
-fix this failure if the cause is something else, so it does not close
-this problem.
+difference as a cause on a cluster whose clocks do drift. Since
+2026-11-17 `identity.Kubeconfig` sets `NotBefore` five minutes before
+the minting (`clockAllowance` in `identity/kubeconfig.go`). The evidence
+above rules out a clock difference for the failure that was seen, so
+the change does not close this problem.

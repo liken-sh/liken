@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"sigs.k8s.io/yaml"
 )
@@ -131,6 +132,26 @@ func TestAdminCertificateChainsToTheClientCA(t *testing.T) {
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	}); err != nil {
 		t.Errorf("admin certificate does not verify as a client cert: %v", err)
+	}
+}
+
+// A command sends its first request in the same second that it mints the
+// credential. An API server whose clock is behind the workstation's refuses
+// a certificate that is not valid yet, so the certificate is valid from a
+// few minutes before it was minted.
+func TestAdminCertificateIsValidOnAnAPIServerWhoseClockIsBehind(t *testing.T) {
+	_, doc := computedKubeconfig(t)
+	block, _ := pem.Decode(doc.Users[0].User.ClientCertificateData)
+	admin, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	behind := time.Now().Add(-time.Minute)
+
+	if admin.NotBefore.After(behind) {
+		t.Errorf("the certificate is valid from %s, which is after the time %s on a clock one minute behind",
+			admin.NotBefore.UTC().Format(time.RFC3339), behind.UTC().Format(time.RFC3339))
 	}
 }
 
