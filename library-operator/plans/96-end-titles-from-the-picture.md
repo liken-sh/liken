@@ -358,7 +358,7 @@ A placement is derived from the readings and the model, and both are
 on the volume. So, like an estimate, nothing on the volume holds it,
 and a catalog that is built again gets its placements back from the
 next placing `Job`. The worker does not place. One path writes every
-placement, and the placing `Job`'s small run covers a video that a
+placement, and a run of the placing `Job` covers a video that a
 worker reads after the model exists.
 
 **When the placing `Job` runs.** Every run places every reading of the
