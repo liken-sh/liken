@@ -13,6 +13,12 @@
 #   make site       build the site that liken.sh serves, into dist/docs/
 #   make versions   report every pin against its upstream
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # The generator reads each component's package.toml and writes the
 # root workflow, one workflow for each component, and the bake file
 # that builds every image. It also writes the Dependabot configuration,

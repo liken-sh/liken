@@ -19,6 +19,12 @@ INPUTS := VERSION fetch.sh build.sh artifact.sh buildroot.sh common.config os.co
 	external.desc Config.in external.mk versions.mk wpa_supplicant.config \
 	$(shell find patches iscsi -type f) ../../toolchains/images.toml
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 OUTPUTS := dist/sbin/mke2fs dist/sbin/mount.nfs dist/sbin/iscsid \
 	dist/sbin/iscsiadm dist/sbin/wpa_supplicant \
 	dist/zoneinfo/UTC dist/versions dist/sbom.cdx.json

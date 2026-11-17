@@ -1,6 +1,12 @@
 # The init domain: liken itself, the only program here that is not
 # vendored. main.go's header comment explains what it is.
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # The liken version that this binary carries, stamped into the
 # machine package at link time (-X overwrites a package variable in
 # the final binary; no generated files, no build step). This version

@@ -15,6 +15,12 @@
 include ../version.mk
 DIST ?= dist
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 all: $(DIST)/liken-logs-image.tar
 
 $(DIST)/liken-logs: ../go.mod ../go.sum $(wildcard *.go) \

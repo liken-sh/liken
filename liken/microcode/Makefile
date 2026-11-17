@@ -9,6 +9,12 @@
 # the VERSION file beside this Makefile, never from a caller.
 override VERSION := $(strip $(file <VERSION))
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # The AMD half comes from the linux-firmware domain's fetched tree,
 # so liken/Makefile orders that domain before this one. The
 # linux-firmware pin is a prerequisite here, because the output path

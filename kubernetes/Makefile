@@ -4,6 +4,12 @@
 # One run of the tests gives both the race check and the coverage
 # profile, because -race with -covermode=atomic does both.
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # A package with no test file writes no rows to the profile, so the
 # gate never counts it: its number is not low, it is missing. This
 # lists such packages, and test fails on the first one.

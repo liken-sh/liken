@@ -306,6 +306,10 @@ during `mksquashfs` or the licensing render leaves a truncated file
 that is newer than its inputs, which Make then treats as current. Add
 the declaration.
 
+Built on 2026-11-17: every Makefile of the repository declares
+`.DELETE_ON_ERROR`, and a test in `ci/makefiles_test.go` fails on one
+that does not.
+
 ## The certificate workflow runs a pinned tool with a narrow token
 
 This is supply-chain hardening of medium priority.

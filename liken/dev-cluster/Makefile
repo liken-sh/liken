@@ -78,6 +78,12 @@ KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 VMLINUZ := ../kernel/dist/$(KERNEL_VERSION)/vmlinuz
 INITRD := image/initrd.cpio
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # Each node's MAC addresses come from its node number, so they never
 # collide. QEMU's default gives every guest the same address
 # (52:54:00:12:34:56). Two machines that share a MAC address on one

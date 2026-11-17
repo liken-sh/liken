@@ -3,6 +3,12 @@
 # main.go's header comment explains what the toolkit is, and why its
 # logic lives in the domain packages it dispatches to.
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # This is the same version stamp that every liken binary carries. See
 # init/Makefile for the full explanation of the -X mechanism, and
 # version.mk for where the version comes from. The toolkit reports

@@ -32,6 +32,12 @@ KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 VMLINUZ := ../kernel/dist/$(KERNEL_VERSION)/vmlinuz
 INITRD = image/initrd.cpio
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # Each lab spells its name into its MAC addresses and its multicast
 # group, so a stray frame or a duplicate address always names its
 # lab: this one uses "G" (0x47) bytes where the dev cluster uses "L"

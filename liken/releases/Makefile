@@ -64,6 +64,12 @@
 # cutting a release, a plain `make run` still boots exactly what it
 # always did.
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # VERSION names which version to produce: `make release
 # VERSION=2026.07.11-001`. There is no default, because the command
 # exists to name a release, so the name must be given. The grammar (a

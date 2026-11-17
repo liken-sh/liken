@@ -19,6 +19,12 @@ include ../version.mk
 DIST ?= dist
 USERLAND_DIST := ../userland/dist
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 all: $(DIST)/iscsid-image.tar
 
 $(DIST)/iscsid $(DIST)/iscsiadm &: $(USERLAND_DIST)/sbin/iscsid $(USERLAND_DIST)/sbin/iscsiadm

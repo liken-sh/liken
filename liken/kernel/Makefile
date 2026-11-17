@@ -4,6 +4,12 @@
 # version of those packages into the two things the rest of the build
 # needs: a bootable vmlinuz and an indexed module tree.
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # The pin is a file, not a variable, so a kernel upgrade shows as a
 # one-line, reviewable diff. $(file <...) reads the file at parse
 # time; strip removes the trailing newline.

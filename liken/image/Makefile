@@ -26,6 +26,12 @@ LOGS_DIST ?= ../logs/dist
 OPENISCSI_DIST ?= ../open-iscsi/dist
 USERLAND_DIST ?= ../userland/dist
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 KERNEL_VERSION := $(strip $(file <../kernel/VERSION))
 K3S_VERSION := $(strip $(file <../k3s/VERSION))
 XTABLES_VERSION := $(strip $(file <../xtables/VERSION))

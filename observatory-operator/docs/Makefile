@@ -7,6 +7,12 @@
 HUGO := go tool hugo
 CRDREF := go tool crdref
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # crdref comes from brand/ through the replace directive in go.mod, so
 # an edit to its sources never changes go.mod. Each generated page
 # names those sources as inputs, and go.mod for the generator's own
@@ -108,7 +114,6 @@ $(REFERENCE)/domes.md: ../deploy/domes-crd.yaml $(CRDREF_SOURCES)
 
 $(REFERENCE)/weatherstations.md: ../deploy/weatherstations-crd.yaml $(CRDREF_SOURCES)
 	$(CRDREF) -title WeatherStation -weight 170 $< $@
-
 
 $(REFERENCE)/switches.md: ../deploy/switches-crd.yaml $(CRDREF_SOURCES)
 	$(CRDREF) -title Switch -weight 180 $< $@

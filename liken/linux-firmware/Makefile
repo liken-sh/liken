@@ -10,6 +10,12 @@
 # the VERSION file beside this Makefile, never from a caller.
 override VERSION := $(strip $(file <VERSION))
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # The derived set is a function of two pins: this domain's release
 # and the kernel build whose modules declare the names. The kernel
 # pin is a prerequisite here, because the output path names only this

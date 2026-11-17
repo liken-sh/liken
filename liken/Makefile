@@ -15,6 +15,12 @@
 # artifacts that the domains exchange, and it delegates the work of
 # producing them.
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # liken's own version stamps the binaries. For a release build, the
 # stamp is a release name. For every development build, the stamp is
 # the git-described commit. version.mk explains the mechanism, and

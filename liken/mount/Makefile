@@ -7,6 +7,12 @@
 # cluster, and reports nothing about itself. The liken version the
 # machine reports covers it, the same way it covers init.
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # CGO_ENABLED=0 forbids C bindings, which makes Go emit a fully
 # static binary: no libc, no dynamic loader. The image ships no
 # shared libraries, so a dynamically linked program would have

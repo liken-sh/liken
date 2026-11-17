@@ -3,6 +3,12 @@
 # each manual one way.
 HUGO := go tool hugo
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 SKILLS := go tool skills
 BASE := https://liken.sh/git/
 

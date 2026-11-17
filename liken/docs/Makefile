@@ -17,6 +17,12 @@
 # file.
 HUGO := go tool hugo
 
+# A recipe that fails, or a build that is killed during one, leaves its
+# target partly written and newer than its inputs. make deletes that
+# target, so the next build makes it again and does not take it as
+# current.
+.DELETE_ON_ERROR:
+
 # The reference pages for the CRDs are generated, never edited:
 # the schemas hold every field's description, and crdref arranges
 # them into pages, so the reference cannot drift from what the API
