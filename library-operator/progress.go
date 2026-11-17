@@ -283,7 +283,7 @@ func (p *progress) recordFinal(ctx context.Context, play string, payload []byte)
 func (p *progress) forget(ctx context.Context, person string, payload []byte) {
 	topic := personForgottenTopic(p.topicBase, person, p.namespace)
 	if len(payload) == 0 {
-		p.bus.Publish(topic, nil, true)
+		p.answer(topic, nil)
 		return
 	}
 	if err := p.store.forgetPerson(ctx, person); err != nil {
@@ -291,7 +291,30 @@ func (p *progress) forget(ctx context.Context, person string, payload []byte) {
 		return
 	}
 	answer, _ := json.Marshal(map[string]string{"at": time.Now().UTC().Format(time.RFC3339)})
-	p.bus.Publish(topic, answer, true)
+	p.answer(topic, answer)
+}
+
+// How long one answer waits for room in the bus's write queue.
+const progressAnswerWait = 10 * time.Second
+
+// answer publishes one retained message that the role publishes once: a
+// recorded mark, a forgotten answer, or the clear of a topic. The role
+// reads the messages of many Plays in one burst when it subscribes, and
+// it answers each one, so the answers can outrun the bus's write queue.
+// The operator holds a Play's finalizer until it reads the recorded mark
+// and a Person's until it reads the forgotten answer, and nothing
+// publishes a dropped answer again while the session lasts. So the
+// answer waits for room in the queue.
+//
+// An answer that the bus still does not take leaves a line in the pod
+// log. The message it answers stays retained on the broker, and the
+// role's next subscribe delivers it again.
+func (p *progress) answer(topic string, payload []byte) {
+	ctx, done := context.WithTimeout(context.Background(), progressAnswerWait)
+	defer done()
+	if err := p.bus.PublishWait(ctx, topic, payload, true); err != nil {
+		p.logf("could not publish on %s: %v", topic, err)
+	}
 }
 
 // publishRecorded says what the role wrote last for one Play, retained,
@@ -305,7 +328,7 @@ func (p *progress) publishRecorded(play string, item, position int, ended bool) 
 		Ended:    ended,
 		At:       time.Now().UTC().Format(time.RFC3339),
 	})
-	p.bus.Publish(playRecordedTopic(p.topicBase, p.namespace, play), payload, true)
+	p.answer(playRecordedTopic(p.topicBase, p.namespace, play), payload)
 }
 
 // seconds reads one H:MM:SS value as seconds. A value it cannot read

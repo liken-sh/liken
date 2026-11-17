@@ -44,13 +44,13 @@ func (p *progress) recordMark(ctx context.Context, name string, payload []byte) 
 	mark := titleMark{}
 	if err := json.Unmarshal(payload, &mark); err != nil {
 		p.logf("the mark %s reads as no mark, and the role cleared it: %v", name, err)
-		p.bus.Publish(topic, nil, true)
+		p.answer(topic, nil)
 		return
 	}
 	if unknown, found := mark.unknownMark(); found {
 		p.logf("the mark %s names %q, which is neither %s nor %s, and the role cleared it",
 			name, unknown, markWatched, markCleared)
-		p.bus.Publish(topic, nil, true)
+		p.answer(topic, nil)
 		return
 	}
 
@@ -92,13 +92,13 @@ func (p *progress) recordMark(ctx context.Context, name string, payload []byte) 
 
 	wait := markClearIn(mark.At, time.Now())
 	if wait == 0 {
-		p.bus.Publish(topic, nil, true)
+		p.answer(topic, nil)
 		return
 	}
 	// The timer is a clock: the retention of one mark. A role that restarts
 	// before it fires reads the mark back on its next subscription and
 	// schedules the clear again from the same press.
-	time.AfterFunc(wait, func() { p.bus.Publish(topic, nil, true) })
+	time.AfterFunc(wait, func() { p.answer(topic, nil) })
 }
 
 // markClearIn is how long a mark pressed at this Unix time stays on the

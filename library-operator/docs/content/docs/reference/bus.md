@@ -87,8 +87,10 @@ dropped topic again on its next pass, which runs within ten seconds.
 
 A message that a sender publishes once is not dropped on a full queue.
 The publish waits for room: an outside play of the Jellyfin backfill
-and of the jellyfin role's reconcile waits up to 30 seconds, and the
-clear of a topic whose object goes waits up to 5 seconds. The operator
+and of the jellyfin role's reconcile waits up to 30 seconds, the
+clear of a topic whose object goes waits up to 5 seconds, and each
+answer of the progress role, its `recorded` mark and its `forgotten`
+answer, waits up to 10 seconds. The operator
 clears the topics of a `Person` and of a `Library` before it releases
 the object's finalizer, so a `Person` or a `Library` that is deleting
 stays until the broker takes the clears. It clears the topics of a
