@@ -20,6 +20,7 @@ use crate::picture::Picture;
 pub struct Probe {
     pub width: usize,
     pub height: usize,
+    // The second the video stream ends.
     pub duration: f64,
 }
 
@@ -40,6 +41,21 @@ struct ProbeFormat {
     duration: String,
 }
 
+// The size of the video and the second its video stream ends.
+//
+// The duration that a container states is the end of its longest stream,
+// and a subtitle track or a wrong header can end long after the last frame.
+// A window measured from that duration starts after the video, where ffmpeg
+// decodes no frame. So the end is the end of the last packet of the video
+// stream. ffprobe seeks to the container's duration, the demuxer goes back
+// to the last keyframe before it, and ffprobe prints the packets from there
+// to the end of the stream.
+//
+// A file that was cut short states the duration of the whole video, and its
+// last packet is only where the cut is. The demuxer reports the cut on
+// stderr and ffprobe still exits with 0, so any report there fails the
+// probe with ffprobe's words. A reading of such a file would place the end
+// titles in the middle of the film.
 pub fn probe(video: &Path) -> Result<Probe, Error> {
     let output = Command::new("ffprobe")
         .args(["-v", "error", "-select_streams", "v:0"])
@@ -50,7 +66,47 @@ pub fn probe(video: &Path) -> Result<Probe, Error> {
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).into());
     }
-    parse_probe(&output.stdout)
+    let container = parse_probe(&output.stdout)?;
+    let packets = Command::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "v:0"])
+        .args(["-read_intervals", &format!("{}%", container.duration)])
+        .args(["-show_entries", "packet=pts_time,duration_time"])
+        .args(["-of", "csv=p=0"])
+        .arg(video)
+        .output()?;
+    let report = String::from_utf8_lossy(&packets.stderr);
+    if !packets.status.success() || !report.trim().is_empty() {
+        return Err(format!(
+            "ffprobe could not read the end of the video stream: {}",
+            report.trim()
+        )
+        .into());
+    }
+    let duration = video_end(&String::from_utf8_lossy(&packets.stdout))
+        .ok_or("the video stream has no packet at the end of the file")?;
+    Ok(Probe {
+        duration,
+        ..container
+    })
+}
+
+// The second the last of ffprobe's packets ends. Each line is a packet's
+// presentation time and its duration. The packets are in decoding order, so
+// the last line is not always the last frame, and a packet that states no
+// duration ends at its own time.
+fn video_end(packets: &str) -> Option<f64> {
+    packets
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split(',');
+            let at: f64 = fields.next()?.trim().parse().ok()?;
+            let length: f64 = fields
+                .next()
+                .and_then(|field| field.trim().parse().ok())
+                .unwrap_or(0.0);
+            Some(at + length)
+        })
+        .reduce(f64::max)
 }
 
 fn parse_probe(json: &[u8]) -> Result<Probe, Error> {
@@ -199,6 +255,24 @@ mod tests {
             duration: 5400.5,
         };
         assert_eq!(parse_probe(json).unwrap(), expected);
+    }
+
+    #[test]
+    fn video_end_is_the_end_of_the_latest_packet() {
+        let packets = "29.875,0.041\n29.958,0.042\n29.917,0.041\n";
+        assert_eq!(video_end(packets), Some(30.0));
+    }
+
+    #[test]
+    fn video_end_reads_a_packet_with_no_duration_and_a_line_with_more_fields() {
+        assert_eq!(video_end("12.5,N/A\n"), Some(12.5));
+        assert_eq!(video_end("12.5,0.5,\n"), Some(13.0));
+    }
+
+    #[test]
+    fn video_end_is_none_without_a_packet() {
+        assert_eq!(video_end(""), None);
+        assert_eq!(video_end("\n"), None);
     }
 
     #[test]

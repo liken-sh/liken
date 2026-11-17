@@ -62,9 +62,16 @@ default. The end titles of 95% of the films of one home library started
 in their last 728 seconds, and those of 95% of its episodes in their
 last 256 seconds, by the marks of two databases on 2026-11-11.
 
+The window ends where the video stream ends, which `read` takes from
+the stream's last packet. The duration that a container states can be
+later, because a subtitle track can outlast the picture, and a window
+measured from it can start after the last frame. When ffprobe reports
+an error as it reads the end of the stream, as it does for a file that
+was cut short, `read` fails with ffprobe's text and writes no reading.
+
 The first line of `<video>.jsonl` is the header. It names the format,
 `liken.sh/titles/reading/v1`, the video file's name and its `size` in
-bytes, the video's length, the second the reading starts at, the two
+bytes, the second the video stream ends, the second the reading starts at, the two
 models with the SHA-256 of each file, the device, and the size of the
 decoded frames. `read` leaves a reading alone when its format, its
 `size`, and its models match, and writes it again when one differs.
