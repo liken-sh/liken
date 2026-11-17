@@ -122,14 +122,37 @@ pub fn named(lines: &[String], names: &[String]) -> usize {
 
 // True when the line holds the name with at most one wrong letter in ten.
 // The reader takes an l for an I and an E for an F, so an exact match
-// misses names that a person reads at once. This is Sellers' algorithm: the edit distance from the name to the
-// closest substring of the line.
+// misses names that a person reads at once.
+//
+// Most names are in no frame, and the comparison below costs the length of
+// the name times the length of the frame's text, for every name of every
+// frame. So two cheaper tests run first, and neither changes an answer. A
+// name of fewer than ten letters allows no wrong letter, so the line holds
+// it only as it is written. A longer name that allows one or two wrong
+// letters is cut into one piece more than the letters it allows. The wrong
+// letters can then be in all the pieces but one, so a line that holds the
+// name holds at least one piece as it is written, and a line that holds no
+// piece is not compared.
 fn holds(line: &str, name: &str) -> bool {
-    let (line, name) = (line.as_bytes(), name.as_bytes());
     let allowed = name.len() / 10;
+    if allowed == 0 {
+        return line.contains(name);
+    }
     if line.len() + allowed < name.len() {
         return false;
     }
+    let piece = name.len() / (allowed + 1);
+    let pieces = name.as_bytes().chunks(piece).take(allowed);
+    let last = &name.as_bytes()[allowed * piece..];
+    let found = |piece: &[u8]| line.as_bytes().windows(piece.len()).any(|at| at == piece);
+    pieces.chain([last]).any(found) && nearest(line, name) <= allowed
+}
+
+// The fewest wrong, missing, and added letters between the name and any
+// part of the line. This is Sellers' algorithm: the edit distance from the
+// name to the closest substring of the line.
+fn nearest(line: &str, name: &str) -> usize {
+    let (line, name) = (line.as_bytes(), name.as_bytes());
     let mut row: Vec<usize> = vec![0; line.len() + 1];
     for (i, letter) in name.iter().enumerate() {
         let mut diagonal = row[0];
@@ -140,9 +163,7 @@ fn holds(line: &str, name: &str) -> bool {
             row[j + 1] = cost.min(row[j] + 1).min(diagonal + 1);
         }
     }
-    row.iter()
-        .min()
-        .is_some_and(|distance| *distance <= allowed)
+    row.into_iter().min().unwrap_or(name.len())
 }
 
 #[cfg(test)]
@@ -194,5 +215,39 @@ mod tests {
         assert_eq!(named(&lines(&["ROCK", "CHRIS"]), &known), 1);
         assert_eq!(named(&lines(&["DEVELOPED BY", "CLYDEPHILLIPS"]), &known), 1);
         assert_eq!(named(&lines(&["CHRIS", "a rock in the road"]), &known), 0);
+    }
+
+    // The names and texts of the tests above, and texts with the wrong
+    // letters at the start, in the middle, and at the end of a name.
+    #[test]
+    fn holds_answers_as_the_whole_comparison_does() {
+        let names = [
+            "evagreen",
+            "madsmikkelsen",
+            "clydephillips",
+            "christopherjohnreilly",
+        ];
+        let texts = [
+            "lechiffremadsmikkelsfn",
+            "lechiffremadsmikkflsfn",
+            "nadsmikkelsen",
+            "madsmikkelsem",
+            "madsmikelsen",
+            "evagreem",
+            "vesperlyndevagreen",
+            "developedbyclydephillips",
+            "xhristopherjohnreillx",
+            "christopherjohnreil",
+            "christofherjahnreilly",
+            "chrxstophxrjohnrxilly",
+            "mads",
+            "",
+        ];
+        for name in names {
+            for text in texts {
+                let whole = nearest(text, name) <= name.len() / 10;
+                assert_eq!(holds(text, name), whole, "{name} in {text}");
+            }
+        }
     }
 }

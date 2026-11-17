@@ -18,8 +18,10 @@ three commands:
   It opens no video and loads no network.
 - `titles place <video>... --model FILE` prints, for each video, the
   second its end titles start and how sure the model is, from the
-  video's reading and the model file. It takes well under a second for a
-  video, so it runs again over every reading when the model changes.
+  video's reading and the model file. `--videos FILE` names more videos,
+  one on each line, and `--threads N` works out the videos' signals on
+  `N` threads. It takes well under a second for a video, so it runs
+  again over every reading when the model changes.
 
 Each cluster fits its own model from its own library. The repository
 holds no model and no list of videos.

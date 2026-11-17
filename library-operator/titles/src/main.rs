@@ -10,7 +10,8 @@ const USAGE: &str = "usage:
 
   titles train --labels FILE --out FILE [--records DIR] [--placements FILE] [--threads N]
                          [--trees N]
-  titles place <video>... --model FILE [--records DIR] [--credits FILE] [--marks FILE]
+  titles place <video>... --model FILE [--videos FILE] [--records DIR] [--credits FILE]
+                         [--marks FILE] [--threads N]
 
 read decodes the last --window seconds of each video (900 by default), and writes the text it
 finds in each second to .liken/titles/<video>.jsonl beside the video. --records names a
@@ -26,10 +27,12 @@ line of JSON. The videos of one folder are placed together, with the usual lengt
 folder's end titles as a prior. The names of a video's people come from the .liken/credits.yaml
 of its folder or of the folder above it, or from the file --credits names. --marks names a file
 of the labels' form. A video in it takes its mark as a prior, so the picture sets the second
-where the two agree and overrules the mark where they do not.
+where the two agree and overrules the mark where they do not. --videos names a file with one
+video on each line, which place takes with the videos of the command line, for a library of
+more videos than a command line holds.
 
 --models defaults to $TITLES_MODELS. --device defaults to cpu. --threads sets the CPU's inference
-threads and defaults to 1. --hwaccel vaapi decodes on the GPU.";
+threads for read and the threads that work out the signals for place, and defaults to 1. --hwaccel vaapi decodes on the GPU.";
 
 struct Args {
     flags: Vec<(String, String)>,
@@ -138,12 +141,23 @@ fn run() -> Result<(), Error> {
                 }
                 None => HashMap::new(),
             };
+            let mut videos = args.paths.clone();
+            if let Some(file) = args.path("videos") {
+                let text = std::fs::read_to_string(&file)
+                    .map_err(|e| format!("{}: {e}", file.display()))?;
+                videos.extend(
+                    text.lines()
+                        .filter(|line| !line.is_empty())
+                        .map(PathBuf::from),
+                );
+            }
             for answer in place::run(
-                &args.paths,
+                &videos,
                 &model,
                 records.as_deref(),
                 credits.as_deref(),
                 &marks,
+                args.number("threads", 1)?,
             )? {
                 println!("{}", serde_json::to_string(&answer)?);
             }

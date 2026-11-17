@@ -12,10 +12,10 @@
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
-use std::thread;
 
 use crate::Error;
 use crate::changepoint::Placement;
+use crate::each::each;
 use crate::model::{self, Model, Score, Trained};
 use crate::place::{self, Item};
 use crate::reading;
@@ -106,22 +106,6 @@ fn matrix_of(label: &Label, records: Option<&Path>) -> Option<(signals::Matrix, 
     let names = signals::people(&label.video, None, records).unwrap_or_default();
     (reading.seconds.len() >= 60)
         .then(|| (signals::matrix(&reading, &names), reading.header.duration))
-}
-
-// Runs `work` on each label on the trainer's threads and returns the
-// results in the labels' order.
-fn each<T: Send>(labels: &[Label], threads: usize, work: impl Fn(&Label) -> T + Sync) -> Vec<T> {
-    let chunk = labels.len().div_ceil(threads.max(1)).max(1);
-    thread::scope(|scope| {
-        let parts: Vec<_> = labels
-            .chunks(chunk)
-            .map(|part| scope.spawn(|| part.iter().map(&work).collect::<Vec<T>>()))
-            .collect();
-        parts
-            .into_iter()
-            .flat_map(|part| part.join().expect("a reading thread panicked"))
-            .collect()
-    })
 }
 
 struct Set {

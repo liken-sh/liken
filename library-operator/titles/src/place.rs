@@ -14,6 +14,7 @@ use serde::Serialize;
 
 use crate::Error;
 use crate::changepoint::{self, Placement, Prior};
+use crate::each::each;
 use crate::model::Model;
 use crate::reading;
 use crate::signals;
@@ -122,19 +123,23 @@ pub struct Answer {
 }
 
 // `marks` holds the videos that a database has a mark for, with the
-// second each mark gives.
+// second each mark gives. The signals of the videos are worked out on
+// `threads` threads, and a reading that does not load fails the whole run,
+// so that no video is left without an answer in silence.
 pub fn run(
     videos: &[PathBuf],
     model: &Path,
     records: Option<&Path>,
     credits: Option<&Path>,
     marks: &HashMap<PathBuf, f64>,
+    threads: usize,
 ) -> Result<Vec<Answer>, Error> {
     let model = Model::load(model)?;
-    let mut items = videos
-        .iter()
-        .map(|video| Item::new(video, records, credits, &model))
-        .collect::<Result<Vec<Item>, Error>>()?;
+    let mut items = each(videos, threads, |video| {
+        Item::new(video, records, credits, &model).map_err(|error| error.to_string())
+    })
+    .into_iter()
+    .collect::<Result<Vec<Item>, String>>()?;
     for item in &mut items {
         item.mark = marks.get(&item.video).copied();
     }
@@ -247,6 +252,7 @@ mod tests {
             None,
             None,
             &HashMap::new(),
+            2,
         )
         .unwrap();
         assert_eq!(answers[0].start, Some(70.0));

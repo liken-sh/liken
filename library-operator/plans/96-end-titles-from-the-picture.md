@@ -247,6 +247,152 @@ high is one of the [open questions](#open-questions). It replaces the
 becomes the fallback for a video with an `appearances` record and no
 reading.
 
+### Placing the end titles
+
+This section, written on 2026-11-15, holds the design of the placement
+in more detail. It replaces two earlier decisions of this plan: that a
+placement is a ledger on the volume, and that the worker places the
+video it reads. The reasons are in the points below.
+
+**The catalog holds one answer, and every reader uses it.** The media
+and library design computes each answer once, when the operator scans
+or enriches a library, and stores it. A reader uses the stored answer
+as it is, and has a fallback only for an answer that is missing. It
+does not rank or merge candidates itself, so the screens stay simple
+and every screen gives the same answer. Today three readers each take
+every credits row of a video, group the rows that overlap, and use the
+median start: the up-next card in `media-operator/display/src/marks.rs`,
+the watched rule in `watched.go`, and the media browser's `watched.rs`,
+which share the test table `watched.json`. With that merge, a placement
+is only one more vote, and two crowd marks outvote it. So:
+
+- The estimate (`markestimate.go`) is the one answer for the credits.
+  It writes its credits row for every video that has any clue, also
+  when a crowd mark wins. Today it writes no row then, so that the
+  readers' median does not count the mark twice.
+- The three readers use the start of the estimate's credits row. A
+  video with no such row falls back to the rule of time: the last 5% of
+  the video or the last 300 seconds, whichever is less. The readers no
+  longer merge the candidates, and `watched.json` shrinks to match.
+- `library-operator` ships the estimate change before the readers
+  change. A reader on the new rule that meets an old catalog, where a
+  crowd mark won and the estimate wrote no row, would fall back to the
+  rule of time for that video.
+
+**How the estimate ranks the clues of the end titles.**
+
+1. A placement with a confidence of 0.6 or more. On the 120 videos
+   checked by hand, the placements at or over 0.6 were within 10
+   seconds for 98%, and the crowd marks of the same videos for 77%
+   ([The confidence that counts](#open-questions)).
+2. The exact clues of today: the crowd marks, a chapter whose title
+   names the credits, and the start of a `preview` span.
+3. The inferred clues of today: the length of the credits in the other
+   episodes of the series, and the quiet stretches of the subtitles.
+4. The faceless end of the `appearances` record.
+
+Inside a tier, the latest clue wins for the end titles, because an
+up-next card that rises a little late costs less than one that rises
+over the end of the story. Today the earliest clue wins, and the
+estimate's comment and its test change with it. The intro keeps the
+earliest clue. A placement under 0.6 is not a clue. The big misses of
+the models measured on 2026-11-15 had low confidence: one film placed
+254 seconds late at 0.51 and one 347 seconds late at 0.21, and under
+"latest wins" a late placement like those would win.
+
+**One placing `Job` for each `Library`.** The placement is a `Job` of
+its own, apart from the fit `Job` and the reading workers, and it runs
+one process with several threads:
+
+- It runs `titles place --threads N` over the readings it places, and
+  names them in a file, with `--videos`, because a library holds more
+  videos than a command line does. On 2026-11-17, on a workstation,
+  `place` took 99 seconds for 1,297 readings on one thread, and most
+  of that was the search for each known name in the text of each
+  frame. Two tests that skip the search where it cannot match, and
+  change no answer, took it to 34 seconds, and four threads to 5
+  seconds, with the same 1,297 placements each time. A measurement of
+  2026-11-15 that gave 0.4 seconds a video was taken on a slower day
+  of the same workstation and is not the tool's speed.
+- It gives `place` every reading of each folder it places, not one
+  video alone. `place` places each video, and then places it again with
+  the median length of the end titles of the other videos in its
+  folder that it placed with a confidence of 0.8 or more, where there
+  are three of them (`titles/src/place.rs`). An episode placed without
+  its siblings can land in a different place.
+- It mounts the library volume read-only. It reads the readings, the
+  names in `credits.yaml` and `billing.yaml`, and the model at
+  `<root>/.liken/titles/model.json`, and it writes nothing there.
+- It writes each placement into the catalog: a row of the marks table
+  of the kind `credits`, the source `titles`, and an ordinal below
+  zero, outside the walk's write, as the estimate's rows are. The row
+  carries the placement's confidence in a new column of the marks
+  table, `confidence`, which is empty on every other row. The estimate
+  reads it to rank the placement.
+- After the rows land, it derives the Library's estimates again with
+  `deriveMarkEstimates`, the step that the close container of every
+  library `Job` runs.
+
+The placing `Job` places from the picture alone. `place` can also take
+a video's crowd mark as a guide, with `--marks`, and the `Job` does not
+pass it. On 2026-11-17 the 120 videos checked by hand were placed both
+ways, each by a model that never saw its film or series. The guide
+changed how sure a placement was more than where it was: 110 of the
+120 placements reached a confidence of 0.6 with it, against 82 without
+it, and 5 of those 110 were more than 10 seconds from the real start,
+against none of the 82. So a mark that is a little wrong makes its own
+placement look sure. Under the ranking above, the answer that the
+estimate keeps was within 3, 10, and 30 seconds of the real start for
+93, 112, and 116 of the 120 videos without the guide, and for 86, 108,
+and 115 with it.
+
+**The intro follows the same rule.** The display's skip over the intro
+merges every intro row of a video today, as the readers of the credits
+do. In the same change, the estimate writes its intro row for every
+video that has a clue, also when a crowd mark wins, and the display
+uses that row. The spans that only the crowd marks give, `recap`,
+`preview`, and `post-credits`, keep the readers' merge until a later
+change gives them a stored answer.
+
+A placement is derived from the readings and the model, and both are
+on the volume. So, like an estimate, nothing on the volume holds it,
+and a catalog that is built again gets its placements back from the
+next placing `Job`. The worker does not place. One path writes every
+placement, and the placing `Job`'s small run covers a video that a
+worker reads after the model exists.
+
+**When the placing `Job` runs.** The operator starts it on an event,
+never on a timer, and runs at most one for each `Library` at a time:
+
+- **A full run** places every reading when the model on the volume is
+  not the model of the last full run. The fit `Job` reports the time of
+  its model in `status.titlesModels`, and the placing `Job` reports the
+  time of the model it placed with, over the bus, as the fit does.
+- **A small run** places only the folders that hold a reading with no
+  placement, when the catalog counts such readings. A reading worker
+  that reads for days then starts one small run after another, each of
+  minutes.
+
+**What it reuses.** The placing `Job` takes the parts of the fit `Job`
+in `titlesfitjob.go` and `titlesfitrun.go`: the builder, the trigger
+that reads the counts and the last run, the bus result, the deletion of
+a finished `Job`, the titles image, and the pod program in it. It takes
+the catalog agent of a library `Job` (`libraryJobAgent` in `pod.go`)
+and `deriveMarkEstimates`. The shared parts move into one place that
+both `Job`s call, and no copy of a builder or a trigger is made.
+
+**The steps, in the order they ship.**
+
+1. Profile `place`, and give it `--threads`. Built on 2026-11-17.
+2. Add the `confidence` column to the marks table.
+3. Build the placing `Job`, its trigger, and its result in the status.
+4. Rank the placement in the estimate, change the end titles to "latest
+   wins", and write the credits row for every video with a clue.
+5. Change the three readers and `watched.json` to the estimate's row
+   and the rule of time.
+6. Update the enrichment guide, the `Library` reference, and the skills
+   for the placing `Job`, its status, and its `Event`s.
+
 ### The names of the whole crew
 
 The `credits` fact kept the billed cast, the directors, and the writers
@@ -508,9 +654,10 @@ In the operator:
 1. **A fit when the tool's columns change.** A release of the tool
    with other columns refuses the model a Library has, and nothing
    starts a fit for that until the Library's count has grown by half.
-2. **The placement.** The worker's `place` of each video it reads, the
-   placement in the ledger, the walk that copies it into the catalog,
-   and the estimate's use of it.
+2. **The placement.** The placing `Job`, the placements in the
+   catalog, the estimate's use of them, and the readers that use the
+   estimate's row, as [Placing the end titles](#placing-the-end-titles)
+   gives them.
 3. **The rename** of `intro` and `credits` to `main-titles` and
    `end-titles` in `library-operator`, `media-operator`, the media
    browser, the stored ledgers, and the manuals.

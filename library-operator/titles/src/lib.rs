@@ -7,6 +7,7 @@
 
 pub mod changepoint;
 pub mod ctc;
+pub mod each;
 pub mod engine;
 pub mod frames;
 pub mod model;
