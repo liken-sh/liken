@@ -6,6 +6,8 @@ package wiim
 import (
 	"context"
 	"testing"
+	"testing/synctest"
+	"time"
 )
 
 // Settings reads the slow-moving settings from the polled status, one
@@ -20,6 +22,68 @@ func TestSettingsMapsThePolledStatus(t *testing.T) {
 	mustMatch(t, settings.Device.Name, strPtr("Test Amp"))
 	mustMatch(t, settings.Device.LED, boolPtr(true))
 	mustMatch(t, settings.Device.Buttons, boolPtr(false))
+}
+
+// A read that the model answers with no value leaves the snapshot's zero
+// value in place, and the zero value is not the device's setting. So
+// Settings reports no value for that field, in each of the device's words
+// for a read it cannot serve.
+func TestSettingsReportsNoValueForAReadTheModelDoesNotServe(t *testing.T) {
+	cases := []struct {
+		name   string
+		answer string
+	}{
+		{"a command the model does not carry", "unknown command"},
+		{"a read the model cannot serve", "Failed"},
+		{"an empty answer", ""},
+	}
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			amp := startFakeAmp(t)
+			amp.answer(ledCommand, one.answer)
+			amp.answer(balanceCommand, one.answer)
+			client := amp.client(nil)
+			client.poll(context.Background())
+
+			settings := client.Settings()
+			mustMatch(t, settings.Device.LED, (*bool)(nil))
+			mustMatch(t, settings.Audio.Balance, (*float64)(nil))
+			mustMatch(t, settings.Device.Buttons, boolPtr(false))
+		})
+	}
+}
+
+// A model's firmware can gain a read. The field is reported again from
+// the first answer that holds a value.
+func TestSettingsReportsAFieldAgainOnceItsReadAnswers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		amp.answer(ledCommand, "unknown command")
+		client := amp.client(nil)
+		client.poll(context.Background())
+		amp.answer(ledCommand, "1")
+
+		time.Sleep(settingsResync)
+		client.poll(context.Background())
+
+		mustMatch(t, client.Settings().Device.LED, boolPtr(true))
+	})
+}
+
+// One request that fails is not the model's answer, so a field whose read
+// answered before stays reported.
+func TestSettingsKeepsAFieldWhoseReadFailedOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeAmp(t)
+		client := amp.client(nil)
+		client.poll(context.Background())
+		amp.broken = map[string]bool{ledCommand: true}
+
+		time.Sleep(settingsResync)
+		client.poll(context.Background())
+
+		mustMatch(t, client.Settings().Device.LED, boolPtr(true))
+	})
 }
 
 // controlReads are the reads of the controls family, which a sent light

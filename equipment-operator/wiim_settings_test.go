@@ -31,6 +31,10 @@ type fakeWiim struct {
 	buttons  bool
 	balance  float64
 	commands []string
+	// unread holds each read command that this model does not carry. The
+	// amp answers it the way a real one answers a command it does not
+	// know.
+	unread map[string]bool
 }
 
 func startFakeWiim(t *testing.T) *fakeWiim {
@@ -46,6 +50,8 @@ func (f *fakeWiim) handle(w http.ResponseWriter, r *http.Request) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 	switch {
+	case f.unread[command]:
+		fmt.Fprint(w, "unknown command")
 	case command == "getStatusEx":
 		fmt.Fprintf(w, `{"DeviceName":%q,"uuid":"FF98F2F78136CE45A780D8A1"}`, f.name)
 	case command == "LED_SWITCH_GET":
@@ -173,5 +179,26 @@ func TestAnUndeclaredWiimSettingSendsNothing(t *testing.T) {
 		unit.setWiimSettings(wiim.Settings{})
 		synctest.Wait()
 		mustDeepEqual(t, amp.sent(), []string(nil))
+	})
+}
+
+// A model that carries no read of a field cannot confirm it, so the
+// operator sends a declared value once and does not send it again on the
+// passes that follow.
+func TestAWiimFieldTheModelCannotReadIsSentOnce(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		amp := startFakeWiim(t)
+		amp.unread = map[string]bool{"LED_SWITCH_GET": true}
+		_, unit := waitingWiim(t, amp)
+
+		led := true
+		want := wiim.Settings{Device: wiim.DeviceSettings{LED: &led}}
+		for range sendLimit + 1 {
+			unit.setWiimSettings(want)
+			synctest.Wait()
+		}
+
+		mustDeepEqual(t, amp.sent(), []string{"LED_SWITCH_SET:1"})
 	})
 }

@@ -146,21 +146,29 @@ func switchCommand(prefix string, value bool) string {
 
 // Settings returns every setting the receiver has reported, read from
 // the stored status. Each pointer is copied, so the returned value
-// never aliases the live state a poll keeps folding into. The values
-// are always reported after a successful poll.
+// never aliases the live state a poll keeps folding into.
+//
+// A field whose read the device answered with no value is nil, so the
+// controller takes it for a field the device does not report and sends a
+// declared value once. Without that, the snapshot's zero value would
+// stand for the device's setting: a model with no read of the status
+// light would report it off, and the operator would send a declared
+// "on" again on every pass. The name comes from the read a poll cannot
+// miss, so it is always reported.
 func (c *Client) Settings() Settings {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	return Settings{
-		Audio: AudioSettings{
-			Balance: floatPtr(c.state.Audio.Balance),
-		},
-		Device: DeviceSettings{
-			Name:    strPtr(c.state.Device.Name),
-			LED:     boolPtr(c.state.Controls.LED),
-			Buttons: boolPtr(c.state.Controls.Buttons),
-		},
+	settings := Settings{Device: DeviceSettings{Name: strPtr(c.state.Device.Name)}}
+	if !c.unread[balanceCommand] {
+		settings.Audio.Balance = floatPtr(c.state.Audio.Balance)
 	}
+	if !c.unread[ledCommand] {
+		settings.Device.LED = boolPtr(c.state.Controls.LED)
+	}
+	if !c.unread[buttonsCommand] {
+		settings.Device.Buttons = boolPtr(c.state.Controls.Buttons)
+	}
+	return settings
 }
 
 // ApplySettings sends the wire command for every declared field, in a

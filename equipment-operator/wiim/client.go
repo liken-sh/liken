@@ -162,6 +162,13 @@ type Client struct {
 	silent        map[string]bool
 	failedReads   map[string]int
 	trackFailures int
+	// unread holds each read command whose last answer held no value: the
+	// device's words for a command it does not carry or a read it cannot
+	// serve. Settings reports no value for a field whose read is here, so
+	// the snapshot's zero value is not taken for the device's setting. A
+	// request that failed changes nothing here, because one lost request
+	// is not the model's answer. The mutex guards it.
+	unread map[string]bool
 	// misses counts the polls in a row the device did not answer, cleared
 	// by the next poll it does.
 	misses int
@@ -665,7 +672,18 @@ func (c *Client) read(ctx context.Context, command string, parse func([]byte)) {
 	c.answeredOnce[command] = true
 	delete(c.failedReads, command)
 	delete(c.silent, command)
-	if isMiss(body) {
+	miss := isMiss(body)
+	c.mutex.Lock()
+	if miss {
+		if c.unread == nil {
+			c.unread = map[string]bool{}
+		}
+		c.unread[command] = true
+	} else {
+		delete(c.unread, command)
+	}
+	c.mutex.Unlock()
+	if miss {
 		return
 	}
 	parse(body)

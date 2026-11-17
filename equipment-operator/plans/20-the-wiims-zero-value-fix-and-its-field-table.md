@@ -2,11 +2,21 @@
 
 Proposed on 2026-11-10, from the phases of
 [plan 16](completed/16-the-wiims-settings.md) that were not built.
-Not built. Plan 14
+Phase 1 is built, and phases 2 and 3 are not. Plan 14
 ([14-one-settings-model-for-every-receiver.md](14-one-settings-model-for-every-receiver.md))
 holds the common settings model, the tiers, and `settingExceptions`
-that this plan uses. Phase 1 can be built now. Phases 2 and 3 wait for
+that this plan uses. Phases 2 and 3 wait for
 plan 14 and for the drills below. None of the drills has run.
+
+Status on 2026-11-17: phase 1 is built. The client records each read
+command whose last answer held no value (`unread`, `wiim/client.go`),
+and `Client.Settings()` reports no value for the balance, the status
+light, or the touch buttons when its read is one of them. A declared
+field that the model cannot read back is then sent once. On the same
+day the client ran against a WiiM Amp on `Linkplay.5.2.830149`, which
+answers all three reads, and it reported all three fields. No unit
+that lacks a read was at hand, so the sent-once path is proven only
+against the fake amp. Phases 2 and 3 are not built.
 
 ## What is built
 
