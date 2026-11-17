@@ -220,6 +220,26 @@ var OSSysctls = map[string]string{
 	// reaches k3s at all.
 	"kernel.panic_on_oops": "1",
 
+	// Whether a lockup becomes a panic. The kernel's two lockup
+	// detectors print a warning by default, and the machine keeps its
+	// hang: its pods stop, it answers nothing, and it stays that way
+	// until a person cuts its power. A soft lockup is a CPU that stays
+	// in kernel mode for more than twice kernel.watchdog_thresh, which
+	// is 20 seconds, and a hard lockup is a CPU that runs with
+	// interrupts off. A panic is the better end for both, for the
+	// reason kernel.panic_on_oops gives: the machine reboots into the
+	// slot it proved, and the next boot reports the crash.
+	//
+	// kernel.hung_task_panic stays off. A task that waits on a slow
+	// iSCSI or NFS server trips it, and a storage outage would then
+	// reboot every machine that mounts from that server.
+	//
+	// These two cover a hang that the kernel can still see. A CPU that
+	// stops completely runs no detector, and only a timer outside the
+	// CPU resets that machine.
+	"kernel.softlockup_panic": "1",
+	"kernel.hardlockup_panic": "1",
+
 	// Whether the machine checks that a packet arrived on the
 	// interface it would use to reply, and drops it if not. liken
 	// does no such check at all today. The loose form, this value,

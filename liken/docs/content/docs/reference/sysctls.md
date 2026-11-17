@@ -109,6 +109,8 @@ Both are ceilings. An unused ceiling costs no memory.
 | Parameter | Value | Why |
 | --- | --- | --- |
 | `kernel.panic_on_oops` | `1` | A kernel bug that does not kill the machine outright leaves it running in an undefined state. A reboot is the better option: the machine reboots into the system slot it already proved, and the crash journal holds the log across the reboot, so the next boot reports the crash. |
+| `kernel.softlockup_panic` | `1` | A CPU that stays in kernel mode for more than 20 seconds panics, and the machine reboots. The kernel's default prints a warning, and the machine stays hung until a person cuts its power. |
+| `kernel.hardlockup_panic` | `1` | A CPU that runs with interrupts off panics, for the same reason. |
 
 ### Hardening
 

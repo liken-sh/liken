@@ -7,6 +7,16 @@ kernel turns a lockup into a panic, which milestone 35 already
 records. Init holds the chipset's hardware watchdog, which resets a
 machine that the kernel itself cannot recover.
 
+Status on 2026-11-17: part one is built for two of its three values.
+`machine.OSSysctls` holds `kernel.softlockup_panic` and
+`kernel.hardlockup_panic`, and on that day ten machines of a production
+fleet that set them through `spec.sysctls` read both back as `1` on
+kernel 7.3.1 with `SysctlsApplied` true. `kernel.nmi_watchdog` is not
+in the table: the kernel's default is already `1`, the entry only makes
+the value read back, and whether a QEMU guest with no performance
+counter accepts the write was not checked. Parts two to five are not
+built.
+
 ## The problem
 
 Milestone 35 left one failure out: "a machine that stops without a
