@@ -237,7 +237,7 @@ func (p Publisher) image(c *Component, image Image, version, mode, recipe string
 			if err != nil {
 				return fmt.Errorf("pushing %s: %w", ref(image.Name, version), err)
 			}
-			if err := p.checkLabels(image, digest, metadata.Labels); err != nil {
+			if err := p.checkPushedLabels(image, digest, metadata.Labels); err != nil {
 				return err
 			}
 			var references []string

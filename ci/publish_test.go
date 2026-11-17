@@ -323,6 +323,44 @@ func TestAPushWhoseLabelsDifferIsNeverSigned(t *testing.T) {
 	}
 }
 
+// A test's registry answers at once, so a publish that reads a pushed
+// digest again does not wait between reads.
+func init() {
+	pushedLabelPause = 0
+}
+
+// A registry can answer 404 for a digest that it accepted a moment
+// before. The publish asks again, so a late answer does not fail a
+// publish whose image is in the registry.
+func TestAPublishWaitsForTheRegistryToServeWhatItPushed(t *testing.T) {
+	p, rec, c := publishFixture(t, nil)
+	rec.registry.lag = 2
+
+	if err := p.Publish(c, "2026.10.02-001", publishRelease); err != nil {
+		t.Fatal(err)
+	}
+
+	if signs := signCommands(rec.commands); len(signs) == 0 {
+		t.Error("the publish signed nothing")
+	}
+}
+
+// A registry that never serves the digest fails the publish, and the
+// image is not signed.
+func TestAPushThatTheRegistryNeverServesIsNeverSigned(t *testing.T) {
+	p, rec, c := publishFixture(t, nil)
+	rec.registry.lag = 1000
+
+	err := p.Publish(c, "2026.10.02-001", publishRelease)
+
+	if err == nil || !strings.Contains(err.Error(), "the registry serves no image") {
+		t.Fatalf("got %v, want the image that the registry does not serve", err)
+	}
+	if signs := signCommands(rec.commands); len(signs) > 0 {
+		t.Errorf("signed:\n%s", strings.Join(signs, "\n"))
+	}
+}
+
 // A run again of a publish checks the labels of the image that the
 // failed run pushed before it signs it, the same as the push does.
 func TestARunAgainChecksThePublishedLabelsBeforeItSigns(t *testing.T) {

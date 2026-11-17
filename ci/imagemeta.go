@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -296,6 +297,32 @@ func (p Publisher) deployAnnotations(c *Component, version string) ([]string, er
 	return args, nil
 }
 
+// errNoImage is the registry's answer that it serves no image at a
+// reference.
+var errNoImage = errors.New("the registry serves no image")
+
+// How many times the publish reads the labels of a digest that it just
+// pushed, and how long it waits before the next read. ghcr.io answered
+// 404 once for a digest that it had accepted two seconds before, and
+// that answer failed a publish whose image was in the registry. The
+// pause grows with each read, so the reads cover half a minute.
+const pushedLabelTries = 5
+
+var pushedLabelPause = 3 * time.Second
+
+// checkPushedLabels checks the labels of a digest that this run just
+// pushed. The registry accepted the push, so its answer that it serves
+// no image there is one to ask again, and every other answer stands.
+func (p Publisher) checkPushedLabels(image Image, digest string, want map[string]string) error {
+	for try := 1; ; try++ {
+		err := p.checkLabels(image, digest, want)
+		if !errors.Is(err, errNoImage) || try == pushedLabelTries {
+			return err
+		}
+		time.Sleep(time.Duration(try) * pushedLabelPause)
+	}
+}
+
 // checkLabels reads the labels of the image that the registry serves
 // at the reference, and fails when they differ from the labels that
 // the publish wrote. An outside base can start to carry a label of its
@@ -313,7 +340,7 @@ func (p Publisher) checkLabels(image Image, reference string, want map[string]st
 		return fmt.Errorf("reading the labels of %s: %w", named, err)
 	}
 	if got == nil {
-		return fmt.Errorf("the registry serves no image for %s, so its labels cannot be checked", named)
+		return fmt.Errorf("%w for %s, so its labels cannot be checked", errNoImage, named)
 	}
 	keys := map[string]bool{}
 	for key := range got {

@@ -25,6 +25,10 @@ type fakeRegistry struct {
 	manifests map[string]string
 	blobs     map[string]string
 	cancelled []string
+	// lag is how many reads of a manifest answer 404 before the registry
+	// serves it, the way a registry can answer a read that follows a
+	// push at once.
+	lag int
 }
 
 // push puts an image into the registry the way buildx pushes one with
@@ -90,6 +94,10 @@ func (f *fakeRegistry) serve(t *testing.T) Registry {
 		case strings.Contains(r.URL.Path, "/manifests/") && r.Method == http.MethodGet:
 			pkg, reference, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/v2/liken-sh/"), "/manifests/")
 			manifest, ok := f.manifests[pkg+"/"+reference]
+			if ok && f.lag > 0 {
+				f.lag--
+				ok = false
+			}
 			if !ok || !strings.Contains(r.Header.Get("Accept"), "application/vnd.oci.image.index.v1+json") {
 				http.NotFound(w, r)
 				return
