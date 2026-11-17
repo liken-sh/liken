@@ -13,7 +13,8 @@ package main
 // imdbcheck.go), and warningReasons below names the ones that post a
 // Warning. Three actions that change no condition post an Event of
 // their own, with the reasons declared here: a Job created, a walk that
-// ended, and a stranded copy deleted. Nothing else posts one: a pass, a
+// ended, a placing of the end titles that ended, and a stranded copy
+// deleted. Nothing else posts one: a pass, a
 // provider call, and a webhook go to the log and the metrics.
 //
 // Only the operator binary posts Events. The pod build creates no
@@ -22,6 +23,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/kubernetes/events"
@@ -40,6 +42,11 @@ const (
 	reasonScanCompleted = "ScanCompleted"
 	// The reporter published a walk that ended with a failure. Warning.
 	reasonScanFailed = "ScanFailed"
+	// The placing Job of a Library placed its end titles with the model.
+	// Normal.
+	reasonEndTitlesPlaced = "EndTitlesPlaced"
+	// The placing Job of a Library could not place its end titles. Warning.
+	reasonEndTitlesPlacingFailed = "EndTitlesPlacingFailed"
 	// The heal deleted a durable copy of a store, and its claim, from a
 	// node that stayed NotReady. Warning, because a node is down.
 	reasonStoreCopyHealed = "StoreCopyHealed"
@@ -127,6 +134,31 @@ func postWalkEnd(recorder *events.Recorder, object events.ObjectReference, befor
 	}
 	recorder.Normal(object, reasonScanCompleted,
 		fmt.Sprintf("the walk of the Job %s found %d titles in %d files", run.Job, after.Titles, after.Files))
+}
+
+// postTitlesPlaced posts the end of a placing run once: on the status write
+// whose end titles entry holds a placing that the status before it did not.
+// The run publishes its result on the bus, and the pass folds it into the
+// status, so this write is the first point at which the Library shows it.
+func postTitlesPlaced(recorder *events.Recorder, object events.ObjectReference, before, after LibraryStatus) {
+	model := endTitlesModel(after.TitlesModels)
+	if model == nil || model.Placed.At.IsZero() {
+		return
+	}
+	if earlier := endTitlesModel(before.TitlesModels); earlier != nil && earlier.Placed.At.Equal(model.Placed.At) {
+		return
+	}
+	placed := model.Placed
+	if placed.Result == titlesPlaceFailed {
+		recorder.Warning(object, reasonEndTitlesPlacingFailed,
+			"could not place the end titles of "+counted(placed.Readings, "reading")+": "+placed.Reason)
+		return
+	}
+	recorder.Normal(object, reasonEndTitlesPlaced, fmt.Sprintf("placed the end titles of %s with the model "+
+		"fitted at %s: the catalog holds %s, %d of them with a confidence of %.1f or more, and %d of the readings "+
+		"hold no end titles", counted(placed.Readings-placed.Missing, "reading"),
+		placed.Model.UTC().Format(time.RFC3339), counted(placed.Placements, "placement"), placed.Sure,
+		titlesSureConfidence, placed.None))
 }
 
 // statusRunOf answers the run of one worker in a status, and false when

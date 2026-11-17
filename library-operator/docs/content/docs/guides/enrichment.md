@@ -753,8 +753,8 @@ hold the same numbers, so the score of each fit has a history.
 
     kubectl -n media get library movies -o jsonpath='{.status.titlesModels}'
 
-The operator does not place the end titles from the model yet. Plan 96
-holds the steps that remain.
+A placing `Job` then places the end titles of every reading with the
+model, as [Placing the end titles](#placing-the-end-titles) describes.
 
     kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=titles
 
@@ -773,6 +773,61 @@ software too. `spec.titles.gpuResourceClaimTemplate` names a
 describes, and with the claim `ffmpeg` decodes and scales the video on
 the render node through VA-API. The tool decodes a video that the
 render node refuses again in software.
+
+#### Placing the end titles
+
+The placing `Job` writes the second that each video's end titles start
+into the catalog, from the video's reading and the library's model. The
+operator starts it, named `<library>-titles-place-<suffix>`, when the
+library has a model and one of these holds:
+
+- No placing has run with the model in `status.titlesModels`. A new
+  fit places the whole library again this way.
+- The catalog holds fewer placements than the last placing wrote, and
+  the `Job` of that placing is gone. A catalog that is built again gets
+  its placements back this way.
+- 50 readings have landed since the last placing, so a worker that
+  reads for days does not start a `Job` for each video.
+- A reading has landed since the last placing, and no titles worker of
+  the library runs, so the last videos of a backfill and a single new
+  episode do not wait for 50.
+
+The `Job` is one pod on the titles image, with the catalog agent of a
+library `Job` beside it on the library's catalog claim. So it runs only
+while no other `Job` of the library that holds that claim runs, and a
+walk waits for it. It also waits for a fit `Job`. It mounts the library
+read-only, writes the paths of the videos into a file in an `emptyDir`,
+and runs `titles place` once, on four threads, over every reading, because
+`place` places the episodes of a folder together. A reading that the
+catalog names and the volume does not hold is left out.
+
+Each video whose reading holds end titles gets one row in the catalog's
+marks table, of the kind `credits-placement` and the source `titles`,
+with the placement's confidence. A screen ignores that kind. A video
+whose reading holds no end titles gets no row, because a mark with no
+start means "from the start of the file". The `Job` writes only the rows
+that changed, deletes the row of a video that has no placement now, and
+then derives the library's mark estimates again, as the close container
+of a library `Job` does. The estimate does not rank the placements yet.
+Plan 96 holds the steps that remain.
+
+The `Job` publishes its result on the bus, and `status.titlesModels`
+holds the last run under `placed`: when it ended, the time of the model
+it placed with, the readings it found, the placements the catalog holds,
+how many of them have a confidence of 0.6 or more, and how many readings
+hold no end titles. A run that found no model on the volume, or whose
+`titles place` failed, records `failed` with the tool's own words and
+keeps the rows it found. Each run posts one `Event` on the `Library`:
+`EndTitlesPlaced` (`Normal`) with the counts, or
+`EndTitlesPlacingFailed` (`Warning`) with the reason. The gauge
+`library_titles_placements` holds the placements, the sure ones, and
+the readings with no end titles.
+
+    kubectl -n media get library movies -o jsonpath='{.status.titlesModels[0].placed}'
+    kubectl -n media get jobs -l library.liken.sh/library=movies,library.liken.sh/worker=titles-place
+
+The container requests one core of CPU and may take `1Gi` of memory.
+`titles place` may run for an hour.
 
 ### Identification
 

@@ -207,7 +207,9 @@ type operator struct {
 	workLists *workLists
 
 	// The last fit of each Library's titles model (titlesfitjob.go).
-	titlesFits *titlesFits
+	titlesFits *titlesResults[titlesFit]
+	// The last placing of each Library's end titles (titlesplacejob.go).
+	titlesPlacings *titlesResults[titlesPlacing]
 
 	// The library Job whose list each heavy fact's last worker took, keyed
 	// by the Library and the fact (factworkerjob.go).
@@ -275,7 +277,8 @@ func newOperator(client *apiclient.Client, stamped images,
 		plays:            newPlayRequests(wake),
 		marks:            newStoreMarks(wake),
 		workLists:        newWorkLists(wake),
-		titlesFits:       newTitlesFits(wake),
+		titlesFits:       newTitlesResults[titlesFit](wake),
+		titlesPlacings:   newTitlesResults[titlesPlacing](wake),
 		published:        map[string]string{},
 		unsent:           map[string]struct{}{},
 		mediaTopicBase:   defaultMediaTopicBase,
@@ -310,6 +313,9 @@ func newOperator(client *apiclient.Client, stamped images,
 	// The last fit of every Library's titles model, which the fit Job
 	// publishes when it ends.
 	library.bus.Subscribe(titlesFitFilter(topicBase))
+	// The last placing of every Library's end titles, which the placing Job
+	// publishes when it ends.
+	library.bus.Subscribe(titlesPlaceFilter(topicBase))
 	return library
 }
 
@@ -594,13 +600,12 @@ func (o *operator) handleBusMessage(topic string, payload []byte) {
 	if len(payload) == 0 {
 		return
 	}
-	if kind == libraryTitlesFitKind {
-		var fit titlesFit
-		if err := json.Unmarshal(payload, &fit); err != nil {
-			fmt.Fprintf(os.Stderr, "reading the titles fit on %s: %v\n", topic, err)
-			return
-		}
-		o.titlesFits.fold(namespace, name, fit)
+	switch kind {
+	case libraryTitlesFitKind:
+		foldTitlesResult(o.titlesFits, topic, namespace, name, payload)
+		return
+	case libraryTitlesPlaceKind:
+		foldTitlesResult(o.titlesPlacings, topic, namespace, name, payload)
 		return
 	}
 	if kind != libraryStatusKind {

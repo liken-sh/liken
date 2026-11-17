@@ -350,21 +350,7 @@ func (r *titlesFitRun) train(ctx context.Context, labels []titlesLabel, out stri
 // The result, retained, so an operator that restarts reads the last fit of
 // each Library back from the broker.
 func (r *titlesFitRun) publish(ctx context.Context, fit titlesFit) error {
-	payload, err := json.Marshal(fit)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(ctx, workItemTimeout)
-	defer cancel()
-	session, err := openBusSession(ctx, r.dial, r.job+"-fit")
-	if err != nil {
-		return err
-	}
-	defer session.close()
-	if err := session.retain(titlesFitTopic(r.base, r.namespace, r.name), payload); err != nil {
-		return err
-	}
-	return session.flush()
+	return publishTitlesResult(ctx, r.dial, r.job+"-fit", titlesFitTopic(r.base, r.namespace, r.name), fit)
 }
 
 // One line of this run, with every path in an error made opaque, the rule

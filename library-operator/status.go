@@ -51,6 +51,9 @@ type libraryObservation struct {
 	// The last fit of the Library's titles model that the broker holds, or
 	// nil.
 	titlesFit *titlesFit
+	// The last placing of the Library's end titles that the broker holds, or
+	// nil.
+	titlesPlacing *titlesPlacing
 }
 
 // deriveLibraryStatus builds the whole status of one Library from one
@@ -121,12 +124,12 @@ func deriveLibraryStatus(library *Library, seen libraryObservation, now time.Tim
 	// itself carries from pass to pass: a fit's result is retained on a
 	// broker that keeps nothing across a restart, and the fit is not run
 	// again to learn its score.
-	status.TitlesModels = titlesModelsStatus(library, seen.titlesFit)
+	status.TitlesModels = titlesModelsStatus(library, seen.titlesFit, seen.titlesPlacing)
 	var marked titlesMarked
 	if seen.report != nil {
 		marked = seen.report.TitlesMarked
 	}
-	model, runs := endTitlesModelCondition(library, status.TitlesModels, marked, titlesFitRuns(library, seen.jobs),
+	model, runs := endTitlesModelCondition(library, status.TitlesModels, marked, titlesJobRuns(library, seen.jobs, titlesFitMode),
 		generation)
 	if runs {
 		conditions = SetCondition(conditions, model, now)
@@ -382,6 +385,7 @@ func writeLibraryStatus(ctx context.Context, recorder *events.Recorder, c *apicl
 		object := libraryReference(library)
 		postTransitions(recorder, object, before.Conditions, library.Status.Conditions)
 		postWalkEnd(recorder, object, before, library.Status)
+		postTitlesPlaced(recorder, object, before, library.Status)
 	}
 	// A Library deleted during the pass is the state its departure
 	// ends in, and has no status left to write.

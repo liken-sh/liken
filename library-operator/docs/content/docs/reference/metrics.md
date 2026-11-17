@@ -24,6 +24,7 @@ beside the base, which holds a `PodMonitor` for each of the three.
 | library-operator | `library_run_last_success_timestamp_seconds{library, worker}` | gauge | a worker that stopped finishing |
 | library-operator | `library_items{library, kind}` | gauge | catalog size over time |
 | library-operator | `library_fact_gap{library, fact}` | gauge | a fact whose gap never closes |
+| library-operator | `library_titles_placements{library, kind, count}` | gauge | the placements of the last placing of the end titles (`placed`), the sure ones (`sure`), and the readings with no end titles (`none`) |
 | library-operator | `library_attempts_total{library, fact, result}` | counter | a fact that stopped finding anything |
 | library-operator | `library_provider_requests_total{library, provider, status}` | counter | a provider that started refusing |
 | library-operator | `library_provider_request_seconds_total{library, provider}` | counter | the time one provider costs a run |

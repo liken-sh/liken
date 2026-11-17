@@ -132,6 +132,10 @@ func failedWithNoLaterSuccess(jobs []Job, runs []libraryRun) *jobFault {
 // finished run row with no failure that started after the failed Job counts
 // as a later success too. The gate's backoff and the Ready condition both
 // read this one rule.
+//
+// A placing of the end titles answers no failure. It runs on the same catalog
+// claim, so its own failure counts, but it walks no folder and runs no phase,
+// so its success says nothing of what failed in a walk.
 func unansweredFailure(jobs []Job, runs []libraryRun) *Job {
 	var failed *Job
 	for index := range jobs {
@@ -145,12 +149,13 @@ func unansweredFailure(jobs []Job, runs []libraryRun) *Job {
 	}
 	at := jobCreated(failed)
 	for index := range jobs {
-		if jobs[index].succeeded() && jobCreated(&jobs[index]).After(at) {
+		if jobs[index].succeeded() && jobCreated(&jobs[index]).After(at) &&
+			jobs[index].Metadata.Labels[workerLabelKey] != titlesPlaceMode {
 			return nil
 		}
 	}
 	for _, run := range runs {
-		if run.Failure == "" && !run.Finished.IsZero() && run.Started.After(at) {
+		if run.Failure == "" && !run.Finished.IsZero() && run.Started.After(at) && run.Worker != titlesPlaceMode {
 			return nil
 		}
 	}

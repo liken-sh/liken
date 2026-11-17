@@ -14,13 +14,9 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
-	"sync"
 	"time"
-
-	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
 // The annotation a fit Job carries with the count of marked videos it was
@@ -36,42 +32,6 @@ const (
 	titlesFitMemoryLimit = "4Gi"
 	titlesFitCPURequest  = "1"
 )
-
-// The last fit of every Library, as the operator's subscription delivers
-// each retained result.
-type titlesFits struct {
-	mutex  sync.Mutex
-	latest map[string]titlesFit
-	wake   chan<- struct{}
-}
-
-func newTitlesFits(wake chan<- struct{}) *titlesFits {
-	return &titlesFits{latest: map[string]titlesFit{}, wake: wake}
-}
-
-// Folds one result, and wakes the loop where it is new, because the pass
-// that answers it writes it into the Library's status.
-func (d *titlesFits) fold(namespace, name string, fit titlesFit) {
-	key := libraryKey(namespace, name)
-	d.mutex.Lock()
-	held, had := d.latest[key]
-	d.latest[key] = fit
-	d.mutex.Unlock()
-	if !had || held != fit {
-		poke(d.wake)
-	}
-}
-
-// The last fit of one Library, or nil where the broker holds none.
-func (d *titlesFits) latestFor(namespace, name string) *titlesFit {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	fit, held := d.latest[libraryKey(namespace, name)]
-	if !held {
-		return nil
-	}
-	return &fit
-}
 
 // The model of one kind of titles as the Library's status holds it: the
 // model the Library places with, and the last fit, which is another fit
@@ -98,6 +58,8 @@ type titlesModelStatus struct {
 	LastReason   string    `json:"lastReason,omitempty"`
 	MarkedVideos int       `json:"markedVideos"`
 	MarkedGroups int       `json:"markedGroups"`
+	// The last run of the placing Job with the model (titlesplace.go).
+	Placed titlesPlaced `json:"placed,omitzero"`
 }
 
 // The model of the end titles in a status, or nil.
@@ -130,24 +92,29 @@ func percent(share float64) int {
 }
 
 // The titles models of a Library's status: what the status held, with the
-// broker's result folded in where it is later than the status's last fit. A
+// broker's fit folded in where it is later than the status's last fit, and
+// the broker's placing where it is later than the status's last placing. A
 // Library that turned the fact off keeps no entry.
-func titlesModelsStatus(library *Library, fit *titlesFit) []titlesModelStatus {
+func titlesModelsStatus(library *Library, fit *titlesFit, placing *titlesPlacing) []titlesModelStatus {
 	if !library.Spec.Titles.Enabled {
 		return nil
 	}
 	held := endTitlesModel(library.Status.TitlesModels)
-	if fit == nil || fit.Kind != titlesKindEnd || (held != nil && !fit.At.After(held.LastFit)) {
-		if held == nil {
-			return nil
-		}
-		return []titlesModelStatus{*held}
-	}
 	var entry titlesModelStatus
 	if held != nil {
 		entry = *held
 	}
-	return []titlesModelStatus{entry.after(*fit)}
+	if fit != nil && fit.Kind == titlesKindEnd && (held == nil || fit.At.After(held.LastFit)) {
+		entry = entry.after(*fit)
+	}
+	if placing != nil && placing.Kind == titlesKindEnd && placing.At.After(entry.Placed.At) {
+		entry.Kind = titlesKindEnd
+		entry.Placed = placing.titlesPlaced
+	}
+	if entry.Kind == "" {
+		return nil
+	}
+	return []titlesModelStatus{entry}
 }
 
 // The condition of the end titles model, and false where the Library does
@@ -205,16 +172,6 @@ func titlesFitBaseline(library *Library, fit *titlesFit, jobs []Job) int {
 	return baseline
 }
 
-// Whether a fit Job of the Library has not finished.
-func titlesFitRuns(library *Library, jobs []Job) bool {
-	for _, job := range jobsOf(jobs, library.Metadata.Namespace, library.Metadata.Name, titlesFitMode) {
-		if !job.finished() {
-			return true
-		}
-	}
-	return false
-}
-
 // The fit step of one Library's pass. It deletes a fit that runs for a
 // Library that turned the fact off, and starts a fit where one is due and
 // none runs.
@@ -222,19 +179,9 @@ func (o *operator) runTitlesFit(ctx context.Context, library *Library, report *l
 	now time.Time) error {
 	namespace, name := library.Metadata.Namespace, library.Metadata.Name
 	if !library.Spec.Titles.Enabled {
-		for _, job := range jobsOf(jobs, namespace, name, titlesFitMode) {
-			if job.finished() {
-				continue
-			}
-			if err := o.deleteJob(ctx, namespace, job.Metadata.Name); err != nil {
-				return fmt.Errorf("deleting the titles fit %s: %w", job.Metadata.Name, err)
-			}
-			o.logf("library %s/%s: deleted the titles fit %s, because the Library turned titles off",
-				namespace, name, job.Metadata.Name)
-		}
-		return nil
+		return o.stopTitlesJobs(ctx, library, jobs, titlesFitMode, "the titles fit")
 	}
-	if report == nil || titlesFitRuns(library, jobs) {
+	if report == nil || titlesJobRuns(library, jobs, titlesFitMode) {
 		return nil
 	}
 	marked := report.TitlesMarked
@@ -242,89 +189,30 @@ func (o *operator) runTitlesFit(ctx context.Context, library *Library, report *l
 	if !titlesFitDue(marked, baseline) {
 		return nil
 	}
-	job := buildTitlesFitJob(library, o.jobImages(), o.jobBus(), marked, now)
-	_, err := o.createJob(ctx, job)
-	if errors.Is(err, apiclient.ErrConflict) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("creating the titles fit %s: %w", job.Metadata.Name, err)
-	}
 	cause := fmt.Sprintf("%s of %d films and series have a reading and a provider's mark",
 		counted(marked.Videos, "video"), marked.Groups)
 	if baseline > 0 {
 		cause += fmt.Sprintf(", and the last fit had %d", baseline)
 	}
-	o.logf("library %s/%s: created the job %s to fit the titles model, because %s", namespace, name,
-		job.Metadata.Name, cause)
-	o.recorder.Normal(libraryReference(library), reasonJobCreated,
-		fmt.Sprintf("created the Job %s, which fits the titles model, because %s", job.Metadata.Name, cause))
-	return nil
+	job := buildTitlesFitJob(library, o.jobImages(), o.jobBus(), marked, now)
+	_, err := o.startTitlesJob(ctx, library, job, "to fit the titles model", "which fits the titles model", cause)
+	return err
 }
 
-// The fit Job of one Library, owned by the Library so the garbage collector
-// takes it with the Library. It is one pod on the titles image, on the
-// volume the phases write. The pod holds no catalog and no Kubernetes
-// credential: it reads the readings and the marks from the volume, and
-// publishes its result on the bus. An emptyDir holds the labels file that
-// the run writes for the tool.
+// The fit Job of one Library. The pod holds no catalog: it reads the
+// readings and the marks from the volume, and the labels file that the run
+// writes for the tool goes in the scratch emptyDir.
 func buildTitlesFitJob(library *Library, images jobImages, bus busEndpoint, marked titlesMarked,
 	created time.Time) *Job {
-	backoff, ttl := int32(scanBackoffLimit), int32(scanJobTTL)
-	deadline := int64((titlesFitTimeout + time.Hour) / time.Second)
-	grace := int64(scannerGracePeriod)
-	noToken := false
-	labels := workerLabels(library.Metadata.Name, titlesFitMode)
-	env := []EnvVar{
-		{Name: libraryNamespaceVariable, Value: library.Metadata.Namespace},
-		{Name: libraryNameVariable, Value: library.Metadata.Name},
-		{Name: libraryKindVariable, Value: library.Spec.Kind},
-		{Name: libraryRootVariable, Value: library.Spec.Storage.Root},
-		{Name: jobNameVariable, ValueFrom: &EnvVarSource{
-			FieldRef: &ObjectFieldSelector{FieldPath: jobNameFieldPath},
-		}},
-	}
-	return &Job{
-		APIVersion: batchAPIVersion,
-		Kind:       "Job",
-		Metadata: ObjectMeta{
-			Name:      libraryJobName(library.Metadata.Name, titlesFitMode, created),
-			Namespace: library.Metadata.Namespace,
-			Labels:    labels,
-			Annotations: map[string]string{
-				jobCreatedAnnotation:   created.UTC().Format(time.RFC3339Nano),
-				titlesMarkedAnnotation: strconv.Itoa(marked.Videos),
-			},
-			OwnerReferences: []OwnerReference{libraryOwner(library)},
+	return buildTitlesJob(library, images, titlesJobSpec{
+		mode:        titlesFitMode,
+		timeout:     titlesFitTimeout,
+		annotations: map[string]string{titlesMarkedAnnotation: strconv.Itoa(marked.Videos)},
+		scratch:     titlesFitScratch,
+		env:         bus.env(),
+		resources: ResourceRequirements{
+			Requests: map[string]string{"cpu": titlesFitCPURequest, "memory": scannerMemoryRequest},
+			Limits:   map[string]string{"memory": titlesFitMemoryLimit},
 		},
-		Spec: JobSpec{
-			BackoffLimit:            &backoff,
-			ActiveDeadlineSeconds:   &deadline,
-			TTLSecondsAfterFinished: &ttl,
-			Template: PodTemplateSpec{
-				Metadata: ObjectMeta{Labels: labels},
-				Spec: PodSpec{
-					RestartPolicy:                 "Never",
-					TerminationGracePeriodSeconds: &grace,
-					AutomountServiceAccountToken:  &noToken,
-					Volumes: []Volume{factWorkerVolume(library),
-						{Name: scratchVolumeName, EmptyDir: &EmptyDirVolumeSource{}}},
-					Containers: []Container{{
-						Name:    titlesFitMode,
-						Image:   images.titles,
-						Command: []string{podBinary, titlesFitMode},
-						Env:     append(env, bus.env()...),
-						VolumeMounts: []VolumeMount{
-							{Name: phaseVolumeOf(library), MountPath: libraryMountPath},
-							{Name: scratchVolumeName, MountPath: titlesFitScratch}},
-						Resources: ResourceRequirements{
-							Requests: map[string]string{"cpu": titlesFitCPURequest, "memory": scannerMemoryRequest},
-							Limits:   map[string]string{"memory": titlesFitMemoryLimit},
-						},
-						SecurityContext: unprivileged(),
-					}},
-				},
-			},
-		},
-	}
+	}, created)
 }

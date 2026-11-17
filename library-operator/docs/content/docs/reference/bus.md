@@ -117,6 +117,7 @@ catalog pod holds every row the `Job` wrote.
 | `unresolved` | integer | How many titles no provider could name. |
 | `fights` | integer | How many titles a fact left because another writer holds the elements it writes. |
 | `titlesMarked` | object | `videos`, how many videos of the library have a reading from the `titles` fact and a provider's mark of the start of their end titles, and `groups`, how many films and series those videos are of. Absent where both are zero. |
+| `titlesReadings` | object | `readings`, how many main videos of the library have a reading from the `titles` fact, `newestReading`, when the newest of them landed, and `placements`, how many placements of their end titles the catalog holds. The operator starts the placing `Job` on these counts. Absent where all are zero. |
 
 Each entry of `runs` carries `worker`, `job`, `started`, and
 `finished`, plus `unidentified`, `removed`, and `failure` where the
@@ -168,6 +169,30 @@ condition.
 | `heldOut` | integer | The videos the model was scored on, which it was not fitted on. |
 | `within3`, `within10`, `within30` | number | The share of the scored videos placed within that many seconds of their marks, from 0 to 1. |
 | `median` | number | The median distance from a placement to its mark, in seconds. |
+
+## The placing of the end titles
+
+`libraries/{namespace}/{name}/titles-place`
+
+What the last placing of one library's end titles did. The placing
+`Job` of the `Library` publishes it retained when it ends, after a
+catalog pod has confirmed its rows, and the operator writes it into
+`placed` in `status.titlesModels`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `kind` | string | The titles the run placed: `end-titles`. |
+| `job` | string | The `Job` that ran the placing. |
+| `at` | RFC 3339 time | When the run ended. |
+| `result` | string | `placed` for a run that wrote its placements, and `failed` for a run that could not place. |
+| `reason` | string | Why the run failed, in the tool's own words. Absent for `placed`. |
+| `model` | RFC 3339 time | When the model the run placed with was fitted. |
+| `readings` | integer | The videos with a reading that the run found in the catalog. |
+| `newestReading` | RFC 3339 time | When the newest of those readings landed. |
+| `placements` | integer | The placements the catalog holds after the run. |
+| `sure` | integer | The placements with a confidence of 0.6 or more. |
+| `none` | integer | The readings that hold no end titles. |
+| `missing` | integer | The readings the catalog names and the volume does not hold. |
 
 ## The refresh times
 

@@ -587,7 +587,7 @@ spec:
                     properties:
                       worker:
                         type: string
-                        description: "Which worker ran: scan for a full walk, rescan for a walk of the folders webhooks named, enrich for the phases of a Job and its hand-off, or cleanup."
+                        description: "Which worker ran: scan for a full walk, rescan for a walk of the folders webhooks named, enrich for the phases of a Job and its hand-off, titles-place for the placing of the end titles, or cleanup."
                       job:
                         type: string
                         description: "The name of the Job that ran, for kubectl describe and logs."
@@ -637,7 +637,7 @@ spec:
                   type: array
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys: [kind]
-                  description: "One entry for each kind of titles a model places, on a library that sets spec.titles.enabled. The library fits its own model on its videos that have a reading and a provider's mark of where their end titles start, and the entry holds the score of that model and the last fit."
+                  description: "One entry for each kind of titles a model places, on a library that sets spec.titles.enabled. The library fits its own model on its videos that have a reading and a provider's mark of where their end titles start, and the entry holds the score of that model, the last fit, and the last placing of the end titles with it."
                   items:
                     type: object
                     required: [kind]
@@ -683,6 +683,43 @@ spec:
                       markedGroups:
                         type: integer
                         description: "How many films and series those videos are of."
+                      placed:
+                        type: object
+                        description: "The last run of the placing Job, which places the end titles of every reading of the library with the model and writes each placement into the catalog. Absent until the first run ends."
+                        properties:
+                          at:
+                            type: string
+                            format: date-time
+                            description: "When the run ended."
+                          result:
+                            type: string
+                            description: "placed for a run that wrote its placements, and failed for a run that could not place, such as one that found no model on the volume or whose titles place failed."
+                          reason:
+                            type: string
+                            description: "Why the run failed, in the tool's own words."
+                          model:
+                            type: string
+                            format: date-time
+                            description: "When the model the run placed with was fitted. A run starts when the model in fitted is not this one."
+                          readings:
+                            type: integer
+                            description: "How many videos with a reading the run found in the catalog. A run starts when 50 more readings have landed, or when any reading has landed and no titles worker runs."
+                          newestReading:
+                            type: string
+                            format: date-time
+                            description: "When the newest of those readings landed."
+                          placements:
+                            type: integer
+                            description: "How many placements the catalog holds after the run. A run starts when the catalog holds fewer, which is a catalog that was built again."
+                          sure:
+                            type: integer
+                            description: "How many of the placements have a confidence of 0.6 or more."
+                          none:
+                            type: integer
+                            description: "How many readings hold no end titles. Their videos have no placement."
+                          missing:
+                            type: integer
+                            description: "How many readings the catalog names and the volume does not hold. The run leaves them out."
                 webhook:
                   type: string
                   description: "The address you give to Radarr, Sonarr, or Jellyfin so that an import rescans that one folder at once; it names the operator's own Service and this Library, so it holds for the life of the Library, and it is reported once the storage is bound and the namespace holds one Catalog."

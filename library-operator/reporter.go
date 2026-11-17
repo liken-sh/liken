@@ -353,6 +353,10 @@ func (r *reporter) buildReport(ctx context.Context, library string) (libraryRepo
 	if err != nil {
 		return libraryReport{}, err
 	}
+	report.TitlesReadings, err = r.catalog.titlesReadings(ctx, library)
+	if err != nil {
+		return libraryReport{}, err
+	}
 	report.Tallies, err = r.catalog.Tallies(ctx, library)
 	if err != nil {
 		return libraryReport{}, err

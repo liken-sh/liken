@@ -172,6 +172,10 @@ last hour:
   finished, and `ScanFailed` (`Warning`) gives the failure of a walk that
   did not. The operator posts each one when the reporter publishes the
   run.
+* `EndTitlesPlaced` (`Normal`) gives the counts of a placing of the end
+  titles that finished, and `EndTitlesPlacingFailed` (`Warning`) gives
+  the reason of one that could not place. The operator posts each one
+  when the placing `Job` publishes its result.
 
 The API server deletes an `Event` an hour after its last write, so the
 conditions and the operator's log keep the facts after that.

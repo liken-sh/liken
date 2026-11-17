@@ -72,13 +72,20 @@ func runTitles(ctx context.Context, args ...string) error {
 // One run of the tool, and a failure that carries its stderr. The caller's
 // context bounds the run.
 func runTitlesTool(ctx context.Context, args ...string) error {
-	var stderr bytes.Buffer
+	_, err := runTitlesToolOutput(ctx, args...)
+	return err
+}
+
+// One run of the tool, with what it printed, for `place`, which prints its
+// answers.
+func runTitlesToolOutput(ctx context.Context, args ...string) ([]byte, error) {
+	var stdout, stderr bytes.Buffer
 	command := exec.CommandContext(ctx, titlesBinary, args...)
-	command.Stderr = &stderr
+	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := command.Run(); err != nil {
-		return &titlesFailure{pass: args[0], err: err, stderr: stderr.String()}
+		return nil, &titlesFailure{pass: args[0], err: err, stderr: stderr.String()}
 	}
-	return nil
+	return stdout.Bytes(), nil
 }
 
 // The arguments of read. The text models run on two threads of the CPU,

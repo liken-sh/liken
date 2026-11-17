@@ -51,6 +51,9 @@ func main() {
 		case titlesFitMode:
 			runTitlesFit()
 			return
+		case titlesPlaceMode:
+			runTitlesPlace()
+			return
 		case progressMode:
 			runProgress()
 			return

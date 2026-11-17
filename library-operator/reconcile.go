@@ -91,6 +91,16 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		if err := o.runTitlesFit(ctx, library, report, jobs, now); err != nil {
 			return err
 		}
+		// The placing of the end titles runs an agent on the catalog claim, as
+		// a library Job does, so the Job it creates joins the list the library
+		// step reads, and that step starts no Job beside it.
+		placing, err := o.runTitlesPlace(ctx, library, report, jobs, now)
+		if err != nil {
+			return err
+		}
+		if placing != nil {
+			jobs = append(jobs, *placing)
+		}
 		// No Job of this Library is built while any source it names has no
 		// verdict yet. A Job built while a check is outstanding would receive
 		// a partial source list, and a phase would close a refresh entry
@@ -114,6 +124,7 @@ func (o *operator) reconcile(ctx context.Context, library *Library, choice catal
 		online:            o.reporters.onlineFor(namespace),
 		gpuTemplates:      templates,
 		titlesFit:         o.titlesFits.latestFor(namespace, name),
+		titlesPlacing:     o.titlesPlacings.latestFor(namespace, name),
 		operatorNamespace: o.namespace,
 		fault:             o.observeJobFault(ctx, jobs, pods, report, namespace, name, now),
 	}

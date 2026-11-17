@@ -438,6 +438,7 @@ both `Job`s call, and no copy of a builder or a trigger is made.
 2. Add the `confidence` column to the marks table. Built on
    2026-11-17.
 3. Build the placing `Job`, its trigger, and its result in the status.
+   Built on 2026-11-17.
 4. Rank the placement in the estimate, change the end titles to "latest
    wins", and write the credits row for every video with a clue. Built
    on 2026-11-17.

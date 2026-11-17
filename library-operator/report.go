@@ -80,6 +80,9 @@ type libraryReport struct {
 	// their end titles, which a fit of the titles model learns from
 	// (titlesfit.go).
 	TitlesMarked titlesMarked `json:"titlesMarked,omitzero"`
+	// The videos of this library with a reading and the placements of their
+	// end titles, which decide when the placing Job runs (titlesplace.go).
+	TitlesReadings titlesReadings `json:"titlesReadings,omitzero"`
 	// The counts the Jobs raised inside containers that have exited. The
 	// operator turns them into Prometheus counters.
 	Tallies []libraryTally `json:"tallies,omitempty"`
@@ -156,6 +159,10 @@ func actsOn(before, after libraryReport) bool {
 		return true
 	}
 	if before.TitlesMarked.step() != after.TitlesMarked.step() {
+		return true
+	}
+	if before.TitlesReadings.step() != after.TitlesReadings.step() ||
+		after.TitlesReadings.Placements < before.TitlesReadings.Placements {
 		return true
 	}
 	return !maps.Equal(openGaps(before), openGaps(after))

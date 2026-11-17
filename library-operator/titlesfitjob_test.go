@@ -168,10 +168,10 @@ func TestTheStatusKeepsTheModelThroughAFitThatLeftNone(t *testing.T) {
 	library := titlesMovies()
 	fitted := fittedOn(120, testNow)
 
-	library.Status.TitlesModels = titlesModelsStatus(library, &fitted)
+	library.Status.TitlesModels = titlesModelsStatus(library, &fitted, nil)
 	rejected := titlesFit{Kind: titlesKindEnd, Result: titlesFitRejected, Reason: "under the floor",
 		At: testNow.Add(time.Hour), Marked: titlesMarked{Videos: 190, Groups: 60}}
-	after := titlesModelsStatus(library, &rejected)
+	after := titlesModelsStatus(library, &rejected, nil)
 
 	want := titlesModelStatus{Kind: titlesKindEnd, Fitted: testNow, Videos: 110, LeftOut: 10, HeldOut: 120,
 		Within3: 47, Within10: 72, Within30: 85, LastFit: testNow.Add(time.Hour), LastResult: titlesFitRejected,
@@ -203,7 +203,7 @@ func TestWhatTheStatusHoldsOfTheModel(t *testing.T) {
 			library.Spec.Titles.Enabled = !test.off
 			library.Status.TitlesModels = test.held
 
-			models := titlesModelsStatus(library, test.fit)
+			models := titlesModelsStatus(library, test.fit, nil)
 
 			if got := endTitlesModel(models); (got == nil) != (test.want == 0) || (got != nil && got.Videos != test.want) {
 				t.Errorf("models = %+v, want a model of %d videos", models, test.want)

@@ -90,6 +90,10 @@ type metrics struct {
 	// fit has a history where the status holds the last one.
 	titlesModel       *prometheus.GaugeVec
 	titlesModelVideos *prometheus.GaugeVec
+	// titlesPlacements is what the last placing of each Library's end titles
+	// counted: the placements the catalog holds, the sure ones, and the
+	// readings with no end titles.
+	titlesPlacements *prometheus.GaugeVec
 	// tallyCounters is the counters the Jobs' own counts feed, by tally
 	// metric name.
 	tallyCounters map[string]*prometheus.CounterVec
@@ -169,6 +173,10 @@ func newMetrics(version string) *metrics {
 			Name: "library_titles_model_videos",
 			Help: "The videos a library's titles model was fitted on.",
 		}, []string{"library", "kind"}),
+		titlesPlacements: factory.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "library_titles_placements",
+			Help: "What the last placing of a library's end titles counted: the placements the catalog holds (placed), those with a confidence of 0.6 or more (sure), and the readings with no end titles (none).",
+		}, []string{"library", "kind", "count"}),
 		tallyCounters: newTallyCounters(factory),
 		lastRun:       map[runKey]time.Time{},
 		lastTally:     map[tallyStateKey]float64{},
@@ -198,8 +206,9 @@ func (m *metrics) recordWatchRestart(kind string) {
 }
 
 // observeTitlesModels publishes the score of each titles model a Library's
-// status holds. A Library with no model, or one that turned the fact off,
-// publishes none, and the series it had are deleted.
+// status holds, and the counts of the last placing with it. A Library with
+// no model, or one that turned the fact off, publishes no score, and the
+// series it had are deleted.
 func (m *metrics) observeTitlesModels(library *Library) {
 	if m == nil || library == nil {
 		return
@@ -208,7 +217,13 @@ func (m *metrics) observeTitlesModels(library *Library) {
 	held := prometheus.Labels{"library": name}
 	m.titlesModel.DeletePartialMatch(held)
 	m.titlesModelVideos.DeletePartialMatch(held)
+	m.titlesPlacements.DeletePartialMatch(held)
 	for _, model := range library.Status.TitlesModels {
+		if placed := model.Placed; !placed.At.IsZero() {
+			for count, value := range map[string]int{"placed": placed.Placements, "sure": placed.Sure, "none": placed.None} {
+				m.titlesPlacements.WithLabelValues(name, model.Kind, count).Set(float64(value))
+			}
+		}
 		if model.Fitted.IsZero() {
 			continue
 		}
@@ -307,6 +322,7 @@ func (m *metrics) dropLibrary(library string) {
 	m.factGap.DeletePartialMatch(held)
 	m.titlesModel.DeletePartialMatch(held)
 	m.titlesModelVideos.DeletePartialMatch(held)
+	m.titlesPlacements.DeletePartialMatch(held)
 	for _, counter := range m.tallyCounters {
 		counter.DeletePartialMatch(held)
 	}

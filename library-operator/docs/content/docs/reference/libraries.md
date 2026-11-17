@@ -176,7 +176,7 @@ What the volume resolved to and what the namespace's reporter says about this li
 | <span id="status--runs"></span>`runs` | [\[\]object](#statusruns) | no | The last run of each worker of this library, as the namespace's reporter published it. |
 | <span id="status--sources"></span>`sources` | [\[\]object](#statussources) | no | One entry per name in spec.sources, in the order the spec names them, so you read which providers this library asks and which it drops. A name that spec.sources repeats appears once per repeat. |
 | <span id="status--sourcessummary"></span>`sourcesSummary` | string | no | How many of the sources are ready against how many names spec.sources holds, in the form 6/6. The SOURCES column of kubectl get reads this field. |
-| <span id="status--titlesmodels"></span>`titlesModels` | [\[\]object](#statustitlesmodels) | no | One entry for each kind of titles a model places, on a library that sets spec.titles.enabled. The library fits its own model on its videos that have a reading and a provider's mark of where their end titles start, and the entry holds the score of that model and the last fit. |
+| <span id="status--titlesmodels"></span>`titlesModels` | [\[\]object](#statustitlesmodels) | no | One entry for each kind of titles a model places, on a library that sets spec.titles.enabled. The library fits its own model on its videos that have a reading and a provider's mark of where their end titles start, and the entry holds the score of that model, the last fit, and the last placing of the end titles with it. |
 | <span id="status--webhook"></span>`webhook` | string | no | The address you give to Radarr, Sonarr, or Jellyfin so that an import rescans that one folder at once; it names the operator's own Service and this Library, so it holds for the life of the Library, and it is reported once the storage is bound and the namespace holds one Catalog. |
 | <span id="status--conditions"></span>`conditions` | [\[\]object](#statusconditions) | no | The typed observations the operator keeps on this library, in the standard Kubernetes form. Bound reports the storage: True when the claim exists, is bound, and its PersistentVolume was read, and False with the reason ClaimNotFound, ClaimUnbound, or VolumeNotFound. Ready reports the scanning path: True when the namespace's catalog pod runs with every container ready, spec.scan.schedule parses, the library's Jobs start and succeed, and the reporter has reported this library, and False with the reason NotBound, NoCatalog, ManyCatalogs, CatalogPending, ScheduleInvalid, JobNotStarted, JobFailed, Offline, or NoReport. JobNotStarted names a Job whose pod has stayed Pending for five minutes, with the reason from the pod's scheduling condition or from its newest Warning event. JobFailed names the newest Job that failed, with the reason the Job controller gives, until a later Job succeeds. Departing reports the teardown of a deleted Library: True for as long as the operator's finalizer holds the object open, with the reason ScanRunning, EnrichRunning, Sweeping, or Blocked, and a message that names what the teardown waits on. Sources reports spec.sources: True when every name resolves to a MetadataProvider and one of them serves each fact this library needs, and False with the reason ProviderNotFound, ProviderNotReady, or FactNotServed. A library that names no source carries no Sources condition. GPUClaimTemplates reports the ResourceClaimTemplates that spec.trickplay.gpuResourceClaimTemplate and spec.appearances.gpuResourceClaimTemplate name for an enabled worker: True with the reason ClaimTemplatesFound when each one exists in the library's namespace, and False with the reason ClaimTemplateNotFound when one does not, which holds that worker back. A library whose enabled workers name no template carries no GPUClaimTemplates condition. EndTitlesModel reports the model that places the library's end titles, on a library that sets spec.titles.enabled: True with the reason Fitted when the library has a model, and False with the reason WaitingForMarks while too few videos have a reading and a provider's mark for a first fit, Fitting while the first fit runs, Rejected when the last fit gave a model under the floor, or FitFailed when the last fit failed. A library that leaves spec.titles off carries no EndTitlesModel condition. |
 
@@ -197,7 +197,7 @@ The last run of each worker of this library, as the namespace's reporter publish
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| <span id="statusruns--worker"></span>`worker` | string | yes | Which worker ran: scan for a full walk, rescan for a walk of the folders webhooks named, enrich for the phases of a Job and its hand-off, or cleanup. |
+| <span id="statusruns--worker"></span>`worker` | string | yes | Which worker ran: scan for a full walk, rescan for a walk of the folders webhooks named, enrich for the phases of a Job and its hand-off, titles-place for the placing of the end titles, or cleanup. |
 | <span id="statusruns--job"></span>`job` | string | no | The name of the Job that ran, for kubectl describe and logs. |
 | <span id="statusruns--started"></span>`started` | string | no | When that Job started its work. |
 | <span id="statusruns--finished"></span>`finished` | string | no | When that Job wrote its last row, which is what a catalog pod confirms before the Job exits. |
@@ -218,7 +218,7 @@ One entry per name in spec.sources, in the order the spec names them, so you rea
 
 ### status.titlesModels[]
 
-One entry for each kind of titles a model places, on a library that sets spec.titles.enabled. The library fits its own model on its videos that have a reading and a provider's mark of where their end titles start, and the entry holds the score of that model and the last fit.
+One entry for each kind of titles a model places, on a library that sets spec.titles.enabled. The library fits its own model on its videos that have a reading and a provider's mark of where their end titles start, and the entry holds the score of that model, the last fit, and the last placing of the end titles with it.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -235,6 +235,24 @@ One entry for each kind of titles a model places, on a library that sets spec.ti
 | <span id="statustitlesmodels--lastreason"></span>`lastReason` | string | no | Why the last fit was rejected or failed, in a sentence. |
 | <span id="statustitlesmodels--markedvideos"></span>`markedVideos` | integer | no | How many videos with a reading and a provider's mark the last fit found. The next fit starts when the library holds half as many again. |
 | <span id="statustitlesmodels--markedgroups"></span>`markedGroups` | integer | no | How many films and series those videos are of. |
+| <span id="statustitlesmodels--placed"></span>`placed` | [object](#statustitlesmodelsplaced) | no | The last run of the placing Job, which places the end titles of every reading of the library with the model and writes each placement into the catalog. Absent until the first run ends. |
+
+#### status.titlesModels[].placed
+
+The last run of the placing Job, which places the end titles of every reading of the library with the model and writes each placement into the catalog. Absent until the first run ends.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| <span id="statustitlesmodelsplaced--at"></span>`at` | string | no | When the run ended. |
+| <span id="statustitlesmodelsplaced--result"></span>`result` | string | no | placed for a run that wrote its placements, and failed for a run that could not place, such as one that found no model on the volume or whose titles place failed. |
+| <span id="statustitlesmodelsplaced--reason"></span>`reason` | string | no | Why the run failed, in the tool's own words. |
+| <span id="statustitlesmodelsplaced--model"></span>`model` | string | no | When the model the run placed with was fitted. A run starts when the model in fitted is not this one. |
+| <span id="statustitlesmodelsplaced--readings"></span>`readings` | integer | no | How many videos with a reading the run found in the catalog. A run starts when 50 more readings have landed, or when any reading has landed and no titles worker runs. |
+| <span id="statustitlesmodelsplaced--newestreading"></span>`newestReading` | string | no | When the newest of those readings landed. |
+| <span id="statustitlesmodelsplaced--placements"></span>`placements` | integer | no | How many placements the catalog holds after the run. A run starts when the catalog holds fewer, which is a catalog that was built again. |
+| <span id="statustitlesmodelsplaced--sure"></span>`sure` | integer | no | How many of the placements have a confidence of 0.6 or more. |
+| <span id="statustitlesmodelsplaced--none"></span>`none` | integer | no | How many readings hold no end titles. Their videos have no placement. |
+| <span id="statustitlesmodelsplaced--missing"></span>`missing` | integer | no | How many readings the catalog names and the volume does not hold. The run leaves them out. |
 
 ### status.conditions[]
 
