@@ -257,7 +257,7 @@ func TestUpsertMarksWritesTheConfidenceOfAPlacementOnly(t *testing.T) {
 	sure := 0.83
 
 	if _, err := catalog.UpsertMarks(t.Context(), nil, []markRow{
-		{Library: file.Library, Path: file.Path, Ordinal: titlesPlacementOrdinal, Kind: markKindCredits,
+		{Library: file.Library, Path: file.Path, Ordinal: titlesPlacementOrdinal, Kind: markKindCreditsPlacement,
 			Start: milliseconds(3251000), Source: markSourceTitles, Confidence: &sure},
 		{Library: file.Library, Path: file.Path, Ordinal: 0, Kind: markKindCredits,
 			Start: milliseconds(3253000), Source: providerBlockTheIntroDB},

@@ -78,10 +78,18 @@ const titlesMarkedSQL = `SELECT count(DISTINCT m.path), count(DISTINCT COALESCE(
 // The source of the marks this fact writes: the placements of the model.
 const markSourceTitles = "titles"
 
-// The ordinal of the placement of a file's end titles. Like the estimate's
-// rows, it is below zero, so the walk's write of the marks ledger leaves it
-// in place.
-const titlesPlacementOrdinal = -3
+// The ordinal and the kind of the placement of a file's end titles. Like
+// the estimate's rows, the ordinal is below zero, so the walk's write of the
+// marks ledger leaves the row in place.
+//
+// The kind is not `credits`, because a placement is a clue for the estimate
+// and not an answer for a screen. A screen acts on every `credits` row it is
+// given, and a placement that the model was not sure of can be minutes from
+// the credits. A screen ignores a kind it does not know.
+const (
+	titlesPlacementOrdinal   = -3
+	markKindCreditsPlacement = "credits-placement"
+)
 
 // The count of one Library's videos that a fit can learn from.
 func (c *Catalog) titlesMarked(ctx context.Context, library string) (titlesMarked, error) {

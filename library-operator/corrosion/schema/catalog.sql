@@ -340,8 +340,9 @@ CREATE TABLE streams (
 -- The rows with an ordinal below zero are not from the ledger. The operator
 -- derives them, and the walk's write leaves them in place: the estimate of
 -- where the credits start, the estimate of the intro, and where the titles
--- model placed the end titles. confidence is how sure the model was of that
--- placement, from 0 to 1, and it is null on every other row. The column has
+-- model placed the end titles, which has the kind credits-placement.
+-- confidence is how sure the model was of that placement, from 0 to 1, and
+-- it is null on every other row. The column has
 -- no default, so a row from before the column holds a null too.
 --
 -- Every read of a file's marks leads with the library and the path, which

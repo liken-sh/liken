@@ -73,7 +73,7 @@ func landProviderMarks(t *testing.T, catalog *Catalog, path string, marks ...mar
 // placing Job writes it.
 func landPlacement(t *testing.T, catalog *Catalog, path string, start int64, confidence float64) {
 	t.Helper()
-	row := markRow{Library: estimateLibrary, Path: path, Ordinal: titlesPlacementOrdinal, Kind: markKindCredits,
+	row := markRow{Library: estimateLibrary, Path: path, Ordinal: titlesPlacementOrdinal, Kind: markKindCreditsPlacement,
 		Start: &start, Source: markSourceTitles, Confidence: &confidence}
 	if _, err := catalog.UpsertMarks(t.Context(), nil, []markRow{row}); err != nil {
 		t.Fatal(err)
