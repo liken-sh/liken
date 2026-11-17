@@ -21,7 +21,7 @@
         uses: {% action "github/codeql-action/upload-sarif" %}
         with:
           sarif_file: trivy/{% .Image %}.sarif
-          category: trivy/{% .Image %}{% end %}
+          category: trivy/{% .Image %}{% template "sarif-ref" %}{% end %}
 {% define "trivy-db-restore" %}
       - id: trivy-day{% if . %}
         if: {% . %}{% end %}

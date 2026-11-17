@@ -629,6 +629,16 @@ jobs:
         with:
           sarif_file: trivy/indi.sarif
           category: trivy/indi
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-simulators.sarif') != '' }}
         continue-on-error: true
@@ -636,6 +646,16 @@ jobs:
         with:
           sarif_file: trivy/indi-simulators.sarif
           category: trivy/indi-simulators
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-phd2.sarif') != '' }}
         continue-on-error: true
@@ -643,6 +663,16 @@ jobs:
         with:
           sarif_file: trivy/indi-phd2.sarif
           category: trivy/indi-phd2
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-open.sarif') != '' }}
         continue-on-error: true
@@ -650,6 +680,16 @@ jobs:
         with:
           sarif_file: trivy/indi-open.sarif
           category: trivy/indi-open
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-zwo.sarif') != '' }}
         continue-on-error: true
@@ -657,6 +697,16 @@ jobs:
         with:
           sarif_file: trivy/indi-zwo.sarif
           category: trivy/indi-zwo
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-qhy.sarif') != '' }}
         continue-on-error: true
@@ -664,6 +714,16 @@ jobs:
         with:
           sarif_file: trivy/indi-qhy.sarif
           category: trivy/indi-qhy
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-playerone.sarif') != '' }}
         continue-on-error: true
@@ -671,6 +731,16 @@ jobs:
         with:
           sarif_file: trivy/indi-playerone.sarif
           category: trivy/indi-playerone
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-svbony.sarif') != '' }}
         continue-on-error: true
@@ -678,6 +748,16 @@ jobs:
         with:
           sarif_file: trivy/indi-svbony.sarif
           category: trivy/indi-svbony
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-atik.sarif') != '' }}
         continue-on-error: true
@@ -685,6 +765,16 @@ jobs:
         with:
           sarif_file: trivy/indi-atik.sarif
           category: trivy/indi-atik
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-fli.sarif') != '' }}
         continue-on-error: true
@@ -692,6 +782,16 @@ jobs:
         with:
           sarif_file: trivy/indi-fli.sarif
           category: trivy/indi-fli
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-sbig.sarif') != '' }}
         continue-on-error: true
@@ -699,6 +799,16 @@ jobs:
         with:
           sarif_file: trivy/indi-sbig.sarif
           category: trivy/indi-sbig
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-mi.sarif') != '' }}
         continue-on-error: true
@@ -706,6 +816,16 @@ jobs:
         with:
           sarif_file: trivy/indi-mi.sarif
           category: trivy/indi-mi
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-qsi.sarif') != '' }}
         continue-on-error: true
@@ -713,6 +833,16 @@ jobs:
         with:
           sarif_file: trivy/indi-qsi.sarif
           category: trivy/indi-qsi
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-apogee.sarif') != '' }}
         continue-on-error: true
@@ -720,6 +850,16 @@ jobs:
         with:
           sarif_file: trivy/indi-apogee.sarif
           category: trivy/indi-apogee
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-astroasis.sarif') != '' }}
         continue-on-error: true
@@ -727,6 +867,16 @@ jobs:
         with:
           sarif_file: trivy/indi-astroasis.sarif
           category: trivy/indi-astroasis
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-gphoto.sarif') != '' }}
         continue-on-error: true
@@ -734,6 +884,16 @@ jobs:
         with:
           sarif_file: trivy/indi-gphoto.sarif
           category: trivy/indi-gphoto
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/indi-touptek.sarif') != '' }}
         continue-on-error: true
@@ -741,6 +901,16 @@ jobs:
         with:
           sarif_file: trivy/indi-touptek.sarif
           category: trivy/indi-touptek
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

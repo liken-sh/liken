@@ -340,6 +340,16 @@ jobs:
         with:
           sarif_file: trivy/${{ matrix.image }}.sarif
           category: trivy/${{ matrix.image }}
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
   # The OS publishes no image, so Trivy has nothing to scan. grype
   # matches the packages of the release's CycloneDX SBOM against the
@@ -428,3 +438,13 @@ jobs:
         with:
           sarif_file: grype/liken-release.sarif
           category: grype/liken-release
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}

@@ -6,7 +6,7 @@ scans the SBOM of each OS release with grype and uploads the findings
 to code scanning, the tree's under the category `grype/liken` and a
 release's under `grype/liken-release`. The items below are
 what the scan does not match, what it reports that no bump of today
-clears, and what the workflows showed when they ran on GitHub. Each
+clears, and what is not proven until a release runs. Each
 item is independent.
 
 ## What the scan does not match
@@ -35,21 +35,17 @@ The root open question
 lists these findings, as seen on 2026-11-11: 20 in the programs that
 k3s ships and one in libevent 2.1.13.
 
-## What a run on GitHub showed
+## What is not proven until a release runs
 
-- **The ref of a release's upload.** The OS publishes on a release
-  tag, so the publish job's upload names `refs/tags/<version>`. Code
-  scanning keeps that upload under the tag, and its view of the
-  default branch reads only the uploads on `main`. On 2026-11-15 the
-  publish of `2026.11.15-001` uploaded 28 findings under its tag, and
-  the alerts of `main` held the 26 findings of the scheduled scan of
-  2026-11-13 until the scheduled scan of 2026-11-16 uploaded 28. So
-  the Security tab shows a new release's findings at the next
-  scheduled scan, at most three days after the publish, and not at
-  the publish. The Trivy upload of a release publish has the same
-  property.
-- **The scheduled workflow.** The scheduled scans of 2026-11-13 and
-  2026-11-16 succeeded, and `upload-sarif` accepted grype's SARIF.
+Every upload of a scan names `main` when its run is on a tag, with the
+run's commit, because code scanning's view of the default branch reads
+only the uploads on `main`. Before that, on 2026-11-15, the publish of
+`2026.11.15-001` uploaded 28 findings under its tag, and the alerts of
+`main` held the 26 findings of the scheduled scan of 2026-11-13 until
+the scheduled scan of 2026-11-16. No release has published since the
+change, so whether code scanning accepts a tag run's upload for `main`
+and shows its findings at the publish was not checked. The Trivy
+upload of a release publish names `main` the same way.
 
 ## A change to the scan's settings
 

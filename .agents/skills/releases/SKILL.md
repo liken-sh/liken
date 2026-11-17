@@ -526,6 +526,12 @@ rm -rf "$key"
 Every finding is in the repository's Security tab, under code
 scanning, and no finding fails a run.
 
+Code scanning keeps each upload under the ref that the upload names,
+and the Security tab's view of the default branch reads only the
+uploads on `main`. So every upload of a scan names `main` when its run
+is on a release tag, with the run's commit. `ci/templates/sarif.tmpl`
+holds the two inputs.
+
 * **Each image.** The publish job of a component runs Trivy, pinned in
   `ci/trivy.go`, on each image that it pushes, and uploads the
   findings that have a fixed version under the category

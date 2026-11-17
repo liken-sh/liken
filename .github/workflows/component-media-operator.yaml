@@ -811,6 +811,16 @@ jobs:
         with:
           sarif_file: trivy/media-operator.sarif
           category: trivy/media-operator
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/media-operator-player.sarif') != '' }}
         continue-on-error: true
@@ -818,6 +828,16 @@ jobs:
         with:
           sarif_file: trivy/media-operator-player.sarif
           category: trivy/media-operator-player
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/media-operator-idle.sarif') != '' }}
         continue-on-error: true
@@ -825,6 +845,16 @@ jobs:
         with:
           sarif_file: trivy/media-operator-idle.sarif
           category: trivy/media-operator-idle
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/media-operator-display.sarif') != '' }}
         continue-on-error: true
@@ -832,6 +862,16 @@ jobs:
         with:
           sarif_file: trivy/media-operator-display.sarif
           category: trivy/media-operator-display
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/media-operator-api.sarif') != '' }}
         continue-on-error: true
@@ -839,6 +879,16 @@ jobs:
         with:
           sarif_file: trivy/media-operator-api.sarif
           category: trivy/media-operator-api
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/media-operator-capabilities.sarif') != '' }}
         continue-on-error: true
@@ -846,6 +896,16 @@ jobs:
         with:
           sarif_file: trivy/media-operator-capabilities.sarif
           category: trivy/media-operator-capabilities
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/media-operator-cli.sarif') != '' }}
         continue-on-error: true
@@ -853,6 +913,16 @@ jobs:
         with:
           sarif_file: trivy/media-operator-cli.sarif
           category: trivy/media-operator-cli
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

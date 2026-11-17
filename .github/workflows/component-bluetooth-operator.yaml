@@ -686,6 +686,16 @@ jobs:
         with:
           sarif_file: trivy/bluetooth-operator.sarif
           category: trivy/bluetooth-operator
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/bluetooth-bondfetch.sarif') != '' }}
         continue-on-error: true
@@ -693,6 +703,16 @@ jobs:
         with:
           sarif_file: trivy/bluetooth-bondfetch.sarif
           category: trivy/bluetooth-bondfetch
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/bluetoothd.sarif') != '' }}
         continue-on-error: true
@@ -700,6 +720,16 @@ jobs:
         with:
           sarif_file: trivy/bluetoothd.sarif
           category: trivy/bluetoothd
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/bluetooth-operator-cli.sarif') != '' }}
         continue-on-error: true
@@ -707,6 +737,16 @@ jobs:
         with:
           sarif_file: trivy/bluetooth-operator-cli.sarif
           category: trivy/bluetooth-operator-cli
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
 
       - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

@@ -13,4 +13,4 @@
         uses: {% action "github/codeql-action/upload-sarif" %}
         with:
           sarif_file: grype/{% .Name %}.sarif
-          category: grype/{% .Name %}{% end %}
+          category: grype/{% .Name %}{% template "sarif-ref" %}{% end %}
