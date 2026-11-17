@@ -7,8 +7,9 @@ package main
 // temporary's, a remove that takes one file this operator wrote and nothing
 // else reads, a remove of a partial file a stopped writer left under .liken,
 // the trickplay map, the move and the remove a merge of two
-// .contributors/ entries makes, the remove of the .liken directory at the
-// library root (rootliken.go), and the replace of a thumbnail or a tile
+// .contributors/ entries makes, the remove of each file of the .liken
+// directory at the library root except the titles model (rootliken.go),
+// and the replace of a thumbnail or a tile
 // directory made from the file a path held before. Every name these doors
 // land takes the owner of its folder (volumeowner.go). The edit of one element
 // in an .nfo file is in xmledit.go, and the door for a file a writer reads,

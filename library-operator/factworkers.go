@@ -1,7 +1,8 @@
 package main
 
-// factworkers.go is the table of the heavy facts: the facts that read a whole
-// video and write only files onto the library volume. Each one runs in a
+// factworkers.go is the table of the heavy facts: the facts that decode a
+// video, the whole of it or its end, and write only files onto the library
+// volume. Each one runs in a
 // worker Job of its own, outside the library Job, because one Library runs
 // one library Job at a time and a fact that decodes for minutes per title
 // would hold every walk and every webhook rescan behind it.

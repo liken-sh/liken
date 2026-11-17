@@ -39,9 +39,12 @@ const trivySHA256 = "c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c3
 // that a cluster pulls. It looks for known vulnerabilities only:
 // GitHub's secret scanning reads the repository that every image is
 // built from. It reports only a vulnerability that has a fixed
-// version. The bases install from Debian sid, which carries many
-// vulnerabilities that no package fixes yet, and those would bury the
-// findings that a bump can act on.
+// version, because a bump can act only on those. On an image of the
+// bases, which install from Debian sid, Trivy matches no Debian
+// package against an advisory, so the scan reports only what the
+// image holds beside those packages.
+// plans/open-problems/trivy-matches-nothing-on-debian-sid.md holds the
+// measurement.
 //
 // A scan reports, and it does not gate. A finding has no effect on the
 // run, and a scan that fails prints a warning, so a publish is never
