@@ -1,0 +1,31 @@
+{% extends "frame/layout.html" %}
+{%- import "links/link.html" as links -%}
+
+{% block title %}{{ kind }} {{ name }}{% if let Some((namespace, _)) = place %} · {{ namespace }}{% endif %} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- Any object: its board, with its own conditions and facts in the
+    middle and what names it and what it names around them, and its
+    card beside.  Never its spec. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="{{ label }}">
+{%- if let Some((namespace, _)) = place %}
+<a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
+{%- else %}
+<span class="switcher-namespace">cluster</span>
+{%- endif %}
+<span class="switch switch-current" aria-current="page">{{ transect_graph::edges::kind_and_name(kind, name) }}</span>
+{%- if let Some(href) = kind_href %}
+<a class="switch" href="{{ href }}" hx-get="{{ href }}">{{ label }}</a>
+{%- endif %}
+</nav>
+{% include "objects/board.html" %}
+</main>
+{% include "objects/card.html" %}
+</div>
+{% endblock %}

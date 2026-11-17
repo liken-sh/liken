@@ -1,0 +1,23 @@
+{%- import "links/link.html" as links -%}
+{#- A log finding's evidence, under the finding's line.  It lists where
+    the matches came from, by pod, container, and machine, with each
+    pod linked to the matching lines on its page, and then the newest
+    lines themselves.  Each link is a plain link, not an htmx swap, so
+    the browser scrolls to the lines. -#}
+{%- if evidence.lists_parts() %}
+<ul class="evidence-parts">
+{%- for part in evidence.parts %}
+<li>{% if let Some(href) = part.href %}<a href="{{ href }}">{{ part.label() }}</a>{% else %}{{ part.label() }}{% endif %}{% if let Some(container) = part.container_text() %} {{ container }}{% endif %}{% if let Some(node) = part.node %} on {% call links::object_link(node, Some(transect_graph::links::machine(node)), "") %}{% endcall %}{% endif %}: {{ part.count_text() }}</li>
+{%- endfor %}
+{%- if let Some(more) = evidence.more_text() %}
+<li>{{ more }}</li>
+{%- endif %}
+</ul>
+{%- endif %}
+{%- if !evidence.samples.is_empty() %}
+<ol class="evidence-lines">
+{%- for sample in evidence.samples %}
+<li>{% if let Some(at) = sample.at() %}<span class="evidence-at">{{ at }}</span> {% endif %}{% if let Some(from) = sample.from() %}<span class="evidence-from">{{ from }}</span> {% endif %}<span class="evidence-message">{{ sample.message }}</span></li>
+{%- endfor %}
+</ol>
+{%- endif %}

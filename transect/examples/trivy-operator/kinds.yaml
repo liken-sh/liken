@@ -1,0 +1,124 @@
+# Kind knowledge for trivy-operator's reports, as trivy-operator would
+# ship it.  A report runs no pods, so the controller's image identifies
+# the operator that writes a report.  Each kind stays watched
+# trimmed.  A vulnerability report's findings knowledge keeps
+# each finding's id, severity, score, package, versions, link, and
+# title, and none of its description; every other report keeps none of
+# its contents.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: clustercompliancereports.aquasecurity.github.io
+spec:
+  controller: {image: aquasec/trivy-operator}
+  docs: https://aquasecurity.github.io/trivy-operator/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: clusterconfigauditreports.aquasecurity.github.io
+spec:
+  controller: {image: aquasec/trivy-operator}
+  docs: https://aquasecurity.github.io/trivy-operator/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: clusterinfraassessmentreports.aquasecurity.github.io
+spec:
+  controller: {image: aquasec/trivy-operator}
+  docs: https://aquasecurity.github.io/trivy-operator/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: clusterrbacassessmentreports.aquasecurity.github.io
+spec:
+  controller: {image: aquasec/trivy-operator}
+  docs: https://aquasecurity.github.io/trivy-operator/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: clustersbomreports.aquasecurity.github.io
+spec:
+  controller: {image: aquasec/trivy-operator}
+  docs: https://aquasecurity.github.io/trivy-operator/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: clustervulnerabilityreports.aquasecurity.github.io
+spec:
+  controller: {image: aquasec/trivy-operator}
+  docs: https://aquasecurity.github.io/trivy-operator/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: configauditreports.aquasecurity.github.io
+spec:
+  controller: {image: aquasec/trivy-operator}
+  docs: https://aquasecurity.github.io/trivy-operator/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: exposedsecretreports.aquasecurity.github.io
+spec:
+  controller: {image: aquasec/trivy-operator}
+  docs: https://aquasecurity.github.io/trivy-operator/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: infraassessmentreports.aquasecurity.github.io
+spec:
+  controller: {image: aquasec/trivy-operator}
+  docs: https://aquasecurity.github.io/trivy-operator/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: rbacassessmentreports.aquasecurity.github.io
+spec:
+  controller: {image: aquasec/trivy-operator}
+  docs: https://aquasecurity.github.io/trivy-operator/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: sbomreports.aquasecurity.github.io
+spec:
+  controller: {image: aquasec/trivy-operator}
+  docs: https://aquasecurity.github.io/trivy-operator/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: vulnerabilityreports.aquasecurity.github.io
+spec:
+  controller: {image: aquasec/trivy-operator}
+  findings:
+    subject:
+      owner: true
+      container: {label: trivy-operator.container.name}
+    digest: report.artifact.digest
+    scannedAt: report.updateTimestamp
+    summary:
+      - {severity: CRITICAL, path: report.summary.criticalCount}
+      - {severity: HIGH, path: report.summary.highCount}
+      - {severity: MEDIUM, path: report.summary.mediumCount}
+      - {severity: LOW, path: report.summary.lowCount}
+      - {severity: UNKNOWN, path: report.summary.unknownCount}
+    items: "report.vulnerabilities[]"
+    item:
+      id: vulnerabilityID
+      severity: severity
+      score: score
+      package: resource
+      installed: installedVersion
+      fixed: fixedVersion
+      link: primaryLink
+      title: title
+  docs: https://aquasecurity.github.io/trivy-operator/

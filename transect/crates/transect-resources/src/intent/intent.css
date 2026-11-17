@@ -1,0 +1,66 @@
+/*
+ * Intent on a card: the opening line of what a thing is, the gotcha
+ * under it, and the docs link, then the provenance mark that every line
+ * of stored text has and the legend under a card that has one.  Marks
+ * are faint, since a mark qualifies a line and should not pull the eye
+ * from it.
+ */
+
+/* The opening line is set as prose, larger than the card's facts. */
+.card-why {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--ink);
+  overflow-wrap: break-word;
+}
+
+/* What goes wrong is guidance, not a problem now, so it stays gray and
+   is set off by a rule rather than by --warm. */
+.card-gotcha {
+  padding-left: 8px;
+  border-left: 2px solid var(--rule-strong);
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+/* What the cluster loses with it is set as a fact about the thing, in
+   the card's own size, with its label quieter than the words. */
+.card-provides {
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--ink);
+  overflow-wrap: break-word;
+}
+
+.card-provides-label { color: var(--ink-muted); }
+
+.card-links {
+  font-size: 13px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+.card-links a { text-decoration: none; }
+
+.card-links a:hover { text-decoration: underline; }
+
+.mark {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--ink-faint);
+  vertical-align: 1px;
+  cursor: help;
+}
+
+.mark-legend {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--ink-faint);
+}

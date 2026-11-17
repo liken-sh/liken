@@ -1,0 +1,9 @@
+{#- The elevation crumb, from the page's `crumbs()`. -#}
+{%- for crumb in crumbs() -%}
+{%- if !loop.first %}<span aria-hidden="true">/</span>{% endif -%}
+{%- if let Some(href) = crumb.href -%}
+<a href="{{ href }}">{{ crumb.text }}</a>
+{%- else -%}
+<span class="elevation-current{% if crumb.name %} elevation-name{% endif %}">{{ crumb.text }}</span>
+{%- endif -%}
+{%- endfor -%}

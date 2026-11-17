@@ -1,0 +1,34 @@
+vulnerabilities · listings · acme-shop · transect
+transect
+cluster / apps / acme-shop / listings / vulnerabilities
+access vulnerabilities kinds
+Search /
+esc
+acme-shop listings overview section logs vulnerabilities
+every severity critical unknown
+indexer
+image-scanner reports 1 finding id in the image of indexer, scanned 30m ago. 1 unknown
+id
+severity
+score
+package installed fixed in
+GHSA-ex12-ab34-cd56
+UNKNOWN
+—
+indexer-lib 3.1.0 —
+main
+image-scanner reports 1 finding id in the image of main, scanned 1h ago. 1 critical
+id
+severity
+score
+package installed fixed in
+CVE-2026-0001 ↗ An overflow in libexample lets a caller run code
+CRITICAL
+9.8
+libexample 1.2.0 1.2.4
+Deployment listings 1 of 1 ready
+1 critical , 1 unknown · vulnerabilities
+If it goes down
+Nothing in the cluster depends on it.
+No NetworkPolicy selects its pods, so any pod may call them.
+no GitOps applier's label or annotation is on it

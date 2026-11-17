@@ -1,0 +1,159 @@
+{% extends "frame/layout.html" %}
+{% import "links/link.html" as links %}
+{% import "frame/tabs.html" as frame %}
+
+{% block title %}{{ namespace }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- The bands, the open namespace, the machines, and the card swap as
+    one block, as the cluster page's do.  A namespace named in a folded
+    band links to its own page, which swaps the body and pushes its URL. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="cluster namespace-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+{#- The namespace's lens tabs are at the right end of this row, as on
+    its access tab, so a click between the two leaves the pointer over
+    them. -#}
+<nav class="switcher" aria-label="{{ namespace }}">
+<a class="switcher-namespace" href="/?select={{ namespace }}#{{ layer }}" hx-get="/?select={{ namespace }}#{{ layer }}">{{ layer }}</a>
+<a class="switch switch-current" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}" aria-current="page">{{ namespace }}</a>
+{% call frame::tabs(tabs()) %}{% endcall %}
+</nav>
+{% include "map/edge_row.html" %}
+<div class="bands">
+{%- for band in bands %}
+<section class="band{% if band.open %} band-open{% else %} band-folded{% endif %}" id="{{ band.name }}" aria-label="{{ band.name }}{% if band.open %}, with {{ namespace }} open{% endif %}">
+<div class="band-label"><div class="band-name">{{ band.name }}</div></div>
+<div class="band-body">
+<div class="folded-names">
+{%- for named in band.names %}{% if !loop.first %} · {% endif %}{% call links::object_link(named.name, Some(transect_graph::links::namespace(named.name)), "") %}{% endcall %}{% if named.looped %}<span class="loop-tag">⟲ loop</span>{% endif %}{% endfor %}
+{%- if let Some(tail) = band.tail() %}{% if !band.names.is_empty() %} · {% endif %}<span class="folded-tail">{{ tail }}</span>{% endif -%}
+</div>
+{%- if band.open %}
+<div class="{{ card.frame_class() }}">
+<div class="opened-head"><span class="opened-name">{{ namespace }}</span><span class="opened-count">{{ header }}</span></div>
+{%- if let Some(matrix) = matrix %}
+{#- A namespace of DaemonSets: one row per DaemonSet, one column per
+    machine.  The page sets the column count in a custom property, so
+    the grid keeps one track per machine whatever the cluster's size. -#}
+<section class="matrix" aria-label="{{ daemon_sets_label() }}">
+<div class="matrix-head"><span class="matrix-label">{{ daemon_sets_label() }}</span><span class="matrix-count">{{ matrix.header() }}</span></div>
+<div class="matrix-panel">
+<div class="matrix-grid" style="--machines: {{ matrix.machines.len() }}">
+<div class="matrix-corner table-head"></div>
+{%- for machine in matrix.machines %}
+<a class="matrix-machine table-head{% if machine.control_plane %} matrix-machine-control-plane{% endif %}" href="/machines/{{ machine.name }}" hx-get="/machines/{{ machine.name }}" title="{{ machine.name }}{% if machine.control_plane %}, control plane{% endif %}">{{ machine.name }}</a>
+{%- endfor %}
+{%- for row in matrix.rows %}
+{%- if let Some(href) = row.href %}
+<a class="matrix-name" href="{{ href }}" hx-get="{{ href }}" title="{{ row.name }}">{{ row.name }}</a>
+{%- else %}
+<div class="matrix-name" title="{{ row.name }}">{{ row.name }}</div>
+{%- endif %}
+{%- for cell in row.cells %}
+<div class="{{ cell.class() }}" title="{{ matrix.machines[loop.index0].name }}: {{ cell.title() }}" aria-label="{{ cell.title() }}"><span class="cell-dot"></span>{{ cell.glyph() }}</div>
+{%- endfor %}
+{%- endfor %}
+</div>
+</div>
+<div class="matrix-legend">
+{%- for (class, glyph, text) in legend() %}
+<span class="legend-entry"><span class="{{ class }} legend-sample"><span class="cell-dot"></span>{{ glyph }}</span>{{ text }}</span>
+{%- endfor %}
+</div>
+</section>
+{%- if !matrix.others.is_empty() %}
+<section class="matrix-others" aria-label="{{ others_label() }}">
+<div class="matrix-head"><span class="matrix-label">{{ others_label() }}</span><span class="matrix-count">{{ matrix.others_header() }}</span></div>
+<div class="others-names">
+{%- for other in matrix.others %}
+{%- if let Some(href) = other.href %}
+<a class="other-name{% if other.warm %} other-warm{% endif %}" href="{{ href }}" hx-get="{{ href }}" title="{{ other.kind }} {{ other.name }}">{{ other.name }}</a>
+{%- else %}
+<span class="other-name{% if other.warm %} other-warm{% endif %}" title="{{ other.kind }} {{ other.name }}">{{ other.name }}</span>
+{%- endif %}
+{%- endfor %}
+</div>
+</section>
+{%- endif %}
+{%- else %}
+<div class="workloads">
+{%- for one in boxes %}
+{%- if let Some(href) = one.href %}
+<a class="{{ one.class() }}" href="{{ href }}" hx-get="{{ href }}">
+{%- else %}
+<div class="{{ one.class() }}">
+{%- endif %}
+<div class="workload-title">{{ one.title }}</div>
+<div class="workload-line">{% if let Some(managed_by) = one.managed_by %}{{ managed_by }} · {% endif %}{{ one.line }}</div>
+{%- for reason in one.health.reasons %}
+<div class="workload-reason">{{ reason }}</div>
+{%- endfor %}
+{%- if !one.machines.is_empty() %}
+<div class="workload-machines">
+{%- for machine in one.machines %}
+<span class="workload-machine">{{ machine }}</span>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if one.href.is_some() %}
+</a>
+{%- else %}
+</div>
+{%- endif %}
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if !resources.is_empty() %}
+{#- The custom resources that are not workloads, one row per kind: the
+    kind opens its list, and each name its page. -#}
+<section class="resources-list" aria-label="Resources in {{ namespace }}">
+<div class="resources-head">Resources</div>
+{%- for group in resources %}
+<div class="resource-group">
+<span class="resource-kind">{% call links::object_link(group.label, Some(group.href.clone()), "") %}{% endcall %}</span>
+<span class="resource-names">
+{%- for item in group.items %}
+<span class="resource-item">{% if let Some(class) = item.dot_class() %}<span class="{{ class }}"></span>{% endif %}{% call links::object_link(item.name, item.href, "") %}{% endcall %}</span>
+{%- endfor %}
+{%- if let Some(more) = group.more_text() %}
+{% call links::object_link(more, Some(group.href.clone()), "resource-more") %}{% endcall %}
+{%- endif %}
+</span>
+</div>
+{%- endfor %}
+</section>
+{%- endif %}
+</div>
+{%- endif %}
+</div>
+</section>
+{%- endfor %}
+<section class="band machines machine-row" aria-label="Machines under {{ namespace }}">
+<div class="band-label"><div class="band-name">Machines</div></div>
+<div class="machine-chips">
+{%- for machine in machines %}
+<a class="machine-chip{% if machine.pods == 0 %} machine-chip-none{% endif %}{% if machine.control_plane %} machine-chip-control-plane{% endif %}" title="{{ machine.name }}" href="{{ transect_graph::links::machine(machine.name) }}" hx-get="{{ transect_graph::links::machine(machine.name) }}">{{ machine.name }}{% if machine.pods > 0 %} <span class="machine-chip-pods">· {{ machine.pods }} pod{% if machine.pods != 1 %}s{% endif %}</span>{% endif %}</a>
+{%- endfor %}
+</div>
+</section>
+{#- The ground band folds to one line that shows each backend outside
+    the cluster that stores this namespace's volumes, with its counts. -#}
+<section class="band ground ground-line" aria-label="Ground under {{ namespace }}">
+<div class="band-label"><div class="band-name">Ground</div></div>
+<div class="ground-under">
+{%- for (name, counts) in ground %}
+<span class="ground-under-box">{{ name }} · {{ counts }}</span>
+{%- else %}
+<span class="ground-under-none">{{ nothing_under() }}</span>
+{%- endfor %}
+</div>
+</section>
+</div>
+</main>
+{% include "cards/namespace.html" %}
+</div>
+{% endblock %}

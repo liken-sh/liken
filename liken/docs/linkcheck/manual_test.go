@@ -40,6 +40,7 @@ var exceptions = []string{
 	// have no manual into the built tree.
 	"/coverage/kubernetes.html",
 	"/coverage/media-screen.html",
+	"/coverage/transect.html",
 }
 
 // TestManualInternalLinks resolves every absolute link in the manual:

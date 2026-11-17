@@ -1,0 +1,95 @@
+# transect's crates, one directory each under crates/, from the page
+# frame at the bottom to the binary at the top. A crate names only the
+# crates below it, and plans/completed/12-crates.md says why each sits
+# where it does.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+# Each outside crate is pinned to one exact version, because
+# `toolchains/latest.sh` reports only the exact `=` pins of a
+# Cargo.toml, and `ci pins` fails when two Cargo.toml files of the
+# repository name a crate at different versions.
+[workspace.dependencies]
+transect-frame = { path = "crates/transect-frame" }
+transect-graph = { path = "crates/transect-graph" }
+transect-resources = { path = "crates/transect-resources" }
+transect-cluster = { path = "crates/transect-cluster" }
+transect-observe = { path = "crates/transect-observe" }
+transect-ground = { path = "crates/transect-ground" }
+transect-supply = { path = "crates/transect-supply" }
+transect-network = { path = "crates/transect-network" }
+transect-map = { path = "crates/transect-map" }
+transect-access = { path = "crates/transect-access" }
+anyhow = "=1.0.104"
+askama = "=0.16.1"
+axum = "=0.8.9"
+base64 = "=0.23.1"
+bytes = "=1.12.1"
+clap = { version = "=4.6.7", features = ["derive", "env"] }
+futures = "=0.3.34"
+http = "=1.5.0"
+http-body-util = "=0.1.5"
+hyper = { version = "=1.12.0", features = ["client", "http1", "http2"] }
+hyper-rustls = { version = "=0.27.10", default-features = false, features = ["http1", "http2", "ring", "tls12"] }
+hyper-timeout = "=0.5.2"
+hyper-util = { version = "=0.1.21", features = ["client-legacy", "http1", "http2", "tokio"] }
+k8s-openapi = { version = "=0.29.0", features = ["v1_37"] }
+kube = { version = "=5.0.0", features = ["runtime"] }
+notify = "=8.2.2"
+reqwest = { version = "=0.13.5", default-features = false, features = ["rustls-no-provider", "query"] }
+ring = "=0.17.14"
+rstest = "=0.28.0"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+serde_yaml = "=0.9.34"
+tikv-jemallocator = "=0.7.0"
+tokio = { version = "=1.54.1", features = ["full"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
+tower = { version = "=0.5.3", features = ["retry", "util"] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+
+# transect's own crates compile at opt-level 1, and their dependencies
+# keep the release default of 3.  About half of transect's compile
+# time is type checking, borrow checking, and collecting generic
+# instances, which no opt-level changes.  Opt-level 1 removes most of
+# LLVM's optimization time, and the pages measured no slower than at 3.
+# Each crate is named, since `package."*"` would also raise the build
+# scripts and proc macros from build-override's opt-level 0 to 3.
+[profile.release.package.transect]
+opt-level = 1
+
+[profile.release.package.transect-frame]
+opt-level = 1
+
+[profile.release.package.transect-graph]
+opt-level = 1
+
+[profile.release.package.transect-resources]
+opt-level = 1
+
+[profile.release.package.transect-cluster]
+opt-level = 1
+
+[profile.release.package.transect-observe]
+opt-level = 1
+
+[profile.release.package.transect-ground]
+opt-level = 1
+
+[profile.release.package.transect-supply]
+opt-level = 1
+
+[profile.release.package.transect-network]
+opt-level = 1
+
+[profile.release.package.transect-map]
+opt-level = 1
+
+[profile.release.package.transect-access]
+opt-level = 1

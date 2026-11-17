@@ -1,0 +1,66 @@
+/*
+ * The workload card, beside the workload's pods.  It shares the
+ * sidebar's column and its cards' styles.  Its findings are worth
+ * knowing but are not faults, so they stay gray, as on the cluster
+ * sidebar.
+ */
+
+.workload-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.workload-card-name {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: break-word;
+}
+
+/* The title opens the workload's page.  It keeps the title's ink and
+   underlines on hover, as a namespace card's name does. */
+.workload-card-name .object-link { color: inherit; }
+
+.workload-card-status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.workload-card-status .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+}
+
+.workload-card-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* What it runs is monospace, as names are.  An image is often longer
+   than the card is wide, so it wraps anywhere. */
+.workload-card-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+.workload-card-rolled { color: var(--ink-faint); }
+
+.workload-finding-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink);
+}

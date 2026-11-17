@@ -1,0 +1,25 @@
+vulnerabilities · transect
+transect
+cluster / vulnerabilities
+access vulnerabilities kinds
+Search /
+esc
+every severity critical high unknown
+image-scanner reports 2 finding ids in the images 2 workloads run now.
+Findings
+id
+severity
+score
+package fixed in
+run by
+CVE-2026-0003 ↗
+UNKNOWN
+7.1
+libother 2.0.1
+Deployment acme-shop/storefront
+GHSA-ex12-ab34-cd56
+UNKNOWN
+—
+indexer-lib —
+Deployment acme-shop/listings
+1 report names an image digest no pod runs now, and is left out. Each workload's vulnerabilities tab shows its own.

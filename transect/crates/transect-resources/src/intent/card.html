@@ -1,0 +1,19 @@
+{%- import "edges/provenance.html" as provenance -%}
+{#- A card's intent: what the thing is, what goes wrong with it, what
+    the cluster loses with it, and where to read more, each with its
+    mark.  A `docs` value that is not
+    plain http or https shows as text, never as a link. -#}
+{%- if let Some(why) = card.why %}
+<div class="card-why">{{ why.text }}{% call provenance::mark(why.provenance) %}{% endcall %}</div>
+{%- endif %}
+{%- if let Some(gotcha) = card.gotcha %}
+<div class="card-gotcha">{{ gotcha.text }}{% call provenance::mark(gotcha.provenance) %}{% endcall %}</div>
+{%- endif %}
+{%- if let Some(provides) = card.provides %}
+<div class="card-provides"><span class="card-provides-label">Provides</span> {{ provides.text }}{% call provenance::mark(provides.provenance) %}{% endcall %}</div>
+{%- endif %}
+{%- if let Some(docs) = card.docs %}
+<div class="card-links">
+{%- if let Some(href) = docs.href %}<a href="{{ href }}" target="_blank" rel="noopener noreferrer">docs</a>{% else %}docs: {{ docs.text }}{% endif %}
+{%- call provenance::mark(docs.provenance) %}{% endcall %}</div>
+{%- endif %}

@@ -1,0 +1,96 @@
+access · acme-shop · transect
+transect
+cluster / apps / acme-shop / access
+access vulnerabilities kinds
+Search /
+esc
+apps acme-shop overview access
+What may reach each port here 4 workloads serve ports; 6 ways in reach them
+A row is one way in from outside the cluster, beside the workload it reaches. the cluster puts this gate on the way on some of its routes or pods stored text declares it it puts none. Open a workload for its drawing.
+workload
+way in
+port
+TLS
+sign-in
+NetworkPolicy
+calls in limited by
+calls out: NetworkPolicy
+Deployment catalog serves 8000
+catalog.example.test Ingress catalog-route
+443
+none
+Deployment help-desk serves 3000
+help.example.test Ingress help-desk-route
+443
+intent
+none
+help.example.test Ingress help-desk-route
+80
+intent
+intent
+Cache session-cache serves 6379
+no way in
+none
+Deployment storefront serves 8080
+shop.example.test Ingress storefront-route , Ingress storefront-admin
+443
+partner-gate
+none
+shop.example.test Ingress storefront-route , Ingress storefront-admin
+80
+intent
+partner-gate
+every machine's address Service storefront-debug · node port
+30080
+What each account may do here 6 accounts, one row each
+a binding grants it it follows from a grant. Accounts with the same marks are listed together. Open an account for its bindings and what follows from them.
+account
+read Secrets
+exec into pods
+run pods
+change workloads
+grant roles
+change what a GitOps tool applies
+through
+ServiceAccount acme-ops/gitops-controller
+ClusterRole cluster-admin
+ServiceAccount acme-shop/storefront
+by name
+Role acme-shop/storefront-secret
+ServiceAccount acme-ops/ops-console intent
+may change what acme-ops/gitops-controller applies
+User <b>"odd" & co
+ClusterRole shop-editor → a pod it starts may mount any Secret
+User https://issuer.example.test/alice
+ClusterRole shop-editor → a pod it starts may mount any Secret
+User shop-owner
+ClusterRole shop-editor → a pod it starts may mount any Secret
+1 of Kubernetes' own components and controllers may do some of the six here.
+account
+read Secrets
+exec into pods
+run pods
+change workloads
+grant roles
+change what a GitOps tool applies
+through
+ServiceAccount acme-ops/batch-worker
+ClusterRole system:controller:job-runner → may run as acme-ops/gitops-controller
+Namespace acme-shop has no Pod Security enforce label, so a pod here may be privileged, use its machine's network, and mount its machine's paths, unless the API server's admission configuration sets a default level.
+For the whole cluster: ways in · accounts
+acme-shop warning
+session-cache-set-0: alert SessionsSlow, firing for 20m
+Answers take over a second.
+catalog.example.test
+help.example.test
+shop.example.test
+Depends on
+acme-ledger
+Controlled by
+acme-promoter
+No NetworkPolicy selects its pods, so any pod may call them.
+Holds
+Till counter-till on node-beta
+radio The counter handset
+Code
+shop/apps/shop Kustomization acme-ops/shop-apps ready

@@ -1,0 +1,36 @@
+# Kind knowledge for media-operator's Player and Remote, as
+# media-operator would ship it.  A Player's references name a Display,
+# a Sink, a Receiver, a Remote, and a ResourceClaim, and the address of
+# the message bus its idle screen uses.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: players.media.liken.sh
+spec:
+  summary: A screen and the speakers beside it that play media.
+  healthy: {condition: Screen}
+  references:
+    - {path: "spec.remotes[].name", kind: Remote, group: media.liken.sh, label: controlled by}
+    - {path: status.screen.monitor, kind: Display, group: display.liken.sh, label: shows on}
+    - {path: status.receiver.name, kind: Receiver, group: equipment.liken.sh, label: plays through}
+    - {path: spec.idle.controller, label: idle screen from}
+    - {path: "status.sinks[].name", kind: Sink, group: audio.liken.sh, label: sound through}
+    - {path: status.idle.bus.address, address: true, edge: depends on, label: talks over}
+    - {path: status.screen.node, kind: Node, edge: runs on}
+    - {path: status.idle.claim, kind: ResourceClaim, group: resource.k8s.io, edge: holds}
+  # Its status is written as Go-http-client, which names no workload.
+  controller: {image: liken-sh/media-operator}
+---
+# A Remote runs nothing; with knowledge it is watched, so its namespace
+# counts it.  Its status.player is left out because the Player already
+# names the Remote, and a reference back would draw a loop of two.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: remotes.media.liken.sh
+spec:
+  summary: A paired controller whose buttons drive one Player.
+  references:
+    - {path: spec.keymap, kind: Keymap, group: media.liken.sh, label: maps buttons with}
+    - {path: status.peripheral, kind: Peripheral, group: bluetooth.liken.sh, label: pairs as}
+  controller: {image: liken-sh/media-operator}

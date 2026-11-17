@@ -1,0 +1,34 @@
+/* The vulnerabilities pages show the scanner's words in gray and a fix
+   as a column.  Wherever a page names a severity, critical is red, high
+   is the brand's warm orange, and every other severity is gray.  liken's
+   brand has no red, so transect defines one that meets WCAG AA (4.5:1)
+   for small text on --page, --panel, and --row in both schemes. */
+:root { --critical: #a8312c; }
+@media (prefers-color-scheme: dark) { :root { --critical: #ef7a70; } }
+.vn-critical { color: var(--critical); }
+.vn-high { color: var(--warm); }
+.vn-lead { margin: 4px 0 12px; color: var(--ink-muted); font-size: 14px; }
+.vn-none, .vn-note { color: var(--ink-muted); font-size: 13px; margin: 8px 0; }
+.vn-quiet { color: var(--ink-muted); }
+.vn-id, .vn-digest { font-family: var(--mono); white-space: nowrap; }
+.vn-nowrap { white-space: nowrap; }
+.vn-mark { margin-left: 4px; color: var(--ink-muted); text-decoration: none; }
+.vn-mark:hover { color: var(--link); }
+.vn-heading { margin: 4px 0 8px; font-size: 15px; }
+/* A finding's title shows under its id and wraps.  A row's packages are
+   a list whose sub-columns have fixed widths, so that they line up down
+   the page. */
+.vn-title { display: block; min-width: 22rem; max-width: 70ch; margin-top: 2px; font-family: var(--sans, inherit); white-space: normal; color: var(--ink-muted); font-size: 12px; }
+.vn-id { vertical-align: top; }
+.vn-table td, .vn-table th { vertical-align: top; }
+.vn-packages { list-style: none; margin: 0; padding: 0; }
+.vn-packages li, .vn-packages-head { display: grid; column-gap: 12px; }
+.vn-packages li + li { margin-top: 2px; }
+.vn-packages li > span { overflow-wrap: anywhere; }
+.vn-packages-head { color: var(--ink-muted); font: inherit; }
+.vn-packages-two li, .vn-packages-two.vn-packages-head { grid-template-columns: minmax(12rem, 24rem) 12rem; }
+.vn-packages-three li, .vn-packages-three.vn-packages-head { grid-template-columns: minmax(10rem, 20rem) 11rem 11rem; }
+.vn-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 13px; }
+.vn-facts dt { color: var(--ink-muted); }
+.vn-facts dd { margin: 0; overflow-wrap: anywhere; }
+.vn-out { overflow-wrap: anywhere; }

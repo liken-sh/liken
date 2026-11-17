@@ -1,0 +1,14 @@
+CSIDriver block.csi.example.test · transect
+transect
+cluster / CSIDrivers / block.csi.example.test
+access vulnerabilities kinds
+Search /
+esc
+cluster CSIDriver block.csi.example.test
+CSIDriver
+block.csi.example.test
+console https://array.example.test:8443 ↗
+console template https://{array}:8443
+StorageClasses StorageClass fast-block
+CSIDriver block.csi.example.test
+kind CSIDriver in storage.k8s.io

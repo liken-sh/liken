@@ -1,0 +1,29 @@
+/*
+ * The color tokens from liken's `brand/liken.css`, copied unchanged.
+ * `crates/transect-frame/tests/brand.rs` fails when a token here
+ * differs from the brand's value.
+ */
+
+:root {
+  --page: #fff;
+  --ink: #1a1a1a;
+  --ink-muted: #555;
+  --panel: #f6f6f6;
+  --row: #f8f8f8;
+  --rule: #ccc;
+  --link: #4a5d3a;
+  --warm: #8a5316;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #16181c;
+    --ink: #e8e8e8;
+    --ink-muted: #a0a6ad;
+    --panel: #22252b;
+    --row: #1d2026;
+    --rule: #333940;
+    --link: #b4c49a;
+    --warm: #e0872f;
+  }
+}

@@ -1,0 +1,42 @@
+{% extends "frame/layout.html" %}
+{%- import "links/link.html" as links -%}
+{%- import "vulnerabilities/rows.html" as rows -%}
+
+{% block title %}{{ id }} · vulnerabilities · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block masthead_vulnerabilities %} masthead-current{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- One id: what the scanner reports about it, and, by container, every
+    workload that runs an image where a current report found the id. -#}
+<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<section class="board-box board-wide" aria-label="{{ id }}">
+<div class="board-label">{{ id }}</div>
+{%- if let Some(title) = title %}
+<p class="vn-heading">{{ title }}</p>
+{%- endif %}
+<p class="vn-lead">{{ lead() }}</p>
+<dl class="vn-facts">
+<dt>severity</dt><dd class="{{ tone }}">{{ severity }}</dd>
+<dt>score</dt><dd class="vn-quiet">{{ score }}</dd>
+<dt>advisory</dt><dd>{% if let Some(link) = link %}<a class="vn-out" href="{{ link }}" rel="noopener noreferrer" target="_blank">{{ link }}</a>{% else %}<span class="board-unset">—</span>{% endif %}</dd>
+</dl>
+</section>
+<section class="board-box board-wide" aria-label="Run by">
+<div class="board-label">Run by</div>
+<table class="board-table vn-table">
+<thead><tr><th>workload</th><th>container</th><th>{% call rows::packages_head(true) %}{% endcall %}</th><th>scanned</th></tr></thead>
+<tbody>
+{%- for row in rows %}
+<tr><td>{% call links::object_link(row.workload.text, row.workload.href, "") %}{% endcall %}</td><td>{% if let Some(tab) = row.tab %}<a href="{{ tab }}" hx-get="{{ tab }}">{{ row.container }}</a>{% else %}{{ row.container }}{% endif %}</td><td>{% call rows::packages(&row.packages, true) %}{% endcall %}</td><td class="vn-quiet vn-nowrap">{{ row.scanned }}</td></tr>
+{%- endfor %}
+</tbody></table>
+</section>
+</main>
+</div>
+{% endblock %}

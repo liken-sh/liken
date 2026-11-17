@@ -1,0 +1,45 @@
+access · device-hub · acme-ops · transect
+transect
+cluster / platform / acme-ops / device-hub / access
+access vulnerabilities kinds
+Search /
+esc
+acme-ops device-hub overview section logs access
+What may reach it, and what it may reach
+Solid lines are routes and grants. Dashed lines are calls a NetworkPolicy admits, or that none limits. A dot on a line is a gate: the cluster puts it there on some of its routes stored text declares it it puts none. Hover anything for its explanation.
+No NetworkPolicy applies to a pod on its machine's network, so it may call any address.
+Nothing in the cluster puts TLS on this way.
+No route to it signs in through anything in the cluster.
+No NetworkPolicy applies to a pod on its machine's network.
+No NetworkPolicy applies to a pod on its machine's network.
+No NetworkPolicy applies to a pod on its machine's network, so it may call any address.
+from outside the cluster
+NetworkPolicy
+TLS
+sign-in
+around the ingress controller
+from inside the cluster
+no NetworkPolicy applies to a pod on its machine's network
+runs as
+holds
+may call
+any address
+node-alpha's address port 8123 · 192.168.0.1
+any pod at its machine's address
+Deployment device-hub 1 pod on node-alpha
+ServiceAccount default no binding names it
+node-alpha's network intent Finds the shop's devices by multicast, so it shares its machine's network.
+host paths /dev/serial
+StatefulSet acme-ledger/ledger-store port 9187 :8123
+Who may change it
+Each line names what the account may do to it. An outlined box follows from a grant, and no binding names it.
+every verb
+1 account bound to cluster-admin
+Deployment device-hub
+The access of Namespace acme-ops lists every account that may act in it.
+For the whole cluster: ways in · accounts
+Deployment device-hub 1 of 1 ready
+If it goes down
+Nothing in the cluster depends on it.
+It is on its machine's network, where no NetworkPolicy applies, so any pod may call it at its machine's address.
+no GitOps applier's label or annotation is on it

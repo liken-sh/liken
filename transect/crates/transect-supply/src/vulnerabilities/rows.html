@@ -1,0 +1,20 @@
+{#- The cells that every findings table uses: an id with the mark that
+    opens the scanner's link and the id's title under it, and a list of
+    packages, one item for each, whose sub-columns line up down the
+    page. -#}
+{%- macro identity(row) -%}
+<a href="{{ row.href }}" hx-get="{{ row.href }}">{{ row.id }}</a>{% if let Some(out) = row.out %} <a class="vn-mark" href="{{ out }}" rel="noopener noreferrer" target="_blank" title="The scanner's link for {{ row.id }}" aria-label="The scanner's link for {{ row.id }}">↗</a>{% endif %}
+{%- if let Some(title) = row.title %}<span class="vn-title">{{ title }}</span>{% endif %}
+{%- endmacro -%}
+
+{%- macro packages_head(installed) -%}
+<span class="vn-packages-head {% if installed %}vn-packages-three{% else %}vn-packages-two{% endif %}"><span>package</span>{% if installed %}<span>installed</span>{% endif %}<span>fixed in</span></span>
+{%- endmacro -%}
+
+{%- macro packages(rows, installed) -%}
+<ul class="vn-packages {% if installed %}vn-packages-three{% else %}vn-packages-two{% endif %}">
+{%- for p in rows %}
+<li><span>{{ p.name }}</span>{% if installed %}<span>{{ p.installed }}</span>{% endif %}<span>{{ p.fixed }}</span></li>
+{%- endfor %}
+</ul>
+{%- endmacro -%}

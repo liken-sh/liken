@@ -3,8 +3,10 @@
 The `liken` project is one system, and this repository holds all of
 it. Each top-level directory is one component, named for what it
 ships. `liken/` is the OS. The operators claim a machine's hardware
-and serve its interfaces. The CSI drivers attach storage, and `brand/`
-holds the theme, the voice rules, and the site tools. `kubernetes/`
+and serve its interfaces. The CSI drivers attach storage. `transect/`
+serves a live, read-only map of a cluster's layers, the relationships
+between its parts, and their health. `brand/` holds the theme, the
+voice rules, and the site tools. `kubernetes/`
 is the Go module that the operators import to read, write, and watch
 Kubernetes objects. `notices/` holds the scripts that copy the license
 notices of the third-party software in an image into that image. `ci/` reads each

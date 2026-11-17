@@ -1,0 +1,28 @@
+{%- import "links/link.html" as links -%}
+{#- The callers that each `NetworkPolicy` admits to the card's workload
+    or namespace.  A workload's card has one row for each set of ports,
+    and a namespace's card has one list of namespaces.  A caller that
+    has a page links to it, as a parcel does.  A row of more than six
+    callers folds to its count, and the count opens to show them. -#}
+{%- if !card.calls.note.is_empty() %}
+<div class="card-code-note">{% call links::sentence(card.calls.note.clone()) %}{% endcall %}</div>
+{%- endif %}
+{%- if !card.calls.rows.is_empty() %}
+<div class="card-depends">
+<div class="card-depends-label">May be called by</div>
+<div class="card-depends-ends">
+{%- for row in card.calls.rows %}
+{%- if row.folds() %}
+<details class="board-fold card-calls-row"><summary>{{ row.who.len() }} callers{% if let Some(ports) = row.ports %} <span class="card-calls-ports">on {{ ports }}</span>{% endif %} <span class="board-fold-show">· show</span><span class="board-fold-hide">· hide</span></summary>
+{%- for end in row.who %}{% if !loop.first %}, {% endif %}{% call links::object_link(end.text, end.href, "") %}{% endcall %}{% endfor %}
+</details>
+{%- else %}
+<div class="card-calls-row">
+{%- for end in row.who %}{% if !loop.first %}, {% endif %}{% call links::object_link(end.text, end.href, "") %}{% endcall %}{% endfor %}
+{%- if let Some(ports) = row.ports %} <span class="card-calls-ports">on {{ ports }}</span>{% endif %}
+</div>
+{%- endif %}
+{%- endfor %}
+</div>
+</div>
+{%- endif %}

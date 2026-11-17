@@ -1,0 +1,21 @@
+{#- "What to know now" beside the map.  In its place the sidebar shows
+    the selected namespace's card or the loss the page shows, and for a
+    machine that is really lost it keeps "What to know now" below the
+    loss.  It renders inside the pushed block, so it changes in the same
+    push as the parcels it names. -#}
+{%- if let Some(card) = card %}
+{% include "cards/namespace.html" %}
+{%- else if let Some(loss) = loss %}
+<aside class="sidebar loss" aria-label="{{ loss.title() }}">
+{% include "loss/sidebar.html" %}
+{%- if loss.real() %}
+<div class="loss-now">
+{%- include "map/now.html" %}
+</div>
+{%- endif %}
+</aside>
+{%- else %}
+<aside class="sidebar" aria-label="What to know now">
+{%- include "map/now.html" %}
+</aside>
+{%- endif %}

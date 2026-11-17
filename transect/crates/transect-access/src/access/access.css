@@ -1,0 +1,398 @@
+/* The access lens: its matrices, their marks, and the card beside them.
+   Each cell is drawn as a slot, like the cells of the DaemonSet matrix,
+   and the page frame's rule for every table keeps the header row in
+   view as the page scrolls. */
+
+.ax-page { padding-right: 24px; min-width: 0; }
+
+/* The page's question, and the one line that explains its marks. */
+.ax-title {
+  margin: 16px 0 4px;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.ax-title .ax-count {
+  margin-left: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-faint);
+}
+
+.ax-legend {
+  margin: 0 0 12px;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.ax-note {
+  margin: 10px 0 0;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+
+.ax-note .object-link { font-size: 12px; }
+.ax-fold > summary { cursor: pointer; }
+.ax-fold[open] > summary { margin-bottom: 8px; }
+
+/* A mark and its meaning stay on one line of the legend. */
+.ax-key { white-space: nowrap; margin-left: 8px; }
+.ax-key .ax-dot, .ax-key .ax-block { margin: 0 5px 0 0; vertical-align: -1px; }
+
+/* ---- Marks -------------------------------------------------------- */
+
+/* A dot is a gate.  A filled dot means that the cluster puts the gate
+   on this way in, and an open dot means that it puts none.  A half dot
+   means that the gate is on some of the routes or pods of the row. */
+.ax-dot {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  vertical-align: middle;
+  flex: none;
+}
+
+.ax-dot-on { background: var(--ink-muted); }
+.ax-dot-off { border: 1.5px solid var(--ink-faint); }
+.ax-dot-half {
+  border: 1.5px solid var(--ink-muted);
+  background: linear-gradient(90deg, var(--ink-muted) 50%, transparent 50%);
+}
+
+/* A declared gate is a ring around a dot, because a sentence that the
+   people who run the cluster wrote declares the gate, and no object in
+   the API shows it.  The sentence's `intent` mark is beside the dot. */
+.ax-dot-declared {
+  border: 1.5px solid var(--ink-muted);
+  background: radial-gradient(circle, var(--ink-muted) 0 2.2px, transparent 2.6px);
+}
+
+.ax-slot .mark { margin: 0; }
+
+/* A block is a grant.  A filled block means that a binding grants the
+   capability to the account, and an outlined block means that it
+   follows from a grant.  A short block means that the capability
+   applies in some namespaces, and the words beside it name them. */
+.ax-block {
+  display: inline-block;
+  width: 34px;
+  height: 16px;
+  border-radius: 3px;
+  box-sizing: border-box;
+  vertical-align: middle;
+  flex: none;
+}
+
+.ax-block-d { background: var(--ink-muted); }
+.ax-block-f { border: 1.5px solid var(--ink-faint); }
+.ax-block-some { width: 12px; }
+
+/* ---- Matrices ----------------------------------------------------- */
+
+.ax-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 14px;
+}
+
+.ax-table thead th {
+  padding: 8px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  text-align: center;
+  white-space: normal;
+  line-height: 1.25;
+  vertical-align: bottom;
+  border-bottom: 1px solid var(--rule);
+}
+
+.ax-table thead th.ax-h-left { text-align: left; }
+.ax-table thead th:first-child { padding-left: 0; }
+.ax-table thead th.ax-through { padding-left: 14px; }
+
+.ax-row > th {
+  text-align: left;
+  font-weight: 400;
+  padding: 5px 16px 5px 0;
+}
+
+.ax-row > td, .ax-row > th { border-bottom: 1px solid var(--row); vertical-align: middle; }
+.ax-row:hover > td, .ax-row:hover > th { background: var(--row); }
+
+.ax-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+span.ax-name { color: var(--ink); }
+
+.ax-sub {
+  display: block;
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.ax-sub .object-link { font-size: 11.5px; color: var(--ink-faint); }
+.ax-sub .object-link:hover { color: var(--link); }
+
+/* A cell is a slot, as in the DaemonSet matrix, and its mark is
+   centered in the slot. */
+.ax-c { padding: 2px; text-align: center; }
+
+.ax-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 52px;
+  height: 26px;
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.ax-slot-left { justify-content: flex-start; padding: 0 9px; }
+.ax-slot-none { background: none; }
+
+.ax-slot .object-link {
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ax-port {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  padding: 0 12px 0 0;
+}
+
+/* Each port stays whole, and a list too long for the column wraps
+   between ports into lines of even length, every line flush right
+   under the column's heading. */
+.ax-port-list {
+  display: block;
+  text-align: right;
+  text-wrap: balance;
+}
+
+/* The gap is between ports, so "any port it opens" keeps its own word
+   spacing. */
+.ax-port-list > span { white-space: nowrap; }
+.ax-port-list > span + span { margin-left: 6px; }
+
+.ax-text {
+  padding: 4px 0 4px 14px;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+
+.ax-text .object-link { font-size: 12.5px; }
+.ax-text .ax-follows { display: block; white-space: normal; font-family: "Source Sans 3", system-ui, sans-serif; color: var(--ink-faint); }
+.ax-quiet { font-family: "Source Sans 3", system-ui, sans-serif; color: var(--ink-faint); }
+
+/* A heading that names, once, the value that a run of rows shares. */
+.ax-run > th {
+  padding: 18px 0 6px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-muted);
+  border-bottom: 1px solid var(--rule);
+}
+
+.ax-run > th .ax-count { margin-left: 8px; font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--ink-faint); }
+.ax-run > th .object-link { font-size: 12.5px; font-weight: 400; }
+
+.ax-scope { font-size: 12.5px; color: var(--ink-muted); white-space: nowrap; }
+
+.ax-ways { table-layout: fixed; }
+.ax-ways thead th:first-child { width: 300px; }
+.ax-ways thead th.ax-port-col { width: 170px; text-align: right; padding-right: 12px; }
+.ax-ways .ax-gate-col { width: 96px; }
+.ax-ways .ax-sign-col { width: 140px; }
+.ax-ways .ax-np-col { width: 96px; }
+
+/* An accounts matrix.  Each capability's slot is as wide as its mark or
+   its namespace, and the account's column takes the width that is left.
+   The role and the step that a grant goes through stay on one line, cut
+   with an ellipsis and shown whole on hover, so a row stays one slot
+   high. */
+.ax-caps { table-layout: fixed; }
+.ax-caps th[scope="row"] { padding: 5px 12px 5px 0; }
+.ax-caps .ax-cap-col { width: 74px; }
+.ax-caps thead th.ax-cap-col { padding-left: 2px; padding-right: 2px; }
+.ax-caps thead th.ax-through { width: 220px; }
+.ax-caps td.ax-text { padding-top: 2px; padding-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ax-caps td.ax-text .ax-quiet { margin-left: 6px; }
+.ax-caps td.ax-text .ax-arrow { color: var(--ink-faint); font-family: "Source Sans 3", system-ui, sans-serif; }
+.ax-caps td.ax-text .ax-follows { display: inline; white-space: nowrap; font-size: 12px; }
+.ax-caps td.ax-text .name-part { display: inline; }
+.ax-caps td.ax-text wbr { display: none; }
+.ax-caps .ax-slot-left { overflow: hidden; }
+.ax-caps .ax-scope { overflow: hidden; text-overflow: ellipsis; }
+
+/* A namespace's access has a ports matrix and an accounts matrix.  The
+   ports matrix has a row for each way in, beside the workload that the
+   way in reaches, and the workload's name and policies span its rows.
+   The accounts matrix groups accounts with the same marks, with no rule
+   between them.  Each column of the ports matrix has its own width, and
+   a workload's name, a way in, and a policy's name wrap after a hyphen
+   to fit it. */
+.ax-section { margin-bottom: 26px; }
+.ax-row-tight > td, .ax-row-tight > th { border-bottom-color: transparent; }
+.ax-ports td, .ax-ports th { vertical-align: top; }
+.ax-table.ax-ports thead th:first-child { width: 22%; }
+.ax-table.ax-ports thead th.ax-way-col { width: 18%; }
+.ax-table.ax-ports thead th.ax-port-col { width: 120px; }
+.ax-table.ax-ports .ax-gate-col { width: 56px; }
+.ax-table.ax-table.ax-ports .ax-np-col { width: 92px; }
+.ax-table.ax-ports .ax-out-col { width: 76px; }
+.ax-ports th[scope="row"] { padding-top: 7px; padding-right: 12px; overflow-wrap: anywhere; }
+.ax-ports td.ax-text { padding-top: 6px; overflow-wrap: anywhere; }
+.ax-ports td.ax-way { padding-left: 0; padding-right: 8px; }
+.ax-ports .ax-port { padding-top: 6px; }
+.ax-ports .ax-sign-col { width: 110px; }
+.ax-way-name { color: var(--ink); }
+.ax-caps-ns .ax-cap-col { width: 96px; }
+/* The sixth column has the longest name, and this width keeps its head
+   two lines tall. */
+.ax-caps .ax-cap-col:nth-child(7) { width: 112px; }
+
+/* ---- The card beside an access page -------------------------------- */
+
+.ax-card-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.ax-card-facts .ax-faint { color: var(--ink-faint); font-size: 12px; }
+.ax-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* In a narrower window, an account's name wraps after its slash, and
+   the column of the role that grants it gets narrower before the blocks
+   do. */
+@media (max-width: 1500px) {
+  .ax-caps th[scope="row"] { padding-right: 10px; }
+  .ax-caps td.ax-text { padding-left: 8px; }
+  .ax-caps thead th.ax-through { width: 200px; }
+  .ax-caps .ax-cap-col { width: 64px; }
+  .ax-slot { min-width: 40px; }
+  .ax-ways thead th:first-child { width: 30%; }
+  .ax-ways thead th.ax-port-col { width: 130px; }
+  .ax-ways th[scope="row"] { padding-right: 8px; }
+  .ax-ways .ax-gate-col { width: 56px; }
+  .ax-ways .ax-np-col { width: 92px; }
+  .ax-ways .ax-sign-col { width: 112px; }
+  .ax-ways td.ax-text { padding-left: 10px; }
+}
+
+/* ---- A workload's drawing ------------------------------------------ */
+
+/* A drawing uses the section view's boxes, lines, and labels, and adds
+   gates as dots on the lines and ports on the workload's left edge. */
+.ax-drawing { margin-bottom: 8px; }
+.ax-drawing .section-box { padding: 8px 10px; }
+.ax-drawing .section-title { font-size: 12.5px; }
+/* A box is laid out tall enough for all of its words, so none is cut
+   short. */
+.ax-drawing .section-title,
+.ax-drawing .section-line { white-space: normal; display: block; -webkit-line-clamp: none; line-clamp: none; }
+.ax-drawing .section-box .mark { margin-right: 4px; }
+/* A label's halo is wide enough to hide a line that crosses it, so a
+   policy's name or "any port" shows whole over a dashed bus. */
+.ax-drawing .section-label { stroke: var(--page); stroke-width: 9px; }
+
+.ax-head {
+  fill: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  stroke: none;
+}
+
+/* The policy that puts a gate on a line, named before the gate, and a
+   link to its page. */
+.ax-via { fill: var(--ink-faint); font-size: 12px; }
+.section-lines .ax-svg-link { pointer-events: all; }
+.ax-svg-link:hover .ax-via { fill: var(--link); text-decoration: underline; }
+
+/* A gate on a line, drawn like the dot in a cell. */
+.ax-gate { stroke-width: 1.5; }
+.ax-gate-on { fill: var(--ink-muted); stroke: var(--ink-muted); }
+.ax-gate-off { fill: var(--page); stroke: var(--ink-faint); }
+.ax-gate-half { stroke: var(--ink-muted); }
+.ax-gate-declared { fill: var(--page); stroke: var(--ink-muted); }
+.ax-gate-core { fill: var(--ink-muted); stroke: none; }
+.ax-half-on { stop-color: var(--ink-muted); }
+.ax-half-off { stop-color: var(--page); }
+
+.section-lines circle { pointer-events: all; }
+
+/* A port the workload serves, on its box's edge, where the lines that
+   reach it end. */
+.ax-socket {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ink-muted);
+  border-radius: 4px;
+  background: var(--page);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  z-index: 1;
+}
+
+/* The workload's text starts at the top, clear of its ports. */
+.section-box.ax-box-ports { align-items: flex-start; text-align: left; padding-left: 46px; }
+.section-box.ax-box-list { justify-content: flex-start; align-items: flex-start; text-align: left; }
+
+/* A box for what follows from a grant is outlined, like an outlined
+   block. */
+.section-box.ax-box-follows { background: none; border: 1.5px solid var(--ink-faint); }
+
+/* The blocks of what a role grants, or of what follows through it, in
+   a line of their own under a box's words. */
+.section-line.ax-blocks { display: flex; gap: 4px; justify-content: center; margin-top: 4px; }
+.section-title .ax-block { margin-right: 2px; vertical-align: -2px; }
+
+/* An answer of "none", stated where the boxes would be. */
+.section-box.ax-box-none {
+  background: none;
+  border: 1px dashed var(--rule-strong);
+  color: var(--ink-muted);
+}
+
+.ax-box-none .section-title { font-family: "Source Sans 3", system-ui, sans-serif; font-weight: 600; color: var(--ink-muted); }
+
+/* Any address: a dashed line that runs off the drawing's edge. */
+.ax-open { mask: linear-gradient(90deg, #000 60%, transparent); }

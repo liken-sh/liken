@@ -1,0 +1,29 @@
+PersistentVolumeClaim data-ledger-db-0 · acme-ledger · transect
+transect
+cluster / data / acme-ledger / Volumes / data-ledger-db-0
+access vulnerabilities kinds
+Search /
+esc
+acme-ledger PersistentVolumeClaim data-ledger-db-0
+Belongs to
+claimed by PersistentVolumeClaim data-ledger-db-0
+Mounted by
+writes Pod ledger-db-0 on node-alpha
+CronJobs, when they run CronJob ledger-backup
+PersistentVolumeClaim
+data-ledger-db-0
+PersistentVolume ledger-archive
+capacity 8Gi
+used 3.0Gi · 38%
+free 5.0Gi
+access modes ReadWriteOnce
+reclaim policy Retain
+phase Bound
+Where its bytes are
+StorageClass StorageClass archive-nfs
+provisioned by nfs.csi.example.test
+on The archive NAS
+at nas.example.test:/exports/ledger
+PersistentVolumeClaim data-ledger-db-0
+kind PersistentVolumeClaim
+namespace acme-ledger

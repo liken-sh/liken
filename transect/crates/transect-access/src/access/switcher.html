@@ -1,0 +1,17 @@
+{%- macro chip(name, href, current) -%}
+<a class="switch{% if current %} switch-current{% endif %}" href="{{ href }}" hx-get="{{ href }}"{% if current %} aria-current="page"{% endif %}>{{ name }}</a>
+{%- endmacro -%}
+{#- A quiet line on an object's access page that leads to the lens's
+    two pages for the whole cluster. -#}
+{%- macro whole_cluster() -%}
+<p class="section-legend ax-legend">For the whole cluster: <a class="object-link" href="/access" hx-get="/access" hx-target="body" hx-swap="innerHTML" hx-push-url="true">ways in</a> · <a class="object-link" href="/access/accounts" hx-get="/access/accounts" hx-target="body" hx-swap="innerHTML" hx-push-url="true">accounts</a></p>
+{%- endmacro -%}
+{#- The row above both access pages shows the lens and a chip for each
+    of its pages.  `ways` is true when the page shown is Ways in. -#}
+{%- macro switcher(ways) -%}
+<nav class="switcher" aria-label="Access">
+<span class="switcher-namespace">access</span>
+{% call chip("ways in", "/access", ways) %}{% endcall %}
+{% call chip("accounts", "/access/accounts", !ways) %}{% endcall %}
+</nav>
+{%- endmacro -%}

@@ -1,0 +1,237 @@
+# The ways in besides the storefront's `Ingress` in `cluster.yaml`:
+#
+# - a second `Ingress` for the shop's host that signs in through a gate;
+# - a `LoadBalancer` `Service` for the ledger, whose listeners on both
+#   machines name it in their labels, as `node-balancer` declares;
+# - a `LoadBalancer` `Service` for the promoter, whose listener's
+#   `DaemonSet` has an owner reference to it, on an address of its own;
+# - a `NodePort` `Service` for the storefront;
+# - a relay that holds six host ports;
+# - a help desk behind its own `Ingress` with TLS, which signs its
+#   callers in itself, as its `signs-in` annotation states;
+# - a catalog behind its own `Ingress` with TLS and no sign-in.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: acme-shop
+  name: storefront-admin
+  annotations: {example.test/gates: acme-ops-partner-gate}
+spec:
+  ingressClassName: proxy
+  tls: [{hosts: [shop.example.test], secretName: storefront-tls}]
+  rules: [{host: shop.example.test, http: {paths: [{path: /admin, pathType: Prefix, backend: {service: {name: storefront-svc, port: {number: 80}}}}]}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-ledger, name: ledger-sql}
+spec: {type: LoadBalancer, selector: {app: ledger-db}, ports: [{port: 5432}], clusterIP: 10.96.0.50}
+status: {loadBalancer: {ingress: [{ip: 192.168.0.1}, {ip: 192.168.0.2}]}}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {namespace: acme-ops, name: sql-listener, uid: sql-listener}
+spec:
+  selector: {matchLabels: {app: sql-listener}}
+  template:
+    metadata: {labels: {app: sql-listener}}
+    spec:
+      containers: [{name: lb, image: example.test/listener-image:1, ports: [{containerPort: 5432, hostPort: 5432}]}]
+status: {desiredNumberScheduled: 2, numberReady: 2, updatedNumberScheduled: 2, numberAvailable: 2}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ops
+  name: sql-listener-a
+  uid: sql-listener-a
+  labels: {app: sql-listener, lb.example.test/service-name: ledger-sql, lb.example.test/service-namespace: acme-ledger}
+  ownerReferences: [{apiVersion: apps/v1, kind: DaemonSet, name: sql-listener, uid: sql-listener, controller: true}]
+spec: {nodeName: node-alpha, containers: [{name: lb, image: example.test/listener-image:1, ports: [{containerPort: 5432, hostPort: 5432}]}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.30}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: lb, ready: true, restartCount: 0, image: example.test/listener-image:1, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ops
+  name: sql-listener-b
+  uid: sql-listener-b
+  labels: {app: sql-listener, lb.example.test/service-name: ledger-sql, lb.example.test/service-namespace: acme-ledger}
+  ownerReferences: [{apiVersion: apps/v1, kind: DaemonSet, name: sql-listener, uid: sql-listener, controller: true}]
+spec: {nodeName: node-beta, containers: [{name: lb, image: example.test/listener-image:1, ports: [{containerPort: 5432, hostPort: 5432}]}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.31}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: lb, ready: true, restartCount: 0, image: example.test/listener-image:1, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-promoter, name: promoter-feed, uid: promoter-feed}
+spec: {type: LoadBalancer, selector: {app: promoter}, ports: [{port: 8443}], clusterIP: 10.96.0.51}
+status: {loadBalancer: {ingress: [{ip: 203.0.113.10}]}}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  namespace: acme-promoter
+  name: feed-listener
+  uid: feed-listener
+  ownerReferences: [{apiVersion: v1, kind: Service, name: promoter-feed, uid: promoter-feed}]
+spec:
+  selector: {matchLabels: {app: feed-listener}}
+  template:
+    metadata: {labels: {app: feed-listener}}
+    spec:
+      containers: [{name: lb, image: example.test/listener-image:1, ports: [{containerPort: 8443, hostPort: 8443}]}]
+status: {desiredNumberScheduled: 1, numberReady: 1, updatedNumberScheduled: 1, numberAvailable: 1}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-promoter
+  name: feed-listener-a
+  uid: feed-listener-a
+  labels: {app: feed-listener}
+  ownerReferences: [{apiVersion: apps/v1, kind: DaemonSet, name: feed-listener, uid: feed-listener, controller: true}]
+spec: {nodeName: node-alpha, containers: [{name: lb, image: example.test/listener-image:1, ports: [{containerPort: 8443, hostPort: 8443}]}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.32}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: lb, ready: true, restartCount: 0, image: example.test/listener-image:1, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-shop, name: storefront-debug}
+spec: {type: NodePort, selector: {app: storefront}, ports: [{port: 8080, nodePort: 30080}], clusterIP: 10.96.0.52}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {namespace: acme-ops, name: metrics-relay, uid: metrics-relay}
+spec:
+  selector: {matchLabels: {app: metrics-relay}}
+  template:
+    metadata: {labels: {app: metrics-relay}}
+    spec:
+      containers: [{name: relay, image: example.test/relay-image:1, ports: [{containerPort: 4317, hostPort: 4317}, {containerPort: 4318, hostPort: 4318}, {containerPort: 9125, hostPort: 9125}, {containerPort: 9411, hostPort: 9411}, {containerPort: 14250, hostPort: 14250}, {containerPort: 14268, hostPort: 14268}]}]
+status: {desiredNumberScheduled: 1, numberReady: 1, updatedNumberScheduled: 1, numberAvailable: 1}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ops
+  name: metrics-relay-a
+  uid: metrics-relay-a
+  labels: {app: metrics-relay}
+  ownerReferences: [{apiVersion: apps/v1, kind: DaemonSet, name: metrics-relay, uid: metrics-relay, controller: true}]
+spec: {nodeName: node-alpha, containers: [{name: relay, image: example.test/relay-image:1, ports: [{containerPort: 4317, hostPort: 4317}, {containerPort: 4318, hostPort: 4318}, {containerPort: 9125, hostPort: 9125}, {containerPort: 9411, hostPort: 9411}, {containerPort: 14250, hostPort: 14250}, {containerPort: 14268, hostPort: 14268}]}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.33}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: relay, ready: true, restartCount: 0, image: example.test/relay-image:1, imageID: '', state: {running: {}}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: acme-shop
+  name: help-desk
+  uid: help-desk
+  annotations: {transect.liken.sh/signs-in: 'OAuth, in the app'}
+spec:
+  selector: {matchLabels: {app: help-desk}}
+  template:
+    metadata: {labels: {app: help-desk}}
+    spec:
+      containers: [{name: main, image: example.test/help-desk-image:1, ports: [{name: http, containerPort: 3000}]}]
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1}
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  namespace: acme-shop
+  name: help-desk-rs
+  uid: help-desk-rs
+  ownerReferences: [{apiVersion: apps/v1, kind: Deployment, name: help-desk, uid: help-desk, controller: true}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-shop
+  name: help-desk-rs-one
+  uid: help-desk-rs-one
+  labels: {app: help-desk}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: help-desk-rs, uid: help-desk-rs, controller: true}]
+spec: {nodeName: node-beta, containers: [{name: main, image: example.test/help-desk-image:1, ports: [{name: http, containerPort: 3000}]}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.34}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/help-desk-image:1, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-shop, name: help-desk-svc}
+spec: {selector: {app: help-desk}, ports: [{port: 80, targetPort: http}], clusterIP: 10.96.0.53}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {namespace: acme-shop, name: help-desk-route}
+spec:
+  ingressClassName: proxy
+  tls: [{hosts: [help.example.test], secretName: help-desk-tls}]
+  rules: [{host: help.example.test, http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: help-desk-svc, port: {number: 80}}}}]}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {namespace: acme-shop, name: catalog, uid: catalog}
+spec:
+  selector: {matchLabels: {app: catalog}}
+  template:
+    metadata: {labels: {app: catalog}}
+    spec:
+      containers: [{name: main, image: example.test/catalog-image:1, ports: [{name: http, containerPort: 8000}]}]
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1}
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  namespace: acme-shop
+  name: catalog-rs
+  uid: catalog-rs
+  ownerReferences: [{apiVersion: apps/v1, kind: Deployment, name: catalog, uid: catalog, controller: true}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-shop
+  name: catalog-rs-one
+  uid: catalog-rs-one
+  labels: {app: catalog}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: catalog-rs, uid: catalog-rs, controller: true}]
+spec: {nodeName: node-alpha, containers: [{name: main, image: example.test/catalog-image:1, ports: [{name: http, containerPort: 8000}]}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.35}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/catalog-image:1, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-shop, name: catalog-svc}
+spec: {selector: {app: catalog}, ports: [{port: 80, targetPort: http}], clusterIP: 10.96.0.54}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: acme-shop
+  name: catalog-route
+  annotations: {example.test/entrypoints: websecure}
+spec:
+  ingressClassName: proxy
+  tls: [{hosts: [catalog.example.test], secretName: catalog-tls}]
+  rules: [{host: catalog.example.test, http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: catalog-svc, port: {number: 80}}}}]}}]

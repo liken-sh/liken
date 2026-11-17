@@ -1,0 +1,37 @@
+/*
+ * The alerts at the top of "Now", drawn in the same style as a
+ * namespace's concern, and the tag on a machine's strip.  Only the dot
+ * and the tag use --warm, so a page of alerts is as calm as a page of
+ * concerns.
+ */
+
+.alert-severity {
+  margin-left: auto;
+  flex: none;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.alert-about {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+.alert-link {
+  font-size: 12px;
+  color: var(--link);
+  text-decoration: none;
+}
+
+.alert-link:hover { text-decoration: underline; }
+
+/* A warning draws an outline around the strip's tag, as it does around
+   a parcel.  A failure fills the tag with .strip-tag-warm. */
+.strip-tag-alert {
+  padding: 0 3px;
+  border: 1px solid var(--warm);
+  border-radius: 3px;
+  color: var(--warm);
+}

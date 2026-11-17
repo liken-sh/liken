@@ -1,0 +1,49 @@
+access · ledger-store · acme-ledger · transect
+transect
+cluster / data / acme-ledger / ledger-store / access
+access vulnerabilities kinds
+Search /
+esc
+acme-ledger ledger-store overview section logs access
+What may reach it, and what it may reach
+Solid lines are routes and grants. Dashed lines are calls a NetworkPolicy admits, or that none limits. A dot on a line is a gate: the cluster puts it there on some of its routes stored text declares it it puts none. Hover anything for its explanation.
+No NetworkPolicy limits its calls out, so it may call any address.
+A NetworkPolicy selects its pods and names who may call them.
+NetworkPolicy store-from-shop admits it.
+NetworkPolicy store-from-ops admits it.
+NetworkPolicy store-metrics-by-address admits it.
+No NetworkPolicy limits its calls out, so it may call any address.
+from outside the cluster
+NetworkPolicy
+from inside the cluster
+store-from-shop
+store-from-ops
+store-metrics-by-address
+runs as
+holds
+may call
+any address
+no way in No Ingress, LoadBalancer, NodePort, or host port reaches it.
+Service ledger-store-sql ClusterIP · port 5432 Deployment acme-shop/storefront every pod in acme-ops
+the machines' addresses where this workload on its machine's network calls from: Deployment acme-ops/device-hub
+StatefulSet ledger-store 1 pod on node-beta
+ServiceAccount ledger-db may read Secrets
+Secret ledger-store-login by name, from its pod spec
+:5432 :8000 :9187
+Who may change it
+Each line names what the account may do to it. An outlined box follows from a grant, and no binding names it.
+every verb
+may change it
+follows
+1 account bound to cluster-admin ServiceAccount acme-ops/ledger-deployer 2 accounts, by running as another each may run a pod as an account that may change it
+StatefulSet ledger-store
+The access of Namespace acme-ledger lists every account that may act in it.
+For the whole cluster: ways in · accounts
+StatefulSet ledger-store 1 of 1 ready
+If it goes down
+Nothing in the cluster depends on it.
+May be called by
+Deployment acme-shop/storefront on port 5432
+DaemonSet acme-ops/edge-proxy , DaemonSet acme-ops/log-shipper , DaemonSet acme-ops/metrics-relay , DaemonSet acme-ops/sql-listener on port 8000
+Deployment acme-ops/device-hub , addresses in 192.168.0.0/24 on port 9187
+no GitOps applier's label or annotation is on it

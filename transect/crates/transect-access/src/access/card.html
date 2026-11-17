@@ -1,0 +1,25 @@
+{%- import "links/link.html" as links -%}
+{#- The card beside every access page.  It describes each page and
+    lists, in one place, what the lens does not read.  `no_gitops` is
+    true when no kind knowledge fills the last column of the accounts
+    page. -#}
+{%- macro card(no_gitops) -%}
+<aside class="sidebar workload-card" aria-label="About access" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="workload-card-head"><b class="workload-card-name">Access</b></div>
+<div class="ax-card-facts">
+<div>{% call links::object_link("Ways in", Some(String::from("/access")), "") %}{% endcall %}: every port that answers from outside the cluster, and the gates on the way to it.</div>
+<div>{% call links::object_link("Accounts", Some(String::from("/access/accounts")), "") %}{% endcall %}: every account a binding names, and what it may do.</div>
+<div class="ax-card-label">Not read</div>
+<div class="ax-faint">A workload's own TLS and sign-in are not in the API. A gate here is one the cluster's objects put in front of the workload, or one declared in stored text, which the people who run the cluster wrote.</div>
+<div class="ax-faint">Whether an address answers from the internet is not in the API.</div>
+<div class="ax-faint">Grants are read from Roles, ClusterRoles, and their bindings. A webhook authorizer, the node authorizer, and admission webhooks are not read.</div>
+<div class="ax-faint">The API server's version and feature gates are not read. Exec counts <code>create</code> on <code>pods/exec</code> and <code>pods/attach</code>, which a server from 1.35 on requires; an older one, or one with AuthorizePodWebsocketUpgradeCreatePermission off, also allows exec with <code>get</code>.</div>
+<div class="ax-faint">Some routes to another account are not followed: approving and signing a certificate request, creating a PersistentVolume, writing an admission webhook, and reading a Secret that contains a ServiceAccount's token, whose type a Secret's metadata does not show.</div>
+<div class="ax-faint">A Pod Security default in the API server's admission configuration is not in the API.</div>
+<div class="ax-faint">No Secret is read. A Secret is shown by its name, from the pod specs and Roles that name it.</div>
+{%- if no_gitops %}
+<div class="ax-faint">No kind knowledge declares <code>applies</code> or <code>repository</code>, so the column "change what a GitOps tool applies" is empty. A GitOps tool's kind knowledge fills it.</div>
+{%- endif %}
+</div>
+</aside>
+{%- endmacro -%}

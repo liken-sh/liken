@@ -1,0 +1,25 @@
+[package]
+name = "transect-access"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+transect-frame.workspace = true
+transect-graph.workspace = true
+transect-resources.workspace = true
+transect-cluster.workspace = true
+transect-network.workspace = true
+transect-map.workspace = true
+askama.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+
+[dev-dependencies]
+transect-map = { workspace = true, features = ["fixtures"] }
+rstest.workspace = true
+
+[lib]
+# The doc comments show YAML and paths, not examples to run.
+doctest = false

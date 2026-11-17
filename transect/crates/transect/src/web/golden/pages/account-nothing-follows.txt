@@ -1,0 +1,25 @@
+ServiceAccount storefront · acme-shop · transect
+transect
+cluster / apps / acme-shop / ServiceAccounts / storefront
+access vulnerabilities kinds
+Search /
+esc
+acme-shop ServiceAccount storefront
+What it may do, and where
+Left to right: what runs as it, the roles it is bound to, what they grant, and what follows. one of the six that a binding grants it one that follows from a grant, and that no binding names. Hover a box for its rules.
+runs as it
+the account
+bound to
+it may
+what follows
+read Secrets get Secrets, by name: storefront-tls; it may not list them
+Role storefront-secret
+ServiceAccount storefront
+Deployment storefront 2 pods on 2 machines
+nothing follows It may not exec into pods, run pods, change workloads, grant roles, or change what a GitOps tool applies in any namespace.
+Who may run as it
+Deployment storefront runs as it, in 2 pods. A pod names any ServiceAccount in its own namespace, so the 6 other accounts that may run pods or change workloads in acme-shop may run as it. The access of Namespace acme-shop lists them.
+For the whole cluster: ways in · accounts
+ServiceAccount storefront
+kind ServiceAccount
+namespace acme-shop

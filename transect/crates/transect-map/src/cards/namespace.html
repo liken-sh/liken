@@ -1,0 +1,76 @@
+{% import "edges/provenance.html" as provenance %}
+{% import "links/link.html" as links %}
+{#- The selected namespace's card, in the sidebar's place.  Its reasons
+    render through the same templates as the "Now" section's, so a
+    workload's reasons show the same words in both. -#}
+<aside class="sidebar namespace-card" aria-label="{{ card.name }} card">
+<div class="namespace-head">
+{#- On the cluster page a click on the selected parcel deselects it, so
+    the name links to the namespace page.  That page shows the card
+    with the name unlinked. -#}
+{%- if let Some(href) = card_link() %}
+{% call links::object_link(card.name, Some(href), "namespace-name") %}{% endcall %}
+{%- else %}
+<b class="namespace-name">{{ card.name }}</b>
+{%- endif %}
+<span class="namespace-health"><span class="dot {{ card.dot_class() }}"></span>{{ card.health_word() }}</span>
+</div>
+{%- include "intent/card.html" %}
+{%- if card_lens() %}
+<div class="card-lens"><a class="object-link" href="/namespaces/{{ card.name }}/access" hx-get="/namespaces/{{ card.name }}/access" hx-target="body" hx-swap="innerHTML" hx-push-url="true">access</a></div>
+{%- endif %}
+{%- if !card.health.reasons.is_empty() %}
+<div class="namespace-reasons">
+{%- for (reason, href) in card.reason_lines() %}
+{%- if let Some(href) = href %}
+<a class="card-body concern-line" href="{{ href }}" hx-get="{{ href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true">{{ reason }}</a>
+{%- else %}
+<div class="card-body">{{ reason }}</div>
+{%- endif %}
+{%- if let Some(note) = reason.note_html() %}
+<div class="card-note">{{ note|safe }}</div>
+{%- endif %}
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if !card.logged.is_empty() %}
+<div class="card-depends">
+<div class="card-depends-label">Worth knowing in its logs</div>
+{%- for reason in card.logged %}
+<div class="card-body">{{ reason }}</div>
+{%- if let Some(note) = reason.note_html() %}
+<div class="card-note">{{ note|safe }}</div>
+{%- endif %}
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if !card.hosts.is_empty() %}
+<div class="namespace-hosts">
+{%- for host in card.hosts %}
+<div class="namespace-host">{{ host }}</div>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if card_workloads() && !card.chips.is_empty() %}
+<div class="chips">
+{%- for chip in card.chips %}
+<span class="{{ chip.class() }}" title="{{ chip }}{% if let Some(title) = chip.title %}&#10;{{ title }}{% endif %}">
+{%- for part in chip.parts() %}{% if !loop.first %} · {% endif %}{% call links::object_link(part.text, part.href, "chip-name") %}{% endcall %}{% endfor -%}
+</span>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if let Some(named) = card.layer_named %}
+<div class="card-code-note">{{ named }}{% call provenance::mark(named.provenance) %}{% endcall %}</div>
+{%- endif %}
+{%- if let Some(volumes) = card.volumes_text() %}
+<div class="namespace-volumes">{{ volumes }}</div>
+{%- endif %}
+{%- include "addresses/card.html" %}
+{%- include "ownership/card.html" %}
+{%- include "policy/card.html" %}
+{%- include "devices/card.html" %}
+{%- include "gitops/card.html" %}
+{%- include "cards/loops.html" %}
+{%- call provenance::legend(card.legend()) %}{% endcall %}
+</aside>

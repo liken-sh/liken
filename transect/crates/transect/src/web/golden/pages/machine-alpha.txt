@@ -1,0 +1,83 @@
+node-alpha · machines · transect
+transect
+cluster / machines / node-alpha
+access vulnerabilities kinds
+Search /
+esc
+cluster control plane node-beta workers node-alpha overview if lost
+node-alpha Worker, ready 10 pods in 4 namespaces run here.
+cpu
+CPU 1.5 used · 0.0 requested of 4
+mem
+mem 6.0 used · 0.0 requested of 15.0 Gi
+apps
+acme-shop
+catalog-rs-one of Deployment catalog
+mem
+cpu
+no request or limit · 0 restarts
+storefront-rs-one of Deployment storefront
+mem
+cpu
+mem 256Mi · cpu 250m · no request or limit · 0 restarts
+data
+acme-ledger
+ledger-db-0 of StatefulSet ledger-db
+mem
+cpu
+mem 1024Mi · cpu 500m · no request or limit · 0 restarts
+operators
+acme-promoter
+promoter-rs-one of Deployment promoter
+mem
+cpu
+mem 16Mi · cpu 20m · no request or limit · 0 restarts
+feed-listener-a of Service promoter-feed
+mem
+cpu
+no request or limit · 0 restarts
+platform
+acme-ops
+device-hub-rs-one of Deployment device-hub
+mem
+cpu
+no request or limit · 0 restarts
+DaemonSet edge-proxy one per machine
+mem
+cpu
+no request or limit · 0 restarts
+DaemonSet log-shipper one per machine
+mem
+cpu
+mem 64Mi · cpu 50m · no request or limit · 0 restarts
+DaemonSet metrics-relay one per machine
+mem
+cpu
+no request or limit · 0 restarts
+DaemonSet sql-listener one per machine
+mem
+cpu
+no request or limit · 0 restarts
+No memory or CPU request or limit, so the figures show what each uses.
+Devices it publishes
+gpu.example.test 1 device · none held
+card-display
+not held
+model A graphics card · resource.kubernetes.io/pciBusID 0000:01:00.0
+with card-render
+Volumes on it
+No volume is on its disk or attached to it.
+Underneath
+Machine node-alpha
+Ready
+Described by machines.liken.sh
+The computer under a Node. Healthy when its Ready condition is True.
+phase Running from status.phase kind
+from the KindKnowledge machines.liken.sh
+Its own logs
+The LogSource logs does not name which of its lines are a machine's own, so they count as the lines of the pod that ships them.
+What its kubelet reports
+CPU 4 CPUs
+Memory 16.0 GiB
+Address 192.168.0.1
+Marked lines are stored text, not read from the cluster. kind: from the kind knowledge. Hover a mark for its source.

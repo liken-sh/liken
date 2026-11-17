@@ -1,0 +1,16 @@
+# A block-storage driver whose `StorageClass` names the array it
+# provisions on.  The driver's console template fills in that array,
+# so the CSI driver's page lists the URL of the array's console.
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: block.csi.example.test
+  annotations:
+    transect.liken.sh/console: 'https://{array}:8443'
+spec: {}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata: {name: fast-block}
+provisioner: block.csi.example.test
+parameters: {array: array.example.test}

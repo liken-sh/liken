@@ -1,0 +1,28 @@
+vulnerabilities · ledger-db · acme-ledger · transect
+transect
+cluster / data / acme-ledger / ledger-db / vulnerabilities
+access vulnerabilities kinds
+Search /
+esc
+acme-ledger ledger-db overview section logs access vulnerabilities
+every severity
+No report names an image digest a pod of ledger-db runs now.
+Reports of images no pod of it runs now
+container
+digest
+scanned
+findings
+main
+sha256:0ld0
+2d ago
+1
+StatefulSet ledger-db 1 of 1 ready
+1 way in · access
+no report of an image it runs now · vulnerabilities
+Depended on by
+Deployment acme-shop/storefront
+If it goes down
+acme-shop/storefront can't reach ledger-db
+No NetworkPolicy selects its pods, so any pod may call them.
+Code
+ledger/deploy Kustomization acme-ops/ledger-apps ready

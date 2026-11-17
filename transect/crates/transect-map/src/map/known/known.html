@@ -1,0 +1,99 @@
+{% extends "frame/layout.html" %}
+{% import "edges/provenance.html" as provenance %}
+{%- import "links/link.html" as links -%}
+{% import "frame/tabs.html" as frame %}
+
+{% block title %}{{ kind }} {{ name }} · {{ namespace }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- A custom resource of a known kind: the object in the middle and a
+    box per reference of its kind's knowledge around it, each naming the
+    field it was read from.
+    The column, the board, and the card swap as one block. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="known-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="{{ kind }} objects in {{ namespace }}">
+<a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
+{%- for entry in column %}
+{%- if let Some(href) = entry.href %}
+<a class="switch{% if entry.current %} switch-current{% endif %}" href="{{ href }}" hx-get="{{ href }}"{% if entry.current %} aria-current="page"{% endif %}>{{ entry.text }}</a>
+{%- else %}
+<span class="switch">{{ entry.text }}</span>
+{%- endif %}
+{%- endfor %}
+{%- for count in counts %}
+{%- if let Some(href) = count.href %}
+<a class="switch known-count" href="{{ href }}" hx-get="{{ href }}"{% if let Some(summary) = count.summary %} title="{{ summary }}"{% endif %}>{{ count.text() }}</a>
+{%- else %}
+<span class="switch known-count"{% if let Some(summary) = count.summary %} title="{{ summary }}"{% endif %}>{{ count.text() }}</span>
+{%- endif %}
+{%- endfor %}
+{%- if let Some(tabs) = tabs %}
+{% call frame::tabs(tabs) %}{% endcall %}
+{%- endif %}
+</nav>
+{% include "map/edge_row.html" %}
+{%- if diagram() %}
+<div class="known-frame">
+<section class="known-board" aria-label="What {{ kind }} {{ name }} is connected to" style="width: {{ width }}px; height: {{ height }}px">
+{#- The lines are drawn under the boxes, in one SVG at the board's own
+    size, so a line's end meets the box's edge at the same
+    coordinates. -#}
+<svg class="section-lines" width="{{ width }}" height="{{ height }}" viewBox="0 0 {{ width }} {{ height }}" aria-hidden="true">
+<defs><marker id="known-arrow" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path class="section-arrow" d="M0 0 L4 2 L0 4 Z"/></marker></defs>
+{%- for relation in boxes %}
+{%- if let Some(d) = relation.line %}
+<path class="{{ relation.line_class }}" d="{{ d }}" marker-end="url(#known-arrow)"/>
+{%- endif %}
+{%- endfor %}
+</svg>
+{%- for relation in boxes %}
+<div class="known-box" style="left: {{ relation.rect.x }}px; top: {{ relation.rect.y }}px; width: {{ relation.rect.width }}px; height: {{ relation.rect.height }}px">
+<div class="known-label">{{ relation.label }}{% if !relation.arrow.is_empty() %} {{ relation.arrow }}{% endif %}</div>
+{%- for end in relation.ends %}
+<div class="known-end">{% call links::object_link(end.reference.text, end.reference.href, "") %}{% endcall %}</div>
+{%- if !end.reaches.is_empty() %}
+<div class="known-under">reaches {% for reached in end.reaches %}{% if !loop.first %}, {% endif %}{% call links::object_link(reached.text, reached.href, "") %}{% endcall %}{% endfor %}</div>
+{%- else if let Some(under) = end.under %}
+<div class="known-under">{{ under }}</div>
+{%- endif %}
+{%- else %}
+<div class="known-none">names nothing now</div>
+{%- endfor %}
+<div class="known-source">{{ relation.source }}</div>
+</div>
+{%- endfor %}
+<div class="{{ center_class() }}" style="left: {{ center.x }}px; top: {{ center.y }}px; width: {{ center.width }}px; height: {{ center.height }}px">
+<div class="known-label">{{ kind }}</div>
+<div class="known-name">{{ name }}</div>
+{%- if let Some(resting) = resting %}
+<div class="known-resting">{{ resting }}</div>
+{%- endif %}
+<div class="known-chips">
+{%- for chip in chips %}
+<span class="known-chip"{% if let Some(title) = chip.title %} title="{{ title }}"{% endif %}><span class="{{ chip.dot_class() }}"></span>{{ chip.text }}</span>
+{%- endfor %}
+</div>
+</div>
+</section>
+</div>
+<p class="known-caption">{{ closing() }}</p>
+{%- endif %}
+{% include "objects/board.html" %}
+{%- if let Some(card) = card %}
+{%- let runs = card.runs() %}
+{%- include "images/runs.html" %}
+{%- endif %}
+</main>
+{%- if let Some(card) = card %}
+{% include "cards/workload.html" %}
+{%- endif %}
+{%- if let Some(card) = known %}
+{% include "objects/card.html" %}
+{%- endif %}
+</div>
+{% endblock %}

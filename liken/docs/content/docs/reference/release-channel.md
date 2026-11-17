@@ -180,11 +180,13 @@ report for the current main](/coverage.html) is on this site. No
 digest pins the report, `release.yaml` does not list it, and no
 machine reads it. It is in the same trust class as the index pages.
 
-Two components of the repository have tests and no manual of their
+Three components of the repository have tests and no manual of their
 own, so this site serves their reports for the current main too:
 [kubernetes](/coverage/kubernetes.html), the Go module that the
-operators share, and [media-screen](/coverage/media-screen.html), the
-Rust crate that the screen clients share.
+operators share, [media-screen](/coverage/media-screen.html), the
+Rust crate that the screen clients share, and
+[transect](/coverage/transect.html), the server of a live, read-only
+map of a cluster.
 
 ## The index pages
 

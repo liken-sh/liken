@@ -1,0 +1,100 @@
+# transect's server: one replica, which lists the cluster once when it
+# starts and serves the map from memory.  A restart costs one full list,
+# so there is no second replica and no leader election.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: transect
+  annotations:
+    # transect reads nearly every kind the cluster serves, so its own
+    # access page would list it as powerful.  This says why.
+    transect.liken.sh/expected-access: Reads every kind but Secrets, and writes nothing, to draw the map.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transect
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transect
+  template:
+    metadata:
+      labels:
+        app: transect
+    spec:
+      serviceAccountName: transect
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: transect
+          image: ghcr.io/liken-sh/transect:latest
+          env:
+            - name: TRANSECT_LISTEN
+              value: 0.0.0.0:8080
+            # An overlay adds the rest, such as TRANSECT_PROMETHEUS,
+            # TRANSECT_ALERTMANAGER, TRANSECT_LOG_SOURCE_URL, and
+            # TRANSECT_RESOURCES.  `transect --help` lists every one.
+          ports:
+            - name: http
+              containerPort: 8080
+          # The port opens only after the first list of the cluster,
+          # which gives up after 30 seconds, so the startup probe allows
+          # 60.
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          # /readyz stays passing after the first list, through an API
+          # server outage, so transect stays on its Service when an
+          # operator most wants to look.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          # A pod exits as soon as it is deleted, and the Service and the
+          # ingress controller drop its address a moment later.  A
+          # request sent in between gets no answer and hangs.  The sleep
+          # keeps the old pod serving until they have moved on to the
+          # new one.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transect
+spec:
+  selector:
+    app: transect
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

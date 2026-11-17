@@ -1,0 +1,62 @@
+//! The order of names in DNS form: API groups, DRA driver names, and
+//! hosts.  A list of them sorts by the name's labels read from the right,
+//! so `liken.sh`, `audio.liken.sh`, and `media.liken.sh` sort together,
+//! and `cert-manager.io` sorts next to `acme.cert-manager.io`, while each
+//! name still shows as it is written.  The core API group, the empty
+//! name, sorts first.
+//!
+//! Labels compare one at a time, not as one reversed string, because in a
+//! string `-` sorts before `.`, which would put `sh.liken-x` between
+//! `sh.liken` and `sh.liken.audio`.
+
+use std::cmp::Ordering;
+
+/// The sort key of `name`: its labels, rightmost first, lowercased.
+pub fn key(name: &str) -> Vec<String> {
+    name.rsplit('.').map(str::to_lowercase).collect()
+}
+
+/// How `a` and `b` order in a list of names in DNS form.
+pub fn order(a: &str, b: &str) -> Ordering {
+    a.rsplit('.')
+        .map(str::to_lowercase)
+        .cmp(b.rsplit('.').map(str::to_lowercase))
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case::core_group_first(&["apps", ""], &["", "apps"])]
+    #[case::one_domain_together(
+        &["media.liken.sh", "apps", "liken.sh", "batch", "audio.liken.sh"],
+        &["apps", "batch", "liken.sh", "audio.liken.sh", "media.liken.sh"]
+    )]
+    #[case::parent_before_its_subdomains(
+        &["acme.cert-manager.io", "cert-manager.io", "aquasecurity.github.io"],
+        &["cert-manager.io", "acme.cert-manager.io", "aquasecurity.github.io"]
+    )]
+    #[case::by_label_not_by_string(
+        &["audio.liken.sh", "liken-x.sh", "liken.sh"],
+        &["liken.sh", "audio.liken.sh", "liken-x.sh"]
+    )]
+    #[case::by_top_level_domain_first(
+        &["kustomize.toolkit.fluxcd.io", "secrets.example.com", "storage.k8s.io"],
+        &["secrets.example.com", "kustomize.toolkit.fluxcd.io", "storage.k8s.io"]
+    )]
+    #[case::ignores_case(&["B.example.test", "a.example.test"], &["a.example.test", "B.example.test"])]
+    fn orders_names_by_their_labels_from_the_right(
+        #[case] names: &[&str],
+        #[case] expected: &[&str],
+    ) {
+        let mut sorted = names.to_vec();
+        sorted.sort_by(|a, b| order(a, b));
+        assert_eq!(sorted, expected);
+        let mut keyed = names.to_vec();
+        keyed.sort_by_key(|name| key(name));
+        assert_eq!(keyed, expected);
+    }
+}

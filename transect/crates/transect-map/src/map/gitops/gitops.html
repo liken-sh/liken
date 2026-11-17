@@ -1,0 +1,75 @@
+{% extends "frame/layout.html" %}
+{% import "links/link.html" as links %}
+
+{% block title %}{{ title() }} · {{ namespace() }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- A GitOps object's card in place of the sidebar, beside the row of its
+    kind's objects in its namespace and what reconciles from it, in the
+    panels a workload's page draws.  Every object listed opens its own
+    page. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="gitops-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="{{ detail.object.kind }} objects in {{ namespace() }}">
+<a class="switcher-namespace" href="/namespaces/{{ namespace() }}" hx-get="/namespaces/{{ namespace() }}">{{ namespace() }}</a>
+{%- for sibling in siblings %}
+{%- if let Some(href) = sibling.href %}
+<a class="switch{% if sibling.current %} switch-current{% endif %}" href="{{ href }}" hx-get="{{ href }}"{% if sibling.current %} aria-current="page"{% endif %}>{{ sibling.name }}</a>
+{%- else %}
+<span class="switch">{{ sibling.name }}</span>
+{%- endif %}
+{%- endfor %}
+</nav>
+{% include "map/edge_row.html" %}
+<section class="gitops-applies" aria-label="{{ reconciling_heading() }}">
+<div class="column-label">{{ reconciling_heading() }}</div>
+{%- for group in reconciling %}
+<div class="gitops-group">
+<span class="gitops-group-label">{% if let Some(namespace) = group.namespace %}{{ namespace }} · {% endif %}{{ group.kind }}</span>
+<div class="gitops-members">
+{%- for member in group.members %}
+{%- if let Some(href) = member.href %}
+<a class="gitops-member" href="{{ href }}" hx-get="{{ href }}">{{ member.text }}</a>
+{%- else %}
+<span class="gitops-member">{{ member.text }}</span>
+{%- endif %}
+{%- endfor %}
+</div>
+</div>
+{%- else %}
+<div class="tiles-none">{{ nothing_text() }}</div>
+{%- endfor %}
+</section>
+</main>
+<aside class="sidebar workload-card" aria-label="{{ name() }} card" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="workload-card-head">
+<b class="workload-card-name">{{ title() }}</b>
+<span class="workload-card-status"><span class="dot {{ dot_class() }}"></span>{{ ready_text() }}</span>
+</div>
+{%- if let Some(message) = message() %}
+<div class="card-body">{{ message }}</div>
+{%- endif %}
+<dl class="gitops-facts">
+{%- if let Some(source) = source %}
+<dt>Source</dt><dd>{% call links::object_link(source.text, source.href, "") %}{% endcall %}</dd>
+{%- endif %}
+{%- if let Some(url) = detail.url %}
+<dt>From</dt><dd>{{ url }}</dd>
+{%- endif %}
+{%- if let Some(path) = detail.path %}
+<dt>Path</dt><dd>{{ path }}</dd>
+{%- endif %}
+{%- if let Some(chart) = detail.chart %}
+<dt>Chart</dt><dd>{{ chart }}</dd>
+{%- endif %}
+{%- if let Some(revision) = detail.revision %}
+<dt>{{ revision_label() }}</dt><dd>{{ revision }}</dd>
+{%- endif %}
+</dl>
+</aside>
+</div>
+{% endblock %}

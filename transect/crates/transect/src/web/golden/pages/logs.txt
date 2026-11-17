@@ -1,0 +1,12 @@
+logs · storefront · acme-shop · transect
+transect
+cluster / apps / acme-shop / storefront / logs
+access vulnerabilities kinds
+Search /
+esc
+storefront storefront-rs-one storefront-rs-two overview section logs access vulnerabilities
+Container main: its last 4 lines, from the LogSource logs, read at 12:00:00 UTC
+listening on :8080
+[warning] cart cache is slow to answer
+[error] payment gateway refused the charge
+request served in 12ms

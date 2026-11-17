@@ -1,0 +1,34 @@
+{%- import "links/link.html" as links -%}
+{#- One piece of hardware a machine publishes, in the same lines every
+    time: its title, then each claim that holds it on a line of its own
+    or "not held", then its facts and the other devices drawn in it,
+    then what its attributes name.  A title from its driver's knowledge
+    is set as words, and a device's own name is set as code.  A holder's
+    name that is cut short shows in full in its line's title. -#}
+{%- macro hardware(device) -%}
+<div class="machine-device"{% if let Some(id) = device.anchors.first() %} id="{{ id }}"{% endif %} title="{{ device.hint }}">
+{%- for id in device.anchors.iter().skip(1) %}<span id="{{ id }}"></span>{% endfor %}
+<div class="machine-device-title{% if !device.titled %} machine-device-name{% endif %}">{{ device.title }}</div>
+{%- if device.claims.is_empty() %}
+<div class="machine-device-holder machine-device-free"><span class="machine-device-mark"></span>not held</div>
+{%- else %}
+{%- for claim in device.claims %}
+<div class="machine-device-holder" title="held by {{ claim.text }}"><span class="machine-device-mark machine-device-held"></span>{% call links::object_link(claim.text, claim.href, "") %}{% endcall %}</div>
+{%- endfor %}
+{%- endif %}
+{%- let facts = device.facts_line() %}
+{%- if !facts.is_empty() %}
+<div class="machine-device-line">{{ facts }}</div>
+{%- endif %}
+{%- if !device.parts.is_empty() %}
+<div class="machine-device-line">with {{ device.parts.join(", ") }}</div>
+{%- endif %}
+{%- let references = device.references() %}
+{%- if !references.is_empty() %}
+<div class="machine-device-line machine-device-references">
+{%- for (verb, named) in references %}{% if !loop.first %} · {% endif %}{{ verb }}
+{%- for thing in named %}{% if !loop.first %},{% endif %} {% call links::object_link(thing.text, thing.href.clone(), "") %}{% endcall %}{% endfor %}
+{%- endfor %}</div>
+{%- endif %}
+</div>
+{%- endmacro -%}

@@ -1,0 +1,69 @@
+storefront · acme-shop · transect
+transect
+cluster / apps / acme-shop / storefront
+access vulnerabilities kinds
+Search /
+esc
+acme-shop catalog help-desk listings storefront ×2 counter-till session-cache overview section logs access vulnerabilities
+Edges
+Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+Entry
+storefront-admin shop.example.test proxy · TLS from shop-issuer 3.2 requests/s · p95 120 ms · no 5xx, over 5m served by DaemonSet acme-ops/edge-proxy
+storefront-route shop.example.test proxy · TLS from shop-issuer 3.2 requests/s · p95 120 ms · no 5xx, over 5m served by DaemonSet acme-ops/edge-proxy
+→
+Services
+storefront-debug NodePort :8080 no endpoints
+storefront-svc ClusterIP :80 no endpoints
+→
+Pods · one per machine
+storefront-rs-one node-alpha · 0 restarts
+mem 256Mi · no request · no limit
+cpu 250m · no request · no limit
+storefront-rs-two node-beta · 0 restarts
+mem 192Mi · no request · no limit
+cpu 200m · no request · no limit
+No memory or CPU request or limit, so the figures show what each uses.
+Also needs ledger-db-svc.acme-ledger.svc.cluster.local:80
+Runs
+image
+repository
+version
+commit
+rolled
+example.test/storefront-image:1
+not read
+none
+none
+—
+Guards not spread by machine no PodDisruptionBudget ✓ RollingUpdate no readiness probe no CPU limit
+Deployment storefront 2 of 2 ready
+3 ways in · access
+1 critical , 1 high , 1 unknown · vulnerabilities
+Depends on
+StatefulSet acme-ledger/ledger-db
+Depended on by kind
+Promotion clearance Promotion spring-sale
+Authenticates through
+sign-in.example.test kind
+Signs in users of
+Gate acme-ops/shop-gate kind
+If it goes down
+acme-ops/shop-gate loses sign-in
+clearance and spring-sale can't reach storefront
+shop.example.test stops answering
+No NetworkPolicy selects its pods, so any pod may call them.
+No readiness probe
+During a rollout, its Service sends requests to each new pod as soon as it starts, before the pod can answer them.
+No PodDisruptionBudget
+No PodDisruptionBudget limits evictions, so a drain can evict both pods at once.
+Code
+shop/apps/shop HelmRelease storefront-release , chart storefront-chart from https://charts.example.test Kustomization acme-ops/shop-apps ready
+Marked lines are stored text, not read from the cluster. kind: from the kind knowledge. Hover a mark for its source.

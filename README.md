@@ -57,6 +57,9 @@ Each top-level directory is one component, named for what it ships:
   volumes.
 - [`per-node-csi-driver/`](per-node-csi-driver/) gives a pod a
   directory that stays on the node it runs on.
+- [`transect/`](transect/) serves a live, read-only map of a
+  Kubernetes cluster: its layers, the relationships between its parts,
+  and their health.
 - [`brand/`](brand/) holds the mark, the stylesheet, the Hugo theme,
   the voice rules, and the tools that build the sites.
 - [`kubernetes/`](kubernetes/) is the Go module that the operators

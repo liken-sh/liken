@@ -1,0 +1,19 @@
+The archive NAS · ground · transect
+transect
+cluster / ground / The archive NAS
+access vulnerabilities kinds
+Search /
+esc
+Reached as
+addresses nas.example.test
+Outside the cluster
+The archive NAS ↗
+1 volume · 1 workload uses it
+Keeps the ledger's archive on NFS. intent
+Marked lines are stored text, not read from the cluster. intent: written by the people who run the cluster. Hover a mark for its source.
+Volumes it keeps
+NFS acme-ledger/data-ledger-db-0
+Keeps the data of
+acme-ledger StatefulSet ledger-db
+Configured to reach it
+No workload is configured with its address.

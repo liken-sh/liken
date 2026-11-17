@@ -1,0 +1,10 @@
+# The build sees only what the image build reads: the workspace, the
+# jemalloc options, the crates, and the closure script. A change to the
+# plans, the examples, the deploy base, or the README leaves the cached
+# build valid.
+*
+!Cargo.toml
+!Cargo.lock
+!.cargo/config.toml
+!crates
+!transect-closure.sh

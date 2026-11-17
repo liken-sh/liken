@@ -1,0 +1,70 @@
+/*
+ * The `/resources` page: one table, a row per document, grouped by file,
+ * in the same panel the other elevations draw their rows in.  Gray
+ * where a document loaded; only a condition to act on takes `--warm`.
+ */
+
+.resources {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 32px;
+}
+
+.resources-summary {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-muted);
+}
+
+/* The panel scrolls with the page, its header row held at the top of
+   the window.  A long path or name wraps, so the table fits its column. */
+.resources-panel {
+  padding: 4px 14px;
+  background: var(--row);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.resources-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.resources-table th {
+  padding: 8px 12px 6px 0;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.resources-table td {
+  padding: 5px 12px 5px 0;
+  vertical-align: top;
+  color: var(--ink-faint);
+}
+
+/* A rule between files, none between a file's documents. */
+.resources-table tbody { border-top: 1px solid var(--rule); }
+
+.resources-path,
+.resources-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.resources-path { color: var(--ink-muted); }
+
+.resources-table td.resources-name { color: var(--ink); }
+
+.resources-table .resources-faint { color: var(--ink-faint); }
+
+.resources-condition { overflow-wrap: break-word; }
+
+.resources-table .resources-trouble { color: var(--warm); }

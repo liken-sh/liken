@@ -1,0 +1,12 @@
+{#- One usage bar, as the workload page's tiles and the pod page's
+    containers draw it.  In the track the used bar is drawn over the
+    requested one, as on the machine strips, so a use past its request
+    shows the used bar extending past the end of the request. -#}
+{%- macro meter(label, bar, title) -%}
+<div class="meter" title="{{ title }}">
+<span class="meter-label">{{ label }}</span>
+<div class="meter-track{% if bar.over() %} meter-over{% endif %}">
+{%- if let Some(request) = bar.request_percent() %}<div class="meter-requested" style="width: {{ request }}%"></div>{% endif %}
+{%- if let Some(used) = bar.used_percent() %}<div class="meter-used" style="width: {{ used }}%"></div>{% endif %}</div>
+</div>
+{%- endmacro -%}

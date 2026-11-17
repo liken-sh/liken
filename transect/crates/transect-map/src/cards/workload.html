@@ -1,0 +1,57 @@
+{% import "edges/provenance.html" as provenance %}
+{% import "links/link.html" as links %}
+{% import "vulnerabilities/counts.html" as vulnerability_counts %}
+{#- The workload's card, beside its pods.  Its reasons render through
+    the same templates as the "Now" section's, and its findings through
+    the same as the sidebar's, so a workload's reasons and findings show
+    the same words everywhere. -#}
+<aside class="sidebar workload-card" aria-label="{{ card.name }} card">
+<div class="workload-card-head">
+<b class="workload-card-name">{% call links::object_link(transect_graph::edges::kind_and_name(card.kind, card.name), card.href, "") %}{% endcall %}</b>
+<span class="workload-card-status"><span class="dot {{ card.dot_class() }}"></span>{{ card.status_text() }}</span>
+</div>
+{%- if !card.conditions.is_empty() %}
+<div class="known-chips workload-card-conditions">
+{%- for chip in card.conditions %}
+<span class="known-chip"{% if let Some(title) = chip.title %} title="{{ title }}"{% endif %}><span class="{{ chip.dot_class() }}"></span>{{ chip.text }}</span>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- include "intent/card.html" %}
+{%- if let Some(access) = card.access %}
+<div class="card-lens">{{ access.ways_in() }} · <a class="object-link" href="{{ access.href }}" hx-get="{{ access.href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true">access</a></div>
+{%- endif %}
+{%- if let Some((counts, href)) = card.vulnerabilities %}
+<div class="card-lens">{% if let Some(counts) = counts %}{% call vulnerability_counts::counts(counts) %}{% endcall %}{% else %}no report of an image it runs now{% endif %} · <a class="object-link" href="{{ href }}" hx-get="{{ href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true">vulnerabilities</a></div>
+{%- endif %}
+{%- if !card.health.reasons.is_empty() %}
+<div class="workload-card-reasons">
+{%- for (reason, href) in card.reason_lines() %}
+{%- if let Some(href) = href %}
+<a class="card-body concern-line" href="{{ href }}" hx-get="{{ href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true">{{ reason }}</a>
+{%- else %}
+<div class="card-body">{{ reason }}</div>
+{%- endif %}
+{%- if let Some(note) = reason.note_html() %}
+<div class="card-note">{{ note|safe }}</div>
+{%- endif %}
+{%- if let Some(evidence) = reason.evidence() %}
+{%- include "logs/evidence.html" %}
+{%- endif %}
+{%- endfor %}
+</div>
+{%- endif %}
+{%- include "addresses/card.html" %}
+{%- include "ownership/card.html" %}
+{%- include "loss/card.html" %}
+{%- include "policy/card.html" %}
+{%- for finding in card.findings %}
+<div class="card workload-finding">
+<div class="workload-finding-title">{{ finding.title() }}</div>
+<div class="card-body">{{ finding.body() }}</div>
+</div>
+{%- endfor %}
+{%- include "gitops/card.html" %}
+{%- include "knowledge/card.html" %}
+{%- call provenance::legend(card.legend()) %}{% endcall %}
+</aside>

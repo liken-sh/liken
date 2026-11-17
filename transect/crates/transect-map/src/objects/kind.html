@@ -1,0 +1,51 @@
+{% extends "frame/layout.html" %}
+{%- import "objects/table.html" as tables -%}
+{%- import "links/link.html" as links -%}
+
+{% block title %}{{ label }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- One kind's objects in every namespace, with its printer columns,
+    under a strip of the other kinds of its API group, beside its
+    card. -#}
+<div class="view{% if wide() %} view-wide{% endif %}" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="Kinds in {{ card.group }}">
+<a class="switcher-namespace" href="/kinds" hx-get="/kinds">kinds</a>
+{%- for entry in strip %}
+{%- if let Some(href) = entry.href %}
+<a class="switch{% if entry.current %} switch-current{% endif %}" href="{{ href }}" hx-get="{{ href }}"{% if entry.current %} aria-current="page"{% endif %}>{{ entry.text }}</a>
+{%- endif %}
+{%- endfor %}
+</nav>
+<section class="board-box" aria-label="{{ label }}">
+<div class="board-label">{{ label }} in every namespace</div>
+{%- if rows.is_empty() %}
+<div class="board-none">{{ none() }}</div>
+{%- else %}
+{% call tables::objects_table(columns, rows, true, false, usize::MAX) %}{% endcall %}
+{%- endif %}
+</section>
+{%- if !scans.is_empty() %}
+{#- A findings report's subject, so a person writing its knowledge sees
+    which workload and container transect attributes each report to,
+    and whether a pod runs the digest it names now. -#}
+<section class="board-box" aria-label="What each report scanned">
+<div class="board-label">What each report scanned</div>
+<table class="board-table">
+<thead><tr><th>report</th><th>workload</th><th>container</th><th>digest</th><th>its summary</th><th>now</th></tr></thead>
+<tbody>
+{%- for scan in scans %}
+<tr><td>{% call links::object_link(scan.report.text, scan.report.href, "") %}{% endcall %}</td><td>{% call links::object_link(scan.workload.text, scan.workload.href, "") %}{% endcall %}</td><td>{{ scan.container }}</td><td class="vn-digest">{{ scan.digest }}</td><td class="board-table-text">{{ scan.summary }}</td><td>{{ scan.state }}</td></tr>
+{%- endfor %}
+</tbody></table>
+</section>
+{%- endif %}
+</main>
+{% include "objects/kind_card.html" %}
+</div>
+{% endblock %}

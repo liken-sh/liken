@@ -1,0 +1,11 @@
+# The console annotation Synology's CSI driver would ship on its
+# CSIDriver: its StorageClasses and volumes name the NAS as `dsm`, and
+# DSM serves its console on 5001 by default.  As written here it is an
+# overlay, which transect merges onto the CSIDriver the cluster serves;
+# moved into the driver's own manifest, it is the same annotation.
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: csi.san.synology.com
+  annotations:
+    transect.liken.sh/console: 'https://{dsm}:5001'

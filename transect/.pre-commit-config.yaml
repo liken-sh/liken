@@ -1,0 +1,38 @@
+# These checks run before every commit, through pre-commit or prek,
+# its drop-in replacement. They are the fast, local ones: formatters,
+# linters, and hygiene checks. The test suites and the coverage gates
+# run in CI, through the `make` targets that package.toml names.
+#
+# The two htmx files are minified upstream files that end without a
+# newline. Their digests are pinned in pin.toml beside them, so no hook
+# may rewrite them.
+exclude: ^crates/transect/src/web/static/(htmx|sse)\.min\.js$
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        # Kubernetes manifests are multi-document streams.
+        args: [--allow-multiple-documents]
+      - id: check-merge-conflict
+      - id: check-added-large-files
+  # shellcheck-py wraps a prebuilt shellcheck binary, so the hook
+  # works on a machine with no shellcheck installed.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        # -x follows the source line of the htmx latest.sh into
+        # toolchains/pin.sh, and of transect-closure.sh into
+        # vulkan/closure.sh.
+        args: [-x]
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: bash -c 'cargo fmt --check'
+        language: system
+        files: \.rs$|^Cargo\.(toml|lock)$|^rust-toolchain\.toml$
+        pass_filenames: false

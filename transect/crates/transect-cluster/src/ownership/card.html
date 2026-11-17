@@ -1,0 +1,34 @@
+{#- The controllers of a card's custom resources, and what its workloads
+    control, from the controlled-by edges.  An end with a page opens it,
+    as a parcel does. -#}
+{%- import "edges/provenance.html" as provenance -%}
+{%- import "links/link.html" as links -%}
+{%- if !card.managed.is_empty() %}
+<div class="card-depends">
+{%- if !card.managed.by.is_empty() %}
+{%- let shared = card.managed.shared_by() %}
+<div class="card-depends-label">Controlled by{% call provenance::heading(shared) %}{% endcall %}</div>
+<div class="card-depends-ends">
+{#- Each controller and its mark are one span, so the column of ends
+    keeps the mark on its controller's row. -#}
+{%- for controller in card.managed.by %}
+{%- let end = controller.reference %}
+<span{% if shared.is_some() %}{% if let Some(mark) = controller.mark %} title="{{ mark.title() }}"{% endif %}{% endif %}>
+{%- call links::object_link(end.text, end.href, "") %}{% endcall %}
+{%- if let Some(mark) = controller.mark %}{% call provenance::line(mark, shared) %}{% endcall %}{% endif %}</span>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if !card.managed.manages.is_empty() %}
+<div class="card-depends-label">Controls</div>
+<div class="card-depends-ends">
+{%- for end in card.managed.manages %}
+{%- call links::object_link(end.text, end.href, "") %}{% endcall %}
+{%- endfor %}
+</div>
+{%- endif %}
+</div>
+{%- endif %}
+{%- if let Some(note) = card.managed.missing_text() %}
+<div class="card-code-note">{{ note }}</div>
+{%- endif %}

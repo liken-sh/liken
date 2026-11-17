@@ -1,0 +1,319 @@
+# `transect`'s own resources for the fixture cluster: its bands, the
+# knowledge of the kinds it describes, the NAS outside it, and its
+# metrics and alerts.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Layers
+metadata:
+  name: layers
+spec:
+  layers:
+    - name: apps
+      namespaceSelectors:
+        - matchExpressions:
+            - {key: kubernetes.io/metadata.name, operator: In, values: [acme-shop]}
+    - name: data
+      namespaceSelectors:
+        - matchExpressions:
+            - {key: kubernetes.io/metadata.name, operator: In, values: [acme-ledger]}
+    - name: operators
+      namespaceSelectors:
+        - matchExpressions:
+            - {key: kubernetes.io/metadata.name, operator: In, values: [acme-promoter]}
+    - name: platform
+      namespaceSelectors:
+        - matchExpressions:
+            - {key: kubernetes.io/metadata.name, operator: In, values: [acme-ops]}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: promotions.promotions.example.test
+spec:
+  summary: A sale on the shop, with a start and an end.
+  layer: apps
+  healthy: {condition: Ready, calm: [Scheduled]}
+  references:
+    - {path: spec.storefront.name, kind: Service, label: discounts}
+  controller: {image: example.test/promoter-image}
+---
+# A gate sends a check for each request to the address in
+# `spec.checkWith`, which answers whether to let the request through.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: gates.proxy.example.test
+spec:
+  summary: A check the proxy runs before each request.
+  referencedBy:
+    - {kind: Ingress, group: networking.k8s.io, annotation: example.test/gates, name: '{namespace}-{name}'}
+  references:
+    - {path: spec.checkWith, address: true, edge: authenticates through, label: asks before each request}
+---
+# The proxy in front of the shop: the controller its `IngressClass`
+# names, the image its `DaemonSet` in `entry.yaml` runs, and how to
+# read the traffic of each `Ingress` it serves.
+apiVersion: transect.liken.sh/v1alpha1
+kind: IngressController
+metadata:
+  name: edge-proxy
+spec:
+  controller: example.test/proxy
+  image: proxy/router
+  entryPoints:
+    annotation: example.test/entrypoints
+    default: [web, websecure]
+    ports:
+      - {name: web, port: 80, redirectsTo: websecure}
+      - {name: websecure, port: 443, tls: true}
+  entry:
+    backend: {label: backend, name: '{namespace}-{service}-{port}'}
+    requests: 'sum by (backend) (rate(proxy_requests_total[5m]))'
+    latency: 'histogram_quantile(0.95, sum by (backend, le) (rate(proxy_request_seconds_bucket[5m])))'
+    errors: 'sum by (backend) (rate(proxy_requests_total{code=~"5.."}[5m]))'
+    window: 5m
+---
+# A handset names the radio it pairs through by the radio's address,
+# which only the radio's status holds, so the reference matches by
+# value.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: handsets.radios.example.test
+spec:
+  summary: A handset the shop's radio has paired.
+  references:
+    - {path: status.radio, kind: Radio, group: radios.example.test, match: status.address, label: pairs through}
+---
+# A till holds a handset device and names the radio it pairs through by
+# the radio's address; the handset device's own attributes name the
+# same radio, so the till's section draws a line from the device to it.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: tills.tills.example.test
+spec:
+  summary: A till at the shop's counter.
+  references:
+    - {path: status.radio, kind: Radio, group: radios.example.test, match: status.address, label: pairs through}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: DeviceKnowledge
+metadata:
+  name: radio.example.test
+spec:
+  title: product
+  facts:
+    - {attribute: battery, label: battery}
+  references:
+    - {attribute: radio, kind: Radio, group: radios.example.test, match: status.address, label: pairs through}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: DeviceKnowledge
+metadata:
+  name: sound.example.test
+spec:
+  title: label
+  facts:
+    - {attribute: connector, label: connector}
+    - {attribute: channels, label: channels}
+  references:
+    - {attribute: card, driver: gpu.example.test, match: resource.kubernetes.io/pciBusID, label: speakers of}
+---
+# The stock room's shelves and bins, each part of the one above it.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: rooms.stock.example.test
+spec:
+  summary: A room the shop keeps stock in.
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: shelves.stock.example.test
+spec:
+  summary: A shelf in a stock room.
+  references:
+    - {path: spec.room, kind: Room, group: stock.example.test, edge: part of}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: bins.stock.example.test
+spec:
+  summary: A bin on a shelf.
+  references:
+    - {path: spec.shelf, kind: Shelf, group: stock.example.test, edge: part of}
+    - {path: spec.overflow, kind: Shelf, group: stock.example.test, edge: part of}
+---
+# The machine under a `Node`, named for it.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: machines.liken.sh
+spec:
+  summary: The computer under a Node.
+  healthy: {condition: Ready}
+  node: metadata.name
+  references:
+    - {path: status.phase, label: phase}
+---
+# The certificate tool's kinds.  A `Certificate` writes the `Secret`
+# that an `Ingress` serves its TLS from, and names its issuer.  An
+# annotation on an `Ingress` may name the issuer too: a `ClusterIssuer`
+# by its name, and an `Issuer` by its name in the `Ingress`'s own
+# namespace.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: certificates.cert-manager.io
+spec:
+  summary: A TLS certificate, kept renewed in the Secret it writes.
+  writesSecret: spec.secretName
+  references:
+    - {path: spec.issuerRef.name, kind: ClusterIssuer, group: cert-manager.io, label: issued by, role: issues-tls}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: clusterissuers.cert-manager.io
+spec:
+  summary: Issues certificates for every namespace.
+  referencedBy:
+    - {kind: Ingress, group: networking.k8s.io, annotation: cert-manager.io/cluster-issuer, name: '{name}', role: issues-tls}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: issuers.cert-manager.io
+spec:
+  summary: Issues certificates in its namespace.
+  referencedBy:
+    - {kind: Ingress, group: networking.k8s.io, annotation: cert-manager.io/issuer, name: '{name}', role: issues-tls}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: Outside
+metadata:
+  name: archive-nas
+spec:
+  title: The archive NAS
+  addresses: [nas.example.test]
+  why: Keeps the ledger's archive on NFS.
+  url: https://nas.example.test:5001
+---
+# The fixture's log store, whose tail of the storefront's first pod is
+# in `signals.yaml`.  Its `level` field holds OpenTelemetry's level
+# names, so `transect` reads each line's level from that field.  When
+# the field holds a value that no list in `levels` names, such as
+# Unspecified, `transect` guesses the line's level from its text.
+apiVersion: transect.liken.sh/v1alpha1
+kind: LogSource
+metadata:
+  name: logs
+spec:
+  url: http://logs.example.test:9428
+  language: logsql
+  query: /select/logsql/query
+  fields:
+    namespace: k8s.namespace.name
+    pod: k8s.pod.name
+    container: k8s.container.name
+    time: _time
+    level: severity_text
+    message: _msg
+  levels:
+    error: [err, fatal]
+    warning: [warn]
+    plain: [info, debug]
+  queries:
+    tail: '{fields.namespace}:"{namespace}" {fields.pod}:"{pod}" | sort by ({fields.time}) desc | limit {limit}'
+    search: '_time:{window} {pattern} | stats by ({fields.namespace}, {fields.pod}) count() matches, max({fields.time}) last | limit {limit}'
+---
+# The fixture's Prometheus and Alertmanager, whose answers are in
+# `signals.yaml`.  The metric names are the fixture's own.
+apiVersion: transect.liken.sh/v1alpha1
+kind: MetricsSource
+metadata:
+  name: metrics
+spec:
+  url: http://prometheus.example.test:9090
+  nodeLabels: [node, instance]
+  queries:
+    machineCpu: {query: machine_cores_used}
+    machineMemory: {query: machine_bytes_used}
+    containerCpu:
+      query: container_cores_used
+      labels: {namespace: namespace, pod: pod, container: container}
+    containerMemory:
+      query: container_bytes_used
+      labels: {namespace: namespace, pod: pod, container: container}
+    volumeUsed:
+      query: claim_bytes_used
+      labels: {namespace: namespace, claim: claim}
+  alerts:
+    url: http://alertmanager.example.test:9093
+    severity: {label: severity, failing: [critical], notice: [info], hidden: [none]}
+    namespace: namespace
+    objects:
+      - {label: pod, kind: Pod}
+      - {label: deployment, group: apps, kind: Deployment}
+    container: container
+    nodeLabels: [node]
+    instanceLabels: [instance]
+    scrapeLabels: [pod, container]
+    exportedPrefix: exported_
+    annotations: {summary: summary, description: description}
+---
+# The forges that host the fixture's GitOps sources, with the URL
+# layouts that the code links use.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Forge
+metadata:
+  name: github
+spec:
+  hosts: [github.com]
+  tree: '{repository}/tree/{ref}/{path}'
+  commit: '{repository}/commit/{sha}'
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: Forge
+metadata:
+  name: gitea
+spec:
+  hosts: [codeberg.org]
+  hostPrefixes: [gitea, forgejo]
+  images: [gitea, forgejo]
+  tree: '{repository}/src/{refKind}/{ref}/{path}'
+  commit: '{repository}/commit/{sha}'
+---
+# The listeners that serve a `LoadBalancer` `Service` on each machine
+# name the `Service` in two labels.
+apiVersion: transect.liken.sh/v1alpha1
+kind: LoadBalancerController
+metadata:
+  name: node-balancer
+spec:
+  listener:
+    name: {label: lb.example.test/service-name}
+    namespace: {label: lb.example.test/service-namespace}
+---
+# The scanner's reports: each names its container by a label, the
+# digest it scanned, and its findings.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: imagereports.scan.example.test
+spec:
+  controller: {image: example/image-scanner}
+  findings:
+    subject:
+      owner: true
+      container: {label: scan.example.test/container}
+    digest: report.artifact.digest
+    scannedAt: report.updateTimestamp
+    summary:
+    - {severity: CRITICAL, path: report.summary.criticalCount}
+    - {severity: HIGH, path: report.summary.highCount}
+    - {severity: UNKNOWN, path: report.summary.unknownCount}
+    items: "report.found[]"
+    item: {id: id, severity: severity, score: score, package: package, installed: installed, fixed: fixed, link: link, title: title}

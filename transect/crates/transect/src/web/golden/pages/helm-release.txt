@@ -1,0 +1,29 @@
+HelmRelease storefront-release · acme-shop · transect
+transect
+cluster / apps / acme-shop / HelmRelease storefront-release
+access vulnerabilities kinds
+Search /
+esc
+acme-shop storefront-release
+Edges
+Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+Applies
+acme-shop · Deployment
+storefront
+HelmRelease storefront-release ready
+Source
+HelmRepository acme-ops/charts-helm
+From
+https://charts.example.test
+Chart
+storefront-chart
+Applied
+1.4.2

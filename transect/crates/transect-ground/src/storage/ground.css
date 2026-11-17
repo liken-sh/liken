@@ -1,0 +1,89 @@
+/*
+ * The ground band, below the machines band, shows the storage outside
+ * the cluster that the cluster stores data on.  Its background is one
+ * step darker than the machines band, as the machines band is darker
+ * than the namespaces, so the map darkens from the top down toward the
+ * ground.
+ */
+
+:root { --ground: #ededed; }
+
+@media (prefers-color-scheme: dark) {
+  :root { --ground: #111316; }
+}
+
+.ground { background: var(--ground); }
+
+/* Boxes size to their text and share the row's spare room, so a long
+   address is never cut and a short driver name does not stretch alone
+   across the band. */
+.ground-boxes {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+/* Dashed, because the cluster connects to the systems in these boxes
+   and does not run them. */
+.ground-box {
+  flex: 1 1 auto;
+  padding: 8px;
+  border: 1px dashed var(--ink-faint);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: break-word;
+}
+
+.ground-count { color: var(--ink-faint); }
+
+/* The link to the system's own console is beside its name, in the
+   faint ink, so that the reader sees the box's name first. */
+.ground-out { color: var(--ink-faint); text-decoration: none; }
+.ground-out:hover { color: var(--link); }
+
+/* A box with the selected namespace's volumes or dependents gets the
+   selection color that fills the selected parcel.  Its dashes are two
+   pixels wide, with one pixel less padding so that the box keeps its
+   size.  The border is
+   not an inset shadow, because a shadow would draw a solid line inside
+   the dashes. */
+.ground-box-here {
+  padding: 7px;
+  border: 2px dashed var(--link);
+  color: var(--link);
+}
+
+.ground-box-here .ground-count { color: inherit; }
+
+.ground-box-faded { opacity: 0.38; }
+
+/* On the namespace page, the ground band becomes one line that lists
+   the backends that the open namespace stores data on. */
+.ground-line { align-items: baseline; }
+
+.ground-under {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.ground-under-box {
+  padding: 4px 10px;
+  border: 1px dashed var(--ink-muted);
+  border-radius: 6px;
+  background: var(--page);
+  overflow-wrap: break-word;
+}
+
+.ground-under-none { color: var(--ink-faint); }
+
+/* A ground box's own page draws the system with the dashed border that
+   its box has on the map. */
+.board-object.ground-object { border-style: dashed; }

@@ -1,0 +1,519 @@
+# This file is generated from transect/package.toml. Do not edit it:
+# edit that file or the templates in ci/templates/, then run
+# `make workflows` at the top of the repository.
+#
+# ci.yaml calls this workflow when a change reaches transect. Each
+# check below is a job from package.toml, and it runs the same command
+# that a workstation runs. The images job builds each image and runs
+# its smoke check.
+#
+# The plan names the jobs and the images that read the change, and
+# only those run, in a run that publishes too. A run that publishes also
+# runs each image that reads the VERSION build argument, because the
+# publish gives it a new version. ci.yaml calls this workflow a
+# second time for the publish job, after every check that ran here and
+# in this component's closure passed.
+#
+# The name carries the component- prefix because the ci component would
+# otherwise share the name ci with the root workflow, and a lookup by
+# name could not tell the two apart.
+name: component-transect
+
+on:
+  workflow_call:
+    inputs:
+      # check runs the jobs and the images that the plan names. publish
+      # runs the publish job alone: ci.yaml calls this workflow a second
+      # time for it, after the checks of every component in this one's
+      # closure pass.
+      stage:
+        type: string
+        required: true
+      # true when the check stage also runs the publish job in its dry
+      # mode, because the code of the publish changed: it builds what a
+      # publish would push, and it pushes nothing.
+      dryrun:
+        type: boolean
+        required: true
+      # The version the outputs get: the release tag, a development
+      # version, a pinned component's own tag, or empty when the run
+      # publishes nothing.
+      version:
+        type: string
+        required: true
+      # none, dev, or release.
+      publish:
+        type: string
+        required: true
+      # The names of the jobs that run, as a JSON list.
+      jobs:
+        type: string
+        required: true
+      # The images that run, as a JSON list of the images job's matrix
+      # entries.
+      images:
+        type: string
+        required: true
+      # The override file that `ci bases` wrote in the plan job. It
+      # points each build at the published image of every pinned base
+      # that passed its checks, and every other base builds from the
+      # tree. ci/bases.go gives the checks.
+      bases:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+# proxy.golang.org sometimes drops a module download partway through
+# the stream. With the default comma, `go` tries the origin only when
+# the proxy answers 404 or 410, so a dropped stream fails the job.
+# With a pipe, `go` fetches the module from its origin after any proxy
+# error, with the runner's git. `GOSUMDB` keeps its default, so the
+# checksum database still verifies a module that `go` fetched from its
+# origin. The value covers the Go of every job here, and of the
+# build-setup action, which takes the env of the job that uses it.
+# The images set the same value in their own build stages.
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
+jobs:
+  rust:
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'rust') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: transect
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # rustup reads the toolchain pin from rust-toolchain.toml.
+      - name: install the toolchain
+        run: rustup show
+
+      # The key holds the component, so a workspace never restores
+      # another component's target directory. Only a push to main
+      # saves, so a branch never writes an entry that pushes one of
+      # main's out of the repository's 10 GB.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: transect
+          key: transect
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
+        with:
+          tool: cargo-llvm-cov
+
+      - run: make test
+
+      # The site renders the coverage report from these files.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-transect-rust
+          path: |
+            transect/coverage-transect.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  prek:
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'prek') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: transect
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # prek runs the hooks of this component only, with
+      # --show-diff-on-failure, so a hook that changes a file fails
+      # with the change it would make. sha256 is the digest
+      # that prekSHA256 in ci/workflow.go pins, because the action checks
+      # only the versions in its own table. SKIP leaves out the hooks
+      # that another job of this workflow runs.
+      - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
+        env:
+          SKIP: cargo-fmt
+        with:
+          prek-version: 0.5.9
+          sha256: 2fee13923018dd517c19dba032ddcae8010cadfb81bc47e742ad5e8981a3f126
+          extra-args: --all-files transect/
+
+  codeql-rust:
+    # ci/codeql.go derives this job. A pull request from a fork gets a
+    # token that cannot write to code scanning, so the analysis runs
+    # only for a branch of this repository.
+    if: ${{ inputs.stage == 'check' && contains(fromJSON(inputs.jobs), 'codeql-rust') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: transect
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # CodeQL analyzes every file of the checkout unless its
+      # configuration names paths, so the configuration limits the
+      # analysis to this job's directory. A crate of another component
+      # that this crate takes by path is analyzed in that component's own
+      # job. The analysis reads the sources without a build.
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: rust
+          build-mode: none
+          config: |
+            paths:
+              - transect
+
+      # The category keeps this job's alerts apart from every other
+      # analysis: code scanning closes an alert only when a later upload
+      # in the same category no longer reports it.
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: codeql/transect/rust
+
+  # Each image builds through docker-bake.hcl at the top of the
+  # repository, as the target of the same name. A Dockerfile that
+  # builds on a base of the repository, as in FROM mpv, gets that base
+  # as a named context: the base's published image when the override
+  # file names it, and otherwise the base's target, so the base builds
+  # at this commit, from its layer cache when nothing in it changed.
+  #
+  # The layer cache is on ghcr, as a :buildcache tag beside each image.
+  # Every build reads it. Every push to main and every run that
+  # publishes also writes the cache of the image this job builds, and
+  # never the cache of a base under it, so the next build finds each
+  # layer that did not change, and the publish job's build of the same
+  # image finds every layer there. A push to another branch only reads
+  # it, so a topic branch cannot replace main's cache.
+  #
+  # Off main, a pinned base's job also writes its layers to ghcr, as a
+  # :buildcache-<version>-<revision> tag beside the image, and every
+  # build reads that tag too. A consumer's job runs after its bases'
+  # jobs, so on a branch that raises a base's revision, the consumer
+  # builds the base from the layers that the base's own job wrote a
+  # moment before, instead of from snapshot.debian.org. The bake file
+  # decides which target writes. Each write ignores an error: a cache
+  # that cannot be written makes the next build slower, and it never
+  # fails this one.
+  #
+  # The matrix comes from the plan: one entry for each image that runs,
+  # with whether it is pinned, whether it loads, and its smoke check.
+  images:
+    name: ${{ matrix.image }}
+    if: ${{ inputs.stage == 'check' && fromJSON(inputs.images)[0] != null }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.images) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The plan job checked the published image of each pinned base,
+      # and this file points the build at each one that passed.
+      - name: write the published bases
+        env:
+          BASES: ${{ inputs.bases }}
+        run: printf '%s\n' "$BASES" > docker-bake.override.hcl
+
+      # The builder runs the BuildKit image that toolchains/images.toml
+      # pins by its digest. With no image, buildx starts BuildKit's
+      # default image, whose tag moves to each new BuildKit release, so
+      # the daemon that builds every image would change with no commit.
+      # ci/buildkit.go gives the check.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
+
+      # A pinned base writes its branch cache on every branch, so its job
+      # logs in on every branch too.
+      - if: ${{ inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || matrix.pinned }}
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # An image whose package.toml sets cache-mount keeps a cache
+      # mount, such as a compiler cache, that BuildKit never writes into
+      # the registry's layer cache. So the job restores the files of an
+      # earlier build into .image-cache/ and copies them into the mount
+      # with the image's cache-seed target before the build. The build
+      # reads the mount only when it misses the layer cache. The key
+      # holds the run, so the restore takes the newest entry that main
+      # saved.
+      - id: image-cache
+        if: ${{ matrix.cache }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .image-cache/${{ matrix.image }}
+          key: image-cache-${{ matrix.image }}-${{ github.run_id }}
+          restore-keys: image-cache-${{ matrix.image }}-
+
+      - name: seed the cache mount
+        if: ${{ matrix.cache }}
+        run: |
+          mkdir -p ".image-cache/${{ matrix.image }}"
+          find ".image-cache/${{ matrix.image }}" -type f | sort > "$RUNNER_TEMP/image-cache-before"
+          docker buildx bake -f docker-bake.hcl -f docker-bake.override.hcl "${{ matrix.image }}-cache-seed"
+
+      # An image for more than one platform cannot load into the
+      # runner's Docker daemon, so only a single-platform image loads,
+      # and only a loaded image has a smoke check. The build reads the
+      # bake file from the checkout, so a named context reaches the
+      # directories of the repository.
+      - if: ${{ !matrix.published }}
+        uses: docker/bake-action@59cb1203cd42bcefd40a1b6d73b589e48c86040e # v7.5.0
+        with:
+          source: .
+          files: |
+            docker-bake.hcl
+            docker-bake.override.hcl
+          targets: ${{ matrix.image }}
+          load: ${{ matrix.load }}
+          push: false
+          vars: |
+            VERSION=${{ inputs.version || 'check' }}
+            CACHE_WRITE=${{ (inputs.publish != 'none' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && matrix.image || '' }}
+            BRANCH_CACHE=${{ matrix.image }}
+
+      # A pinned image whose tag is published with the tree's recipe is
+      # the build of this commit's recipe, so the job pulls it by its
+      # tag and checks it, and builds nothing. ci/plan.go gives the
+      # rule.
+      - name: pull the published image
+        if: ${{ matrix.published }}
+        run: docker pull "ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version }}"
+
+      - name: smoke check
+        if: ${{ matrix.smoke != '' && matrix.load }}
+        run: bash "${{ matrix.smoke }}" "ghcr.io/liken-sh/${{ matrix.image }}:${{ inputs.version || 'check' }}"
+
+      # Only main saves the cache, as with the Go caches, and only when
+      # the build added files to the mount: a build that hit the layer
+      # cache compiled nothing, and its entry would repeat the one it
+      # restored.
+      - id: image-cache-export
+        name: copy the cache mount out
+        if: ${{ matrix.cache && github.ref == 'refs/heads/main' }}
+        run: |
+          docker buildx bake -f docker-bake.hcl -f docker-bake.override.hcl "${{ matrix.image }}-cache-export"
+          find ".image-cache/${{ matrix.image }}" -type f | sort > "$RUNNER_TEMP/image-cache-after"
+          if cmp -s "$RUNNER_TEMP/image-cache-before" "$RUNNER_TEMP/image-cache-after"; then
+            echo changed=false >> "$GITHUB_OUTPUT"
+          else
+            echo changed=true >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: ${{ steps.image-cache-export.outputs.changed == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .image-cache/${{ matrix.image }}
+          key: ${{ steps.image-cache.outputs.cache-primary-key }}
+
+  publish:
+    if: ${{ inputs.stage == 'publish' || inputs.dryrun }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    # security-events: write uploads the Trivy scan of each image.
+    # id-token: write lets cosign take the job's OIDC token and sign
+    # each image keyless, with this workflow at its ref as the signer.
+    # No other job of the workflow holds it.
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - id: setup-go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ci/go.mod
+          cache: false
+
+      # The repository's Actions cache holds 10 GB, and GitHub evicts
+      # the oldest entries when the caches pass that limit. So every run
+      # restores the Go caches, and only a push to main saves them: a
+      # branch never writes an entry that pushes one of main's out.
+      #
+      # The downloaded modules are one entry for each Go module, which
+      # every job of the module restores. The key follows the hash of
+      # `go.sum` alone, so the entry changes only when `go.sum` changes,
+      # and a push to main that does not change `go.sum` saves no
+      # modules. The
+      # module's `go` job saves the entry, because it runs the module's
+      # tests and reads every module that this job reads.
+      # When no entry has the key, as on a branch that changes `go.sum`,
+      # the restore takes the newest entry of the same module, which
+      # holds most of the modules that the job needs.
+      #
+      # The entry holds the extracted source and, from the download
+      # cache, only the `go.mod` files and the zip hashes. `go` reads the
+      # `go.mod` files to load the module graph, and it downloads a module
+      # again when its zip hash is missing. `go` does not read a zip
+      # file after it extracts the source, and the zip files are about
+      # half of the compressed entry.
+      - id: go-modules
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod/*
+            !~/go/pkg/mod/cache
+            ~/go/pkg/mod/cache/download/**/*.mod
+            ~/go/pkg/mod/cache/download/**/*.ziphash
+          key: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ hashFiles('ci/go.sum') }}
+          restore-keys: go-modules-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-
+
+      # The build cache holds Go's test results and the compiled
+      # packages of the dependencies and of the job's own module. The
+      # key holds the Go version and the hash of these files:
+      #
+      #   ci/go.sum
+      #
+      # The key holds no commit, so main saves an entry only when one
+      # of these inputs changes, and the entry stays until the next
+      # change. A key that held the commit saved a new entry of several
+      # hundred megabytes for each job on each push to main, and those
+      # entries filled the repository's 10 GB. A run restores the entry
+      # of its inputs, which holds every dependency compiled. The
+      # packages of the module that changed since that entry compile
+      # again, and their tests run again.
+      #
+      # When no entry has the key, as on a branch that changes one of
+      # the files, the restore takes the newest entry of the same job.
+      # Each job has entries of its own: a job that builds less would
+      # save an entry without the packages that the other job
+      # compiles, and the other job would restore it and compile them
+      # again.
+      - id: go-build
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-${{ hashFiles('ci/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-${{ steps.setup-go.outputs.go-version }}-ci-${{ github.job }}-
+
+      # The builder runs the BuildKit image that toolchains/images.toml
+      # pins by its digest. With no image, buildx starts BuildKit's
+      # default image, whose tag moves to each new BuildKit release, so
+      # the daemon that builds every image would change with no commit.
+      # ci/buildkit.go gives the check.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.34.2@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe
+
+      # A dry run pushes nothing, so it needs no login.
+      - if: ${{ !inputs.dryrun }}
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: fluxcd/flux2/action@3fa784edd773d56630bb9f62645e08f70c2cff0a # v2.10.0
+        with:
+          version: 2.10.0
+
+      # The publish scans each image that it pushes with Trivy, so an
+      # image that this run publishes is scanned, and a pinned base is
+      # scanned once for each tag. The root workflow's trivy job scans
+      # every published image again when the Trivy configuration
+      # changes. The scan reports and does not gate: an install that
+      # fails here makes each scan fail, and the publish warns and pushes
+      # the next image. Each scan reads Trivy's vulnerability database
+      # that the root workflow's trivy-db job saved to the cache, and
+      # Trivy downloads the database once, before the first scan, when
+      # the restore finds none that is current.
+      - id: trivy-day
+        if: ${{ !inputs.dryrun }}
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - if: ${{ !inputs.dryrun }}
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy/db
+          key: trivy-db-${{ steps.trivy-day.outputs.day }}
+          restore-keys: trivy-db-
+
+      # The step installs Trivy from its release archive, and checks the
+      # archive against trivySHA256 in ci/trivy.go before it unpacks the
+      # binary, so a release that changed after the bump fails here.
+      - if: ${{ !inputs.dryrun }}
+        continue-on-error: true
+        env:
+          TRIVY_VERSION: 0.76.1
+          TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+        run: |
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/$archive"
+          echo "$TRIVY_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict -
+          mkdir -p "$RUNNER_TEMP/trivy-bin"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/trivy-bin" trivy
+          echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
+
+      # The plan job checked the published image of each pinned base,
+      # and this file points the build at each one that passed.
+      - name: write the published bases
+        env:
+          BASES: ${{ inputs.bases }}
+        run: printf '%s\n' "$BASES" > docker-bake.override.hcl
+
+      # Each image builds again through docker-bake.hcl, and pushes. An
+      # image that ran in the images job above builds from the layers that
+      # the job wrote to the cache. An image that did not run reads
+      # neither the version nor any file that changed, and it builds from
+      # the layers that an earlier run on main wrote. Each push carries
+      # buildx's SBOM and provenance attestations, and cosign, from the
+      # image that toolchains/images.toml pins, signs the digest of each
+      # image that the push wrote. ci/sign.go gives the details. The deploy artifact
+      # goes last, because a cluster follows the deploy artifact, and it
+      # must never name an image that is not pushed yet.
+      - name: publish
+        working-directory: ci
+        run: go run . publish -root .. -component transect -version "${{ inputs.version }}" -mode "${{ inputs.dryrun && 'dry' || inputs.publish }}" -sarif "${{ github.workspace }}/trivy"
+
+      # The scan of each image goes under a category of its own,
+      # trivy/<image>. Code scanning closes an alert only when a later
+      # upload in the same category no longer reports it, so the upload
+      # of one image never closes the alerts of another, and the next
+      # scan of the same image replaces its results. Each step runs when
+      # the publish wrote its image's scan, even when a later image
+      # failed.
+      - if: ${{ !cancelled() && !inputs.dryrun && hashFiles('trivy/transect.sarif') != '' }}
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy/transect.sarif
+          category: trivy/transect
+          # Code scanning keeps each upload under the ref that the upload
+          # names, and its view of the default branch reads only the
+          # uploads on main. A release runs on a tag, and its commit is
+          # one that CI proved on main, so the upload of a tag's run
+          # names main with that commit. Without the ref, the Security
+          # tab would show a release's findings only after the next
+          # scheduled scan in scan.yaml. The action takes the ref only
+          # with the sha.
+          ref: ${{ startsWith(github.ref, 'refs/tags/') && 'refs/heads/main' || github.ref }}
+          sha: ${{ github.sha }}
+
+      - if: ${{ github.ref == 'refs/heads/main' && steps.go-build.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/go-build
+          key: ${{ steps.go-build.outputs.cache-primary-key }}

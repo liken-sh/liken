@@ -1,0 +1,31 @@
+{%- import "links/link.html" as links -%}
+{#- A table of one kind's objects: each name with its dot, its
+    namespace when `namespaced`, its condition when `condition`, and
+    its printer columns.  Past `most` rows, the rest fold behind a count
+    that opens them; board.css shows the folded rows while it is open.
+    A name wraps to fit the column, and a long value is cut with an
+    ellipsis, with the whole value on hover.  A value not set is a gray
+    dash, and the count shown in place of an object or a list is
+    gray. -#}
+{%- macro objects_table(columns, rows, namespaced, condition, most) -%}
+<table class="board-table board-objects">
+<thead><tr><th>Name</th>{% if namespaced %}<th>Namespace</th>{% endif %}{% if condition %}<th>Condition</th>{% endif %}{% for column in columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
+<tbody>
+{%- for row in rows %}
+<tr{% if loop.index > most %} class="board-folded"{% endif %}>
+<td class="board-table-name"><span class="board-cell">{% if let Some(class) = row.item.dot_class() %}<span class="{{ class }}"></span>{% else %}<span class="dot dot-none"></span>{% endif %}{% call links::object_link(row.item.name, row.item.href, "") %}{% endcall %}</span></td>
+{%- if namespaced %}
+<td class="board-table-name">{% if let Some(namespace) = row.namespace %}{% call links::object_link(namespace, Some(transect_graph::links::namespace(namespace)), "") %}{% endcall %}{% endif %}</td>
+{%- endif %}
+{%- if condition %}
+<td class="board-table-text">{% if let Some(condition) = row.condition %}{{ condition }}{% else %}<span class="board-unset" title="reports no condition">—</span>{% endif %}</td>
+{%- endif %}
+{%- for value in row.values %}<td class="board-table-value"{% if !value.is_empty() %} title="{{ value }}"{% endif %}>{% if value.is_empty() %}<span class="board-unset" title="not set">—</span>{% else if transect_resources::knowledge::jsonpath::counted_structure(value.as_str()) %}<span class="board-unset">{{ value }}</span>{% else %}{{ value }}{% endif %}</td>{% endfor %}
+</tr>
+{%- endfor %}
+</tbody>
+</table>
+{%- if rows.len() > most %}
+<details class="board-fold board-table-fold"><summary>{{ rows.len() - most }} more <span class="board-fold-show">· show</span><span class="board-fold-hide">· hide</span></summary></details>
+{%- endif %}
+{%- endmacro -%}

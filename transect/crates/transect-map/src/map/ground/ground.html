@@ -1,0 +1,44 @@
+{% extends "frame/layout.html" %}
+{%- import "objects/box.html" as boxes -%}
+{%- import "edges/provenance.html" as provenance -%}
+
+{% block title %}{{ title }} · ground · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- One ground box as a board: how it is reached on the left, the thing
+    itself in the middle with its link out and its Outside's lines,
+    and what it keeps and what depends on it on the right. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="board-page board-page-alone" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<section class="board" aria-label="{{ title }} and what uses it">
+<div class="board-side board-left">
+{% call boxes::section_box(reached) %}{% endcall %}
+</div>
+<div class="board-object ground-object">
+<div class="board-label">Outside the cluster</div>
+<h1 class="board-object-name">{{ title }}{% if let Some(link) = link %} <a class="ground-out" href="{{ link }}" target="_blank" rel="noopener noreferrer" title="Open {{ title }}'s own page">↗</a>{% endif %}</h1>
+{%- if let Some(url) = url_text %}
+<div class="board-line">{{ url }}</div>
+{%- endif %}
+{%- for console in consoles %}
+<div class="board-line"><a href="{{ console }}" target="_blank" rel="noopener noreferrer">{{ console }}</a></div>
+{%- endfor %}
+<div class="board-line">{{ summary }}</div>
+{%- for line in about %}
+<div class="board-message">{{ line.text }}{% call provenance::mark(line.provenance) %}{% endcall %}</div>
+{%- endfor %}
+{%- if let Some(legend) = legend() %}
+<div class="board-none">{{ legend }}</div>
+{%- endif %}
+</div>
+<div class="board-side board-right">
+{%- for section in uses %}{% call boxes::section_box(section) %}{% endcall %}{% endfor %}
+</div>
+</section>
+</main>
+</div>
+{% endblock %}

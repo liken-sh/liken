@@ -1,0 +1,48 @@
+{% extends "frame/layout.html" %}
+{%- import "links/link.html" as links -%}
+{%- import "edges/provenance.html" as provenance -%}
+{%- import "access/card.html" as access -%}
+{%- import "access/switcher.html" as switcher -%}
+{%- import "access/accounts/rows.html" as rows -%}
+
+{% block title %}accounts · access · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block masthead_access %} masthead-current{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- What each account may do, and where.  The page has a row for each
+    account and a column for each capability, in runs whose headings
+    name what their rows share. -#}
+<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="board-page ax-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+{% call switcher::switcher(false) %}{% endcall %}
+<h1 class="ax-title">What each account may do, and where<span class="ax-count">{{ count() }} accounts, one row each</span></h1>
+<p class="ax-legend">Every account in the cluster that a binding grants one of these six. <span class="ax-key"><span class="ax-block ax-block-d"></span> a binding grants it</span> <span class="ax-key"><span class="ax-block ax-block-f"></span> it follows from a grant.</span> A full block is every namespace; a short one is the namespaces named beside it.</p>
+<table class="ax-table ax-caps">
+{% call rows::head(columns) %}{% endcall %}
+<tbody>
+{%- for run in runs %}
+<tr class="ax-run"><th colspan="8" scope="rowgroup">{% call links::sentence(run.heading.clone()) %}{% endcall %}<span class="ax-count">{{ run.rows.len() }}</span></th></tr>
+{%- for one in run.rows %}{% call rows::row(one) %}{% endcall %}{% endfor %}
+{%- endfor %}
+</tbody></table>
+<p class="ax-note">{{ everyone }}</p>
+{%- if !controllers.is_empty() %}
+<details class="ax-note ax-fold"><summary>{{ controllers.len() }} of Kubernetes' own components and controllers may do some of the six.</summary>
+<table class="ax-table ax-caps">
+{% call rows::head(columns) %}{% endcall %}
+<tbody>
+{%- for one in controllers %}{% call rows::row(one) %}{% endcall %}{% endfor %}
+</tbody></table>
+</details>
+{%- endif %}
+{%- if let Some(none) = none %}<p class="ax-note" title="{{ none.names }}">{{ none.text }}</p>{% endif %}
+{%- if let Some(unbound) = unbound %}<p class="ax-note" title="{{ unbound.names }}">{{ unbound.text }}</p>{% endif %}
+</main>
+{% call access::card(no_gitops) %}{% endcall %}
+</div>
+{% endblock %}

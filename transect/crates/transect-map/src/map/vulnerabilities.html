@@ -1,0 +1,57 @@
+{% extends "frame/layout.html" %}
+{%- import "frame/tabs.html" as frame -%}
+{%- import "vulnerabilities/choices.html" as choices -%}
+{%- import "vulnerabilities/rows.html" as rows -%}
+{%- import "vulnerabilities/counts.html" as vulnerability_counts -%}
+
+{% block title %}vulnerabilities · {{ name }} · {{ namespace }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- What the scanner reports of each image the workload runs now, a
+    box per container, then the reports of images it no longer runs. -#}
+<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="{{ name }}">
+<a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
+<a class="switch switch-current" href="{{ workload_path }}" hx-get="{{ workload_path }}">{{ name }}</a>
+{% call frame::tabs(tabs()) %}{% endcall %}
+</nav>
+{% call choices::choices(choices) %}{% endcall %}
+{%- if scanned.is_empty() %}
+<p class="vn-lead">No report names an image digest a pod of {{ name }} runs now.</p>
+{%- endif %}
+{%- for one in scanned %}
+<section class="board-box board-wide" aria-label="{{ one.container }}">
+<div class="board-label">{{ one.container }}</div>
+<p class="vn-lead">{{ one.lead }} <span class="vn-quiet">{% call vulnerability_counts::counts(one.counts) %}{% endcall %}</span></p>
+{%- if !one.rows.is_empty() %}
+<table class="board-table vn-table">
+<thead><tr><th>id</th><th>severity</th><th>score</th><th>{% call rows::packages_head(true) %}{% endcall %}</th></tr></thead>
+<tbody>
+{%- for row in one.rows %}
+<tr><td class="vn-id">{% call rows::identity(row) %}{% endcall %}</td><td class="vn-nowrap {{ row.tone }}">{{ row.severity }}</td><td class="vn-nowrap vn-quiet">{{ row.score }}</td><td>{% call rows::packages(&row.packages, true) %}{% endcall %}</td></tr>
+{%- endfor %}
+</tbody></table>
+{%- endif %}
+</section>
+{%- endfor %}
+{%- if !stale.is_empty() %}
+<section class="board-box board-wide" aria-label="Reports of images it no longer runs">
+<div class="board-label">Reports of images no pod of it runs now</div>
+<table class="board-table vn-table">
+<thead><tr><th>container</th><th>digest</th><th>scanned</th><th>findings</th></tr></thead>
+<tbody>
+{%- for one in stale %}
+<tr><td>{{ one.container }}</td><td class="vn-digest">{{ one.digest }}</td><td class="vn-quiet">{{ one.scanned }}</td><td>{{ one.findings }}</td></tr>
+{%- endfor %}
+</tbody></table>
+</section>
+{%- endif %}
+</main>
+{% include "cards/workload.html" %}
+</div>
+{% endblock %}

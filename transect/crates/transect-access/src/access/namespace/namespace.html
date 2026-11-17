@@ -1,0 +1,89 @@
+{% extends "frame/layout.html" %}
+{%- import "links/link.html" as links -%}
+{%- import "edges/provenance.html" as provenance -%}
+{%- import "frame/tabs.html" as frame -%}
+{%- import "access/marks.html" as marks -%}
+{%- import "access/accounts/rows.html" as rows -%}
+{%- import "access/switcher.html" as switcher -%}
+
+{% block title %}access · {{ namespace }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block masthead_access %} masthead-current{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- A namespace's access: what may reach each port its workloads serve,
+    a row per way in beside the workload it reaches, then what each
+    account may do here, a row per account, then its Pod Security
+    level, with the namespace's card beside them. -#}
+<div class="view view-wider" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="board-page ax-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="{{ namespace }}">
+<a class="switcher-namespace" href="/?select={{ namespace }}#{{ layer }}" hx-get="/?select={{ namespace }}#{{ layer }}">{{ layer }}</a>
+<a class="switch switch-current" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
+{% call frame::tabs(tabs()) %}{% endcall %}
+</nav>
+<section class="ax-section">
+<h2 class="ax-title">What may reach each port here<span class="ax-count">{{ ports_count() }}</span></h2>
+<p class="ax-legend">A row is one way in from outside the cluster, beside the workload it reaches. <span class="ax-key"><span class="ax-dot ax-dot-on"></span> the cluster puts this gate on the way</span> <span class="ax-key"><span class="ax-dot ax-dot-half"></span> on some of its routes or pods</span> <span class="ax-key"><span class="ax-dot ax-dot-declared"></span> stored text declares it</span> <span class="ax-key"><span class="ax-dot ax-dot-off"></span> it puts none.</span> Open a workload for its drawing.</p>
+{%- if served.is_empty() %}
+<p class="ax-note">No workload here serves a port.</p>
+{%- else %}
+<table class="ax-table ax-ways ax-ports">
+<thead><tr><th class="ax-h-left">workload</th><th class="ax-h-left ax-way-col">way in</th><th class="ax-port-col">port</th><th class="ax-gate-col">TLS</th><th class="ax-sign-col">sign-in</th><th class="ax-np-col">NetworkPolicy</th><th class="ax-h-left ax-through">calls in limited by</th><th class="ax-out-col">calls out: NetworkPolicy</th></tr></thead>
+<tbody>
+{%- for one in served %}
+{%- if one.ways.is_empty() %}
+<tr class="ax-row"><th scope="row">{% call links::object_link(one.name.text, one.name.href, "ax-name") %}{% endcall %}<span class="ax-sub">{{ one.serves }}</span></th>
+<td class="ax-text ax-way"><span class="ax-quiet">no way in</span></td><td></td>
+<td class="ax-c"><span class="ax-slot ax-slot-none"></span></td><td class="ax-c"><span class="ax-slot ax-slot-none"></span></td>
+<td class="ax-c">{% call marks::dot(one.policy) %}{% endcall %}</td>
+<td class="ax-text">{% for policy in one.limited %}{% if !loop.first %}<br>{% endif %}{% call links::object_link(policy.text, policy.href, "") %}{% endcall %}{% endfor %}{% if one.limited.is_empty() %}<span class="ax-quiet">{{ one.unlimited }}</span>{% endif %}</td>
+<td class="ax-c">{% call marks::dot(one.out) %}{% endcall %}</td></tr>
+{%- else %}
+{%- for way in one.ways %}
+<tr class="ax-row{% if !loop.last %} ax-row-tight{% endif %}">
+{%- if loop.first %}<th scope="row" rowspan="{{ one.span() }}">{% call links::object_link(one.name.text, one.name.href, "ax-name") %}{% endcall %}<span class="ax-sub">{{ one.serves }}</span></th>{% endif %}
+<td class="ax-text ax-way">{% if let Some(machine) = way.machine %}{% call links::object_link(machine.text, machine.href, "") %}{% endcall %}{% endif %}<span class="ax-way-name">{{ way.name }}</span>{% if let Some((text, said)) = way.said %} <span title="{{ text }}">{% call provenance::mark(said) %}{% endcall %}</span>{% endif %}<span class="ax-sub">
+{%- for via in way.via %}{% if !loop.first %}, {% endif %}{% call links::object_link(via.text, via.href, "") %}{% endcall %}{% endfor -%}
+{%- if let Some(how) = way.how %}{% if !way.via.is_empty() %} · {% endif %}{{ how }}{% endif -%}
+</span></td>
+<td class="ax-port"><span class="ax-port-list">{% for port in way.ports %}{% if !loop.first %} {% endif %}<span>{{ port }}</span>{% endfor %}</span></td>
+{%- for dot in way.gates %}<td class="ax-c">{% call marks::dot(dot) %}{% endcall %}</td>{% endfor %}
+{%- if loop.first %}
+<td class="ax-text" rowspan="{{ one.span() }}">{% for policy in one.limited %}{% if !loop.first %}<br>{% endif %}{% call links::object_link(policy.text, policy.href, "") %}{% endcall %}{% endfor %}{% if one.limited.is_empty() %}<span class="ax-quiet">{{ one.unlimited }}</span>{% endif %}</td>
+<td class="ax-c" rowspan="{{ one.span() }}">{% call marks::dot(one.out) %}{% endcall %}</td>
+{%- endif %}</tr>
+{%- endfor %}
+{%- endif %}
+{%- endfor %}
+</tbody></table>
+{%- endif %}
+</section>
+<section class="ax-section">
+<h2 class="ax-title">What each account may do here<span class="ax-count">{{ accounts.len() }} accounts, one row each</span></h2>
+<p class="ax-legend"><span class="ax-key"><span class="ax-block ax-block-d"></span> a binding grants it</span> <span class="ax-key"><span class="ax-block ax-block-f"></span> it follows from a grant.</span> Accounts with the same marks are listed together. Open an account for its bindings and what follows from them.</p>
+<table class="ax-table ax-caps ax-caps-ns">
+{% call rows::head(columns) %}{% endcall %}
+<tbody>
+{%- for one in accounts %}{% call rows::row(one) %}{% endcall %}{% endfor %}
+</tbody></table>
+{%- if !controllers.is_empty() %}
+<details class="ax-note ax-fold"><summary>{{ controllers.len() }} of Kubernetes' own components and controllers may do some of the six here.</summary>
+<table class="ax-table ax-caps ax-caps-ns">
+{% call rows::head(columns) %}{% endcall %}
+<tbody>
+{%- for one in controllers %}{% call rows::row(one) %}{% endcall %}{% endfor %}
+</tbody></table>
+</details>
+{%- endif %}
+<p class="ax-note">{{ pod_security }}</p>
+</section>
+{% call switcher::whole_cluster() %}{% endcall %}
+</main>
+{% include "cards/namespace.html" %}
+</div>
+{% endblock %}

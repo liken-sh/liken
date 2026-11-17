@@ -1,0 +1,75 @@
+# What the fixture's signals answer, as each source would: the alerts
+# Alertmanager reports as firing, in the shape of `GET /api/v2/alerts`,
+# and the series Prometheus answers each instant query of the fixture's
+# `MetricsSource` with, by the query.
+#
+# The alerts give one example of each place an alert attaches: an
+# object in a namespace, a machine, the cluster, and one an
+# exporter reports about another namespace.  No page shows the
+# watchdog.
+alerts:
+  - labels: {alertname: LedgerExporterDown, severity: critical, namespace: acme-ledger, deployment: ledger-exporter}
+    annotations: {summary: The ledger exporter is not answering., description: 'It has not answered a scrape for 10 minutes. [View the runbook](https://runbooks.example.test/ledger/exporter-down?window=10m&source=alert-rule-annotation-with-a-long-unbroken-address-that-never-wraps) or see https://dashboards.example.test/d/ledger-exporter/overview-of-every-exporter-answering-the-ledger-scrapes.'}
+    startsAt: '2026-01-01T11:30:00Z'
+    status: {state: active}
+  - labels: {alertname: SessionsSlow, severity: warning, namespace: monitoring, pod: state-exporter-0, exported_namespace: acme-shop, exported_pod: session-cache-set-0}
+    annotations: {summary: Answers take over a second.}
+    startsAt: '2026-01-01T11:40:00Z'
+    status: {state: active}
+  - labels: {alertname: MachineDiskFilling, severity: warning, node: node-beta}
+    annotations: {summary: A disk is 85% full.}
+    startsAt: '2026-01-01T11:00:00Z'
+    status: {state: active}
+  - labels: {alertname: CertificateRenewal, severity: info}
+    annotations: {summary: A certificate renews this week.}
+    startsAt: '2026-01-01T10:00:00Z'
+    status: {state: active}
+  - labels: {alertname: Watchdog, severity: none}
+    startsAt: '2026-01-01T00:00:00Z'
+    status: {state: active}
+prometheus:
+  - query: machine_cores_used
+    samples:
+      - {labels: {node: node-alpha}, value: 1.5}
+      - {labels: {instance: 'node-beta:10250'}, value: 0.75}
+  - query: machine_bytes_used
+    samples:
+      - {labels: {node: node-alpha}, value: 6442450944}
+      - {labels: {instance: 'node-beta:10250'}, value: 3221225472}
+  - query: container_bytes_used
+    samples:
+      - {labels: {namespace: acme-shop, pod: storefront-rs-one, container: main}, value: 268435456}
+      - {labels: {namespace: acme-shop, pod: storefront-rs-two, container: main}, value: 201326592}
+      - {labels: {namespace: acme-ledger, pod: ledger-db-0, container: main}, value: 1073741824}
+      - {labels: {namespace: acme-ledger, pod: ledger-exporter-rs-one, container: main}, value: 33554432}
+      - {labels: {namespace: acme-ops, pod: log-shipper-aaaa, container: main}, value: 67108864}
+      - {labels: {namespace: acme-ops, pod: log-shipper-bbbb, container: main}, value: 50331648}
+      - {labels: {namespace: acme-shop, pod: session-cache-set-0, container: main}, value: 536870912}
+      - {labels: {namespace: acme-promoter, pod: promoter-rs-one, container: main}, value: 16777216}
+      - {labels: {namespace: acme-shop, pod: counter-till-set-0, container: main}, value: 8388608}
+  - query: container_cores_used
+    samples:
+      - {labels: {namespace: acme-shop, pod: storefront-rs-one, container: main}, value: 0.25}
+      - {labels: {namespace: acme-shop, pod: storefront-rs-two, container: main}, value: 0.2}
+      - {labels: {namespace: acme-ledger, pod: ledger-db-0, container: main}, value: 0.5}
+      - {labels: {namespace: acme-ledger, pod: ledger-exporter-rs-one, container: main}, value: 0.01}
+      - {labels: {namespace: acme-ops, pod: log-shipper-aaaa, container: main}, value: 0.05}
+      - {labels: {namespace: acme-ops, pod: log-shipper-bbbb, container: main}, value: 0.04}
+      - {labels: {namespace: acme-shop, pod: session-cache-set-0, container: main}, value: 0.1}
+      - {labels: {namespace: acme-promoter, pod: promoter-rs-one, container: main}, value: 0.02}
+      - {labels: {namespace: acme-shop, pod: counter-till-set-0, container: main}, value: 0.01}
+  - query: claim_bytes_used
+    samples:
+      - {labels: {namespace: acme-ledger, claim: data-ledger-db-0}, value: 3221225472}
+# The rows the log store answers the tail of the storefront's first
+# pod with, newest first, as the store gives them: one line of each
+# level its level field names, and one whose level field names none.
+logs:
+  - namespace: acme-shop
+    pod: storefront-rs-one
+    container: main
+    rows:
+      - {_time: '2026-01-01T11:59:00Z', severity_text: Unspecified, _msg: 'request served in 12ms'}
+      - {_time: '2026-01-01T11:58:00Z', severity_text: ERROR, _msg: 'payment gateway refused the charge'}
+      - {_time: '2026-01-01T11:57:00Z', severity_text: Warn, _msg: 'cart cache is slow to answer'}
+      - {_time: '2026-01-01T11:56:00Z', severity_text: INFO, _msg: 'listening on :8080'}

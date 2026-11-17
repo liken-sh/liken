@@ -1,0 +1,126 @@
+{#- The loss of a set of machines, which the map's sidebar shows in its
+    aside in place of its usual content.  A head gives the pods that run
+    on those machines.  A card follows when the loss takes the machines
+    that transect's own signals come from.  Next comes what the loss
+    stops that leaves the cluster blind or cuts it off.  Then come the
+    namespaces that stay
+    down until the machines return, each with the reason, the ones that
+    stay down until their pods start on other machines, the ones that
+    accept no writes until a replica is promoted, and the ones left
+    short, one line each.  The pods of the DaemonSets get one line.
+    Then a section lists what else fails with the machines: the
+    workloads and hosts that depend on what is lost, and the custom
+    resources that nothing reconciles.  Then "what happens next" shows when Kubernetes evicts the pods and
+    which pods stay stuck.  For machines that are really down, it shows
+    the out-of-service taint as a command for the reader to run.  When a
+    loss leaves the control plane without a majority, the template shows
+    that first, because then Kubernetes evicts no pod and starts no pod
+    on another machine.  When a machine is really lost, the sidebar adds
+    "what to know now" below this template, because the loss is not the
+    only thing that a reader at 2am needs. -#}
+{%- import "edges/provenance.html" as provenance -%}
+{%- import "links/link.html" as links -%}
+{%- import "resources/off.html" as off -%}
+<div class="card loss-head">
+<div class="loss-title">{{ loss.title() }}</div>
+<div class="loss-summary">{{ loss.summary() }}
+{%- if let Some(gone) = loss.gone_text() %} {{ gone }}{% endif %}</div>
+{%- if let Some(unknown) = loss.unknown %}
+<div class="loss-summary">{{ unknown }}</div>
+{%- endif %}
+{%- if let Some(majority) = loss.majority_text() %}
+<div class="loss-summary{% if loss.majority_guessed() %} loss-guess{% endif %}" title="{{ loss.majority_title() }}">{{ majority }}</div>
+{%- endif %}
+</div>
+{%- if let Some(blind) = loss.blind %}
+<div class="card loss-headless">{{ blind }}</div>
+{%- endif %}
+{%- if let Some(headless) = loss.headless_text() %}
+<div class="card loss-headless">{{ headless }}</div>
+{%- endif %}
+{%- if !loss.vital.is_empty() %}
+<div class="sidebar-heading">{{ loss.vital_heading() }}</div>
+<div class="loss-lines">
+{%- for line in loss.vital %}
+<div>{% call links::object_link(line.namespace, Some(transect_graph::links::namespace(line.namespace)), "loss-namespace loss-down") %}{% endcall %}: {% call links::sentence(loss.link(&line.pieces())) %}{% endcall %}</div>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if let Some(alerting) = loss.alerting %}
+<div class="loss-lines loss-faint">{% call off::line(alerting) %}{% endcall %}</div>
+{%- endif %}
+{%- if let Some(nothing) = loss.nothing_text() %}
+<div class="loss-lines">{{ nothing }}</div>
+{%- endif %}
+{%- if !loss.stuck.is_empty() %}
+<div class="sidebar-heading">{{ loss.stuck_heading() }}</div>
+<div class="loss-lines">
+{%- for line in loss.stuck %}
+<div>{% call links::object_link(line.namespace, Some(transect_graph::links::namespace(line.namespace)), "loss-namespace loss-down") %}{% endcall %}: {% call links::sentence(loss.link(&line.pieces())) %}{% endcall %}
+{%- let why = line.stranded_pieces() %}
+{%- if !why.is_empty() %}. <span class="loss-why">{% call links::sentence(loss.link(&why)) %}{% endcall %}</span>{% endif %}</div>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if !loss.back.is_empty() %}
+<div class="sidebar-heading">{{ loss.back_heading() }}</div>
+<div class="loss-lines">
+{%- for line in loss.back %}
+<div>{% call links::object_link(line.namespace, Some(transect_graph::links::namespace(line.namespace)), "loss-namespace loss-down") %}{% endcall %}: {% call links::sentence(loss.link(&line.pieces())) %}{% endcall %}</div>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if !loss.primary.is_empty() %}
+<div class="sidebar-heading">{{ loss.primary_heading() }}</div>
+<div class="loss-lines">
+{%- for line in loss.primary %}
+<div>{% call links::object_link(line.namespace, Some(transect_graph::links::namespace(line.namespace)), "loss-namespace loss-down") %}{% endcall %}: {% call links::sentence(loss.link(&line.pieces())) %}{% endcall %}</div>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if !loss.short.is_empty() %}
+<div class="sidebar-heading">{{ loss.short_heading() }}</div>
+<div class="loss-lines">
+{%- for line in loss.short %}
+<div>{% call links::object_link(line.namespace, Some(transect_graph::links::namespace(line.namespace)), "loss-namespace") %}{% endcall %}: {% call links::sentence(loss.link(&line.pieces())) %}{% endcall %}</div>
+{%- endfor %}
+{%- if let Some(folded) = loss.folded_text() %}
+<div class="loss-faint">{{ folded }}</div>
+{%- endif %}
+</div>
+{%- endif %}
+{%- if let Some(daemon_sets) = loss.daemon_sets_text() %}
+<div class="loss-lines loss-faint">{{ daemon_sets }}</div>
+{%- endif %}
+{%- if !loss.cascade.is_empty() || !loss.unreconciled.is_empty() %}
+<div class="sidebar-heading">{{ loss.cascade_heading() }}</div>
+<div class="loss-lines">
+{%- for line in loss.cascade %}
+<div>{% if let Some(namespace) = line.namespace %}{% call links::object_link(namespace, Some(transect_graph::links::namespace(namespace)), "loss-namespace") %}{% endcall %}: {% endif %}{% call links::sentence(loss.cascade_parts(line)) %}{% endcall %}{% for mark in line.marks() %}{% call provenance::mark(mark) %}{% endcall %}{% endfor %}</div>
+{%- endfor %}
+{%- for line in loss.unreconciled %}
+<div>{% call links::sentence(loss.link(&loss.unreconciled_pieces(line))) %}{% endcall %}</div>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if !loss.next.is_empty() %}
+<div class="sidebar-heading">{{ loss.next_heading() }}</div>
+<div class="loss-lines">
+{%- if let Some((tag, text)) = loss.eviction() %}
+<div class="loss-next"><span class="loss-when">{{ tag }}</span><span>{{ text }}
+{%- if let Some(differ) = loss.differ_text() %} {{ differ }}{% endif %}</span></div>
+{%- endif %}
+{%- for line in loss.stuck_lines() %}
+<div class="loss-next"><span class="loss-when loss-stuck">{{ loss.stuck_tag() }}</span><span>{% call links::sentence(loss.link(line)) %}{% endcall %}</span></div>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if let Some(text) = loss.out_of_service_text() %}
+<div class="card loss-release">
+<div>{{ text }}</div>
+{%- for command in loss.out_of_service_commands() %}
+<code>{{ command }}</code>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- call provenance::legend(loss.legend()) %}{% endcall -%}

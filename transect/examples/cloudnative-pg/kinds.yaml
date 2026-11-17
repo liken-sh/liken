@@ -1,0 +1,94 @@
+# Kind knowledge for CloudNativePG, as CloudNativePG would ship it.  A
+# Cluster's operator keeps a budget on the primary that lets none go,
+# and switches the primary to a replica before a drain reaches it.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: clusters.postgresql.cnpg.io
+spec:
+  summary: A PostgreSQL primary and the replicas that stream from it.
+  healthy: {condition: Ready}
+  references:
+    - {path: status.currentPrimary, kind: Pod, label: primary is}
+    - {path: status.writeService, kind: Service, label: writes through}
+    - {path: status.readService, kind: Service, label: reads through}
+  controller: {image: cloudnative-pg/cloudnative-pg}
+  disruptions: operator
+  # This field names the pod that takes writes.  Losing it stops writes
+  # until the operator promotes a replica; losing a replica leaves it
+  # short.
+  primary: status.currentPrimary
+  docs: https://cloudnative-pg.io/documentation/current/
+---
+# Its other kinds name only the controller's image, so a workload's
+# Manages box finds the objects the operator reconciles, which run no
+# pods of their own.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: backups.postgresql.cnpg.io
+spec:
+  controller: {image: cloudnative-pg/cloudnative-pg}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: clusterimagecatalogs.postgresql.cnpg.io
+spec:
+  controller: {image: cloudnative-pg/cloudnative-pg}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: databaseroles.postgresql.cnpg.io
+spec:
+  controller: {image: cloudnative-pg/cloudnative-pg}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: databases.postgresql.cnpg.io
+spec:
+  controller: {image: cloudnative-pg/cloudnative-pg}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: failoverquorums.postgresql.cnpg.io
+spec:
+  controller: {image: cloudnative-pg/cloudnative-pg}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: imagecatalogs.postgresql.cnpg.io
+spec:
+  controller: {image: cloudnative-pg/cloudnative-pg}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: poolers.postgresql.cnpg.io
+spec:
+  controller: {image: cloudnative-pg/cloudnative-pg}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: publications.postgresql.cnpg.io
+spec:
+  controller: {image: cloudnative-pg/cloudnative-pg}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: scheduledbackups.postgresql.cnpg.io
+spec:
+  controller: {image: cloudnative-pg/cloudnative-pg}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: subscriptions.postgresql.cnpg.io
+spec:
+  controller: {image: cloudnative-pg/cloudnative-pg}

@@ -1,0 +1,56 @@
+ImageReports · transect
+transect
+cluster / kinds / ImageReports
+access vulnerabilities kinds
+Search /
+esc
+kinds ImageReports ×4
+ImageReports in every namespace
+Name
+Namespace
+Repository
+statefulset-ledger-db-main
+acme-ledger
+ledger-db-image
+replicaset-listings-rs-indexer
+acme-shop
+indexer-image
+replicaset-listings-rs-main
+acme-shop
+listings-image
+replicaset-storefront-rs-main
+acme-shop
+storefront-image
+What each report scanned
+report
+workload
+container
+digest
+its summary
+now
+replicaset-listings-rs-indexer
+Deployment acme-shop/listings
+indexer
+sha256:1e01
+1 unknown
+current
+replicaset-listings-rs-main
+Deployment acme-shop/listings
+main
+sha256:ca01
+1 critical
+current
+replicaset-storefront-rs-main
+Deployment acme-shop/storefront
+main
+sha256:5a01
+1 critical, 1 high, 1 unknown
+current
+statefulset-ledger-db-main
+StatefulSet acme-ledger/ledger-db
+main
+sha256:0ld0
+1 high
+stale
+ImageReports 4 objects
+scan.example.test

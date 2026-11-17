@@ -1,0 +1,161 @@
+# Who may do what: the accounts matrix's rows, one of each kind.
+#
+# - gitops-controller is bound to every verb on every resource, and
+#   writes its appliers' status, so it is the appliers' controller;
+# - ops-console may change what the GitOps tool applies, so through
+#   the tool it may do what gitops-controller may do;
+# - the promoter may change the workloads of its own namespace;
+# - the storefront may read one `Secret`, by name;
+# - the ledger's accounts may read its Secrets, through their
+#   group;
+# - a user may run pods in the shop, through an aggregated role;
+# - a batch worker, whose binding Kubernetes ships, folds into the
+#   controllers' line;
+# - ledger-deployer is the account ledger-apps applies as, which may
+#   change the ledger's workloads;
+# - shop-greeter is named by no binding.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {namespace: acme-ops, name: gitops-controller}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: acme-ops
+  name: ops-console
+  annotations:
+    transect.liken.sh/why: 'The console the operators work from, which edits what the GitOps tool applies.'
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {namespace: acme-ops, name: batch-worker}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {namespace: acme-ops, name: ledger-deployer}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {namespace: acme-shop, name: storefront}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {namespace: acme-shop, name: shop-greeter}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {namespace: acme-ledger, name: ledger-db}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: cluster-admin, labels: {kubernetes.io/bootstrapping: rbac-defaults}}
+rules: [{apiGroups: ['*'], resources: ['*'], verbs: ['*']}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: gitops-controller-admin}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}
+subjects: [{kind: ServiceAccount, namespace: acme-ops, name: gitops-controller}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: gitops-status-writer}
+rules: [{apiGroups: [kustomize.toolkit.fluxcd.io], resources: [kustomizations/status], verbs: [patch, update]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: gitops-controller-status}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: gitops-status-writer}
+subjects: [{kind: ServiceAccount, namespace: acme-ops, name: gitops-controller}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: applier-editor}
+rules: [{apiGroups: [kustomize.toolkit.fluxcd.io], resources: [kustomizations], verbs: [get, list, patch]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {namespace: acme-ops, name: ops-console-edits}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: applier-editor}
+subjects: [{kind: ServiceAccount, name: ops-console}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: promoter-deployer}
+rules: [{apiGroups: [apps], resources: [deployments], verbs: [get, create, patch]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {namespace: acme-promoter, name: promoter-deploys}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: promoter-deployer}
+subjects: [{kind: ServiceAccount, name: promoter}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {namespace: acme-shop, name: storefront-secret}
+rules: [{apiGroups: [''], resources: [secrets], verbs: [get], resourceNames: [storefront-tls]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {namespace: acme-shop, name: storefront-reads-its-secret}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: storefront-secret}
+subjects: [{kind: ServiceAccount, name: storefront}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {namespace: acme-ledger, name: ledger-secret-reader}
+rules: [{apiGroups: [''], resources: [secrets], verbs: [get, list]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {namespace: acme-ledger, name: ledger-accounts-read}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ledger-secret-reader}
+subjects: [{kind: Group, name: 'system:serviceaccounts:acme-ledger'}]
+---
+# The controller manager writes the rules of the roles that
+# `aggregationRule` selects into `rules`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: shop-editor}
+aggregationRule: {clusterRoleSelectors: [{matchLabels: {example.test/aggregate-to-shop-editor: 'true'}}]}
+rules: [{apiGroups: [''], resources: [pods], verbs: [get, list, create]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {namespace: acme-shop, name: shop-owner-edits}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: shop-editor}
+subjects: [{kind: User, name: shop-owner}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: 'system:controller:job-runner', labels: {kubernetes.io/bootstrapping: rbac-defaults}}
+rules: [{apiGroups: [batch], resources: [jobs], verbs: [create, patch]}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: 'system:controller:job-runner', labels: {kubernetes.io/bootstrapping: rbac-defaults}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: 'system:controller:job-runner'}
+subjects: [{kind: ServiceAccount, namespace: acme-ops, name: batch-worker}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: app-deployer}
+rules:
+- {apiGroups: [apps], resources: [deployments, statefulsets], verbs: [get, list, create, patch, update]}
+- {apiGroups: [''], resources: [services, configmaps], verbs: [get, list, create, patch, delete]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {namespace: acme-ledger, name: ledger-deployer-deploys}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: app-deployer}
+subjects: [{kind: ServiceAccount, namespace: acme-ops, name: ledger-deployer}]
+---
+# A user whose name holds markup, which every page escapes, and one
+# whose name holds slashes, as an identity provider's user may.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {namespace: acme-shop, name: odd-name-edits}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: shop-editor}
+subjects:
+- {kind: User, name: '<b>"odd" & co'}
+- {kind: User, name: 'https://issuer.example.test/alice'}

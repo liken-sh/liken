@@ -1,0 +1,57 @@
+section · storefront · acme-shop · transect
+transect
+cluster / apps / acme-shop / storefront / section
+access vulnerabilities kinds
+Search /
+esc
+acme-shop storefront overview section logs access vulnerabilities
+From entry to storage
+Solid lines are structure. Dashed lines are callers. Dotted lines are guesses.
+Edges
+Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+Entry
+apps
+data
+Machines
+Ground
+from spec.storefront.name in the KindKnowledge promotions.promotions.example.test
+from spec.storefront.name in the KindKnowledge promotions.promotions.example.test
+from spec.checkWith of Gate partner-gate, named by example.test/gates on Ingress storefront-admin in the KindKnowledge gates.proxy.example.test
+routes to
+selects
+depends on
+reconciles from
+depends on
+authenticates through
+shop.example.test Ingress storefront-admin · proxy · TLS from shop-issuer 3.2 requests/s · p95 120 ms · no 5xx, over 5m shop.example.test Ingress storefront-route · proxy · TLS from shop-issuer 3.2 requests/s · p95 120 ms · no 5xx, over 5m Service storefront-debug NodePort :8080 · no endpoints Service storefront-svc ClusterIP :80 · no endpoints Deployment storefront 2 replicas · all ready clearance Promotion spring-sale Promotion storefront-release HelmRelease acme-ledger/ledger-db StatefulSet 1 replica · ready node-alpha runs 1 pod node-beta runs 1 pod · control plane sign-in.example.test kind outside the cluster
+Deployment storefront 2 of 2 ready
+3 ways in · access
+1 critical , 1 high , 1 unknown · vulnerabilities
+Depends on
+StatefulSet acme-ledger/ledger-db
+Depended on by kind
+Promotion clearance Promotion spring-sale
+Authenticates through
+sign-in.example.test kind
+Signs in users of
+Gate acme-ops/shop-gate kind
+If it goes down
+acme-ops/shop-gate loses sign-in
+clearance and spring-sale can't reach storefront
+shop.example.test stops answering
+No NetworkPolicy selects its pods, so any pod may call them.
+No readiness probe
+During a rollout, its Service sends requests to each new pod as soon as it starts, before the pod can answer them.
+No PodDisruptionBudget
+No PodDisruptionBudget limits evictions, so a drain can evict both pods at once.
+Code
+shop/apps/shop HelmRelease storefront-release , chart storefront-chart from https://charts.example.test Kustomization acme-ops/shop-apps ready
+Marked lines are stored text, not read from the cluster. kind: from the kind knowledge. Hover a mark for its source.

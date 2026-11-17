@@ -1,0 +1,17 @@
+{% extends "frame/layout.html" %}
+
+{% block title %}search · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block main %}
+<main class="search-page">
+<form class="search-form" action="/search" method="get">
+<input class="search-input" type="search" name="q" value="{{ results.query }}" autocomplete="off" spellcheck="false" aria-label="Search" hx-get="/search" hx-trigger="input changed delay:30ms, search" hx-target="#search-page-results" hx-swap="outerHTML" hx-sync="this:replace">
+</form>
+{%- let rows = results.rows %}
+{%- let query = results.query %}
+{%- let list = results.list %}
+{% include "search/results.html" %}
+</main>
+{% endblock %}

@@ -1,0 +1,31 @@
+{%- import "links/link.html" as links -%}
+{#- An accounts matrix's header and one of its rows: the account, a
+    mark for each capability, and the role and the step that it goes
+    through, on one line.  Why an account is bound as it is shows as a
+    mark, with the sentence on hover, so the row also stays one line.
+    The cluster's matrix and a namespace's matrix both use these
+    macros. -#}
+{%- macro head(columns) -%}
+<thead><tr><th class="ax-h-left">account</th>
+{%- for column in columns %}<th class="ax-cap-col" title="{{ column.verbs }}">{{ column.name }}</th>{% endfor -%}
+<th class="ax-h-left ax-through">through</th></tr></thead>
+{%- endmacro -%}
+
+{%- macro row(row) -%}
+<tr class="ax-row{% if row.tight %} ax-row-tight{% endif %}"><th scope="row">{% call links::object_link(row.name, row.href, "ax-name") %}{% endcall %}
+{%- if let Some(why) = row.why %} <span class="mark ax-why" title="{{ why.text }}&#10;{{ why.provenance.hover() }}">{{ why.provenance.mark().unwrap_or("why") }}</span>{% endif %}</th>
+{%- for cell in row.cells %}<td class="ax-c">
+{%- if let Some(mark) = cell -%}
+{%- if let Some(scope) = mark.scope -%}
+<span class="ax-slot ax-slot-left" title="{{ mark.title }}"><span class="{{ mark.class() }}"></span><span class="ax-scope">{{ scope }}</span></span>
+{%- else -%}
+<span class="ax-slot"><span class="{{ mark.class() }}" title="{{ mark.title }}"></span></span>
+{%- endif -%}
+{%- else -%}<span class="ax-slot ax-slot-none"></span>{%- endif -%}
+</td>{% endfor -%}
+<td class="ax-text"{% if let Some(line) = row.line() %} title="{{ line }}"{% endif %}>
+{%- if let Some(role) = row.role %}{% call links::object_link(role.text, role.href, "") %}{% endcall %}{% endif -%}
+{%- if let Some((count, names)) = row.more %} <span class="ax-quiet" title="{{ names }}">+{{ count }}</span>{% endif -%}
+{%- if let Some(step) = row.step %}{% if row.role.is_some() %} <span class="ax-arrow">→</span> {% endif %}<span class="ax-follows" title="{{ step.title }}">{{ step.before }}{% if let Some(account) = step.account %}{% call links::object_link(account.text, account.href, "") %}{% endcall %}{% endif %}{{ step.after }}</span>{% endif -%}
+</td></tr>
+{%- endmacro -%}

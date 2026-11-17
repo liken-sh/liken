@@ -1,0 +1,7 @@
+{#- A count line, such as "7 critical, 100 high": critical in red, high
+    in the brand's warm orange, every other severity in gray. -#}
+{%- macro counts(line) -%}
+{%- if line.is_empty() -%}no findings{%- else -%}
+{%- for tally in line.tallies() %}{% if !loop.first %}, {% endif %}<span class="{{ tally.tone }}">{{ tally.text }}</span>{% endfor -%}
+{%- endif -%}
+{%- endmacro -%}

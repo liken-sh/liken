@@ -1,0 +1,38 @@
+Promotion spring-sale · acme-shop · transect
+transect
+cluster / apps / acme-shop / Promotion spring-sale
+access vulnerabilities kinds
+Search /
+esc
+acme-shop Promotion clearance Promotion spring-sale Certificates ×1 HelmReleases ×1 ImageReports ×3
+Edges
+Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+discounts ↖
+Service storefront-svc
+reaches Deployment storefront
+from spec.storefront.name
+Promotion
+spring-sale
+Ready: running
+Each relation names the field it was read from.
+Belongs to
+controlled by Deployment acme-promoter/promoter
+Status
+Discount 20%
+Ready True
+Refers to
+depends on Deployment storefront
+Promotion spring-sale healthy
+Controlled by
+Deployment acme-promoter/promoter
+Described by promoter
+A sale on the shop, with a start and an end. Healthy when its Ready condition is True.
+from the KindKnowledge promotions.promotions.example.test

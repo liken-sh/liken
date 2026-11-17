@@ -1,0 +1,130 @@
+# A vulnerability scanner's reports, one per container's image, read
+# through the findings knowledge in `resources.yaml`.  The storefront's
+# report is current.  The ledger's report names a digest that its pod
+# does not run, so it is stale.  The listings `Deployment` runs two
+# containers, each with a report, and the storefront's report and the
+# report of its `main` container share one id.  Findings come with and
+# without a fix, with and without a score, and two have the scanner's
+# UNKNOWN severity.  The
+# storefront's report repeats one finding exactly, and names one id for
+# two packages with different scores and severities.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {namespace: acme-shop, name: listings, uid: listings}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: listings}}
+  template:
+    metadata: {labels: {app: listings}}
+    spec:
+      containers:
+      - {name: main, image: example.test/listings-image:1}
+      - {name: indexer, image: example.test/indexer-image:1}
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1}
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  namespace: acme-shop
+  name: listings-rs
+  uid: listings-rs
+  ownerReferences: [{apiVersion: apps/v1, kind: Deployment, name: listings, uid: listings, controller: true}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-shop
+  name: listings-rs-one
+  uid: listings-rs-one
+  labels: {app: listings}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: listings-rs, uid: listings-rs, controller: true}]
+spec:
+  nodeName: node-beta
+  containers:
+  - {name: main, image: example.test/listings-image:1}
+  - {name: indexer, image: example.test/indexer-image:1}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.19}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses:
+  - {name: main, ready: true, restartCount: 0, image: example.test/listings-image:1, imageID: 'example.test/listings-image@sha256:ca01', state: {running: {}}}
+  - {name: indexer, ready: true, restartCount: 0, image: example.test/indexer-image:1, imageID: 'example.test/indexer-image@sha256:1e01', state: {running: {}}}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: imagereports.scan.example.test}
+spec:
+  group: scan.example.test
+  scope: Namespaced
+  names: {kind: ImageReport, plural: imagereports}
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Repository, type: string, jsonPath: .report.artifact.repository}
+---
+apiVersion: scan.example.test/v1
+kind: ImageReport
+metadata:
+  namespace: acme-shop
+  name: replicaset-storefront-rs-main
+  uid: report-storefront
+  labels: {scan.example.test/container: main}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: storefront-rs, uid: storefront-rs, controller: true}]
+report:
+  artifact: {repository: storefront-image, digest: 'sha256:5a01'}
+  updateTimestamp: '2026-01-01T09:00:00Z'
+  summary: {criticalCount: 1, highCount: 1, unknownCount: 1}
+  found:
+  - {id: CVE-2026-0001, severity: CRITICAL, score: 9.8, package: libexample, installed: 1.2.3, fixed: 1.2.4, link: 'https://advisories.example.test/CVE-2026-0001', title: An overflow in libexample lets a caller run code, description: A description the store never keeps}
+  - {id: CVE-2026-0002, severity: HIGH, score: 7.5, package: libother, installed: 2.0.0, fixed: '', link: 'https://advisories.example.test/CVE-2026-0002', title: libother reads past the end of a buffer}
+  - {id: CVE-2026-0002, severity: HIGH, score: 7.5, package: libother, installed: 2.0.0, fixed: '', link: 'https://advisories.example.test/CVE-2026-0002', title: libother reads past the end of a buffer}
+  - {id: CVE-2026-0001, severity: HIGH, score: 5.8, package: libexample-dev, installed: 1.2.3, fixed: 1.2.4, link: 'https://advisories.example.test/CVE-2026-0001', title: An overflow in libexample lets a caller run code}
+  - {id: CVE-2026-0003, severity: UNKNOWN, score: 7.1, package: libother, installed: 2.0.0, fixed: 2.0.1, link: 'https://advisories.example.test/CVE-2026-0003'}
+---
+apiVersion: scan.example.test/v1
+kind: ImageReport
+metadata:
+  namespace: acme-ledger
+  name: statefulset-ledger-db-main
+  uid: report-ledger
+  labels: {scan.example.test/container: main}
+  ownerReferences: [{apiVersion: apps/v1, kind: StatefulSet, name: ledger-db, uid: ledger-db, controller: true}]
+report:
+  artifact: {repository: ledger-db-image, digest: 'sha256:0ld0'}
+  updateTimestamp: '2025-12-30T12:00:00Z'
+  summary: {criticalCount: 0, highCount: 1, unknownCount: 0}
+  found:
+  - {id: CVE-2025-0009, severity: HIGH, score: 8.1, package: libledger, installed: 0.9.0, fixed: 0.9.1}
+---
+apiVersion: scan.example.test/v1
+kind: ImageReport
+metadata:
+  namespace: acme-shop
+  name: replicaset-listings-rs-main
+  uid: report-listings-main
+  labels: {scan.example.test/container: main}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: listings-rs, uid: listings-rs, controller: true}]
+report:
+  artifact: {repository: listings-image, digest: 'sha256:ca01'}
+  updateTimestamp: '2026-01-01T11:00:00Z'
+  summary: {criticalCount: 1, highCount: 0, unknownCount: 0}
+  found:
+  - {id: CVE-2026-0001, severity: CRITICAL, score: 9.8, package: libexample, installed: 1.2.0, fixed: 1.2.4, link: 'https://advisories.example.test/CVE-2026-0001', title: An overflow in libexample lets a caller run code}
+---
+apiVersion: scan.example.test/v1
+kind: ImageReport
+metadata:
+  namespace: acme-shop
+  name: replicaset-listings-rs-indexer
+  uid: report-listings-indexer
+  labels: {scan.example.test/container: indexer}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: listings-rs, uid: listings-rs, controller: true}]
+report:
+  artifact: {repository: indexer-image, digest: 'sha256:1e01'}
+  updateTimestamp: '2026-01-01T11:30:00Z'
+  summary: {criticalCount: 0, highCount: 0, unknownCount: 1}
+  found:
+  - {id: GHSA-ex12-ab34-cd56, severity: UNKNOWN, package: indexer-lib, installed: 3.1.0, link: 'javascript:alert(1)'}

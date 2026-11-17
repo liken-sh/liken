@@ -1,0 +1,17 @@
+{%- import "links/link.html" as links -%}
+{#- Entries of the list of changes, newest first.  Each entry shows the
+    time in the mono face, the sentence with a link to the object that
+    changed, and the commit that a revision came from.  Under a rollout,
+    the entry lists the restarts that followed it. -#}
+<ol class="changed-list">
+{%- for change in listed.changes %}
+<li class="changed-entry">
+<span class="changed-time">{{ listed.time(change) }}</span>
+<span class="changed-text">{% call links::object_link(change.text(), change.href, "") %}{% endcall %}
+{%- if let Some((href, text)) = change.commit() %} <span class="changed-commit">· <a href="{{ href }}">{{ text }}</a></span>{% endif %}
+{%- for after in change.after %}
+<span class="changed-after">{% call links::object_link(after.after_text(), after.href, "") %}{% endcall %} <span class="changed-time-after">{{ listed.time(after) }}</span></span>
+{%- endfor %}</span>
+</li>
+{%- endfor %}
+</ol>

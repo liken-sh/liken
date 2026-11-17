@@ -1,0 +1,60 @@
+# A MetricsSource for a cluster that runs kube-prometheus, or the
+# kube-prometheus-stack chart, with its usual names: Prometheus and
+# Alertmanager in the monitoring namespace, the kubelet's cAdvisor and
+# volume metrics with a `node` label, kube-state-metrics, and alert
+# rules that label each alert's severity.  Change the Services' names
+# to match the release, and set `url` for a port-forward from a
+# workstation, which takes precedence over the Service.
+apiVersion: transect.liken.sh/v1alpha1
+kind: MetricsSource
+metadata:
+  name: metrics
+spec:
+  service: {namespace: monitoring, name: prometheus-k8s, port: 9090}
+  # The kubelet's ServiceMonitor puts the Node's name in `node`.
+  nodeLabels: [node]
+  queries:
+    # The root cgroup, id="/": everything the machine runs, its system
+    # daemons and the kubelet included, which is what metrics-server
+    # reports and `kubectl top node` prints.  `max` keeps a kubelet
+    # scraped by two jobs from counting twice.
+    machineCpu:
+      query: 'max by (node) (rate(container_cpu_usage_seconds_total{id="/"}[2m]))'
+    # The working set: what the kubelet counts toward eviction.
+    machineMemory:
+      query: 'max by (node) (container_memory_working_set_bytes{id="/"})'
+    # container!="" drops the pod's own cgroup, which already counts its
+    # containers, and container!="POD" the pause container.
+    containerCpu:
+      query: 'max by (namespace, pod, container) (rate(container_cpu_usage_seconds_total{container!="", container!="POD"}[2m]))'
+      labels: {namespace: namespace, pod: pod, container: container}
+    containerMemory:
+      query: 'max by (namespace, pod, container) (container_memory_working_set_bytes{container!="", container!="POD"})'
+      labels: {namespace: namespace, pod: pod, container: container}
+    # The kubelet reports the bytes used on each claim's volume.
+    volumeUsed:
+      query: 'max by (namespace, persistentvolumeclaim) (kubelet_volume_stats_used_bytes)'
+      labels: {namespace: namespace, claim: persistentvolumeclaim}
+  alerts:
+    # The pods behind this Service are the cluster's alerting path,
+    # which a loss of their machines leads with.
+    service: {namespace: monitoring, name: alertmanager-main, port: 9093}
+    # kube-prometheus's rules: `none` is the watchdog and the alerts
+    # that exist only to inhibit others.
+    severity: {label: severity, failing: [critical], notice: [info], hidden: [none]}
+    namespace: namespace
+    # Most specific first.  kube-state-metrics names a Job by job_name;
+    # `job` is the scrape job.
+    objects:
+      - {label: pod, kind: Pod}
+      - {label: deployment, group: apps, kind: Deployment}
+      - {label: statefulset, group: apps, kind: StatefulSet}
+      - {label: daemonset, group: apps, kind: DaemonSet}
+      - {label: cronjob, group: batch, kind: CronJob}
+      - {label: job_name, group: batch, kind: Job}
+      - {label: persistentvolumeclaim, kind: PersistentVolumeClaim}
+      - {label: service, kind: Service}
+    container: container
+    nodeLabels: [node]
+    instanceLabels: [instance]
+    annotations: {summary: summary, description: description}

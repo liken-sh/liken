@@ -1,0 +1,9 @@
+# The pin makes a workstation and CI compile with the same rustc, and
+# `ci pins` holds it to the Rust of the rust image in
+# toolchains/images.toml, which the image build compiles with. The
+# components are what the gates run: clippy, rustfmt, and the LLVM
+# tools that cargo-llvm-cov measures coverage with.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy", "llvm-tools", "rustfmt"]

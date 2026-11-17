@@ -1,0 +1,10 @@
+{#- The lenses an object's page offers, at the right end of its row:
+    each tab is a link to its own URL, and the lens the page shows is
+    marked current. -#}
+{%- macro tabs(tabs) -%}
+<span class="lens-tabs" role="navigation" aria-label="Lenses">
+{%- for tab in tabs.tabs %}
+<a class="lens-tab{% if tab.current %} lens-tab-current{% endif %}" href="{{ tab.href }}" hx-get="{{ tab.href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true"{% if tab.current %} aria-current="page"{% endif %}>{{ tab.label }}</a>
+{%- endfor %}
+</span>
+{%- endmacro -%}

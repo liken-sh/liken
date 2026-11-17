@@ -1,0 +1,10 @@
+{#- The row of severity links on a page: every severity, or one alone.
+    Each choice has its own URL, so the page needs no script to narrow
+    its list. -#}
+{%- macro choices(choices) -%}
+<nav class="switcher" aria-label="Severities">
+{%- for choice in choices %}
+<a class="switch{% if choice.current %} switch-current{% endif %}" href="{{ choice.href }}" hx-get="{{ choice.href }}"{% if choice.current %} aria-current="page"{% endif %}>{{ choice.label }}</a>
+{%- endfor %}
+</nav>
+{%- endmacro -%}

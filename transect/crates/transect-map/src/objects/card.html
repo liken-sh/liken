@@ -1,0 +1,44 @@
+{%- import "edges/provenance.html" as provenance -%}
+{%- import "links/link.html" as links -%}
+{#- An object's card, in the sidebar beside its board: its kind and
+    name with its health, its CRD's description of the kind, the workload
+    whose controller reconciles it, where its code is, and its kind's
+    knowledge. -#}
+<aside class="sidebar workload-card" aria-label="{{ card.name }} card" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="workload-card-head">
+<b class="workload-card-name">{{ transect_graph::edges::kind_and_name(card.kind, card.name) }}</b>
+{%- if let Some(status) = card.status_text() %}
+<span class="workload-card-status"><span class="{{ card.dot_class() }}"></span>{{ status }}</span>
+{%- endif %}
+</div>
+{#- A card that would show only its title shows what the object is,
+    where it is, and how old it is, so the sidebar is never empty. -#}
+{%- if card.bare() %}
+<div class="card-depends">
+{%- for (label, value) in card.facts %}
+<div class="card-related"><span class="card-related-label">{{ label }}</span> <span>{{ value }}</span></div>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if let Some(why) = card.why %}
+<div class="card-why">{{ why.text }}{% call provenance::mark(why.provenance) %}{% endcall %}</div>
+{%- endif %}
+{%- if !card.controllers.is_empty() %}
+<div class="card-depends">
+<div class="card-depends-label">Controlled by</div>
+<div class="card-depends-ends">
+{%- for end in card.controllers %}{% call links::object_link(end.text, end.href, "") %}{% endcall %}{% endfor %}
+</div>
+</div>
+{%- endif %}
+{%- if !card.code.is_empty() %}
+<div class="card-depends">
+<div class="card-depends-label">Code</div>
+<div class="card-depends-ends">
+{%- for end in card.code %}{% call links::object_link(end.text, end.href, "") %}{% endcall %}{% endfor %}
+</div>
+</div>
+{%- endif %}
+{%- include "knowledge/card.html" %}
+{%- call provenance::legend(card.legend()) %}{% endcall %}
+</aside>

@@ -1,0 +1,15 @@
+{%- import "edges/provenance.html" as provenance -%}
+{%- import "links/link.html" as links -%}
+{#- What the loss of this workload would take, one hop out, on the
+    workload's card.  The lines are the ones that a loss of its machine
+    shows, for this workload only.  A line has a provenance mark where
+    intent names what a workload provides. -#}
+<div class="card-depends">
+<div class="card-depends-label">{{ card.if_down.heading() }}</div>
+{%- if let Some(nothing) = card.if_down.nothing_text() %}
+<div class="card-if-down card-if-down-nothing">{{ nothing }}</div>
+{%- endif %}
+{%- for line in card.if_down.lines() %}
+<div class="card-if-down">{% call links::sentence(card.if_down.line_parts(line)) %}{% endcall %}{% for mark in line.marks %}{% call provenance::mark(mark) %}{% endcall %}{% endfor %}</div>
+{%- endfor %}
+</div>

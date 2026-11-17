@@ -1,0 +1,53 @@
+# The stock room, whose shelves are part of it and whose bins are part
+# of a shelf, as the `part of` references in kind knowledge declare, so
+# a board shows the nesting.  A bin can be part of two shelves, and it
+# nests under the first.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: rooms.stock.example.test}
+spec:
+  group: stock.example.test
+  scope: Namespaced
+  names: {kind: Room, plural: rooms}
+  versions: [{name: v1, served: true, storage: true}]
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: shelves.stock.example.test}
+spec:
+  group: stock.example.test
+  scope: Namespaced
+  names: {kind: Shelf, plural: shelves}
+  versions: [{name: v1, served: true, storage: true}]
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: bins.stock.example.test}
+spec:
+  group: stock.example.test
+  scope: Namespaced
+  names: {kind: Bin, plural: bins}
+  versions: [{name: v1, served: true, storage: true}]
+---
+apiVersion: stock.example.test/v1
+kind: Room
+metadata: {namespace: acme-ops, name: back-room, uid: back-room}
+status: {conditions: [{type: Ready, status: 'True'}]}
+---
+apiVersion: stock.example.test/v1
+kind: Shelf
+metadata: {namespace: acme-ops, name: top-shelf, uid: top-shelf}
+spec: {room: back-room}
+status: {conditions: [{type: Ready, status: 'True'}]}
+---
+apiVersion: stock.example.test/v1
+kind: Shelf
+metadata: {namespace: acme-ops, name: low-shelf, uid: low-shelf}
+spec: {room: back-room}
+status: {conditions: [{type: Ready, status: 'True'}]}
+---
+apiVersion: stock.example.test/v1
+kind: Bin
+metadata: {namespace: acme-ops, name: screw-bin, uid: screw-bin}
+spec: {shelf: top-shelf, overflow: low-shelf}
+status: {conditions: [{type: Ready, status: 'True'}]}

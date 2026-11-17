@@ -1,0 +1,13 @@
+{%- import "links/link.html" as links -%}
+{%- import "edges/provenance.html" as provenance -%}
+{#- A gate's dot in its slot, with the objects that put the gate there
+    beside it, or the mark of the sentence that declares it. -#}
+{%- macro dot(dot) -%}
+{%- if dot.wide() -%}
+<span class="ax-slot ax-slot-left" title="{{ dot.title }}"><span class="{{ dot.class }}" title="{{ dot.title }}"></span>
+{%- if let Some(said) = dot.said %}{% call provenance::mark(said) %}{% endcall %}{% endif %}
+{%- for name in dot.names %}{% if !loop.first %}, {% endif %}{% call links::object_link(name.text, name.href, "") %}{% endcall %}{% endfor %}</span>
+{%- else -%}
+<span class="ax-slot"><span class="{{ dot.class }}" title="{{ dot.title }}"></span></span>
+{%- endif -%}
+{%- endmacro -%}

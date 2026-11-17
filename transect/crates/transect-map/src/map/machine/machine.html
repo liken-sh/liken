@@ -1,0 +1,200 @@
+{% extends "frame/layout.html" %}
+{% import "resources/off.html" as off %}
+{% import "edges/provenance.html" as provenance %}
+{%- import "links/link.html" as links -%}
+{%- import "frame/tabs.html" as frame -%}
+{%- import "map/bar.html" as bar -%}
+{%- import "map/machine/hardware.html" as hw -%}
+
+{% block title %}{{ name }} · machines · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- One machine: what it is, how full it is, what runs there, and the
+    devices it publishes.  The row of machines, the sections, and the card of the
+    resource below it swap as one block. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="machine-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="Machines">
+<a class="switcher-namespace" href="/" hx-get="/">cluster</a>
+{%- for switch in switches %}
+{%- if let Some(label) = switch.label %}
+<span class="switch-label">{{ label }}</span>
+{%- endif %}
+<a class="{{ switch.class() }}" href="{{ switch.href() }}" hx-get="{{ switch.href() }}"{% if switch.control_plane %} title="{{ switch.name }}, control plane"{% endif %}{% if switch.current %} aria-current="page"{% endif %}>{{ switch.name }}</a>
+{%- endfor %}
+{% call frame::tabs(tabs()) %}{% endcall %}
+</nav>
+<div class="machine-columns">
+<section class="machine-main" aria-label="Machine {{ name }}">
+<section class="machine-strip" aria-label="{{ name }} at a glance">
+<div class="machine-head">
+<b class="machine-name">{{ name }}</b>
+<span class="machine-status"><span class="{{ dot_class() }}"></span>{{ status_text() }}</span>
+<span class="machine-pods">{{ pods_text() }}</span>
+</div>
+<div class="machine-meters">
+<div class="meter" title="{{ machine.cpu_title() }}">
+<span class="meter-label">cpu</span>
+<div class="meter-track"><div class="meter-requested" style="width: {{ machine.cpu_percent() }}%"></div>
+{%- if let Some(used) = machine.cpu_used_percent() %}<div class="meter-used" style="width: {{ used }}%"></div>{% endif %}</div>
+<span class="machine-figure">{{ machine.cpu_title() }}</span>
+</div>
+<div class="meter" title="{{ machine.memory_title() }}">
+<span class="meter-label">mem</span>
+<div class="meter-track"><div class="meter-requested" style="width: {{ machine.memory_percent() }}%"></div>
+{%- if let Some(used) = machine.memory_used_percent() %}<div class="meter-used" style="width: {{ used }}%"></div>{% endif %}</div>
+<span class="machine-figure">{{ machine.memory_title() }}</span>
+</div>
+</div>
+</section>
+{#- What runs here, a box per band in the map's order, a box per
+    namespace inside it, and a row per pod: its name and workload, its
+    bars, and how it is doing. -#}
+{%- for band in bands %}
+<section class="machine-band" aria-label="{{ band.name }}">
+<span class="row-label">{{ band.name }}</span>
+<div class="machine-namespaces">
+{%- for namespace in band.namespaces %}
+<div class="machine-namespace{% if namespace.wide() %} machine-namespace-wide{% endif %}">
+<div class="machine-namespace-head">{% call links::object_link(namespace.name, Some(transect_graph::links::namespace(namespace.name)), "machine-namespace-name") %}{% endcall %}</div>
+<div class="machine-rows">
+{%- for row in namespace.rows %}
+<div class="{{ row.class() }}" title="{{ row.tile.name }}">
+<div class="machine-pod-names">
+{%- call links::object_link(row.name.text, row.name.href, "machine-pod-name") %}{% endcall %}
+{%- if let Some(workload) = row.workload %}
+{%- if let Some(joiner) = row.joiner %}
+<span class="machine-pod-of">{{ joiner }}</span>
+{%- call links::object_link(workload.text, workload.href, "machine-pod-workload") %}{% endcall %}
+{%- else %}
+{%- call links::object_link(workload.text, workload.href, "machine-pod-tag") %}{% endcall %}
+{%- endif %}
+{%- endif %}
+</div>
+{#- Every row draws both bars, so the column lines up.  A bar with no
+    request or limit has no scale and stays empty, and its figures are in
+    the gray line under the bars. -#}
+<div class="machine-pod-bars">
+{% call bar::meter("mem", row.tile.memory, memory_title(row.tile)) %}{% endcall %}
+{% call bar::meter("cpu", row.tile.cpu, cpu_title(row.tile)) %}{% endcall %}
+</div>
+<span class="machine-pod-line">
+{%- if let Some(note) = unscaled_note(row.tile) %}{{ note }} · {% endif %}
+{{- row_line(row.tile) }}</span>
+</div>
+{%- endfor %}
+</div>
+</div>
+{%- endfor %}
+</div>
+</section>
+{%- endfor %}
+{%- if !bands.is_empty() %}
+<div class="machine-legend">
+<div class="tiles-legend">{{ legend }}</div>
+{%- if let Some(note) = usage_note %}
+<div class="tiles-legend">{% call off::line(note) %}{% endcall %}</div>
+{%- endif %}
+</div>
+{%- endif %}
+<div class="board-row machine-boxes">
+<section class="board-box machine-devices" aria-label="Devices it publishes">
+<div class="board-label">Devices it publishes</div>
+{%- if let Some(note) = devices_note %}
+<div class="board-none">{{ note }}</div>
+{%- else if drivers.is_empty() %}
+<div class="board-none">It publishes no devices.</div>
+{%- endif %}
+{#- A box per driver, its name and count over its hardware: what a
+    claim holds first, then what none holds, folded past a few. -#}
+{%- if !drivers.is_empty() %}
+<div class="machine-drivers">
+{%- for driver in drivers %}
+<section class="machine-driver{% if driver.wide() %} machine-driver-wide{% endif %}" aria-label="{{ driver.name }}">
+<div class="machine-driver-head"><span class="machine-driver-name">{{ driver.name }}</span><span class="machine-count">{{ driver.count() }}</span></div>
+<div class="machine-driver-devices">
+{%- for device in driver.held() %}{% call hw::hardware(device) %}{% endcall %}{% endfor %}
+{%- let free = driver.free() %}
+{%- if !driver.folds() %}
+{%- for device in free.iter() %}{% call hw::hardware(device) %}{% endcall %}{% endfor %}
+{%- endif %}
+</div>
+{%- if driver.folds() %}
+<details class="board-fold machine-driver-fold"><summary>{{ free.len() }} not held <span class="board-fold-show">· show</span><span class="board-fold-hide">· hide</span></summary>
+<div class="machine-driver-devices">
+{%- for device in free.iter() %}{% call hw::hardware(device) %}{% endcall %}{% endfor %}
+</div>
+</details>
+{%- endif %}
+</section>
+{%- endfor %}
+</div>
+{%- endif %}
+</section>
+<section class="board-box" aria-label="Volumes on it">
+<div class="board-label">Volumes on it</div>
+{%- if volumes.is_empty() %}
+<div class="board-none">No volume is on its disk or attached to it.</div>
+{%- endif %}
+{%- for volume in volumes %}
+<div class="machine-line">
+{%- call links::object_link(volume.claim.text, volume.claim.href, "") %}{% endcall %} <span class="machine-count">{{ volume.how }}</span></div>
+{%- endfor %}
+</section>
+{%- if let Some(card) = underneath %}
+<section class="board-box machine-underneath" aria-label="{{ card.title }}">
+<div class="board-label">Underneath</div>
+<div class="machine-underneath-title">{% call links::object_link(card.title, card.href.clone(), "") %}{% endcall %}</div>
+{%- if !card.chips.is_empty() %}
+<div class="known-chips">
+{%- for chip in card.chips %}
+<span class="known-chip"{% if let Some(title) = chip.title %} title="{{ title }}"{% endif %}><span class="{{ chip.dot_class() }}"></span>{{ chip.text }}</span>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- include "knowledge/card.html" %}
+</section>
+{%- else if let Some(none) = underneath_none %}
+<section class="board-box machine-underneath" aria-label="Underneath">
+<div class="board-label">Underneath</div>
+<div class="board-none">{{ none }}</div>
+</section>
+{%- endif %}
+</div>
+<section class="board-box board-wide" aria-label="Its own logs">
+<div class="board-label">Its own logs</div>
+{%- if let Some(note) = logs.note %}
+<div class="board-none">{% call off::line(note) %}{% endcall %}</div>
+{%- endif %}
+{%- for line in logs.lines %}
+<div class="machine-line">{{ line }}</div>
+{%- endfor %}
+{%- let evidence = logs.evidence %}
+{%- include "logs/evidence.html" %}
+</section>
+</section>
+<aside class="sidebar machine-card" aria-label="{{ name }} facts">
+<div class="card-depends">
+<div class="card-depends-label">What its kubelet reports</div>
+{%- for (fact, value) in facts.lines %}
+<div class="card-related"><span class="card-related-label">{{ fact }}</span> <span>{{ value }}</span></div>
+{%- endfor %}
+</div>
+{%- if !facts.labels.is_empty() %}
+<div class="card-depends">
+<div class="card-depends-label">Labels</div>
+{%- for label in facts.labels %}
+<div class="machine-label">{{ label }}</div>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- call provenance::legend(legend()) %}{% endcall %}
+</aside>
+</div>
+</main>
+</div>
+{% endblock %}

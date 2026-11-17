@@ -1,0 +1,102 @@
+# The way in: the proxy that serves the storefront's `Ingress`, as its
+# `IngressClass` names it, and the issuer of the storefront's
+# certificate.  The `Certificate` that writes the `Ingress`'s TLS
+# `Secret` names that issuer, and cert-manager reads it there.
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata: {name: proxy}
+spec: {controller: example.test/proxy}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {namespace: acme-ops, name: edge-proxy, uid: edge-proxy}
+spec:
+  selector: {matchLabels: {app: edge-proxy}}
+  template:
+    metadata: {labels: {app: edge-proxy}}
+    spec:
+      containers:
+      - name: proxy
+        image: registry.example.test/proxy/router:2
+status: {desiredNumberScheduled: 1, numberReady: 1, updatedNumberScheduled: 1, numberAvailable: 1}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ops
+  name: edge-proxy-a
+  uid: edge-proxy-a
+  labels: {app: edge-proxy}
+  ownerReferences: [{apiVersion: apps/v1, kind: DaemonSet, name: edge-proxy, uid: edge-proxy, controller: true}]
+spec: {nodeName: node-alpha, containers: [{name: proxy, image: registry.example.test/proxy/router:2}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.9}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: proxy, ready: true, restartCount: 0, image: registry.example.test/proxy/router:2, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-ops, name: edge-proxy-lb}
+spec: {type: LoadBalancer, selector: {app: edge-proxy}, ports: [{name: web, port: 80}, {name: websecure, port: 443}], clusterIP: 10.96.0.40}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: clusterissuers.cert-manager.io}
+spec:
+  group: cert-manager.io
+  scope: Cluster
+  names: {kind: ClusterIssuer, plural: clusterissuers}
+  versions: [{name: v1, served: true, storage: true}]
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata: {name: shop-issuer, uid: shop-issuer}
+status: {conditions: [{type: Ready, status: 'True'}]}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: certificates.cert-manager.io}
+spec:
+  group: cert-manager.io
+  scope: Namespaced
+  names: {kind: Certificate, plural: certificates}
+  versions: [{name: v1, served: true, storage: true}]
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata: {namespace: acme-shop, name: storefront-cert, uid: storefront-cert}
+spec:
+  secretName: storefront-tls
+  dnsNames: [shop.example.test]
+  issuerRef: {name: shop-issuer, kind: ClusterIssuer, group: cert-manager.io}
+status: {conditions: [{type: Ready, status: 'True'}]}
+---
+# The proxy's gates, each of which asks an address before the proxy
+# lets a request through.  The addresses are a `Service` in the
+# cluster by its namespaced name, a `Service` that does not exist in
+# its namespace, and a sign-in service outside the cluster.  Only the
+# last is a ground box.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: gates.proxy.example.test}
+spec:
+  group: proxy.example.test
+  scope: Namespaced
+  names: {kind: Gate, plural: gates}
+  versions: [{name: v1, served: true, storage: true}]
+---
+apiVersion: proxy.example.test/v1
+kind: Gate
+metadata: {namespace: acme-ops, name: shop-gate, uid: shop-gate}
+spec: {checkWith: 'http://storefront-svc.acme-shop:80/check'}
+---
+apiVersion: proxy.example.test/v1
+kind: Gate
+metadata: {namespace: acme-ops, name: retired-gate, uid: retired-gate}
+spec: {checkWith: 'http://retired-checker.acme-shop.svc:9000/check'}
+---
+apiVersion: proxy.example.test/v1
+kind: Gate
+metadata: {namespace: acme-ops, name: partner-gate, uid: partner-gate}
+spec: {checkWith: 'https://sign-in.example.test/check'}

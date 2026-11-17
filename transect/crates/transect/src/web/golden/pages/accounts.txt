@@ -1,0 +1,77 @@
+accounts · access · transect
+transect
+cluster / access / accounts
+access vulnerabilities kinds
+Search /
+esc
+access ways in accounts
+What each account may do, and where 10 accounts, one row each
+Every account in the cluster that a binding grants one of these six. a binding grants it it follows from a grant. A full block is every namespace; a short one is the namespaces named beside it.
+account
+read Secrets
+exec into pods
+run pods
+change workloads
+grant roles
+change what a GitOps tool applies
+through
+Bound to ClusterRole cluster-admin 1
+ServiceAccount acme-ops/gitops-controller
+ClusterRole cluster-admin
+May change what ServiceAccount acme-ops/gitops-controller applies, which is bound to ClusterRole cluster-admin 1
+ServiceAccount acme-ops/ops-console intent
+ClusterRole applier-editor
+Every other account granted one of the six 8
+ServiceAccount acme-ledger/ledger-db
+acme-ledger
+Role acme-ledger/ledger-secret-reader
+ServiceAccount acme-ops/ledger-deployer
+acme-ledger
+acme-ledger
+ClusterRole app-deployer → may run as acme-ledger/ledger-db
+ServiceAccount acme-promoter/promoter
+acme-promoter
+acme-promoter
+ClusterRole promoter-deployer → a pod it starts may mount any Secret
+ServiceAccount acme-shop/storefront
+acme-shop, by name
+Role acme-shop/storefront-secret
+Group system:serviceaccounts:acme-ledger
+acme-ledger
+Role acme-ledger/ledger-secret-reader
+User <b>"odd" & co
+acme-shop
+acme-shop
+ClusterRole shop-editor → a pod it starts may mount any Secret
+User https://issuer.example.test/alice
+acme-shop
+acme-shop
+ClusterRole shop-editor → a pod it starts may mount any Secret
+User shop-owner
+acme-shop
+acme-shop
+ClusterRole shop-editor → a pod it starts may mount any Secret
+No binding grants any of the six to Group system:authenticated or Group system:serviceaccounts, the groups every account is in.
+1 of Kubernetes' own components and controllers may do some of the six.
+account
+read Secrets
+exec into pods
+run pods
+change workloads
+grant roles
+change what a GitOps tool applies
+through
+ServiceAccount acme-ops/batch-worker
+ClusterRole system:controller:job-runner → may run as acme-ops/gitops-controller
+1 ServiceAccount is named by no binding.
+Access
+Ways in : every port that answers from outside the cluster, and the gates on the way to it.
+Accounts : every account a binding names, and what it may do.
+Not read
+A workload's own TLS and sign-in are not in the API. A gate here is one the cluster's objects put in front of the workload, or one declared in stored text, which the people who run the cluster wrote.
+Whether an address answers from the internet is not in the API.
+Grants are read from Roles, ClusterRoles, and their bindings. A webhook authorizer, the node authorizer, and admission webhooks are not read.
+The API server's version and feature gates are not read. Exec counts create on pods/exec and pods/attach , which a server from 1.35 on requires; an older one, or one with AuthorizePodWebsocketUpgradeCreatePermission off, also allows exec with get .
+Some routes to another account are not followed: approving and signing a certificate request, creating a PersistentVolume, writing an admission webhook, and reading a Secret that contains a ServiceAccount's token, whose type a Secret's metadata does not show.
+A Pod Security default in the API server's admission configuration is not in the API.
+No Secret is read. A Secret is shown by its name, from the pod specs and Roles that name it.

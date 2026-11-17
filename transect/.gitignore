@@ -1,0 +1,12 @@
+# The Rust build tree. It never belongs to the tree.
+/target/
+
+# The files of one cluster: its resources for transect, its design
+# drafts, and the notes on how to reach it. AGENTS.md says why they stay
+# out of the repository.
+/local/
+
+# The coverage data the gate measures, and the page `make
+# coverage-report` draws from it. CI writes them on every run.
+/coverage-transect.xml
+/coverage.html

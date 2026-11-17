@@ -1,0 +1,105 @@
+node-beta · machines · transect
+transect
+cluster / machines / node-beta
+access vulnerabilities kinds
+Search /
+esc
+cluster control plane node-beta workers node-alpha overview if lost
+node-beta Control plane, ready 9 pods in 3 namespaces run here.
+cpu
+CPU 0.8 used · 0.0 requested of 4
+mem
+mem 3.0 used · 0.0 requested of 15.0 Gi
+apps
+acme-shop
+session-cache-set-0 of Cache session-cache
+mem
+cpu
+mem 512Mi · cpu 100m · no request or limit · 0 restarts
+help-desk-rs-one of Deployment help-desk
+mem
+cpu
+no request or limit · 0 restarts
+listings-rs-one of Deployment listings
+mem
+cpu
+no request or limit · 0 restarts
+storefront-rs-two of Deployment storefront
+mem
+cpu
+mem 192Mi · cpu 200m · no request or limit · 0 restarts
+counter-till-set-0 of Till counter-till
+mem
+cpu
+mem 8Mi · cpu 10m · no request or limit · 0 restarts
+data
+acme-ledger
+ledger-exporter-rs-one of Deployment ledger-exporter
+mem
+cpu
+mem 32Mi · cpu 10m · no request or limit · not ready · 14 restarts
+ledger-store-0 of StatefulSet ledger-store
+mem
+cpu
+no request or limit · 0 restarts
+platform
+acme-ops
+DaemonSet log-shipper one per machine
+mem
+cpu
+mem 48Mi · cpu 40m · no request or limit · 0 restarts
+DaemonSet sql-listener one per machine
+mem
+cpu
+no request or limit · 0 restarts
+No memory or CPU request or limit, so the figures show what each uses.
+Devices it publishes
+gpu.example.test 1 device · 1 held
+card-display
+acme-shop/storefront-screen-claim-template-generated-x7k2p
+model A graphics card · resource.kubernetes.io/pciBusID 0000:02:00.0
+with card-render
+radio.example.test 1 device · 1 held
+The counter handset
+acme-shop/till-handset
+battery 80
+pairs through Radio radio-desk
+sound.example.test 8 devices · 1 held
+The counter speakers
+acme-shop/counter-speakers
+connector HDMI-A-1 · channels 2
+speakers of card-display , card-render
+7 not held · show · hide
+analog-in
+not held
+connector line in · channels 2
+analog-out
+not held
+connector line out · channels 2
+hdmi-2
+not held
+connector HDMI-A-2 · channels 2
+hdmi-3
+not held
+connector HDMI-A-3 · channels 8
+headphones
+not held
+connector front jack · channels 2
+usb-audio
+not held
+connector usb · channels 2
+usb-audio-capture
+not held
+connector usb · channels 1
+Volumes on it
+No volume is on its disk or attached to it.
+Underneath
+no Machine names this Node
+Its own logs
+The LogSource logs does not name which of its lines are a machine's own, so they count as the lines of the pod that ships them.
+What its kubelet reports
+CPU 4 CPUs
+Memory 16.0 GiB
+Address 192.168.0.2
+Labels
+node-role.kubernetes.io/control-plane

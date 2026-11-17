@@ -1,0 +1,24 @@
+{#- The firing alerts at the top of "Now", the worst first.  Each card
+    shows the alert's name and severity, what it is about and for how
+    long, the summary and description that its rule wrote, and a link
+    to its group in Alertmanager. -#}
+{%- for alert in sidebar.alerts %}
+<div class="card concern alert">
+<div class="concern-head"><span class="dot {{ alert.level_class() }}"></span><b class="concern-name">{{ alert.name }}</b>
+{%- if let Some(severity) = alert.severity %}<span class="alert-severity">{{ severity }}</span>{% endif %}</div>
+{%- if let Some(href) = alert.about.href() %}
+<a class="alert-about concern-line" href="{{ href }}" hx-get="{{ href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true">{{ alert.line() }}</a>
+{%- else %}
+<div class="alert-about">{{ alert.line() }}</div>
+{%- endif %}
+{%- if let Some(summary) = alert.summary %}
+<div class="card-body">{{ transect_observe::alerts::markup::inline(summary)|safe }}</div>
+{%- endif %}
+{%- if let Some(description) = alert.description %}
+<div class="card-note">{{ transect_observe::alerts::markup::inline(description)|safe }}</div>
+{%- endif %}
+{%- if let Some(link) = alert.link %}
+<a class="alert-link" href="{{ link }}" target="_blank" rel="noopener noreferrer">In Alertmanager →</a>
+{%- endif %}
+</div>
+{%- endfor %}

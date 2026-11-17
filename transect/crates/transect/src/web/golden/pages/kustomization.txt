@@ -1,0 +1,29 @@
+Kustomization shop-apps · acme-ops · transect
+transect
+cluster / platform / acme-ops / Kustomization shop-apps
+access vulnerabilities kinds
+Search /
+esc
+acme-ops backup-apps ledger-apps ops-apps shop-apps
+Edges
+Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+Applies
+acme-shop · HelmRelease
+storefront-release
+Kustomization shop-apps ready
+Source
+GitRepository shop-git
+From
+https://github.com/acme/shop
+Path
+./apps/shop
+Applied
+main@sha1:1111111111111111111111111111111111111111

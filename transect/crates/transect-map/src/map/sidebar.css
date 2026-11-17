@@ -1,0 +1,199 @@
+/*
+ * The sidebar beside the cluster map: what needs attention now, then
+ * what is worth knowing.  Cards are drawn on --panel like the parcels,
+ * and only a problem uses --warm.
+ */
+
+/* Mid sage, the one green the plan allows, marks the all-clear dot. */
+:root {
+  --clear: #6e8352;
+}
+
+/* One width on every page, so the sidebar starts at the same x
+   whichever elevation the reader is on. */
+.sidebar {
+  width: 360px;
+  flex: none;
+  box-sizing: border-box;
+  padding: 16px 32px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sidebar-heading {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.sidebar-heading-next { margin-top: 4px; }
+
+.sidebar-note {
+  margin-top: -6px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.card {
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card-body {
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+/* A card's link to the access lens, in small faint text. */
+.card-lens {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.card-note {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--ink-faint);
+  padding-left: 10px;
+}
+
+.all-clear {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  border-radius: 5px;
+  flex: none;
+}
+
+.dot-clear { background: var(--clear); }
+
+/* A condition that does not decide health, or an object at rest: gray,
+   since nothing about it is good or bad.  It takes the faint ink, not
+   a rule's gray, so it shows as a mark on the panel.  Its hue has no
+   green in it, which keeps it apart from a healthy dot of the same
+   weight. */
+.dot-gray { background: var(--ink-faint); }
+
+/* A failure fills its dot and a warning outlines it, as the map fills
+   and outlines a parcel.  A notice outlines it in gray, since the map
+   leaves its parcel gray. */
+.concern-failing { background: var(--warm); }
+.concern-warning { border: 2px solid var(--warm); }
+.concern-notice { border: 2px solid var(--rule-strong); }
+
+.concern-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.concern-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A finding worth knowing is not a fault, so its card stays in the
+   sidebar's grays.  Only "Now" uses --warm. */
+.finding-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+/* A finding about several machines lists one line per machine above
+   its body, as compact as the body text. */
+.finding-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+.finding-machine {
+  font-family: var(--mono);
+  color: var(--ink);
+}
+
+/* A reason, a namespace's name, and a finding's line are links, so a
+   reader can open what they name in a new tab.  They keep the card's
+   ink so the sidebar stays calm, and a hover shows where a click goes. */
+a.concern-name,
+a.concern-line,
+a.finding-machine {
+  color: inherit;
+  text-decoration: none;
+}
+
+a.concern-line { display: block; }
+
+a.concern-name:hover,
+a.concern-line:hover,
+a.finding-machine:hover { text-decoration: underline; }
+
+/* Below this width the map needs the whole row, so the sidebar moves
+   under it and takes the full width. */
+@media (max-width: 1000px) {
+  .sidebar {
+    width: auto;
+    padding: 0 32px 16px;
+  }
+}
+
+/* A log finding's evidence: the places its matches came from, then a
+   few of its lines in the mono face, each cut to one row so five lines
+   stay five rows. */
+.evidence-parts {
+  margin: 2px 0 0;
+  padding-left: 10px;
+  list-style: none;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--ink-faint);
+}
+
+.evidence-lines {
+  margin: 4px 0 6px;
+  padding: 4px 8px;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ink-muted);
+  background: var(--row);
+  border-left: 2px solid var(--rule-strong);
+}
+
+.evidence-lines li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.evidence-at,
+.evidence-from {
+  color: var(--ink-faint);
+}

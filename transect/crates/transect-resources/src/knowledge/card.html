@@ -1,0 +1,29 @@
+{%- import "edges/provenance.html" as provenance -%}
+{%- import "links/link.html" as links -%}
+{#- The end of a custom resource's card whose kind has knowledge: whose
+    knowledge it is read through, what the kind is, the condition that
+    means it works, and what each of its fields names, with the field.
+    A `docs` value that is not plain http or https shows as text, never
+    as a link. -#}
+{%- if let Some(known) = card.known %}
+{%- let shared = known.shared() %}
+<div class="card-depends">
+{%- let through = known.through() %}
+<div class="card-depends-label">Described by {% call links::object_link(through.text, through.href, "") %}{% endcall %}{% call provenance::heading(shared) %}{% endcall %}</div>
+{%- if let Some(body) = known.body() %}
+<div class="card-body">{{ body }}</div>
+{%- endif %}
+{%- for related in known.related %}
+<div class="card-related"><span class="card-related-label">{{ related.label }}</span>
+ {% call links::object_link(related.reference.text, related.reference.href, "") %}{% endcall %}
+<span class="card-related-source">{{ related.source }}</span>
+{%- call provenance::line(related.provenance, shared) %}{% endcall %}</div>
+{%- endfor %}
+{%- if let Some(docs) = known.docs %}
+<div class="card-links">
+{%- if let Some(href) = docs.href %}<a href="{{ href }}" target="_blank" rel="noopener noreferrer">docs</a>{% else %}docs: {{ docs.text }}{% endif %}
+{%- call provenance::line(docs.provenance, shared) %}{% endcall %}</div>
+{%- endif %}
+<div class="card-code-note">{{ known.source() }}</div>
+</div>
+{%- endif %}

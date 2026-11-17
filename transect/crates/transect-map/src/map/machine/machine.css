@@ -1,0 +1,327 @@
+/*
+ * The machine page as a board: a strip of the machine's figures, a box
+ * per band of what runs there, boxes of its devices, volumes, logs, and
+ * the resource below it, and on the right what its kubelet reports.
+ * Colors are liken's tokens.
+ */
+
+.machine-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 32px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.machine-columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.machine-main {
+  flex: 1 1 420px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  container-type: inline-size;
+}
+
+.machine-card { flex: 0 1 360px; }
+
+/* The strip: the machine's name, role, readiness, and pod count over
+   its CPU and memory bars, in the heavier rule the object's own box
+   takes on a board. */
+.machine-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 2px solid var(--rule-strong);
+  border-radius: 10px;
+}
+
+.machine-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+}
+
+.machine-name { font-size: 18px; font-weight: 600; color: var(--ink); }
+
+.machine-status { color: var(--ink-muted); }
+
+.machine-pods { color: var(--ink-faint); }
+
+.machine-meters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+  gap: 6px 24px;
+}
+
+.machine-figure { color: var(--ink-faint); margin-left: 8px; white-space: nowrap; }
+
+/* A band: its name on the left, as the workload page labels its rows,
+   and its namespaces packed beside it. */
+.machine-band {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--row);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.machine-band > .row-label { padding-top: 4px; }
+
+
+/* The namespaces are laid out in a grid of columns at least 300px wide,
+   which fills the band at any width.  A namespace of many pods spans
+   the band and lays out its own rows in the same columns, so it never
+   leaves the band's other columns empty beside it.  Dense packing fills
+   the holes that the short namespaces leave. */
+.machine-namespaces {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-auto-flow: row dense;
+  gap: 10px;
+  align-items: start;
+}
+
+@container (max-width: 560px) {
+  .machine-band { flex-direction: column; }
+  .machine-namespaces { width: 100%; }
+}
+
+.machine-namespace {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+}
+
+.machine-namespace-wide { grid-column: 1 / -1; }
+
+.machine-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.machine-namespace-wide .machine-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(276px, 1fr));
+  gap: 8px 22px;
+}
+
+.machine-namespace-head { font-weight: 600; }
+
+/* A pod: its name and workload on one line, then its bars and how it
+   is doing. */
+.machine-pod {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+}
+
+.machine-pod-not-ready {
+  margin: 0 -6px;
+  padding: 8px 6px 4px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px var(--warm);
+}
+
+.machine-pod-names {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.machine-pod-name { overflow-wrap: anywhere; }
+
+.machine-pod-workload { overflow-wrap: anywhere; }
+
+.machine-pod-of { color: var(--ink-faint); }
+
+/* A DaemonSet's "one per machine", a tag after its name that keeps its
+   words together. */
+.machine-pod-tag {
+  padding: 0 5px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  color: var(--ink-muted);
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.machine-legend { margin-top: -4px; }
+
+.machine-pod-bars {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.machine-pod-bars > .meter { flex: 1 1 120px; min-width: 0; }
+
+.machine-pod-line { color: var(--ink-faint); }
+
+.machine-underneath-title { font-weight: 600; }
+
+.machine-note { color: var(--ink-faint); }
+
+.machine-count { color: var(--ink-faint); }
+
+.machine-line { color: var(--ink-muted); }
+
+.machine-label { color: var(--ink-muted); overflow-wrap: anywhere; }
+
+/* The boxes under the bands are in a grid of columns, and the devices
+   box spans it. */
+.machine-boxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.machine-devices { grid-column: 1 / -1; }
+
+/* A box per driver, packed in columns at least 300px wide as a band
+   packs its namespaces.  A driver with more hardware than one column
+   shows spans the row and lays out its hardware in the same columns. */
+.machine-drivers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-auto-flow: row dense;
+  gap: 10px;
+  align-items: start;
+}
+
+.machine-driver {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+}
+
+.machine-driver-wide { grid-column: 1 / -1; }
+
+.machine-driver-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 12px;
+}
+
+.machine-driver-name { font-weight: 600; overflow-wrap: anywhere; }
+
+.machine-driver-devices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.machine-driver-wide .machine-driver-devices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(276px, 1fr));
+  gap: 8px 22px;
+}
+
+.machine-driver-fold[open] > summary { margin-bottom: 8px; }
+
+/* A piece of hardware, as a pod row is drawn: a rule above it, its
+   title, its holders, then gray lines of facts and references. */
+.machine-device {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+}
+
+.machine-device-title {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.machine-device-name {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* A holder is a generated name too long for a column, so it keeps to
+   one line and ends in an ellipsis.  The device's title attribute gives
+   the whole name. */
+.machine-device-holder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.machine-device-holder > .object-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.machine-device-free { color: var(--ink-faint); }
+
+/* Held fills the mark and not held outlines it, in gray, because
+   holding a device is neither good nor bad. */
+.machine-device-mark {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 1px solid var(--ink-faint);
+}
+
+.machine-device-held { background: var(--ink-muted); border-color: var(--ink-muted); }
+
+.machine-device-line {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+/* The device that a link from another page opens at, which links.js
+   marks, so the reader finds it on a page too short to scroll it to the
+   top. */
+.machine-device.link-target {
+  margin: 0 -6px;
+  padding: 8px 6px 6px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px var(--ink-faint);
+}

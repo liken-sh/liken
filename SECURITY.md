@@ -13,7 +13,7 @@ there is no on-call rotation behind that number.
 ## What is in scope
 
 liken's own code is in scope: the init, the `liken` CLI, the operators
-that run on a machine, the build, and the release workflow. The release
+that run on a machine, `transect`, the build, and the release workflow. The release
 channel at https://releases.liken.sh is also in scope, because machines
 trust what they download from it.
 

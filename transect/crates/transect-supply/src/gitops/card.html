@@ -1,0 +1,41 @@
+{%- import "resources/off.html" as off -%}
+{#- Where the card's object is declared.  The section shows a link to
+    the directory in its repository when a `Forge` declares its forge,
+    and otherwise the repository and path as text.  It also shows the
+    release that installed the object, whether a running image is built
+    from the same repository, and whether the object's applier is
+    ready. -#}
+{%- if !card.code.entries.is_empty() %}
+<div class="card-code">
+<div class="card-depends-label">Code</div>
+{%- for code in card.code.entries %}
+<div class="card-code-entry">
+{%- if let Some(declared) = code.declared %}
+{%- if let Some(place) = declared.place %}
+{%- if let Some(href) = place.href() %}
+<a href="{{ href }}" target="_blank" rel="noopener">{{ place.text() }}</a>
+{%- else %}
+<span>{{ place.text() }}</span>
+{%- endif %}
+{%- endif %}
+{%- endif %}
+{%- if let Some(release) = code.release %}
+<span>
+{%- if let Some(href) = release.href %}<a class="object-link" href="{{ href }}">{{ release.name_text(card.code.here()) }}</a>{% else %}{{ release.name_text(card.code.here()) }}{% endif -%}
+{{ release.chart_text() }}</span>
+{%- endif %}
+{%- if let Some(declared) = code.declared %}
+{%- if declared.built_here %}
+<span>{{ declared.built_here_text() }}</span>
+{%- endif %}
+<span{% if declared.failing() %} class="card-code-failing"{% endif %}>
+{%- if let Some(href) = declared.href %}<a class="object-link" href="{{ href }}">{{ declared.name_text(card.code.here()) }}</a>{% else %}{{ declared.name_text(card.code.here()) }}{% endif %} {{ declared.state_text() -}}
+</span>
+{%- endif %}
+</div>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- if let Some(note) = card.code.note %}
+<div class="card-code-note">{% call off::line(note) %}{% endcall %}</div>
+{%- endif %}

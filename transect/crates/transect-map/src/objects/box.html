@@ -1,0 +1,56 @@
+{%- import "links/link.html" as links -%}
+{%- import "resources/off.html" as off -%}
+{#- One section of an object's board as a box: its title, then each
+    fact's label over what it names.  A fact that names more than a box
+    shows at a glance folds to its count, which opens to the names. -#}
+{%- macro section_box(section) -%}
+<section class="board-box" aria-label="{{ section.title }}">
+<div class="board-label">{{ section.title }}</div>
+{%- if !section.facts.is_empty() %}
+{%- if let Some(summary) = section.folded %}
+<details class="board-fold"><summary>{{ summary }} <span class="board-fold-show">· show</span><span class="board-fold-hide">· hide</span></summary>
+{%- endif %}
+<div class="{% if section.is_own() %}board-facts{% else %}board-list{% endif %}">
+{%- for fact in section.facts %}
+{%- call fact_values(fact) %}{% endcall %}
+{%- endfor %}
+</div>
+{%- if section.folded.is_some() %}
+</details>
+{%- endif %}
+{%- endif %}
+{%- if section.is_empty() %}
+{%- if let Some(none) = section.none %}
+<div class="board-none">{% call off::line(none) %}{% endcall %}</div>
+{%- endif %}
+{%- endif %}
+</section>
+{%- endmacro -%}
+
+{#- A fact as a label and its values.  Inside a box the label is
+    above the values.  In the object's own box, the `board-facts` grid
+    sets the label beside them. -#}
+{%- macro fact_values(fact) -%}
+<div class="board-fact"><span class="board-fact-label">{{ fact.label }}</span>
+{%- if fact.folds() %}
+<details class="board-fold"><summary>{{ fact.count() }} <span class="board-fold-show">· show</span><span class="board-fold-hide">· hide</span></summary>
+{%- call values(fact) %}{% endcall %}
+</details>
+{%- else %}
+{%- call values(fact) %}{% endcall %}
+{%- endif %}
+</div>
+{%- endmacro -%}
+
+{%- macro values(fact) -%}
+<span class="board-values">
+{%- match fact.shape %}
+{%- when transect_map::objects::Shape::Unset %}<span class="board-unset" title="not set">—</span>
+{%- when transect_map::objects::Shape::Literal %}{% for value in fact.values %}<code class="board-literal{% if transect_resources::knowledge::jsonpath::counted_structure(value.text.as_str()) %} board-unset{% endif %}">{{ value.text }}</code>{% endfor %}
+{%- when transect_map::objects::Shape::Placed %}{% for (what, on) in fact.pairs() %}<span class="board-placed">{% call links::object_link(what.text, what.href, "board-name") %}{% endcall %} <span class="board-on">on</span> {% call links::object_link(on.text, on.href, "board-name") %}{% endcall %}</span>{% endfor %}
+{%- when transect_map::objects::Shape::External %}{% for value in fact.values %}{% if let Some(href) = value.href %}<a class="board-name" href="{{ href }}" target="_blank" rel="noopener">{{ value.text }} ↗</a>{% endif %}{% endfor %}
+{%- when transect_map::objects::Shape::Template %}{% for value in fact.values %}<code class="board-literal board-unset">{{ value.text }}</code>{% endfor %}
+{%- when transect_map::objects::Shape::Names %}{% for value in fact.values %}{% call links::object_link(value.text, value.href, "board-name") %}{% endcall %}{% endfor %}
+{%- endmatch %}
+</span>
+{%- endmacro -%}

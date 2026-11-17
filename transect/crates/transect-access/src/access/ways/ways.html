@@ -1,0 +1,57 @@
+{% extends "frame/layout.html" %}
+{%- import "links/link.html" as links -%}
+{%- import "access/card.html" as access -%}
+{%- import "access/switcher.html" as switcher -%}
+{%- import "access/marks.html" as marks -%}
+
+{% block title %}ways in · access · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block masthead_access %} masthead-current{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- What may reach each port from outside the cluster: a row per way
+    in, with the three gates on the way to it, grouped in runs whose
+    headings name what their rows share. -#}
+<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="board-page ax-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+{% call switcher::switcher(true) %}{% endcall %}
+<h1 class="ax-title">What may reach each port from outside the cluster<span class="ax-count">{{ count() }} ways in</span></h1>
+<p class="ax-legend">A row is one way in: a host or an address, and a port. <span class="ax-key"><span class="ax-dot ax-dot-on"></span> the cluster puts this gate on the way</span> <span class="ax-key"><span class="ax-dot ax-dot-half"></span> on some of its routes or pods</span> <span class="ax-key"><span class="ax-dot ax-dot-declared"></span> stored text declares it</span> <span class="ax-key"><span class="ax-dot ax-dot-off"></span> it puts none.</span></p>
+<table class="ax-table ax-ways">
+<thead><tr><th class="ax-h-left">way in</th><th class="ax-port-col">port</th><th class="ax-gate-col">TLS</th><th class="ax-sign-col">sign-in</th><th class="ax-np-col">NetworkPolicy</th><th class="ax-h-left ax-through">reaches</th></tr></thead>
+<tbody>
+{%- for run in runs %}
+<tr class="ax-run"><th colspan="6" scope="rowgroup">{{ run.heading }}<span class="ax-count">{{ run.rows.len() }}</span></th></tr>
+{%- for row in run.rows %}
+<tr class="ax-row"><th scope="row">
+{%- if let Some(machine) = row.machine %}{% call links::object_link(machine.text, machine.href, "ax-name") %}{% endcall %}{% endif -%}
+{% call links::object_link(row.name, row.href, "ax-name") %}{% endcall %}<span class="ax-sub">
+{%- for via in row.via %}{% if !loop.first %}, {% endif %}{% call links::object_link(via.text, via.href, "") %}{% endcall %}{% endfor -%}
+{%- if let Some(how) = row.how %}{% if !row.via.is_empty() %} · {% endif %}{{ how }}{% endif -%}
+</span></th>
+<td class="ax-port"><span class="ax-port-list">{% for port in row.ports %}{% if !loop.first %} {% endif %}<span>{{ port }}</span>{% endfor %}</span></td>
+{%- for dot in row.gates %}<td class="ax-c">{% call marks::dot(dot) %}{% endcall %}</td>{% endfor %}
+<td class="ax-text">{% if let Some(reaches) = row.reaches %}{% call links::object_link(reaches.text, reaches.href, "") %}{% endcall %}{% endif %}
+{%- if let Some((count, names)) = row.more %} <span class="ax-quiet" title="{{ names }}">+{{ count }}</span>{% endif %}</td></tr>
+{%- endfor %}
+{%- endfor %}
+</tbody></table>
+{%- for line in entered %}
+<p class="ax-note">{% call links::sentence(line.clone()) %}{% endcall %}</p>
+{%- endfor %}
+{%- for line in callbacks %}
+<p class="ax-note">{% call links::sentence(line.clone()) %}{% endcall %}</p>
+{%- endfor %}
+{%- for line in unserved %}
+<p class="ax-note">{% call links::sentence(line.clone()) %}{% endcall %}</p>
+{%- endfor %}
+<p class="ax-note">{% call links::sentence(open.clone()) %}{% endcall %}</p>
+{%- if let Some(unread) = unread %}<p class="ax-note">{{ unread }}</p>{% endif %}
+</main>
+{% call access::card(no_gitops) %}{% endcall %}
+</div>
+{% endblock %}

@@ -1,0 +1,122 @@
+# A hub on its machine's network, in a namespace whose `NetworkPolicy`
+# selects every pod.  The policy limits the log shipper's callers and
+# not the hub's, because no `NetworkPolicy` applies to a pod on its
+# machine's network.  The hub holds a host port and a host path, and
+# its `host-access` annotation states why.
+#
+# A ledger store that nothing outside the cluster reaches.  Three
+# policies admit callers to its three ports: the storefront on its SQL
+# port, every pod of the operations namespace on its status port, and
+# the machines' addresses, where the hub calls from, on its metrics
+# port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {namespace: acme-ops, name: ops-from-ops}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress: [{from: [{podSelector: {}}]}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: acme-ops
+  name: device-hub
+  uid: device-hub
+  annotations: {transect.liken.sh/host-access: 'Finds the shop''s devices by multicast, so it shares its machine''s network.'}
+spec:
+  selector: {matchLabels: {app: device-hub}}
+  template:
+    metadata: {labels: {app: device-hub}}
+    spec:
+      hostNetwork: true
+      containers: [{name: main, image: example.test/device-hub-image:1, ports: [{name: http, containerPort: 8123, hostPort: 8123}], volumeMounts: [{name: devices, mountPath: /dev/serial}]}]
+      volumes: [{name: devices, hostPath: {path: /dev/serial}}]
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1}
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  namespace: acme-ops
+  name: device-hub-rs
+  uid: device-hub-rs
+  ownerReferences: [{apiVersion: apps/v1, kind: Deployment, name: device-hub, uid: device-hub, controller: true}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ops
+  name: device-hub-rs-one
+  uid: device-hub-rs-one
+  labels: {app: device-hub}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: device-hub-rs, uid: device-hub-rs, controller: true}]
+spec:
+  nodeName: node-alpha
+  hostNetwork: true
+  containers: [{name: main, image: example.test/device-hub-image:1, ports: [{name: http, containerPort: 8123, hostPort: 8123}], volumeMounts: [{name: devices, mountPath: /dev/serial}]}]
+  volumes: [{name: devices, hostPath: {path: /dev/serial}}]
+status:
+  phase: Running
+  podIPs: [{ip: 192.168.0.1}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/device-hub-image:1, imageID: '', state: {running: {}}}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {namespace: acme-ledger, name: ledger-store, uid: ledger-store}
+spec:
+  selector: {matchLabels: {app: ledger-store}}
+  serviceName: ledger-store
+  template:
+    metadata: {labels: {app: ledger-store}}
+    spec:
+      serviceAccountName: ledger-db
+      containers: [{name: main, image: example.test/ledger-store-image:1, ports: [{name: sql, containerPort: 5432}, {name: status, containerPort: 8000}, {name: metrics, containerPort: 9187}], envFrom: [{secretRef: {name: ledger-store-login}}]}]
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ledger
+  name: ledger-store-0
+  uid: ledger-store-0
+  labels: {app: ledger-store}
+  ownerReferences: [{apiVersion: apps/v1, kind: StatefulSet, name: ledger-store, uid: ledger-store, controller: true}]
+spec:
+  nodeName: node-beta
+  serviceAccountName: ledger-db
+  containers: [{name: main, image: example.test/ledger-store-image:1, ports: [{name: sql, containerPort: 5432}, {name: status, containerPort: 8000}, {name: metrics, containerPort: 9187}], envFrom: [{secretRef: {name: ledger-store-login}}]}]
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.36}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/ledger-store-image:1, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-ledger, name: ledger-store-sql}
+spec: {selector: {app: ledger-store}, ports: [{port: 5432, targetPort: sql}], clusterIP: 10.96.0.55}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {namespace: acme-ledger, name: store-from-shop}
+spec:
+  podSelector: {matchLabels: {app: ledger-store}}
+  policyTypes: [Ingress]
+  ingress: [{from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: acme-shop}}, podSelector: {matchLabels: {app: storefront}}}], ports: [{port: 5432}]}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {namespace: acme-ledger, name: store-from-ops}
+spec:
+  podSelector: {matchLabels: {app: ledger-store}}
+  policyTypes: [Ingress]
+  ingress: [{from: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: acme-ops}}}], ports: [{port: status}]}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {namespace: acme-ledger, name: store-metrics-by-address}
+spec:
+  podSelector: {matchLabels: {app: ledger-store}}
+  policyTypes: [Ingress]
+  ingress: [{from: [{ipBlock: {cidr: 192.168.0.0/24}}], ports: [{port: 9187}]}]

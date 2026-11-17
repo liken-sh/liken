@@ -1,0 +1,40 @@
+device-hub · acme-ops · transect
+transect
+cluster / platform / acme-ops / device-hub
+access vulnerabilities kinds
+Search /
+esc
+acme-ops device-hub edge-proxy log-shipper metrics-relay sql-listener overview section logs access
+Edges
+Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+Pods
+device-hub-rs-one node-alpha · 0 restarts
+mem no reading · no request · no limit
+cpu no reading · no request · no limit
+No memory or CPU request or limit, so the figures show what each uses.
+Runs
+image
+repository
+version
+commit
+rolled
+example.test/device-hub-image:1
+not read
+none
+none
+—
+Guards ✓ RollingUpdate no readiness probe no CPU limit
+Deployment device-hub 1 of 1 ready
+1 way in · access
+If it goes down
+Nothing in the cluster depends on it.
+It is on its machine's network, where no NetworkPolicy applies, so any pod may call it at its machine's address.
+no GitOps applier's label or annotation is on it

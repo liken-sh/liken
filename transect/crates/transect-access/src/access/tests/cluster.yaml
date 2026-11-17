@@ -1,0 +1,344 @@
+kind: ClusterRole
+metadata: {name: cluster-admin, labels: {kubernetes.io/bootstrapping: rbac-defaults}}
+rules: [{apiGroups: ['*'], resources: ['*'], verbs: ['*']}]
+---
+kind: ClusterRoleBinding
+metadata: {name: admins}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}
+subjects: [{kind: ServiceAccount, namespace: ops, name: admin}, {kind: Group, name: system:masters}]
+---
+kind: Role
+metadata: {namespace: ops, name: deployer}
+rules: [{apiGroups: [apps], resources: [deployments], verbs: [get, patch]}]
+---
+kind: RoleBinding
+metadata: {namespace: ops, name: deployer}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: deployer}
+subjects: [{kind: ServiceAccount, name: deployer}]
+---
+kind: ClusterRole
+metadata: {name: tree-writer}
+rules: [{apiGroups: [apply.example.test], resources: [trees, trees/status], verbs: [get, list, watch, patch]}]
+---
+kind: ClusterRoleBinding
+metadata: {name: applier-admin}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-admin}
+subjects: [{kind: ServiceAccount, namespace: ops, name: applier}]
+---
+kind: ClusterRole
+metadata: {name: tree-editor}
+rules: [{apiGroups: [apply.example.test], resources: [trees], verbs: [patch]}]
+---
+kind: RoleBinding
+metadata: {namespace: tools, name: editor}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: tree-editor}
+subjects: [{kind: ServiceAccount, name: editor}]
+---
+kind: Role
+metadata: {namespace: tools, name: named-secrets}
+rules: [{apiGroups: [''], resources: [secrets], verbs: [get], resourceNames: [api-token]}]
+---
+kind: RoleBinding
+metadata: {namespace: tools, name: reader}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: named-secrets}
+subjects: [{kind: ServiceAccount, name: reader}]
+---
+kind: Role
+metadata: {namespace: tools, name: binder}
+rules:
+- {apiGroups: [rbac.authorization.k8s.io], resources: [roles], verbs: [bind]}
+- {apiGroups: [rbac.authorization.k8s.io], resources: [rolebindings], verbs: [create]}
+---
+kind: RoleBinding
+metadata: {namespace: tools, name: binder}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: binder}
+subjects: [{kind: ServiceAccount, name: binder}]
+---
+kind: Role
+metadata: {namespace: tools, name: every-pod-subresource}
+rules: [{apiGroups: [''], resources: ['pods/*'], verbs: ['*']}]
+---
+kind: Role
+metadata: {namespace: tools, name: secrets}
+rules: [{apiGroups: [''], resources: [secrets], verbs: [list]}]
+---
+kind: RoleBinding
+metadata: {namespace: tools, name: wild}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: every-pod-subresource}
+subjects: [{kind: ServiceAccount, name: wild}]
+---
+kind: RoleBinding
+metadata: {namespace: tools, name: wild-as-a-user}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: secrets}
+subjects: [{kind: User, name: 'system:serviceaccount:tools:wild'}]
+---
+kind: Role
+metadata: {namespace: shop, name: exec}
+rules: [{apiGroups: [''], resources: [pods/exec], verbs: [create]}]
+---
+kind: RoleBinding
+metadata: {namespace: shop, name: viewer}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: exec}
+subjects: [{kind: ServiceAccount, name: viewer}]
+---
+kind: Role
+metadata: {namespace: ledger, name: exec}
+rules: [{apiGroups: [''], resources: [pods/exec], verbs: [create]}]
+---
+kind: RoleBinding
+metadata: {namespace: ledger, name: locked}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: exec}
+subjects: [{kind: ServiceAccount, name: locked}]
+---
+kind: Role
+metadata: {namespace: ledger, name: secret-reader}
+rules: [{apiGroups: [''], resources: [secrets], verbs: [get, list]}]
+---
+kind: RoleBinding
+metadata: {namespace: ledger, name: ledger-accounts}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: secret-reader}
+subjects: [{kind: Group, name: 'system:serviceaccounts:ledger'}]
+---
+kind: ClusterRole
+metadata: {name: editor}
+aggregationRule: {clusterRoleSelectors: [{matchLabels: {example.test/aggregate-to-editor: 'true'}}]}
+rules: [{apiGroups: [''], resources: [pods], verbs: [create, delete]}]
+---
+kind: RoleBinding
+metadata: {namespace: shop, name: alice}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: editor}
+subjects: [{kind: User, name: alice}]
+---
+kind: ClusterRole
+metadata: {name: changer}
+rules: [{apiGroups: [apps], resources: [statefulsets], verbs: [update]}]
+---
+kind: RoleBinding
+metadata: {namespace: ledger, name: web}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: changer}
+subjects: [{kind: ServiceAccount, namespace: shop, name: web}]
+---
+kind: ClusterRole
+metadata: {name: runner}
+rules: [{apiGroups: [batch], resources: [jobs], verbs: [create]}]
+---
+kind: RoleBinding
+metadata: {namespace: shop, name: db}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: runner}
+subjects: [{kind: ServiceAccount, namespace: ledger, name: db}]
+---
+kind: ClusterRole
+metadata: {name: every-secret}
+rules: [{apiGroups: [''], resources: [secrets], verbs: [watch]}]
+---
+kind: ClusterRoleBinding
+metadata: {name: db-secrets}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: every-secret}
+subjects: [{kind: ServiceAccount, namespace: ledger, name: db}]
+---
+kind: RoleBinding
+metadata: {namespace: ledger, name: bob}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: tree-editor}
+subjects: [{kind: User, name: bob}]
+---
+kind: Pod
+metadata: {namespace: shop, name: web-1}
+spec:
+  serviceAccountName: web
+  nodeName: machine-1
+  containers: [{name: main}]
+  volumes:
+  - {name: kube-api-access, projected: {sources: [{serviceAccountToken: {path: token}}]}}
+  - {name: tls, secret: {secretName: web-tls}}
+---
+kind: Pod
+metadata: {namespace: ledger, name: db-0}
+spec:
+  serviceAccountName: db
+  automountServiceAccountToken: false
+  containers: [{name: main, envFrom: [{secretRef: {name: db-login}}]}]
+---
+kind: ClusterRole
+metadata: {name: kubelet-reader}
+rules: [{apiGroups: [''], resources: [nodes, nodes/proxy], verbs: [get, list]}]
+---
+kind: ClusterRoleBinding
+metadata: {name: scraper}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: kubelet-reader}
+subjects: [{kind: ServiceAccount, namespace: watch, name: scraper}]
+---
+kind: RoleBinding
+metadata: {namespace: tools, name: node-reader}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: kubelet-reader}
+subjects: [{kind: ServiceAccount, name: node-reader}]
+---
+kind: Role
+metadata: {namespace: shop, name: pod-patcher}
+rules: [{apiGroups: [''], resources: [pods], verbs: [get, patch]}]
+---
+kind: RoleBinding
+metadata: {namespace: shop, name: labeller}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: pod-patcher}
+subjects: [{kind: ServiceAccount, name: labeller}]
+---
+kind: Role
+metadata: {namespace: shop, name: token-maker}
+rules: [{apiGroups: [''], resources: [serviceaccounts/token], verbs: [create]}]
+---
+kind: RoleBinding
+metadata: {namespace: shop, name: minter}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: token-maker}
+subjects: [{kind: ServiceAccount, name: minter}]
+---
+kind: Role
+metadata: {namespace: shop, name: web-token}
+rules: [{apiGroups: [''], resources: [serviceaccounts/token], verbs: [create], resourceNames: [viewer]}]
+---
+kind: RoleBinding
+metadata: {namespace: shop, name: one-token}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: web-token}
+subjects: [{kind: ServiceAccount, name: one-token}]
+---
+kind: ClusterRole
+metadata: {name: impersonator}
+rules: [{apiGroups: [''], resources: [users, groups, serviceaccounts], verbs: [impersonate]}]
+---
+kind: ClusterRoleBinding
+metadata: {name: carol}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: impersonator}
+subjects: [{kind: User, name: carol}]
+---
+kind: RoleBinding
+metadata: {namespace: ledger, name: dave}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: impersonator}
+subjects: [{kind: User, name: dave}]
+---
+kind: ClusterRole
+metadata: {name: group-impersonator}
+rules: [{apiGroups: [''], resources: [groups], verbs: [impersonate]}]
+---
+kind: ClusterRoleBinding
+metadata: {name: erin}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: group-impersonator}
+subjects: [{kind: User, name: erin}]
+---
+kind: Role
+metadata: {namespace: granting, name: clusterrole-binder}
+rules:
+- {apiGroups: [rbac.authorization.k8s.io], resources: [clusterroles], verbs: [bind]}
+- {apiGroups: [rbac.authorization.k8s.io], resources: [rolebindings], verbs: [create]}
+---
+kind: RoleBinding
+metadata: {namespace: granting, name: granter}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: clusterrole-binder}
+subjects: [{kind: ServiceAccount, name: granter}]
+---
+kind: ClusterRole
+metadata: {name: cluster-binder}
+rules:
+- {apiGroups: [rbac.authorization.k8s.io], resources: [clusterroles], verbs: [bind]}
+- {apiGroups: [rbac.authorization.k8s.io], resources: [clusterrolebindings], verbs: [create]}
+---
+kind: RoleBinding
+metadata: {namespace: rewriting, name: cluster-binder}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-binder}
+subjects: [{kind: ServiceAccount, name: cluster-binder}]
+---
+kind: ClusterRoleBinding
+metadata: {name: frank}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: cluster-binder}
+subjects: [{kind: User, name: frank}]
+---
+kind: Role
+metadata: {namespace: rewriting, name: self-editor}
+rules:
+- {apiGroups: [rbac.authorization.k8s.io], resources: [roles], verbs: [escalate, patch], resourceNames: [self-editor]}
+- {apiGroups: [''], resources: [configmaps], verbs: [get]}
+---
+kind: RoleBinding
+metadata: {namespace: rewriting, name: escalator}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: self-editor}
+subjects: [{kind: ServiceAccount, name: escalator}]
+---
+kind: Role
+metadata: {namespace: rewriting, name: escalate-and-bind-nothing}
+rules:
+- {apiGroups: [rbac.authorization.k8s.io], resources: [roles], verbs: [escalate]}
+- {apiGroups: [rbac.authorization.k8s.io], resources: [rolebindings], verbs: [create]}
+---
+kind: RoleBinding
+metadata: {namespace: rewriting, name: escalate-only}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: escalate-and-bind-nothing}
+subjects: [{kind: ServiceAccount, name: escalate-only}]
+---
+kind: Role
+metadata: {namespace: shop, name: exec-web-1}
+rules: [{apiGroups: [''], resources: [pods/exec], verbs: [create], resourceNames: [web-1]}]
+---
+kind: RoleBinding
+metadata: {namespace: shop, name: peek}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: exec-web-1}
+subjects: [{kind: ServiceAccount, name: peek}]
+---
+kind: Role
+metadata: {namespace: shop, name: exec-another}
+rules: [{apiGroups: [''], resources: [pods/exec], verbs: [create], resourceNames: [web-2]}]
+---
+kind: RoleBinding
+metadata: {namespace: shop, name: peek-elsewhere}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: exec-another}
+subjects: [{kind: ServiceAccount, name: peek-elsewhere}]
+---
+kind: ClusterRole
+metadata: {name: one-kubelet}
+rules: [{apiGroups: [''], resources: [nodes/proxy], verbs: [get], resourceNames: [machine-1]}]
+---
+kind: ClusterRoleBinding
+metadata: {name: gina}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: one-kubelet}
+subjects: [{kind: User, name: gina}]
+---
+kind: Role
+metadata: {namespace: sources, name: repo-pusher}
+rules: [{apiGroups: [apply.example.test], resources: [repos], verbs: [update]}]
+---
+kind: RoleBinding
+metadata: {namespace: sources, name: pusher}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: repo-pusher}
+subjects: [{kind: ServiceAccount, name: pusher}]
+---
+kind: Role
+metadata: {namespace: pinned, name: one-tree}
+rules: [{apiGroups: [apply.example.test], resources: [trees], verbs: [patch], resourceNames: [pinned]}]
+---
+kind: RoleBinding
+metadata: {namespace: pinned, name: pinner}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: one-tree}
+subjects: [{kind: ServiceAccount, name: pinner}]
+---
+kind: Role
+metadata: {namespace: pinned, name: another-tree}
+rules: [{apiGroups: [apply.example.test], resources: [trees], verbs: [patch], resourceNames: [elsewhere]}]
+---
+kind: RoleBinding
+metadata: {namespace: pinned, name: misser}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: another-tree}
+subjects: [{kind: ServiceAccount, name: misser}]
+---
+kind: Role
+metadata: {namespace: naming, name: tree-writer}
+rules: [{apiGroups: [apply.example.test], resources: [trees], verbs: [patch]}]
+---
+kind: RoleBinding
+metadata: {namespace: naming, name: writer}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: tree-writer}
+subjects: [{kind: ServiceAccount, name: writer}]
+---
+kind: RoleBinding
+metadata: {namespace: naming, name: other}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: exec-here}
+subjects: [{kind: ServiceAccount, name: other}]
+---
+kind: Role
+metadata: {namespace: naming, name: exec-here}
+rules: [{apiGroups: [''], resources: [pods/exec], verbs: [create]}]

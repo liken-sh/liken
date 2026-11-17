@@ -1,0 +1,142 @@
+{% extends "frame/layout.html" %}
+{% import "resources/off.html" as off %}
+{% import "map/bar.html" as bar %}
+{% import "images/origin.html" as origin %}
+{% import "links/link.html" as links %}
+{% import "frame/tabs.html" as frame %}
+
+{% block title %}{{ name }} · {{ namespace }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- The row, the containers, and the placement swap as one block.  A pod
+    in the row, or the workload before them, links to its own page,
+    which swaps the body and pushes its URL. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="pod-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="Pods of {% if let Some(workload) = workload %}{{ workload.name }}{% else %}{{ name }}{% endif %}">
+{%- if let Some(workload) = workload %}
+{%- if let Some(href) = workload.href %}
+<a class="switcher-namespace" href="{{ href }}" hx-get="{{ href }}">{{ workload.name }}</a>
+{%- else %}
+<span class="switcher-namespace">{{ workload.name }}</span>
+{%- endif %}
+{%- else %}
+<a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
+{%- endif %}
+{%- for switch in switches %}
+<a class="{{ switch.class() }}" href="{{ switch.href }}" hx-get="{{ switch.href }}"{% if switch.current %} aria-current="page"{% endif %}>{{ switch.label }}</a>
+{%- endfor %}
+{% call frame::tabs(tabs()) %}{% endcall %}
+</nav>
+{% include "map/edge_row.html" %}
+<section class="pod-inside" aria-label="Inside the pod">
+{%- for block in containers %}
+<div class="pod-block">
+<div class="column-label">{{ role(block) }}</div>
+<div class="pod-block-name">{{ block.name }}</div>
+<div class="pod-runs">
+{%- if let Some(image) = block.image %}<div class="pod-image">{{ image }}</div>{% endif %}
+{%- if let Some(found) = block.origin %}{% call origin::origin(found, true) %}{% endcall %}{% endif %}
+{%- if let Some(command) = command(block) %}<div class="pod-command" title="{{ command }}">{{ command }}</div>{% endif %}
+{%- if let Some(ports) = ports(block) %}<div>{{ ports }}</div>{% endif %}
+</div>
+{%- if !block.finished() %}
+<div class="pod-meters">
+{% call bar::meter("mem", block.memory, memory_title(block)) %}{% endcall %}
+{%- let (used, allowed) = memory_figures(block) %}
+<div class="pod-figures"><span>{{ used }}</span><span>{{ allowed }}</span></div>
+{% call bar::meter("cpu", block.cpu, cpu_title(block)) %}{% endcall %}
+{%- let (used, allowed) = cpu_figures(block) %}
+<div class="pod-figures"><span>{{ used }}</span><span>{{ allowed }}</span></div>
+</div>
+{%- endif %}
+<div class="pod-chips">
+{%- for chip in chips(block) %}
+<span class="{{ chip.class() }}">{{ chip.text }}</span>
+{%- endfor %}
+</div>
+</div>
+{%- endfor %}
+{%- if !mounts.is_empty() %}
+<div class="pod-block">
+<div class="column-label">Mounts</div>
+<div class="pod-list">
+{%- for row in mounts %}
+<div class="pod-item">
+<div class="pod-item-line"><span class="pod-item-name">{{ row.mount.path }}</span><span class="pod-item-faint">
+{%- if let Some(claim) = row.claim %}{% call links::object_link(claim.text, claim.href, "") %}{% endcall %} · {% if let Some((_, backend)) = row.mount.claim() %}{{ backend }}{% endif %}
+{%- else %}{{ row.mount.what() }}{% endif %}</span></div>
+{%- if let Some(details) = row.mount.details() %}<div class="pod-item-faint">{{ details }}</div>{% endif %}
+{%- if let Some(shared) = row.shared %}<div class="pod-item-shared">{{ shared }}</div>{% endif %}
+</div>
+{%- endfor %}
+</div>
+</div>
+{%- endif %}
+{%- if !environment.is_empty() %}
+{#- Names and counts only.  The view model contains no value, so no
+    value can reach the page. -#}
+<div class="pod-block">
+<div class="column-label">{{ environment.heading() }}</div>
+<div class="pod-list">
+{%- for source in environment.sources %}
+<div class="pod-item pod-item-line"{% if let Some(title) = source_title(source) %} title="{{ title }}"{% endif %}><span class="pod-item-name"><span class="pod-item-faint">{{ source.kind_text() }}</span> {{ source.name }}</span><span class="pod-item-faint">{{ source.keys_text() }}</span></div>
+{%- endfor %}
+{%- if let Some(plain) = environment.plain_text() %}<div class="pod-item pod-item-dashed">{{ plain }}</div>{% endif %}
+{%- if let Some(fields) = environment.fields_text() %}<div class="pod-item pod-item-dashed">{{ fields }}</div>{% endif %}
+</div>
+<div class="pod-note">{{ names_only() }}</div>
+</div>
+{%- endif %}
+</section>
+{%- if let Some(note) = usage_note %}
+<div class="tiles-legend">{% call off::line(note) %}{% endcall %}</div>
+{%- endif %}
+<section class="placement" aria-label="Placement">
+<span class="row-label">Runs on</span>
+{%- if let Some(machine) = placement.machine %}
+<span class="placement-machine"><b>{% call links::object_link(machine.name, Some(transect_graph::links::machine(machine.name)), "") %}{% endcall %}</b>{% if let Some(line) = machine_line() %} · {{ line }}{% endif %}</span>
+{%- else %}
+<span class="placement-machine">not scheduled yet</span>
+{%- endif %}
+<span class="placement-line">{{ placement_line() }}</span>
+{%- if let Some(holds) = holds_line() %}
+<span class="placement-holds" title="{{ holds_title() }}">{{ holds }}</span>
+{%- endif %}
+</section>
+{#- The last few log lines, read when the page loaded and kept for
+    pushes, as a preview of the logs lens.  Log text is untrusted, so it
+    is escaped like every other value, and no filter here marks it safe. -#}
+{%- if let Some(tails) = logs %}
+<section class="pod-logs" aria-label="Last log lines">
+<div class="pod-logs-head"><span class="row-label">Logs</span>
+{%- if tails.forbidden %}<span class="pod-logs-note">{{ logs_forbidden() }}</span>
+{%- else %}<span class="pod-logs-note">{{ preview_note() }}</span>{% endif %}
+<a class="pod-logs-all" href="{{ logs_href() }}" hx-get="{{ logs_href() }}">All lines →</a></div>
+{%- if !tails.forbidden %}
+{%- for tail in tails.containers %}
+{%- if tails.containers.len() > 1 %}<div class="log-name">{{ tail.container }}</div>{% endif %}
+{%- match tail.read %}
+{%- when logs::Read::Lines(lines) %}
+<div class="log-lines">
+{%- for line in preview(lines) %}
+<div class="{{ line.class() }}"{% if let Some(at) = line.time_text() %} title="{{ at }}"{% endif %}>{{ line.text }}
+{%- for tag in line.tags %} <span class="{{ tag.severity.tag_class() }}" title="{{ tag.meaning }}">{{ tag.pattern }}</span>{% endfor %}</div>
+{%- endfor %}
+</div>
+{%- when logs::Read::Empty %}
+<div class="log-quiet">{{ logs_empty() }}</div>
+{%- when logs::Read::Failed(message) %}
+<div class="log-quiet">{{ message }}</div>
+{%- endmatch %}
+{%- endfor %}
+{%- endif %}
+</section>
+{%- endif %}
+</main>
+</div>
+{% endblock %}

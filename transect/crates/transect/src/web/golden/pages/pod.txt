@@ -1,0 +1,31 @@
+storefront-rs-one · acme-shop · transect
+transect
+cluster / apps / acme-shop / storefront / storefront-rs-one
+access vulnerabilities kinds
+Search /
+esc
+storefront storefront-rs-one · node-alpha storefront-rs-two · node-beta overview logs
+Edges
+Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+Container
+main
+example.test/storefront-image:1
+mem
+256Mi no request · no limit
+cpu
+250m no request · no limit
+0 restarts no probes
+Runs on node-alpha · worker · 4 cores 10 pods here · not started
+Logs the last 5 lines of each container All lines →
+listening on :8080
+[warning] cart cache is slow to answer
+[error] payment gateway refused the charge
+request served in 12ms

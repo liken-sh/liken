@@ -1,0 +1,40 @@
+[package]
+name = "transect"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+transect-graph.workspace = true
+transect-resources.workspace = true
+transect-cluster.workspace = true
+transect-observe.workspace = true
+transect-ground.workspace = true
+transect-supply.workspace = true
+transect-network.workspace = true
+transect-map.workspace = true
+transect-access.workspace = true
+anyhow.workspace = true
+askama.workspace = true
+axum.workspace = true
+clap.workspace = true
+futures.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tikv-jemallocator.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+transect-graph = { workspace = true, features = ["fixtures"] }
+transect-resources = { workspace = true, features = ["fixtures"] }
+transect-observe = { workspace = true, features = ["fixtures"] }
+transect-map = { workspace = true, features = ["fixtures"] }
+http-body-util.workspace = true
+rstest.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+tower.workspace = true

@@ -1,0 +1,40 @@
+[package]
+name = "transect-supply"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+transect-frame.workspace = true
+transect-graph.workspace = true
+transect-resources.workspace = true
+transect-cluster.workspace = true
+transect-observe.workspace = true
+transect-ground.workspace = true
+anyhow.workspace = true
+askama.workspace = true
+base64.workspace = true
+http.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+reqwest.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[features]
+# The test builders other crates' tests read.
+fixtures = ["transect-resources/fixtures"]
+
+[dev-dependencies]
+transect-graph = { workspace = true, features = ["fixtures"] }
+transect-resources = { workspace = true, features = ["fixtures"] }
+transect-cluster = { workspace = true, features = ["fixtures"] }
+transect-observe = { workspace = true, features = ["fixtures"] }
+rstest.workspace = true
+
+[lib]
+# The doc comments show YAML and paths, not examples to run.
+doctest = false

@@ -1,0 +1,36 @@
+vulnerabilities · transect
+transect
+cluster / vulnerabilities
+access vulnerabilities kinds
+Search /
+esc
+every severity critical high unknown
+image-scanner reports 4 finding ids in the images 2 workloads run now.
+Findings
+id
+severity
+score
+package fixed in
+run by
+CVE-2026-0001 ↗ An overflow in libexample lets a caller run code
+CRITICAL
+9.8
+libexample 1.2.4
+libexample-dev 1.2.4
+Deployment acme-shop/listings , Deployment acme-shop/storefront
+CVE-2026-0002 ↗ libother reads past the end of a buffer
+HIGH
+7.5
+libother —
+Deployment acme-shop/storefront
+CVE-2026-0003 ↗
+UNKNOWN
+7.1
+libother 2.0.1
+Deployment acme-shop/storefront
+GHSA-ex12-ab34-cd56
+UNKNOWN
+—
+indexer-lib —
+Deployment acme-shop/listings
+1 report names an image digest no pod runs now, and is left out. Each workload's vulnerabilities tab shows its own.

@@ -1,0 +1,157 @@
+//! The map's elevations: their view models, templates, and styles.
+
+mod bar;
+mod cluster;
+mod edge_row;
+mod gitops;
+mod gone;
+pub mod ground;
+pub mod known;
+mod machine;
+mod namespace;
+pub mod pages;
+mod pod;
+pub mod relation;
+mod section;
+mod sidebar;
+pub mod vulnerabilities;
+mod workload;
+
+use askama::Template;
+
+pub use cluster::{ClusterMap, Selected, UNSORTED};
+pub use edge_row::{EdgeRow, ON_THE_MAP};
+pub use gitops::GitOpsPage;
+pub use gone::{Above, GonePage, Named as Gone};
+pub use known::{Board, Entry as KnownEntry, KnownPage, chips as known_chips, every_chip};
+pub use machine::{
+    DevicesRead, Driver, MachinePage, OwnLogs, Reads as MachineReads, Underneath, VolumeLine,
+    by_driver, legend as machine_legend, runs_here, switches as machine_switches,
+};
+pub use namespace::{Contents, NamespacePage};
+pub use pod::{Contents as PodContents, PodPage};
+pub use section::{Contents as SectionContents, SectionPage, drawing as section_drawing};
+pub use sidebar::Sidebar;
+use transect_frame::frame::crumbs::Crumb;
+pub use workload::{
+    Contents as WorkloadContents, WorkloadPage, card as workload_card, controller, find, has_page,
+    known_through,
+};
+
+use crate::cards::NamespaceCard;
+use transect_ground::loss;
+use transect_ground::machines::{self, Machine};
+use transect_ground::storage::Ground;
+
+/// The cluster elevation as a whole page.  Its `main` block holds the map
+/// and the sidebar, and renders on its own as the fragment that a pushed
+/// update replaces.
+#[derive(Template)]
+#[template(path = "map/cluster.html", blocks = ["main"])]
+pub struct ClusterPage {
+    pub map: ClusterMap,
+    /// The selected namespace.  The crumb names it, and the event stream's
+    /// URL includes it.
+    pub selected: Option<Selected>,
+    pub machines: Vec<Machine>,
+    /// Why the machines band draws no used bars, when it draws none.
+    pub usage_note: Option<transect_resources::resources::OffLine>,
+    /// Why no strip names a device, when the holds edge kind is turned
+    /// off.
+    pub devices_note: Option<&'static str>,
+    pub ground: Ground,
+    pub sidebar: Sidebar,
+    /// The selected namespace's card, which the page shows in place of the
+    /// sidebar.
+    pub card: Option<NamespaceCard>,
+    /// What the loss of a set of machines takes down.  The page shows it in
+    /// place of the sidebar when it shows a loss.
+    pub loss: Option<loss::Sidebar>,
+    /// The main column's row of edge kinds.
+    pub edge_row: EdgeRow,
+}
+
+impl ClusterPage {
+    /// The machines band's groups, in the order it draws them.
+    pub fn machine_groups(&self) -> Vec<machines::Group<'_>> {
+        machines::groups(&self.machines)
+    }
+
+    /// The crumb: the cluster alone, or with a namespace selected, the
+    /// cluster and the layer as links and the namespace as the current
+    /// place.  The cluster always links home, even on the map itself, so
+    /// it clears a selection.  The layer links to the map scrolled to its
+    /// band.
+    pub fn crumbs(&self) -> Vec<Crumb> {
+        match (&self.selected, &self.loss) {
+            (Some(selected), Some(loss)) if !loss.all_real() => vec![
+                Crumb::home(),
+                Crumb::link(&loss.crumb(), format!("/?lose={}", loss.param())),
+                Crumb::current_name(&selected.namespace),
+            ],
+            (Some(selected), _) => vec![
+                Crumb::home(),
+                Crumb::link(&selected.layer, format!("/#{}", selected.layer)),
+                Crumb::current_name(&selected.namespace),
+            ],
+            (None, Some(loss)) if !loss.all_real() => {
+                vec![Crumb::home(), Crumb::current(&loss.crumb())]
+            }
+            (None, _) => vec![Crumb::home()],
+        }
+    }
+
+    /// Whether the card lists the namespace's workloads as chips.  It does,
+    /// because the map's parcel shows only their count.
+    pub fn card_workloads(&self) -> bool {
+        true
+    }
+
+    /// Whether the card leads to the access of the selected namespace.
+    pub fn card_lens(&self) -> bool {
+        true
+    }
+
+    /// Where the card's name leads: the selected namespace's page.
+    pub fn card_link(&self) -> Option<String> {
+        self.selected
+            .as_ref()
+            .map(|selected| format!("/namespaces/{}", selected.namespace))
+    }
+
+    /// The URL of the event stream for the view this page shows.  It comes
+    /// from the selection the map found and the machines the cluster has,
+    /// not the raw query, so a link to a namespace or a machine that is
+    /// gone streams the plain cluster.
+    pub fn events_url(&self) -> String {
+        match (&self.selected, &self.loss) {
+            (Some(selected), Some(loss)) if !loss.all_real() => format!(
+                "/events/?lose={}&select={}",
+                loss.param(),
+                selected.namespace
+            ),
+            (Some(selected), _) => format!("/events/?select={}", selected.namespace),
+            (None, Some(loss)) if !loss.all_real() => {
+                format!("/events/?lose={}", loss.param())
+            }
+            (None, _) => "/events/".into(),
+        }
+    }
+
+    /// Whether the page shows something other than `/`, so Escape and a
+    /// click on empty map go back to it.  A loss that is all real is what
+    /// `/` shows.
+    pub fn away(&self) -> bool {
+        let asked = self.loss.as_ref().is_some_and(|loss| !loss.all_real());
+        self.selected.is_some() || asked
+    }
+
+    /// Where Escape goes: back to the loss from a namespace selected in
+    /// it, and otherwise to `/`.
+    pub fn away_href(&self) -> String {
+        match (&self.selected, &self.loss) {
+            (Some(_), Some(loss)) if !loss.all_real() => format!("/?lose={}", loss.param()),
+            _ => "/".into(),
+        }
+    }
+}

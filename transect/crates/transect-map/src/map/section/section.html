@@ -1,0 +1,61 @@
+{% extends "frame/layout.html" %}
+
+{% block title %}section · {{ name }} · {{ namespace }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% import "edges/provenance.html" as provenance %}
+{% import "links/link.html" as links %}
+{% import "frame/tabs.html" as frame %}
+{% import "map/section/boxes.html" as boxes %}
+
+{% block main %}
+{#- The section view is swapped as one block, with its rows, boxes, lines,
+    and the card beside them, so a box is never drawn where its row was
+    before and a line never points to where a box was.  Every position
+    is computed on the server and written inline, and nothing in the
+    page measures. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="section-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="{{ name }}">
+<a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
+<a class="switch switch-current" href="{{ workload_path }}" hx-get="{{ workload_path }}">{{ name }}</a>
+{% call frame::tabs(tabs()) %}{% endcall %}
+</nav>
+<p class="section-subtitle">{{ subtitle() }}</p>
+{#- The legend explains what the lines mean, and the edge kinds beside
+    it select which lines are drawn. -#}
+<div class="section-key">
+<p class="section-legend">{{ legend() }}</p>
+{% include "map/edge_row.html" %}
+</div>
+<div class="section-scroll">
+<section class="section-drawing" style="width: {{ width }}px; height: {{ height }}px; --section-width: {{ width }}px" aria-label="The section through {{ name }}">
+{%- for row in rows %}
+<div class="{{ row.band.class() }}{% if loop.last %} section-row-last{% endif %}" style="{{ row.style() }}"><span class="section-row-label">{{ row.band.label() }}</span></div>
+{%- endfor %}
+<div class="section-spine" style="left: {{ spine_left() }}px; width: {{ spine_width() }}px" aria-hidden="true"></div>
+{#- The lines are drawn under the boxes, in one SVG at the section view's
+    own size, so a line's end and the box's edge share coordinates. -#}
+<svg class="section-lines" width="{{ width }}" height="{{ height }}" viewBox="0 0 {{ width }} {{ height }}" aria-hidden="true">
+<defs><marker id="section-arrow" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path class="section-arrow" d="M0 0 L4 2 L0 4 Z"/></marker></defs>
+{%- for line in lines %}
+<path class="{{ line.style.class() }}" d="{{ line.d }}" marker-end="url(#section-arrow)">{% if let Some(title) = line.title %}<title>{{ title }}</title>{% endif %}</path>
+{%- endfor %}
+{%- for label in labels %}
+<text class="{{ label.anchor.class() }}" x="{{ label.x }}" y="{{ label.y }}">{{ label.text }}</text>
+{%- endfor %}
+</svg>
+{%- for row in rows %}
+{%- for (boxed, rect) in row.boxes %}
+{% call boxes::boxed(boxed, box_class(boxed), place(rect)) %}{% endcall %}
+{%- endfor %}
+{%- endfor %}
+</section>
+</div>
+</main>
+{% include "cards/workload.html" %}
+</div>
+{% endblock %}

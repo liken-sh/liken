@@ -1,0 +1,65 @@
+/* The Runs box on a workload's page: a table with one row for each
+   image that the workload runs, on the same row color as the guards.
+   Names and revisions are monospace, as names are everywhere.  A long
+   image name wraps at any character instead of widening the table. */
+
+.runs {
+  padding: 12px 14px;
+  background: var(--row);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.runs-table {
+  flex: 1;
+  min-width: 0;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.runs-table th {
+  padding: 0 12px 4px 0;
+  text-align: left;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.runs-table td {
+  padding: 3px 12px 3px 0;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+/* A commit's short hash and an age are short and are useful only when
+   whole, so they never wrap.  The image and repository columns wrap
+   instead to make room. */
+.runs-table .runs-whole {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.runs-image { color: var(--ink); }
+
+.runs-faint { color: var(--ink-faint); }
+
+.runs-table a { text-decoration: none; }
+
+.runs-table a:hover { text-decoration: underline; }
+
+/* The description from the image's labels, under its row, in the
+   prose face. */
+.runs-about td {
+  padding-bottom: 8px;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+}

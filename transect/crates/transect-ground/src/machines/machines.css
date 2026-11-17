@@ -1,0 +1,207 @@
+/*
+ * The machines band shows one strip for each `Node`, with bars that
+ * compare what its pods request and what it uses with what it can
+ * allocate.  The band is darker than the namespace bands above it,
+ * because the machines are one layer closer to the ground.
+ */
+
+/* The requested bar is mid sage in both schemes.  The used bar is drawn
+   over it, so it uses the scheme's strongest color: pale sage on dark,
+   and ink on light.  Deep moss, the light scheme's other sage, is too
+   close to mid sage to tell apart in a 6px bar. */
+:root {
+  --requested: #6e8352;
+  --used: var(--ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --used: #b4c49a;
+  }
+}
+
+.machines { background: var(--page); }
+
+.band-note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.legend {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.legend-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  width: 14px;
+  height: 6px;
+  border-radius: 1px;
+}
+
+.swatch-used { background: var(--used); }
+.swatch-requested { background: var(--requested); }
+.swatch-free { background: var(--rule); }
+
+/* The control plane and the workers each start their own rows, with
+   more room between the groups than between strips. */
+.strips {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.group-label {
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+/* The strips are small multiples.  Every strip has the same fixed width,
+   so the reader can compare machines at a glance, and a strip's size
+   never implies anything about its machine.  A narrow window adds rows,
+   and a short last row leaves a gap. */
+.group-strips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 150px);
+  gap: 6px;
+  align-content: start;
+}
+
+.strip {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background: var(--row);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* A control-plane machine's border uses the requested bar's sage, which
+   is the same color in both schemes, so a leader stands out even in a
+   group of one.  The not-ready rule comes after it, so the warm border
+   replaces the sage when both apply. */
+.strip-control-plane { border-color: var(--requested); }
+.strip-not-ready { border-color: var(--warm); }
+
+/* A machine page's switches name their groups the same way as the band,
+   in the band's gray label.  The switches have no sage border, because
+   a ring already marks the machine that the page shows.  The folded
+   band's chips and the `DaemonSet` matrix's columns mark the control
+   plane in sage. */
+.switch-label {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.switch-label:not(:nth-child(2)) { margin-left: 10px; }
+.machine-chip.machine-chip-control-plane { border-color: var(--requested); }
+.matrix-machine-control-plane { box-shadow: inset 0 -1px 0 var(--requested); }
+
+/* The head is one line in every strip, so every strip is the same
+   height.  When the name and the tag do not both fit, the name is cut
+   short and the tag stays whole. */
+.strip-head {
+  display: flex;
+  justify-content: space-between;
+  column-gap: 8px;
+  white-space: nowrap;
+}
+
+.strip-head .strip-tag { flex: none; }
+
+/* The name is a link to the machine's page, drawn as bold text with no
+   underline, so the band stays calm until the reader points at it. */
+.strip-name {
+  font-weight: 700;
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.strip-name:hover { text-decoration: underline; }
+
+.strip-tag { color: var(--ink-faint); }
+
+/* The count of the selected namespace's pods uses the selection color,
+   which also fills the namespace's parcel, so the strips that run those
+   pods look like part of the selection.  "none here" stays faint. */
+.strip-tag-here { color: var(--link); }
+
+/* A machine that is not Ready is a failure, so its tag is filled. */
+.strip-tag-warm {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--warm);
+  color: var(--page);
+}
+
+.meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.meter-label {
+  width: 26px;
+  flex: none;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.meter-track {
+  flex: 1;
+  position: relative;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--rule);
+}
+
+.meter-requested,
+.meter-used {
+  position: absolute;
+  inset: 0 auto 0 0;
+}
+
+.meter-requested { background: var(--requested); }
+.meter-used { background: var(--used); }
+
+.strip-pods {
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+/* The selected namespace's devices use the selection color, the same as
+   its pod count.  A device name is longer than a strip is wide, so the
+   line can break at any character and is cut at two lines.  The line's
+   title lists every device. */
+.strip-holds {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--link);
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}

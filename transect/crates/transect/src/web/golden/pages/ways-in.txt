@@ -1,0 +1,73 @@
+ways in · access · transect
+transect
+cluster / access
+access vulnerabilities kinds
+Search /
+esc
+access ways in accounts
+What may reach each port from outside the cluster 10 ways in
+A row is one way in: a host or an address, and a port. the cluster puts this gate on the way on some of its routes or pods stored text declares it it puts none.
+way in
+port
+TLS
+sign-in
+NetworkPolicy
+reaches
+Hosts with TLS, sign-in on some routes, and no NetworkPolicy 1
+shop.example.test Ingress acme-shop/storefront-route , Ingress acme-shop/storefront-admin
+443
+partner-gate
+Deployment acme-shop/storefront
+Hosts with TLS, sign-in the workload declares, and no NetworkPolicy 1
+help.example.test Ingress acme-shop/help-desk-route
+443
+intent
+Deployment acme-shop/help-desk
+Hosts with TLS, and no sign-in or NetworkPolicy 1
+catalog.example.test Ingress acme-shop/catalog-route
+443
+Deployment acme-shop/catalog
+Hosts with a redirect to TLS the ingress controller declares, sign-in the workload declares, and no NetworkPolicy 1
+help.example.test Ingress acme-shop/help-desk-route
+80
+intent
+intent
+Deployment acme-shop/help-desk
+Hosts with sign-in on some routes, a redirect to TLS the ingress controller declares, and no NetworkPolicy 1
+shop.example.test Ingress acme-shop/storefront-route , Ingress acme-shop/storefront-admin
+80
+intent
+partner-gate
+Deployment acme-shop/storefront
+LoadBalancer Services 2
+2 machines' addresses Service acme-ledger/ledger-sql · LoadBalancer
+5432
+StatefulSet acme-ledger/ledger-db
+node-alpha 's address Service acme-promoter/promoter-feed · LoadBalancer
+8443
+Deployment acme-promoter/promoter
+Node ports 1
+every machine's address Service acme-shop/storefront-debug · node port
+30080
+Deployment acme-shop/storefront
+Host ports 1
+node-alpha 's address host port
+4317 4318 9125 9411 14250 14268
+DaemonSet acme-ops/metrics-relay
+Pods on their machine's network 1
+node-alpha 's address on its machine's network
+8123
+Deployment acme-ops/device-hub
+3 hosts enter through DaemonSet acme-ops/edge-proxy , which answers on ports 80 and 443 through Service acme-ops/edge-proxy-lb .
+2 namespaces have pods and no NetworkPolicy that limits calls in: acme-shop , acme-promoter .
+Access
+Ways in : every port that answers from outside the cluster, and the gates on the way to it.
+Accounts : every account a binding names, and what it may do.
+Not read
+A workload's own TLS and sign-in are not in the API. A gate here is one the cluster's objects put in front of the workload, or one declared in stored text, which the people who run the cluster wrote.
+Whether an address answers from the internet is not in the API.
+Grants are read from Roles, ClusterRoles, and their bindings. A webhook authorizer, the node authorizer, and admission webhooks are not read.
+The API server's version and feature gates are not read. Exec counts create on pods/exec and pods/attach , which a server from 1.35 on requires; an older one, or one with AuthorizePodWebsocketUpgradeCreatePermission off, also allows exec with get .
+Some routes to another account are not followed: approving and signing a certificate request, creating a PersistentVolume, writing an admission webhook, and reading a Secret that contains a ServiceAccount's token, whose type a Secret's metadata does not show.
+A Pod Security default in the API server's admission configuration is not in the API.
+No Secret is read. A Secret is shown by its name, from the pod specs and Roles that name it.

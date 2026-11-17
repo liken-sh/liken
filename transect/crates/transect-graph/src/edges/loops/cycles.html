@@ -1,0 +1,11 @@
+{#- A loop's cycles, one per line: each member, then an arrow labelled
+    with what it needs the next member by, and back to the first.  Set
+    `found` to the loop before including it. -#}
+<ul class="loop-cycles">
+{%- for cycle in found.cycles() %}
+<li class="loop-cycle">
+{%- for step in cycle.steps %}<span class="loop-member">{{ step.member }}</span> <span class="loop-arrow">{{ step.verb() }} →</span> {% endfor -%}
+<span class="loop-member">{{ cycle.first() }}</span>
+</li>
+{%- endfor %}
+</ul>

@@ -1,0 +1,38 @@
+{% extends "frame/layout.html" %}
+{%- import "frame/tabs.html" as frame -%}
+{%- import "links/link.html" as links -%}
+{%- import "access/drawing/drawing.html" as drawings -%}
+{%- import "access/switcher.html" as switcher -%}
+
+{% block title %}access · {{ name }} · {{ namespace }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block masthead_access %} masthead-current{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- A workload's access page has two drawings, with the workload's card
+    beside them.  The first shows what may reach each port that the
+    workload serves and what the workload may reach.  The second shows
+    who may change it. -#}
+<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="section-map ax-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="{{ name }}">
+<a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
+<a class="switch switch-current" href="{{ workload_path }}" hx-get="{{ workload_path }}">{{ name }}</a>
+{% call frame::tabs(tabs()) %}{% endcall %}
+</nav>
+<h2 class="section-subtitle">What may reach it, and what it may reach</h2>
+<p class="section-legend ax-legend">Solid lines are routes and grants. Dashed lines are calls a NetworkPolicy admits, or that none limits. A dot on a line is a gate: <span class="ax-key"><span class="ax-dot ax-dot-on"></span> the cluster puts it there</span> <span class="ax-key"><span class="ax-dot ax-dot-half"></span> on some of its routes</span> <span class="ax-key"><span class="ax-dot ax-dot-declared"></span> stored text declares it</span> <span class="ax-key"><span class="ax-dot ax-dot-off"></span> it puts none.</span> Hover anything for its explanation.</p>
+{% call drawings::drawing(reach, "reach", "What may reach it") %}{% endcall %}
+<h2 class="section-subtitle" id="changes">Who may change it</h2>
+<p class="section-legend ax-legend">Each line names what the account may do to it. An outlined box follows from a grant, and no binding names it.</p>
+{% call drawings::drawing(change, "change", "Who may change it") %}{% endcall %}
+<p class="section-legend ax-legend">{% call links::object_link(format!("The access of Namespace {}", self.namespace), Some(format!("/namespaces/{}/access", self.namespace)), "") %}{% endcall %} lists every account that may act in it.</p>
+{% call switcher::whole_cluster() %}{% endcall %}
+</main>
+{% include "cards/workload.html" %}
+</div>
+{% endblock %}

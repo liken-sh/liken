@@ -1,0 +1,6 @@
+{#- One line in place of what a page cannot show, from `OffLine`: its
+    words, and when the resource that would show it did not load, a
+    link to the page that gives the reason. -#}
+{%- macro line(off) -%}
+{{ off.text }}{% if off.see_resources %}; see <a href="/resources" hx-get="/resources" hx-target="body" hx-swap="innerHTML" hx-push-url="true">/resources</a>{% endif %}
+{%- endmacro -%}

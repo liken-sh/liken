@@ -1,0 +1,58 @@
+/* Lists of objects: a namespace's resources grouped by kind under its
+   workloads, and one kind's objects as a table.  Names are monospace,
+   as on the map.  A dot shows each object's own condition, gray-clear
+   when the condition holds and --warm only when it does not. */
+
+.resources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+}
+
+.resources-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.resource-group {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.resource-kind {
+  flex: none;
+  min-width: 160px;
+  color: var(--ink-muted);
+}
+
+.resource-kind .object-link { color: var(--ink-muted); }
+
+.resource-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.resource-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.resource-item .dot,
+.objects-name .dot {
+  width: 8px;
+  height: 8px;
+}
+
+.dot-none { visibility: hidden; }
+
+.resource-more { color: var(--ink-faint); }

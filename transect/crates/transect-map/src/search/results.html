@@ -1,0 +1,22 @@
+{#- The rows a query found, best first.  Each row opens its object's
+    page; its chips open the object's other lenses, and Tab reaches them
+    from the row.  The rows swap the body and push their URL, so a
+    result opens as any link does. -#}
+<ol class="search-results" id="{{ list }}" aria-label="Results">
+{%- for row in rows %}
+<li class="search-result">
+<a class="search-row" href="{{ row.href }}" hx-get="{{ row.href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<span class="{{ row.dot_class() }}"></span>
+<span class="search-name">{{ row.name }}</span>
+<span class="search-kind">{{ row.kind }}</span>
+{%- if let Some(context) = row.context %}<span class="search-context">{{ context }}</span>{% endif %}
+</a>
+{%- for (label, href) in row.lenses %}
+<a class="search-lens" href="{{ href }}" hx-get="{{ href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true">{{ label }}</a>
+{%- endfor %}
+</li>
+{%- endfor %}
+{%- if rows.is_empty() %}
+<li class="search-nothing">{% if query.is_empty() %}Type a name, a host, or a page.{% else %}Nothing matches “{{ query }}”.{% endif %}</li>
+{%- endif %}
+</ol>

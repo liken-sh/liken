@@ -497,6 +497,16 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
+  - package-ecosystem: cargo
+    directory: /transect
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 0
+    groups:
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
   - package-ecosystem: github-actions
     directory: /
     schedule:

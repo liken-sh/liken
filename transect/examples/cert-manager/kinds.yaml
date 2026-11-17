@@ -1,0 +1,50 @@
+# Kind knowledge for cert-manager, as cert-manager would ship it.
+# transect finds an Ingress's issuer in either of two ways.  A
+# Certificate writes the Secret the Ingress serves its TLS from and
+# names its issuer in spec.issuerRef; a reference names one kind, so
+# this one reads the issuerRef as a ClusterIssuer's name, which is how
+# most clusters issue.
+# Or the Ingress names its issuer with the ingress-shim annotations: a
+# ClusterIssuer by its name, and an Issuer by its name in the Ingress's
+# own namespace.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: certificates.cert-manager.io
+spec:
+  summary: A TLS certificate cert-manager keeps renewed in the Secret it writes.
+  healthy: {condition: Ready}
+  writesSecret: spec.secretName
+  references:
+    - {path: spec.issuerRef.name, kind: ClusterIssuer, group: cert-manager.io, label: issued by, role: issues-tls}
+  docs: https://cert-manager.io/docs/usage/certificate/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: clusterissuers.cert-manager.io
+spec:
+  summary: Issues certificates for any namespace, from an ACME server, a CA, or Vault.
+  healthy: {condition: Ready}
+  referencedBy:
+    - kind: Ingress
+      group: networking.k8s.io
+      annotation: cert-manager.io/cluster-issuer
+      name: '{name}'
+      role: issues-tls
+  docs: https://cert-manager.io/docs/configuration/
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: issuers.cert-manager.io
+spec:
+  summary: Issues certificates in its own namespace, from an ACME server, a CA, or Vault.
+  healthy: {condition: Ready}
+  referencedBy:
+    - kind: Ingress
+      group: networking.k8s.io
+      annotation: cert-manager.io/issuer
+      name: '{name}'
+      role: issues-tls
+  docs: https://cert-manager.io/docs/configuration/

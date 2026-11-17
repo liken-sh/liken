@@ -1,0 +1,62 @@
+/* The lens tabs end an object page's row, pushed to its right end.
+   They look like one control: the current lens takes the panel and the
+   ink, and the others stay muted until hovered. */
+.lens-tabs {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.lens-tab {
+  padding: 3px 10px;
+  border-radius: 4px;
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+
+.lens-tab:hover { color: var(--ink); background: var(--panel); }
+
+.lens-tab-current {
+  color: var(--ink);
+  background: var(--panel);
+}
+
+/* The logs lens takes the whole width, since a log line is long and
+   the lens has no card beside it. */
+.logs-lens {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 32px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* A pod's chip leads with its health's dot, as a search row does. */
+.logs-lens .switch .dot {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+.logs-note {
+  margin: 0;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+
+.logs-box {
+  padding: 12px 14px;
+  background: var(--row);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  overflow-x: auto;
+}

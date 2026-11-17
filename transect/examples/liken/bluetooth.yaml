@@ -1,0 +1,26 @@
+# Kind knowledge for bluetooth-operator's Peripheral and Adapter, as
+# bluetooth-operator would ship it.  A Peripheral's status.adapter is
+# the radio's address, such as AA:BB:CC:DD:EE:FF, not the Adapter's
+# name, aa-bb-cc-dd-ee-ff, so the reference matches on the Adapter's
+# status.address.  A remote that sleeps between presses reports
+# Connected False with reason Asleep, which is rest, not a fault.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: peripherals.bluetooth.liken.sh
+spec:
+  summary: A Bluetooth device a radio has paired.
+  healthy: {condition: Connected, calm: [Asleep]}
+  references:
+    - {path: status.adapter, kind: Adapter, group: bluetooth.liken.sh, match: status.address, edge: depends on, label: pairs through}
+  controller: {image: liken-sh/bluetooth-operator}
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: adapters.bluetooth.liken.sh
+spec:
+  summary: A Bluetooth radio on one machine, which pairs and holds devices.
+  references:
+    - {path: status.node, kind: Node, edge: runs on, label: is on}
+  controller: {image: liken-sh/bluetooth-operator}

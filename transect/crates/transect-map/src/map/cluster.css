@@ -1,0 +1,211 @@
+/*
+ * The cluster elevation: bands stacked into one block, each with a
+ * label column and its parcels.
+ */
+
+/* The sidebar beside the map pads the gap between them, so the map pads
+   its right side only once the sidebar moves under it. */
+.cluster {
+  padding: 16px 0 16px 32px;
+}
+
+@media (max-width: 1000px) {
+  .cluster { padding-right: 32px; }
+
+  /* When the page stacks, the map would push "Now" and a loss below
+     every band, which is a long scroll on a narrow screen, so the
+     cluster page's sidebar comes first.  A namespace's card stays below
+     the map, as a workload's does, since the map is what its page is
+     for. */
+  .view:has(> main.cluster) > .sidebar:not(.namespace-card) {
+    order: -1;
+    padding-top: 16px;
+  }
+}
+
+.band {
+  display: flex;
+  gap: 16px;
+  padding: 12px 14px;
+  background: var(--row);
+  border: 1px solid var(--rule);
+}
+
+.band + .band { border-top: none; }
+.band:first-child { border-top-left-radius: 10px; border-top-right-radius: 10px; }
+.band:last-child { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
+
+.band-label {
+  width: 96px;
+  flex: none;
+  font-size: 12px;
+}
+
+.band-name {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.band-count {
+  margin-top: 4px;
+  color: var(--ink-faint);
+}
+
+.parcels {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 5px;
+  /* Rows are spaced by each parcel's bottom margin, not row-gap, so the
+     filler below adds no height when it wraps onto a line of its own. */
+  margin-bottom: -5px;
+}
+
+/* A filler after the last parcel keeps a short last row near its
+   parcels' own widths.  Without it, one light parcel alone on the last
+   row stretches across the band and looks like a heavy namespace.
+   Its basis is a quarter of the band, so it only fits on a last row
+   with that much room to spare.  On such a row its grow factor, far
+   above any row's total weight, takes nearly all the room.  A last row
+   with less room pushes it onto a line of its own and stretches to the
+   edge like the rows above it, which keeps a band of one full row
+   flush. */
+.parcels::after {
+  content: "";
+  flex: 1000 1 25%;
+}
+
+/* A parcel's share of its band follows its workload count.  Flex items
+   never shrink below their content, and a name never wraps, so a long
+   name in a light parcel widens the parcel instead of breaking at a
+   hyphen.  Only a name wider than the whole band is cut short. */
+.parcel {
+  flex: var(--weight) 1 calc(var(--weight) * 30px);
+  max-width: 100%;
+  height: 52px;
+  margin-bottom: 5px;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+/* The loop mark follows the name and keeps its place when a long name
+   is cut short. */
+.parcel-name {
+  display: flex;
+  white-space: nowrap;
+}
+
+.parcel-namespace {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Under a loss, the tag names every workload the loss takes, so the
+   parcel grows to hold it rather than cutting it short. */
+.parcel:has(.loss-tag) { height: auto; min-height: 52px; }
+
+.parcel:has(.loss-tag) .parcel-count { white-space: normal; }
+
+.parcel-count {
+  position: relative;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* A parcel that the selection's edges reach is outlined in faint gray,
+   and its second line shows how: the relation replaces the count, in
+   the count's own type.  The relation is positioned over the count, so
+   it adds nothing to the width the parcel asks of its band.  The count
+   stays beneath it, hidden, and keeps the width it always had, so
+   selecting a parcel never resizes another or reflows a band.  A
+   relation longer than its parcel ends in an ellipsis, with the whole
+   of it in its title.
+   Color is kept for a loop and for problems.  The warning and failure
+   rules below come later, so a parcel that needs attention keeps its
+   --warm border. */
+.parcel-tagged {
+  border-color: var(--ink-faint);
+  box-shadow: inset 0 0 0 1px var(--ink-faint);
+}
+
+.parcel-count:has(.parcel-relation) .parcel-workloads { visibility: hidden; }
+
+.parcel-relation {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A loop is worth knowing but is not a failure, so its tag has no color
+   and puts no outline on the parcel.  It is a muted word in a thin rule
+   on the namespace page's folded bands, and a muted mark after the name
+   on the cluster map. */
+.loop-tag {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  color: var(--ink-muted);
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.loop-mark {
+  flex: none;
+  margin-left: 6px;
+  color: var(--ink-muted);
+}
+
+/* Only a problem gets color.  A warning outlines the parcel in
+   --warm, two pixels wide with the inset shadow so the parcel keeps its
+   size.  A failure fills it, with text in the page color: dark on the
+   light orange of the dark scheme, white on the brown of the light
+   scheme, about 6.5 to 1 in both. */
+.parcel-warning {
+  border-color: var(--warm);
+  box-shadow: inset 0 0 0 1px var(--warm);
+}
+
+.parcel-failing {
+  border-color: var(--warm);
+  background: var(--warm);
+  color: var(--page);
+  font-weight: 600;
+}
+
+.parcel-failing .parcel-count { color: inherit; opacity: 0.8; }
+
+/* On a failure's fill the loop mark's muted ink does not show against
+   --warm, so the mark uses the parcel's page-colored text. */
+.parcel-failing .loop-mark { color: inherit; }
+
+/* The selected parcel takes a ring of the selection color outside its
+   border, so its own border and fill still show its health.  Selecting
+   a parcel changes one thing about it, and a parcel that needs
+   attention looks the same selected or not.  The ring is drawn in the
+   gap between parcels.  It keeps the pointer, since a second click
+   deselects it.  Its name keeps its weight, since a bold name can run
+   wider and widen the parcel. */
+.parcel-selected {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
+}

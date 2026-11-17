@@ -1,0 +1,41 @@
+{#- An object's name wherever a page shows it: a link to its page when
+    it has one, and plain text when it has none, so no name links to a
+    page that does not exist.  A click on the link replaces the page's
+    body and pushes the link's URL onto the browser's history, so the
+    link works the same inside the main column and in a card.  `class`
+    adds the caller's own classes to either.  `shown` writes a name
+    such as `Kind namespace/name` with its namespace and its name each
+    in a `name-part` span, which wraps as a whole, so a narrow box
+    breaks the name after its slash before it
+    breaks at a hyphen inside it.  Text with a space after its last
+    slash is not a name, and `shown` writes it unchanged. -#}
+{%- macro shown(text) -%}
+{%- if let Some((head, tail)) = text.rsplit_once('/') -%}
+{%- if tail.contains(' ') -%}{{ text }}
+{%- else -%}
+{%- if let Some((words, namespace)) = head.rsplit_once(' ') -%}{{ words }} <span class="name-part">{{ namespace }}/</span>
+{%- else -%}<span class="name-part">{{ head }}/</span>
+{%- endif -%}
+<wbr><span class="name-part">{{ tail }}</span>
+{%- endif -%}
+{%- else -%}{{ text }}
+{%- endif -%}
+{%- endmacro -%}
+{%- macro object_link(text, href, class) -%}
+{%- if let Some(href) = href -%}
+<a class="object-link{% if !class.is_empty() %} {{ class }}{% endif %}" href="{{ href }}" hx-get="{{ href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true">{% call shown(text) %}{% endcall %}</a>
+{%- else -%}
+<span class="object-name{% if !class.is_empty() %} {{ class }}{% endif %}">{% call shown(text) %}{% endcall %}</span>
+{%- endif -%}
+{%- endmacro -%}
+{#- A sentence with the objects it names linked, from `Linker::link`:
+    each name with a page is a link, and the words between are text. -#}
+{%- macro sentence(parts) -%}
+{%- for part in parts -%}
+{%- if let Some(href) = part.href -%}
+<a class="object-link" href="{{ href }}" hx-get="{{ href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true">{% call shown(part.text) %}{% endcall %}</a>
+{%- else -%}
+{{ part.text }}
+{%- endif -%}
+{%- endfor -%}
+{%- endmacro -%}

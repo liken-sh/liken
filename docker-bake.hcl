@@ -167,6 +167,7 @@ group "default" {
     "media-operator-cli",
     "people-operator",
     "per-node-csi-driver",
+    "transect",
   ]
 }
 
@@ -1379,6 +1380,31 @@ target "per-node-csi-driver" {
   tags       = ["ghcr.io/liken-sh/per-node-csi-driver:${VERSION}"]
   cache-from = ["type=registry,ref=ghcr.io/liken-sh/per-node-csi-driver:buildcache"]
   cache-to   = CACHE_WRITE == "per-node-csi-driver" ? ["type=registry,ref=ghcr.io/liken-sh/per-node-csi-driver:buildcache,mode=max,ignore-error=true"] : []
+}
+
+target "transect" {
+  description = "transect, which serves a live, read-only map of a Kubernetes cluster: its layers, the relationships between its parts, and their health."
+  context    = "transect"
+  dockerfile = "Dockerfile"
+  platforms  = ["linux/amd64"]
+  contexts = {
+    "brand" = "brand"
+    "builder" = "vulkan"
+    "debian" = "docker-image://debian:sid-slim@sha256:5ac67a4d7c0de96e83873e4dd8f7ea3b507ba292fb2cce60a0c3f73322df5cae"
+    "golang" = "docker-image://golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9"
+    "manifest" = "toolchains/manifest"
+    "notices" = "notices"
+    "rust" = "docker-image://rust:1.99.1-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137"
+    "toolchains" = "toolchains"
+    "trust" = PUBLISHED_TRUST != "" ? "docker-image://${PUBLISHED_TRUST}" : "target:trust"
+  }
+  args = {
+    VERSION = VERSION
+    SNAPSHOT = "20261101"
+  }
+  tags       = ["ghcr.io/liken-sh/transect:${VERSION}"]
+  cache-from = ["type=registry,ref=ghcr.io/liken-sh/transect:buildcache"]
+  cache-to   = CACHE_WRITE == "transect" ? ["type=registry,ref=ghcr.io/liken-sh/transect:buildcache,mode=max,ignore-error=true"] : []
 }
 
 # CI runs this target before the image's build, to copy the

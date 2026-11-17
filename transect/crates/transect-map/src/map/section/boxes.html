@@ -1,0 +1,37 @@
+{%- import "links/link.html" as links -%}
+{%- import "edges/provenance.html" as provenance -%}
+{#- One box of a drawing, placed by `place`, an inline style the server
+    computed, and classed by `class`.  The section view and the access
+    drawings draw every box through this one macro. -#}
+{%- macro boxed(boxed, class, place) -%}
+{#- A box with an external link has two links, to its page and to its
+    own console, so the title is a link and the box itself is not. -#}
+{%- if let Some(external) = boxed.external %}
+<div class="{{ class }}" style="{{ place }}">
+<b class="section-title" title="{{ boxed.tooltip() }}">{% call links::object_link(boxed.title, boxed.href.clone(), "") %}{% endcall %} <a class="ground-out" href="{{ external }}" target="_blank" rel="noopener noreferrer" title="Open {{ boxed.title }}'s own page">↗</a></b>
+{%- else if let Some(href) = boxed.href %}
+<a class="{{ class }}" style="{{ place }}" href="{{ href }}" hx-get="{{ href }}">
+<b class="section-title" title="{{ boxed.tooltip() }}">{% if let Some(block) = boxed.block %}<span class="{{ block }}"></span> {% endif %}{% for part in boxed.title_parts() %}{% if !loop.first %}<wbr>{% endif %}{{ part }}{% endfor %}</b>
+{%- else if !boxed.folded.is_empty() %}
+{#- A box that counts names opens to show them, linked, in a list drawn
+    over the drawing below the box. -#}
+<div class="{{ class }} section-box-fold" style="{{ place }}">
+<details class="section-fold"><summary class="section-title">{{ boxed.title }}</summary>
+<span class="section-fold-list">{% for part in boxed.folded %}{% call links::object_link(part.text, part.href, "") %}{% endcall %}{% endfor %}</span></details>
+{%- else %}
+<div class="{{ class }}" style="{{ place }}">
+<b class="section-title" title="{{ boxed.tooltip() }}">{% if let Some(block) = boxed.block %}<span class="{{ block }}"></span> {% endif %}{% for part in boxed.title_parts() %}{% if !loop.first %}<wbr>{% endif %}{{ part }}{% endfor %}</b>
+{%- endif %}
+{#- A box that counts several names links each one in its last line,
+    so the box is not a link itself. -#}
+{%- for line in boxed.lines %}
+{%- if loop.last && !boxed.names.is_empty() %}<span class="section-line" title="{{ boxed.tooltip() }}">
+{%- for part in boxed.names %}{% if !loop.first %}, {% endif %}{% call links::object_link(part.text, part.href, "") %}{% endcall %}{% endfor -%}
+</span>
+{%- else %}<span class="section-line" title="{{ line }}">
+{%- if loop.first %}{% if let Some(mark) = boxed.mark %}{% call provenance::mark(mark) %}{% endcall %} {% endif %}{% endif %}{{ line }}</span>
+{%- endif %}
+{%- endfor -%}
+{%- if !boxed.blocks.is_empty() %}<span class="section-line ax-blocks">{% for block in boxed.blocks %}<span class="{{ block }}"></span>{% endfor %}</span>{% endif -%}
+{%- if boxed.href.is_some() && boxed.external.is_none() %}</a>{% else %}</div>{% endif %}
+{%- endmacro -%}

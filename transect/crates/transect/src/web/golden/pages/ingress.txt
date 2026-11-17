@@ -1,0 +1,21 @@
+Ingress storefront-route · acme-shop · transect
+transect
+cluster / apps / acme-shop / Ingresses / storefront-route
+access vulnerabilities kinds
+Search /
+esc
+acme-shop Ingress storefront-route
+Ingress
+storefront-route
+hosts shop.example.test
+backends storefront-svc:80
+class IngressClass proxy
+TLS from shop-issuer
+served by DaemonSet acme-ops/edge-proxy
+Traffic
+requests to storefront-svc:80 3.2 requests/s · p95 120 ms · no 5xx, over 5m
+Refers to
+routes to Service storefront-svc
+Ingress storefront-route
+kind Ingress in networking.k8s.io
+namespace acme-shop

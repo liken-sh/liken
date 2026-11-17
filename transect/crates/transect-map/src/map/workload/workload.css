@@ -1,0 +1,297 @@
+/*
+ * The workload elevation draws a row of the namespace's workloads, a row
+ * of columns from the entry through the pod tiles to the volumes, and
+ * a row of guards, beside the workload's card.  The bars reuse the
+ * machine strips' meters from machines.css, so a pod's usage looks the
+ * same as a machine's.
+ */
+
+.workload-map {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 0 16px 32px;
+  font-family: var(--mono);
+  font-size: 12px;
+  container-type: inline-size;
+}
+
+.switcher,
+.workload-flow,
+.needs,
+.guards {
+  padding: 12px 14px;
+  background: var(--row);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+/* A switcher's chips look the same on every page, whatever font the
+   page's column sets. */
+.switcher {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.switcher,
+.needs,
+.guards {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The namespace starts the row, in the band labels' small capitals, and
+   links to the namespace's page. */
+.switcher-namespace,
+.row-label {
+  width: 96px;
+  flex: none;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  text-decoration: none;
+  overflow-wrap: break-word;
+}
+
+.row-label { font-size: 11px; color: var(--ink-faint); }
+
+.switch {
+  padding: 4px 10px;
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+
+.switch:hover { color: var(--ink); }
+
+/* The workload shown gets a ring of the selection color, as a
+   selected parcel does, so a warning's --warm outline still shows. */
+.switch-current {
+  outline: 2px solid var(--link);
+  outline-offset: 1px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.switch-warning { box-shadow: inset 0 0 0 1px var(--warm); }
+
+.workload-flow {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 16px;
+}
+
+.flow-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The pods column takes the width the fixed columns leave, so the tiles
+   keep the widest column however many Services and volumes are beside
+   them. */
+.flow-door { width: 170px; flex: none; }
+.flow-service { width: 150px; flex: none; }
+.flow-pods { flex: 1; }
+.flow-volumes { width: 190px; flex: none; }
+
+.flow-arrow {
+  align-self: center;
+  font-size: 18px;
+  color: var(--ink-faint);
+}
+
+/* When the row is too narrow for its columns side by side, the columns
+   stack in the order a request travels, each at the full width, and the
+   arrows turn down. */
+@container (max-width: 960px) {
+  .workload-flow { flex-direction: column; }
+  .flow-door,
+  .flow-service,
+  .flow-volumes { width: auto; }
+  .flow-arrow {
+    align-self: flex-start;
+    margin-left: 12px;
+    transform: rotate(90deg);
+  }
+}
+
+.flow-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+/* A Service with an endpoint not ready, or none, gets --warm, as a
+   pod tile that is not ready does. */
+.flow-short {
+  border-color: var(--warm);
+  box-shadow: inset 0 0 0 1px var(--warm);
+}
+
+.flow-name,
+.flow-line { overflow-wrap: break-word; }
+
+.flow-line { color: var(--ink-muted); }
+
+.flow-faint { color: var(--ink-faint); }
+
+/* The controller that serves an Ingress opens its own page. */
+.flow-faint a { color: var(--ink-muted); text-decoration: none; }
+
+.flow-faint a:hover { text-decoration: underline; }
+
+.flow-volume {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+/* The backend is outside the workload, so it is drawn as the ground
+   boxes are: dashed, under the claims that store their data there. */
+.flow-backend {
+  padding: 10px 12px;
+  border: 1px dashed var(--ink-faint);
+  border-radius: 8px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+.column-label {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 8px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  color: inherit;
+  text-decoration: none;
+}
+
+/* A tile opens its pod's page. */
+.tile:hover { border-color: var(--link); }
+
+/* A pod that is not ready gets --warm, as a warning parcel does.  A
+   finished one, such as a CronJob's last run, is dashed and faint. */
+.tile-not-ready {
+  border-color: var(--warm);
+  box-shadow: inset 0 0 0 1px var(--warm);
+}
+
+.tile-finished {
+  border-style: dashed;
+  background: none;
+  color: var(--ink-faint);
+}
+
+.tile-head {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  column-gap: 12px;
+  row-gap: 2px;
+  min-width: 0;
+}
+
+.tile-name {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.tile-line { color: var(--ink-muted); }
+
+/* A bar's figures in place of its bar wrap under the label, not past
+   the tile's edge. */
+.meter-figures { min-width: 0; }
+
+/* A pod that uses more than its request, with no limit above it, fills
+   its bar.  The track's --warm outline shows that its use goes past the
+   bar's end. */
+.meter-over { box-shadow: 0 0 0 1px var(--warm); }
+
+.meter-figures {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.tiles-none { color: var(--ink-faint); }
+
+.tiles-legend {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ink-faint);
+}
+
+.guard {
+  padding: 5px 10px;
+  border-radius: 5px;
+  background: var(--panel);
+}
+
+.guard-check { color: var(--clear); }
+
+/* A guard that a workload lacks but does not need stays faint.  A guard
+   that it needs is outlined, as its finding on the card is set apart.
+   The finding is worth knowing and is no fault, so the outline is gray. */
+.guard-open { color: var(--ink-faint); }
+
+.guard-warn {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
+  color: var(--ink);
+}
+
+/* An address that reaches something in the cluster is outlined in
+   --link, as a link is colored, and links to what it reaches.  The
+   Secrets count is not a link, so it is on --panel like a guard. */
+.need {
+  padding: 5px 10px;
+  border-radius: 5px;
+  color: var(--link);
+  box-shadow: inset 0 0 0 1px var(--link);
+  text-decoration: none;
+}
+
+a.need:hover { text-decoration: underline; }
+
+.need-secrets {
+  padding: 5px 10px;
+  border-radius: 5px;
+  background: var(--panel);
+}

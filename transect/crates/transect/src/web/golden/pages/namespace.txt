@@ -1,0 +1,57 @@
+acme-ledger · transect
+transect
+cluster / data / acme-ledger
+access vulnerabilities kinds
+Search /
+esc
+data acme-ledger overview access
+Edges
+Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+apps
+acme-shop
+data
+acme-ledger 4 workloads · 3 pods · 1 volume
+StatefulSet ledger-db
+1 replica
+node-alpha
+Deployment ledger-exporter
+1 replica
+ledger-exporter: none of 1 ready
+ledger-exporter: alert LedgerExporterDown, firing for 30m
+main in ledger-exporter-rs-one is crash looping after 14 restarts
+node-beta
+StatefulSet ledger-store
+1 replica
+node-beta
+CronJob ledger-backup
+has not run yet
+Resources
+ImageReports statefulset-ledger-db-main
+operators
+acme-promoter
+platform
+acme-ops
+Machines
+node-beta · 2 pods node-alpha · 1 pod
+Ground
+The archive NAS · 1 NFS
+acme-ledger failing
+access
+ledger-exporter: none of 1 ready ledger-exporter: alert LedgerExporterDown, firing for 30m
+The ledger exporter is not answering.
+main in ledger-exporter-rs-one is crash looping after 14 restarts
+1 volume
+Depended on by
+acme-shop
+No NetworkPolicy selects the pods of Deployment ledger-exporter , StatefulSet ledger-db , or CronJob ledger-backup , so any pod may call them.
+Code
+ledger/deploy Kustomization acme-ops/ledger-apps ready
+storage.example.test/acme-backups ./ledger Kustomization acme-ops/backup-apps not ready: kustomize build failed: missing resource

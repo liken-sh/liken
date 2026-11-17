@@ -1,0 +1,269 @@
+/*
+ * The namespace card, which takes the sidebar's column when a namespace
+ * is selected.  Names, hosts, and chips are monospace, as the map
+ * draws names, and the chips have the --panel background of the
+ * parcels that they represent.
+ */
+
+.namespace-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.namespace-name {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: break-word;
+}
+
+.namespace-health {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+/* The card's dot is smaller than a concern's, so it
+   looks like part of the word beside it. */
+.namespace-health .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+}
+
+.namespace-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The volume count is plain text under the chips, a fact about the
+   namespace as a whole, so it does not look like one more workload. */
+.namespace-volumes {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.namespace-hosts {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+/* Two columns of equal chips.  A chip with a long name spans both, and
+   a name never breaks inside a word: what does not fit is cut short,
+   with the whole name in the chip's title. */
+.chips {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.chip {
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--panel);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip-wide { grid-column: span 2; }
+
+/* A chip's names open their workloads.  They keep the chip's ink, so
+   the grid looks like a grid of names, and underline on hover. */
+.chip .object-link { color: inherit; }
+
+/* A chip whose workload needs attention takes --warm as a parcel does:
+   outlined for a warning, filled for a failure. */
+.chip-warning {
+  box-shadow: inset 0 0 0 1px var(--warm);
+}
+
+.chip-failing {
+  background: var(--warm);
+  color: var(--page);
+  font-weight: 600;
+}
+
+/* On the cluster page the name opens the namespace.  It takes the link
+   color, and underlines on hover. */
+a.namespace-name {
+  color: var(--link);
+  text-decoration: none;
+}
+
+a.namespace-name:hover { text-decoration: underline; }
+
+/* What a card's object depends on, and what depends on it: a small
+   label over the names, which are monospace as every name is and open
+   their pages in --link.  Both cards draw this section, so its rules
+   are in this file, with the card the cluster page shows first. */
+.card-depends {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card-depends-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.card-depends-label + .card-depends-ends + .card-depends-label { margin-top: 6px; }
+
+.card-depends-ends {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+/* Marked lines that share one mark follow the section's unmarked ones
+   under that mark, set off by a rule to show that the mark applies
+   to them. */
+.card-depends-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  padding-left: 8px;
+  border-left: 1px solid var(--rule-strong);
+}
+
+.card-depends-ends a { text-decoration: none; }
+
+.card-depends-ends a:hover { text-decoration: underline; }
+
+/* A holder's machine is named once, in faint ink, after the holder's
+   name, and its devices are listed under it in the indented group. */
+.card-holds-on { color: var(--ink-faint); }
+
+/* Each holder after the first has a margin to separate it from the
+   devices above it, and a device's driver is gray, as its machine is,
+   so the device's own name is the most visible part of the line. */
+.card-holds-holder:not(:first-child) { margin-top: 6px; }
+
+/* A reader scans a row of callers for its names, so the ports that the
+   callers reach follow the names in a fainter ink. */
+.card-calls-ports { color: var(--ink-faint); }
+
+/* Where the card's object is declared.  Paths are monospace, as names
+   are, and wrap anywhere, because a repository URL is often wider than
+   the card.  Only an applier that is not ready is drawn in color. */
+.card-code {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card-code-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+.card-code-entry a { text-decoration: none; }
+
+.card-code-entry a:hover { text-decoration: underline; }
+
+.card-code-failing { color: var(--warm); }
+
+.card-code-note {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+/* A loop is worth knowing but is not a failure, so its section is set
+   off by a rule in the card's own grays, not by color. */
+.card-loop {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+}
+
+.card-loop-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.card-loop-meaning {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+/* Each cycle shows as one line of members, with the edge kind on
+   each arrow in a fainter ink so the members stand out. */
+.loop-cycles {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+.loop-cycle + .loop-cycle {
+  margin-top: 4px;
+}
+
+.loop-member {
+  color: var(--ink);
+}
+
+.loop-arrow {
+  font-size: 12px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* What a custom resource's fields name, through its kind's knowledge:
+   the verb, the named object in monospace as every name is, and the
+   field it was read from in a fainter ink, because the named object
+   is what a reader scans for. */
+.card-related {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+.card-related-label {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  color: var(--ink-faint);
+}
+
+.card-related a { text-decoration: none; }
+
+.card-related a:hover { text-decoration: underline; }
+
+.card-related-source {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-faint);
+}

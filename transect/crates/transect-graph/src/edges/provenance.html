@@ -1,0 +1,23 @@
+{#- The mark a line of stored text shows.  Every card draws
+    provenance through this one macro, so a mark looks the same
+    everywhere; its title gives where the line was written. -#}
+{%- macro mark(provenance) -%}
+{%- if let Some(word) = provenance.mark() %} <span class="mark" title="{{ provenance.hover() }}">{{ word }}</span>{% endif %}
+{%- endmacro -%}
+
+{#- A section heading's mark, when every line in it shares one, and a
+    line's own mark, which it shows only when the heading has none.  A
+    line whose mark moved to its heading keeps where it came from in its
+    title. -#}
+{%- macro heading(shared) -%}
+{%- if let Some(provenance) = shared %}{% call mark(provenance) %}{% endcall %}{% endif %}
+{%- endmacro -%}
+
+{%- macro line(provenance, shared) -%}
+{%- if shared.is_none() %}{% call mark(provenance) %}{% endcall %}{% endif %}
+{%- endmacro -%}
+
+{#- The legend under a card's last section, when any line is marked. -#}
+{%- macro legend(text) -%}
+{%- if let Some(text) = text %}<div class="mark-legend">{{ text }}</div>{% endif %}
+{%- endmacro -%}

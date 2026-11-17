@@ -1,0 +1,25 @@
+{#- The edge kinds this cluster has, each a checkbox that loads this
+    view with its kind flipped and pushes that URL.  The checkboxes
+    filter the page's picture, so a page that draws edges puts them in
+    its main column, at the right above what they filter, and the
+    masthead contains navigation only.  The links already name their
+    kinds, so they use htmx's data- prefix, because the server adds the
+    view's kinds to every other link and skips links with that prefix.
+    They are in a <details> so a narrow window folds them behind one
+    "Edges" control with no script, and a wide window shows them inline
+    and hides the control.  Each kind's meaning is its title, and a
+    line under it in the folded list. -#}
+{%- if !edge_row.toggles.is_empty() %}
+<details class="edge-menu">
+<summary>Edges</summary>
+<fieldset class="edge-kinds" aria-label="Edge kinds"{% if let Some(affects) = edge_row.affects %} title="{{ affects }}"{% endif %}>
+{%- if let Some(affects) = edge_row.affects %}
+<span class="edge-affects">{{ affects }}</span>
+{%- endif %}
+<span class="edge-label">Edges</span>
+{%- for toggle in edge_row.toggles %}
+<label class="edge-kind{% if !toggle.on %} edge-kind-off{% endif %}" title="{{ toggle.meaning }}"><input type="checkbox"{% if toggle.on %} checked{% endif %} data-hx-get="{{ toggle.href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true"><span>{{ toggle.label }}</span><span class="edge-kind-meaning">{{ toggle.meaning }}</span></label>
+{%- endfor %}
+</fieldset>
+</details>
+{%- endif %}

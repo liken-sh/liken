@@ -1,0 +1,91 @@
+/*
+ * The list of changes, in the sidebar under "Changed" and in full on
+ * /changed.  Each entry shows a time in the mono face beside its
+ * sentence.  A commit and the restarts under a rollout use the faint
+ * ink.
+ */
+
+.changed-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--ink-muted);
+}
+
+.changed-entry {
+  display: flex;
+  gap: 10px;
+}
+
+.changed-time {
+  flex: none;
+  min-width: 40px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.changed-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.changed-text a {
+  color: inherit;
+}
+
+.changed-commit,
+.changed-time-after {
+  color: var(--ink-faint);
+}
+
+.changed-after {
+  display: block;
+  padding-left: 10px;
+  font-size: 12px;
+}
+
+.changed-all {
+  display: block;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.changed {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 32px;
+  max-width: 960px;
+}
+
+.changed-summary {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-muted);
+}
+
+.changed-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--ink-faint);
+}
+
+.changed-panel {
+  padding: 12px 14px;
+  background: var(--row);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+@media (max-width: 640px) {
+  .changed {
+    padding: 16px;
+  }
+}

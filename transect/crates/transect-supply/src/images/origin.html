@@ -1,0 +1,21 @@
+{#- Where a container's image came from: the commit it was built from,
+    as a link when transect can link to the forge, its version, its
+    description, and its documentation, or the reason that transect
+    cannot read them.  Label text is untrusted, so askama escapes it like
+    every other value, and no filter here marks it safe. -#}
+{%- import "edges/provenance.html" as provenance -%}
+{#- `describe` is false where the card already opens with the
+    description, so it is not shown twice. -#}
+{%- macro origin(origin, describe) -%}
+<div class="origin">
+{%- if let Some(text) = origin.code_text() %}
+<div class="origin-code">
+{%- if let Some(href) = origin.href() %}<a href="{{ href }}" target="_blank" rel="noopener noreferrer">{{ text }}</a>{% else %}<span>{{ text }}</span>{% endif %}
+</div>
+{%- endif %}
+{%- if let Some(note) = origin.note() %}<div class="origin-faint">{{ note }}</div>{% endif %}
+{%- if let Some(version) = origin.version_text() %}<div class="origin-faint">{{ version }}</div>{% endif %}
+{%- if describe %}{%- if let Some(description) = origin.description() %}<div class="origin-description">{{ description }}{% call provenance::mark(origin.description_provenance()) %}{% endcall %}</div>{% endif %}{% endif %}
+{%- if let Some(href) = origin.documentation() %}<div><a href="{{ href }}" target="_blank" rel="noopener noreferrer">documentation</a></div>{% endif %}
+</div>
+{%- endmacro -%}

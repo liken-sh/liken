@@ -1,0 +1,167 @@
+/* Quick search: a dialog near the top of the window over a dimmed
+   page, the query on top and the rows under it.  Rows are names, so
+   they are monospace.  A dot shows each row's health in the map's
+   colors, and only a problem takes --warm. */
+
+.search {
+  width: min(680px, calc(100vw - 32px));
+  margin: 12vh auto auto;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.search::backdrop { background: rgb(0 0 0 / 0.45); }
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 12px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.search-input {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 15px;
+  outline: none;
+}
+
+/* The browser's own clear button on a search field draws in its
+   accent color, the only blue on the page; Escape and the close button
+   do what a reader wants from it. */
+.search-input::-webkit-search-cancel-button { appearance: none; }
+
+/* The close button and the masthead's search control are drawn as the
+   lens chips are, in the gray inks. */
+.search-close,
+.search-open {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.search-close:hover,
+.search-close:focus-visible,
+.search-open:hover,
+.search-open:focus-visible { color: var(--ink); border-color: var(--ink-faint); outline: none; }
+
+.search-open kbd {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.search-results {
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.search-results:empty { display: none; }
+
+.search-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+}
+
+.search-result:focus-within { background: var(--row); }
+
+/* Enter in the query opens the first row, so the first row is marked
+   as the one in focus while the query is. */
+.search:has(.search-input:focus) .search-result:first-child { background: var(--row); }
+
+.search-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--ink);
+  text-decoration: none;
+  outline: none;
+}
+
+.search-row .dot { align-self: center; flex: none; }
+
+.search-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-kind,
+.search-context {
+  font-size: 12px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.search-context {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-lens {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-decoration: none;
+  outline: none;
+}
+
+.search-lens:hover,
+.search-lens:focus { color: var(--ink); background: var(--panel); border-color: var(--ink-faint); }
+
+.search-lens:last-child { margin-right: 6px; }
+
+.search-nothing {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--ink-faint);
+}
+
+/* `/search` as a page of its own: the same field and rows, in the
+   main column. */
+.search-page {
+  max-width: 680px;
+  padding: 16px 32px;
+}
+
+.search-page .search-input {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--panel);
+}

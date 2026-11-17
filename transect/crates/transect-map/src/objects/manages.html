@@ -1,0 +1,14 @@
+{%- import "objects/table.html" as tables -%}
+{#- The custom resources a workload's controller reconciles: a box per
+    kind in the row with Runs and Guards, each with the kind's link, its
+    count, the rule that matched, and a table of its objects whose rows
+    past the first eight fold behind a count. -#}
+{%- for kind in manages %}
+<section class="runs manages" aria-label="Controls {{ kind.label }}">
+<span class="row-label">Controls</span>
+<div class="manages-body">
+<div class="manages-head"><b>{% call links::object_link(kind.label, Some(kind.href.clone()), "") %}{% endcall %}</b><span class="manages-count">{{ kind.rows.len() }}</span><span class="manages-rule">{{ kind.rule }}</span></div>
+{% call tables::objects_table(kind.columns.as_slice(), kind.rows.as_slice(), true, false, 8) %}{% endcall %}
+</div>
+</section>
+{%- endfor %}

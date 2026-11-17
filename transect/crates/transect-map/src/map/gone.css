@@ -1,0 +1,30 @@
+/*
+ * The page for an object that is gone.  Nothing on it needs fixing, so
+ * it is gray and quiet, as a healthy page is.  It shows one line that
+ * names what the object was, and a row of links to the places above it
+ * that still exist.
+ */
+
+.gone {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 32px;
+  color: var(--ink-faint);
+}
+
+.gone-what {
+  margin: 0;
+  font-size: 16px;
+}
+
+.gone-up {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 14px;
+}
+
+.gone-up a { text-decoration: none; }
+
+.gone-name { font-family: var(--mono); }

@@ -1,0 +1,35 @@
+[package]
+name = "transect-observe"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+transect-graph.workspace = true
+transect-resources.workspace = true
+transect-cluster.workspace = true
+anyhow.workspace = true
+futures.workspace = true
+http.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tracing.workspace = true
+
+[features]
+# The test builders other crates' tests read.
+fixtures = []
+
+[dev-dependencies]
+transect-resources = { workspace = true, features = ["fixtures"] }
+transect-cluster = { workspace = true, features = ["fixtures"] }
+rstest.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[lib]
+# The doc comments show YAML and paths, not examples to run.
+doctest = false

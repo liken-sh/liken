@@ -1,0 +1,35 @@
+{% extends "frame/layout.html" %}
+{%- import "links/link.html" as links -%}
+{%- import "objects/table.html" as tables -%}
+
+{% block title %}{{ label }} · {{ namespace }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- One kind's objects in one namespace, under a strip of the
+    namespace's custom kinds, beside the kind's card. -#}
+<div class="view{% if wide() %} view-wide{% endif %}" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="Custom resources in {{ namespace }}">
+<a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
+{%- for entry in strip %}
+{%- if let Some(href) = entry.href %}
+<a class="switch{% if entry.current %} switch-current{% endif %}" href="{{ href }}" hx-get="{{ href }}"{% if entry.current %} aria-current="page"{% endif %}>{{ entry.text }}</a>
+{%- endif %}
+{%- endfor %}
+</nav>
+<section class="board-box" aria-label="{{ label }} in {{ namespace }}">
+<div class="board-head"><span class="board-label">{{ label }} in {{ namespace }}</span>{% call links::object_link("in every namespace", Some(everywhere.clone()), "board-aside") %}{% endcall %}</div>
+{%- if rows.is_empty() %}
+<div class="board-none">{{ none() }}</div>
+{%- else %}
+{% call tables::objects_table(columns, rows, false, true, usize::MAX) %}{% endcall %}
+{%- endif %}
+</section>
+</main>
+{% include "objects/kind_card.html" %}
+</div>
+{% endblock %}

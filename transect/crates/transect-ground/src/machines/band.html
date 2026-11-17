@@ -1,0 +1,84 @@
+{%- import "resources/off.html" as off -%}
+{%- import "links/link.html" as links -%}
+{#- The machines band, which the page draws below the namespace bands
+    from its `machines` and `usage_note`.  In each meter's track the used
+    bar is drawn over the requested bar, so when a machine uses more than
+    it requested, the used bar extends past the end of the requested bar.
+    The control-plane machines are drawn first, and the workers start
+    their own row below them.  With a namespace selected, each strip's
+    pods line counts the namespace's pods that run there, and a line
+    names the devices they hold there, with every one in the line's
+    title.  A machine that is not ready shows a "not ready" tag in its
+    head.
+    When alerts are firing about a ready machine, its head shows their
+    count, with their names in the tag's title. -#}
+<section class="band machines" aria-label="Machines">
+<div class="band-label">
+<div class="band-name">Machines</div>
+<div class="band-count">{{ machines.len() }} machine{% if machines.len() != 1 %}s{% endif %}</div>
+{%- if let Some(note) = usage_note %}
+<div class="band-note">{% call off::line(note) %}{% endcall %}</div>
+{%- endif %}
+{%- if let Some(note) = devices_note %}
+<div class="band-note">{{ note }}</div>
+{%- endif %}
+<div class="legend">
+<div class="legend-entry"><span class="swatch swatch-used"></span>used</div>
+<div class="legend-entry"><span class="swatch swatch-requested"></span>requested</div>
+<div class="legend-entry"><span class="swatch swatch-free"></span>free now</div>
+</div>
+</div>
+<div class="strips">
+{%- for group in machine_groups() %}
+<div class="machine-group">
+{%- if let Some(label) = group.label %}
+<div class="group-label">{{ label }}</div>
+{%- endif %}
+<div class="group-strips">
+{%- for machine in group.machines %}
+{%- if machine.lost %}
+{#- A lost machine's strip has no bars, because its requests and usage
+    were lost with the machine.  The strip shows what ran there in their
+    place. -#}
+<div class="strip strip-lost">
+<div class="strip-head">
+{% call links::object_link(machine.name, Some(transect_graph::links::machine(machine.name)), "strip-name") %}{% endcall %}
+<span class="strip-tag">{{ machine.lost_tag() }}</span>
+</div>
+<div class="strip-pods">{{ machine.lost_text() }}</div>
+</div>
+{%- else %}
+<div class="strip{% if machine.control_plane %} strip-control-plane{% endif %}{% if !machine.ready %} strip-not-ready{% endif %}">
+<div class="strip-head">
+{% call links::object_link(machine.name, Some(transect_graph::links::machine(machine.name)), "strip-name") %}{% endcall %}
+{%- if !machine.ready %}
+<span class="strip-tag strip-tag-warm">not ready</span>
+{%- else if let Some(alerted) = machine.alerted %}
+<span class="strip-tag {{ alerted.tag_class() }}" title="{{ alerted.title() }}">{{ alerted.tag() }}</span>
+{%- endif %}
+</div>
+<div class="meter" title="{{ machine.cpu_title() }}">
+<span class="meter-label">cpu</span>
+<div class="meter-track"><div class="meter-requested" style="width: {{ machine.cpu_percent() }}%"></div>
+{%- if let Some(used) = machine.cpu_used_percent() %}<div class="meter-used" style="width: {{ used }}%"></div>{% endif %}</div>
+</div>
+<div class="meter" title="{{ machine.memory_title() }}">
+<span class="meter-label">mem</span>
+<div class="meter-track"><div class="meter-requested" style="width: {{ machine.memory_percent() }}%"></div>
+{%- if let Some(used) = machine.memory_used_percent() %}<div class="meter-used" style="width: {{ used }}%"></div>{% endif %}</div>
+</div>
+{#- The selected namespace's count shares the pods line, not the
+    header, so a long machine name never gets cut short to make room. -#}
+<div class="strip-pods">{{ machine.pods }} pod{% if machine.pods != 1 %}s{% endif %}
+{%- if let Some(here) = machine.here_text() %} · <span class="strip-tag{% if machine.here != Some(0) %} strip-tag-here{% endif %}">{{ here }}</span>{% endif %}</div>
+{%- if let Some(held) = machine.held_text() %}
+<div class="strip-holds" title="{{ machine.held_title() }}">{{ held }}</div>
+{%- endif %}
+</div>
+{%- endif %}
+{%- endfor %}
+</div>
+</div>
+{%- endfor %}
+</div>
+</section>

@@ -1,0 +1,492 @@
+# The fixture cluster: every object the tests and `--fixture` serve.
+#
+# Every name is unique across kinds and appears in no page's prose, so
+# a test can find an object by its name in a page's text.  Each group
+# of documents below gives one page type an example; add to a group,
+# or start another, when a page needs one.  Keep the pods in their
+# order, because some tests replace a pod by its position.
+
+# Two machines, both ready, of four cores and 16Gi each.  The second
+# is the control plane, so the rows of machines draw both groups.
+apiVersion: v1
+kind: Node
+metadata: {name: node-alpha}
+status:
+  addresses: [{type: InternalIP, address: 192.168.0.1}]
+  capacity: {cpu: '4', memory: 16Gi}
+  allocatable: {cpu: '4', memory: 15Gi}
+  conditions: [{type: Ready, status: 'True'}]
+---
+apiVersion: v1
+kind: Node
+metadata: {name: node-beta, labels: {node-role.kubernetes.io/control-plane: ''}}
+status:
+  addresses: [{type: InternalIP, address: 192.168.0.2}]
+  capacity: {cpu: '4', memory: 16Gi}
+  allocatable: {cpu: '4', memory: 15Gi}
+  conditions: [{type: Ready, status: 'True'}]
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: acme-shop, labels: {kubernetes.io/metadata.name: acme-shop}}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: acme-ledger, labels: {kubernetes.io/metadata.name: acme-ledger}}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: acme-ops, labels: {kubernetes.io/metadata.name: acme-ops}}
+---
+apiVersion: v1
+kind: Namespace
+metadata: {name: acme-promoter, labels: {kubernetes.io/metadata.name: acme-promoter}}
+---
+# A storefront `Deployment` behind an `Ingress` and a `Service`, which
+# calls the ledger in another namespace.  It is the example of a
+# workload with an entry, and its section view goes from the `Ingress`
+# down to the ledger's volume.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: acme-shop
+  name: storefront
+  uid: storefront
+  labels:
+    kustomize.toolkit.fluxcd.io/name: shop-apps
+    kustomize.toolkit.fluxcd.io/namespace: acme-ops
+    helm.toolkit.fluxcd.io/name: storefront-release
+    helm.toolkit.fluxcd.io/namespace: acme-shop
+spec:
+  replicas: 2
+  selector: {matchLabels: {app: storefront}}
+  template:
+    metadata: {labels: {app: storefront}}
+    spec:
+      serviceAccountName: storefront
+      containers:
+      - name: main
+        image: example.test/storefront-image:1
+        env: [{name: LEDGER_URL, value: 'http://ledger-db-svc.acme-ledger.svc.cluster.local:80'}]
+        ports: [{name: http, containerPort: 8080}]
+status: {replicas: 2, readyReplicas: 2, availableReplicas: 2, updatedReplicas: 2}
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  namespace: acme-shop
+  name: storefront-rs
+  uid: storefront-rs
+  ownerReferences: [{apiVersion: apps/v1, kind: Deployment, name: storefront, uid: storefront, controller: true}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-shop
+  name: storefront-rs-one
+  uid: storefront-rs-one
+  labels: {app: storefront}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: storefront-rs, uid: storefront-rs, controller: true}]
+spec: {nodeName: node-alpha, serviceAccountName: storefront, containers: [{name: main, image: example.test/storefront-image:1}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.1}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/storefront-image:1, imageID: 'example.test/storefront-image@sha256:5a01', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-shop
+  name: storefront-rs-two
+  uid: storefront-rs-two
+  labels: {app: storefront}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: storefront-rs, uid: storefront-rs, controller: true}]
+spec: {nodeName: node-beta, serviceAccountName: storefront, containers: [{name: main, image: example.test/storefront-image:1}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.2}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/storefront-image:1, imageID: 'example.test/storefront-image@sha256:5a01', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-shop, name: storefront-svc}
+spec: {selector: {app: storefront}, ports: [{port: 80, targetPort: http}], clusterIP: 10.96.0.14}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: acme-shop
+  name: storefront-route
+spec:
+  ingressClassName: proxy
+  tls: [{hosts: [shop.example.test], secretName: storefront-tls}]
+  rules: [{host: shop.example.test, http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: storefront-svc, port: {number: 80}}}}]}}]
+---
+# The ledger's database, whose one pod stores its data on a claim bound
+# to an NFS volume on a NAS outside the cluster.  It gives the pages a
+# volume, its claim, and the ground box under the map.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  namespace: acme-ledger
+  name: ledger-db
+  uid: ledger-db
+  labels:
+    kustomize.toolkit.fluxcd.io/name: ledger-apps
+    kustomize.toolkit.fluxcd.io/namespace: acme-ops
+spec:
+  replicas: 1
+  serviceName: ledger-db-svc
+  selector: {matchLabels: {app: ledger-db}}
+  template:
+    metadata: {labels: {app: ledger-db}}
+    spec:
+      containers:
+      - name: main
+        image: example.test/ledger-db-image:1
+        ports: [{name: http, containerPort: 8080}]
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1, currentReplicas: 1}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ledger
+  name: ledger-db-0
+  uid: ledger-db-0
+  labels: {app: ledger-db}
+  ownerReferences: [{apiVersion: apps/v1, kind: StatefulSet, name: ledger-db, uid: ledger-db, controller: true}]
+spec:
+  nodeName: node-alpha
+  containers: [{name: main, image: example.test/ledger-db-image:1, volumeMounts: [{name: data, mountPath: /var/lib/ledger}]}]
+  volumes: [{name: data, persistentVolumeClaim: {claimName: data-ledger-db-0}}]
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.3}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/ledger-db-image:1, imageID: 'example.test/ledger-db-image@sha256:1d02', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {namespace: acme-ledger, name: ledger-db-svc}
+spec: {selector: {app: ledger-db}, ports: [{port: 80, targetPort: http}], clusterIP: 10.96.0.13}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {namespace: acme-ledger, name: data-ledger-db-0}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 8Gi}}
+  storageClassName: archive-nfs
+  volumeName: ledger-archive
+status: {phase: Bound}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata: {name: ledger-archive}
+spec:
+  capacity: {storage: 8Gi}
+  accessModes: [ReadWriteOnce]
+  storageClassName: archive-nfs
+  persistentVolumeReclaimPolicy: Retain
+  nfs: {server: nas.example.test, path: /exports/ledger}
+  claimRef: {namespace: acme-ledger, name: data-ledger-db-0}
+status: {phase: Bound}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata: {name: archive-nfs}
+provisioner: nfs.csi.example.test
+---
+# A nightly backup of the ledger, whose pods mount the database's claim
+# read-only.  It puts a `CronJob` on a volume's page.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  namespace: acme-ledger
+  name: ledger-backup
+  uid: ledger-backup
+  labels:
+    kustomize.toolkit.fluxcd.io/name: backup-apps
+    kustomize.toolkit.fluxcd.io/namespace: acme-ops
+spec:
+  schedule: '0 3 * * *'
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers: [{name: main, image: example.test/ledger-backup-image:1, volumeMounts: [{name: data, mountPath: /var/lib/ledger, readOnly: true}]}]
+          volumes: [{name: data, persistentVolumeClaim: {claimName: data-ledger-db-0}}]
+---
+# The ledger's exporter, whose one pod crashes on start.  It is the
+# example of a failing workload.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {namespace: acme-ledger, name: ledger-exporter, uid: ledger-exporter}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: ledger-exporter}}
+  template:
+    metadata: {labels: {app: ledger-exporter}}
+    spec:
+      containers: [{name: main, image: example.test/ledger-exporter-image:1}]
+status:
+  replicas: 1
+  updatedReplicas: 1
+  unavailableReplicas: 1
+  conditions: [{type: Available, status: 'False', reason: MinimumReplicasUnavailable}]
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  namespace: acme-ledger
+  name: ledger-exporter-rs
+  uid: ledger-exporter-rs
+  ownerReferences: [{apiVersion: apps/v1, kind: Deployment, name: ledger-exporter, uid: ledger-exporter, controller: true}]
+---
+# A log shipper `DaemonSet` on both machines.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  namespace: acme-ops
+  name: log-shipper
+  uid: log-shipper
+  labels:
+    kustomize.toolkit.fluxcd.io/name: ops-apps
+    kustomize.toolkit.fluxcd.io/namespace: acme-ops
+spec:
+  selector: {matchLabels: {app: log-shipper}}
+  template:
+    metadata: {labels: {app: log-shipper}}
+    spec:
+      containers: [{name: main, image: example.test/log-shipper-image:1, ports: [{name: http, containerPort: 8080}]}]
+status: {desiredNumberScheduled: 2, currentNumberScheduled: 2, numberReady: 2, numberAvailable: 2, updatedNumberScheduled: 2, numberMisscheduled: 0}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ops
+  name: log-shipper-aaaa
+  uid: log-shipper-aaaa
+  labels: {app: log-shipper}
+  ownerReferences: [{apiVersion: apps/v1, kind: DaemonSet, name: log-shipper, uid: log-shipper, controller: true}]
+spec: {nodeName: node-alpha, containers: [{name: main, image: example.test/log-shipper-image:1}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.4}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/log-shipper-image:1, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ops
+  name: log-shipper-bbbb
+  uid: log-shipper-bbbb
+  labels: {app: log-shipper}
+  ownerReferences: [{apiVersion: apps/v1, kind: DaemonSet, name: log-shipper, uid: log-shipper, controller: true}]
+spec: {nodeName: node-beta, containers: [{name: main, image: example.test/log-shipper-image:1}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.5}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/log-shipper-image:1, imageID: '', state: {running: {}}}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-ledger
+  name: ledger-exporter-rs-one
+  uid: ledger-exporter-rs-one
+  labels: {app: ledger-exporter}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: ledger-exporter-rs, uid: ledger-exporter-rs, controller: true}]
+spec: {nodeName: node-beta, containers: [{name: main, image: example.test/ledger-exporter-image:1}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.6}]
+  conditions: [{type: Ready, status: 'False', reason: ContainersNotReady}]
+  containerStatuses:
+  - name: main
+    ready: false
+    restartCount: 14
+    image: example.test/ledger-exporter-image:1
+    imageID: ''
+    state: {waiting: {reason: CrashLoopBackOff, message: back-off 5m0s restarting failed container}}
+    lastState: {terminated: {exitCode: 1, reason: Error}}
+---
+# `Gizmo` is a custom kind that no kind knowledge describes and that
+# runs nothing, so its store is trimmed to metadata, conditions, and
+# printer columns.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: gizmos.gizmos.example.test}
+spec:
+  group: gizmos.example.test
+  scope: Namespaced
+  names: {kind: Gizmo, plural: gizmos}
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Ready, type: string, jsonPath: '.status.conditions[?(@.type=="Ready")].status'}
+    - {name: First, type: string, jsonPath: '.spec.parts[0:1]'}
+    - {name: Size, type: string, jsonPath: '.spec.size'}
+    - {name: Detail, type: string, jsonPath: '.status.detail', priority: 1}
+---
+apiVersion: gizmos.example.test/v1
+kind: Gizmo
+metadata: {namespace: acme-shop, name: gizmo-red, uid: gizmo-red}
+spec: {size: large, parts: [a, b]}
+status: {conditions: [{type: Ready, status: 'True'}]}
+---
+apiVersion: gizmos.example.test/v1
+kind: Gizmo
+metadata: {namespace: acme-shop, name: gizmo-blue, uid: gizmo-blue}
+spec: {size: small, parts: [a, b]}
+status: {conditions: [{type: Ready, status: 'False'}]}
+---
+# `Cache` is a custom kind that no kind knowledge describes and that
+# owns a `StatefulSet`, so a `Cache` is a workload of its own, and its
+# store keeps each object whole.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: caches.caches.example.test}
+spec:
+  group: caches.example.test
+  scope: Namespaced
+  names: {kind: Cache, plural: caches}
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        description: A cache of shoppers' sessions, kept in memory on one pod.
+        type: object
+---
+apiVersion: caches.example.test/v1
+kind: Cache
+metadata: {namespace: acme-shop, name: session-cache, uid: session-cache}
+spec: {memory: 1Gi}
+status: {conditions: [{type: Ready, status: 'True'}]}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  namespace: acme-shop
+  name: session-cache-set
+  uid: session-cache-set
+  ownerReferences: [{apiVersion: caches.example.test/v1, kind: Cache, name: session-cache, uid: session-cache, controller: true}]
+spec:
+  replicas: 1
+  serviceName: session-cache-set
+  selector: {matchLabels: {app: session-cache}}
+  template:
+    metadata: {labels: {app: session-cache}}
+    spec:
+      containers: [{name: main, image: example.test/session-cache-image:1, ports: [{containerPort: 6379}]}]
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1, currentReplicas: 1}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-shop
+  name: session-cache-set-0
+  uid: session-cache-set-0
+  labels: {app: session-cache}
+  ownerReferences: [{apiVersion: apps/v1, kind: StatefulSet, name: session-cache-set, uid: session-cache-set, controller: true}]
+spec: {nodeName: node-beta, containers: [{name: main, image: example.test/session-cache-image:1, ports: [{containerPort: 6379}]}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.7}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/session-cache-image:1, imageID: '', state: {running: {}}}]
+---
+# `Promotion` is a custom kind that kind knowledge describes and that
+# an operator in its own namespace reconciles, so the operator's page
+# has a Controls table.  The knowledge is in `resources.yaml`.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: promotions.promotions.example.test}
+spec:
+  group: promotions.example.test
+  scope: Namespaced
+  names: {kind: Promotion, plural: promotions}
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - {name: Discount, type: string, jsonPath: '.spec.discount'}
+    - {name: Ready, type: string, jsonPath: '.status.conditions[?(@.type=="Ready")].status'}
+---
+apiVersion: promotions.example.test/v1
+kind: Promotion
+metadata: {namespace: acme-shop, name: spring-sale, uid: spring-sale}
+spec: {discount: 20%, storefront: {name: storefront-svc}}
+status: {conditions: [{type: Ready, status: 'True', reason: Running}]}
+---
+apiVersion: promotions.example.test/v1
+kind: Promotion
+metadata: {namespace: acme-shop, name: clearance, uid: clearance}
+spec: {discount: 50%, storefront: {name: storefront-svc}}
+status: {conditions: [{type: Ready, status: 'False', reason: Scheduled, message: starts at the end of the month}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {namespace: acme-promoter, name: promoter, uid: promoter}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: promoter}}
+  template:
+    metadata: {labels: {app: promoter}}
+    spec:
+      serviceAccountName: promoter
+      containers: [{name: main, image: example.test/promoter-image:1}]
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1}
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  namespace: acme-promoter
+  name: promoter-rs
+  uid: promoter-rs
+  ownerReferences: [{apiVersion: apps/v1, kind: Deployment, name: promoter, uid: promoter, controller: true}]
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-promoter
+  name: promoter-rs-one
+  uid: promoter-rs-one
+  labels: {app: promoter}
+  ownerReferences: [{apiVersion: apps/v1, kind: ReplicaSet, name: promoter-rs, uid: promoter-rs, controller: true}]
+spec: {nodeName: node-alpha, serviceAccountName: promoter, containers: [{name: main, image: example.test/promoter-image:1}]}
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.8}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/promoter-image:1, imageID: '', state: {running: {}}}]
+---
+# The operator's identity and what it may do, which the `ServiceAccount`
+# and `ClusterRole` pages draw.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {namespace: acme-promoter, name: promoter}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: promotion-editor}
+rules:
+- apiGroups: [promotions.example.test]
+  resources: [promotions, promotions/status]
+  verbs: [get, list, watch, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: promoter-edits-promotions}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: promotion-editor}
+subjects: [{kind: ServiceAccount, namespace: acme-promoter, name: promoter}]

@@ -1,0 +1,23 @@
+{%- import "edges/provenance.html" as provenance -%}
+{%- import "links/link.html" as links -%}
+{#- The ground band, drawn below the machines band from the page's
+    `ground`.  Each backend outside the cluster gets one dashed box,
+    because the cluster connects to these backends and does not run
+    them.  When a namespace is selected, each box shows that namespace's
+    share of it, and a box with none of the namespace's volumes and none
+    of its dependents fades.  A box that an `Outside` names shows the
+    `Outside`'s intent as its `title`, marked as stored text.  The box's
+    name links to its page, and a ↗ beside the name opens the system's
+    own console when its `Outside` gives one, or when its drivers'
+    `console` templates give exactly one. -#}
+<section class="band ground" aria-label="Ground">
+<div class="band-label">
+<div class="band-name">Ground</div>
+<div class="band-count">{{ ground.total_text() }}</div>
+</div>
+<div class="ground-boxes">
+{%- for one in ground.boxes %}
+<div class="{{ one.class() }}"{% if let Some(title) = one.about_title() %} title="{{ title }}"{% endif %}>{% call links::object_link(one.name, Some(one.page.clone()), "ground-name") %}{% endcall %}{% if let Some(link) = one.link %} <a class="ground-out" href="{{ link }}" target="_blank" rel="noopener noreferrer" title="Open {{ one.name }}'s own page">↗</a>{% endif %}{% if let Some(line) = one.about.first() %}{% call provenance::mark(line.provenance) %}{% endcall %}{% endif %}{% if let Some(text) = one.text(ground) %} <span class="ground-count">· {{ text }}</span>{% endif %}</div>
+{%- endfor %}
+</div>
+</section>

@@ -1,0 +1,9 @@
+{#- Draws each loop that the card's namespace is in: the loop's members
+    in the title, what a loop means, and the cycles its objects close. -#}
+{%- for found in card.loops %}
+<div class="card-loop">
+<div class="card-loop-title">⟲ {{ found.title() }}</div>
+<div class="card-loop-meaning">{{ found.meaning() }}</div>
+{% include "edges/loops/cycles.html" %}
+</div>
+{%- endfor %}

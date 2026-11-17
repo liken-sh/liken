@@ -1,0 +1,206 @@
+# The fixture cluster's hardware: a radio and what pairs through it, a
+# till that holds a handset through Dynamic Resource Allocation, and the
+# devices each machine's ResourceSlices list.  Read after
+# `cluster.yaml`, whose machines and namespaces these name.
+
+# A radio and a handset paired through it, both outside any namespace.
+# The handset names its radio by the radio's address.  That is a
+# reference by value, so the store keeps the kind it points to whole.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: radios.radios.example.test}
+spec:
+  group: radios.example.test
+  scope: Cluster
+  names: {kind: Radio, plural: radios}
+  versions: [{name: v1, served: true, storage: true}]
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: handsets.radios.example.test}
+spec:
+  group: radios.example.test
+  scope: Cluster
+  names: {kind: Handset, plural: handsets}
+  versions: [{name: v1, served: true, storage: true}]
+---
+apiVersion: radios.example.test/v1
+kind: Radio
+metadata: {name: radio-desk, uid: radio-desk}
+status: {address: '00:11:22:33:44:55', conditions: [{type: Ready, status: 'True'}]}
+---
+apiVersion: radios.example.test/v1
+kind: Handset
+metadata: {name: handset-till, uid: handset-till}
+status: {radio: '00:11:22:33:44:55', conditions: [{type: Ready, status: 'True'}]}
+---
+# A till at the counter, a custom workload whose one pod holds a
+# handset device through a claim.  Device knowledge gives the handset
+# its title and links it to the radio its attributes name.  A GPU on
+# the other machine lists its render and display nodes under one PCI
+# bus ID, with no device knowledge.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: tills.tills.example.test}
+spec:
+  group: tills.example.test
+  scope: Namespaced
+  names: {kind: Till, plural: tills}
+  versions: [{name: v1, served: true, storage: true}]
+---
+apiVersion: tills.example.test/v1
+kind: Till
+metadata: {namespace: acme-shop, name: counter-till, uid: counter-till}
+status: {radio: '00:11:22:33:44:55', conditions: [{type: Ready, status: 'True'}]}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  namespace: acme-shop
+  name: counter-till-set
+  uid: counter-till-set
+  ownerReferences: [{apiVersion: tills.example.test/v1, kind: Till, name: counter-till, uid: counter-till, controller: true}]
+spec:
+  replicas: 1
+  serviceName: counter-till-set
+  selector: {matchLabels: {app: counter-till}}
+  template:
+    metadata: {labels: {app: counter-till}}
+    spec:
+      containers: [{name: main, image: example.test/till-image:1}]
+status: {replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1, currentReplicas: 1}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: acme-shop
+  name: counter-till-set-0
+  uid: counter-till-set-0
+  labels: {app: counter-till}
+  ownerReferences: [{apiVersion: apps/v1, kind: StatefulSet, name: counter-till-set, uid: counter-till-set, controller: true}]
+spec:
+  nodeName: node-beta
+  containers: [{name: main, image: example.test/till-image:1}]
+  resourceClaims: [{name: handset, resourceClaimName: till-handset}]
+status:
+  phase: Running
+  podIPs: [{ip: 10.0.0.9}]
+  conditions: [{type: Ready, status: 'True'}]
+  containerStatuses: [{name: main, ready: true, restartCount: 0, image: example.test/till-image:1, imageID: '', state: {running: {}}}]
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata: {namespace: acme-shop, name: till-handset}
+spec: {devices: {requests: [{name: handset, exactly: {deviceClassName: handsets}}]}}
+status:
+  allocation:
+    devices:
+      results: [{request: handset, driver: radio.example.test, pool: node-beta, device: handset-one}]
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceSlice
+metadata: {name: radio-node-beta}
+spec:
+  driver: radio.example.test
+  nodeName: node-beta
+  pool: {name: node-beta, generation: 1, resourceSliceCount: 1}
+  devices:
+  - name: handset-one
+    attributes:
+      product: {string: The counter handset}
+      battery: {int: 80}
+      radio: {string: '00:11:22:33:44:55'}
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceSlice
+metadata: {name: gpu-node-alpha}
+spec:
+  driver: gpu.example.test
+  nodeName: node-alpha
+  pool: {name: node-alpha, generation: 1, resourceSliceCount: 1}
+  devices:
+  - name: card-render
+    attributes:
+      model: {string: A graphics card}
+      resource.kubernetes.io/pciBusID: {string: '0000:01:00.0'}
+  - name: card-display
+    attributes:
+      model: {string: A graphics card}
+      resource.kubernetes.io/pciBusID: {string: '0000:01:00.0'}
+---
+# `node-beta`'s other hardware, so its page draws several drivers: a
+# GPU whose render and display nodes share a PCI bus ID, held by a
+# claim with a long generated name, and a sound card's outputs.  A
+# claim holds one output, and more outputs are unheld than the page
+# lists unfolded for one driver.  Device knowledge gives a title only
+# to the outputs that have a `label` attribute.
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata: {namespace: acme-shop, name: storefront-screen-claim-template-generated-x7k2p}
+spec: {devices: {requests: [{name: screen, exactly: {deviceClassName: screens}}]}}
+status:
+  allocation:
+    devices:
+      results: [{request: screen, driver: gpu.example.test, pool: node-beta, device: card-display}]
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata: {namespace: acme-shop, name: counter-speakers}
+spec: {devices: {requests: [{name: speakers, exactly: {deviceClassName: speakers}}]}}
+status:
+  allocation:
+    devices:
+      results: [{request: speakers, driver: sound.example.test, pool: node-beta, device: hdmi-1}]
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceSlice
+metadata: {name: gpu-node-beta}
+spec:
+  driver: gpu.example.test
+  nodeName: node-beta
+  pool: {name: node-beta, generation: 1, resourceSliceCount: 1}
+  devices:
+  - name: card-render
+    attributes:
+      model: {string: A graphics card}
+      resource.kubernetes.io/pciBusID: {string: '0000:02:00.0'}
+  - name: card-display
+    attributes:
+      model: {string: A graphics card}
+      resource.kubernetes.io/pciBusID: {string: '0000:02:00.0'}
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceSlice
+metadata: {name: sound-node-beta}
+spec:
+  driver: sound.example.test
+  nodeName: node-beta
+  pool: {name: node-beta, generation: 1, resourceSliceCount: 1}
+  devices:
+  - {name: hdmi-1, attributes: {label: {string: The counter speakers}, card: {string: '0000:02:00.0'}, connector: {string: HDMI-A-1}, channels: {int: 2}}}
+  - {name: hdmi-2, attributes: {connector: {string: HDMI-A-2}, channels: {int: 2}}}
+  - {name: hdmi-3, attributes: {connector: {string: HDMI-A-3}, channels: {int: 8}}}
+  - {name: analog-out, attributes: {connector: {string: line out}, channels: {int: 2}}}
+  - {name: analog-in, attributes: {connector: {string: line in}, channels: {int: 2}}}
+  - {name: headphones, attributes: {connector: {string: front jack}, channels: {int: 2}}}
+  - {name: usb-audio, attributes: {connector: {string: usb}, channels: {int: 2}}}
+  - {name: usb-audio-capture, attributes: {connector: {string: usb}, channels: {int: 1}}}
+---
+# The machine under `node-alpha`, as liken describes it: a
+# cluster-scoped resource named for its `Node`, whose kind knowledge
+# declares that with `node`.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: machines.liken.sh}
+spec:
+  group: liken.sh
+  scope: Cluster
+  names: {kind: Machine, plural: machines}
+  versions: [{name: v1alpha1, served: true, storage: true}]
+---
+apiVersion: liken.sh/v1alpha1
+kind: Machine
+metadata: {name: node-alpha, uid: machine-alpha}
+status:
+  phase: Running
+  conditions: [{type: Ready, status: 'True'}]

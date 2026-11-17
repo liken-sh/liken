@@ -1,0 +1,391 @@
+/*
+ * An object's board: the object in a box in the middle, what it is part
+ * of and what names it in boxes to its left, what it names in boxes to
+ * its right, and each table across the page under them.  The boxes
+ * take the look of a known kind's diagram: --panel, the rule's border,
+ * and the band labels' small capitals.  The object's box takes the
+ * heavier rule that the object's box takes in that diagram.
+ * The board spans the main column, and in a narrow column it stacks
+ * with the object first.
+ */
+
+.board-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 0 16px 32px;
+  font-family: var(--mono);
+  font-size: 12px;
+  container-type: inline-size;
+}
+
+/* A board with no card beside it keeps the same gutter on its right as
+   on its left. */
+.board-page-alone { padding-right: 32px; }
+
+.board {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.board-side {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.board-object,
+.board-box {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.board-object {
+  flex: 1.4 1 0;
+  border: 2px solid var(--rule-strong);
+  padding: 14px 16px;
+}
+
+.board-failing {
+  border-color: var(--warm);
+  box-shadow: inset 0 0 0 2px var(--warm);
+}
+
+.board-warning { border-color: var(--warm); }
+
+@container (max-width: 860px) {
+  .board {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .board-object { order: -1; }
+}
+
+/* With the object drawn elsewhere, as under a known kind's diagram, the
+   boxes fill one row as wide as the column. */
+.board-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+
+.board-label {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.board-object-name {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.board-object-name .dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+}
+
+.board-line { color: var(--ink-muted); }
+
+.board-message {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--ink-muted);
+  overflow-wrap: break-word;
+}
+
+.board-none { color: var(--ink-faint); }
+
+/* In a box, each fact's label is above its names, one name to a line. */
+.board-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.board-list .board-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.board-fact-label {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.board-values {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The object's own facts, such as its printer columns, show as a
+   grid: each label beside its value. */
+.board-facts {
+  display: grid;
+  grid-template-columns: minmax(90px, max-content) minmax(0, 1fr);
+  gap: 4px 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+}
+
+.board-facts .board-fact { display: contents; }
+
+.board-facts .board-values {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.board-literal { font-family: var(--mono); font-size: 12px; }
+
+.board-unset { color: var(--ink-faint); }
+
+/* A long list folds to its count, which opens to the names. */
+.board-fold > summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--ink);
+}
+
+.board-fold > summary::-webkit-details-marker { display: none; }
+
+.board-fold-show,
+.board-fold-hide { color: var(--ink-faint); }
+
+.board-fold[open] .board-fold-show,
+.board-fold:not([open]) .board-fold-hide { display: none; }
+
+.board-fold[open] > summary { margin-bottom: 3px; }
+
+.board-wide { gap: 6px; }
+
+/* A table under the board takes the page's width, and its first
+   column, such as a rule's verbs, stays on one line, so a long column
+   of resources beside it wraps rather than squeezing it. */
+.board-wide .board-table { width: 100%; }
+.board-wide .board-table td:first-child { white-space: nowrap; }
+
+.board-table {
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.board-table th {
+  padding: 0 16px 4px 0;
+  text-align: left;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.board-table td {
+  padding: 4px 16px 4px 0;
+  border-top: 1px solid var(--rule);
+  vertical-align: baseline;
+  overflow-wrap: anywhere;
+}
+
+/* A box's label with a link beside it, such as a namespace's list of a
+   kind and the same kind in every namespace. */
+.board-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.board-aside { font-family: "Source Sans 3", system-ui, sans-serif; font-size: 12px; }
+
+.board-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.board-cell .dot { flex: none; width: 8px; height: 8px; }
+
+.board-table-text { font-family: "Source Sans 3", system-ui, sans-serif; font-size: 13px; color: var(--ink-muted); }
+
+/* A table of objects fits its column.  A name wraps after a hyphen,
+   and each printer column's value stays on one line, cut with an
+   ellipsis past 16em, its whole value on hover. */
+.board-objects td { white-space: nowrap; }
+.board-objects td.board-table-name { white-space: normal; min-width: 8em; }
+.board-objects td.board-table-value { max-width: 16em; overflow: hidden; text-overflow: ellipsis; }
+
+/* A table's rows past its first few hide until the count under it is
+   open. */
+.board-box:not(:has(> .board-table-fold[open])) .board-folded,
+.manages-body:not(:has(> .board-table-fold[open])) .board-folded { display: none; }
+
+/* /kinds: a box per API group, packed in columns so a group of one
+   kind and a group of twenty are side by side without gaps. */
+.kinds-boxes {
+  column-width: 300px;
+  column-gap: 12px;
+}
+
+.kinds-group {
+  break-inside: avoid;
+  margin-bottom: 12px;
+}
+
+/* The domain a run of groups is registered under, in faint ink, before
+   its first box.  The groups sort by domain, so the heading explains
+   the order. */
+.kinds-domain {
+  break-after: avoid;
+  margin: 4px 0 6px;
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.kinds-group-name { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+
+.kinds-controllers { color: var(--ink-faint); font-family: "Source Sans 3", system-ui, sans-serif; font-size: 12px; }
+
+.kinds-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kinds-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
+}
+
+.kinds-kind { overflow-wrap: anywhere; }
+
+.kinds-count {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.kinds-row-controllers { grid-column: 1 / -1; }
+
+.kinds-unhealthy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.kinds-unhealthy .dot { width: 8px; height: 8px; }
+
+.kinds-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.kinds-empty-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+/* A workload's Controls boxes are in the row with Runs and Guards, one
+   per kind, with the Runs box's label. */
+.manages-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.manages-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.manages-count { color: var(--ink-muted); }
+
+.manages-rule {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.manages .board-table { width: 100%; }
+
+/* A run of Controls boxes looks like one group: only the first shows
+   the label, and the rest keep its width so their tables line up. */
+.manages + .manages .row-label { visibility: hidden; }
+
+/* An object and the machine it is on, as a pod that mounts a volume:
+   both names linked, with a gray "on" between. */
+.board-placed { min-width: 0; }
+
+.board-on {
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+/* What the object is part of frames its board, and its parts are boxes
+   inside its own box, each listing its own parts. */
+.board-frame {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 12px 14px 14px;
+}
+
+.board-frame-head { margin-bottom: 10px; }
+
+.board-frame-head .board-label { display: inline; margin-right: 6px; }
+
+.board-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+}
+
+.board-part {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.board-part-name { font-weight: 600; }

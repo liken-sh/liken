@@ -1,0 +1,31 @@
+[package]
+name = "transect-resources"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+transect-graph.workspace = true
+# Only the test builders behind `fixtures` read anyhow.
+anyhow = { workspace = true, optional = true }
+askama.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+notify.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[features]
+# The test builders other crates' tests read.
+fixtures = ["dep:anyhow"]
+
+[dev-dependencies]
+anyhow.workspace = true
+rstest.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[lib]
+# The doc comments show YAML and paths, not examples to run.
+doctest = false

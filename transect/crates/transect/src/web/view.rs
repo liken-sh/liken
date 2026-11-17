@@ -1,0 +1,440 @@
+//! What a URL requests.  A view is the key the event stream renders
+//! by, so two URLs that request the same view share one rendering.
+
+use serde::Deserialize;
+
+use transect_graph::edges::Shown;
+use transect_supply::vulnerabilities::Shown as Severities;
+
+/// One page and the edge kinds it shows, which render differently, so
+/// the event stream keys its renderings by both.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct View {
+    pub page: Page,
+    pub shown: Shown,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Page {
+    /// The cluster map, with one namespace selected or none.
+    Cluster { select: Option<String> },
+    /// The cluster map if the machines named were lost, by name, with
+    /// one namespace selected in it or none.
+    Loss {
+        lose: Vec<String>,
+        select: Option<String>,
+    },
+    /// One namespace, opened.
+    Namespace { name: String },
+    /// One namespace's access tab.
+    NamespaceAccess { name: String },
+    /// Every object of one kind in one namespace, by the kind's
+    /// resource name.
+    Objects { namespace: String, resource: String },
+    /// One workload, by its namespace, its kind's resource name, and
+    /// its name.
+    Workload {
+        namespace: String,
+        resource: String,
+        name: String,
+    },
+    /// One pod, by its namespace and name.
+    Pod { namespace: String, name: String },
+    /// One object of a kind outside any namespace, by its kind's name in
+    /// the URL and its name.
+    ClusterObject { resource: String, name: String },
+    /// `transect`'s own resources and their conditions.
+    Resources,
+    /// What changed in the cluster over the last day.
+    Changed,
+    /// Every custom kind the cluster serves.
+    Kinds,
+    /// What may reach each port from outside the cluster.
+    WaysIn,
+    /// What each account may do, and where.
+    Accounts,
+    /// Every id a current findings report holds, with the severities a
+    /// query narrows it to.
+    Vulnerabilities { severities: Severities },
+    /// One finding id's page.
+    Vulnerability { id: String },
+    /// A group's or a user's access, by `groups` or `users` and its
+    /// name.
+    Subject { kinds: String, name: String },
+    /// One custom kind's objects across namespaces, by `<plural>.<group>`.
+    Kind { resource: String },
+    /// One machine, by its `Node`'s name.
+    Machine { name: String },
+    /// One ground box, by its `Outside`'s name or its backend's.
+    Ground { name: String },
+    /// One `PersistentVolume`, by name.
+    Volume { name: String },
+    /// One workload's section, by the same parts as its page.
+    Section {
+        namespace: String,
+        resource: String,
+        name: String,
+    },
+    /// One workload's access tab, by the same parts as its page.
+    Access {
+        namespace: String,
+        resource: String,
+        name: String,
+    },
+    /// One workload's vulnerabilities tab, by the same parts as its
+    /// page, with the severities a query narrows it to.
+    WorkloadVulnerabilities {
+        namespace: String,
+        resource: String,
+        name: String,
+        severities: Severities,
+    },
+    /// The logs lens of a pod, whose resource is `pods`, or of a
+    /// workload, with the pod and the container a query names.
+    Logs {
+        namespace: String,
+        resource: String,
+        name: String,
+        pod: Option<String>,
+        container: Option<String>,
+    },
+}
+
+/// The query string every view reads.
+#[derive(Debug, Default, Deserialize)]
+pub struct Query {
+    select: Option<String>,
+    lose: Option<String>,
+    edges: Option<String>,
+    pod: Option<String>,
+    container: Option<String>,
+    severity: Option<String>,
+}
+
+impl Query {
+    /// The namespace to select.  An empty `select` selects nothing, as a
+    /// form with a blank field would send it.
+    pub fn select(&self) -> Option<String> {
+        self.select
+            .clone()
+            .filter(|namespace| !namespace.is_empty())
+    }
+
+    /// The machines to lose, each once and sorted, so two URLs that
+    /// name one set in another order share a view.
+    pub fn lose(&self) -> Vec<String> {
+        let names = self.lose.iter().flat_map(|names| names.split(','));
+        let mut names: Vec<String> = names
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(Into::into)
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// The pod a workload's logs lens requests, when one is named.
+    pub fn pod(&self) -> Option<String> {
+        self.pod.clone().filter(|pod| !pod.is_empty())
+    }
+
+    /// The container a logs lens requests, when one is named.
+    pub fn container(&self) -> Option<String> {
+        self.container
+            .clone()
+            .filter(|container| !container.is_empty())
+    }
+
+    /// The severities a vulnerabilities page narrows to, every one
+    /// when the query names none.
+    pub fn severities(&self) -> Severities {
+        Severities::parse(self.severity.as_deref())
+    }
+
+    /// The edge kinds to show.
+    pub fn shown(&self) -> Shown {
+        Shown::parse(self.edges.as_deref())
+    }
+}
+
+impl View {
+    /// The view at `path`, the URL path without its leading slash, or
+    /// `None` for a path no view serves.
+    pub fn at(path: &str, query: Query) -> Option<Self> {
+        let page = Page::at(path, &query)?;
+        Some(Self {
+            page,
+            shown: query.shown(),
+        })
+    }
+}
+
+impl Page {
+    /// Whether the page is in the access lens, where a name opens its
+    /// object's access page: a page under `/access`, a namespace's or a
+    /// workload's access tab, or a `ServiceAccount`'s page, which is its
+    /// access drawing.
+    pub fn in_access(&self) -> bool {
+        match self {
+            Self::WaysIn | Self::Accounts | Self::Subject { .. } => true,
+            Self::NamespaceAccess { .. } | Self::Access { .. } => true,
+            Self::Workload { resource, .. } => resource == "serviceaccounts",
+            _ => false,
+        }
+    }
+
+    /// The cluster map a query on `/` requests.  A selection in a loss
+    /// keeps the loss on the map and opens the namespace's card in the
+    /// sidebar, so a click on a parcel stays in the loss.
+    pub fn cluster(query: &Query) -> Self {
+        match query.lose() {
+            lose if lose.is_empty() => Self::Cluster {
+                select: query.select(),
+            },
+            lose => Self::Loss {
+                lose,
+                select: query.select(),
+            },
+        }
+    }
+
+    fn at(path: &str, query: &Query) -> Option<Self> {
+        match path.split('/').collect::<Vec<_>>()[..] {
+            [""] => Some(Self::cluster(query)),
+            ["resources"] => Some(Self::Resources),
+            ["changed"] => Some(Self::Changed),
+            ["kinds"] => Some(Self::Kinds),
+            ["access"] => Some(Self::WaysIn),
+            ["access", "accounts"] => Some(Self::Accounts),
+            ["vulnerabilities"] => Some(Self::Vulnerabilities {
+                severities: query.severities(),
+            }),
+            // A scanner's id may hold a slash, so the id is the whole
+            // rest of the path.
+            ["vulnerabilities", ref id @ ..] if !id.concat().is_empty() => {
+                Some(Self::Vulnerability { id: id.join("/") })
+            }
+            // A user's or a group's name may hold slashes, as an
+            // identity provider's names do, and the router decodes a
+            // `%2F` in the path to `/`, so the name is the whole rest.
+            [
+                "access",
+                "accounts",
+                kinds @ ("groups" | "users"),
+                ref name @ ..,
+            ] if !name.concat().is_empty() => Some(Self::Subject {
+                kinds: kinds.into(),
+                name: name.join("/"),
+            }),
+            ["kinds", resource] if !resource.is_empty() => Some(Self::Kind {
+                resource: resource.into(),
+            }),
+            ["machines", name] if !name.is_empty() => Some(Self::Machine { name: name.into() }),
+            ["ground", name] if !name.is_empty() => Some(Self::Ground { name: name.into() }),
+            ["volumes", name] if !name.is_empty() => Some(Self::Volume { name: name.into() }),
+            ["cluster", resource, name] if !resource.is_empty() && !name.is_empty() => {
+                Some(Self::ClusterObject {
+                    resource: resource.into(),
+                    name: name.into(),
+                })
+            }
+            ["namespaces", name] if !name.is_empty() => Some(Self::Namespace { name: name.into() }),
+            ["namespaces", name, "access"] if !name.is_empty() => {
+                Some(Self::NamespaceAccess { name: name.into() })
+            }
+            ["namespaces", namespace, resource]
+                if !namespace.is_empty() && !resource.is_empty() =>
+            {
+                Some(Self::Objects {
+                    namespace: namespace.into(),
+                    resource: resource.into(),
+                })
+            }
+            // `pods` is no workload's resource name, so a pod's path is
+            // read before a workload's.
+            ["namespaces", namespace, "pods", name]
+                if !namespace.is_empty() && !name.is_empty() =>
+            {
+                Some(Self::Pod {
+                    namespace: namespace.into(),
+                    name: name.into(),
+                })
+            }
+            ["namespaces", namespace, resource, name]
+                if [namespace, resource, name]
+                    .iter()
+                    .all(|part| !part.is_empty()) =>
+            {
+                Some(Self::Workload {
+                    namespace: namespace.into(),
+                    resource: resource.into(),
+                    name: name.into(),
+                })
+            }
+            ["namespaces", namespace, resource, name, "section"]
+                if resource != "pods"
+                    && [namespace, resource, name]
+                        .iter()
+                        .all(|part| !part.is_empty()) =>
+            {
+                Some(Self::Section {
+                    namespace: namespace.into(),
+                    resource: resource.into(),
+                    name: name.into(),
+                })
+            }
+            ["namespaces", namespace, resource, name, "access"]
+                if [namespace, resource, name]
+                    .iter()
+                    .all(|part| !part.is_empty()) =>
+            {
+                Some(Self::Access {
+                    namespace: namespace.into(),
+                    resource: resource.into(),
+                    name: name.into(),
+                })
+            }
+            ["namespaces", namespace, resource, name, "vulnerabilities"]
+                if resource != "pods"
+                    && [namespace, resource, name]
+                        .iter()
+                        .all(|part| !part.is_empty()) =>
+            {
+                Some(Self::WorkloadVulnerabilities {
+                    namespace: namespace.into(),
+                    resource: resource.into(),
+                    name: name.into(),
+                    severities: query.severities(),
+                })
+            }
+            ["namespaces", namespace, resource, name, "logs"]
+                if [namespace, resource, name]
+                    .iter()
+                    .all(|part| !part.is_empty()) =>
+            {
+                Some(Self::Logs {
+                    namespace: namespace.into(),
+                    resource: resource.into(),
+                    name: name.into(),
+                    pod: query.pod(),
+                    container: query.container(),
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    fn query(select: Option<&str>) -> Query {
+        Query {
+            select: select.map(Into::into),
+            ..Query::default()
+        }
+    }
+
+    #[rstest]
+    #[case::the_cluster("", None, Some(Page::Cluster { select: None }))]
+    #[case::a_selection("", Some("shop"), Some(Page::Cluster { select: Some("shop".into()) }))]
+    #[case::a_blank_selection("", Some(""), Some(Page::Cluster { select: None }))]
+    #[case::a_namespace("namespaces/shop", None, Some(Page::Namespace { name: "shop".into() }))]
+    #[case::a_namespace_ignores_the_selection("namespaces/shop", Some("blog"), Some(Page::Namespace { name: "shop".into() }))]
+    #[case::no_namespace_named("namespaces/", None, None)]
+    #[case::one_kind_in_a_namespace("namespaces/shop/widgets.example.io", None, Some(Page::Objects { namespace: "shop".into(), resource: "widgets.example.io".into() }))]
+    #[case::a_kind_with_no_name("namespaces/shop/", None, None)]
+    #[case::a_workload("namespaces/shop/deployments/web", None, Some(Page::Workload { namespace: "shop".into(), resource: "deployments".into(), name: "web".into() }))]
+    #[case::a_custom_workload("namespaces/shop/caches.cache.example.io/sessions", Some("blog"), Some(Page::Workload { namespace: "shop".into(), resource: "caches.cache.example.io".into(), name: "sessions".into() }))]
+    #[case::a_pod("namespaces/shop/pods/web-5d8f-x2x7q", None, Some(Page::Pod { namespace: "shop".into(), name: "web-5d8f-x2x7q".into() }))]
+    #[case::a_pod_with_no_name("namespaces/shop/pods/", None, None)]
+    #[case::a_workload_with_no_name("namespaces/shop/deployments/", None, None)]
+    #[case::below_a_workload("namespaces/shop/deployments/web/more", None, None)]
+    #[case::a_section("namespaces/shop/deployments/web/section", None, Some(Page::Section { namespace: "shop".into(), resource: "deployments".into(), name: "web".into() }))]
+    #[case::no_section_of_a_pod("namespaces/shop/pods/web-5d8f-x2x7q/section", None, None)]
+    #[case::a_section_with_no_name("namespaces/shop/deployments//section", None, None)]
+    #[case::a_pods_logs("namespaces/shop/pods/web-5d8f-x2x7q/logs", None, Some(Page::Logs { namespace: "shop".into(), resource: "pods".into(), name: "web-5d8f-x2x7q".into(), pod: None, container: None }))]
+    #[case::a_workloads_logs("namespaces/shop/deployments/web/logs", None, Some(Page::Logs { namespace: "shop".into(), resource: "deployments".into(), name: "web".into(), pod: None, container: None }))]
+    #[case::the_resources("resources", None, Some(Page::Resources))]
+    #[case::the_changes("changed", None, Some(Page::Changed))]
+    #[case::the_kinds("kinds", None, Some(Page::Kinds))]
+    #[case::the_ways_in("access", None, Some(Page::WaysIn))]
+    #[case::a_workloads_access("namespaces/shop/deployments/web/access", None, Some(Page::Access { namespace: "shop".into(), resource: "deployments".into(), name: "web".into() }))]
+    #[case::the_accounts("access/accounts", None, Some(Page::Accounts))]
+    #[case::a_workloads_vulnerabilities("namespaces/shop/deployments/web/vulnerabilities", None, Some(Page::WorkloadVulnerabilities { namespace: "shop".into(), resource: "deployments".into(), name: "web".into(), severities: Severities::default() }))]
+    #[case::the_vulnerabilities("vulnerabilities", None, Some(Page::Vulnerabilities { severities: Severities::default() }))]
+    #[case::one_finding("vulnerabilities/CVE-2026-0001", None, Some(Page::Vulnerability { id: "CVE-2026-0001".into() }))]
+    #[case::no_finding_named("vulnerabilities/", None, None)]
+    #[case::a_namespaces_access("namespaces/shop/access", None, Some(Page::NamespaceAccess { name: "shop".into() }))]
+    #[case::a_group("access/accounts/groups/system:masters", None, Some(Page::Subject { kinds: "groups".into(), name: "system:masters".into() }))]
+    #[case::a_user_whose_name_holds_slashes("access/accounts/users/https://issuer.example.test/alice", None, Some(Page::Subject { kinds: "users".into(), name: "https://issuer.example.test/alice".into() }))]
+    #[case::a_subject_with_no_name("access/accounts/users/", None, None)]
+    #[case::not_a_kind_of_subject("access/accounts/robots/r2", None, None)]
+    #[case::one_kind("kinds/widgets.example.io", None, Some(Page::Kind { resource: "widgets.example.io".into() }))]
+    #[case::a_machine("machines/alpha", None, Some(Page::Machine { name: "alpha".into() }))]
+    #[case::a_ground_box("ground/a-nas", None, Some(Page::Ground { name: "a-nas".into() }))]
+    #[case::no_machine_named("machines/", None, None)]
+    #[case::a_cluster_scoped_object("cluster/clusterroles.rbac.authorization.k8s.io/view", None, Some(Page::ClusterObject { resource: "clusterroles.rbac.authorization.k8s.io".into(), name: "view".into() }))]
+    #[case::an_unknown_path("nowhere", None, None)]
+    fn reads_the_view_from_the_url(
+        #[case] path: &str,
+        #[case] select: Option<&str>,
+        #[case] page: Option<Page>,
+    ) {
+        let view = View::at(path, query(select));
+        assert_eq!(view.map(|view| view.page), page);
+    }
+
+    #[rstest]
+    #[case::one_machine(Some("alpha"), None, Page::Loss { lose: vec!["alpha".into()], select: None })]
+    #[case::a_selection_in_it(Some("alpha"), Some("shop"), Page::Loss { lose: vec!["alpha".into()], select: Some("shop".into()) })]
+    #[case::a_set_in_any_order(Some("beta, alpha,beta"), None, Page::Loss { lose: vec!["alpha".into(), "beta".into()], select: None })]
+    #[case::a_blank_loss(Some(","), Some("shop"), Page::Cluster { select: Some("shop".into()) })]
+    fn reads_the_loss_from_the_url(
+        #[case] lose: Option<&str>,
+        #[case] select: Option<&str>,
+        #[case] page: Page,
+    ) {
+        let query = Query {
+            lose: lose.map(Into::into),
+            ..query(select)
+        };
+        assert_eq!(View::at("", query).map(|view| view.page), Some(page));
+    }
+
+    #[rstest]
+    #[case::a_pod_and_a_container(Some("web-2"), Some("proxy"), (Some("web-2".to_string()), Some("proxy".to_string())))]
+    #[case::blank(Some(""), Some(""), (None, None))]
+    fn reads_the_pod_and_container_a_logs_lens_asks_for(
+        #[case] pod: Option<&str>,
+        #[case] container: Option<&str>,
+        #[case] expected: (Option<String>, Option<String>),
+    ) {
+        let query = Query {
+            pod: pod.map(Into::into),
+            container: container.map(Into::into),
+            ..Query::default()
+        };
+        let page = View::at("namespaces/shop/deployments/web/logs", query).map(|view| view.page);
+        let found = match page {
+            Some(Page::Logs { pod, container, .. }) => (pod, container),
+            other => panic!("not a logs lens: {other:?}"),
+        };
+        assert_eq!(found, expected);
+    }
+
+    #[rstest]
+    #[case::every_kind(None, Shown::default())]
+    #[case::some_kinds(Some("holds,runs-on"), Shown::parse(Some("runs-on,holds")))]
+    fn reads_the_edge_kinds_from_the_url(#[case] edges: Option<&str>, #[case] shown: Shown) {
+        let query = Query {
+            edges: edges.map(Into::into),
+            ..Query::default()
+        };
+        assert_eq!(View::at("", query).map(|view| view.shown), Some(shown));
+    }
+}

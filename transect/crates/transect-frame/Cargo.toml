@@ -1,0 +1,13 @@
+[package]
+name = "transect-frame"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+rstest.workspace = true
+
+[lib]
+# The doc comments show YAML and paths, not examples to run.
+doctest = false

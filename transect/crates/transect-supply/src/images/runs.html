@@ -1,0 +1,28 @@
+{#- The Runs box, in a workload page's main column: one row per image
+    that the workload's pods run, with each fact in its own labeled cell.
+    Label text is untrusted, so askama escapes it like every other
+    value. -#}
+{%- if !runs.is_empty() %}
+<section class="runs" aria-label="Runs">
+<span class="row-label">Runs</span>
+<table class="runs-table">
+<thead><tr><th>image</th><th>repository</th><th>version</th><th>commit</th><th>rolled</th></tr></thead>
+<tbody>
+{%- for row in runs.rows %}
+<tr>
+<td class="runs-image">{{ row.image }}</td>
+<td>{% if let Some(repository) = row.repository %}{{ repository }}{% else if let Some(note) = row.note %}<span class="runs-faint">{{ note }}</span>{% else %}<span class="runs-faint">not read</span>{% endif %}</td>
+<td>{% if let Some(version) = row.version %}{{ version }}{% else %}<span class="runs-faint">none</span>{% endif %}</td>
+<td class="runs-whole">{% if let Some(commit) = row.commit %}{% if let Some(href) = commit.href %}<a href="{{ href }}" target="_blank" rel="noopener noreferrer">{{ commit.text }}</a>{% else %}{{ commit.text }}{% endif %}{% else %}<span class="runs-faint">none</span>{% endif %}</td>
+<td class="runs-whole">{% if let Some(rolled) = row.rolled %}{{ rolled }}{% else %}<span class="runs-faint" title="not known">—</span>{% endif %}</td>
+</tr>
+{%- if row.description.is_some() || row.documentation.is_some() %}
+<tr class="runs-about"><td colspan="5">
+{%- if let Some(description) = row.description %}{{ description }}{% endif %}
+{%- if let Some(href) = row.documentation %}{% if row.description.is_some() %} {% endif %}<a href="{{ href }}" target="_blank" rel="noopener noreferrer">documentation</a>{% endif %}</td></tr>
+{%- endif %}
+{%- endfor %}
+</tbody>
+</table>
+</section>
+{%- endif %}

@@ -1,0 +1,24 @@
+{#- The devices that a card's workloads hold, from the holds edges.  Each
+    holder has its own line, with the machine that its devices are on,
+    and each device is indented under it, linked to its line on its
+    machine's page.  When a holder's devices are on several machines,
+    each device's line names its machine in place of the holder's
+    line. -#}
+{%- if !card.holds.rows.is_empty() %}
+<div class="card-depends">
+<div class="card-depends-label">Holds</div>
+<div class="card-depends-ends">
+{%- for row in card.holds.rows %}
+<div class="card-holds-holder">{% call links::object_link(row.workload.text, row.workload.href, "") %}{% endcall %}
+{%- if let Some(machine) = row.machine %} <span class="card-holds-on">on {% call links::object_link(machine.text, machine.href, "") %}{% endcall %}</span>
+{%- else if let Some(count) = row.machines %} <span class="card-holds-on">on {{ count }} machines</span>{% endif %}</div>
+<div class="card-depends-group">
+{%- for held in row.devices %}
+<span title="{{ held.full }}"><span class="card-holds-on">{{ held.driver }}</span> {% call links::object_link(held.device.text, held.device.href, "") %}{% endcall %}
+{%- if let Some(machine) = held.machine %} <span class="card-holds-on">on {% call links::object_link(machine.text, machine.href, "") %}{% endcall %}</span>{% endif %}</span>
+{%- endfor %}
+</div>
+{%- endfor %}
+</div>
+</div>
+{%- endif %}

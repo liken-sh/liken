@@ -1,0 +1,379 @@
+/*
+ * The namespace elevation folds the cluster's bands to one line each,
+ * opens the namespace in its band with a box per workload, and draws
+ * the machines as a row of chips.  It reuses the cluster page's band
+ * styles from cluster.css.
+ */
+
+.band-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* A folded band is one line: its label and its first names. */
+.band-folded {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  align-items: baseline;
+}
+
+.folded-names {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-faint);
+  overflow-wrap: break-word;
+}
+
+.folded-names a {
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+
+.folded-names a:hover { text-decoration: underline; }
+
+/* The open namespace has a lighter panel than its band.  Its border
+   shows the health that its parcel shows on the cluster page, so one
+   namespace looks the same on both pages: gray when healthy, --warm
+   for a warning, heavier --warm for a failure. */
+.opened {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.opened-warning {
+  border-color: var(--warm);
+  box-shadow: inset 0 0 0 1px var(--warm);
+}
+
+.opened-failing {
+  border-color: var(--warm);
+  box-shadow: inset 0 0 0 2px var(--warm);
+}
+
+.opened-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-family: var(--mono);
+}
+
+.opened-name {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.opened-count {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.workloads {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.workload {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background: var(--row);
+  min-width: 0;
+}
+
+/* A box that opens its workload's page keeps the box's ink, and its
+   border darkens on hover to show that it is a link. */
+a.workload {
+  color: inherit;
+  text-decoration: none;
+}
+
+a.workload:hover { border-color: var(--ink-faint); }
+
+.workload-title {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: break-word;
+}
+
+.workload-line {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.workload-reason {
+  font-size: 13px;
+  color: var(--warm);
+}
+
+/* The machine chips are at the bottom of the box, so the chips in a row
+   of boxes line up whatever the lines above them contain. */
+.workload-machines {
+  margin-top: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.workload-machine {
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--page);
+}
+
+/* A CronJob or a Job does not run all the time, so its border is
+   dashed. */
+.workload-scheduled { border-style: dashed; }
+
+/* As on the cluster page, only a problem has color.  --warm outlines a
+   warning, and a failure gets a heavier outline, because a filled box
+   would make its text hard to read. */
+.workload-warning {
+  border-color: var(--warm);
+  box-shadow: inset 0 0 0 1px var(--warm);
+}
+
+.workload-failing {
+  border-color: var(--warm);
+  box-shadow: inset 0 0 0 2px var(--warm);
+}
+
+.machine-row { align-items: baseline; }
+
+.machine-chips {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* "name · 10 pods" stays on one line.  A name too long for the column
+   is cut short, and the chip's title gives the full name. */
+.machine-chip {
+  padding: 6px 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  background: var(--panel);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.machine-chip-pods { color: var(--ink-faint); }
+
+/* A chip opens its machine's page, and looks like a box, not a link. */
+a.machine-chip { color: inherit; text-decoration: none; }
+
+a.machine-chip:hover { border-color: var(--ink-faint); }
+
+/* A machine that runs none of the namespace's pods keeps its place in
+   the row, drawn faint, so the row shows the whole cluster. */
+.machine-chip-none {
+  border-color: var(--rule);
+  background: none;
+  color: var(--ink-faint);
+}
+
+/* The matrix: a namespace of DaemonSets, one row per DaemonSet and one
+   column per machine.  It scrolls sideways inside the open namespace
+   when the cluster has more machines than the page has room for. */
+.matrix,
+.matrix-others {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.matrix-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.matrix-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.matrix-count {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.matrix-panel {
+  --table-ground: var(--page);
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--page);
+}
+
+/* The machines' row sticks as a table's header does.  Its shadow fills
+   the grid's gaps around it, so a row that scrolls under the header
+   shows only outside the header's edge. */
+.matrix-grid > .table-head {
+  align-self: stretch;
+  box-shadow: 0 0 0 4px var(--table-ground);
+}
+
+.matrix-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) repeat(var(--machines), minmax(44px, 1fr));
+  gap: 4px;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.matrix-machine {
+  text-align: center;
+  font-size: 11px;
+  color: var(--ink-muted);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+a.matrix-machine:hover { text-decoration: underline; }
+
+.matrix-name {
+  color: var(--ink);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+a.matrix-name:hover { text-decoration: underline; }
+
+/* A cell is a slot with a dot for the pod.  It is gray where the pod is
+   ready, and --warm only where something needs attention. */
+.cell {
+  height: 28px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink-faint);
+}
+
+.cell-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--ink-muted);
+}
+
+.cell-restarting {
+  border-color: var(--warm);
+  color: var(--warm);
+}
+
+.cell-not-ready .cell-dot { background: var(--warm); }
+
+.cell-not-ready { border-color: var(--warm); }
+
+/* When a machine has no pod and nothing keeps one off it, nobody chose
+   the gap.  So its cell gets a warm dashed outline over a warm wash,
+   which makes it different from every gray cell around it. */
+.cell-missing {
+  border: 1.5px dashed var(--warm);
+  background: color-mix(in srgb, var(--warm) 14%, transparent);
+  color: var(--warm);
+  font-weight: 600;
+}
+
+/* A machine that the DaemonSet skips by design is expected, so its cell
+   has no slot and no border, only a faint dash. */
+.cell-skipped {
+  background: none;
+  color: var(--rule);
+}
+
+.cell-missing .cell-dot,
+.cell-skipped .cell-dot { display: none; }
+
+.matrix-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.legend-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A sample is as wide as its dot and glyph need, like the cells. */
+.legend-sample {
+  min-width: 22px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 11px;
+}
+
+.others-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.other-name {
+  padding: 6px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 5px;
+  background: var(--row);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+a.other-name:hover { border-color: var(--ink-faint); }
+
+.other-warm {
+  border-color: var(--warm);
+  color: var(--warm);
+}
+
+/* The objects of known kinds that run nothing have no pods to draw, so
+   they show under the boxes as chips. */
+.kind-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+/* The row above the map shows the namespace's band, its name, and its
+   lens tabs. */
+.namespace-map > .switcher { margin: 0 24px 14px 0; }

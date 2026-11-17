@@ -1,0 +1,45 @@
+{% extends "frame/layout.html" %}
+{%- import "links/link.html" as links -%}
+{%- import "vulnerabilities/choices.html" as choices -%}
+{%- import "vulnerabilities/rows.html" as rows -%}
+
+{% block title %}vulnerabilities · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block masthead_vulnerabilities %} masthead-current{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- Every finding id in a current report, with the workloads that run
+    an image that contains it.  The words come from the scanner. -#}
+<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+{% call choices::choices(choices) %}{% endcall %}
+<p class="vn-lead">{{ lead() }}</p>
+{%- if !described %}
+<p class="vn-none">No loaded kind knowledge describes a findings report, so no report is read. Kind knowledge with <code>findings</code> for a scanner's report kind fills this page.</p>
+{%- endif %}
+<section class="board-box board-wide" aria-label="Findings">
+<div class="board-label">Findings</div>
+{%- if ids.is_empty() %}
+<div class="board-none">No current report lists a finding.</div>
+{%- else %}
+<table class="board-table vn-table">
+<thead><tr><th>id</th><th>severity</th><th>score</th><th>{% call rows::packages_head(false) %}{% endcall %}</th><th>run by</th></tr></thead>
+<tbody>
+{%- for row in ids %}
+<tr><td class="vn-id">{% call rows::identity(row) %}{% endcall %}</td><td class="vn-nowrap {{ row.tone }}">{{ row.severity }}</td><td class="vn-nowrap vn-quiet">{{ row.score }}</td><td>{% call rows::packages(&row.packages, false) %}{% endcall %}</td><td>
+{%- for name in row.workloads %}{% if !loop.first %}, {% endif %}{% call links::object_link(name.text, name.href, "") %}{% endcall %}{% endfor -%}
+{%- if let Some((count, names)) = row.more %} <a class="vn-quiet" href="{{ row.href }}" hx-get="{{ row.href }}" title="{{ names }}">+{{ count }}</a>{% endif %}</td></tr>
+{%- endfor %}
+</tbody></table>
+{%- endif %}
+</section>
+{%- if stale > 0 %}
+<p class="vn-note">{{ stale }} {% if stale == 1 %}report names an image digest no pod runs now, and is{% else %}reports name an image digest no pod runs now, and are{% endif %} left out. Each workload's vulnerabilities tab shows its own.</p>
+{%- endif %}
+</main>
+</div>
+{% endblock %}

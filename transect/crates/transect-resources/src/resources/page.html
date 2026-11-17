@@ -1,0 +1,45 @@
+{% extends "frame/layout.html" %}
+
+{% block title %}resources · transect{% endblock %}
+
+{% block elevation %}<a href="/">cluster</a><span aria-hidden="true">/</span><span class="elevation-current">resources</span>{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- The page lists each file under `--resources` and each document in
+    it, one row for each document: its kind, its name, and its
+    conditions in words.  A condition a reader should act on takes
+    `--warm`; a document that loaded shows "loaded", faint.  Each
+    condition's title holds its type, status, and reason as a CRD's
+    `status.conditions` would. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="resources">
+<p class="resources-summary">{{ summary() }}</p>
+<div class="resources-panel">
+<table class="resources-table">
+<thead><tr><th>File</th><th>Kind</th><th>Name</th><th>State</th></tr></thead>
+{%- for file in files %}
+<tbody>
+{%- if let Some(problem) = file.problem %}
+<tr><td class="resources-path">{{ file.path }}</td><td colspan="3" class="resources-trouble">{{ problem }}</td></tr>
+{%- endif %}
+{%- for document in file.documents %}
+<tr>
+<td class="resources-path">{% if loop.first && file.problem.is_none() %}{{ file.path }}{% endif %}</td>
+<td class="resources-name">{% if document.kind.is_empty() %}<span class="resources-faint">no kind</span>{% else %}{{ document.kind }}{% endif %}</td>
+<td class="resources-name">{% if document.name.is_empty() %}<span class="resources-faint">no name</span>{% else %}{{ document.name }}{% endif %}</td>
+<td>
+{%- for condition in document.conditions %}
+<div class="resources-condition{% if condition.trouble() %} resources-trouble{% endif %}" title="{{ condition.title() }}">{{ condition.text() }}</div>
+{%- endfor %}
+</td>
+</tr>
+{%- endfor %}
+</tbody>
+{%- endfor %}
+</table>
+</div>
+</main>
+</div>
+{% endblock %}

@@ -1,0 +1,48 @@
+{%- import "edges/provenance.html" as provenance -%}
+{%- import "links/link.html" as links -%}
+{#- What a card's object depends on and what depends on it, from the
+    depends-on edges, then the identity providers it signs its users in
+    through and the applications that sign in through it.  An end that
+    has a page links to it, as a parcel does.  An end that only intent
+    gives shows its mark, and an entry of intent that names nothing
+    readable shows as its own text. -#}
+{%- macro link(end, shared) -%}
+<span{% if shared.is_some() %}{% if let Some(mark) = end.mark %} title="{{ mark.title() }}"{% endif %}{% endif %}>
+{%- call links::object_link(end.reference.text, end.reference.href, "") %}{% endcall %}
+{%- if let Some(mark) = end.mark %}{% call provenance::line(mark, shared) %}{% endcall %}{% endif %}</span>
+{%- endmacro -%}
+{#- With `grouped`, the unmarked ends list first and the marked ones
+    follow under their one shared mark. -#}
+{%- macro section(label, ends, unread, shared, grouped) -%}
+{%- if !ends.is_empty() || !unread.is_empty() %}
+<div class="card-depends-label">{{ label }}{% call provenance::heading(shared) %}{% endcall %}</div>
+<div class="card-depends-ends">
+{%- if let Some(mark) = grouped %}
+{%- for end in ends.iter() %}{% if end.mark.is_none() %}
+{%- call link(end, shared) %}{% endcall %}
+{%- endif %}{% endfor %}
+<div class="card-depends-group">
+<div class="card-depends-group-mark">{% call provenance::mark(mark) %}{% endcall %}</div>
+{%- for end in ends.iter() %}{% if end.mark.is_some() %}
+{%- call link(end, grouped) %}{% endcall %}
+{%- endif %}{% endfor %}
+</div>
+{%- else %}
+{%- for end in ends.iter() %}
+{%- call link(end, shared) %}{% endcall %}
+{%- endfor %}
+{%- endif %}
+{%- for entry in unread.iter() %}
+<span{% if shared.is_some() %} title="{{ entry.provenance.title() }}"{% endif %}>{{ entry.text() }}{% call provenance::line(entry.provenance, shared) %}{% endcall %}</span>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- endmacro -%}
+{%- if !card.depends.is_empty() %}
+<div class="card-depends">
+{%- call section("Depends on", card.depends.on, card.depends.unread_on(), card.depends.shared_on(), card.depends.grouped_on()) %}{% endcall %}
+{%- call section("Depended on by", card.depends.by, card.depends.unread_none(), card.depends.shared_by(), card.depends.grouped_by()) %}{% endcall %}
+{%- call section("Authenticates through", card.depends.through, card.depends.unread_through(), card.depends.shared_through(), card.depends.grouped_through()) %}{% endcall %}
+{%- call section("Signs in users of", card.depends.signs_in, card.depends.unread_none(), card.depends.shared_signs_in(), card.depends.grouped_signs_in()) %}{% endcall %}
+</div>
+{%- endif %}

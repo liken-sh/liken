@@ -1,0 +1,62 @@
+{%- import "links/link.html" as links -%}
+{%- import "resources/off.html" as off -%}
+{#- What to know now: the firing alerts, the namespaces that need
+    attention, then what is worth knowing.  Each reason links to what it
+    is about, and each finding's line to what it names, so a reader can
+    open the pod or workload in a new tab as easily as in this one.  The
+    plain sidebar shows only this list, and when a machine is really
+    lost, the sidebar shows this list below the loss. -#}
+{%- if let Some(unknown) = sidebar.unknown %}
+<div class="card concern"><div class="card-body">{{ unknown }} The map shows the cluster as it is.</div></div>
+{%- endif %}
+<div class="sidebar-heading">Now</div>
+{%- include "alerts/now.html" %}
+{%- for concern in sidebar.concerns %}
+<div class="card concern">
+<div class="concern-head"><span class="dot {{ concern.level_class() }}"></span>{% call links::object_link(concern.namespace, Some(transect_graph::links::namespace(concern.namespace)), "concern-name") %}{% endcall %}</div>
+{%- for line in concern.lines %}
+<a class="card-body concern-line" href="{{ line.href }}" hx-get="{{ line.href }}" hx-target="body" hx-swap="innerHTML" hx-push-url="true">{{ line.reason }}</a>
+{%- if let Some(note) = line.reason.note_html() %}
+<div class="card-note">{{ note|safe }}</div>
+{%- endif %}
+{%- if let Some(evidence) = line.reason.evidence() %}
+{%- include "logs/evidence.html" %}
+{%- endif %}
+{%- endfor %}
+</div>
+{%- endfor %}
+{%- if sidebar.alerts.is_empty() && sidebar.concerns.is_empty() %}
+<div class="card all-clear"><span class="dot dot-clear"></span><div>Nothing needs attention</div></div>
+{%- endif %}
+{%- if let Some(note) = sidebar.alert_note %}
+<div class="sidebar-note">{% call off::line(note) %}{% endcall %}</div>
+{%- endif %}
+{%- if !sidebar.findings.is_empty() %}
+<div class="sidebar-heading sidebar-heading-next">Worth knowing</div>
+{%- for finding in sidebar.findings %}
+<div class="card finding">
+<div class="finding-title">{{ finding.title() }}</div>
+{%- let lines = finding.lines() %}
+{%- if !lines.is_empty() %}
+<ul class="finding-lines">
+{%- for line in lines %}
+<li>{% call links::object_link(line.label, line.href, "finding-machine") %}{% endcall %}{% if !line.text.is_empty() %}: {{ line.text }}{% endif %}
+{%- if let Some(evidence) = line.evidence %}
+{%- include "logs/evidence.html" %}
+{%- endif %}</li>
+{%- endfor %}
+</ul>
+{%- endif %}
+{%- if let Some(found) = finding.as_loop() %}
+{% include "edges/loops/cycles.html" %}
+{%- endif %}
+<div class="card-body">{{ finding.body() }}</div>
+</div>
+{%- endfor %}
+{%- endif %}
+{%- if !sidebar.changed.changes.is_empty() %}
+<div class="sidebar-heading sidebar-heading-next">Changed</div>
+{%- let listed = sidebar.changed %}
+{%- include "changed/list.html" %}
+<a class="changed-all" href="/changed" hx-get="/changed" hx-target="body" hx-swap="innerHTML" hx-push-url="true">{{ listed.all_text() }}</a>
+{%- endif %}

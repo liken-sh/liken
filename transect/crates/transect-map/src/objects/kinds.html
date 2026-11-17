@@ -1,0 +1,78 @@
+{% extends "frame/layout.html" %}
+{%- import "links/link.html" as links -%}
+
+{% block title %}kinds · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- Every custom kind the cluster serves, a box per API group: each kind
+    with its count, how many are not ready, and its controllers, or the
+    group's once when every kind in it shares them.  The kinds with no
+    objects fold into the last box. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="board-page" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="kinds-boxes">
+{%- for group in groups %}
+{%- if let Some(domain) = heading(loop.index0) %}
+<div class="kinds-domain">{{ domain }}</div>
+{%- endif %}
+<section class="board-box kinds-group" aria-label="{{ group.name }}">
+<div class="kinds-group-name">{{ group.name }}</div>
+{%- if !group.controllers.is_empty() %}
+<div class="kinds-controllers">controlled by {% for controller in group.controllers %}{% if !loop.first %}, {% endif %}{% call links::object_link(controller.text, controller.href, "") %}{% endcall %}{% endfor %}</div>
+{%- endif %}
+<div class="kinds-rows">
+{%- for kind in group.kinds %}
+<div class="kinds-row">
+<span class="kinds-kind"{% if let Some(summary) = kind.summary %} title="{{ summary }}"{% endif %}>{% call links::object_link(kind.label_in(group.name), Some(kind.href.clone()), "") %}{% endcall %}</span>
+<span class="kinds-count">{% if let Some((text, class)) = kind.unhealthy_text() %}<span class="kinds-unhealthy"><span class="{{ class }}"></span>{{ text }}</span> of {% endif %}{{ kind.count }}</span>
+{%- if !kind.controllers.is_empty() %}
+<span class="kinds-controllers kinds-row-controllers">{% for controller in kind.controllers %}{% if !loop.first %}, {% endif %}{% call links::object_link(controller.text, controller.href, "") %}{% endcall %}{% endfor %}</span>
+{%- endif %}
+</div>
+{%- endfor %}
+</div>
+</section>
+{%- endfor %}
+{%- if !empty.is_empty() %}
+<section class="board-box kinds-group" aria-label="Kinds with no objects">
+<div class="board-label">No objects</div>
+<details class="board-fold">
+<summary>{{ empty_count() }} kinds <span class="board-fold-show">· show</span><span class="board-fold-hide">· hide</span></summary>
+<div class="kinds-rows">
+{%- for group in empty %}
+<div class="kinds-empty"><span class="kinds-group-name">{{ group.name }}</span>
+<span class="kinds-empty-names">{% for kind in group.kinds %}{% call links::object_link(kind.label, Some(kind.href.clone()), "") %}{% endcall %}{% endfor %}</span></div>
+{%- endfor %}
+</div>
+</details>
+</section>
+{%- endif %}
+</div>
+</main>
+<aside class="sidebar workload-card" aria-label="Kinds card" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+{%- let (kinds, objects) = totals() %}
+<div class="workload-card-head">
+<b class="workload-card-name">Kinds</b>
+<span class="workload-card-status">{{ kinds }} kinds, {{ objects }} objects</span>
+</div>
+<div class="card-body">The custom kinds the cluster serves, a box per API group. A kind's page lists its objects in every namespace.</div>
+{%- let unhealthy = unhealthy() %}
+{%- if !unhealthy.is_empty() %}
+<div class="card-depends">
+<div class="card-depends-label">Not ready</div>
+<div class="card-depends-ends">
+{%- for kind in unhealthy %}
+{%- if let Some((text, class)) = kind.unhealthy_text() %}
+<span class="kinds-unhealthy"><span class="{{ class }}"></span>{% call links::object_link(kind.label, Some(kind.href.clone()), "") %}{% endcall %} <span class="card-calls-ports">{{ text }}</span></span>
+{%- endif %}
+{%- endfor %}
+</div>
+</div>
+{%- endif %}
+</aside>
+</div>
+{% endblock %}

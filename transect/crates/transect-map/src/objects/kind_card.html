@@ -1,0 +1,28 @@
+{%- import "edges/provenance.html" as provenance -%}
+{%- import "links/link.html" as links -%}
+{#- A kind's card, beside its objects: its plural and group, how many
+    objects it has and how many are not ready, its CRD's description,
+    and the workloads that control its objects with how they were
+    found. -#}
+<aside class="sidebar workload-card" aria-label="{{ card.label }} card" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<div class="workload-card-head">
+<b class="workload-card-name">{{ card.label }}</b>
+<span class="workload-card-status"><span class="{{ card.dot_class() }}"></span>{{ card.status_text() }}</span>
+</div>
+<div class="card-code-note kind-card-group">{{ card.group }}</div>
+{%- if let Some(why) = card.why %}
+<div class="card-why">{{ why.text }}{% call provenance::mark(why.provenance) %}{% endcall %}</div>
+{%- endif %}
+{%- if !card.controllers.is_empty() %}
+<div class="card-depends">
+<div class="card-depends-label">Controlled by</div>
+<div class="card-depends-ends">
+{%- for end in card.controllers %}{% call links::object_link(end.text, end.href, "") %}{% endcall %}{% endfor %}
+</div>
+{%- if let Some(rule) = card.rule %}
+<div class="card-code-note">{{ rule }}</div>
+{%- endif %}
+</div>
+{%- endif %}
+{%- call provenance::legend(card.legend()) %}{% endcall %}
+</aside>

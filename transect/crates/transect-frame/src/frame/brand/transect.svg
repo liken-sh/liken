@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-41 -41 82 82" role="img" aria-label="transect">
+<path d="M0 29V38" stroke="#e0872f" stroke-width="3" stroke-linecap="round"/>
+<polygon points="0,4 31,17 0,30 -31,17" fill="#4a5d3a" stroke="#4a5d3a" stroke-width="3" stroke-linejoin="round"/>
+<path d="M0 17V11" stroke="#e0872f" stroke-width="3" stroke-linecap="round"/>
+<ellipse cx="0" cy="17" rx="4.6" ry="2.4" fill="#e0872f"/>
+<polygon points="0,-13 31,0 0,13 -31,0" fill="#6e8352" stroke="#6e8352" stroke-width="3" stroke-linejoin="round"/>
+<path d="M0 0V-6" stroke="#e0872f" stroke-width="3" stroke-linecap="round"/>
+<ellipse cx="0" cy="0" rx="4.6" ry="2.4" fill="#e0872f"/>
+<polygon points="0,-30 31,-17 0,-4 -31,-17" fill="#b4c49a" stroke="#b4c49a" stroke-width="3" stroke-linejoin="round"/>
+<path d="M0 -17V-38" stroke="#e0872f" stroke-width="3" stroke-linecap="round"/>
+<ellipse cx="0" cy="-17" rx="4.6" ry="2.4" fill="#e0872f"/>
+</svg>

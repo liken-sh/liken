@@ -1,0 +1,69 @@
+acme-shop · cluster · transect
+transect
+cluster / apps / acme-shop
+access vulnerabilities kinds
+Search /
+esc
+Edges
+The map draws no lines. A selected namespace's relations, the loop marks, and a loss's cascade follow the edges of the kinds that are on. Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+apps
+1 namespace
+acme-shop
+6 workloads
+data
+1 namespace
+acme-ledger
+4 workloads it needs
+operators
+1 namespace
+acme-promoter
+2 workloads controls it
+platform
+1 namespace
+acme-ops
+5 workloads logs in via it +1
+Machines
+2 machines
+used
+requested
+free now
+control plane
+node-beta 1 alert
+cpu
+mem
+9 pods · 5 here
+holds radio handset-one
+workers
+node-alpha
+cpu
+mem
+10 pods · 2 here
+Ground
+1 volume
+The archive NAS ↗ intent
+acme-shop warning
+access
+session-cache-set-0: alert SessionsSlow, firing for 20m
+Answers take over a second.
+catalog.example.test
+help.example.test
+shop.example.test
+storefront ×2 catalog · help-desk listings Cache session-cache Till counter-till
+Depends on
+acme-ledger
+Controlled by
+acme-promoter
+No NetworkPolicy selects its pods, so any pod may call them.
+Holds
+Till counter-till on node-beta
+radio The counter handset
+Code
+shop/apps/shop Kustomization acme-ops/shop-apps ready

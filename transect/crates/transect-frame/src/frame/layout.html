@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}transect{% endblock %}</title>
+<link rel="icon" type="image/svg+xml" href="/static/brand/transect.svg">
+<link rel="stylesheet" href="/static/brand/liken.css">
+<link rel="stylesheet" href="/static/web/layout.css">
+{#- Every elevation's styles load on every page.  A click from one
+    elevation to another swaps only the body, so the head the first page
+    loaded has to style every page the reader can reach from it.  Each
+    file's rules are scoped by its own classes. #}
+<link rel="stylesheet" href="/static/map/cluster.css">
+<link rel="stylesheet" href="/static/machines/machines.css">
+<link rel="stylesheet" href="/static/storage/ground.css">
+<link rel="stylesheet" href="/static/map/sidebar.css">
+<link rel="stylesheet" href="/static/alerts/alerts.css">
+<link rel="stylesheet" href="/static/loss/loss.css">
+<link rel="stylesheet" href="/static/cards/namespace.css">
+<link rel="stylesheet" href="/static/cards/workload.css">
+<link rel="stylesheet" href="/static/images/origin.css">
+<link rel="stylesheet" href="/static/images/runs.css">
+<link rel="stylesheet" href="/static/intent/intent.css">
+<link rel="stylesheet" href="/static/map/namespace/namespace.css">
+<link rel="stylesheet" href="/static/map/workload/workload.css">
+<link rel="stylesheet" href="/static/map/pod/pod.css">
+<link rel="stylesheet" href="/static/map/section/section.css">
+<link rel="stylesheet" href="/static/lenses/lenses.css">
+<link rel="stylesheet" href="/static/search/search.css">
+<link rel="stylesheet" href="/static/map/gitops/gitops.css">
+<link rel="stylesheet" href="/static/map/known/known.css">
+<link rel="stylesheet" href="/static/objects/objects.css">
+<link rel="stylesheet" href="/static/objects/board.css">
+<link rel="stylesheet" href="/static/map/machine/machine.css">
+<link rel="stylesheet" href="/static/map/gone.css">
+<link rel="stylesheet" href="/static/resources/resources.css">
+<link rel="stylesheet" href="/static/changed/changed.css">
+<link rel="stylesheet" href="/static/access/access.css">
+<link rel="stylesheet" href="/static/vulnerabilities/vulnerabilities.css">
+<script src="/static/htmx.min.js" defer></script>
+<script src="/static/htmx-ext-sse.min.js" defer></script>
+<script src="/static/web/links.js" defer></script>
+<script src="/static/web/stream.js" defer></script>
+<script src="/static/search/search.js" defer></script>
+</head>
+<body>
+<header class="masthead">
+<a class="wordmark" href="/"><img class="mark" src="/static/brand/transect.svg" alt="" width="22" height="22">transect</a>
+<nav class="elevation" aria-label="Elevation">{% block elevation %}{% endblock %}</nav>
+{#- The masthead is navigation only: the wordmark, the crumb, and
+    search, the access lens, the vulnerabilities when some kind
+    knowledge describes a scanner's reports, and the list of kinds, on
+    every page, so a
+    reader finds them without knowing a key.  The button shows the key
+    that opens search.  The edge kinds filter a page's picture, so each
+    page that draws edges places them in its own main column. -#}
+<div class="masthead-tools">
+<a class="masthead-link{% block masthead_access %}{% endblock %}" href="/access" hx-get="/access" hx-target="body" hx-swap="innerHTML" hx-push-url="true">access</a>
+{%- if let Ok(described) = "vulnerabilities"|value::<bool> %}{% if *described %}
+<a class="masthead-link{% block masthead_vulnerabilities %}{% endblock %}" href="/vulnerabilities" hx-get="/vulnerabilities" hx-target="body" hx-swap="innerHTML" hx-push-url="true">vulnerabilities</a>
+{%- endif %}{% endif %}
+<a class="masthead-link" href="/kinds" hx-get="/kinds" hx-target="body" hx-swap="innerHTML" hx-push-url="true">kinds</a>
+<button type="button" class="search-open" aria-label="Search" title="Search: ctrl+k or /">Search <kbd>/</kbd></button>
+</div>
+</header>
+{#- Quick search: ctrl+k, /, or any letter typed outside a field opens
+    it, and each keystroke asks the server for the rows that match.
+    search.js handles the keys. -#}
+<dialog class="search" id="search" aria-label="Search">
+<div class="search-bar">
+<input class="search-input" type="search" name="q" autocomplete="off" spellcheck="false" aria-label="Search" placeholder="A name, a kind, a host, or a page" hx-get="/search" hx-trigger="input changed delay:30ms, search" hx-target="#search-results" hx-swap="outerHTML" hx-sync="this:replace">
+<button type="button" class="search-close" aria-label="Close search" title="Close: Escape">esc</button>
+</div>
+<ol class="search-results" id="search-results" aria-label="Results"></ol>
+</dialog>
+<div class="page"{% block stream %}{% endblock %}>
+{% block main %}{% endblock %}
+</div>
+</body>
+</html>

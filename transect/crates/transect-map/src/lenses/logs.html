@@ -1,0 +1,84 @@
+{% extends "frame/layout.html" %}
+{% import "frame/tabs.html" as frame %}
+
+{% block title %}logs · {{ name() }} · {{ namespace }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- The logs lens, full width: the row with the lenses, the pods of a
+    workload, each with its health's dot, and the containers of the pod
+    to switch between, then one container's lines and the lines each
+    pattern tags.  Log text is untrusted, so it is escaped like every
+    other value, and no filter in this template marks it safe. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="logs-lens" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="Logs of {{ name() }}">
+<a class="switcher-namespace" href="{{ overview() }}" hx-get="{{ overview() }}">{{ name() }}</a>
+{%- for choice in pods %}
+<a class="switch{% if choice.current %} switch-current{% endif %}" href="{{ choice.href }}" hx-get="{{ choice.href }}"{% if choice.current %} aria-current="page"{% endif %}>{% if let Some(dot) = choice.dot_class() %}<span class="{{ dot }}"></span>{% endif %}{{ choice.label }}</a>
+{%- endfor %}
+{% call frame::tabs(tabs) %}{% endcall %}
+</nav>
+{%- if !containers.is_empty() %}
+<nav class="switcher" aria-label="Containers">
+<span class="row-label">Container</span>
+{%- for choice in containers %}
+<a class="switch{% if choice.current %} switch-current{% endif %}" href="{{ choice.href }}" hx-get="{{ choice.href }}"{% if choice.current %} aria-current="page"{% endif %}>{{ choice.label }}</a>
+{%- endfor %}
+</nav>
+{%- endif %}
+{%- if pod.is_none() %}
+<p class="logs-note">{{ no_pods() }}</p>
+{%- else if let Some(tails) = logs %}
+{%- if tails.forbidden %}
+<p class="logs-note">{{ forbidden() }}</p>
+{%- else %}
+<p class="logs-note">{{ note(tails) }}</p>
+{%- if let Some(why) = fallback(tails) %}
+<p class="logs-note">{{ why }}</p>
+{%- endif %}
+{%- if let Some(tail) = tail(tails) %}
+<section class="logs-box" aria-label="Lines of {{ tail.container }}">
+{%- if let Some(lines) = lines(tail.read) %}
+<div class="log-lines">
+{%- for line in lines %}
+<div class="{{ line.class() }}"{% if let Some(at) = line.time_text() %} title="{{ at }}"{% endif %}>{{ line.text }}
+{%- for tag in line.tags %} <span class="{{ tag.severity.tag_class() }}" title="{{ tag.meaning }}">{{ tag.pattern }}</span>{% endfor %}</div>
+{%- endfor %}
+</div>
+{%- else %}
+{%- match tail.read %}
+{%- when transect_observe::logs::Read::Failed(message) %}
+<div class="log-quiet">{{ message }}</div>
+{%- else %}
+<div class="log-quiet">{{ empty() }}</div>
+{%- endmatch %}
+{%- endif %}
+</section>
+{%- endif %}
+{#- Each pattern's lines in this pod since the pod started.  A link
+    from a namespace's matches opens this page to show these lines. -#}
+{%- for matching in tails.matching %}
+{%- let lines = self.matching_lines(matching) %}
+{%- if !lines.is_empty() %}
+<section class="logs-box" id="matching-{{ matching.tag.pattern }}" aria-label="Lines {{ matching.tag.pattern }} tags">
+<div class="log-name">{{ matching_heading(lines.len()) }} <span class="{{ matching.tag.severity.tag_class() }}" title="{{ matching.tag.meaning }}">{{ matching.tag.pattern }}</span></div>
+<div class="logs-note">{{ matching.tag.meaning }}</div>
+<div class="log-lines">
+{%- for line in lines %}
+<div class="{{ line.class() }}"{% if let Some(at) = line.time_text() %} title="{{ at }}"{% endif %}>{{ line.text }}</div>
+{%- endfor %}
+</div>
+</section>
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- else %}
+<p class="logs-note">Reading the lines.</p>
+{%- endif %}
+</main>
+</div>
+{% endblock %}

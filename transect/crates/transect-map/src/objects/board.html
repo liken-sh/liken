@@ -1,0 +1,103 @@
+{%- import "objects/box.html" as boxes -%}
+{%- import "resources/off.html" as off -%}
+{#- The object's parts, each a box naming its own parts. -#}
+{%- macro parts(nesting) -%}
+{%- if !nesting.parts.is_empty() %}
+<div class="board-parts" aria-label="Its parts">
+{%- for part in nesting.parts %}
+<section class="board-box board-part" aria-label="{{ part.reference.text }}">
+<div class="board-part-name">{% call links::object_link(part.reference.text, part.reference.href, "board-name") %}{% endcall %}</div>
+{%- for inner in part.parts %}
+<div>{% call links::object_link(inner.text, inner.href, "board-name") %}{% endcall %}</div>
+{%- endfor %}
+</section>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- endmacro -%}
+{#- An object's board, from `objects::ObjectBoard`: what it is part of
+    and what names it on the left, the object with its conditions and
+    its own facts in the middle, what it names on the right, and each
+    table across the page under them.  With no middle, as under board
+    9's diagram, the boxes are laid in one row.  What the object is part
+    of, as kind knowledge's `part of` names it, frames the board, and
+    its parts are boxes inside its own. -#}
+{%- if let Some(frame) = board.nesting.frame %}
+<section class="board-frame" aria-label="Part of {{ frame.text }}">
+<div class="board-frame-head"><span class="board-label">Part of</span> {% call links::object_link(frame.text, frame.href, "board-name") %}{% endcall %}</div>
+{%- endif %}
+{%- if let Some(center) = board.center %}
+<section class="board" aria-label="{{ center.kind }} {{ center.name }} and what it is connected to">
+{%- if !board.left.is_empty() %}
+<div class="board-side board-left">
+{%- for section in board.left %}{% call boxes::section_box(section) %}{% endcall %}{% endfor %}
+</div>
+{%- endif %}
+<div class="{{ center.class() }}">
+<div class="board-label">{{ center.kind }}</div>
+<h1 class="board-object-name">{% if let Some(class) = center.dot_class() %}<span class="{{ class }}"></span>{% endif %}{{ center.name }}</h1>
+{%- if let Some(resting) = center.resting %}
+<div class="board-line">{{ resting }}</div>
+{%- endif %}
+{%- if let Some(note) = center.note %}
+<div class="board-line">{% call off::line(note) %}{% endcall %}</div>
+{%- endif %}
+{%- if !center.chips.is_empty() %}
+<div class="known-chips">
+{%- for chip in center.chips %}
+<span class="known-chip"{% if let Some(title) = chip.title %} title="{{ title }}"{% endif %}><span class="{{ chip.dot_class() }}"></span>{{ chip.text }}</span>
+{%- endfor %}
+</div>
+{%- endif %}
+{%- for message in center.messages %}
+<div class="board-message">{{ message }}</div>
+{%- endfor %}
+{%- for section in board.own %}
+<div class="board-facts" aria-label="{{ section.title }}">
+{%- for fact in section.facts %}{% call boxes::fact_values(fact) %}{% endcall %}{% endfor %}
+</div>
+{%- endfor %}
+{%- for also in board.nesting.also %}
+<div class="board-line">also part of {% call links::object_link(also.text, also.href, "board-name") %}{% endcall %}</div>
+{%- endfor %}
+{%- call parts(board.nesting) %}{% endcall %}
+</div>
+{%- if !board.right.is_empty() %}
+<div class="board-side board-right">
+{%- for section in board.right %}{% call boxes::section_box(section) %}{% endcall %}{% endfor %}
+</div>
+{%- endif %}
+</section>
+{%- else %}
+{%- let row = board.row() %}
+{%- if !row.is_empty() %}
+<section class="board-row" aria-label="What it is connected to">
+{%- for section in row %}{% call boxes::section_box(section) %}{% endcall %}{% endfor %}
+</section>
+{%- endif %}
+{%- if !board.nesting.parts.is_empty() %}
+<section class="board-box board-wide" aria-label="Its parts">
+<div class="board-label">Its parts</div>
+{%- call parts(board.nesting) %}{% endcall %}
+</section>
+{%- endif %}
+{%- endif %}
+{%- if board.nesting.frame.is_some() %}
+</section>
+{%- endif %}
+{%- for section in board.wide %}
+{%- if let Some(table) = section.table %}
+<section class="board-box board-wide" aria-label="{{ section.title }}">
+<div class="board-label">{{ section.title }}</div>
+<table class="board-table">
+<thead><tr>{% for head in table.head %}<th>{{ head }}</th>{% endfor %}</tr></thead>
+<tbody>
+{%- for row in table.rows %}
+<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+{%- endfor %}
+</tbody>
+</table>
+{%- if table.rows.is_empty() %}{% if let Some(none) = section.none %}<div class="board-none">{% call off::line(none) %}{% endcall %}</div>{% endif %}{% endif %}
+</section>
+{%- endif %}
+{%- endfor %}

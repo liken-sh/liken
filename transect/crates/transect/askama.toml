@@ -1,0 +1,2 @@
+[general]
+dirs = ["src", "../transect-frame/src", "../transect-graph/src", "../transect-resources/src", "../transect-cluster/src", "../transect-observe/src", "../transect-ground/src", "../transect-supply/src", "../transect-network/src", "../transect-map/src", "../transect-access/src"]

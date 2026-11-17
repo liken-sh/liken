@@ -1,0 +1,141 @@
+{% extends "frame/layout.html" %}
+{% import "resources/off.html" as off %}
+{% import "map/bar.html" as bar %}
+{%- import "links/link.html" as links -%}
+{% import "edges/provenance.html" as provenance %}
+{% import "frame/tabs.html" as frame %}
+
+{% block title %}{{ name }} · {{ namespace }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- The switcher, the row, the guards, and the card swap as one block.
+    A workload in the switcher, or the namespace before them, links to
+    its own page, which swaps the body and pushes its URL. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="workload-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<nav class="switcher" aria-label="Workloads in {{ namespace }}">
+<a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
+{%- for switch in switches %}
+<a class="{{ switch.class() }}" href="{{ switch.href }}" hx-get="{{ switch.href }}"{% if switch.current %} aria-current="page"{% endif %}>{{ switch.label }}</a>
+{%- endfor %}
+{% call frame::tabs(tabs()) %}{% endcall %}
+</nav>
+{% include "map/edge_row.html" %}
+{#- The row goes left to right in the order a request travels: the
+    Ingresses that route to the Services, the Services that select the
+    pods, the pods, and the claims the pods mount above the backend that
+    stores each claim's data.  A column with nothing in it is left out
+    with its arrow. -#}
+<section class="workload-flow" aria-label="How a request reaches {{ name }} and where it keeps its data">
+{%- if !entry.ingresses.is_empty() %}
+<div class="flow-column flow-door">
+<div class="column-label">Entry</div>
+{%- for ingress in entry.ingresses %}
+<div class="flow-box"><b class="flow-name">{% call links::object_link(ingress.name, ingress.href(), "") %}{% endcall %}</b>
+{%- for host in ingress.host_lines() %}<span class="flow-line">{{ host }}</span>{% endfor -%}
+<span class="flow-faint">{{ ingress.serving_words() }}{% if let Some(issuer) = ingress.issuer() %} {% call links::object_link(issuer.text, issuer.href.clone(), "") %}{% endcall %}{% endif %}</span>
+{#- Each backend's traffic in gray, with the backend named when there
+    are several, or the one line that tells what would show the traffic. -#}
+{%- for line in ingress.traffic.lines(ingress.namespace, false) %}
+<span class="flow-line flow-traffic"{% if let Some(title) = ingress.traffic.title() %} title="{{ title }}"{% endif %}>{% if let Some(backend) = line.backend %}{% call links::object_link(backend.text, backend.href, "") %}{% endcall %} · {% endif %}{{ line.figures }}</span>
+{%- endfor %}
+{%- if let Some(note) = ingress.traffic.note() %}
+<span class="flow-faint flow-traffic">{% call off::line(note) %}{% endcall %}</span>
+{%- endif %}
+{%- if let Some(controller) = ingress.controller %}
+<span class="flow-faint"{% if ingress.controller_guessed %} title="A guess: no IngressController declares the controller its class names, and this workload takes the cluster's web traffic and is named for the class, or is the only one that takes it."{% endif %}>served by {% call links::object_link(controller.text, controller.href, "") %}{% endcall %}{% if ingress.controller_guessed %}?{% endif %}</span>
+{%- endif %}</div>
+{%- endfor %}
+</div>
+<div class="flow-arrow" aria-hidden="true">→</div>
+{%- endif %}
+{%- if !entry.services.is_empty() %}
+<div class="flow-column flow-service">
+<div class="column-label">{{ entry.services_heading() }}</div>
+{%- for service in entry.services %}
+<div class="flow-box{% if service.short() %} flow-short{% endif %}"><b class="flow-name">{% call links::object_link(service.name, service.href(), "") %}{% endcall %}</b><span class="flow-line">{{ service.kind_line() }}</span><span class="flow-faint">{{ service.endpoints_line() }}</span></div>
+{%- endfor %}
+</div>
+<div class="flow-arrow" aria-hidden="true">→</div>
+{%- endif %}
+<div class="flow-column flow-pods" aria-label="Pods of {{ name }}">
+<div class="column-label">{{ pods_heading }}</div>
+<div class="tiles">
+{%- for tile in tiles %}
+<a class="{{ tile.class() }}" href="{{ tile_href(tile) }}" hx-get="{{ tile_href(tile) }}">
+<div class="tile-head"><b class="tile-name" title="{{ tile.name }}">{{ tile.short_name }}</b><span class="tile-line">{{ tile_line(tile) }}</span></div>
+{#- A bar with neither a request nor a limit has nothing to scale to, so
+    its figures replace it, in the form the pod page writes them. -#}
+{%- if let Some(figures) = memory_unscaled(tile) %}
+<div class="meter" title="{{ memory_title(tile) }}"><span class="meter-label">mem</span><span class="meter-figures">{{ figures }}</span></div>
+{%- else %}
+{% call bar::meter("mem", tile.memory, memory_title(tile)) %}{% endcall %}
+{%- endif %}
+{%- if let Some(figures) = cpu_unscaled(tile) %}
+<div class="meter" title="{{ cpu_title(tile) }}"><span class="meter-label">cpu</span><span class="meter-figures">{{ figures }}</span></div>
+{%- else %}
+{% call bar::meter("cpu", tile.cpu, cpu_title(tile)) %}{% endcall %}
+{%- endif %}
+</a>
+{%- else %}
+<div class="tiles-none">No pods</div>
+{%- endfor %}
+</div>
+{%- if !tiles.is_empty() %}
+<div class="tiles-legend">{{ legend }}</div>
+{%- endif %}
+{%- if let Some(note) = usage_note %}
+<div class="tiles-legend">{% call off::line(note) %}{% endcall %}</div>
+{%- endif %}
+</div>
+{%- if !mounts.is_empty() %}
+<div class="flow-arrow" aria-hidden="true">→</div>
+<div class="flow-column flow-volumes">
+<div class="column-label">{{ mounts.heading() }}</div>
+{%- for group in mounts.groups %}
+{%- for mount in group.mounts %}
+<div class="flow-volume">{% call links::object_link(mount.claim, claim_href(mount.claim), "flow-name") %}{% endcall %}{% if let Some(size) = mount.size %}<span class="flow-faint">{{ size }}</span>{% endif %}</div>
+{%- endfor %}
+<div class="flow-backend">{{ group.backend() }}</div>
+{%- endfor %}
+</div>
+{%- endif %}
+</section>
+{#- What the workload is configured to reach besides its entry and
+    its volumes: each address that resolves to something in the
+    cluster, linked to that thing's page, then the Secrets it reads. -#}
+{%- if !needs.is_empty() || secrets > 0 %}
+<section class="needs" aria-label="Also needs">
+<span class="row-label">Also needs</span>
+{%- for need in needs %}
+{%- if let Some(href) = need.href() %}
+<a class="need" href="{{ href }}" hx-get="{{ href }}" title="{{ need.title() }}">{{ need.text }}</a>
+{%- else %}
+<span class="need" title="{{ need.title() }}">{{ need.text }}</span>
+{%- endif %}
+{%- if let Some(mark) = need.mark %}{% call provenance::mark(mark) %}{% endcall %}{% endif %}
+{%- endfor %}
+{%- if let Some(secrets) = secrets_text() %}
+<span class="need-secrets">{{ secrets }}</span>
+{%- endif %}
+</section>
+{%- endif %}
+{%- let runs = card.runs() %}
+{%- include "images/runs.html" %}
+{% include "objects/manages.html" %}
+{%- if !guards.is_empty() %}
+<section class="guards" aria-label="Guards">
+<span class="row-label">Guards</span>
+{%- for guard in guards %}
+<span class="{{ guard.class() }}"{% if let Some(title) = guard.title %} title="{{ title }}"{% endif %}>{% if guard.held() %}<span class="guard-check" aria-hidden="true">✓</span> {% endif %}{{ guard.text }}</span>
+{%- endfor %}
+</section>
+{%- endif %}
+</main>
+{% include "cards/workload.html" %}
+</div>
+{% endblock %}

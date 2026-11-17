@@ -1,0 +1,35 @@
+# The page layouts of the public forges, which code links follow.  A
+# forge a cluster serves itself, behind an Ingress to a gitea or forgejo
+# image, is found by that image, at any host.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Forge
+metadata:
+  name: github
+spec:
+  hosts: [github.com]
+  tree: '{repository}/tree/{ref}/{path}'
+  commit: '{repository}/commit/{sha}'
+---
+apiVersion: transect.liken.sh/v1alpha1
+kind: Forge
+metadata:
+  name: gitlab
+spec:
+  hosts: [gitlab.com]
+  hostPrefixes: [gitlab]
+  images: [gitlab-ce, gitlab-ee]
+  tree: '{repository}/-/tree/{ref}/{path}'
+  commit: '{repository}/-/commit/{sha}'
+---
+# Gitea and Forgejo, and Codeberg, which runs Forgejo.  Their directory
+# pages name whether a ref is a branch, a tag, or a commit.
+apiVersion: transect.liken.sh/v1alpha1
+kind: Forge
+metadata:
+  name: gitea
+spec:
+  hosts: [codeberg.org, gitea.com]
+  hostPrefixes: [gitea, forgejo]
+  images: [gitea, forgejo]
+  tree: '{repository}/src/{refKind}/{ref}/{path}'
+  commit: '{repository}/commit/{sha}'

@@ -1,0 +1,31 @@
+{%- import "map/section/boxes.html" as boxes -%}
+{#- One access drawing, drawn the way the section view draws.  The lines
+    are in one SVG at the drawing's own size, under the boxes, and the
+    server places each box.  A gate is a dot on its line, and a port is
+    a small box on the workload's left edge.  `id` keeps the SVG ids of
+    two drawings on one page distinct. -#}
+{%- macro drawing(drawing, id, label) -%}
+<div class="section-scroll"><section class="section-drawing ax-drawing" style="width: {{ drawing.width }}px; height: {{ drawing.height }}px; --section-width: {{ drawing.width }}px" aria-label="{{ label }}">
+<svg class="section-lines" width="{{ drawing.width }}" height="{{ drawing.height }}" viewBox="0 0 {{ drawing.width }} {{ drawing.height }}" aria-hidden="true">
+<defs><marker id="ax-arrow-{{ id }}" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path class="section-arrow" d="M0 0 L4 2 L0 4 Z"/></marker>
+<linearGradient id="ax-half-{{ id }}"><stop offset="50%" class="ax-half-on"/><stop offset="50%" class="ax-half-off"/></linearGradient></defs>
+{%- for line in drawing.lines %}
+<path class="{{ drawing.line_class(line) }}" d="{{ line.d }}"{% if !line.d.ends_with(format!(" {} {}", line.to.x, line.to.y).as_str()) %} marker-end="url(#ax-arrow-{{ id }})"{% endif %}>{% if let Some(title) = line.title %}<title>{{ title }}</title>{% endif %}</path>
+{%- endfor %}
+{%- for dot in drawing.dots %}
+<circle class="{{ dot.gate.class }}" cx="{{ dot.x }}" cy="{{ dot.y }}" r="5.5"{% if dot.gate.class.ends_with("half") %} fill="url(#ax-half-{{ id }})"{% endif %}><title>{{ dot.gate.title }}</title></circle>
+{%- if dot.gate.declared %}<circle class="ax-gate-core" cx="{{ dot.x }}" cy="{{ dot.y }}" r="2.2"><title>{{ dot.gate.title }}</title></circle>{% endif %}
+{%- endfor %}
+{%- for text in drawing.texts %}
+{%- if let Some(href) = text.href %}<a class="ax-svg-link" href="{{ href }}" hx-get="{{ href }}"><text class="{{ text.class }}" x="{{ text.x }}" y="{{ text.y }}">{{ text.text }}</text></a>
+{%- else %}<text class="{{ text.class }}" x="{{ text.x }}" y="{{ text.y }}">{{ text.text }}</text>{% endif %}
+{%- endfor %}
+</svg>
+{%- for placed in drawing.boxes %}
+{% call boxes::boxed(placed.boxed, placed.class, placed.place()) %}{% endcall %}
+{%- endfor %}
+{%- for socket in drawing.sockets %}
+<span class="ax-socket" style="{{ socket.place() }}" title="{{ socket.title }}">{{ socket.text }}</span>
+{%- endfor %}
+</section></div>
+{%- endmacro -%}

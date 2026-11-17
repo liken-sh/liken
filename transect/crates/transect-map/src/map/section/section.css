@@ -1,0 +1,239 @@
+/*
+ * The section view: one workload from its entry to the ground, in the map's
+ * bands, at a fixed width.  Every row and box is placed by the server in
+ * inline styles, so these rules only color and type them.
+ */
+
+/* The section view takes the row's free width, as every elevation's map does,
+   so the card is at the same x as the sidebar on every elevation.  In a
+   narrower window its rows scroll. */
+.view > .section-map {
+  padding: 16px 0 16px 32px;
+}
+
+/* The section view keeps its layout at any width, because its lines are
+   drawn to the boxes' positions at its own width.  It zooms to the width
+   of its column: out in a narrow window, where a sideways scroll would
+   put its right-hand column behind a scrollbar, and in, up to a third
+   larger, in a wide window, so it fills the column.  A browser that
+   cannot divide one length by another scrolls instead. */
+.section-scroll {
+  overflow-x: auto;
+  container-type: inline-size;
+}
+
+@supports (zoom: calc(100cqw / 976px)) {
+  .section-drawing { zoom: min(1.33, calc(100cqw / var(--section-width))); }
+}
+
+.section-drawing {
+  position: relative;
+  flex: none;
+}
+
+.section-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  background: var(--row);
+  border: 1px solid var(--rule);
+}
+
+.section-row:first-child { border-top-left-radius: 10px; border-top-right-radius: 10px; }
+.section-row-last { border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
+
+/* The bands below the layers take their colors from the cluster map, a
+   step darker toward the ground. */
+.section-row-machines { background: var(--page); }
+
+.section-row-ground { background: var(--ground); }
+
+.section-row-label {
+  position: absolute;
+  left: 16px;
+  top: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+/* The spine is tinted the selection color from the first row to the
+   last, so the eye follows the workload's own path down. */
+.section-spine {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--link);
+  opacity: 0.14;
+}
+
+.section-lines {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* Solid lines are structure, as the section view's legend explains. */
+.section-path {
+  fill: none;
+  stroke: var(--ink-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Dashed lines are callers, and dotted ones are edges transect guessed,
+   such as a controller found among several candidates. */
+.section-path-dashed { stroke-dasharray: 6 6; }
+
+/* A line from stored text or a guess shows its source on hover, so it
+   receives the pointer events that the other lines let through. */
+.section-lines path:has(title) { pointer-events: stroke; }
+
+.section-path-dotted {
+  stroke: var(--ink-faint);
+  stroke-dasharray: 2 6;
+}
+
+.section-arrow {
+  fill: var(--ink-muted);
+  stroke: none;
+}
+
+/* A label has a halo in the rows' color, so a line that crosses it on
+   its way to another box is drawn under the words, not through them. */
+.section-label {
+  fill: var(--ink-muted);
+  font-size: 13px;
+  dominant-baseline: central;
+  paint-order: stroke;
+  stroke: var(--row);
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}
+
+/* A label on the right side ends at the side box whose edge it names. */
+.section-label-end { text-anchor: end; }
+
+/* The heading keeps a margin from the tab row above it. */
+.section-subtitle {
+  margin: 16px 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.section-legend {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.section-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 24px;
+  margin-bottom: 12px;
+}
+
+.section-key > .section-legend { margin: 0; }
+
+.section-key > .edge-menu {
+  margin: 0 0 0 auto;
+}
+
+.section-box {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  color: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  text-decoration: none;
+}
+
+a.section-box:hover { border-color: var(--link); }
+
+/* A box that opens a page has its title in the link color, so a reader
+   tells it from a box that opens nothing before hovering. */
+a.section-box .section-title { color: var(--link); }
+
+/* A title or a line too long for the box's width wraps to a second
+   line, at a hyphen or a space where it can, and only then is cut
+   short.  The layout gives the box the height for both lines, and the
+   whole text of each is in its title. */
+.section-title,
+.section-line {
+  max-width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: break-word;
+}
+
+.section-title {
+  font-family: var(--mono);
+  font-weight: 600;
+}
+
+.section-line { color: var(--ink-muted); }
+
+.section-box-workload { border: 2px solid var(--link); }
+
+/* A box that counts names shows them on a click: the list is drawn over
+   the drawing below the box, in the box's own colors, until it closes. */
+.section-box-fold { overflow: visible; z-index: 2; }
+.section-fold > summary { cursor: pointer; list-style: none; color: var(--link); }
+.section-fold > summary::-webkit-details-marker { display: none; }
+.section-fold[open] > .section-fold-list {
+  position: absolute;
+  top: calc(100% - 1px);
+  left: -1px;
+  right: -1px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 12.5px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 0 0 8px 8px;
+}
+
+a.section-box-workload:hover { border-color: var(--ink); }
+
+.section-box-short {
+  border-color: var(--warm);
+  box-shadow: inset 0 0 0 1px var(--warm);
+}
+
+.section-box-machine { border-color: var(--ink-muted); }
+
+/* Dashed, as the ground band's boxes are, because the cluster reaches
+   these and does not run them. */
+.section-box-ground {
+  background: var(--page);
+  border: 1px dashed var(--ink-faint);
+}
+
+@media (max-width: 1000px) {
+  .view > .section-map { padding-right: 32px; }
+}

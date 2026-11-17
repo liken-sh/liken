@@ -1,0 +1,20 @@
+# Kind knowledge for liken's Machine, as liken would ship it.  Every
+# reference is a value: a Machine names no other object, and its Node
+# shares its name.
+apiVersion: transect.liken.sh/v1alpha1
+kind: KindKnowledge
+metadata:
+  name: machines.liken.sh
+spec:
+  summary: The computer under a Node, with the operating system liken declares for it and the hardware it reads.
+  healthy: {condition: Ready}
+  # A Machine takes its Node's name, so the machine page shows it
+  # underneath, and search finds the machine by it.
+  node: metadata.name
+  references:
+    - {path: status.phase, label: phase}
+    - {path: status.role, label: etcd role}
+    - {path: status.version.liken, label: runs liken}
+    - {path: status.version.kernel, label: kernel}
+    - {path: status.hardware.cpus, label: cpus}
+    - {path: status.firmware.bootCurrent, label: booted from}

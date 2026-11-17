@@ -1,0 +1,26 @@
+ServiceAccount ops-console · acme-ops · transect
+transect
+cluster / platform / acme-ops / ServiceAccounts / ops-console
+access vulnerabilities kinds
+Search /
+esc
+acme-ops ServiceAccount ops-console
+What it may do, and where
+Left to right: what runs as it, the roles it is bound to, what they grant, and what follows. one of the six that a binding grants it one that follows from a grant, and that no binding names. Hover a box for its rules.
+runs as it
+the account
+bound to
+it may
+what follows
+bound to
+change what a GitOps tool applies patch Kustomizations
+ClusterRole applier-editor in acme-ops
+ServiceAccount ops-console intent The console the operators work from, which edits what the GitOps tool applies.
+no pod runs as it
+ServiceAccount acme-ops/gitops-controller applies what Kustomization objects name ClusterRole cluster-admin every verb, every kind so each of the six follows
+Who may run as it
+A pod names any ServiceAccount in its own namespace, so the 2 other accounts that may run pods or change workloads in acme-ops may run as it. The access of Namespace acme-ops lists them.
+For the whole cluster: ways in · accounts
+ServiceAccount ops-console
+kind ServiceAccount
+namespace acme-ops

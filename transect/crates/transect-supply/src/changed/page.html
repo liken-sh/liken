@@ -1,0 +1,23 @@
+{% extends "frame/layout.html" %}
+
+{% block title %}changed · transect{% endblock %}
+
+{% block elevation %}<a href="/">cluster</a><span aria-hidden="true">/</span><span class="elevation-current">changed</span>{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- Every change of the last day that the cluster's objects still
+    record, newest first, in one panel. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="changed">
+<p class="changed-summary">{{ listed.summary() }}</p>
+<p class="changed-note">{{ sources() }}</p>
+{%- if !listed.changes.is_empty() %}
+<div class="changed-panel">
+{%- include "changed/list.html" %}
+</div>
+{%- endif %}
+</main>
+</div>
+{% endblock %}

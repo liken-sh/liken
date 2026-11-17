@@ -1,0 +1,24 @@
+{% extends "frame/layout.html" %}
+
+{% block title %}{{ name }} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- The object the URL named, and the places above it that still exist.
+    This block swaps as every elevation's block does, so when the object
+    comes back the stream replaces this page with the object's own
+    page. -#}
+<div class="view" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="gone" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+<p class="gone-what">{{ sentence() }}</p>
+<nav class="gone-up" aria-label="Up from {{ name }}">
+{%- for link in up %}
+<a{% if link.name %} class="gone-name"{% endif %} href="{{ link.href }}" hx-get="{{ link.href }}">{{ link.text }}</a>
+{%- endfor %}
+</nav>
+</main>
+</div>
+{% endblock %}

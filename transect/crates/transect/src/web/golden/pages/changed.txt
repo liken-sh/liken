@@ -1,0 +1,16 @@
+changed · transect
+transect
+cluster / changed
+access vulnerabilities kinds
+Search /
+esc
+8 changes in the last 24 hours, newest first, in UTC.
+transect keeps no history, so each entry is a time an object still records: a ReplicaSet's or a ControllerRevision's creation, a Job's, a CronJob's last run, the fetch of the revision a GitOps applier applied, a container's last exit, a machine condition's last change, and an alert's start. A change whose object is gone leaves no entry.
+11:40 alert SessionsSlow started firing: acme-shop · session-cache-set-0
+11:30 alert LedgerExporterDown started firing: acme-ledger · ledger-exporter
+11:00 acme-ops/shop-apps applied main · shop@1111111
+11:00 alert MachineDiskFilling started firing: machine node-beta
+10:00 acme-ops/ledger-apps applied a commit · ledger@2222222
+10:00 alert CertificateRenewal started firing: cluster-wide
+09:00 acme-ops/ops-apps applied v3
+07:00 acme-ops/backup-apps applied sha256:4444444444444444444444444444444444444444444444444444444444444444

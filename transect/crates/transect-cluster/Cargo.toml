@@ -1,0 +1,41 @@
+[package]
+name = "transect-cluster"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+transect-graph.workspace = true
+transect-resources.workspace = true
+anyhow.workspace = true
+futures.workspace = true
+http.workspace = true
+hyper.workspace = true
+hyper-rustls.workspace = true
+hyper-timeout.workspace = true
+hyper-util.workspace = true
+k8s-openapi.workspace = true
+kube.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+tower.workspace = true
+tracing.workspace = true
+
+[features]
+# The test builders other crates' tests read.
+fixtures = []
+
+[dev-dependencies]
+transect-resources = { workspace = true, features = ["fixtures"] }
+bytes.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["server"] }
+hyper-util = { workspace = true, features = ["server"] }
+rstest.workspace = true
+serde_yaml.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+
+[lib]
+# The doc comments show YAML and paths, not examples to run.
+doctest = false

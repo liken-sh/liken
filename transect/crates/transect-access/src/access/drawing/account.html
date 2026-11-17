@@ -1,0 +1,48 @@
+{% extends "frame/layout.html" %}
+{%- import "links/link.html" as links -%}
+{%- import "access/card.html" as access -%}
+{%- import "access/switcher.html" as switcher -%}
+{%- import "access/drawing/drawing.html" as drawings -%}
+
+{% block title %}{{ title }}{% if let Some(namespace) = namespace() %} · {{ namespace }}{% endif %} · transect{% endblock %}
+
+{% block elevation %}{% include "frame/crumbs.html" %}{% endblock %}
+
+{% block masthead_access %} masthead-current{% endblock %}
+
+{% block stream %} hx-ext="sse" sse-connect="{{ events_url() }}"{% endblock %}
+
+{% block main %}
+{#- An account's page.  One drawing shows what runs as the account, the
+    roles it is bound to, what they grant, and what follows.  Under the
+    drawing, the page shows who may run as the account, and the
+    account's card is beside them.  A ServiceAccount's page is this
+    page. -#}
+<div class="view view-wide" id="view" sse-swap="view" hx-swap="outerHTML">
+<main class="section-map ax-map" hx-target="body" hx-swap="innerHTML" hx-push-url="true">
+{%- if let Some(namespace) = namespace() %}
+<nav class="switcher" aria-label="{{ name }}">
+<a class="switcher-namespace" href="/namespaces/{{ namespace }}" hx-get="/namespaces/{{ namespace }}">{{ namespace }}</a>
+<span class="switch switch-current" aria-current="page">{{ title }}</span>
+</nav>
+{%- else %}
+{% call switcher::switcher(false) %}{% endcall %}
+{%- endif %}
+<h2 class="section-subtitle">What it may do, and where</h2>
+<p class="section-legend ax-legend">Left to right: {% if namespace().is_some() %}what runs as it{% else %}who it is{% endif %}, the roles it is bound to, what they grant, and what follows. <span class="ax-key"><span class="ax-block ax-block-d ax-block-some"></span> one of the six that a binding grants it</span> <span class="ax-key"><span class="ax-block ax-block-f ax-block-some"></span> one that follows from a grant, and that no binding names.</span> Hover a box for its rules.</p>
+{% call drawings::drawing(drawing, "account", title) %}{% endcall %}
+{%- if let Some(run_as) = run_as %}
+<h2 class="section-subtitle">Who may run as it</h2>
+<p class="section-legend ax-legend">{% call links::sentence(run_as.clone()) %}{% endcall %}</p>
+{%- endif %}
+{%- if namespace().is_some() %}
+{% call switcher::whole_cluster() %}{% endcall %}
+{%- endif %}
+</main>
+{%- if let Some(card) = card %}
+{% include "objects/card.html" %}
+{%- else %}
+{% call access::card(no_gitops) %}{% endcall %}
+{%- endif %}
+</div>
+{% endblock %}

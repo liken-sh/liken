@@ -1,0 +1,85 @@
+cluster · transect
+transect
+cluster
+access vulnerabilities kinds
+Search /
+esc
+Edges
+The map draws no lines. A selected namespace's relations, the loop marks, and a loss's cascade follow the edges of the kinds that are on. Edges
+runs on A pod runs on a machine.
+depends on A workload calls what an address it is configured with reaches.
+authenticates through An application signs its users in through a provider.
+stores on A workload keeps its data where its volumes are.
+holds A workload's pods hold a device that a ResourceClaim gave them.
+reconciles from A GitOps tool applies an object from a source.
+controlled by An operator's controller reconciles a custom resource.
+allowed to call NetworkPolicies let one workload call another.
+apps
+1 namespace
+acme-shop
+6 workloads
+data
+1 namespace
+acme-ledger
+4 workloads
+operators
+1 namespace
+acme-promoter
+2 workloads
+platform
+1 namespace
+acme-ops
+5 workloads
+Machines
+2 machines
+used
+requested
+free now
+control plane
+node-beta 1 alert
+cpu
+mem
+9 pods
+workers
+node-alpha
+cpu
+mem
+10 pods
+Ground
+1 volume
+The archive NAS ↗ intent · 1 NFS
+Now
+LedgerExporterDown critical
+acme-ledger · ledger-exporter, firing for 30m
+The ledger exporter is not answering.
+It has not answered a scrape for 10 minutes. View the runbook or see https://dashboards.example.test/d/ledger-exporter/overview-of-every-exporter-answering-the-ledger-scrapes .
+MachineDiskFilling warning
+machine node-beta, firing for 1h
+A disk is 85% full.
+SessionsSlow warning
+acme-shop · session-cache-set-0, firing for 20m
+Answers take over a second.
+CertificateRenewal info
+cluster-wide, firing for 2h
+A certificate renews this week.
+acme-ledger
+ledger-exporter: none of 1 ready main in ledger-exporter-rs-one is crash looping after 14 restarts
+Worth knowing
+19 pods request no memory
+5 of them each use 64 Mi or more, and all 19 use 2.1 Gi together. The scheduler places them as if they used no memory, and the kubelet evicts them first.
+1 replicated workload behind a Service has no readiness probe
+acme-shop/storefront
+During a rollout, their Services send requests to each new pod as soon as it starts, before the pod can answer them.
+1 replicated workload has no PodDisruptionBudget
+acme-shop/storefront
+No PodDisruptionBudget limits their evictions, so a drain can evict all of a workload's pods at once.
+Changed
+11:40 alert SessionsSlow started firing: acme-shop · session-cache-set-0
+11:30 alert LedgerExporterDown started firing: acme-ledger · ledger-exporter
+11:00 acme-ops/shop-apps applied main · shop@1111111
+11:00 alert MachineDiskFilling started firing: machine node-beta
+10:00 acme-ops/ledger-apps applied a commit · ledger@2222222
+10:00 alert CertificateRenewal started firing: cluster-wide
+09:00 acme-ops/ops-apps applied v3
+07:00 acme-ops/backup-apps applied sha256:4444444444444444444444444444444444444444444444444444444444444444
+All 8 changes in the last 24 hours →
