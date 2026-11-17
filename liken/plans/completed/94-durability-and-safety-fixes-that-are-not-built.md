@@ -20,7 +20,9 @@ that proves it:
 * [Two comments state opposite rules about FAT](../open-problems/two-comments-state-opposite-rules-about-fat.md).
 * [The primary and backup GPT have no barrier between them](../open-problems/the-primary-and-backup-gpt-have-no-barrier.md).
 * [`LastUsableLBA` is off by one](../open-problems/last-usable-lba-is-off-by-one.md).
-* [The wpa_supplicant control channel can panic on close](../open-problems/the-wpa-supplicant-control-channel-can-panic-on-close.md).
+* The wpa_supplicant control channel can panic on close. Fixed on
+  2026-11-17: the reader sends each event under the lock that `close`
+  holds, and stops when the control is closed.
 * [Two waits have no bound after SIGKILL](../open-problems/two-waits-have-no-bound-after-sigkill.md),
   with open question 1.
 * [The proving watchdog blocks its own shutdown](../open-problems/the-proving-watchdog-blocks-its-own-shutdown.md).

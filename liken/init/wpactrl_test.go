@@ -295,6 +295,49 @@ func TestClosingTheControlEndsTheEventStream(t *testing.T) {
 	}
 }
 
+// The supplicant reports for the life of the machine, so a close can meet
+// a reader that already holds an event. A send on a closed channel panics,
+// and a panic in init stops the machine, so the reader's send and the
+// close must not run at the same moment. The race detector reports them
+// when they can.
+func TestClosingWhileTheSupplicantReportsIsSafe(t *testing.T) {
+	s := newStandInSupplicant(t, "OK\n")
+	control, err := attachWPAControl(s.socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := <-s.attached
+	reported := make(chan struct{})
+	go func() {
+		defer close(reported)
+		for {
+			if _, err := s.conn.WriteToUnix([]byte("<3>CTRL-EVENT-SCAN-RESULTS"), peer); err != nil {
+				return
+			}
+		}
+	}()
+	// A reader takes each event, so the channel has room and the
+	// control's send succeeds until the close.
+	drained, taken := make(chan struct{}), make(chan struct{}, 1)
+	go func() {
+		defer close(drained)
+		for range control.events() {
+			select {
+			case taken <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	<-taken
+	<-taken
+
+	control.close()
+
+	<-drained
+	s.conn.Close()
+	<-reported
+}
+
 func TestClosingRemovesTheClientsOwnSocket(t *testing.T) {
 	// The supplicant drops a monitor whose socket has gone, so leaving
 	// the file behind would leave a dead monitor on its list.

@@ -327,7 +327,12 @@ func attachRequest(conn *net.UnixConn) error {
 }
 
 // read carries one connection's messages onto the event channel, and
-// ends when that connection closes.
+// ends when that connection closes, or when the control does.
+//
+// Each send goes out under the lock, because close closes the channel
+// under the same lock, and a send on a closed channel panics. A close of
+// the connection does not stop a reader that already holds a message, so
+// the reader also checks that the control is still open.
 func (c *wpaControl) read(conn *net.UnixConn) {
 	buf := make([]byte, wpaMessageMax)
 	for {
@@ -339,10 +344,16 @@ func (c *wpaControl) read(conn *net.UnixConn) {
 		if !ok {
 			continue
 		}
+		c.mu.Lock()
+		if c.closed {
+			c.mu.Unlock()
+			return
+		}
 		select {
 		case c.out <- event:
 		default:
 		}
+		c.mu.Unlock()
 	}
 }
 
