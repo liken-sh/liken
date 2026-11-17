@@ -1,74 +1,42 @@
-# 68. Init holds the hardware watchdog
+# 98. Init holds the hardware watchdog
 
-Milestone 68. Proposed 2026-09-25. A machine that hangs without a
-panic stays hung until a person cuts its power, and it leaves no
-record of why. This milestone closes that gap in two layers. The
-kernel turns a lockup into a panic, which milestone 35 already
-records. Init holds the chipset's hardware watchdog, which resets a
-machine that the kernel itself cannot recover.
+Milestone 98. Proposed 2026-11-17, from the parts of
+[milestone 68](completed/68-init-holds-the-hardware-watchdog.md) that
+were not built. Nothing in it is built. Init holds the chipset's
+hardware watchdog, which resets a machine that the kernel itself
+cannot recover, and the next boot reports the reset. The parts keep
+milestone 68's numbers, so the cross-references between them match
+that milestone's text. None of the drills has run.
 
-Status on 2026-11-17: part one is built for two of its three values.
-`machine.OSSysctls` holds `kernel.softlockup_panic` and
-`kernel.hardlockup_panic`, and on that day ten machines of a production
-fleet that set them through `spec.sysctls` read both back as `1` on
-kernel 7.3.1 with `SysctlsApplied` true. `kernel.nmi_watchdog` is not
-in the table: the kernel's default is already `1`, the entry only makes
-the value read back, and whether a QEMU guest with no performance
-counter accepts the write was not checked. Parts two to five are not
-built.
+## What is built
+
+Milestone 68's part one is built (41170ba8). `machine.OSSysctls` sets
+`kernel.softlockup_panic` and `kernel.hardlockup_panic` to `1` on every
+machine, so a CPU that stays in kernel mode for more than 20 seconds,
+or runs with interrupts off, panics. The machine boots with `panic=10`
+and `kernel.panic_on_oops=1`, so the panic reboots it in ten seconds
+into the proven slot, and milestone 35's crash capture
+([completed/35-crash-capture.md](completed/35-crash-capture.md))
+records it in `status.lastCrash`. `kernel.nmi_watchdog` is not in the
+table, and milestone 68's status paragraph gives the reason.
 
 ## The problem
 
-Milestone 35 left one failure out: "a machine that stops without a
-panic records nothing, and only a hardware watchdog finds it." A
-production fleet on 2026-09-24 showed what that costs. An Intel N100
-leader stopped at one moment with no warning. Its pods' logs ended in
-the same second, its kernel log held no error, and its memory, CPU,
-and temperature were normal up to the end. The machine did not
-answer ARP, but its power LED was on and its link LED showed
-traffic. It stayed that way for 43 hours, until a person cut its
-power. `status.lastCrash` stayed empty, because the kernel never
-panicked. The only trace was the SSD's unsafe-shutdown count, which
-went up by one when the person cut the power.
+A machine that hangs without a panic stays hung until a person cuts
+its power, and it leaves no record of why. A production fleet on
+2026-09-24 showed what that costs. An Intel N100 leader stopped at one
+moment with no warning. Its pods' logs ended in the same second, its
+kernel log held no error, and its memory, CPU, and temperature were
+normal up to the end. The machine did not answer ARP, but its power
+LED was on and its link LED showed traffic. It stayed that way for 43
+hours, until a person cut its power. `status.lastCrash` stayed empty,
+because the kernel never panicked. Milestone 68 gives the full record.
 
-The machine boots with `panic=10` and `kernel.panic_on_oops=1`, so a
-panic or an oops reboots it in ten seconds. A lockup is neither. The
-vendored kernel was 7.2.6 when this plan was written, and that build
-had both lockup detectors, with `CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=0`
-and without `CONFIG_BOOTPARAM_HARDLOCKUP_PANIC`. A detector that fires
-prints a warning and the machine keeps its hang. `liken/kernel/VERSION`
-names the kernel that `liken` vendors now, and the `config-*` file in
-that release's modules package gives its current settings.
-
-A hang below the kernel is worse. If a CPU stops completely, or the
-firmware holds it in system management mode, no kernel code runs, and
-no detector fires. Only a timer outside the CPU can act.
-
-## Part one: a lockup becomes a panic
-
-`machine/sysctldefaults.go` gains three entries:
-
-| Parameter | Value | Why |
-| --- | --- | --- |
-| `kernel.softlockup_panic` | `1` | A CPU that stays in kernel mode for more than 20 seconds (twice `kernel.watchdog_thresh`) panics instead of printing a warning. |
-| `kernel.hardlockup_panic` | `1` | A CPU that runs with interrupts off panics. The hard-lockup detector runs on the NMI watchdog (`CONFIG_HARDLOCKUP_DETECTOR_PERF=y`). |
-| `kernel.nmi_watchdog` | `1` | The kernel's default is already `1`. The entry makes the value read back in `status.sysctls`, so a person can see that the hard-lockup detector runs. |
-
-These are the same argument as `kernel.panic_on_oops`: a panic
-reboots into the proven slot, and pstore carries the log across the
-reboot. A hang keeps neither.
-
-`kernel.hung_task_panic` stays off. A task that waits on a slow iSCSI
-or NFS server trips it, and a storage outage would then reboot every
-machine that mounts from that server.
-
-**Evidence already in hand.** A production fleet of nine machines
-applied these three values through `spec.sysctls` on 2026-09-25. All
-three read back as `1` on every machine, `SysctlsApplied` stayed
-true, and no machine had a pending disruption. The fleet covers four
-chipsets: Intel Cannon Point-LP, Alder Lake-N, and Gemini Lake, and
-an AMD FCH. So the values apply live on the shipped kernel, with no
-reboot.
+Milestone 68's part one turns a kernel lockup into a panic. A hang
+below the kernel is worse. If a CPU stops completely, or the firmware
+holds it in system management mode, no kernel code runs, and no
+detector fires. Only a timer outside the CPU can act. The parts below
+give init that timer.
 
 ## Part two: the drivers
 
@@ -139,9 +107,9 @@ kernels.
 so that a kernel lockup produces a panic and a `lastCrash` record
 before the chipset acts. That path is 20 seconds to detect a soft
 lockup, then the ten seconds of `panic=10`, 30 seconds in all. At 60
-seconds the chipset acts only when the kernel cannot. The driver converts the
-requested timeout to the chipset's own count, and init reads the
-value back from the ioctl, because a driver can round it.
+seconds the chipset acts only when the kernel cannot. The driver
+converts the requested timeout to the chipset's own count, and init
+reads the value back from the ioctl, because a driver can round it.
 
 **The timer is not a machine-plane component.** A component restarts
 on failure and stops in `plane.shutdown`. The timer must do neither.
@@ -175,9 +143,10 @@ They run from the stick and change nothing that a reset protects.
 `WDIOC_GETBOOTSTATUS` returns `WDIOF_CARDRESET` when the timer reset
 the machine. `iTCO_wdt` reads the chipset's second-timeout status bit
 for this. `sp5100_tco` and `i6300esb` read their own equivalents,
-and drills one and five confirm each driver's report. The bit clears when the driver reads it, so init preserves the fact
-on `machineState` in the same crash store that milestone 35 uses, as
-a record named for the boot that read it. Each boot derives the
+and drills one and five confirm each driver's report. The bit clears
+when the driver reads it, so init preserves the fact on
+`machineState` in the same crash store that milestone 35 uses, as a
+record named for the boot that read it. Each boot derives the
 summary from the store again, under the reconstructibility rule.
 
 Two new status fields carry it:
@@ -210,9 +179,15 @@ prunes any field that the schema does not declare.
 3. **A fail-stop stays off.** A guest boots a manifest that it cannot
    claim, fail-stops, and powers off. It must stay off for longer than
    the timeout.
-4. **The lockup values read back.** Every guest reports the three
-   values from part one in `status.sysctls`. The lockup paths are
-   kernel code, and this milestone does not drill a real lockup.
+4. **The lockup values read back.** Every guest reports the two
+   values that part one built, `kernel.softlockup_panic` and
+   `kernel.hardlockup_panic`, as `1` in `status.sysctls`. The third
+   value that milestone 68 proposed, `kernel.nmi_watchdog`, is not in
+   the table: the kernel's default is already `1`, the entry only makes
+   the value read back, and whether a QEMU guest with no performance
+   counter accepts the write was not checked. So this drill does not
+   read it. The lockup paths are kernel code, and this milestone does
+   not drill a real lockup.
 5. **The real chipsets.** One machine of each chipset above boots the
    release: `status.watchdog` must show `Armed` or `Absent`, with the
    `NO_REBOOT` refusal named when it is `Absent`. On one testbed

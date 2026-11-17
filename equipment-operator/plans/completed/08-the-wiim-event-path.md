@@ -231,4 +231,4 @@ development build `2026.09.19-002-dev-028-ab218213`:
   AVTransport event, or need a read of their own. A drill answers
   this.
 * The settings families the amp will not confirm, which
-  [plan 20](../20-the-wiims-zero-value-fix-and-its-field-table.md) covers.
+  [plan 21](../21-the-wiims-field-table.md) covers.

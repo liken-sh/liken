@@ -84,7 +84,7 @@ Status on 2026-10-04:
 
 Status on 2026-11-10: closed. Two more items are built, and every item
 that is not built continues in
-[milestone 94](../94-durability-and-safety-fixes-that-are-not-built.md),
+[milestone 94](94-durability-and-safety-fixes-that-are-not-built.md),
 with the fix text and the corrections below.
 
 * Built 2026-11-01: the external actions of part six. Every `uses:` of
@@ -104,7 +104,10 @@ with the fix text and the corrections below.
   conditions stamped with the current generation; the grow-only CEL
   rules on status writes; the flux seed tests that CI skips; the BIOS
   drill of the release publish; `.DELETE_ON_ERROR`; and the `lego`
-  digest and the split of `RELEASES_CERT_TOKEN`.
+  digest and the split of `RELEASES_CERT_TOKEN`. Milestone 94 built
+  `.DELETE_ON_ERROR` on 2026-11-17 and closed, and each other fix is
+  now its own open problem, which milestone 94's status paragraph
+  lists.
 
 The round has six parts: the boot chain's writes, init's process
 supervision, the operators' failure paths, the CRD schema and CI
