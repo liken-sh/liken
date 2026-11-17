@@ -66,7 +66,9 @@ func TestTheCompositorStartsAgainAfterTheOperatorEndsIt(t *testing.T) {
 			}
 			// The second compositor crashes, with no order, and the
 			// container exits with the status of the crash.
-			_ = second.Process.Signal(syscall.SIGSEGV)
+			if err := second.Process.Signal(syscall.SIGSEGV); err != nil {
+				t.Fatalf("signalling the second compositor at pid %d: %v", second.Process.Pid, err)
+			}
 			if got, want := <-status, 128+int(syscall.SIGSEGV); got != want {
 				t.Errorf("the container exited with %d, want %d", got, want)
 			}
