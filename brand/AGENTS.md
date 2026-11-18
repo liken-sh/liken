@@ -9,6 +9,7 @@ Every other component reads this directory from the tree, so a change
 here reaches every site and screen in the same commit.
 
 `voice.md` is the voice for every word the project publishes. Read it
-before you write prose here.
+before you write prose here. `messages.md`, `names.md`, and
+`instructions.md` hold the rules for those three kinds of text.
 
 `make test` runs every check CI runs.

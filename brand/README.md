@@ -30,13 +30,22 @@ the tree of the same repository:
 
 `voice.md` states the voice and tone rules for every word the
 project publishes, on the sites and in the source files' comments.
-It needs no other file. The root `AGENTS.md` imports it with the line
-`@brand/voice.md`, and each component's `AGENTS.md` imports it by its
-path from that component.
+The root `AGENTS.md` imports it with the line `@brand/voice.md`, and
+each component's `AGENTS.md` imports it by its path from that
+component, so every session loads it. Three files beside it hold the
+rules that only some work needs, and `voice.md` links to each:
+[`messages.md`](messages.md) for errors, log lines, the messages of
+conditions and `Event`s, and test failures,
+[`names.md`](names.md) for identifiers, tests, and names in the API,
+and [`instructions.md`](instructions.md) for `AGENTS.md` files,
+skills, and briefs for agents. No `AGENTS.md` imports those three,
+so they cost a session nothing until it reads them.
 
-[`editing-prompt.md`](editing-prompt.md) is a reusable assignment
-template for reviewing repository prose. It keeps factual review and
-source-boundary checks with the writing rules.
+[`editing-prompt.md`](editing-prompt.md) is the brief that a session
+gives to an agent that corrects prose, messages, or names in one part
+of the repository. It states how to keep every fact through an edit,
+which names and texts are interfaces that the agent reports and does
+not change, and what the agent returns.
 
 ## Using the theme
 

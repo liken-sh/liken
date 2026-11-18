@@ -44,11 +44,14 @@ text against it before you publish it.
 @brand/voice.md
 
 The rules are ASD-STE100, Simplified Technical English, with additions.
-Four of them matter most in a session that crosses components: name the
-component and the object it acts on, give the reason before the
-description, keep the code face on every identifier, and describe the
-system as it is now. `liken` names the code, so it takes the code face
-too.
+Three files beside `brand/voice.md` each hold the rules for one kind
+of text. Read `brand/messages.md` before you write an error, a log
+line, the message of a condition or an `Event`, or a test failure.
+Read `brand/names.md` before you name an identifier, a file, a test,
+or a part of the API. Read `brand/instructions.md` before you write
+an `AGENTS.md` file, a skill, or a brief for another agent. Load the
+`commit-messages` skill before you write a commit message or the
+description of a pull request.
 
 ## Privacy
 

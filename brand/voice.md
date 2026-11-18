@@ -12,6 +12,19 @@ the base, and the rules below add only what it does not state. STE
 keeps each word and sentence plain. It does not make a page clear on
 its own: a page of correct STE sentences can still be hard to follow.
 
+Three kinds of text have more rules, each in a file beside this one.
+Read the file before you write that kind of text:
+
+- [`messages.md`](messages.md) for an error, a log line, the message
+  of a condition or an `Event`, and the failure of a test.
+- [`names.md`](names.md) for an identifier, a package, a file, a
+  test, and a name in the API.
+- [`instructions.md`](instructions.md) for an `AGENTS.md` file, a
+  skill, and a brief for another agent.
+
+The `commit-messages` skill under `.agents/skills` has the rules for
+a commit message and the description of a pull request.
+
 ## Plain explanation
 
 Write the way you would explain the system to a colleague at a
@@ -56,6 +69,52 @@ words you would use out loud.
   read" tells the reader nothing about the model. Start with the
   model.
 
+## Sentences
+
+Each pattern below is common in text that a language model writes,
+and each one delays a fact or puts a claim where a fact belongs. The
+correction is the same every time: write the fact, with its subject
+and its verb.
+
+- **Write "is" and "has".** "The `Recorder` serves as the writer of
+  every `Event`" and "the image features a static binary" use a
+  longer verb to say less. Write "the `Recorder` writes every
+  `Event`" and "the image has one static binary".
+- **Give a result its own clause, with its cause.** "The operator
+  caches the list, ensuring fast reads" adds a claim after the comma
+  and does not say how it follows. Write "the operator caches the
+  list, so a read makes no request to the API server".
+- **Contrast only with what the reader could believe.** "The file is
+  not a cache, it is a record" denies a claim that nobody made, to
+  make the second half sound important. Write "the file records
+  which panels to power down". Keep a contrast that corrects a
+  likely assumption: "the watch starts at that version, not at the
+  present".
+- **Do not ask a question and then answer it.** "Why a file? Because
+  a container restart clears memory" becomes "the record is in a
+  file because a container restart clears memory".
+- **Do not put a label before a sentence.** "The catch: the bus has
+  one adapter", "Key point:", and "Note:" tell the reader how to
+  feel about the sentence that follows. Write the sentence, and put
+  a condition in a clause with "when" or "unless".
+- **Start a section with a fact.** The first sentence under a
+  heading does not repeat the heading, and it does not say what the
+  section will cover.
+- **State a claim once, at its true strength.** "This could
+  potentially cause the pod to perhaps restart" has three hedges on
+  one fact. When the result happens only in some conditions, write
+  "can" and name the condition. When you do not know, say what you
+  did not check.
+- **Name the source of a claim.** "It is generally recommended" and
+  "many users report" name nobody. Name the specification, the
+  upstream document, or the measurement, or delete the sentence.
+- **Break up a string of nouns.** "The claim device release grace
+  period" is five nouns, and the reader must work out which one
+  owns which. Write "the time that the operator waits before it
+  releases a claim's device".
+- **Write two sentences in place of a semicolon**, or join them with
+  the word that states their relation: "because", "so", "but".
+
 ## Pages
 
 Arrange each page in the order that the reader needs it: what the
@@ -89,8 +148,8 @@ operation and the reason for it.
   Add context before you shorten the text.
 - Use established technical terms. A precise word such as
   "reconnects", "retains", or "deletes" often explains more than
-  "stands", "holds", or "goes". Choose the verb for the operation;
-  do not apply a list of replacements without reading the passage.
+  "stands", "holds", or "goes". Choose the verb for the operation.
+  Do not apply a list of replacements without reading the passage.
 - Explain the behavior behind a metaphor. "The promise has to live
   in a file" leaves the reader to infer what is recorded and why.
   "The operator records which panels to power down when their claims
@@ -102,8 +161,8 @@ operation and the reason for it.
 Review the paragraph as a whole. Replacing a figurative verb does not
 help if the reader still has to infer how its sentences connect.
 Introduce the component or state before describing what changes it.
-Explain a technical term when the intended reader needs a definition;
-keep the term when it names the concept precisely.
+Explain a technical term when the intended reader needs a definition.
+Keep the term when it names the concept precisely.
 
 Use a natural, conversational voice. Humor is fine when it fits the
 subject and keeps the facts clear. Do not add jokes or turn an
@@ -125,11 +184,19 @@ source file. Four more rules apply to comments:
   history belongs in the commit message, where a reader can find it
   during a review or a bisect, and skip it any other time.
 - Write complete sentences.
+- Do not repeat the code. A comment that says what the next line
+  does, a doc comment that turns the function's name into a
+  sentence, and a banner such as "Step 1" give the reader nothing
+  that the code did not. Write the comment only when it holds a
+  reason, a limit, or a fact about the domain.
 
 ## Words
 
 - Do not write "best practices", "leverage", "comprehensive",
-  "robust", "seamless", or "root cause".
+  "robust", "seamless", or "root cause". The list is short because
+  one of these words is a sign and not the fault. The sentence that
+  holds it usually states no fact, and a synonym does not correct
+  that. Rewrite the sentence so that it states the fact.
 - Do not use an em-dash. Use a period or a comma.
 - Set every technical identifier in the code face, always: a
   Kubernetes kind or API name (`PairingRequest`, `ResourceClaim`,
@@ -165,7 +232,13 @@ source file. Four more rules apply to comments:
 
 - Give the answer first. Then give the data that supports it.
 - Name the subject in a heading. Write "The release channel", not
-  "What about releases?" or "Getting your bits".
+  "What about releases?" or "Getting your bits". Capitalize the
+  first word and each proper name, and no other word.
+- Use a list for items that are separate and alike: steps, fields,
+  options. Write an explanation as a paragraph, because a list
+  removes the "because" and "so" between its facts.
+- Use bold only for the term that starts a list item. Do not use an
+  emoji.
 
 ## Rewriting
 
