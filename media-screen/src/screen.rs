@@ -1,11 +1,14 @@
-//! The rules a screen client holds for one `Player`: the quiet window and the
-//! off window, the focus gate, the shade, the level the operator relays,
-//! the cycle request, and the panel desire.
+//! The rules that a screen client follows for one `Player`: when the
+//! idle screen goes dark, which remote's presses it acts on, and whether
+//! it requests the monitor on or off from `media-operator`.
 //!
-//! [`Screen`] reaches no socket and holds no clock. Every rule below is
-//! a function of what arrived and what time it is, so a test proves
-//! each one with no broker and no thread, and [`crate::Reader`] is the
-//! only part of the crate that opens anything.
+//! A sleeping screen is one that the client has faded to black. The panel
+//! request is `on` or `off`, the monitor state that the client publishes on
+//! the panel topic for `media-operator` to apply.
+//!
+//! [`Screen`] opens no socket and reads no clock. Each method takes the
+//! message and the current time and returns the effects, so a test needs
+//! no broker and no thread. [`crate::Reader`] owns the connection.
 
 mod commands;
 pub mod keys;
@@ -19,69 +22,66 @@ use crate::status::{Activity, Status};
 use crate::volume::Volume;
 use crate::wiring::{Remote, Wiring};
 
-/// The suffix that turns a remote's focus topic into its cycle topic, the
-/// same path `media-operator`'s `remoteFocusCycleTopic` builds, so a client
-/// needs no second topic list.
+/// Appended to a remote's focus topic to get its cycle topic. It must
+/// match `remoteFocusCycleTopic` in `media-operator`.
 const CYCLE_SUFFIX: &str = "/cycle";
 
-/// One thing the client draws.
-///
-/// Each one is a fact the screen shows or a moment it moves on, and
-/// none of them is a decision the client makes again. The shade moments
-/// say which way the cover eases. A focus names the controller a live
-/// mark landed on, by its place in `spec.remotes`.
+/// An event for the client to act on, usually by drawing something. The
+/// rules in this module have already filtered it, so the client acts on
+/// every one it receives.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Moment {
-    /// One press this crate does not act on itself, under the kernel's
-    /// name for the control. The client holds its own table from these
-    /// names to what they do there, so a letter key on a remote with a
-    /// keyboard reaches a client that types.
+    /// A key press that this crate passes to the client, with the
+    /// kernel's key name, such as `KEY_UP`. The client maps keys to
+    /// actions with its own table.
     Press(String),
-    /// The quiet window ran out, or the client asked for the shade.
+    /// Fade the screen to black. Sent when the fade timer expires, when
+    /// the client calls [`Screen::sleep`], when `media-operator` requests
+    /// sleep, and when the retained panel request is `off`.
     Sleep,
-    /// A press, a live mark, or a starting `Play` lifted the shade. When a
-    /// press other than back lifted it over a lit panel while the unit
-    /// plays nothing, the press follows as a [`Moment::Press`] in the same
-    /// fold, so the client lifts its shade first and then acts on the
-    /// press.
+    /// Show the screen again. Sent after a press, a focus change to this
+    /// `Player`, a `Play` starting, or a wake request from
+    /// `media-operator`. When the press that woke the screen also goes
+    /// to the client, [`Moment::Press`] follows in the same result.
     Wake,
-    /// A live mark named this `Player`. `remote` is the controller's place in
-    /// `spec.remotes`, which is the order the status lists the parts in.
+    /// A live focus message moved a remote to this `Player`, or
+    /// `media-operator` responded to this client's cycle request.
+    /// `remote` is the remote's index in `spec.remotes`, which is also the
+    /// order of the remotes in the status.
     Focus { remote: usize },
-    /// The unit's whole presentable state.
+    /// The complete `Player` status.
     Status(Status),
-    /// The unit's listening level, as `media-operator` relays it. `pressed` is
-    /// false for the broker's catch-up and true for a live message, which is
-    /// a person changing the level with a remote or at the device. A client
-    /// draws the bar for a pressed level only when `Volume::draws_after` the
-    /// level it held says so.
+    /// The listening level that `media-operator` relays. `pressed` is
+    /// false for the retained message that the broker sends on
+    /// subscribe, and true for a live message, which means a person
+    /// changed the level. For a pressed level, the client draws the
+    /// volume bar only when `Volume::draws_after` returns true for the
+    /// previous level.
     Level { volume: Volume, pressed: bool },
-    /// A person took the up-next offer on the scrubber. The bytes are the
-    /// `request` of the `Play`'s next block, which this crate never reads:
-    /// the client that wrote the `Play` reads its own words back and starts
-    /// what follows. The moment fires whether or not the unit is idle,
-    /// because the unit is never idle when this arrives.
+    /// A person accepted the up-next offer on the scrubber. The bytes
+    /// are the `request` of the `Play`'s next item, unparsed, because
+    /// the client that wrote the `Play` parses its own format. It is
+    /// sent while a film plays, so it does not wait for the `Player` to
+    /// be idle.
     PlayNext(Vec<u8>),
-    /// One message on a topic the client owns. The rules read nothing in
-    /// the payload and hold no state from it, because the topic is the
-    /// client's own. `retained` is the broker's mark on the delivery, so a
-    /// client tells the catch-up on a topic it owns from a live write.
+    /// A message on a topic that the client registered with
+    /// [`Screen::reading`]. The rules do not read it. `retained` tells
+    /// the client whether the broker sent a stored value or a live
+    /// write.
     Message {
         topic: String,
         payload: Vec<u8>,
         retained: bool,
     },
-    /// The bus session started. A client that owns retained state
-    /// republishes it here, which is the bus rule that each connected
-    /// program republishes the retained state it owns when its session
-    /// reconnects. The moment arrives on the first session too, because a
-    /// client cannot tell that one from a reconnect.
+    /// A bus session started, including the first one. Each program on
+    /// the bus republishes its own retained state when it connects, in
+    /// case the broker restarted and lost it, so a client with retained
+    /// state publishes it here.
     Connected,
 }
 
-/// One message this crate sends on the bus. The client never builds one:
-/// [`crate::Reader`] performs each of these on the connection it already
-/// holds.
+/// A message that [`crate::Reader`] publishes on its connection for the
+/// rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Publish {
     pub topic: String,
@@ -89,102 +89,92 @@ pub struct Publish {
     pub retained: bool,
 }
 
-/// What one fold leaves to do: something the client draws, or something the
-/// crate sends.
+/// One result of a message or a timer: a [`Moment`] for the client, or a
+/// [`Publish`] for the reader to send.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     Moment(Moment),
     Publish(Publish),
 }
 
-/// One controller's mark and whether this bus session already delivered one.
-/// The first message of a session is the broker's retained catch-up, a
-/// restore and not a person, so it sets the gate and pulses nothing.
-///
-/// `cycle_asked` is set while this client's cycle request on the controller
-/// waits for its answer. On a controller that one unit lists, the operator
-/// answers with the same mark, and that repeat is the press's feedback.
-/// Every other repeat of the mark is a publisher that sent it again, and a
-/// person did nothing.
+/// The last message on one remote's focus topic: the name of the
+/// `Player` that the remote controls, which `media-operator` publishes
+/// retained.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct Mark {
+struct FocusMessage {
     player: String,
-    caught_up: bool,
-    cycle_asked: bool,
+    /// False until the first message of the current bus session. On
+    /// subscribe the broker sends the retained message first, and that
+    /// message restores state and is not a person's action, so it produces
+    /// no [`Moment::Focus`]. On a focus topic with no retained message, the
+    /// first live message is treated the same way and also produces none.
+    received_this_session: bool,
+    /// True from this client's cycle request until the next focus
+    /// message. When only one `Player` lists the remote, `media-operator`
+    /// responds by publishing the same `Player` again, and `on_focus`
+    /// treats that repeat as a focus change so the person sees a response.
+    cycle_requested: bool,
 }
 
-/// Which window the armed deadline belongs to.
+/// Which timer the deadline belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Window {
-    /// The quiet window, which brings the shade down.
-    Quiet,
-    /// The off window, which states the off desire.
+enum Timer {
+    /// When it expires, the screen sleeps.
+    Fade,
+    /// When it expires, the client requests the panel off.
     Off,
 }
 
-/// The state a screen client holds for one unit.
+/// The state of one `Player`'s screen client.
 #[derive(Debug)]
 pub struct Screen {
-    /// The `Player`'s own object name, the value a focus mark holds when it
-    /// names this unit. An empty name matches no mark, so a client that read
-    /// none answers no press.
+    /// A remote's presses act here only while its focus message is this
+    /// name. An empty name matches no focus message.
     player_name: String,
     status_topic: String,
-    /// The unit's volume topic, empty for a `Player` whose level the operator
-    /// does not relay. Empty is the speaker gate: the client subscribes to no
-    /// level.
+    /// Empty when `media-operator` does not relay this `Player`'s level.
     volume_topic: String,
     commands_topic: String,
     panel_topic: String,
-    /// The topic `media-operator` publishes wake and sleep on for this
-    /// unit's screen.
+    /// Where `media-operator` publishes wake and sleep requests.
     power_topic: String,
-    /// The unit's controllers, in `spec.remotes` order, so a controller's
-    /// index in this list is the index a focus moment carries.
+    /// In `spec.remotes` order, so an index here is the index in
+    /// [`Moment::Focus`].
     remotes: Vec<Remote>,
-    /// The last mark each controller's focus topic delivered, one per entry
-    /// of `remotes`.
-    marks: Vec<Mark>,
-    /// The control each controller holds down whose press or repeat only
-    /// woke the screen, one per entry of `remotes`, until its release or the
-    /// controller's next press. Its repeats find the shade up, and they would
-    /// otherwise reach the client and act where the press did not.
-    woke_only: Vec<Option<String>>,
-    /// The topics the client owns. They are the client's own configuration
-    /// and not the `Player`'s wiring, so they arrive from the client and not
-    /// from a variable the operator sets.
+    /// One entry per remote.
+    focus: Vec<FocusMessage>,
+    /// One entry per remote: the key whose repeats are ignored until its
+    /// release or the remote's next press. See `on_press`.
+    repeats_ignored: Vec<Option<String>>,
+    /// Topics from the client's own configuration, set by
+    /// [`Screen::reading`].
     client_topics: Vec<String>,
 
-    /// The quiet window. Zero never arms the timer.
+    /// The fade timer. Zero disables it.
     fade_after: Duration,
-    /// The off window, clamped to at least the fade. Zero leaves the desire
-    /// at on forever.
+    /// The off timer, measured from the start of the fade timer.
+    /// `Wiring::read` raises it to at least `fade_after`, because `rearm`
+    /// subtracts `fade_after` from it. Zero disables it.
     off_after: Duration,
 
-    /// Whether the last status named the activity `Idle`, the only state the
-    /// timer arms in. It starts false, so a client answers no press until the
-    /// retained status reaches it.
+    /// Whether the last status had the activity `Idle`. The timers run
+    /// only while it is true. It starts false, so until the retained status
+    /// arrives no press goes to the client and no timer runs.
     idle: bool,
-    /// Whether the shade is down.
     asleep: bool,
-    /// The panel desire as the client knows it: the retained desire the
-    /// broker delivered, or the one this client last stated. `None` is a
-    /// desire not read yet, and the client states none until a press or a
-    /// window changes the panel. The client writes no hardware; the
-    /// operator reads the desire from the bus and overrides the screen's
-    /// `Display`.
-    desire: Option<&'static str>,
-    /// The armed window and the moment it runs out.
-    deadline: Option<(Instant, Window)>,
-    /// The lines the folds since the last [`Screen::take_lines`] wrote, one
-    /// per operation a person caused: a press and what it did or why it did
-    /// nothing, a window that brought the shade down, a panel desire. A
-    /// repeat, a catch-up, and a status that moves nothing write none.
+    /// The retained panel request from the broker, or the last one this
+    /// client published. `None` until one arrives. `media-operator` reads
+    /// the request and overrides the screen's `Display` to match, so the
+    /// client never drives the monitor itself.
+    panel_request: Option<&'static str>,
+    deadline: Option<(Instant, Timer)>,
+    /// Log lines since the last [`Screen::take_lines`]: one for each
+    /// press, each timer that expires, and each panel request published.
+    /// Repeats, retained messages, and unchanged statuses write none.
     lines: Vec<String>,
 }
 
 impl Screen {
-    /// The screen one wiring describes.
     pub fn new(wiring: &Wiring) -> Self {
         Self {
             player_name: wiring.player_name.clone(),
@@ -193,38 +183,32 @@ impl Screen {
             commands_topic: wiring.commands_topic.clone(),
             panel_topic: wiring.panel_topic.clone(),
             power_topic: wiring.power_topic.clone(),
-            marks: vec![Mark::default(); wiring.remotes.len()],
-            woke_only: vec![None; wiring.remotes.len()],
+            focus: vec![FocusMessage::default(); wiring.remotes.len()],
+            repeats_ignored: vec![None; wiring.remotes.len()],
             remotes: wiring.remotes.clone(),
             client_topics: Vec::new(),
             fade_after: wiring.fade_after,
             off_after: wiring.off_after,
             idle: false,
             asleep: false,
-            // A client that starts has not read the retained desire yet. It
-            // adopts the one the broker holds, so a pod that restarts in a
-            // dark room keeps the room dark.
-            desire: None,
+            // Wait for the retained request in `on_panel`, so a pod that
+            // restarts while the panel is off keeps the panel off.
+            panel_request: None,
             deadline: None,
             lines: Vec::new(),
         }
     }
 
-    /// The lines the folds wrote since the last call, oldest first.
-    /// [`crate::Reader`] prints them, so a client that holds a reader logs
-    /// them with no code of its own.
+    /// Returns the log lines written since the last call, oldest first.
+    /// [`crate::Reader`] prints them.
     pub fn take_lines(&mut self) -> Vec<String> {
         std::mem::take(&mut self.lines)
     }
 
-    /// The same screen, plus the topics the client owns. A client that keeps
-    /// retained state of its own, such as a mark for the person watching,
-    /// names those topics here and reads every message on them back as a
-    /// [`Moment::Message`]. An empty name is no topic and is dropped.
-    ///
-    /// The rules read nothing on these topics. They are a second
-    /// subscription on the one connection this crate holds, so a client
-    /// opens no session of its own under a second identifier.
+    /// Adds topics for the client's own retained state. Each message on
+    /// them comes back as a [`Moment::Message`]. Empty names are dropped.
+    /// They share this crate's connection, so the client does not open a
+    /// second session under another client id.
     #[must_use]
     pub fn reading(mut self, client_topics: &[String]) -> Self {
         self.client_topics = client_topics
@@ -235,15 +219,9 @@ impl Screen {
         self
     }
 
-    /// The topics to subscribe to. An empty topic is one the operator did not
-    /// set, and a unit whose level the operator does not relay has no volume
-    /// topic at all.
-    ///
-    /// A press on any of the unit's controllers reaches the quiet window, so
-    /// every events topic is read. The focus topic is retained, so each mark
-    /// arrives on subscribe and the gate stands before the first press. The
-    /// panel topic is read for the same reason: the retained desire arrives
-    /// before the client states one.
+    /// Returns the topics to subscribe to, leaving out the empty ones.
+    /// The focus and panel topics are retained, so the screen has each
+    /// focus message and the panel request before the first press.
     pub fn filters(&self) -> Vec<String> {
         let mut filters = vec![
             self.status_topic.clone(),
@@ -261,20 +239,14 @@ impl Screen {
         filters
     }
 
-    /// The moment the armed window runs out, and nothing while no window is
-    /// armed.
     pub fn next_deadline(&self) -> Option<Instant> {
         self.deadline.map(|(at, _)| at)
     }
 
-    /// Fold one message from any subscription, and the topic says which
-    /// message this is. A topic this screen did not subscribe to, and a
-    /// payload that does not decode, are both nothing at all, so a newer
-    /// message on a topic has no effect rather than a crash.
-    ///
-    /// `retained` is the broker's own mark on a delivery from its retained
-    /// store. A retained level is the catch-up, which no person changed, so
-    /// it sets the level and shows no indicator; a live level is a change.
+    /// Handles one message from any subscription and returns the
+    /// effects. A message on an unknown topic, or one that does not
+    /// decode, has no effect, so a newer message format does not crash
+    /// an older client.
     pub fn deliver(
         &mut self,
         topic: &str,
@@ -285,18 +257,12 @@ impl Screen {
         if !self.status_topic.is_empty() && topic == self.status_topic {
             return self.on_status(payload, now);
         }
-        // The volume topic carries a state and not a named command, so it is
-        // read before the command vocabulary below.
         if !self.volume_topic.is_empty() && topic == self.volume_topic {
             return on_level(payload, retained);
         }
-        // A controller's presses are checked before the commands topic,
-        // because a key event is not the operator's command vocabulary.
         if let Some(index) = self.remote_for(topic, |remote| &remote.events) {
             return self.on_press(index, payload, now);
         }
-        // The mark is a state on its own retained topic, read before the
-        // command vocabulary for the same reason the level is.
         if let Some(index) = self.remote_for(topic, |remote| &remote.focus) {
             return self.on_focus(index, payload, now);
         }
@@ -309,8 +275,8 @@ impl Screen {
         if !self.power_topic.is_empty() && topic == self.power_topic {
             return self.on_power(payload, now);
         }
-        // The client's own topics are read last, so a topic that is also one
-        // of the screen's fires the screen's rule alone and never twice.
+        // Checked last, so a client topic that is also one of the
+        // screen's topics runs only the screen's rule.
         if self.client_topics.iter().any(|owned| owned == topic) {
             return vec![Effect::Moment(Moment::Message {
                 topic: topic.to_string(),
@@ -321,33 +287,32 @@ impl Screen {
         Vec::new()
     }
 
-    /// The armed window running out: the quiet window brings the shade down
-    /// and starts the off window, and the off window states the off desire
-    /// and arms nothing.
+    /// Acts on the running timer if it has expired. When the fade timer
+    /// expires, the screen sleeps and the off timer starts. When the off
+    /// timer expires, the client requests the panel off.
     pub fn tick(&mut self, now: Instant) -> Vec<Effect> {
-        let Some((at, window)) = self.deadline else {
+        let Some((at, timer)) = self.deadline else {
             return Vec::new();
         };
         if now < at {
             return Vec::new();
         }
         let mut effects = Vec::new();
-        match window {
-            Window::Quiet => {
+        match timer {
+            Timer::Fade => {
                 self.asleep = true;
-                // The shade coming down starts the second window.
                 self.rearm(now);
-                self.shade(Some(Moment::Sleep), &mut effects);
+                self.push_sleep_or_wake(Some(Moment::Sleep), &mut effects);
                 self.lines.push(format!(
-                    "the quiet window of {} s ran out, so the shade is down",
+                    "the fade timer of {} s expired, so the screen is asleep",
                     self.fade_after.as_secs()
                 ));
             }
-            Window::Off => {
+            Timer::Off => {
                 self.deadline = None;
-                let desire = self.desire(panel::OFF, &mut effects);
+                let panel_line = self.request_panel(panel::OFF, &mut effects);
                 self.lines.push(format!(
-                    "the off window of {} s ran out{desire}",
+                    "the off timer of {} s expired{panel_line}",
                     self.off_after.as_secs()
                 ));
             }
@@ -355,13 +320,9 @@ impl Screen {
         effects
     }
 
-    /// Bring the shade down on the client's own reading of a press. The stock
-    /// idle client asks on back; a client with levels asks only at the top
-    /// one, because only the client knows whether back has anywhere to go.
-    ///
-    /// It acts only while the unit plays nothing and the screen is awake, and
-    /// it makes the same three moves the quiet window makes, so the shade and
-    /// the panel desire behave the same whichever one asked.
+    /// Puts the screen to sleep at the client's request, as the fade
+    /// timer does, and starts the off timer. Does nothing unless the
+    /// `Player` is idle and the screen is awake.
     pub fn sleep(&mut self, now: Instant) -> Vec<Effect> {
         if !self.idle || self.asleep {
             return Vec::new();
@@ -369,45 +330,39 @@ impl Screen {
         self.asleep = true;
         self.rearm(now);
         let mut effects = Vec::new();
-        self.shade(Some(Moment::Sleep), &mut effects);
+        self.push_sleep_or_wake(Some(Moment::Sleep), &mut effects);
         self.lines
-            .push("the client asked for the shade, so the shade is down".into());
+            .push("the client requested sleep, so the screen is asleep".into());
         effects
     }
 
-    /// The start of every bus session. A fresh session redelivers every
-    /// retained mark, so each one is a catch-up again and pulses nothing. The
-    /// mark itself stands across the reconnect, so the gate does not open or
-    /// close on a broker restart alone.
+    /// Handles the start of a bus session. The broker resends every
+    /// retained focus message, so the next one on each topic is treated
+    /// as retained again. The stored focus messages are kept, so a broker
+    /// restart does not change which remote controls this `Player`.
     ///
-    /// The panel desire is this client's own retained state, so a desire the
-    /// client holds goes out again on every session, and a broker that
-    /// restarted holds it again. A client that has read no desire and stated
-    /// none sends nothing, because a restart is not a reason to change the
-    /// panel.
-    ///
-    /// [`Moment::Connected`] tells the client the same thing, so a client
-    /// republishes the retained state it owns on the topics it named.
+    /// The client publishes its panel request again, which restores it on
+    /// a broker that restarted. A client with no panel request publishes
+    /// none, because a reconnect is no reason to change the panel.
     pub fn connected(&mut self) -> Vec<Effect> {
-        for mark in &mut self.marks {
-            mark.caught_up = false;
+        for focus in &mut self.focus {
+            focus.received_this_session = false;
         }
         let mut effects = Vec::new();
-        self.publish_desire(&mut effects);
+        self.publish_panel_request(&mut effects);
         effects.push(Effect::Moment(Moment::Connected));
         effects
     }
 
-    /// Fold one status. `Idle` is the only activity the timer arms in, so a
-    /// status that leaves `Idle` disarms it. The same status lifts the shade
-    /// if the screen sleeps, so a `Play` started from another room shows its
-    /// film and not a black screen.
+    /// Handles one status. The timers run only while the `Player` is
+    /// idle. When it stops being idle while the screen is asleep, the
+    /// screen wakes, so a `Play` started from another `Player`'s remote
+    /// shows the film and not a black screen.
     ///
-    /// The operator republishes the status on any change to the payload, a
-    /// controller's `Connected` flap included, so only a status that moved
-    /// the unit into or out of `Idle` restarts the quiet window; a republish
-    /// of the same activity leaves the window where it stands. The client
-    /// draws every status either way.
+    /// `media-operator` republishes the status on any change, such as a
+    /// remote connecting. So only a change into or out of `Idle`
+    /// restarts the timer, and every other status only goes to the
+    /// client.
     fn on_status(&mut self, payload: &[u8], now: Instant) -> Vec<Effect> {
         let Some(status) = crate::status::parse(payload) else {
             return Vec::new();
@@ -424,25 +379,25 @@ impl Screen {
             moment = Some(Moment::Wake);
         }
         self.rearm(now);
-        self.shade(moment, &mut effects);
+        self.push_sleep_or_wake(moment, &mut effects);
         effects
     }
 
-    /// Fold one message off the panel topic. The retained desire is what the
-    /// panel shows now, so a client that holds no desire yet adopts it. An
-    /// adopted off desire is a dark panel, so the shade comes down with it:
-    /// a press then wakes the screen and states the on desire. A live message
-    /// is this client's own publish coming back, and it changes nothing.
+    /// Handles one message on the panel topic. A client with no panel
+    /// request adopts the retained one, because it is the panel's current
+    /// state. An adopted `off` puts the screen to sleep, so the next press
+    /// wakes it and publishes `on`. A live message is this client's own
+    /// publish and changes nothing.
     fn on_panel(&mut self, payload: &[u8], retained: bool, now: Instant) -> Vec<Effect> {
-        if !retained || self.desire.is_some() {
+        if !retained || self.panel_request.is_some() {
             return Vec::new();
         }
         let Some(adopted) =
-            crate::object::<panel::Stated>(payload).and_then(|stated| stated.desire())
+            crate::object::<panel::Received>(payload).and_then(|received| received.request())
         else {
             return Vec::new();
         };
-        self.desire = Some(adopted);
+        self.panel_request = Some(adopted);
         if adopted == panel::ON || self.asleep {
             return Vec::new();
         }
@@ -451,99 +406,81 @@ impl Screen {
         vec![Effect::Moment(Moment::Sleep)]
     }
 
-    /// Fold one key event. The checks run in this order. A power key is
-    /// `media-operator`'s: the operator turns the `Player` off or on through
-    /// its `spec.power`, and then publishes sleep or wake on the power topic
-    /// (power.rs). So a power key moves nothing here and never reaches the
-    /// client, in any state. The cycle key asks the operator to move the
-    /// mark and does nothing else. A sleeping screen wakes on any other
-    /// press, so a person gets the screen back with whatever control they
-    /// touched.
+    /// Handles one key event from remote `index`. A remote acts only while
+    /// its focus message is this `Player`.
     ///
-    /// While the unit plays nothing and the panel is lit, the press that
-    /// lifts the shade then reaches the client too, after the wake, so the
-    /// client lifts its shade and acts on the press. The shade comes down
-    /// over a lit panel after every quiet window, and on a `Player` whose
-    /// off window is zero it is the only thing between the person and the
-    /// client, so a press that only lifted it would make a person press
-    /// twice after each quiet stretch. A press on a panel that is dark,
-    /// because the off window ran out or `media-operator` asked the screen
-    /// to sleep, only wakes the screen: the person pressed at a dark TV
-    /// and could not see what the press would act on. Back on the shade
-    /// only lifts it too, for every client: the stock idle screen lowers
-    /// the shade on back, so a back that reached it would undo the wake,
-    /// and one rule for every client keeps a press of back from undoing
-    /// the wake there.
+    /// A release does not go to the client and does not wake or sleep the
+    /// screen. The client needs no release, because the remote's reader pod
+    /// sends the repeats while the key is down and stops them at the
+    /// release. A release only clears the key from `repeats_ignored`.
     ///
-    /// A repeat that finds the shade down does nothing, not even wake the
-    /// screen. The control was held while the shade came down, by the
-    /// quiet window, by the client's answer to its own press, or by a sleep
-    /// ask, and its press acted before that. A wake on the repeat would
-    /// lift the shade the client just asked for, or light a panel that was
-    /// just turned off.
+    /// A power key does nothing here, because `media-operator` handles it
+    /// through `spec.power` and then sends a request on the power topic.
     ///
-    /// A control whose press only woke the screen, or whose repeat found
-    /// the shade down, holds until its release, and its repeats do nothing.
-    /// Without the hold, its later repeats would find the shade up and reach
-    /// the client: a held back would lower the shade again, and a held
-    /// select on a dark panel would act blind. The controller's next press
-    /// ends the hold too, so a release the bus lost holds nothing for long.
+    /// While the `Player` is idle, the cycle key publishes a cycle request
+    /// and does nothing else, even on a sleeping screen. `media-operator`
+    /// responds with a focus message, and `on_focus` wakes the screen.
     ///
-    /// Every other key, while the unit plays nothing, reaches the client.
-    /// Every press but a power press restarts the quiet window.
+    /// Any other press on a sleeping screen wakes it. While the `Player` is
+    /// idle the press also goes to the client, so a person does not have to
+    /// press twice each time the screen fades. The press only wakes the
+    /// screen when the panel request is `off`, because the person could not
+    /// see what it would act on, and when the key is back, for the reason
+    /// that [`keys::BACK`] gives. A repeat on a sleeping screen does not
+    /// wake it.
     ///
-    /// A press acts only while the remote's mark names this `Player`. A pad
-    /// pointed at another room touches nothing here, not the shade and not
-    /// the client. A release reaches no client and moves no shade, because
-    /// the standing pod holds the repeat and stops it at the release. Its
-    /// one effect here is to end the hold of its control.
+    /// When a press only wakes the screen, or a repeat arrives while it
+    /// sleeps, the crate ignores that key's repeats until it is released.
+    /// Without this, a held back key would put the screen to sleep again,
+    /// and a held select would act on a dark panel. The remote's next press
+    /// also clears the key, so a lost release does not leave it ignored.
+    ///
+    /// While the `Player` is idle, other presses and repeats go to the
+    /// client. Every press or repeat that passes the focus, power, and
+    /// `repeats_ignored` checks restarts the running timer. Only a press
+    /// writes a log line, not a repeat or a release.
     fn on_press(&mut self, index: usize, payload: &[u8], now: Instant) -> Vec<Effect> {
         let Some(press) = press::parse(payload) else {
             return Vec::new();
         };
-        // A press is one line, and only the press: a repeat and a release
-        // are the same act of a person, and the line already says what the
-        // press did.
         let trigger = format!(
             "{} from remote {}",
             press.key,
             remote_name(&self.remotes[index].events)
         );
-        // A release ends the hold of a control whose press only woke the
-        // screen, whether or not the mark still names this `Player`.
-        if !press.edge() && self.woke_only[index].as_deref() == Some(press.key.as_str()) {
-            self.woke_only[index] = None;
+        // Cleared even when the focus is on another `Player`, so the entry
+        // does not outlive the key press.
+        if !press.held() && self.repeats_ignored[index].as_deref() == Some(press.key.as_str()) {
+            self.repeats_ignored[index] = None;
         }
-        if !self.holds_focus(index) {
+        if !self.has_focus(index) {
             if press.down() {
-                let mark = &self.marks[index].player;
-                self.lines.push(if mark.is_empty() {
-                    format!(
-                        "{trigger} ignored, because no focus mark names a player for this remote"
-                    )
+                let player = &self.focus[index].player;
+                self.lines.push(if player.is_empty() {
+                    format!("{trigger} ignored, because the remote's focus topic names no player")
                 } else {
-                    format!("{trigger} ignored, because focus is on player {mark}")
+                    format!("{trigger} ignored, because focus is on player {player}")
                 });
             }
             return Vec::new();
         }
-        if !press.edge() {
+        if !press.held() {
             return Vec::new();
         }
         if keys::power(&press.key) {
             if press.down() {
                 self.lines.push(format!(
-                    "{trigger} left to media-operator, which turns the player off and on"
+                    "{trigger} ignored, because media-operator turns the player off and on"
                 ));
             }
             return Vec::new();
         }
         if press.down() {
-            self.woke_only[index] = None;
-        } else if self.woke_only[index].as_deref() == Some(press.key.as_str()) {
+            self.repeats_ignored[index] = None;
+        } else if self.repeats_ignored[index].as_deref() == Some(press.key.as_str()) {
             return Vec::new();
         } else if self.asleep {
-            self.woke_only[index] = Some(press.key);
+            self.repeats_ignored[index] = Some(press.key);
             return Vec::new();
         }
         let down = press.down();
@@ -555,7 +492,7 @@ impl Screen {
         if self.idle && press.down() && press.key == keys::CYCLE {
             publish = self.cycle(index);
             if publish.is_some() {
-                self.marks[index].cycle_asked = true;
+                self.focus[index].cycle_requested = true;
             }
             line = Some(match &publish {
                 Some(cycle) => format!(
@@ -565,9 +502,8 @@ impl Screen {
                 None => format!("{trigger} ignored, because the remote has no focus topic"),
             });
         } else if self.asleep {
-            // The desire is read before the wake states the on desire, so it
-            // still says whether the panel was dark when the person pressed.
-            let dark = self.desire == Some(panel::OFF);
+            // Read before the wake publishes `on`.
+            let dark = self.panel_request == Some(panel::OFF);
             let back = keys::back(&press.key);
             self.asleep = false;
             moment = Some(Moment::Wake);
@@ -577,11 +513,11 @@ impl Screen {
                 ));
                 forwarded = Some(press.key);
             } else {
-                self.woke_only[index] = Some(press.key.clone());
+                self.repeats_ignored[index] = Some(press.key.clone());
                 let why = if dark {
                     ", because the panel was off"
                 } else if back {
-                    ", because back on the shade only lifts it"
+                    ", because back on a sleeping screen only wakes it"
                 } else {
                     ""
                 };
@@ -589,10 +525,9 @@ impl Screen {
                     "{trigger} woke the screen and did nothing else{why}"
                 ));
             }
-        } else if self.idle && keys::owned(&press.key) {
-            // A repeat of the cycle key asks nothing: one press is one
-            // cycle, and the key is the crate's, so it never reaches the
-            // client.
+        } else if self.idle && keys::cycle(&press.key) {
+            // A repeat of the cycle key does nothing, so one press
+            // cycles once.
         } else if self.idle {
             if press.down() {
                 line = Some(format!("{trigger} passed to the client"));
@@ -602,14 +537,14 @@ impl Screen {
 
         self.rearm(now);
         let mut effects = Vec::new();
-        let mut desire = self.shade(moment, &mut effects);
-        // A client that read no desire does not know whether the panel is
-        // dark. A press is a person in the room, so it states the on desire.
-        if self.desire.is_none() && down {
-            desire = self.desire(panel::ON, &mut effects);
+        let mut panel_line = self.push_sleep_or_wake(moment, &mut effects);
+        // With no panel request the client cannot tell whether the panel
+        // is off. A press means a person is in the room, so publish `on`.
+        if self.panel_request.is_none() && down {
+            panel_line = self.request_panel(panel::ON, &mut effects);
         }
         if let Some(line) = line {
-            self.lines.push(line + &desire);
+            self.lines.push(line + &panel_line);
         }
         if let Some(key) = forwarded {
             effects.push(Effect::Moment(Moment::Press(key)));
@@ -620,34 +555,29 @@ impl Screen {
         effects
     }
 
-    /// Fold one mark off a controller's focus topic. It sets the gate every
-    /// time. A live message that moves the mark to this `Player` is a person
-    /// pointing the controller here: it lifts the shade, restarts the quiet
-    /// window, and pulses the display with the controller's index. So does
-    /// the repeat that answers this client's own cycle request. The
-    /// session's first message is the broker's retained catch-up, so it sets
-    /// the gate and does nothing else. A mark that names another `Player`, or
-    /// a `Play` name left from an older operator, gates closed and pulses
-    /// nothing.
+    /// Handles one message on remote `index`'s focus topic, and always
+    /// stores it.
     ///
-    /// Any other repeat of the mark this client already holds is a publisher
-    /// that sent the same mark again, such as an operator after a restart,
-    /// and not a person. It changes nothing, because a wake here would light
-    /// a sleeping screen in a dark room.
+    /// A live message that moves the remote to this `Player` means a
+    /// person pointed the remote here. It wakes the screen, restarts the
+    /// fade timer, and sends [`Moment::Focus`]. So does the repeated
+    /// message that responds to this client's cycle request.
     ///
-    /// A mark that does not name this `Player` only closes the gate here. The
-    /// standing pod synthesises the repeat and stops it at the release, so a
-    /// control held as the mark moves away needs nothing stopped here.
+    /// The retained message, a message for another `Player`, and any
+    /// other repeat of the stored message only update the stored one. A
+    /// repeat comes from a publisher that sent the message again, such as
+    /// `media-operator` after a restart, and waking on it would light the
+    /// screen in an empty room.
     fn on_focus(&mut self, index: usize, payload: &[u8], now: Instant) -> Vec<Effect> {
-        let mark = String::from_utf8_lossy(payload).into_owned();
-        let held = &self.marks[index];
-        let live = held.caught_up;
-        let moved = held.player != mark || held.cycle_asked;
-        let names_this_player = self.names_this_player(&mark);
-        self.marks[index] = Mark {
-            player: mark,
-            caught_up: true,
-            cycle_asked: false,
+        let player = String::from_utf8_lossy(payload).into_owned();
+        let stored = &self.focus[index];
+        let live = stored.received_this_session;
+        let moved = stored.player != player || stored.cycle_requested;
+        let names_this_player = self.names_this_player(&player);
+        self.focus[index] = FocusMessage {
+            player,
+            received_this_session: true,
+            cycle_requested: false,
         };
         if !names_this_player || !live || !moved {
             return Vec::new();
@@ -660,15 +590,16 @@ impl Screen {
         }
         self.rearm(now);
         let mut effects = Vec::new();
-        self.shade(moment, &mut effects);
+        self.push_sleep_or_wake(moment, &mut effects);
         effects.push(Effect::Moment(Moment::Focus { remote: index }));
         effects
     }
 
-    /// The cycle request the operator arbitrates, on the controller's own
-    /// cycle topic, not retained, because a cycle is an event and not a
-    /// state. It is the same message the playback pod's command sidecar
-    /// publishes during a film.
+    /// Builds the request for `media-operator` to move the remote's
+    /// focus to the next `Player`. It is not retained, because a cycle
+    /// is an event. The playback pod's command sidecar publishes the
+    /// same request during a film. Returns `None` when the remote has no
+    /// focus topic.
     fn cycle(&self, index: usize) -> Option<Publish> {
         let focus = &self.remotes[index].focus;
         if focus.is_empty() {
@@ -681,47 +612,47 @@ impl Screen {
         })
     }
 
-    /// Add one fold's shade moment. A wake also states the on desire, which
-    /// is what lifts the override. No moment is the ordinary case of a fold
-    /// that changed no state, and it adds nothing.
+    /// Adds `moment` to `effects`. A wake also requests the panel `on`,
+    /// which removes the override on the screen's `Display`.
     ///
-    /// The answer is the end of a line that says the desire went out, or
-    /// nothing when no desire moved.
-    fn shade(&mut self, moment: Option<Moment>, effects: &mut Vec<Effect>) -> String {
+    /// Returns the end of a log line about the panel request, or an empty
+    /// string when the request did not change.
+    fn push_sleep_or_wake(&mut self, moment: Option<Moment>, effects: &mut Vec<Effect>) -> String {
         let Some(moment) = moment else {
             return String::new();
         };
         let wake = moment == Moment::Wake;
         effects.push(Effect::Moment(moment));
         if wake {
-            return self.desire(panel::ON, effects);
+            return self.request_panel(panel::ON, effects);
         }
         String::new()
     }
 
-    /// Hold the new desire and publish it. An unchanged desire publishes
-    /// nothing, because the broker holds the last one. A client that holds
-    /// no desire yet publishes any desire, because it has no value to match.
+    /// Stores and publishes `request`, unless it equals the stored one,
+    /// which the broker already retains.
     ///
-    /// The answer is the end of a line that says where the desire went, or
-    /// nothing when it did not move.
-    fn desire(&mut self, desire: &'static str, effects: &mut Vec<Effect>) -> String {
-        if self.desire == Some(desire) {
+    /// Returns the end of a log line about the request, or an empty
+    /// string when it did not change.
+    fn request_panel(&mut self, request: &'static str, effects: &mut Vec<Effect>) -> String {
+        if self.panel_request == Some(request) {
             return String::new();
         }
-        self.desire = Some(desire);
-        self.publish_desire(effects);
+        self.panel_request = Some(request);
+        self.publish_panel_request(effects);
         if self.panel_topic.is_empty() {
-            return format!(", and the player has no panel topic for the {desire} desire");
+            return format!(", and the player has no panel topic to request {request}");
         }
-        format!(", published panel desire {desire} to {}", self.panel_topic)
+        format!(
+            ", published panel request {request} to {}",
+            self.panel_topic
+        )
     }
 
-    /// The desire this client holds now, retained, so the operator reads the
-    /// current one the moment it subscribes. A `Player` with no panel topic
-    /// states no desire.
-    fn publish_desire(&self, effects: &mut Vec<Effect>) {
-        let Some(desire) = self.desire else {
+    /// Publishes the stored panel request retained, so `media-operator`
+    /// receives it as soon as it subscribes.
+    fn publish_panel_request(&self, effects: &mut Vec<Effect>) {
+        let Some(request) = self.panel_request else {
             return;
         };
         if self.panel_topic.is_empty() {
@@ -729,48 +660,45 @@ impl Screen {
         }
         effects.push(Effect::Publish(Publish {
             topic: self.panel_topic.clone(),
-            payload: panel::Desire { desire }.payload(),
+            payload: panel::Request { desire: request }.payload(),
             retained: true,
         }));
     }
 
-    /// Restart the armed window from now. The quiet window runs only while
-    /// the screen is awake, the unit plays nothing, and the policy is above
-    /// zero; every other state leaves it disarmed. The off window runs from
-    /// the moment the shade came down, so the two windows measure one quiet
-    /// stretch, and it arms only while the panel is not already dark.
+    /// Restarts the timer that fits the current state, or stops both.
+    /// While idle and awake, the fade timer runs for `fade_after`. While
+    /// idle and asleep with the panel request not `off`, the off timer
+    /// runs for `off_after - fade_after`, so it expires `off_after` after
+    /// the fade timer started. A zero duration disables its timer.
     fn rearm(&mut self, now: Instant) {
         self.deadline = None;
         if !self.idle {
             return;
         }
         if self.asleep {
-            if self.off_after.is_zero() || self.desire == Some(panel::OFF) {
+            if self.off_after.is_zero() || self.panel_request == Some(panel::OFF) {
                 return;
             }
-            self.deadline = Some((now + (self.off_after - self.fade_after), Window::Off));
+            self.deadline = Some((now + (self.off_after - self.fade_after), Timer::Off));
             return;
         }
         if self.fade_after.is_zero() {
             return;
         }
-        self.deadline = Some((now + self.fade_after, Window::Quiet));
+        self.deadline = Some((now + self.fade_after, Timer::Fade));
     }
 
-    /// Whether this controller's mark names this `Player` right now.
-    fn holds_focus(&self, index: usize) -> bool {
-        self.names_this_player(&self.marks[index].player)
+    fn has_focus(&self, index: usize) -> bool {
+        self.names_this_player(&self.focus[index].player)
     }
 
-    /// Compare one mark against the `Player`'s own name. A client that read
-    /// no name matches no mark and answers no press.
-    fn names_this_player(&self, mark: &str) -> bool {
-        !self.player_name.is_empty() && mark == self.player_name
+    fn names_this_player(&self, player: &str) -> bool {
+        !self.player_name.is_empty() && player == self.player_name
     }
 
-    /// Which controller a topic belongs to, by a scan over the unit's own
-    /// controllers. An empty topic names none, so a controller the operator
-    /// gave no focus topic matches nothing.
+    /// Returns the index of the remote whose topic, chosen by `of`, is
+    /// `topic`. An empty topic matches no remote, so a remote with no
+    /// focus topic never matches.
     fn remote_for(&self, topic: &str, of: impl Fn(&Remote) -> &String) -> Option<usize> {
         if topic.is_empty() {
             return None;
@@ -779,8 +707,6 @@ impl Screen {
     }
 }
 
-/// Fold one message off the volume topic into the moment the client draws.
-/// The screen holds no level of its own, because no rule here reads it.
 fn on_level(payload: &[u8], retained: bool) -> Vec<Effect> {
     let Some(volume) = crate::volume::parse(payload) else {
         return Vec::new();
@@ -791,11 +717,11 @@ fn on_level(payload: &[u8], retained: bool) -> Vec<Effect> {
     })]
 }
 
-/// The `Remote` a controller topic belongs to, as `namespace/name`. Every
-/// controller topic is `<base>/remotes/<namespace>/<name>/<kind>`, and the
-/// base can hold slashes of its own, so the name is found from the remotes
-/// segment and not from the start. A topic of another shape names itself,
-/// so a line never loses its trigger.
+/// Returns `namespace/name` of the `Remote` that a topic of the form
+/// `<base>/remotes/<namespace>/<name>/<kind>` belongs to. The base can
+/// contain slashes, so the search starts from the last `remotes`
+/// segment. Any other topic is returned unchanged, so a log line always
+/// names its source.
 fn remote_name(topic: &str) -> String {
     let parts: Vec<&str> = topic.split('/').collect();
     parts

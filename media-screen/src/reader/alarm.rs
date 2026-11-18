@@ -1,81 +1,72 @@
-//! The alarm the clock thread waits on. The clock sleeps until the armed
-//! deadline, or with no timeout while nothing is armed, so an idle screen
-//! wakes this thread for nothing. Another thread can arm or move a window
-//! while the clock sleeps: the reader thread on a delivery, and the client
-//! through [`crate::Bus::sleep`]. That thread rings the alarm, and the clock
-//! reads the deadline again.
+//! Wakes the clock thread when another thread arms a timer or moves its
+//! deadline earlier. The clock waits with no timeout while no timer is
+//! armed, so without this signal it would not see a timer that the reader
+//! thread or [`crate::Bus::sleep`] arms.
 
 use std::sync::{Condvar, Mutex};
 use std::time::Instant;
 
-/// A ring count and a closed mark behind one lock, and the condition
-/// variable the clock waits on.
-///
-/// The count guards against a lost ring. The clock reads the count before it
-/// reads the deadline, and its wait returns at once when the count moved
-/// since that read. A window armed between the clock's read of the deadline
-/// and the start of its wait therefore still ends the wait.
+/// The signal count prevents a lost wakeup. The clock reads it before it
+/// reads the deadline, and `wait` returns at once if it has changed since,
+/// so a timer armed between that read and the wait still ends the wait.
 #[derive(Debug, Default)]
 pub(super) struct Alarm {
     state: Mutex<State>,
-    bell: Condvar,
+    changed: Condvar,
 }
 
 #[derive(Debug, Default)]
 struct State {
-    rings: u64,
+    signals: u64,
     closed: bool,
 }
 
 impl Alarm {
-    /// The ring count now. The clock reads it before it reads the deadline,
-    /// and hands it to [`Alarm::wait`].
-    pub(super) fn seen(&self) -> u64 {
-        self.lock().rings
+    /// The number of signals so far, to pass to [`Alarm::wait`].
+    pub(super) fn signal_count(&self) -> u64 {
+        self.lock().signals
     }
 
-    /// Wake the clock, because a window was armed or moved earlier.
-    pub(super) fn ring(&self) {
-        self.lock().rings += 1;
-        self.bell.notify_all();
+    /// Wakes the clock because a timer was armed or moved earlier.
+    pub(super) fn signal(&self) {
+        self.lock().signals += 1;
+        self.changed.notify_all();
     }
 
-    /// Wake the clock for the last time, because the client dropped its
-    /// reader. The clock sleeps with no timeout while nothing is armed, so
-    /// without this call the thread never ends.
+    /// Makes every `wait` return false, so the clock thread ends after the
+    /// client drops its reader. A wait with no deadline would otherwise
+    /// never return.
     pub(super) fn close(&self) {
         self.lock().closed = true;
-        self.bell.notify_all();
+        self.changed.notify_all();
     }
 
-    /// Sleep until `deadline`, or with no timeout when it is `None`, and
-    /// return early on a ring after `seen`. The answer is false only when the
-    /// alarm closed, which ends the clock thread.
-    ///
-    /// The loop absorbs spurious wakeups: a return from the condition
-    /// variable that no ring, close, or deadline caused waits again.
-    pub(super) fn wait(&self, seen: u64, deadline: Option<Instant>) -> bool {
+    /// Waits until `deadline`, or with no timeout when it is `None`, and
+    /// returns early on a signal after `signals_before` was read. Returns
+    /// false only when the alarm is closed. The loop waits again after a
+    /// spurious wakeup of the condition variable.
+    pub(super) fn wait(&self, signals_before: u64, deadline: Option<Instant>) -> bool {
         let mut state = self.lock();
         loop {
             if state.closed {
                 return false;
             }
-            if state.rings != seen {
+            if state.signals != signals_before {
                 return true;
             }
             state = match deadline {
                 None => self
-                    .bell
+                    .changed
                     .wait(state)
-                    .expect("no thread panics with the lock"),
+                    .expect("the alarm lock is poisoned"),
                 Some(at) => {
                     let now = Instant::now();
                     if now >= at {
                         return true;
                     }
-                    self.bell
+                    self.changed
                         .wait_timeout(state, at - now)
-                        .expect("no thread panics with the lock")
+                        .expect("the alarm lock is poisoned")
                         .0
                 }
             };
@@ -83,7 +74,7 @@ impl Alarm {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().expect("no thread panics with the lock")
+        self.state.lock().expect("the alarm lock is poisoned")
     }
 }
 

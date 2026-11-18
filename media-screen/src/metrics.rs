@@ -1,19 +1,11 @@
-//! The two gauges this crate reports on its own, through whatever recorder
-//! the client that links it installed. [`build_info`] runs once, at start.
-//! [`bus_connected`] runs from [`crate::reader`], on every change the
-//! connection goes through.
-//!
-//! Neither function opens a listener or names a port: that is the
-//! consuming binary's own setting, read the way every other one is, in
-//! its own `wiring`. A client with no recorder installed pays for a
-//! macro call that finds nowhere to go, which is what lets a
-//! workstation run with none.
+//! The gauges of this crate. They go to whatever `metrics` recorder the
+//! client binary installs, and the client chooses how to serve them. With no
+//! recorder installed the calls do nothing, so a client also runs on a
+//! workstation.
 
-/// `liken_build_info{component, version}`, milestone 65's one gauge every
-/// process in the organization reports under its own name. `component` is
-/// this binary's identity, fixed in its own source; `version` is the tag
-/// the operator resolved this client's image from, so a mixed fleet shows
-/// on one panel.
+/// Sets `liken_build_info{component, version}` to 1, so a query of the gauge
+/// shows which version of each client runs. The client calls it once at
+/// start.
 pub fn build_info(component: &str, version: &str) {
     metrics::gauge!(
         "liken_build_info",
@@ -23,10 +15,10 @@ pub fn build_info(component: &str, version: &str) {
     .set(1.0);
 }
 
-/// `media_bus_connected`, 1 while the session is up and 0 the moment it
-/// is not. [`crate::reader::read`] calls this on every `ConnAck` and every
-/// socket error, so a scrape never reads a session that ended with no word
-/// of it.
+/// Sets `media_bus_connected` to 1 while the MQTT session is up and to 0
+/// after it fails. [`crate::Reader::open`] sets it to 0 before the first
+/// session, and [`crate::reader::read`] sets it on every `ConnAck` and every
+/// connection error.
 pub fn bus_connected(connected: bool) {
     metrics::gauge!("media_bus_connected").set(if connected { 1.0 } else { 0.0 });
 }
@@ -38,9 +30,9 @@ mod tests {
 
     use super::*;
 
-    /// Read the one gauge value a body sets, under a recorder of the test's
-    /// own. A local recorder never touches the process-wide one, so the
-    /// crate's other tests never race it.
+    /// Runs `body` under a recorder local to this thread, so tests that run
+    /// in parallel do not share one, and returns the value and labels of the
+    /// gauge called `name`.
     fn gauge(name: &str, body: impl FnOnce()) -> Option<(f64, Vec<(String, String)>)> {
         let recorder = DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
@@ -70,7 +62,7 @@ mod tests {
         let (value, labels) = gauge("liken_build_info", || {
             build_info("idle-screen", "2026.09.10-001")
         })
-        .expect("build_info sets the gauge");
+        .expect("build_info did not set liken_build_info");
 
         assert_eq!(value, 1.0);
         assert_eq!(
@@ -85,14 +77,14 @@ mod tests {
     #[test]
     fn bus_connected_reports_one_while_up() {
         let (value, _) = gauge("media_bus_connected", || bus_connected(true))
-            .expect("bus_connected sets the gauge");
+            .expect("bus_connected did not set media_bus_connected");
         assert_eq!(value, 1.0);
     }
 
     #[test]
     fn bus_connected_reports_zero_once_the_session_ends() {
         let (value, _) = gauge("media_bus_connected", || bus_connected(false))
-            .expect("bus_connected sets the gauge");
+            .expect("bus_connected did not set media_bus_connected");
         assert_eq!(value, 0.0);
     }
 }

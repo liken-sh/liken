@@ -1,6 +1,6 @@
-// One press as the standing remote pod publishes it, on a controller's
-// events topic. The name is the kernel's, so a consumer holds no table of
-// numbers, and this crate passes the name through to its client unchanged.
+// The key events that the remote pod publishes on a controller's events
+// topic. The key is the kernel's input name, such as `KEY_UP`, and this crate
+// passes it to its client unchanged.
 
 use serde::Deserialize;
 
@@ -12,25 +12,21 @@ pub struct Press {
 }
 
 impl Press {
-    /// Whether this event is a control held down, the press or the repeat.
-    /// The release is excluded because only a down edge is a person's act,
-    /// and a release that counted would wake the screen its own press just
-    /// put to sleep.
-    pub fn edge(&self) -> bool {
+    /// Whether the key is held down: a press or an autorepeat. A release does
+    /// not count, because the release of a press that put the screen to sleep
+    /// would otherwise wake it again.
+    pub fn held(&self) -> bool {
         self.value == 1 || self.value == 2
     }
 
-    /// Whether this event is the control going down, which is the edge the
-    /// cycle key asks on.
+    /// Whether this event is the press and not a repeat.
     pub fn down(&self) -> bool {
         self.value == 1
     }
 }
 
-/// Read one event off a controller's events topic. A payload that is not an
-/// object, and one that names no key or no value, are no press at all. Both
-/// fields are required, so a message from another writer on this topic
-/// changes nothing rather than reading as a release of an unnamed control.
+/// Decodes one event. Both fields are required, so a message from another
+/// writer on the topic returns `None` instead of a release of an unnamed key.
 pub fn parse(payload: &[u8]) -> Option<Press> {
     crate::object(payload)
 }
@@ -40,7 +36,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_press_carries_the_kernels_name_and_the_kernels_value() {
+    fn a_press_decodes_the_kernels_key_name_and_value() {
         assert_eq!(
             parse(br#"{"key":"KEY_UP","value":1}"#),
             Some(Press {
@@ -51,34 +47,34 @@ mod tests {
     }
 
     #[test]
-    fn the_press_and_the_repeat_are_the_control_held_down() {
+    fn a_press_and_a_repeat_are_held_and_a_release_is_not() {
         assert!(
             parse(br#"{"key":"KEY_UP","value":1}"#)
-                .expect("it decodes")
-                .edge()
+                .expect("the press payload decodes")
+                .held()
         );
         assert!(
             parse(br#"{"key":"KEY_UP","value":2}"#)
-                .expect("it decodes")
-                .edge()
+                .expect("the press payload decodes")
+                .held()
         );
         assert!(
             !parse(br#"{"key":"KEY_UP","value":0}"#)
-                .expect("it decodes")
-                .edge()
+                .expect("the press payload decodes")
+                .held()
         );
     }
 
     #[test]
-    fn only_value_one_is_the_control_going_down() {
+    fn only_value_one_is_the_key_going_down() {
         assert!(
             parse(br#"{"key":"KEY_MUTE","value":1}"#)
-                .expect("it decodes")
+                .expect("the press payload decodes")
                 .down()
         );
         assert!(
             !parse(br#"{"key":"KEY_MUTE","value":2}"#)
-                .expect("it decodes")
+                .expect("the press payload decodes")
                 .down()
         );
     }

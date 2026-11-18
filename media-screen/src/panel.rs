@@ -1,45 +1,42 @@
-// The retained panel topic carries a desire and not a report. The unit it
-// belongs to is named by the topic, not by the body.
-//
-// A client states a desire instead of writing the panel, because a
-// screen client holds no API credentials and no wire. The operator
-// reads the desire off this topic and overrides the screen's `Display`,
-// and the display-operator writes the hardware.
+// The panel topic. A screen client has no Kubernetes credentials and no
+// connection to the monitor, so it publishes the monitor state it requests,
+// `on` or `off`, in the `desire` field of a retained message.
+// `media-operator` reads it and sets an override on the screen's `Display`,
+// and `display-operator` switches the monitor. The topic name identifies the
+// `Player`, so the payload does not.
 
 use serde::{Deserialize, Serialize};
 
-/// The two desires a client states. They are the values on the panel topic,
-/// not the states the `Player` status carries.
+/// The values of the `desire` field. These are values of the panel topic, not
+/// of the `Player` status.
 pub const ON: &str = "on";
 pub const OFF: &str = "off";
 
-/// The whole payload on the panel topic.
+/// The panel request that a client publishes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct Desire<'a> {
+pub struct Request<'a> {
     pub desire: &'a str,
 }
 
-impl Desire<'_> {
-    /// The desire as it travels on the topic.
+impl Request<'_> {
+    /// The JSON bytes to publish.
     pub fn payload(self) -> Vec<u8> {
-        // A word always encodes, so the error is the interface's and not a
-        // state this code reaches.
+        // Serializing a struct with one string field cannot fail.
         serde_json::to_vec(&self).unwrap_or_default()
     }
 }
 
-/// The payload as a reader takes it off the topic. A client reads the
-/// retained desire back before it states one of its own.
+/// A panel request as the broker sends it back.
 #[derive(Debug, Deserialize)]
-pub struct Stated {
+pub struct Received {
     #[serde(default)]
     desire: String,
 }
 
-impl Stated {
-    /// The desire as one of the two words this crate states. A word it does
-    /// not state is no desire, so a newer writer's word changes nothing here.
-    pub fn desire(&self) -> Option<&'static str> {
+impl Received {
+    /// Returns `None` for any value other than `ON` or `OFF`, so a value that
+    /// a newer writer adds changes nothing in this client.
+    pub fn request(&self) -> Option<&'static str> {
         match self.desire.as_str() {
             ON => Some(ON),
             OFF => Some(OFF),
@@ -53,9 +50,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_reader_takes_each_desire_back_and_no_other_word() {
-        let read =
-            |payload: &[u8]| crate::object::<Stated>(payload).and_then(|stated| stated.desire());
+    fn a_received_request_is_on_or_off_and_nothing_else() {
+        let read = |payload: &[u8]| {
+            crate::object::<Received>(payload).and_then(|received| received.request())
+        };
         assert_eq!(read(br#"{"desire":"on"}"#), Some(ON));
         assert_eq!(read(br#"{"desire":"off"}"#), Some(OFF));
         assert_eq!(read(br#"{"desire":"dim"}"#), None);
@@ -63,8 +61,8 @@ mod tests {
     }
 
     #[test]
-    fn each_desire_is_one_word_on_the_topic() {
-        assert_eq!(Desire { desire: ON }.payload(), br#"{"desire":"on"}"#);
-        assert_eq!(Desire { desire: OFF }.payload(), br#"{"desire":"off"}"#);
+    fn a_request_publishes_one_desire_field() {
+        assert_eq!(Request { desire: ON }.payload(), br#"{"desire":"on"}"#);
+        assert_eq!(Request { desire: OFF }.payload(), br#"{"desire":"off"}"#);
     }
 }

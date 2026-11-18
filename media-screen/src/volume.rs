@@ -1,37 +1,31 @@
-// The listening level as `Player` state. One retained topic carries it, and
-// `media-operator` is its only writer: it relays the level that the unit's
-// `Receiver` or `Sink` reports, divided by the device's `spec.volume.max`, so
-// every screen draws one scale whatever device sets the room's level. A screen
-// reads the topic and draws it, and publishes nothing on it. A `Receiver` that
-// shows its own volume overlay on the TV marks its level with
-// `"indicator": "receiver"`, and a screen tracks that level and draws no bar,
-// so the TV shows one indicator and not two.
+// The retained volume topic, which only `media-operator` writes. The
+// operator divides the level that the `Player`'s `Receiver` or `Sink`
+// reports by the device's maximum, so every screen draws a 0.0 to 1.0
+// scale whatever the device. The maximum is `spec.volume.max`, or for a
+// `Receiver` that sets none, the top of its driver's own scale. When a `Receiver` sets
+// `spec.volume.indicator` to `Receiver`, it draws its own overlay on the TV,
+// and the operator adds `"indicator": "receiver"` so the screen draws no
+// second bar.
 
 use serde::Deserialize;
 
-/// The bottom and the top of the normalized range. The top is the device's
-/// `spec.volume.max`, the highest level a press can ask for.
+/// The ends of the range. `MAX_LEVEL` is the device's maximum.
 pub const MIN_LEVEL: f64 = 0.0;
 pub const MAX_LEVEL: f64 = 1.0;
 
-/// Who draws the volume indicator for the level on the topic. The operator
-/// omits the field unless a `Receiver` draws its own overlay, so an absent
-/// field, and a value this build does not know, both mean the screen draws.
+/// Which side draws the volume bar. A missing field and an unknown value both
+/// decode as `Player`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Indicator {
-    /// The receiver draws its own overlay on the TV, and the screen draws no
-    /// bar.
     Receiver,
-    /// The `Player`'s screen draws the bar.
     #[default]
     #[serde(other)]
     Player,
 }
 
-/// The whole payload on the volume topic. The operator writes the level and
-/// the mute on every message, and each one still defaults here, so a partial
-/// payload reads as the zero value instead of failing to decode.
+/// The payload of the volume topic. A payload that omits a field decodes
+/// with that field's zero value instead of failing.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 pub struct Volume {
     #[serde(default)]
@@ -43,8 +37,7 @@ pub struct Volume {
 }
 
 impl Default for Volume {
-    /// The state the client holds before any message reaches it: the top of
-    /// the range, unmuted, drawn by the screen.
+    /// The volume before any message arrives.
     fn default() -> Self {
         Self {
             level: MAX_LEVEL,
@@ -55,8 +48,8 @@ impl Default for Volume {
 }
 
 impl Volume {
-    /// The level held inside 0.0 to 1.0. A level outside the range is clamped
-    /// rather than refused, so a message cannot draw a row past the top.
+    /// Clamps `level` to 0.0 to 1.0, so a bad message cannot draw a bar past
+    /// either end of the scale.
     pub fn clamped(self) -> Self {
         Self {
             level: self.level.clamp(MIN_LEVEL, MAX_LEVEL),
@@ -64,12 +57,12 @@ impl Volume {
         }
     }
 
-    /// Whether a live message carrying this volume draws the bar, after the
-    /// screen held `before`. A level the receiver draws on the TV draws no
-    /// bar. A message that differs from `before` only in the indicator is
-    /// the operator republishing the retained level after the indicator
-    /// changed, and no person changed the level, so it draws no bar either.
-    /// A press at the end of the scale repeats the whole payload, and draws.
+    /// Whether a live message with this volume draws the bar, after the
+    /// screen had `before`. A message that changes only `indicator` draws
+    /// nothing, because the operator republished the level after a change of
+    /// `spec.volume.indicator` or of device, and nobody pressed a key. A
+    /// message equal to `before` does draw, because a press at either end of
+    /// the scale republishes the same payload.
     pub fn draws_after(self, before: Volume) -> bool {
         let only_the_indicator = self.indicator != before.indicator
             && self.level == before.level
@@ -77,7 +70,7 @@ impl Volume {
         self.indicator == Indicator::Player && !only_the_indicator
     }
 
-    /// The level as the whole percent a screen prints beside the bar.
+    /// The level as a whole percent, for the label beside the bar.
     pub fn percent(self) -> i64 {
         // The level is clamped to 0.0 to 1.0, so the product fits in an i64.
         #[allow(clippy::cast_possible_truncation)]
@@ -86,8 +79,7 @@ impl Volume {
     }
 }
 
-/// Read one message off the volume topic. A payload that does not decode is no
-/// state at all and changes nothing.
+/// Decodes one message from the volume topic, with the level clamped.
 pub fn parse(payload: &[u8]) -> Option<Volume> {
     crate::object::<Volume>(payload).map(Volume::clamped)
 }
@@ -191,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn text_that_does_not_parse_is_no_state() {
+    fn a_payload_that_does_not_decode_returns_none() {
         assert_eq!(parse(b""), None);
         assert_eq!(parse(b"0.4"), None);
         assert_eq!(parse(b"[0.4,true]"), None);
@@ -199,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn a_client_with_no_message_holds_the_top_unmuted() {
+    fn the_default_volume_is_the_maximum_level_unmuted() {
         assert_eq!(Volume::default().level, MAX_LEVEL);
         assert!(!Volume::default().muted);
     }

@@ -1,32 +1,26 @@
-// The `Player`'s retained status: one message that carries the whole of what
-// the operator says about a unit. The operator folds the Kubernetes objects
-// into it, so a client resolves nothing and reads one payload.
-//
-// `media-operator` writes it in `playerstatus.go`.
+// The `Player`'s retained status message, which `media-operator` writes in
+// `playerstatus.go`. It combines the `Player`, its `Play`, and its devices
+// into one payload, so a client needs no access to the API server.
 
 use serde::Deserialize;
 
-/// The status as it travels on the topic.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
-    /// The unit's friendly name. It replaces the whole identity block, so an
-    /// edit to a `Player` shows with no pod restart.
+    /// The display name is in the status, so an edit to the `Player`
+    /// reaches the screen without a pod restart.
     #[serde(default)]
     pub display_name: String,
     #[serde(default)]
     pub activity: Activity,
-    /// The `Play` that runs or starts on the unit. A unit at rest names none.
+    /// The `Play` that is starting or playing on the `Player`, if any.
     #[serde(default)]
     pub play: Option<Play>,
     #[serde(default)]
     pub components: Vec<Component>,
 }
 
-/// What the unit is doing. The three words are the operator's own, and the
-/// screen draws a different motion for each: `Starting` ramps the mark up
-/// while a person waits, `Playing` stops it because a film covers the surface,
-/// and `Idle` eases it back to rest.
+/// What the `Player` is doing.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Activity {
     #[default]
@@ -36,9 +30,7 @@ pub enum Activity {
 }
 
 impl Activity {
-    /// The activity one word names. A word this client does not name reads as
-    /// `Idle`, which draws the mark at rest and no activity line, because
-    /// every comparison downstream is against `Starting` and `Playing` alone.
+    /// An unrecognized word becomes `Idle`.
     pub fn from_word(word: &str) -> Self {
         match word {
             "Starting" => Self::Starting,
@@ -54,8 +46,8 @@ impl<'de> Deserialize<'de> for Activity {
     }
 }
 
-/// The `Play` on the unit. `name` is the object a person finds with `kubectl`,
-/// and `title` is the one line the screen draws.
+/// `name` is the `Play`'s `metadata.name`, and `title` is the line the
+/// screen draws.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct Play {
     #[serde(default)]
@@ -64,47 +56,45 @@ pub struct Play {
     pub title: String,
 }
 
-/// One part of the unit: a screen, a set of speakers, or a controller.
+/// One device of the `Player`: its screen, a set of speakers, or a
+/// controller. The operator lists the screen first, then the speakers, then
+/// the controllers in `spec.remotes` order.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct Component {
-    /// A part that carries no name defaults to an empty one, and the
-    /// identity block drops it, because one unnamed part must not cost
-    /// the whole retained status and leave the screen on stale state.
+    /// Without this default, one part with no name would fail the whole
+    /// status, and the screen would keep showing the previous one.
     #[serde(default)]
     pub name: String,
-    /// `display`, `sink`, or `remote`. It is the screen's whole vocabulary for
-    /// a part, and it says what to draw rather than which `DeviceClass` the
-    /// part came from.
+    /// `display`, `sink`, or `remote`. This is what the screen draws, not
+    /// the part's `DeviceClass`.
     #[serde(default)]
     pub kind: String,
-    /// The presence of a part that has any. A wired screen and its speakers
-    /// report none and carry no key, and the screen draws them at full
-    /// brightness always, because a part that cannot be absent must not read
-    /// as present-for-now.
+    /// The operator sets this only on a controller whose connection state
+    /// it reads. The screen draws a part without it at full brightness.
     #[serde(default)]
     pub connected: Option<bool>,
-    /// The charge the part reports, from 0 to 100. A part that runs on no
-    /// battery, and one whose device reports no level, carries no key, and the
-    /// screen draws the name alone.
+    /// The battery charge from 0 to 100. It is `None` for a part with no
+    /// battery and for a device that reports no level, which is not the
+    /// same as an empty battery.
     #[serde(default)]
     pub battery: Option<i64>,
-    /// True on the one controller whose focus mark names this unit. It appears
-    /// nowhere else, so exactly one unit draws the marker for a controller that
-    /// several units list.
+    /// `Some(true)` on a controller whose focus topic names this `Player`,
+    /// and absent otherwise. A controller that several `Player`s list is
+    /// focused on at most one of them.
     #[serde(default)]
     pub focused: Option<bool>,
 }
 
 impl Component {
-    /// The kind name of a controller, the one part that carries presence and
-    /// focus. A focus moment counts the controllers in the order the status
-    /// lists them, which is the `Player`'s `spec.remotes` order.
+    /// The `kind` of a controller, the only part that has `connected`,
+    /// `battery`, or `focused`. The `remote` index of a
+    /// [`crate::Moment::Focus`] counts only the parts of this kind, in the
+    /// order the status lists them.
     pub const REMOTE: &'static str = "remote";
 }
 
-/// Read one message off the status topic. A payload that does not decode is no
-/// status at all and changes nothing, because a half-read status on a screen is
-/// worse than the last good one.
+/// Returns `None` for a payload that does not decode, and the screen keeps
+/// the last good status.
 pub fn parse(payload: &[u8]) -> Option<Status> {
     crate::object(payload)
 }
@@ -116,8 +106,8 @@ mod tests {
     #[test]
     fn the_whole_status_decodes() {
         let status = parse(
-            br#"{"displayName":"The Den","activity":"Starting",
-                 "play":{"name":"den-tv-1","title":"A Film"},
+            br#"{"displayName":"Player One","activity":"Starting",
+                 "play":{"name":"player-1-1","title":"A Film"},
                  "components":[
                    {"name":"The screen","kind":"display"},
                    {"name":"A remote","kind":"remote","connected":true,
@@ -125,7 +115,7 @@ mod tests {
         )
         .expect("the status decodes");
 
-        assert_eq!(status.display_name, "The Den");
+        assert_eq!(status.display_name, "Player One");
         assert_eq!(status.activity, Activity::Starting);
         assert_eq!(
             status.play.as_ref().map(|play| play.title.as_str()),
@@ -140,37 +130,38 @@ mod tests {
     }
 
     #[test]
-    fn a_unit_at_rest_names_no_play_and_no_parts() {
-        let status = parse(br#"{"displayName":"The Den","activity":"Idle"}"#).expect("it decodes");
+    fn an_idle_status_with_no_play_or_components_decodes_to_none_and_empty() {
+        let status =
+            parse(br#"{"displayName":"Player One","activity":"Idle"}"#).expect("it decodes");
         assert_eq!(status.activity, Activity::Idle);
         assert_eq!(status.play, None);
         assert!(status.components.is_empty());
     }
 
     #[test]
-    fn a_word_this_client_does_not_name_is_idle() {
+    fn an_unrecognized_activity_word_is_idle() {
         assert_eq!(Activity::from_word("Playing"), Activity::Playing);
         assert_eq!(Activity::from_word("Buffering"), Activity::Idle);
         assert_eq!(Activity::from_word(""), Activity::Idle);
     }
 
     #[test]
-    fn text_that_does_not_parse_is_no_status() {
+    fn a_payload_that_is_not_a_json_object_is_no_status() {
         assert_eq!(parse(b""), None);
         assert_eq!(parse(b"{"), None);
         assert_eq!(parse(b"[]"), None);
-        assert_eq!(parse(br#"["The Den","Idle",null,[]]"#), None);
+        assert_eq!(parse(br#"["Player One","Idle",null,[]]"#), None);
     }
 
     #[test]
-    fn a_part_with_no_name_leaves_the_rest_of_the_status_readable() {
+    fn a_component_with_no_name_still_decodes_the_rest_of_the_status() {
         let status = parse(
-            br#"{"displayName":"The Den","components":[
+            br#"{"displayName":"Player One","components":[
                    {"kind":"remote"},{"name":"A remote","kind":"remote"}]}"#,
         )
         .expect("the status decodes");
 
-        assert_eq!(status.display_name, "The Den");
+        assert_eq!(status.display_name, "Player One");
         assert_eq!(status.components[0].name, "");
         assert_eq!(status.components[1].name, "A remote");
     }

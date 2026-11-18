@@ -1,43 +1,47 @@
-// The power topic. `media-operator` publishes wake and sleep there when the
-// `Player`'s `spec.power` changes, and when a TV asks for this unit's screen
-// over HDMI-CEC. The screen answers each the way a press or the quiet window
-// would, whether or not the unit's screen is wired through a `Receiver`.
+// The power topic. `media-operator` publishes `wake` or `sleep` on it when
+// the `Player`'s `spec.power` changes, and when a TV requests this `Player`'s
+// screen over HDMI-CEC. `wake` wakes the screen and requests the panel on,
+// and `sleep` puts the screen to sleep and requests the panel off.
 
 use super::*;
 
 #[test]
-fn every_unit_subscribes_to_its_power_topic() {
+fn every_player_subscribes_to_its_power_topic() {
     assert!(
         Screen::new(&wiring())
             .filters()
-            .contains(&POWER.to_string())
+            .contains(&POWER.to_string()),
+        "the filters do not include {POWER}"
     );
 }
 
 #[test]
-fn a_wake_ask_wakes_a_sleeping_screen_and_asks_for_the_panel() {
+fn a_wake_request_wakes_a_sleeping_screen_and_lights_the_panel() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
     screen.asleep = true;
-    screen.desire = Some(crate::panel::OFF);
+    screen.panel_request = Some(crate::panel::OFF);
 
     let effects = screen.deliver(POWER, br#"{"action":"wake"}"#, false, now);
 
     assert_eq!(moments(effects.clone()), [Moment::Wake]);
-    assert_eq!(publishes(effects), [desire(crate::panel::ON)]);
-    assert!(!screen.asleep);
+    assert_eq!(publishes(effects), [panel_request(crate::panel::ON)]);
+    assert!(
+        !screen.asleep,
+        "the screen is asleep after the wake request, want awake"
+    );
     assert_eq!(
         screen.take_lines(),
         [format!(
-            "{POWER} asked to wake the screen, published panel desire on to {PANEL}"
+            "{POWER} requested wake, so the screen is awake, published panel request on to {PANEL}"
         )]
     );
 }
 
-// The quiet window lowers the shade and leaves the desire on, so a wake
-// behind the shade lifts it and states nothing new.
+// The fade timer leaves the panel request at `on`, so there is nothing to
+// publish.
 #[test]
-fn a_wake_ask_behind_the_shade_lifts_it() {
+fn a_wake_request_wakes_the_screen() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
     screen.asleep = true;
@@ -45,74 +49,90 @@ fn a_wake_ask_behind_the_shade_lifts_it() {
     let effects = screen.deliver(POWER, br#"{"action":"wake"}"#, false, now);
 
     assert_eq!(moments(effects.clone()), [Moment::Wake]);
-    assert!(publishes(effects).is_empty());
+    assert!(
+        publishes(effects).is_empty(),
+        "the wake request published a panel request, want none because the request is already on"
+    );
 }
 
-// A client that read no desire does not know whether the panel is dark,
-// so a wake states the on desire.
+// A client that has read no panel request cannot tell whether the panel is
+// off.
 #[test]
-fn a_wake_ask_states_the_on_desire_a_client_has_not_read() {
+fn a_wake_request_publishes_on_when_no_panel_request_was_read() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
-    screen.desire = None;
+    screen.panel_request = None;
 
     let effects = screen.deliver(POWER, br#"{"action":"wake"}"#, false, now);
 
-    assert!(moments(effects.clone()).is_empty());
-    assert_eq!(publishes(effects), [desire(crate::panel::ON)]);
+    assert!(
+        moments(effects.clone()).is_empty(),
+        "the wake request produced a moment, want none because the screen is awake"
+    );
+    assert_eq!(publishes(effects), [panel_request(crate::panel::ON)]);
 }
 
 #[test]
-fn a_wake_ask_on_an_awake_screen_changes_nothing() {
+fn a_wake_request_on_an_awake_screen_changes_nothing() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
 
     assert!(
         screen
             .deliver(POWER, br#"{"action":"wake"}"#, false, now)
-            .is_empty()
+            .is_empty(),
+        "the wake request on an awake screen produced effects, want none"
     );
-    assert!(screen.take_lines().is_empty());
+    assert!(
+        screen.take_lines().is_empty(),
+        "the wake request on an awake screen wrote a log line, want none"
+    );
 }
 
 #[test]
-fn a_sleep_ask_brings_the_shade_down_and_turns_the_panel_off() {
+fn a_sleep_request_puts_the_screen_to_sleep_and_requests_the_panel_off() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
 
     let effects = screen.deliver(POWER, br#"{"action":"sleep"}"#, false, now);
 
     assert_eq!(moments(effects.clone()), [Moment::Sleep]);
-    assert_eq!(publishes(effects), [desire(crate::panel::OFF)]);
-    assert!(screen.asleep);
+    assert_eq!(publishes(effects), [panel_request(crate::panel::OFF)]);
+    assert!(
+        screen.asleep,
+        "the screen is awake after the sleep request, want asleep"
+    );
     assert_eq!(screen.next_deadline(), None);
     assert_eq!(
         screen.take_lines(),
         [format!(
-            "{POWER} asked the screen to sleep, so the shade is down, published panel desire off to {PANEL}"
+            "{POWER} requested sleep, so the screen is asleep, published panel request off to {PANEL}"
         )]
     );
 }
 
 #[test]
-fn a_sleep_ask_on_a_dark_screen_changes_nothing() {
+fn a_sleep_request_on_a_dark_screen_changes_nothing() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
     screen.asleep = true;
-    screen.desire = Some(crate::panel::OFF);
+    screen.panel_request = Some(crate::panel::OFF);
 
     assert!(
         screen
             .deliver(POWER, br#"{"action":"sleep"}"#, false, now)
-            .is_empty()
+            .is_empty(),
+        "the sleep request on a dark screen produced effects, want none"
     );
-    assert!(screen.take_lines().is_empty());
+    assert!(
+        screen.take_lines().is_empty(),
+        "the sleep request on a dark screen wrote a log line, want none"
+    );
 }
 
-// A film that plays goes on. The screen sleeps only while nothing plays,
-// the same rule the quiet window follows.
+// Like the fade timer, `sleep` acts only while nothing plays.
 #[test]
-fn a_sleep_ask_during_a_play_changes_nothing() {
+fn a_sleep_request_during_a_play_changes_nothing() {
     let now = Instant::now();
     let mut screen = focused(&wiring());
     screen.deliver(STATUS, &status("Playing"), true, now);
@@ -120,12 +140,15 @@ fn a_sleep_ask_during_a_play_changes_nothing() {
     assert!(
         screen
             .deliver(POWER, br#"{"action":"sleep"}"#, false, now)
-            .is_empty()
+            .is_empty(),
+        "the sleep request during a play produced effects, want none"
     );
-    assert!(!screen.asleep);
+    assert!(
+        !screen.asleep,
+        "the screen is asleep after a sleep request during a play, want awake"
+    );
 }
 
-// Wake and sleep are the only words on the topic.
 #[test]
 fn every_other_action_and_a_payload_that_does_not_decode_change_nothing() {
     let now = Instant::now();
@@ -139,6 +162,10 @@ fn every_other_action_and_a_payload_that_does_not_decode_change_nothing() {
         let mut screen = idling(&wiring(), now);
         screen.asleep = true;
 
-        assert!(screen.deliver(POWER, payload, false, now).is_empty());
+        assert!(
+            screen.deliver(POWER, payload, false, now).is_empty(),
+            "the payload {:?} produced effects, want none",
+            String::from_utf8_lossy(payload)
+        );
     }
 }

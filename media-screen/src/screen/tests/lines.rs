@@ -1,11 +1,11 @@
-// The lines the rules write: one per operation a person caused, and none
-// for a repeat, a release, a catch-up, or a fold that moves nothing.
+// The screen writes one log line for each operation that a person caused,
+// and none for a repeat, a release, a retained message, or a message that
+// changes nothing.
 
 use super::*;
 
-/// A screen that plays nothing, with a quiet window and an off window, so a
-/// test reads the lines the two windows write.
-fn windowed() -> Wiring {
+/// A `Player` with both a fade timer and an off timer.
+fn with_both_timers() -> Wiring {
     Wiring {
         fade_after: Duration::from_secs(600),
         off_after: Duration::from_secs(1800),
@@ -19,18 +19,18 @@ fn a_press_writes_one_line_that_says_what_it_did() {
         (
             wiring(),
             "KEY_UP",
-            "KEY_UP from remote house/sofa passed to the client".to_string(),
+            "KEY_UP from remote default/remote-1 passed to the client".to_string(),
         ),
         (
             wiring(),
             "KEY_VOLUMEUP",
-            "KEY_VOLUMEUP from remote house/sofa passed to the client".to_string(),
+            "KEY_VOLUMEUP from remote default/remote-1 passed to the client".to_string(),
         ),
         (
             wiring(),
             keys::CYCLE,
             format!(
-                "KEY_CYCLEWINDOWS from remote house/sofa: cycle focus, published the cycle request to {SOFA_FOCUS}/cycle"
+                "KEY_CYCLEWINDOWS from remote default/remote-1: cycle focus, published the cycle request to {FIRST_REMOTE_FOCUS}/cycle"
             ),
         ),
     ];
@@ -38,7 +38,7 @@ fn a_press_writes_one_line_that_says_what_it_did() {
         let now = Instant::now();
         let mut screen = idling(&wiring, now);
 
-        screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
+        screen.deliver(FIRST_REMOTE_EVENTS, &key(name, 1), false, now);
 
         assert_eq!(screen.take_lines(), [want]);
     }
@@ -50,11 +50,13 @@ fn a_cycle_with_no_focus_topic_says_why() {
     let mut screen = idling(&wiring(), now);
     screen.remotes[0].focus = String::new();
 
-    screen.deliver(SOFA_EVENTS, &key(keys::CYCLE, 1), false, now);
+    screen.deliver(FIRST_REMOTE_EVENTS, &key(keys::CYCLE, 1), false, now);
 
     assert_eq!(
         screen.take_lines(),
-        ["KEY_CYCLEWINDOWS from remote house/sofa ignored, because the remote has no focus topic"]
+        [
+            "KEY_CYCLEWINDOWS from remote default/remote-1 ignored, because the remote has no focus topic"
+        ]
     );
 }
 
@@ -70,10 +72,13 @@ fn a_repeat_and_a_release_write_no_line() {
         ("KEY_UP", 0),
         ("KEY_POWER", 2),
     ] {
-        screen.deliver(SOFA_EVENTS, &key(name, value), false, now);
+        screen.deliver(FIRST_REMOTE_EVENTS, &key(name, value), false, now);
     }
 
-    assert!(screen.take_lines().is_empty());
+    assert!(
+        screen.take_lines().is_empty(),
+        "a repeat and a release wrote a log line, want none"
+    );
 }
 
 #[test]
@@ -81,20 +86,20 @@ fn a_press_pointed_elsewhere_says_why_once() {
     let cases = [
         (
             "console",
-            "KEY_UP from remote house/sofa ignored, because focus is on player console",
+            "KEY_UP from remote default/remote-1 ignored, because focus is on player console",
         ),
         (
             "",
-            "KEY_UP from remote house/sofa ignored, because no focus mark names a player for this remote",
+            "KEY_UP from remote default/remote-1 ignored, because the remote's focus topic names no player",
         ),
     ];
-    for (mark, want) in cases {
+    for (player, want) in cases {
         let now = Instant::now();
         let mut screen = idling(&wiring(), now);
-        screen.marks[0].player = mark.into();
+        screen.focus[0].player = player.into();
 
         for value in [1, 2, 2, 0] {
-            screen.deliver(SOFA_EVENTS, &key("KEY_UP", value), false, now);
+            screen.deliver(FIRST_REMOTE_EVENTS, &key("KEY_UP", value), false, now);
         }
 
         assert_eq!(screen.take_lines(), [want]);
@@ -107,15 +112,18 @@ fn a_press_during_a_film_writes_no_line_here() {
     let mut screen = focused(&wiring());
     screen.deliver(STATUS, &status("Playing"), true, now);
 
-    screen.deliver(SOFA_EVENTS, &key("KEY_UP", 1), false, now);
+    screen.deliver(FIRST_REMOTE_EVENTS, &key("KEY_UP", 1), false, now);
 
-    assert!(screen.take_lines().is_empty());
+    assert!(
+        screen.take_lines().is_empty(),
+        "a press during a film wrote a log line, want none"
+    );
 }
 
 #[test]
-fn the_two_windows_each_write_a_line() {
+fn each_timer_writes_a_line() {
     let now = Instant::now();
-    let mut screen = idling(&windowed(), now);
+    let mut screen = idling(&with_both_timers(), now);
 
     screen.tick(now + Duration::from_secs(600));
     screen.tick(now + Duration::from_secs(1800));
@@ -123,18 +131,18 @@ fn the_two_windows_each_write_a_line() {
     assert_eq!(
         screen.take_lines(),
         [
-            "the quiet window of 600 s ran out, so the shade is down".to_string(),
-            format!("the off window of 1800 s ran out, published panel desire off to {PANEL}"),
+            "the fade timer of 600 s expired, so the screen is asleep".to_string(),
+            format!("the off timer of 1800 s expired, published panel request off to {PANEL}"),
         ]
     );
 }
 
 #[test]
-fn a_desire_with_no_panel_topic_says_so() {
+fn a_panel_request_with_no_panel_topic_is_logged() {
     let now = Instant::now();
     let wiring = Wiring {
         panel_topic: String::new(),
-        ..windowed()
+        ..with_both_timers()
     };
     let mut screen = idling(&wiring, now);
 
@@ -144,12 +152,12 @@ fn a_desire_with_no_panel_topic_says_so() {
 
     assert_eq!(
         screen.take_lines(),
-        ["the off window of 1800 s ran out, and the player has no panel topic for the off desire"]
+        ["the off timer of 1800 s expired, and the player has no panel topic to request off"]
     );
 }
 
 #[test]
-fn the_client_asking_for_the_shade_writes_a_line() {
+fn a_sleep_requested_by_the_client_writes_a_line() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
 
@@ -158,20 +166,20 @@ fn the_client_asking_for_the_shade_writes_a_line() {
 
     assert_eq!(
         screen.take_lines(),
-        ["the client asked for the shade, so the shade is down"]
+        ["the client requested sleep, so the screen is asleep"]
     );
 }
 
 #[test]
-fn an_ask_on_the_commands_topic_writes_a_line() {
+fn a_command_on_the_commands_topic_writes_a_line() {
     let cases = [
         (
             r#"{"action":"home"}"#,
-            format!("{COMMANDS} asked for home, passed to the client as KEY_HOMEPAGE"),
+            format!("{COMMANDS} received home, passed to the client as KEY_HOMEPAGE"),
         ),
         (
             r#"{"action":"play-next","request":{"id":"b"}}"#,
-            format!("{COMMANDS} asked for play-next, passed to the client"),
+            format!("{COMMANDS} received play-next, passed to the client"),
         ),
     ];
     for (payload, want) in cases {
@@ -185,18 +193,24 @@ fn an_ask_on_the_commands_topic_writes_a_line() {
 }
 
 #[test]
-fn a_status_that_moves_nothing_writes_no_line() {
+fn a_status_that_changes_nothing_writes_no_line() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
 
     screen.deliver(STATUS, &status("Idle"), true, now);
     screen.deliver(VOLUME, br#"{"level":0.4,"muted":false}"#, true, now);
 
-    assert!(screen.take_lines().is_empty());
+    assert!(
+        screen.take_lines().is_empty(),
+        "a status that changes nothing wrote a log line, want none"
+    );
 }
 
 #[test]
-fn a_topic_of_another_shape_names_itself() {
+fn remote_name_returns_an_unexpected_topic_unchanged() {
     assert_eq!(remote_name("somewhere/else"), "somewhere/else");
-    assert_eq!(remote_name("a/remotes/b/remotes/den/pad/focus"), "den/pad");
+    assert_eq!(
+        remote_name("a/remotes/b/remotes/default/pad/focus"),
+        "default/pad"
+    );
 }

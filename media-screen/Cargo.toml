@@ -1,14 +1,13 @@
-# media-screen is the bus half of a screen client for one Player: the
-# timers, the focus gate, the shade, the volume level, the cycle
-# request, and the panel desire. Each screen client holds these rules in its own
-# process, and this crate is how two clients in two components,
-# media-operator's idle screen and library-operator's media browser,
-# hold the same ones.
+# media-screen does everything a screen client for one `Player` does
+# over MQTT, except drawing. It runs the idle timers, puts the screen to
+# sleep, requests the panel off, reads the volume level that media-operator
+# relays, acts on a remote's presses only while the remote's focus is on
+# this `Player`, and requests that media-operator move that focus. Both
+# media-operator's idle screen and library-operator's media browser link
+# it, so the two programs follow the same rules.
 #
-# The dependencies are the broker client and JSON, and nothing else. A
-# screen client draws with whatever toolkit it chose, so this crate must
-# compile for a program that draws with any of them, and it names no
-# window library.
+# The crate depends on no window or drawing library, because each client
+# draws with its own toolkit.
 [package]
 name = "media-screen"
 version = "0.1.0"
@@ -22,21 +21,18 @@ path = "src/lib.rs"
 rumqttc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# The facade for the two gauges this crate reports on its own: the build
-# identity and the bus connection. It names no recorder, so a client with
-# none installed pays for a lookup that finds nowhere to go.
+# The crate sets its gauges through this facade and installs no
+# recorder. In a client that installs none, the values are discarded.
 metrics = { workspace = true }
 
-# DebuggingRecorder is a real recorder with no socket under it, so a test
-# reads the values the crate reported instead of a mock's stand-in for them.
+# DebuggingRecorder keeps gauge values in memory, so a test reads them
+# with no mock.
 [dev-dependencies]
 metrics-util = { version = "=0.20.4", default-features = false, features = ["debugging"] }
 
-# The crate is a workspace of its own, so its tests and its coverage gate
-# run here, and a change to it runs its own job and the jobs of the two
-# clients that link it, and nothing else. Its dependency versions are
-# exact, so a client that links it resolves the same rumqttc and serde
-# as the crate's own tests do.
+# The crate is its own workspace, so its tests and coverage gate run
+# here. The versions are exact, so a client that links the crate
+# resolves the same rumqttc and serde that the crate's tests ran with.
 [workspace]
 resolver = "3"
 

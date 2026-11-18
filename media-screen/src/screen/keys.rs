@@ -1,63 +1,48 @@
-// The keys this crate answers itself while nothing plays, beside the
-// playback pod's table in `media-operator`'s `keybindings.go`. The two
-// share the cycle key. This crate owns it because no client draws a
-// list for it: the cycle key is answered for the operator. The volume
-// keys belong to neither table. `media-operator` reads them off the
-// remote's events topic and sets the level of the unit's devices, and a
-// screen draws the level the operator relays. The power keys belong to
-// no client either: `media-operator` reads them the same way and turns
-// the `Player` off and on, and this crate drops them. Every other key passes
-// through to the client under the kernel's name, and the client binds
-// it. The crate holds no table of the keys a client may want, because a
-// remote with a keyboard sends letters, and only the client knows what
-// a letter does on its screen.
+// Kernel key names that this crate treats specially. Every other key passes
+// to the client, because only the client defines what a key does on its
+// screen. `media-operator` reads the volume and power keys from each
+// controller's events topic and acts on them itself, so this crate drops
+// the power keys and passes the volume keys to the client.
 
-/// The key that asks the operator to move the focus mark to the next unit. It
-/// is the same name during a film and between films.
+/// While the `Player` is idle, this crate turns a press of this key into a
+/// request to `media-operator` to move the controller's focus to the next
+/// `Player`. During a film, the playback pod handles the same key, as
+/// `media-operator/keybindings.go` lists.
 pub const CYCLE: &str = "KEY_CYCLEWINDOWS";
 
-/// The keys a client reads as back: the three back synonyms, because a
-/// shell sends whichever one it was built with, and `KEY_BACKSPACE`,
-/// which the media browser reads as back on every screen but the search
-/// wall, where it deletes a character. A client reads all four. This
-/// crate never sleeps the
-/// screen on a press: only the client knows whether back has anywhere
-/// to go, and the client asks for the shade with
-/// [`super::Screen::sleep`]. Back on the shade only lifts it and never
-/// reaches the client. The stock idle screen lowers the shade on back,
-/// and one rule for every client keeps a press of back from undoing the
-/// wake there.
+/// The keys that mean back. Remotes send different names for it, and the
+/// media browser also reads `KEY_BACKSPACE` as back, except in search,
+/// where it deletes a character.
+///
+/// Only the client can tell whether back has anywhere to go, so the client
+/// calls [`super::Screen::sleep`], as the idle screen does on back. A back
+/// press while the screen sleeps only wakes it and does not reach the
+/// client, because the idle screen would put it to sleep again at once.
 pub const BACK: [&str; 4] = ["KEY_BACK", "KEY_ESC", "KEY_EXIT", "KEY_BACKSPACE"];
 
-/// The four power keys: the two power synonyms a shell and a Bluetooth
-/// remote send, which toggle, and the names the kernel's `rc-cec` keymap
-/// gives a TV remote's Power Off Function and Power On Function (HDMI-CEC
-/// 1.3a, CEC 13.13.3). `media-operator` reads them off the controller's
-/// events topic and turns the `Player` off and on through its
-/// `spec.power`, so this crate never acts on them and never hands them to
-/// the client. `media-operator` holds the same four names in
-/// `media-operator/powerkeys.go`, because a Rust list cannot reach Go: a
-/// change to one changes both.
+/// `KEY_POWER` and `KEY_POWER2` toggle. `KEY_SLEEP` and `KEY_WAKEUP` are
+/// the names that the kernel's `rc-cec` keymap gives the CEC Power Off
+/// Function and Power On Function (HDMI-CEC 1.3a, CEC 13.13.3).
+/// `media-operator` turns the `Player` off and on through `spec.power` on
+/// these keys, so this crate never passes them to the client.
+/// `media-operator/powerkeys.go` lists the same keys, so change both
+/// together.
 pub const POWER: [&str; 4] = ["KEY_POWER", "KEY_POWER2", "KEY_SLEEP", "KEY_WAKEUP"];
 
-/// The key name a home ask reaches the client under. The playback pod
-/// publishes the ask on the `Player`'s commands topic during a film, and
-/// this crate turns it into a press, so a client binds one name for home
-/// whether the press came off a remote or out of an ask.
+/// When the playback pod publishes a home request on the `Player`'s
+/// commands topic, this crate passes it to the client as a press of this
+/// key, so the client handles home the same way from a remote and from a
+/// film.
 pub const HOME: &str = "KEY_HOMEPAGE";
 
-/// Whether this crate acts on the key itself. This check and [`power`]
-/// keep a key from the client; every other key passes through.
-pub fn owned(key: &str) -> bool {
+pub fn cycle(key: &str) -> bool {
     key == CYCLE
 }
 
-/// Whether one kernel key name is a back synonym.
 pub fn back(key: &str) -> bool {
     BACK.contains(&key)
 }
 
-/// Whether one kernel key name is a power key.
 pub fn power(key: &str) -> bool {
     POWER.contains(&key)
 }
@@ -67,12 +52,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_cycle_key_is_this_crates_own() {
-        assert!(owned(CYCLE));
+    fn the_cycle_key_cycles_focus() {
+        assert!(cycle(CYCLE));
     }
 
     #[test]
-    fn a_key_this_crate_acts_on_no_further_is_none_of_its_own() {
+    fn no_other_key_cycles_focus() {
         for key in [
             "KEY_UP",
             "KEY_ENTER",
@@ -87,24 +72,24 @@ mod tests {
             "KEY_UNMUTE",
             "",
         ] {
-            assert!(!owned(key));
+            assert!(!cycle(key));
         }
     }
 
     #[test]
-    fn every_key_a_client_reads_as_back_is_the_clients_to_answer() {
+    fn every_back_key_name_means_back() {
         for key in ["KEY_BACK", "KEY_ESC", "KEY_EXIT", "KEY_BACKSPACE"] {
             assert!(back(key), "{key}");
-            assert!(!owned(key), "{key}");
+            assert!(!cycle(key), "{key}");
         }
         assert!(!back("KEY_UP"));
     }
 
     #[test]
-    fn the_four_power_keys_are_none_of_the_crates_own() {
+    fn every_power_key_name_is_a_power_key() {
         for key in POWER {
             assert!(power(key));
-            assert!(!owned(key));
+            assert!(!cycle(key));
         }
         assert!(!power("KEY_UP"));
         assert!(!power("KEY_BACK"));

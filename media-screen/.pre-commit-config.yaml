@@ -1,7 +1,5 @@
-# These checks run before every commit, through pre-commit or prek,
-# its drop-in replacement. They are the fast, local ones: formatters,
-# linters, and hygiene checks. The test suites and the coverage gates
-# run in CI, through the `make` targets that package.toml names.
+# Fast checks that pre-commit or prek runs before each commit. The tests
+# and the coverage gate run in `make test`.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

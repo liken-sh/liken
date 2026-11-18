@@ -1,7 +1,7 @@
-// The socket half, proved with no socket. `rumqttc`'s `Client::new` opens
-// nothing: it makes the request queue and hands back a connection the caller
-// drives. So a test builds a client, feeds the reader a canned sequence of
-// the events a broker would send, and reads what reached the channel.
+// Most tests here use no socket. `rumqttc`'s `Client::new` opens nothing:
+// it creates the request queue and returns a connection that the caller
+// drives. A test builds a client, passes `read` a fixed list of the events
+// a broker would send, and checks what reached the channel.
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -15,10 +15,8 @@ use super::*;
 use crate::Bus;
 use crate::wiring::Remote;
 
-/// The one gauge value a body reported, under a recorder local to this
-/// thread. The reader's own threads still hold the process-wide recorder,
-/// which every other test also leaves untouched, so a local scope is what
-/// keeps this crate's connection gauge out of every test but its own.
+/// The tests that call this install a recorder for the current thread only,
+/// so the gauge that one test sets does not appear in another.
 fn gauge(snapshotter: &Snapshotter, name: &str) -> Option<f64> {
     snapshotter
         .snapshot()
@@ -32,15 +30,15 @@ fn gauge(snapshotter: &Snapshotter, name: &str) -> Option<f64> {
         )
 }
 
-const STATUS: &str = "liken/media/players/house/theater/status";
-const PANEL: &str = "liken/media/players/house/theater/panel";
-const EVENTS: &str = "liken/media/remotes/house/sofa/events";
-const FOCUS: &str = "liken/media/remotes/house/sofa/focus";
+const STATUS: &str = "liken/media/players/default/player-1/status";
+const PANEL: &str = "liken/media/players/default/player-1/panel";
+const EVENTS: &str = "liken/media/remotes/default/remote-1/events";
+const FOCUS: &str = "liken/media/remotes/default/remote-1/focus";
 
 fn wiring() -> Wiring {
     Wiring {
         bus_address: "127.0.0.1:1883".into(),
-        player_name: "theater".into(),
+        player_name: "player-1".into(),
         status_topic: STATUS.into(),
         panel_topic: PANEL.into(),
         remotes: vec![Remote {
@@ -51,25 +49,18 @@ fn wiring() -> Wiring {
     }
 }
 
-/// One reader over a broker that connects to nothing, and the threads' half
-/// of it. `rumqttc`'s `Client::new` opens no socket, so every publish and
-/// every subscribe lands in the queue and goes no further.
-///
-/// The reader holds the rules and the threads hold a weak reference, the way
-/// [`Reader::open`] builds them, so a test that drops the reader ends the
-/// threads.
+/// A [`Reader`] and its [`Threads`], set up as [`Reader::open`] sets them up
+/// but over a client with no socket, so every publish and subscribe stays in
+/// the request queue.
 fn reader() -> (Reader, Threads) {
     reader_over(wiring())
 }
 
-/// The same reader over a wiring a test states, for the one test that needs a
-/// window short enough to run inside it.
+/// For tests that need a short timer.
 fn reader_over(wiring: Wiring) -> (Reader, Threads) {
     reader_reading(wiring, &[])
 }
 
-/// The same reader over topics the client owns, for the tests about what a
-/// client reads back on a topic of its own.
 fn reader_reading(wiring: Wiring, client_topics: &[String]) -> (Reader, Threads) {
     let (client, _) = Broker::new(MqttOptions::new("test", "localhost", 1883), QUEUE_DEPTH);
     let (sender, moments) = mpsc::channel();
@@ -91,37 +82,31 @@ fn reader_reading(wiring: Wiring, client_topics: &[String]) -> (Reader, Threads)
     )
 }
 
-/// The unit's retained status, already read, so the screen plays nothing.
-fn idling(reader: &Reader) {
-    reader.screen.lock().expect("the lock is free").deliver(
-        STATUS,
-        br#"{"activity":"Idle"}"#,
-        true,
-        Instant::now(),
-    );
+fn deliver_idle_status(reader: &Reader) {
+    reader
+        .screen
+        .lock()
+        .expect("the screen lock is poisoned")
+        .deliver(STATUS, br#"{"activity":"Idle"}"#, true, Instant::now());
 }
 
-/// A waker that counts its calls, so a test reads whether one fold woke the
-/// loop once or not at all.
-fn counting(threads: &Threads) -> Arc<AtomicUsize> {
+fn counting_waker(threads: &Threads) -> Arc<AtomicUsize> {
     let woken = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&woken);
     let wake: Waker = Arc::new(move || {
         counter.fetch_add(1, Ordering::SeqCst);
     });
-    *threads.waker.lock().expect("the lock is free") = Some(wake);
+    *threads.waker.lock().expect("the waker lock is poisoned") = Some(wake);
     woken
 }
 
-/// One message off the broker, retained or live.
-fn publish(topic: &str, payload: &str, retain: bool) -> Event {
+fn incoming_publish(topic: &str, payload: &str, retain: bool) -> Event {
     let mut message = Message::new(topic, QoS::AtMostOnce, payload.as_bytes().to_vec());
     message.retain = retain;
     Event::Incoming(Packet::Publish(message))
 }
 
-/// The acknowledgement that starts a session.
-fn connected() -> Event {
+fn connack() -> Event {
     Event::Incoming(Packet::ConnAck(ConnAck {
         session_present: false,
         code: ConnectReturnCode::Success,
@@ -156,30 +141,28 @@ fn a_client_with_no_broker_and_a_client_with_no_topics_open_no_reader() {
 
 #[test]
 fn a_client_with_only_topics_of_its_own_opens_a_reader() {
-    // Port 1 answers nothing, so the reader reports a failed session and
-    // waits. The wiring names no topic at all, and the client's own topic is
-    // the whole subscription.
+    // The wiring has no topics, so the client's own topic is the whole
+    // subscription. Nothing listens on port 1, so the session fails.
     let reader = Reader::open(
         &Wiring {
             bus_address: "127.0.0.1:1".into(),
             ..Wiring::default()
         },
         "media-screen-test",
-        &["liken/library/screens/house/theater/watching".into()],
+        &["liken/library/screens/default/player-1/watching".into()],
     );
 
     assert!(reader.is_some());
 }
 
 #[test]
-fn a_session_subscribes_states_the_panel_desire_and_says_it_connected() {
+fn a_new_session_sends_the_client_a_connected_moment() {
     let (reader, threads) = reader();
 
-    read(&threads, [Ok(connected())].into_iter());
+    read(&threads, [Ok(connack())].into_iter());
 
-    // The desire is a publish, so it reaches the broker's queue and not the
-    // client. The moment is what a client with retained state of its own
-    // republishes on.
+    // The panel request is a publish, so it goes to the request queue and
+    // not to the client.
     assert_eq!(reader.drain(), [Moment::Connected]);
 }
 
@@ -188,9 +171,8 @@ fn opening_a_reader_marks_the_bus_not_yet_connected() {
     let recorder = DebuggingRecorder::new();
     let snapshotter = recorder.snapshotter();
 
-    // Port 1 refuses the connection instantly, the way the crate's other
-    // no-broker-yet test uses it, so this reads the mark `Reader::open`
-    // makes before either thread starts, not a race against the retry.
+    // `Reader::open` sets the gauge before it starts either thread, so the
+    // result does not depend on the failed sessions to port 1.
     let reader = with_local_recorder(&recorder, || {
         Reader::open(
             &Wiring {
@@ -213,7 +195,7 @@ fn a_session_marks_the_bus_connected() {
     let snapshotter = recorder.snapshotter();
 
     with_local_recorder(&recorder, || {
-        read(&threads, [Ok(connected())].into_iter());
+        read(&threads, [Ok(connack())].into_iter());
     });
 
     assert_eq!(gauge(&snapshotter, "media_bus_connected"), Some(1.0));
@@ -234,10 +216,13 @@ fn a_failed_session_marks_the_bus_not_connected() {
 
 #[test]
 fn a_message_on_a_client_topic_reaches_the_client() {
-    let owned = "liken/library/screens/house/theater/watching";
+    let owned = "liken/library/screens/default/player-1/watching";
     let (reader, threads) = reader_reading(wiring(), &[owned.into()]);
 
-    read(&threads, [Ok(publish(owned, "person-a", true))].into_iter());
+    read(
+        &threads,
+        [Ok(incoming_publish(owned, "person-a", true))].into_iter(),
+    );
 
     assert_eq!(
         reader.drain(),
@@ -252,13 +237,13 @@ fn a_message_on_a_client_topic_reaches_the_client() {
 #[test]
 fn a_delivery_reaches_the_client_and_wakes_the_loop_once() {
     let (reader, threads) = reader();
-    let woken = counting(&threads);
+    let woken = counting_waker(&threads);
 
     read(
         &threads,
-        [Ok(publish(
+        [Ok(incoming_publish(
             STATUS,
-            r#"{"displayName":"The Theater","activity":"Idle"}"#,
+            r#"{"displayName":"Player One","activity":"Idle"}"#,
             true,
         ))]
         .into_iter(),
@@ -269,40 +254,44 @@ fn a_delivery_reaches_the_client_and_wakes_the_loop_once() {
 }
 
 #[test]
-fn a_fold_that_draws_nothing_wakes_nothing() {
+fn a_message_that_produces_no_moment_does_not_wake_the_loop() {
     let (reader, threads) = reader();
-    let woken = counting(&threads);
+    let woken = counting_waker(&threads);
 
-    // A mark is a state the gate reads, and the catch-up draws nothing.
-    read(&threads, [Ok(publish(FOCUS, "theater", true))].into_iter());
+    // A retained message on the focus topic changes state and produces no
+    // moment.
+    read(
+        &threads,
+        [Ok(incoming_publish(FOCUS, "player-1", true))].into_iter(),
+    );
 
     assert!(reader.drain().is_empty());
     assert_eq!(woken.load(Ordering::SeqCst), 0);
 }
 
 #[test]
-fn a_payload_that_decodes_to_nothing_reaches_no_client() {
+fn a_payload_that_is_not_json_sends_no_moment() {
     let (reader, threads) = reader();
 
     read(
         &threads,
-        [Ok(publish(EVENTS, "not json", false))].into_iter(),
+        [Ok(incoming_publish(EVENTS, "not json", false))].into_iter(),
     );
 
     assert!(reader.drain().is_empty());
 }
 
 #[test]
-fn a_failed_session_is_a_line_and_the_loop_runs_on() {
+fn a_failed_session_does_not_stop_the_reader_loop() {
     let (reader, threads) = reader();
 
     read(
         &threads,
         [
             Err(ConnectionError::RequestsDone),
-            Ok(publish(
+            Ok(incoming_publish(
                 STATUS,
-                r#"{"displayName":"The Theater","activity":"Idle"}"#,
+                r#"{"displayName":"Player One","activity":"Idle"}"#,
                 true,
             )),
         ]
@@ -313,7 +302,7 @@ fn a_failed_session_is_a_line_and_the_loop_runs_on() {
 }
 
 #[test]
-fn an_event_this_crate_reads_nothing_from_changes_nothing() {
+fn an_event_the_reader_ignores_produces_no_moment() {
     let (reader, threads) = reader();
 
     read(
@@ -329,13 +318,12 @@ fn a_delivery_after_the_client_dropped_its_reader_ends_the_thread() {
     let (reader, threads) = reader();
     drop(reader);
 
-    // The rules are gone with the reader, so the first event ends the loop
-    // and the second one never decodes.
+    // The rules are gone, so the first event ends the loop.
     read(
         &threads,
         [
-            Ok(publish(STATUS, r#"{"activity":"Idle"}"#, true)),
-            Ok(publish(STATUS, r#"{"activity":"Playing"}"#, true)),
+            Ok(incoming_publish(STATUS, r#"{"activity":"Idle"}"#, true)),
+            Ok(incoming_publish(STATUS, r#"{"activity":"Playing"}"#, true)),
         ]
         .into_iter(),
     );
@@ -352,18 +340,16 @@ fn a_client_that_dropped_its_channel_ends_the_thread() {
 
     read(
         &threads,
-        [Ok(publish(STATUS, r#"{"activity":"Idle"}"#, true))].into_iter(),
+        [Ok(incoming_publish(STATUS, r#"{"activity":"Idle"}"#, true))].into_iter(),
     );
 
-    // The send failed, so the status never reached the client and the loop
-    // returned before it read the second event.
     assert!(reader.drain().is_empty());
 }
 
 #[test]
-fn the_client_asks_for_the_shade_and_reads_it_back() {
+fn sleep_sends_a_sleep_moment_back_to_the_client() {
     let (reader, _threads) = reader();
-    idling(&reader);
+    deliver_idle_status(&reader);
 
     reader.sleep();
 
@@ -380,22 +366,21 @@ fn the_reconnect_wait_doubles_up_to_the_ceiling() {
     assert_eq!(waits, [1, 2, 4, 8, 16, 30, 30].map(Duration::from_secs));
 }
 
-/// A clock on a thread of its own over `threads`.
-fn clocking(threads: &Threads) -> std::thread::JoinHandle<()> {
+fn spawn_clock(threads: &Threads) -> std::thread::JoinHandle<()> {
     let running = threads.clone();
     std::thread::spawn(move || clock(&running))
 }
 
-/// How long the armed window stays armed, polled until it disarms or until
-/// `limit` passes, so a clock that never fires fails the test and does not
-/// hang it.
-fn armed_for(reader: &Reader, limit: Duration) -> Duration {
+/// Polls until no timer is armed or `limit` passes, and returns the elapsed
+/// time. The limit makes a clock that never fires fail the test instead of
+/// hanging it.
+fn time_until_disarmed(reader: &Reader, limit: Duration) -> Duration {
     let start = Instant::now();
     while start.elapsed() < limit
         && reader
             .screen
             .lock()
-            .expect("the lock is free")
+            .expect("the screen lock is poisoned")
             .next_deadline()
             .is_some()
     {
@@ -405,38 +390,40 @@ fn armed_for(reader: &Reader, limit: Duration) -> Duration {
 }
 
 #[test]
-fn a_window_another_thread_armed_runs_out_on_time() {
-    // The quiet window is an hour, so the clock starts a wait of an hour. The
-    // client's own request for the shade then arms the off window 50 ms out,
-    // and only a ring can end the clock's wait that soon.
+fn a_timer_armed_by_another_thread_ends_the_clocks_wait() {
+    // The fade timer is an hour, so the clock starts waiting for an hour.
+    // The client's `sleep` call then arms the off timer 50 ms out, and only
+    // a signal of the alarm can end the clock's wait that soon.
     let (reader, threads) = reader_over(Wiring {
         fade_after: Duration::from_secs(3600),
         off_after: Duration::from_secs(3600) + Duration::from_millis(50),
         ..wiring()
     });
-    idling(&reader);
-    let thread = clocking(&threads);
+    deliver_idle_status(&reader);
+    let thread = spawn_clock(&threads);
     std::thread::sleep(Duration::from_millis(50));
 
     reader.sleep();
 
-    // The off window ran out and disarmed. The margin is far above a
-    // scheduler delay, and far below the hour the clock started to wait.
-    assert!(armed_for(&reader, Duration::from_secs(2)) < Duration::from_millis(500));
+    // The 500 ms limit is well above normal scheduling delay and well below
+    // the hour that the clock started waiting for.
+    assert!(time_until_disarmed(&reader, Duration::from_secs(2)) < Duration::from_millis(500));
     drop(reader);
-    thread.join().expect("the clock ends");
+    thread.join().expect("the clock thread panicked");
 }
 
 #[test]
 fn a_clock_with_nothing_armed_ends_when_the_client_drops_its_reader() {
-    // The unit's status never arrived, so no window is armed and the clock
-    // waits with no timeout. The drop is what ends it.
+    // No status has arrived, so no timer is armed and the clock waits with
+    // no timeout until the reader is dropped.
     let (reader, threads) = reader();
     let (ended, ends) = mpsc::channel();
     let running = threads.clone();
     std::thread::spawn(move || {
         clock(&running);
-        ended.send(()).expect("the test waits for the end");
+        ended
+            .send(())
+            .expect("the test stopped waiting for the clock to end");
     });
     std::thread::sleep(Duration::from_millis(50));
 
@@ -446,23 +433,22 @@ fn a_clock_with_nothing_armed_ends_when_the_client_drops_its_reader() {
 }
 
 #[test]
-fn the_clock_runs_the_windows_and_ends_with_the_client() {
-    // A quiet window short enough to run out inside the test, so the clock's
-    // first tick brings the shade down and the client reads it.
+fn the_clock_fires_a_timer_and_ends_when_the_client_drops_its_reader() {
+    // The fade timer is short, so the clock fires it at once and the client
+    // receives the sleep moment.
     let (reader, threads) = reader_over(Wiring {
         fade_after: Duration::from_millis(5),
         ..wiring()
     });
-    idling(&reader);
+    deliver_idle_status(&reader);
 
-    let thread = clocking(&threads);
+    let thread = spawn_clock(&threads);
     while reader.drain().is_empty() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    // The rules go with the reader, so the thread ends on its next pass.
     drop(reader);
-    thread.join().expect("the clock ends");
+    thread.join().expect("the clock thread panicked");
 }
 
 #[test]
@@ -481,15 +467,15 @@ fn a_clock_whose_client_dropped_its_channel_ends_the_thread() {
         fade_after: Duration::from_millis(5),
         ..wiring()
     });
-    idling(&reader);
+    deliver_idle_status(&reader);
     let (sender, closed) = mpsc::channel();
     reader.moments = closed;
     drop(sender);
 
     clock(&threads);
 
-    // The window brought the shade down, but the client had dropped its
-    // channel, so nothing waits to be drained.
+    // The fade timer fired, and the clock ended when it could not send the
+    // sleep moment.
     assert!(reader.drain().is_empty());
 }
 
@@ -501,29 +487,27 @@ fn a_debug_line_names_the_reader_and_nothing_inside_it() {
 }
 
 #[test]
-fn the_client_identifier_names_the_client_and_the_machine_it_runs_on() {
+fn the_client_identifier_names_the_client_and_its_pod() {
     assert_eq!(
-        client_id("idle-screen", "den-tv-idle-7f4\n"),
-        "idle-screen-den-tv-idle-7f4"
+        client_id("idle-screen", "player-1-idle-7f4\n"),
+        "idle-screen-player-1-idle-7f4"
     );
     assert_eq!(client_id("idle-screen", ""), "idle-screen");
 }
 
 #[test]
-fn the_machine_answers_to_a_name_or_to_none() {
-    // A workstation and a pod both have the file; a container that does not
-    // reads an empty name, and the identifier is then the client's own.
+fn hostname_does_not_fail_when_the_file_is_missing() {
     let _ = hostname();
 }
 
 #[test]
-fn an_address_with_no_port_answers_on_the_mqtt_default() {
+fn an_address_with_no_port_uses_the_mqtt_default_port() {
     assert_eq!(broker("broker"), Some(("broker".into(), 1883)));
     assert_eq!(broker(" broker:1884 "), Some(("broker".into(), 1884)));
 }
 
 #[test]
-fn an_address_this_client_cannot_read_is_no_broker() {
+fn an_unparseable_address_has_no_broker() {
     assert_eq!(broker(""), None);
     assert_eq!(broker("broker:soon"), None);
     assert_eq!(broker("[::1"), None);
@@ -532,23 +516,22 @@ fn an_address_this_client_cannot_read_is_no_broker() {
 }
 
 #[test]
-fn an_ipv6_literal_reads_its_port_off_the_brackets() {
+fn an_ipv6_literal_in_brackets_has_its_port_after_the_bracket() {
     assert_eq!(broker("[::1]:1884"), Some(("::1".into(), 1884)));
     assert_eq!(broker(" [fd00::1]:1884 "), Some(("fd00::1".into(), 1884)));
     assert_eq!(broker("[::1]"), Some(("::1".into(), 1883)));
 }
 
 #[test]
-fn an_ipv6_literal_with_no_brackets_answers_on_the_mqtt_default() {
+fn an_ipv6_literal_with_no_brackets_uses_the_mqtt_default_port() {
     assert_eq!(broker("::1"), Some(("::1".into(), 1883)));
     assert_eq!(broker("fd00::1"), Some(("fd00::1".into(), 1883)));
 }
 
 #[test]
-fn a_reader_takes_the_loops_waker_and_ends_with_the_client() {
-    // Port 1 answers nothing, so the reader thread reports a failed session
-    // and waits, the way it does while a broker is down. Both threads hold a
-    // weak reference to the rules, so the drop below ends them.
+fn a_reader_accepts_a_waker_and_ends_with_the_client() {
+    // Nothing listens on port 1, so the reader thread retries as it does
+    // while the broker is down.
     let reader = Reader::open(
         &Wiring {
             bus_address: "127.0.0.1:1".into(),
@@ -557,36 +540,34 @@ fn a_reader_takes_the_loops_waker_and_ends_with_the_client() {
         "media-screen-test",
         &[],
     )
-    .expect("the wiring names a broker and topics");
+    .expect("Reader::open returned None for a wiring with a broker address");
 
     reader.wake_on_delivery(Arc::new(|| {}));
 
     assert!(reader.drain().is_empty());
 }
 
-/// A broker for one client, speaking as much MQTT 3.1.1 as this test needs:
-/// it answers the CONNECT and then reads. It parses nothing, because what
-/// this test measures is that the client's own bytes reach the one
-/// connection the crate holds.
-///
-/// The thread ends when it finds `wanted` in what the client wrote, or when
-/// the deadline passes, and it reports which. The port is taken from the
-/// kernel, so two runs never collide.
-fn listening(wanted: Vec<u8>) -> (u16, std::thread::JoinHandle<bool>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("the broker takes a port");
-    let port = listener.local_addr().expect("the port is known").port();
+/// A fake broker for one client. It responds to the CONNECT with a CONNACK,
+/// then reads without parsing, because the tests only check that certain
+/// bytes reach the connection. Its thread returns true when `wanted`
+/// appears in what the client wrote, or false after 5 seconds.
+fn fake_broker(wanted: Vec<u8>) -> (u16, std::thread::JoinHandle<bool>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("binding the fake broker to a port");
+    let port = listener
+        .local_addr()
+        .expect("reading the fake broker port")
+        .port();
 
     let thread = std::thread::spawn(move || {
-        let (mut client, _) = listener.accept().expect("the client connects");
+        let (mut client, _) = listener.accept().expect("accepting the client connection");
         client
             .set_read_timeout(Some(Duration::from_millis(100)))
-            .expect("the reads are bounded");
-        // The CONNECT, read and not parsed, and then the acknowledgement
-        // that lets the client flush what it queued.
+            .expect("setting the read timeout");
+        // The client sends its queued packets only after the CONNACK.
         let _ = client.read(&mut [0_u8; 1024]);
         client
             .write_all(&[0x20, 0x02, 0x00, 0x00])
-            .expect("the connack goes out");
+            .expect("writing the CONNACK");
 
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut written: Vec<u8> = Vec::new();
@@ -608,9 +589,9 @@ fn listening(wanted: Vec<u8>) -> (u16, std::thread::JoinHandle<bool>) {
     (port, thread)
 }
 
-/// One topic as a SUBSCRIBE carries it: the length, the topic, and the
-/// requested QoS, which is 0 for every filter this crate sends.
-fn filter(topic: &str) -> Vec<u8> {
+/// One topic filter of a SUBSCRIBE packet: the two-byte length, the topic,
+/// and QoS 0, which this crate requests for every filter.
+fn subscribe_filter(topic: &str) -> Vec<u8> {
     let mut wire = Vec::from((topic.len() as u16).to_be_bytes());
     wire.extend(topic.as_bytes());
     wire.push(0x00);
@@ -619,8 +600,8 @@ fn filter(topic: &str) -> Vec<u8> {
 
 #[test]
 fn a_session_subscribes_to_the_clients_own_topics() {
-    let owned = "liken/library/screens/house/theater/watching";
-    let (port, broker) = listening(filter(owned));
+    let owned = "liken/library/screens/default/player-1/watching";
+    let (port, broker) = fake_broker(subscribe_filter(owned));
 
     let reader = Reader::open(
         &Wiring {
@@ -630,21 +611,23 @@ fn a_session_subscribes_to_the_clients_own_topics() {
         "media-screen-test",
         &[owned.into()],
     )
-    .expect("the wiring names a broker and topics");
+    .expect("Reader::open returned None for a wiring with a broker address");
 
     assert!(
-        broker.join().expect("the broker thread ends"),
-        "the subscribe carries the client's own topic"
+        broker.join().expect("the fake broker thread panicked"),
+        "the broker did not receive a subscribe to the client's own topic"
     );
     drop(reader);
 }
 
-/// One QoS 0 PUBLISH as it travels. The topic and the payload are both
-/// short, so the remaining length is the one byte the protocol uses under
-/// 128.
-fn packet(topic: &str, payload: &[u8], retained: bool) -> Vec<u8> {
+/// One QoS 0 PUBLISH packet, with a remaining length under 128, which MQTT
+/// encodes in one byte.
+fn publish_packet(topic: &str, payload: &[u8], retained: bool) -> Vec<u8> {
     let length = 2 + topic.len() + payload.len();
-    assert!(length < 128, "this test writes one length byte");
+    assert!(
+        length < 128,
+        "the remaining length is {length}, and this helper writes one byte, so it must be under 128"
+    );
 
     let mut wire = vec![0x30 | u8::from(retained), length as u8];
     wire.extend((topic.len() as u16).to_be_bytes());
@@ -654,12 +637,10 @@ fn packet(topic: &str, payload: &[u8], retained: bool) -> Vec<u8> {
 }
 
 #[test]
-fn a_clients_own_publish_goes_out_on_the_one_connection() {
-    // The topic is the client's own, so this crate neither subscribes to
-    // it nor reads what comes back on it.
-    let topic = "liken/library/plays/house/requests";
+fn a_clients_own_publish_goes_out_on_the_readers_connection() {
+    let topic = "liken/library/plays/default/requests";
     let payload = br#"{"list":"friday"}"#.to_vec();
-    let (port, broker) = listening(packet(topic, &payload, true));
+    let (port, broker) = fake_broker(publish_packet(topic, &payload, true));
 
     let reader = Reader::open(
         &Wiring {
@@ -669,17 +650,16 @@ fn a_clients_own_publish_goes_out_on_the_one_connection() {
         "media-screen-test",
         &[],
     )
-    .expect("the wiring names a broker and topics");
+    .expect("Reader::open returned None for a wiring with a broker address");
 
     reader.publish(topic, payload, true);
 
     assert!(
-        broker.join().expect("the broker thread ends"),
-        "the publish reached the connection the reader already holds"
+        broker.join().expect("the fake broker thread panicked"),
+        "the broker did not receive the publish on the reader's connection"
     );
-    // The client named no topic of its own to the reader, so nothing about
-    // this one comes back. The session start is the one moment a client
-    // hears here.
+    // The client passed the reader no topics, so its publish does not come
+    // back to it.
     assert!(
         reader
             .drain()

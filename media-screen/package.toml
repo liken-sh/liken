@@ -1,6 +1,6 @@
-# The bus half of a screen client, as a Rust library. media-operator's
-# idle screen and library-operator's media browser link it by path, so
-# each one lists it in [depends]. It publishes nothing of its own.
+# A Rust library that publishes no output. media-operator's idle screen
+# and library-operator's media browser link it by path, so each lists it
+# in its own `components`, and a change here runs their jobs too.
 [package]
 name = "media-screen"
 license = "MIT"
@@ -13,11 +13,9 @@ timeout = 20
 env = { CARGO_INCREMENTAL = "0" }
 coverage = ["coverage-media-screen.xml"]
 
-# The hooks in .pre-commit-config.yaml: the formatters, the linters,
-# and the hygiene checks. The jobs above run the tests and the
-# coverage gates.
+# Runs the hooks of .pre-commit-config.yaml.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-# The rust job runs the same check as this hook.
+# The rust job already runs `cargo fmt --check`.
 skip = ["cargo-fmt"]

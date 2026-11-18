@@ -1,36 +1,34 @@
-// The power keys. `media-operator` reads them off the controller's events
-// topic and changes the `Player`'s `spec.power`, so a screen client neither
-// acts on them nor hands them to the client, in any state: awake, asleep,
-// idle, or playing.
+// `media-operator` reads the power keys from the controller's events topic
+// and changes the `Player`'s `spec.power`, so this crate ignores them and
+// does not pass them to its client.
 
 use super::*;
 
 #[test]
-fn a_power_key_reaches_no_client_and_moves_nothing() {
+fn a_power_key_reaches_no_client_and_changes_nothing() {
     let now = Instant::now();
     let cases = [
         (false, Some(crate::panel::ON)),
         (true, Some(crate::panel::OFF)),
     ];
     for name in keys::POWER {
-        for (asleep, desire) in cases {
+        for (asleep, panel_request) in cases {
             let mut screen = idling(&wiring(), now);
             screen.asleep = asleep;
-            screen.desire = desire;
+            screen.panel_request = panel_request;
 
-            let effects = screen.deliver(SOFA_EVENTS, &key(name, 1), false, now);
+            let effects = screen.deliver(FIRST_REMOTE_EVENTS, &key(name, 1), false, now);
 
             assert!(effects.is_empty(), "{name} asleep {asleep}");
             assert_eq!(screen.asleep, asleep, "{name}");
-            assert_eq!(screen.desire, desire, "{name}");
+            assert_eq!(screen.panel_request, panel_request, "{name}");
         }
     }
 }
 
-// A power press restarts no window, because it is not a person at this
-// screen: the operator decides what it does to the Player.
+// A power key press alone does not show that anyone is using this screen.
 #[test]
-fn a_power_key_does_not_restart_the_quiet_window() {
+fn a_power_key_does_not_restart_the_fade_timer() {
     let wiring = Wiring {
         fade_after: Duration::from_secs(600),
         ..wiring()
@@ -40,7 +38,7 @@ fn a_power_key_does_not_restart_the_quiet_window() {
     let armed = screen.next_deadline();
 
     screen.deliver(
-        SOFA_EVENTS,
+        FIRST_REMOTE_EVENTS,
         &key("KEY_POWER", 1),
         false,
         now + Duration::from_secs(60),
@@ -58,7 +56,7 @@ fn a_power_key_during_a_play_reaches_nothing() {
     for name in keys::POWER {
         assert!(
             screen
-                .deliver(SOFA_EVENTS, &key(name, 1), false, now)
+                .deliver(FIRST_REMOTE_EVENTS, &key(name, 1), false, now)
                 .is_empty(),
             "{name}"
         );
@@ -66,31 +64,37 @@ fn a_power_key_during_a_play_reaches_nothing() {
 }
 
 #[test]
-fn a_power_key_says_who_answers_it() {
+fn a_power_key_logs_that_media_operator_handles_it() {
     let now = Instant::now();
     let mut screen = idling(&wiring(), now);
 
-    screen.deliver(SOFA_EVENTS, &key("KEY_POWER", 1), false, now);
-    screen.deliver(SOFA_EVENTS, &key("KEY_POWER", 2), false, now);
-    screen.deliver(SOFA_EVENTS, &key("KEY_POWER", 0), false, now);
+    screen.deliver(FIRST_REMOTE_EVENTS, &key("KEY_POWER", 1), false, now);
+    screen.deliver(FIRST_REMOTE_EVENTS, &key("KEY_POWER", 2), false, now);
+    screen.deliver(FIRST_REMOTE_EVENTS, &key("KEY_POWER", 0), false, now);
 
     assert_eq!(
         screen.take_lines(),
         [
-            "KEY_POWER from remote house/sofa left to media-operator, which turns the player off and on"
+            "KEY_POWER from remote default/remote-1 ignored, because media-operator turns the player off and on"
         ]
     );
 }
 
-// The commands topic carries no power ask, so a writer that publishes one
-// there moves nothing here.
 #[test]
-fn a_power_ask_on_the_commands_topic_moves_nothing() {
+fn a_power_command_on_the_commands_topic_changes_nothing() {
     let now = Instant::now();
     for payload in [&br#"{"action":"power"}"#[..], br#"{"action":"power-off"}"#] {
         let mut screen = idling(&wiring(), now);
 
-        assert!(screen.deliver(COMMANDS, payload, false, now).is_empty());
-        assert!(screen.take_lines().is_empty());
+        assert!(
+            screen.deliver(COMMANDS, payload, false, now).is_empty(),
+            "the payload {:?} produced effects, want none",
+            String::from_utf8_lossy(payload)
+        );
+        assert!(
+            screen.take_lines().is_empty(),
+            "the payload {:?} wrote a log line, want none",
+            String::from_utf8_lossy(payload)
+        );
     }
 }

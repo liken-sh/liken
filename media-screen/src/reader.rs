@@ -1,20 +1,20 @@
-//! The socket half of the crate: the thread that holds the connection, the
-//! subscribe it sends on every session, the clock that runs the two windows
-//! and the publishes the rules ask for.
+//! The MQTT connection of the crate. The reader thread owns the connection,
+//! subscribes at the start of each session, and passes each message to the
+//! [`Screen`] rules. The clock thread fires the rules' timers: the fade
+//! timer that puts the screen to sleep and the off timer that requests the
+//! panel off. Both threads publish what the rules produce on the same
+//! connection.
 //!
-//! The client sees none of this. It holds a [`Reader`], calls
-//! [`Bus::drain`] on every wake of its loop, and draws what comes back.
-//! Every publish this crate makes goes out on the connection these
-//! threads already hold, so the client opens nothing and names no topic
-//! of the crate's.
+//! A client keeps a [`Reader`], calls [`Bus::drain`] each time its loop
+//! wakes, and draws the [`Moment`]s it returns. The client opens no
+//! connection and does not need this crate's topic names.
 
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
-// `rumqttc`'s client type is imported under the broker's name, because this
-// crate holds a `Screen` of its own and one file must not read as if it spoke
-// about both.
+// `rumqttc`'s `Client` is renamed so that it is not mistaken for the
+// client program that uses this crate.
 use rumqttc::{
     Client as Broker, ConnectionError, Event, MqttOptions, Packet, QoS, SubscribeFilter,
 };
@@ -26,74 +26,75 @@ mod alarm;
 
 use alarm::Alarm;
 
-/// The port a broker answers on when the address names none.
 const DEFAULT_PORT: u16 = 1883;
 
-/// The keepalive this client asks for. It is the interval `media-operator`'s
-/// own bus client asks for, so every client of one broker keeps the same
-/// clock.
+/// The same keepalive as `busKeepalive` in `media-operator/bus.go`.
 const KEEPALIVE: Duration = Duration::from_secs(30);
 
-/// The largest packet this client sends or accepts. rumqttc caps both at
-/// ten kilobytes unless told otherwise, and a play request for a whole
-/// season of episodes with the work that follows it is larger than that.
-/// The broker enforces a cap of its own as well: `media-operator/deploy/bus.yaml`
-/// sets no `max_packet_size`, so Mosquitto applies the default that the
-/// `mosquitto.conf` manual states for that option, which is above this one.
+/// The largest packet this client sends or accepts. rumqttc limits both
+/// directions to 10 KB by default, and a play request for a whole season of
+/// episodes, with the items that follow it, is larger than that. The broker
+/// has its own limit. `media-operator/deploy/bus.yaml` sets no
+/// `max_packet_size`, so Mosquitto uses its default, which the
+/// `mosquitto.conf` manual gives as larger than this value.
 const MAX_PACKET_SIZE: usize = 256 * 1024;
 
-/// The bounds of the wait after a failed session. The wait starts at the
-/// floor, doubles on each failure up to the ceiling, and returns to the floor
-/// on the next session, so a broker that is down is no tight reconnect loop
-/// and a broker that returns is reached within the ceiling. They are the
-/// bounds `media-operator`'s own bus client uses.
+/// After a failed session, the reader thread waits before it reconnects, so
+/// a broker that is down is not redialed in a tight loop. The wait starts at
+/// `RECONNECT_MIN`, doubles on each failure up to `RECONNECT_MAX`, and
+/// resets when a session connects. `media-operator/bus.go` uses the same
+/// limits.
 const RECONNECT_MIN: Duration = Duration::from_secs(1);
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
 
-/// The capacity of `rumqttc`'s outbound request queue, which carries the
-/// subscribes and every publish the rules ask for. The inbound path to the
-/// client is an unbounded channel, and it drops nothing.
+/// The capacity of `rumqttc`'s request queue of subscribes and publishes.
+/// A publish that finds the queue full is logged and dropped. The channel
+/// of moments to the client is unbounded, so no moment is dropped.
 const QUEUE_DEPTH: usize = 64;
 
-/// A handle that wakes the client's event loop from any thread.
+/// A function that wakes the client's event loop. It can be called from any
+/// thread.
 pub type Waker = Arc<dyn Fn() + Send + Sync>;
 
-/// What a client needs from the bus. It is a trait so a client's own tests
-/// fold real moments and see a real request with no socket under them.
+/// What a client needs from the bus. A client's tests can supply their own
+/// implementation, which feeds in real moments and records the requests
+/// without a socket.
 pub trait Bus: std::fmt::Debug {
-    /// Every moment that arrived since the last call. The call never blocks.
+    /// Returns the moments that arrived since the last call. It never
+    /// blocks.
     fn drain(&self) -> Vec<Moment>;
 
-    /// Ask for the shade, from the client's own reading of a press. The stock
-    /// idle client asks on back; a client with levels asks at its top level,
-    /// because only the client knows whether back has anywhere to go.
+    /// Puts the screen to sleep, for a client that handles key presses
+    /// itself. The idle screen calls it on a back press. A client with
+    /// nested screens calls it only on a back press at its top screen,
+    /// because only the client can tell whether back has a screen to return
+    /// to.
     fn sleep(&self);
 
-    /// Publish one payload on a topic of the client's own, on the
-    /// connection this crate already holds. A client with a request of
-    /// its own, such as the library layer's browser asking for a
-    /// `Play`, must not open a second connection to the same broker
-    /// under a second identifier. The rules in [`Screen`] neither read
-    /// the topic nor act on it. The client hears a message back on it
-    /// only when the client named it to [`Reader::open`].
+    /// Publishes one payload on a topic that the client owns, over this
+    /// crate's connection, so a client that sends its own requests, such as
+    /// the library browser requesting a `Play`, opens no second connection
+    /// with a second client identifier. The [`Screen`] rules ignore the
+    /// topic. Messages on it reach the client only when the client passed
+    /// the topic to [`Reader::open`].
     fn publish(&self, topic: &str, payload: Vec<u8>, retained: bool);
 
-    /// Wake the loop on every delivery, so a press shows on the next frame
-    /// rather than at the next scheduled second.
+    /// Registers a function that the threads call after they send moments,
+    /// so the client draws a key press on its next frame. Without a waker, a
+    /// moment waits in the channel until the client's loop wakes on its own.
     fn wake_on_delivery(&self, wake: Waker);
 }
 
-/// The slot the threads read their waker from. The loop does not exist yet
-/// when the reader connects, so the waker arrives after the threads start,
-/// and each one reads the slot on every delivery.
-type WakerSlot = Arc<Mutex<Option<Waker>>>;
+/// The client registers its waker after the threads start, so the threads
+/// read it from here each time they send moments.
+type SharedWaker = Arc<Mutex<Option<Waker>>>;
 
-/// The subscription, held by the client.
+/// The client's handle to the bus connection. Dropping it ends both
+/// threads.
 pub struct Reader {
     moments: mpsc::Receiver<Moment>,
-    /// The rules. Both threads hold a weak reference to this one value, so
-    /// dropping the reader ends both of them, and a client that opened a
-    /// reader and let it go leaves no thread behind.
+    /// The only strong reference to the rules. The threads hold `Weak` ones
+    /// and end when they can no longer upgrade them.
     screen: Arc<Mutex<Screen>>,
     threads: Threads,
 }
@@ -105,17 +106,18 @@ impl std::fmt::Debug for Reader {
 }
 
 impl Reader {
-    /// Connect to the broker the wiring names and subscribe. The answer is
-    /// `None` when the operator named no broker or no topics, which is how a
-    /// client runs on a workstation with its seeds alone.
+    /// Connects to the broker in `wiring` and subscribes. It returns `None`
+    /// when `wiring` has no broker address, when there is no topic to
+    /// subscribe to, or when a thread fails to start. A client with no
+    /// reader runs on a workstation with only its built-in content.
     ///
-    /// `client_id` must name this client alone, because a broker closes the
-    /// older connection when two arrive under one identifier.
+    /// Build `client_id` with [`client_id`], because a broker closes the
+    /// older connection when two connections use one identifier.
     ///
-    /// `client_topics` are topics the client owns. The reader subscribes to
-    /// them beside the screen's own on every session, and every message on
-    /// one arrives as a [`Moment::Message`]. They count as topics: a client
-    /// that names one opens a reader over a wiring that names none.
+    /// The reader subscribes to `client_topics` in each session, beside the
+    /// screen's own topics, and each message on one arrives as a
+    /// [`Moment::Message`]. A client that passes one of its own topics gets a
+    /// reader even when `wiring` has no topics.
     pub fn open(wiring: &Wiring, client_id: &str, client_topics: &[String]) -> Option<Self> {
         let screen = Screen::new(wiring).reading(client_topics);
         let (host, port) = broker(&wiring.bus_address)?;
@@ -127,8 +129,10 @@ impl Reader {
         options.set_keep_alive(KEEPALIVE);
         options.set_max_packet_size(MAX_PACKET_SIZE, MAX_PACKET_SIZE);
         let (client, connection) = Broker::new(options, QUEUE_DEPTH);
-        // A scrape before the first session sees a broker configured but not
-        // yet reached, not the silence an unset MEDIA_BUS_ADDRESS reports.
+        // `media_bus_connected` reads 0 until the first session connects. The
+        // metric is absent when `open` returned `None` before this line:
+        // the broker address is unset or does not parse, or there is no
+        // topic to subscribe to.
         crate::metrics::bus_connected(false);
 
         let (sender, moments) = mpsc::channel();
@@ -141,10 +145,9 @@ impl Reader {
             alarm: Arc::default(),
         };
 
-        // The connection thread never leaves its loop, so the two windows run
-        // on a thread of their own. A deadline on the connection itself would
-        // have to cancel a read of the socket to fire, and a cancelled read
-        // can lose the press it was in the middle of.
+        // The timers fire on their own thread because the reader thread
+        // blocks in the socket read. Interrupting that read to fire a timer
+        // could lose a message that was partly read.
         let reading = threads.clone();
         spawn("media-bus", move || {
             let mut connection = connection;
@@ -162,24 +165,19 @@ impl Reader {
 }
 
 impl Bus for Reader {
-    /// The call costs the decoding and nothing else, because the threads
-    /// decoded every moment before the channel.
     fn drain(&self) -> Vec<Moment> {
         self.moments.try_iter().collect()
     }
 
-    /// The shade comes back through [`Bus::drain`] the way every other moment
-    /// does, so the client folds one stream.
+    /// The resulting [`Moment::Sleep`] comes back through [`Bus::drain`] like
+    /// every other moment, so the client handles one stream.
     fn sleep(&self) {
-        let effects = fold(&self.screen, &self.threads.alarm, |screen| {
+        let effects = run_rule(&self.screen, &self.threads.alarm, |screen| {
             screen.sleep(Instant::now())
         });
         perform(&self.threads, effects);
     }
 
-    /// The publish is queued rather than sent, the way every publish the
-    /// rules ask for is, because the reader thread is what drives the
-    /// connection.
     fn publish(&self, topic: &str, payload: Vec<u8>, retained: bool) {
         send(
             &self.threads.client,
@@ -191,60 +189,54 @@ impl Bus for Reader {
         );
     }
 
-    /// Without a waker a moment waits in the channel for the next scheduled
-    /// wake, and a press then shows up to a second late.
     fn wake_on_delivery(&self, wake: Waker) {
         *self
             .threads
             .waker
             .lock()
-            .expect("no reader panics with the lock") = Some(wake);
+            .expect("the waker lock is poisoned") = Some(wake);
     }
 }
 
-/// The reader thread ends on its next event after the drop, because it finds
-/// the rules gone. The clock can sleep with no timeout, so the drop closes its
-/// alarm to end it.
+/// The reader thread ends at its next event, when it finds the rules gone.
+/// The clock thread can be waiting with no timeout, so the drop closes the
+/// alarm to wake it.
 impl Drop for Reader {
     fn drop(&mut self) {
         self.threads.alarm.close();
     }
 }
 
-/// What each thread of this crate holds: the rules, the connection to publish
-/// on, the channel to the client, the slot the client loop's waker arrives in,
-/// and the alarm that wakes the clock thread.
+/// The state that the reader thread and the clock thread share.
 #[derive(Clone)]
 struct Threads {
     screen: Weak<Mutex<Screen>>,
     client: Broker,
     sender: mpsc::Sender<Moment>,
-    waker: WakerSlot,
+    waker: SharedWaker,
     alarm: Arc<Alarm>,
 }
 
 impl Threads {
-    /// The rules, while a client still holds them. A thread that reads
-    /// nothing here ends, because the client its work is for is gone.
     fn screen(&self) -> Option<Arc<Mutex<Screen>>> {
         self.screen.upgrade()
     }
 }
 
-/// Start one of this crate's threads. A client that spawns none draws its
-/// seeds and hears nothing for the life of the pod, so the line says why.
+/// Starts a named thread. A failure is logged, because the client then
+/// gets no reader and runs without the bus until the pod restarts.
 fn spawn(name: &str, body: impl FnOnce() + Send + 'static) -> Option<()> {
     std::thread::Builder::new()
         .name(name.into())
         .spawn(body)
-        .inspect_err(|error| eprintln!("media-screen: {name}: {error}"))
+        .inspect_err(|error| eprintln!("media-screen: starting the {name} thread: {error}"))
         .ok()
         .map(|_| ())
 }
 
-/// The reader thread. It subscribes on every connection, because a broker
-/// holds no subscription across a session, and it folds each message through
-/// the rules before the channel, so the client's loop takes finished values.
+/// The reader thread's loop. It subscribes on each CONNACK, because the
+/// broker discards the subscriptions when a session ends. Each message goes
+/// through the rules, and only the moments they produce reach the client.
 fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, ConnectionError>>) {
     let mut backoff = RECONNECT_MIN;
     for event in events {
@@ -255,21 +247,26 @@ fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, Connection
             Ok(Event::Incoming(Packet::ConnAck(_))) => {
                 crate::metrics::bus_connected(true);
                 backoff = RECONNECT_MIN;
-                fold(&screen, &threads.alarm, |screen| {
+                run_rule(&screen, &threads.alarm, |screen| {
                     let effects = screen.connected();
+                    // QoS 0, as `media-operator/bus.go` uses. A message lost
+                    // with a failed session is not sent again. That is
+                    // acceptable, because the broker sends each retained
+                    // message again on subscribe, and every publisher
+                    // publishes its retained state again when it connects.
                     let filters = screen.filters().into_iter().map(|path| SubscribeFilter {
                         path,
                         qos: QoS::AtMostOnce,
                     });
-                    // The subscribe is queued rather than sent, because this
-                    // thread is the one that drives the connection. A blocking
-                    // send would wait for a reader that is this loop.
+                    // `try_subscribe_many` queues the request. A blocking send
+                    // would wait for the connection to be read, and this
+                    // thread is what reads it.
                     let _ = threads.client.try_subscribe_many(filters);
                     effects
                 })
             }
             Ok(Event::Incoming(Packet::Publish(message))) => {
-                fold(&screen, &threads.alarm, |screen| {
+                run_rule(&screen, &threads.alarm, |screen| {
                     screen.deliver(
                         &message.topic,
                         &message.payload,
@@ -280,9 +277,9 @@ fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, Connection
             }
             Err(error) => {
                 crate::metrics::bus_connected(false);
-                // The client reconnects on its own, so the line is the record
-                // and not a request for anything.
-                eprintln!("media-screen: bus: {error}");
+                // The iterator reconnects when the loop requests the next
+                // event, so the thread waits out the backoff first.
+                eprintln!("media-screen: bus connection: {error}");
                 std::thread::sleep(backoff);
                 backoff = next_backoff(backoff);
                 Vec::new()
@@ -290,42 +287,38 @@ fn read(threads: &Threads, events: impl Iterator<Item = Result<Event, Connection
             Ok(_) => Vec::new(),
         };
         if !perform(threads, effects) {
-            // The client dropped its reader, so nothing reads what this
-            // thread decodes.
+            // The client dropped its end of the channel, so nothing reads
+            // what this thread produces.
             return;
         }
     }
 }
 
-/// The clock thread, which is the two windows.
-/// It sleeps to the earliest armed deadline, or with no timeout while
-/// nothing is armed, so a screen at rest wakes this thread for nothing. A fold on another thread that arms a
-/// window, or moves one earlier, rings the alarm, and the clock reads the
-/// deadline again.
+/// The clock thread's loop. It sleeps until the next timer's deadline, or
+/// with no timeout while no timer is armed, so an idle screen does not wake
+/// it. A thread that arms a timer or moves one earlier signals the alarm, and
+/// the clock reads the deadline again.
 fn clock(threads: &Threads) {
     loop {
         let Some(screen) = threads.screen() else {
             return;
         };
-        // The ring count is read before the deadline, so a window armed
-        // between this read and the wait still ends the wait.
-        let seen = threads.alarm.seen();
+        let signals = threads.alarm.signal_count();
         let deadline = screen
             .lock()
-            .expect("no thread panics with the lock")
+            .expect("the screen lock is poisoned")
             .next_deadline();
-        // The clock gives up the rules before the wait, so the reader thread
-        // and the client both lock them while this one waits, and a dropped
-        // reader frees them.
+        // Drop the strong reference before waiting, or the rules stay alive
+        // after the client drops its reader.
         drop(screen);
-        if !threads.alarm.wait(seen, deadline) {
+        if !threads.alarm.wait(signals, deadline) {
             return;
         }
 
         let Some(screen) = threads.screen() else {
             return;
         };
-        let effects = fold(&screen, &threads.alarm, |screen| {
+        let effects = run_rule(&screen, &threads.alarm, |screen| {
             screen.tick(Instant::now())
         });
         if !perform(threads, effects) {
@@ -334,27 +327,24 @@ fn clock(threads: &Threads) {
     }
 }
 
-/// The wait after the next failure: twice this one, and never above the
-/// ceiling.
 fn next_backoff(backoff: Duration) -> Duration {
     (backoff * 2).min(RECONNECT_MAX)
 }
 
-/// Run one fold under the lock and print the lines it wrote, one per
-/// operation a person caused, before the lock is released, so two threads'
-/// lines never interleave out of the order the rules ran them in.
+/// Runs `rule` under the lock, and logs the lines it produced before the
+/// lock is released, so the lines of both threads appear in the order the
+/// rules ran.
 ///
-/// A fold that arms a window, or moves the armed one earlier, rings the
-/// clock's alarm. A window that moved later or disarmed rings nothing: the
-/// clock wakes at the earlier moment it already waits for, finds the window
-/// not yet due, and waits again. So a press, which restarts the quiet window
-/// later, does not wake the clock.
-fn fold(
+/// When the next deadline moves earlier, `run_rule` signals the alarm so the
+/// clock waits for the new deadline. A deadline that moves later needs no
+/// signal, because the clock wakes at the earlier one, finds nothing due, and
+/// waits again.
+fn run_rule(
     screen: &Mutex<Screen>,
     alarm: &Alarm,
     rule: impl FnOnce(&mut Screen) -> Vec<Effect>,
 ) -> Vec<Effect> {
-    let mut screen = screen.lock().expect("no thread panics with the lock");
+    let mut screen = screen.lock().expect("the screen lock is poisoned");
     let before = screen.next_deadline();
     let effects = rule(&mut screen);
     for line in screen.take_lines() {
@@ -365,36 +355,33 @@ fn fold(
         .is_some_and(|at| before.is_none_or(|then| at < then));
     drop(screen);
     if earlier {
-        alarm.ring();
+        alarm.signal();
     }
     effects
 }
 
-/// Perform one fold's effects: send each moment to the client, publish each
-/// message on the connection, and wake the loop once if anything reached the
-/// client. The answer is false only when the client dropped its receiver,
-/// which ends the thread that called.
-///
-/// The wake follows the sends, so the loop reads a whole fold on one pass
-/// rather than one moment per wake.
+/// Sends each moment to the client and queues each publish. Then, when any
+/// moment was sent, it calls the client's waker once, so the client handles
+/// all the moments of one rule on one wake. It returns false when the client
+/// dropped its receiver, and the calling thread then ends.
 fn perform(threads: &Threads, effects: Vec<Effect>) -> bool {
-    let mut drew = false;
+    let mut sent_moment = false;
     for effect in effects {
         match effect {
             Effect::Moment(moment) => {
                 if threads.sender.send(moment).is_err() {
                     return false;
                 }
-                drew = true;
+                sent_moment = true;
             }
             Effect::Publish(publish) => send(&threads.client, publish),
         }
     }
-    if drew
+    if sent_moment
         && let Some(wake) = threads
             .waker
             .lock()
-            .expect("no client panics with the lock")
+            .expect("the waker lock is poisoned")
             .as_ref()
     {
         wake();
@@ -402,9 +389,8 @@ fn perform(threads: &Threads, effects: Vec<Effect>) -> bool {
     true
 }
 
-/// One publish, queued rather than sent, because the reader thread is what
-/// drives the connection. It goes at QoS 0, and the rules say which messages
-/// the broker retains.
+/// Queues one publish at QoS 0. The reader thread drives the connection and
+/// writes it.
 fn send(client: &Broker, publish: Publish) {
     if let Err(error) = client.try_publish(
         publish.topic,
@@ -412,14 +398,13 @@ fn send(client: &Broker, publish: Publish) {
         publish.retained,
         publish.payload,
     ) {
-        eprintln!("media-screen: bus: {error}");
+        eprintln!("media-screen: publishing to the bus: {error}");
     }
 }
 
-/// The identifier this client connects under. It must name this client alone,
-/// because a broker closes the older connection when two arrive under one
-/// identifier. `prefix` is the client's own name, so two different clients on
-/// one machine do not collide either.
+/// Builds the MQTT client identifier from `prefix`, the client's own name,
+/// and `hostname`, which in a pod is the pod's name. So each replica of a
+/// client connects under its own identifier.
 pub fn client_id(prefix: &str, hostname: &str) -> String {
     match hostname.trim() {
         "" => prefix.to_string(),
@@ -427,18 +412,19 @@ pub fn client_id(prefix: &str, hostname: &str) -> String {
     }
 }
 
-/// The name this machine answers to. In a pod it is the pod's own name, which
-/// is unique in the cluster.
+/// Reads the host name from `/etc/hostname`, or returns an empty string when
+/// the file is missing. In a pod it is the pod's name.
 pub fn hostname() -> String {
     std::fs::read_to_string("/etc/hostname").unwrap_or_default()
 }
 
-/// The broker's host and port. An address with no port answers on the MQTT
-/// default. An empty address is no broker at all.
+/// Splits a broker address into host and port. An address with no port gets
+/// `DEFAULT_PORT`. An empty address, or one with an unparseable port,
+/// returns `None`.
 ///
-/// An IPv6 literal carries colons of its own, so the port follows the
-/// brackets the URI form puts around the address, and a bare literal is the
-/// host alone on the default port.
+/// An IPv6 literal contains colons, so its port is read only after the
+/// closing bracket (`[::1]:1884`). A literal without brackets is taken as
+/// the whole host, with the default port.
 fn broker(address: &str) -> Option<(String, u16)> {
     let address = address.trim();
     if address.is_empty() {

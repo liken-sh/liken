@@ -1,20 +1,15 @@
-//! Everything a screen client for one `Player` does with the bus, short
-//! of drawing.
+//! The bus half of a screen client for one `Player`: everything except
+//! drawing. `media-operator`'s idle screen and `library-operator`'s media
+//! browser both link it by path, so a change here reaches both clients.
 //!
-//! The crate has two halves. [`Screen`] is pure and holds every rule:
-//! the focus gate, the play gate, the quiet window and the shade, the
-//! off window and the panel desire, the level `media-operator` relays,
-//! and the cycle request. [`Reader`] is the thread over the broker: it
-//! subscribes, folds each message through the rules, runs the
-//! deadlines, performs the publishes, and hands the client what it
-//! draws. A client also names topics of its own, and [`Reader`]
-//! subscribes to those on the same connection, so a client reads back
-//! the retained state it owns.
-//!
-//! Two clients read it: this repository's idle screen, and the library
-//! layer's media browser, which takes it as a git dependency pinned to
-//! a release tag. The crate opens no window, holds no keymap of its
-//! own, and names no toolkit.
+//! [`Screen`] holds the rules and does no I/O: which controller's presses
+//! count, when the screen sleeps and when the panel turns off, the volume
+//! level that `media-operator` relays, and the request to move focus to the
+//! next `Player`. [`Reader`] runs a thread on the broker connection that
+//! subscribes, passes each message to [`Screen`], runs its deadlines, and
+//! sends its publishes. A client can add topics of its own, so that it reads
+//! back retained state that it publishes. The crate has no window and no
+//! drawing toolkit, so each client draws a sleeping screen in its own way.
 
 pub mod metrics;
 pub mod panel;
@@ -28,10 +23,8 @@ pub use reader::{Bus, Reader, Waker};
 pub use screen::{Effect, Moment, Publish, Screen};
 pub use wiring::Wiring;
 
-/// Read one JSON object off a topic. Every payload on these topics is an
-/// object, so a payload that is not one is not this operator's and it changes
-/// nothing. The check is here because a derived reader also takes a JSON array
-/// as the same fields in order, and a two-element array is not a status.
+/// Returns `None` for any payload that is not a JSON object, because serde
+/// also decodes a JSON array into a struct as its fields in order.
 pub(crate) fn object<T: serde::de::DeserializeOwned>(payload: &[u8]) -> Option<T> {
     let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
     if !value.is_object() {
