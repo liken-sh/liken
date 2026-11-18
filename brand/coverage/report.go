@@ -1,10 +1,7 @@
-// The page: from the inputs to one HTML file.
-//
-// The file stands alone. A site publishes it beside the manual, and
-// a release ships it, so it carries its own stylesheet, asks for
-// nothing over the network, and needs no JavaScript. The summary
-// links into the annotated sources with plain anchors, and a file
-// with nothing missing opens closed with a details element.
+// The report is one HTML file that embeds its stylesheet and uses no
+// JavaScript, so it renders with no other file beside it. The summary
+// tables link to each annotated source file with plain anchors.
+
 package main
 
 import (
@@ -19,9 +16,8 @@ import (
 //go:embed report.css
 var reportCSS string
 
-// The views below are what the template draws. They hold strings and
-// counts alone, so the template chooses no numbers and finds no
-// files.
+// The view types hold the values that the template prints, so the
+// template computes nothing.
 type reportView struct {
 	Title      string
 	Stylesheet template.CSS
@@ -54,15 +50,15 @@ type lineView struct {
 	Text   string
 }
 
-// Render draws the whole report. Every input keeps its own summary
-// table, because the inputs count in different units and one table
-// of both would read as one number.
+// Render returns the HTML report for the given inputs. Each input has
+// its own summary table, because the inputs count in different units
+// and a combined table would suggest that the numbers add up.
 func Render(title string, sources []*Source) ([]byte, error) {
 	page := reportView{
 		Title:      title,
 		Stylesheet: template.CSS(brand.Stylesheet + reportCSS),
 	}
-	taken := map[string]bool{}
+	used := map[string]bool{}
 	for i, source := range sources {
 		view := sourceView{
 			ID:      fmt.Sprintf("s%d", i),
@@ -73,7 +69,7 @@ func Render(title string, sources []*Source) ([]byte, error) {
 			Percent: percent(source.Covered, source.Total),
 		}
 		for _, file := range source.Files {
-			view.Files = append(view.Files, viewOf(file, fmt.Sprintf("f%d", i), taken))
+			view.Files = append(view.Files, viewOf(file, fmt.Sprintf("f%d", i), used))
 		}
 		page.Sources = append(page.Sources, view)
 	}
@@ -85,13 +81,12 @@ func Render(title string, sources []*Source) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-// viewOf prepares one file: its id, its numbers, and one view for
-// every line of its text. A file with lines to look at opens open,
-// and a file with none opens closed, so the page shows the work that
-// is left and keeps the rest within reach.
-func viewOf(file File, prefix string, taken map[string]bool) fileView {
+// viewOf builds the view of one file. A file with uncovered lines
+// starts open and any other file starts closed, so the page shows the
+// files that need work.
+func viewOf(file File, prefix string, used map[string]bool) fileView {
 	view := fileView{
-		ID:      identifier(prefix+"-"+file.Name, taken),
+		ID:      identifier(prefix+"-"+file.Name, used),
 		Name:    file.Name,
 		Covered: file.Covered,
 		Total:   file.Total,
@@ -101,8 +96,8 @@ func viewOf(file File, prefix string, taken map[string]bool) fileView {
 	if file.Text == "" {
 		return view
 	}
-	// A file's last line ends with a newline, and splitting on it
-	// leaves an empty last field that is no line of the file.
+	// Without TrimSuffix, the final newline makes Split return an empty
+	// last line that the file does not have.
 	lines := strings.Split(strings.TrimSuffix(file.Text, "\n"), "\n")
 	for number, text := range lines {
 		class := "line"
@@ -114,12 +109,11 @@ func viewOf(file File, prefix string, taken map[string]bool) fileView {
 	return view
 }
 
-// identifier turns a name into an anchor a link can hold: lower
-// case, with every run of other characters as one hyphen. Two names
-// can fold onto one identifier, so each one is taken once and the
-// next gets a number, and no link on the page lands on the wrong
-// file.
-func identifier(name string, taken map[string]bool) string {
+// identifier converts a file name to an HTML id of lower case letters
+// and digits, with each run of other characters replaced by one
+// hyphen. Different names can produce the same id, so used records the
+// ids already assigned, and a repeat gets a numeric suffix.
+func identifier(name string, used map[string]bool) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(name) {
 		switch {
@@ -130,16 +124,16 @@ func identifier(name string, taken map[string]bool) string {
 		}
 	}
 	id := strings.Trim(b.String(), "-")
-	for at := 2; taken[id]; at++ {
+	for at := 2; used[id]; at++ {
 		id = fmt.Sprintf("%s-%d", strings.Trim(b.String(), "-"), at)
 	}
-	taken[id] = true
+	used[id] = true
 	return id
 }
 
-// The source lines carry no newline between them, because each line
-// is a block of its own. A newline would draw a second, empty line
-// under every line of every file.
+// The template puts no newline between the line spans, because each
+// span is a block element. A newline between them would render as an
+// extra empty line under every source line.
 var reportTemplate = template.Must(template.New("report").Parse(`<!doctype html>
 <html lang="en">
 <head>

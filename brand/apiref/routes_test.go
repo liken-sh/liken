@@ -5,21 +5,19 @@ import (
 	"testing"
 )
 
-// generate renders one inline document, for the shapes a fixture
-// file would only make harder to read.
+// generate renders a page from an inline JSON document, for cases
+// that are easier to read than a fixture file.
 func generate(t *testing.T, document string) string {
 	t.Helper()
 	page, err := Generate([]byte(document), "x.json", Options{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the page: %v", err)
 	}
 	return string(page)
 }
 
-// A document whose answers are all captures and problem documents
-// declares no content at all. Its table holds the two columns that
-// carry facts, because a media type column of "none" on every row
-// says nothing.
+// When no response declares content, the table leaves out the media
+// type and schema columns.
 func TestResponsesWithNoContentGetTwoColumns(t *testing.T) {
 	page := generate(t, `{"openapi":"3.1.0","info":{"title":"a","version":"v1"},"paths":{"/a":{"get":{
 		"summary":"A thing","responses":{"200":{"description":"The thing."}}}}}}`)
@@ -33,8 +31,8 @@ func TestResponsesWithNoContentGetTwoColumns(t *testing.T) {
 	}
 }
 
-// One response with several media types is one row per media type,
-// so a reader sees the schema each form answers with.
+// A response with several media types gets one row for each media
+// type, so the reader sees the schema of each.
 func TestEachMediaTypeIsItsOwnRow(t *testing.T) {
 	page := generate(t, `{"openapi":"3.1.0","info":{"title":"a","version":"v1"},"paths":{"/a":{"get":{
 		"responses":{"200":{"description":"The sound.","content":{
@@ -50,8 +48,8 @@ func TestEachMediaTypeIsItsOwnRow(t *testing.T) {
 	}
 }
 
-// A response with no content, beside responses that have some, keeps
-// its row in the four-column table.
+// A response with no content still gets a row when other responses of
+// the operation have content.
 func TestAResponseWithNoContentKeepsItsRow(t *testing.T) {
 	page := generate(t, `{"openapi":"3.1.0","info":{"title":"a","version":"v1"},"paths":{"/a":{"get":{
 		"responses":{
@@ -63,8 +61,8 @@ func TestAResponseWithNoContentKeepsItsRow(t *testing.T) {
 }
 
 // OpenAPI says a path item's parameters apply to every method on the
-// path, and that an operation's own parameter of the same name and
-// place replaces it.
+// path, and that an operation's own parameter with the same name and
+// location replaces one of them.
 func TestAnOperationParameterReplacesThePathItemParameter(t *testing.T) {
 	page := generate(t, `{"openapi":"3.1.0","info":{"title":"a","version":"v1"},"paths":{"/a":{
 		"parameters":[
@@ -117,7 +115,27 @@ func TestRequirementPhrase(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := requirementPhrase(parseSchema(t, tc.given)); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
+				t.Errorf("the result is %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEmitSecurityStatesTheDocumentRequirement(t *testing.T) {
+	schemes := parseSchema(t, `{"bearer":{"type":"http","scheme":"bearer"}}`)
+	for _, tc := range []struct {
+		name         string
+		requirements string
+		want         string
+	}{
+		{"a scheme", `[{"bearer":[]}]`, "Every route requires `bearer`, unless its own section states otherwise."},
+		{"an open document", `[{}]`, "Every route accepts a caller with no credential, unless its own section states otherwise."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var b strings.Builder
+			emitSecurity(&b, schemes, parseSchema(t, tc.requirements))
+			if !strings.Contains(b.String(), tc.want) {
+				t.Errorf("the section does not contain %q:\n%s", tc.want, b.String())
 			}
 		})
 	}
@@ -140,14 +158,13 @@ func TestSchemeType(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := schemeType(parseSchema(t, tc.scheme)); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
+				t.Errorf("the result is %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-// A document with no security schemes gets no section, so a manual
-// for an API that takes no credential says nothing about them.
+// A document with no security schemes gets no security section.
 func TestADocumentWithNoSchemesHasNoSecuritySection(t *testing.T) {
 	page := generate(t, `{"openapi":"3.1.0","info":{"title":"a","version":"v1"},"paths":{"/a":{"get":{
 		"responses":{"200":{"description":"The thing."}}}}}}`)

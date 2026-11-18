@@ -1,25 +1,13 @@
-# These are the entries of the top nav, in order. Every liken site
-# renders the same labels from this file, so the family reads as one
-# place whichever site the reader lands on. There is no entry for the
-# site's manual, because the sidebar on every page shows the whole
-# manual already; a nav entry would name the same destination twice.
+# The top nav of every liken site, in order. There is no entry for a
+# site's manual, because the sidebar shows it on every page.
 #
-# An entry with an absolute url is family-wide: "liken", "operators",
-# and "releases" point at the same places from every site. "operators"
-# links to the page in the OS manual that orients a reader to every
-# extension operator and links to each one's manual. An entry with
-# param instead of url is site-scoped: it takes its destination from
-# the named parameter in the site's hugo.yaml. "repository" therefore
-# points at the code that the site documents. When a site does not
-# set the parameter, the nav omits the entry. There is no fallback
-# on purpose, because a guessed destination would point readers at
-# the wrong repository.
+# An entry with `param` in place of `url` reads its URL from that
+# parameter in the site's hugo.yaml, so "repository" links the code
+# that the site documents. A site that does not set the parameter gets
+# no entry, because a guessed URL would link the wrong repository.
 #
-# `code: true` sets the label in the code face; the project's name is
-# a command, and the nav writes it the way the prose does. A site can
-# replace this file by shipping its own data/nav.yaml, because Hugo
-# gives a site's data/ precedence over the theme's. No site does, so
-# every site renders the same nav.
+# `code: true` sets the label in the code face. A site can replace
+# this file with its own data/nav.yaml.
 - label: liken
   url: https://liken.sh/
   code: true

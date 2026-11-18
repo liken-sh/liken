@@ -6,10 +6,10 @@ import (
 )
 
 // Goldmark computes a heading's id from its rendered text, so the
-// inline syntax has to disappear before Anchor sees it: backticks and
-// emphasis markers render as nothing, a link renders as its text, and
-// a trailing attribute block sets attributes and renders nothing. A
-// braced path template is text, and stays.
+// inline syntax must be removed before Anchor sees it. Backticks and
+// emphasis markers disappear, a link becomes its text, and a trailing
+// attribute block disappears. A braced path template is text and
+// stays.
 func TestStripInline(t *testing.T) {
 	for raw, want := range map[string]string{
 		"The `liken` command":                         "The liken command",
@@ -28,9 +28,9 @@ func TestStripInline(t *testing.T) {
 	}
 }
 
-// pageAnchors reads a page the way Goldmark does: front matter and
-// fenced code are not headings, and a repeated heading gets a numbered
-// id so both remain addressable.
+// pageAnchors reads a page the way Goldmark does. Front matter and
+// fenced code contain no headings, and a repeated heading gets a
+// numbered id.
 func TestPageAnchorsCollectsHeadingIDs(t *testing.T) {
 	page := []byte(`---
 title: p
@@ -63,9 +63,9 @@ title: p
 	}
 }
 
-// internalLinks finds every link whose target starts with a slash:
-// inline links, image links, and links with a title. External
-// links and links inside fenced code are not the manual's to check.
+// internalLinks finds every link whose target starts with a slash,
+// including image links and links with a title. It skips external
+// links and links inside fenced code.
 func TestInternalLinksFindsAbsoluteTargets(t *testing.T) {
 	page := []byte(`Read [the guide](/docs/guides/install/) and
 [one section](/docs/reference/cluster/#spec), but not

@@ -1,5 +1,6 @@
-// The reader for a Cobertura report, the file `cargo llvm-cov
-// --cobertura` writes.
+// This file reads a Cobertura report, the file that
+// `cargo llvm-cov --cobertura` writes.
+
 package main
 
 import (
@@ -7,14 +8,10 @@ import (
 	"path/filepath"
 )
 
-// The parts of the format this program reads. A class is one source
-// file. Its lines element holds every line the compiler
-// instrumented, and the lines under a method are the same lines
-// again, one method at a time, so only the class's own list counts.
-//
-// The report says nothing about the language that wrote it, so the
-// page names such an input after the file or after the -label the
-// command line gives.
+// coberturaReport holds the parts of the Cobertura format that this
+// program reads. A class is one source file, and its lines element
+// lists every instrumented line. Each method lists its own lines
+// again, so the program reads only the class's list.
 type coberturaReport struct {
 	XMLName xml.Name         `xml:"coverage"`
 	Covered int              `xml:"lines-covered,attr"`
@@ -33,9 +30,9 @@ type coberturaLine struct {
 	Hits   int `xml:"hits,attr"`
 }
 
-// readCobertura counts lines, which is what the format holds. The
-// totals come from the root element, because that is the number the
-// tool that wrote the report stands behind.
+// readCobertura reads a Cobertura report, which counts lines. The
+// report's totals come from the lines-covered and lines-valid
+// attributes of the root element, as the tool wrote them.
 func readCobertura(data []byte, label, root string) (*Source, error) {
 	var report coberturaReport
 	if err := xml.Unmarshal(data, &report); err != nil {
@@ -68,8 +65,8 @@ func readCobertura(data []byte, label, root string) (*Source, error) {
 		}
 	}
 
-	// A file's own numbers come from its lines, counted once each,
-	// because a report may name one file in more than one class.
+	// A file's totals come from its marked lines, so a file that
+	// appears in more than one class counts each line once.
 	for _, file := range byName {
 		file.Total = len(file.Marks)
 		for _, mark := range file.Marks {
@@ -83,11 +80,10 @@ func readCobertura(data []byte, label, root string) (*Source, error) {
 	return source, nil
 }
 
-// candidates lists where one class's file may stand, nearest first.
-// The filenames are relative to the source element, which holds the
-// path of the tree the tests ran in. That machine is often not this
-// one, so the root wins wherever it holds the file, and the source
-// element is the fallback.
+// candidates returns the paths to try for a class's source file, in
+// order. A filename is relative to the source elements, which give the
+// path of the tree on the machine that ran the tests. That is often
+// another machine, so the path under root comes first.
 func (r coberturaReport) candidates(filename, root string) []string {
 	paths := []string{filepath.Join(root, filename)}
 	for _, source := range r.Sources {

@@ -1,22 +1,15 @@
-// crdref generates the manual's CRD reference pages.
+// crdref generates a manual's reference page for one CRD from its
+// schema. Each component's docs module declares it as a tool, and the
+// docs Makefile runs it once for each CRD:
 //
-// The docs Makefile runs it once per CRD:
+//	go tool crdref [-kind <Kind>] [-title <title>] [-weight <n>] [-postamble <file>] <crd.yaml> <out.md> [preamble.md]
 //
-//	go run ./crdref [-kind <Kind>] [-title <title>] [-weight <n>] [-postamble <file>] <crd.yaml> <out.md> [preamble.md]
-//
-// The output lands in the Hugo content tree and is gitignored: the
-// schemas are the source of truth, and the pages are build products,
-// regenerated whenever a schema or this program changes.
-//
-// The liken repositories run this program with
-// `go tool crdref`, pinned as a tool dependency of each docs
-// module. They ship several
-// CRDs in one manifest file, so -kind names the one a page
-// documents, and -title and -weight name and order the page. Their
-// reference pages carry hand-written sections under the field
-// tables, which -postamble supplies. Every flag defaults to what
-// this repository's own pages already have, so this repository's
-// Makefile rules pass none of them.
+// The page goes into the Hugo content tree and is committed. The
+// Makefile writes it again when the schema or this program changes.
+// A manifest file can contain several CRDs, so -kind selects one.
+// -title sets the page title, which is the kind by default. -weight
+// orders the page in its section. -postamble appends a hand-written
+// file after the field tables.
 package main
 
 import (
@@ -26,8 +19,8 @@ import (
 	"os"
 )
 
-// usage is both the -h help text and the error a wrong argument
-// count returns, so one line stays true for both.
+// usage is the -h help text and the error for a wrong number of
+// arguments.
 const usage = "usage: crdref [-kind <Kind>] [-title <title>] [-weight <n>] " +
 	"[-postamble <file>] <crd.yaml> <out.md> [preamble.md]"
 
@@ -38,9 +31,6 @@ func main() {
 	}
 }
 
-// The flags come before the positional arguments, and the
-// positional form is unchanged, so the Makefile rules that predate
-// the flags run as they are.
 func run(args []string) error {
 	flags := flag.NewFlagSet("crdref", flag.ContinueOnError)
 	flags.Usage = func() {
@@ -52,8 +42,7 @@ func run(args []string) error {
 	title := flags.String("title", "", "the front matter title, in place of the kind")
 	weight := flags.Int("weight", defaultWeight, "the front matter weight, which orders the page in its section")
 	if err := flags.Parse(args); err != nil {
-		// flags.Usage wrote the help text already, so -h is done and
-		// is not a failure.
+		// flags.Usage has printed the help text, so -h succeeds.
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -62,7 +51,7 @@ func run(args []string) error {
 
 	args = flags.Args()
 	if len(args) < 2 || len(args) > 3 {
-		return errors.New(usage)
+		return fmt.Errorf("expected 2 or 3 arguments, got %d\n%s", len(args), usage)
 	}
 	crd, err := os.ReadFile(args[0])
 	if err != nil {

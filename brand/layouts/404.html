@@ -1,7 +1,6 @@
 {{ define "main" }}
-{{/* Static hosts serve /404.html for any path that does not exist;
-GitHub Pages does this by convention, and nginx needs an error_page
-directive that points here. */}}
+{{/* GitHub Pages serves /404.html for any path that does not exist.
+nginx does the same when its error_page directive names this file. */}}
 <h1>Not found</h1>
 <p>This page does not exist. Start from the
 <a href="/docs/">manual</a> or the <a href="/">front page</a>.</p>

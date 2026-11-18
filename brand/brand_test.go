@@ -6,10 +6,8 @@ import (
 	"testing"
 )
 
-// The mark inlines into a page as markup, so a page is only as
-// well-formed as the SVG is. This parses it the way a browser would
-// have to: as one XML document with an svg root that carries its own
-// namespace, because an inlined document cannot borrow one.
+// A page inlines the mark as markup, so a malformed SVG breaks the
+// page. The svg root must declare its namespace itself.
 func TestMarkIsAWellFormedSVGDocument(t *testing.T) {
 	var root struct {
 		XMLName xml.Name
@@ -25,8 +23,7 @@ func TestMarkIsAWellFormedSVGDocument(t *testing.T) {
 	}
 }
 
-// The stylesheet inlines into every page, so an empty one is a page
-// with no style, and no build would notice.
+// An empty stylesheet gives unstyled pages without failing any build.
 func TestStylesheetIsNotEmpty(t *testing.T) {
 	if strings.TrimSpace(Stylesheet) == "" {
 		t.Fatal("the stylesheet is empty")

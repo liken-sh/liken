@@ -9,14 +9,13 @@ import (
 	"strings"
 )
 
-// CheckManual resolves every internal link in one site's content
-// tree. It walks contentRoot, collects each page's heading ids, and
-// checks every absolute link target against them, so a broken deep
-// link fails at authoring time instead of on the served site. It
-// returns one message per broken link, and none when every link
-// resolves. exceptions are the absolute link paths no content file
-// answers for, such as a build product the deploy stamps or a file
-// a module mount serves; each site passes its own list.
+// CheckManual checks every absolute link in the Markdown files under
+// contentRoot against the pages and their heading ids, so a broken
+// link fails a test before the site is published. It returns one
+// message for each broken link, or one message when the content tree
+// cannot be read. exceptions lists the link paths that
+// have no content file, such as a file that the deploy writes or that
+// a module mount serves.
 func CheckManual(contentRoot string, exceptions []string) []string {
 	excepted := make(map[string]bool, len(exceptions))
 	for _, path := range exceptions {
@@ -24,7 +23,7 @@ func CheckManual(contentRoot string, exceptions []string) []string {
 	}
 	pages, err := loadPages(contentRoot)
 	if err != nil {
-		return []string{fmt.Sprintf("cannot read the content tree at %s: %v", contentRoot, err)}
+		return []string{fmt.Sprintf("reading the content tree %s: %v", contentRoot, err)}
 	}
 	files := make([]string, 0, len(pages))
 	for file := range pages {
@@ -42,9 +41,8 @@ func CheckManual(contentRoot string, exceptions []string) []string {
 	return problems
 }
 
-// loadPages reads every Markdown file under root, keyed by its
-// path relative to root, which is the form the link targets
-// resolve against.
+// loadPages reads every Markdown file under root, keyed by its path
+// relative to root.
 func loadPages(root string) (map[string][]byte, error) {
 	pages := map[string][]byte{}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -68,9 +66,8 @@ func loadPages(root string) (map[string][]byte, error) {
 	return pages, nil
 }
 
-// resolveTarget checks one absolute link target against the loaded
-// pages. A target is either a served asset, a page, or a page with a
-// fragment; anything else is a broken link.
+// resolveTarget returns nil when target is an excepted path, a page,
+// or a page and the id of one of its headings.
 func resolveTarget(pages map[string][]byte, excepted map[string]bool, target string) error {
 	path, fragment, _ := strings.Cut(target, "#")
 	if excepted[path] {
@@ -84,15 +81,14 @@ func resolveTarget(pages map[string][]byte, excepted map[string]bool, target str
 		return nil
 	}
 	if !pageAnchors(page)[fragment] {
-		return fmt.Errorf("no heading in %s renders the id %q", path, fragment)
+		return fmt.Errorf("%s has no heading with the id %q", path, fragment)
 	}
 	return nil
 }
 
-// pageFor maps a URL path to its content file. Hugo renders
-// content/docs/guides/install.md at /docs/guides/install/, and a
-// section's _index.md at the section's own URL, so both spellings
-// answer for a path.
+// pageFor returns the content file that Hugo serves at a URL path.
+// Hugo serves docs/guides/install.md at /docs/guides/install/, and a
+// section's _index.md at the section's URL, so pageFor tries both.
 func pageFor(pages map[string][]byte, path string) ([]byte, error) {
 	trimmed := strings.Trim(path, "/")
 	if trimmed == "" {
@@ -104,5 +100,5 @@ func pageFor(pages map[string][]byte, path string) ([]byte, error) {
 	if page, ok := pages[filepath.Join(trimmed, "_index.md")]; ok {
 		return page, nil
 	}
-	return nil, fmt.Errorf("no content file answers for %s", path)
+	return nil, fmt.Errorf("no content file serves %s", path)
 }

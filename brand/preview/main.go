@@ -1,18 +1,17 @@
-// preview serves a built tree of the project's sites on a workstation,
-// so a person can read every manual together before anything
-// publishes.
+// preview serves the built sites on a workstation, so you can read
+// all the manuals together before they are published.
 //
-// The root Makefile builds each component's site into one tree, in the
-// layout of the one site: liken's manual at the root, and each
-// component's manual under its own prefix. `make preview` then runs
-// this program on that tree:
+// `make preview` at the top of the repository builds every
+// component's site into one tree, with liken's manual at the root and
+// each component's manual under its own prefix, and runs this program
+// on it:
 //
 //	go run ./preview -dir <tree> [-addr localhost:8080]
 //
-// A plain file server is almost enough. It differs from GitHub Pages
-// in two answers, and this program gives the answer Pages gives: every
-// page's Markdown twin is text/markdown, and a missing page gets the
-// site's own 404.html with the status 404.
+// It is a plain file server with two changes, so that it responds the
+// way GitHub Pages does. It serves each page's Markdown version, the
+// index.md beside its index.html, as text/markdown. It responds to a
+// missing page with the status 404 and the site's own 404.html.
 package main
 
 import (
@@ -43,21 +42,21 @@ func run(args []string) error {
 		return err
 	}
 	if *dir == "" {
-		return errors.New(usage)
+		return fmt.Errorf("-dir is required\n%s", usage)
 	}
 	fmt.Printf("serving %s at http://%s/\n", *dir, *addr)
 	return http.ListenAndServe(*addr, handler(*dir))
 }
 
-// handler serves root the way GitHub Pages serves a site. Go's table
-// of types has no entry for .md, so without the registration a twin
-// would go out as whatever the content sniffs as.
+// handler serves the tree at root. Go's MIME table has no entry for
+// .md, so without the registration the file server would guess a type
+// from the content of a Markdown version.
 func handler(root string) http.Handler {
 	_ = mime.AddExtensionType(".md", "text/markdown; charset=utf-8")
 	files := http.FileServer(http.Dir(root))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Cleaning the path as an absolute one drops every ".." at its top,
-		// so a request cannot name a file outside the tree.
+		// Clean removes a leading ".." from an absolute path, so a
+		// request cannot name a file outside the tree.
 		name := filepath.Join(root, filepath.Clean("/"+r.URL.Path))
 		if _, err := os.Stat(name); errors.Is(err, os.ErrNotExist) {
 			notFound(w, root)
@@ -67,8 +66,9 @@ func handler(root string) http.Handler {
 	})
 }
 
-// notFound answers with the site's own 404.html, which Hugo builds at
-// the root of the tree, or with a plain 404 when the tree has none.
+// notFound responds with the status 404 and the 404.html that Hugo
+// builds at the root of the tree, or with Go's plain-text 404 when
+// the tree has none.
 func notFound(w http.ResponseWriter, root string) {
 	page, err := os.Open(filepath.Join(root, "404.html"))
 	if err != nil {

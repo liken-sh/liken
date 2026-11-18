@@ -1,14 +1,13 @@
 //! The `liken` look, for a program that draws with `iced`.
 //!
-//! The mark and the palette come out of `liken.svg` and `liken.css`, the two
-//! originals in this repository, and this crate embeds both files and parses
-//! them. Nothing here is a copy of a number in those files, so the mark on a
-//! screen and the mark on a page cannot drift.
+//! This crate embeds `liken.svg` and `liken.css` from this repository and
+//! parses them on first use to get the mark and the palette. It copies no
+//! color or coordinate from those files, so the mark on a screen and the mark on a web
+//! page stay the same.
 //!
-//! The crate carries the mark, the palette, the pulse the mark runs on, and
-//! the family's two faces. It carries no type scale, no margins, and no
-//! layout. Those belong to the display that draws the mark, and a ten-foot
-//! screen and a web page do not share them.
+//! The crate has no type scale, margins, or layout. Each program that uses
+//! it sets its own, because a screen read from across a room needs
+//! different ones from a web page.
 
 pub mod font;
 pub mod mark;

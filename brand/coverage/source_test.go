@@ -7,15 +7,15 @@ import (
 	"testing"
 )
 
-// The fixture tree under testdata is a two-file Go module and one
-// Rust file, with a profile and a Cobertura report that describe
-// them. Every number below is countable by hand from those files.
+// tree is the source tree that testdata/go.out and
+// testdata/cobertura.xml describe. The expected numbers in these tests
+// can be counted by hand from those files.
 const tree = "testdata/tree"
 
 func TestReadGoProfileCountsStatements(t *testing.T) {
 	source, err := Read("testdata/go.out", tree)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/go.out: %v", err)
 	}
 	if source.Label != "Go (example.com/widget)" {
 		t.Errorf("label is %q, want the module path", source.Label)
@@ -31,7 +31,7 @@ func TestReadGoProfileCountsStatements(t *testing.T) {
 func TestReadGoProfileCountsEachFile(t *testing.T) {
 	source, err := Read("testdata/go.out", tree)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/go.out: %v", err)
 	}
 	for _, tc := range []struct {
 		name    string
@@ -50,15 +50,12 @@ func TestReadGoProfileCountsEachFile(t *testing.T) {
 	}
 }
 
-// A profile row names a block, not a line, and two blocks meet on
-// one line: the line that opens a branch belongs to the code before
-// it and to the branch itself. Such a line counts as covered, because
-// the test did reach it. Only the lines inside a block that never
-// ran are uncovered.
+// Line 5 of widget.go ends a block that ran and starts a branch that
+// did not, so it is covered.
 func TestReadGoProfileMarksLines(t *testing.T) {
 	source, err := Read("testdata/go.out", tree)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/go.out: %v", err)
 	}
 	file := fileNamed(t, source, "widget.go")
 	for _, tc := range []struct {
@@ -80,10 +77,10 @@ func TestReadGoProfileMarksLines(t *testing.T) {
 	}
 }
 
-func TestReadGoProfileTakesTheSourceText(t *testing.T) {
+func TestReadGoProfileReadsTheSourceText(t *testing.T) {
 	source, err := Read("testdata/go.out", tree)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/go.out: %v", err)
 	}
 	file := fileNamed(t, source, "widget.go")
 	if !strings.Contains(file.Text, "func Add(a, b int) int {") {
@@ -94,7 +91,7 @@ func TestReadGoProfileTakesTheSourceText(t *testing.T) {
 func TestReadCoberturaCountsLines(t *testing.T) {
 	source, err := Read("testdata/cobertura.xml", tree)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/cobertura.xml: %v", err)
 	}
 	if source.Label != "cobertura.xml" {
 		t.Errorf("label is %q, want the input's name", source.Label)
@@ -117,7 +114,7 @@ func TestReadCoberturaCountsLines(t *testing.T) {
 func TestReadCoberturaMarksLines(t *testing.T) {
 	source, err := Read("testdata/cobertura.xml", tree)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/cobertura.xml: %v", err)
 	}
 	file := fileNamed(t, source, "spin/src/spin.rs")
 	for _, tc := range []struct {
@@ -136,18 +133,18 @@ func TestReadCoberturaMarksLines(t *testing.T) {
 	}
 }
 
-// The XML may come from another machine, where the tree stood at
-// another path. The root wins whenever it holds the file, so a report
-// built here reads the sources here.
+// The XML may come from another machine, where the source tree was at
+// a different path. Read uses the root when it has the file and falls
+// back to the path in the source element otherwise.
 func TestReadCoberturaFallsBackToTheSourceElement(t *testing.T) {
 	absolute, err := filepath.Abs(tree)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the tree path absolute: %v", err)
 	}
 	elsewhere := t.TempDir()
 	source, err := Read(coberturaFrom(t, absolute), elsewhere)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the Cobertura copy: %v", err)
 	}
 	file := fileNamed(t, source, "spin/src/spin.rs")
 	if !strings.Contains(file.Text, "pub fn spin") {
@@ -155,13 +152,12 @@ func TestReadCoberturaFallsBackToTheSourceElement(t *testing.T) {
 	}
 }
 
-// A file that neither the root nor the source element holds still
-// gets its row, because its numbers are true even where its text is
-// missing.
+// A file that is in neither the root nor the source element still
+// gets a row, because its coverage numbers are valid without its text.
 func TestReadKeepsAFileWithNoTextOnDisk(t *testing.T) {
 	source, err := Read("testdata/cobertura.xml", t.TempDir())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/cobertura.xml: %v", err)
 	}
 	file := fileNamed(t, source, "spin/src/spin.rs")
 	if file.Text != "" {
@@ -175,16 +171,16 @@ func TestReadKeepsAFileWithNoTextOnDisk(t *testing.T) {
 func TestReadRefusesAnInputOfNeitherKind(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "notes.txt")
 	if err := os.WriteFile(path, []byte("coverage was fine\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing notes.txt: %v", err)
 	}
 	if _, err := Read(path, tree); err == nil {
 		t.Error("a file that is neither a profile nor a Cobertura report must be refused")
 	}
 }
 
-// An input of the right kind can still be damaged, by a run that
-// stopped halfway or by a merge of two files. The report refuses it
-// rather than counting a part of it.
+// An input of a known format can still be damaged, for example by a
+// run that stopped halfway or by two files merged together. Read
+// returns an error and does not count the part it could parse.
 func TestReadRefusesADamagedInput(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -196,7 +192,7 @@ func TestReadRefusesADamagedInput(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "input")
 			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing the input: %v", err)
 			}
 			if _, err := Read(path, tree); err == nil {
 				t.Error("a damaged input must be refused")
@@ -217,8 +213,6 @@ func TestReadRefusesATreeWithNoModuleFile(t *testing.T) {
 	}
 }
 
-// fileNamed finds one file's row, so each test above reads as the
-// number it checks.
 func fileNamed(t *testing.T, source *Source, name string) File {
 	t.Helper()
 	for _, file := range source.Files {
@@ -226,23 +220,22 @@ func fileNamed(t *testing.T, source *Source, name string) File {
 			return file
 		}
 	}
-	t.Fatalf("%s holds no file named %s", source.Label, name)
+	t.Fatalf("%s has no file named %s", source.Label, name)
 	return File{}
 }
 
-// coberturaFrom writes a report whose <source> is the given
-// directory, so a test can put the tree where only that element
-// names it.
+// coberturaFrom writes a copy of the Cobertura fixture with its
+// <source> element set to source, and returns the path of the copy.
 func coberturaFrom(t *testing.T, source string) string {
 	t.Helper()
 	report, err := os.ReadFile("testdata/cobertura.xml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/cobertura.xml: %v", err)
 	}
 	path := filepath.Join(t.TempDir(), "cobertura.xml")
 	moved := strings.Replace(string(report), "/nowhere/tree", source, 1)
 	if err := os.WriteFile(path, []byte(moved), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the Cobertura copy: %v", err)
 	}
 	return path
 }

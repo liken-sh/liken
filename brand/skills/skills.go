@@ -1,13 +1,14 @@
-// The generator: from one guide's Markdown to one SKILL.md, and from
-// a site's guides directory to the skills directory this program
-// owns.
+// Generate turns one guide's Markdown into one SKILL.md, and Emit
+// turns a site's guides directory into the skills directory that this
+// program writes.
 //
-// A guide already has what a skill needs: the steps, the exact
-// commands, and the checks. The one thing it lacks is a trigger
-// line, and the one thing an agent lacks is the site, because it
-// reads the skill from a checkout. So the front matter gains a
-// required description, and every link becomes a full URL. Nothing
-// else about the guide changes, so the guide stays the one source.
+// A guide already has the steps, the exact commands, and the checks
+// that a skill needs. It does not have a description that tells an
+// agent when to use it, and an agent reads the skill from a checkout,
+// where a site link resolves to nothing. So the front matter must have
+// a description, and every link becomes a full URL. Nothing else about
+// the guide changes, so the guide stays the only source.
+
 package main
 
 import (
@@ -24,11 +25,11 @@ import (
 	"github.com/liken-sh/liken/brand/linkcheck"
 )
 
-// preamble opens every skill. It names where the guide lives on the
-// site, and it tells the agent to check the kubectl context before
-// the first command, because a workstation with two contexts is the
-// usual case and the wrong cluster is the first mistake an agent
-// makes.
+// preamble is the first paragraph of every skill. It gives the
+// guide's URL, and it tells the agent to check the kubectl context
+// before the first command, because a workstation often has more than
+// one context, and a command against the wrong cluster changes that
+// cluster.
 const preamble = "This skill is the guide at %s, emitted for agents. " +
 	"Before the first command, run `kubectl config current-context` " +
 	"and confirm that it names the cluster the person means."
@@ -43,10 +44,10 @@ const maxNameLength = 64
 
 // Generate renders one guide as one SKILL.md. The slug is the guide
 // file's base name, and it becomes the skill's name. The front
-// matter's title and weight are dropped: the body already carries
-// the H1, and a skill has no order in a section. The description is
-// required, because the trigger line is the one thing a skill has
-// that a guide does not. base is the site's base URL, which every
+// matter's title and weight are dropped, because the body already has
+// the H1 and a skill has no order in a section. The description is
+// required, because an agent reads it to decide when to load the
+// skill. base is the site's base URL, which every
 // link in the body resolves against.
 func Generate(guide []byte, slug string, base string) ([]byte, error) {
 	file := slug + ".md"
@@ -73,9 +74,9 @@ func Generate(guide []byte, slug string, base string) ([]byte, error) {
 	}
 
 	var b strings.Builder
-	// A double-quoted YAML scalar carries any description, colons
-	// and quotation marks included, and Go's quoting rules produce
-	// one that YAML reads back unchanged.
+	// A double-quoted YAML scalar can contain any description,
+	// including colons and quotation marks, and YAML reads a string
+	// that strconv.Quote wrote back unchanged.
 	fmt.Fprintf(&b, "---\nname: %s\ndescription: %s\n---\n\n", slug, strconv.Quote(front.Description))
 	fmt.Fprintf(&b, preamble+"\n\n", page)
 	b.WriteString(strings.TrimLeft(rewriteLinks(body, base, page), "\n"))
@@ -83,8 +84,8 @@ func Generate(guide []byte, slug string, base string) ([]byte, error) {
 }
 
 // Emit writes one skill for every guide in guidesDir, then removes
-// every other skill directory in outDir. This program owns outDir,
-// so a renamed or deleted guide leaves no stale skill. The section
+// every other skill directory in outDir. Only this program writes
+// outDir, so a renamed or deleted guide leaves no stale skill. The section
 // page _index.md, files that are not Markdown, and subdirectories
 // are not guides, so Emit skips them and does not report them.
 func Emit(guidesDir, outDir, base string) error {
@@ -123,8 +124,8 @@ func Emit(guidesDir, outDir, base string) error {
 }
 
 // sweep removes the directories in outDir that this run did not
-// write. It removes only directories: a file at the top of outDir,
-// such as a README, is the repository's, not this program's.
+// write. It removes only directories, because a file at the top of
+// outDir, such as a README, is written by a person.
 func sweep(outDir string, written map[string]bool) error {
 	entries, err := os.ReadDir(outDir)
 	if err != nil {
@@ -159,8 +160,9 @@ func splitFrontMatter(guide []byte) (matter, body string) {
 
 // rewriteLinks rewrites the link targets on the body's prose lines
 // and returns every line, fences included, because the output is the
-// guide itself. A fenced block holds commands or output, so its text
-// stays as written, the same rule linkcheck applies when it scans.
+// guide itself. A fenced block contains commands or output, so its
+// text stays as written. linkcheck skips fenced blocks for the same
+// reason.
 func rewriteLinks(body, base string, page *url.URL) string {
 	lines := strings.Split(body, "\n")
 	inFence := false
@@ -183,8 +185,7 @@ func rewriteLinks(body, base string, page *url.URL) string {
 // reads the skill from disk, where a site path resolves to nothing.
 // An absolute path joins the base, and a relative path resolves
 // against the guide's own page. A fragment, an empty target, and a
-// target that already has a scheme or a host say where they point
-// and stay as they are.
+// target that already has a scheme or a host stay as they are.
 func rewriteTarget(target, base string, page *url.URL) string {
 	if target == "" || strings.HasPrefix(target, "#") {
 		return target

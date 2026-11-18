@@ -1,14 +1,13 @@
-{{- /* The footer under every page: the page's Markdown twin and, on a
-site that publishes one, the test coverage report. A site with more
-to say in its footer shadows this partial. */ -}}
+{{- /* The footer under every page links the page's Markdown version
+and, on a site that publishes one, the test coverage report. A site
+that needs other footer links overrides this partial. */ -}}
 <footer>
   {{ with .OutputFormats.Get "markdown" -}}
   <a href="{{ .RelPermalink }}">This page as Markdown</a>
   {{- end }}
-  {{- /* A site that publishes a test coverage report sets the
-  coverage parameter, and its footer links the page the report lands
-  on. A site that sets nothing shows no link, and its footer is the
-  one it has today. */ -}}
+  {{- /* A site that publishes a test coverage report at
+  /coverage.html sets the coverage parameter. A site that does not set
+  it shows no link. */ -}}
   {{- if .Site.Params.coverage }}
   <a href="/coverage.html">Test coverage</a>
   {{- end }}

@@ -1,19 +1,19 @@
-//! The mark comes out of `liken.svg`. The values below are the ones that file
-//! writes, so an edit to a polygon fails here until the test states the new
-//! shape.
+//! The tests write out the values that `liken.svg` contains. When someone
+//! edits a polygon in that file, these tests fail until they are updated
+//! with the new shape.
 
 use iced_widget::core::{Color, Point};
 use liken_iced::mark;
 use liken_iced::palette;
 
-/// Where the tests place the mark: the middle of a 1920 by 1080 canvas, at the
-/// third of the width `liken`'s idle screen gives it.
+/// The center of a 1920 by 1080 canvas, and a third of its width, as the
+/// idle screen in `media-operator/idle` places the mark.
 const CENTER: Point = Point::new(960.0, 540.0);
 const SPAN: f32 = 640.0;
 
-/// A vertex of the mark mapped onto the canvas, computed from [`mark::bounds`]
-/// alone. The tests map their own vertices, so a mapping the crate got wrong
-/// does not agree with itself.
+/// Maps a vertex of the mark onto the canvas, using only [`mark::bounds`].
+/// The tests do not call the crate's own mapping, because a wrong mapping in
+/// the crate would then agree with itself and pass.
 fn onto_canvas(point: Point) -> Point {
     let box_ = mark::bounds();
     let scale = SPAN / box_.width;
@@ -41,7 +41,7 @@ fn every_hexagon_has_six_vertices_and_no_two_are_the_same() {
         for (at, point) in hexagon.points.iter().enumerate() {
             assert!(
                 !hexagon.points[at + 1..].contains(point),
-                "hexagon {index} repeats a vertex"
+                "hexagon {index} has a repeated vertex, want six distinct vertices"
             );
         }
     }
@@ -100,14 +100,14 @@ fn the_mark_draws_in_four_greens_and_one_orange() {
         fills,
         ["#4a5d3a", "#6e8352", "#93a877", "#b4c49a", "#e0872f"]
     );
-    // The darkest green and the palest are the two `--link` tokens of
-    // liken.css, one for each color scheme.
+    // The darkest and the palest green are the `--link` tokens of
+    // `liken.css` for the light and the dark color scheme.
     assert_eq!(palette::light().link, Color::from_rgb8(0x4a, 0x5d, 0x3a));
     assert_eq!(palette::dark().link, Color::from_rgb8(0xb4, 0xc4, 0x9a));
 }
 
 #[test]
-fn the_box_holds_every_vertex() {
+fn the_bounds_equal_the_extremes_of_every_vertex() {
     let box_ = mark::bounds();
 
     assert_eq!(
@@ -138,7 +138,7 @@ fn a_centroid_is_the_middle_of_its_hexagon() {
 
             assert!(
                 (reach - radius).abs() < 0.01,
-                "hexagon {index} reaches {reach} at one vertex and {radius} at another"
+                "hexagon {index} has a vertex {reach} from its centroid and another {radius}, want equal distances"
             );
         }
     }
@@ -159,7 +159,7 @@ fn a_resting_mark_fills_the_span_it_is_given() {
 }
 
 #[test]
-fn a_resting_mark_holds_the_still_shape() {
+fn a_mark_at_rest_places_every_vertex_on_its_unscaled_position() {
     for (index, hexagon) in mark::hexagons().iter().enumerate() {
         let placed = hexagon.place(CENTER, SPAN, 0.0, 41.75);
 
@@ -172,7 +172,7 @@ fn a_resting_mark_holds_the_still_shape() {
 }
 
 #[test]
-fn the_pulse_moves_a_vertex_about_its_centroid() {
+fn the_pulse_scales_each_vertex_distance_from_the_centroid() {
     for (index, hexagon) in mark::hexagons().iter().enumerate() {
         let centroid = onto_canvas(hexagon.centroid);
         let still = hexagon.place(CENTER, SPAN, 0.0, 41.75);
@@ -185,7 +185,7 @@ fn the_pulse_moves_a_vertex_about_its_centroid() {
 
             assert!(
                 (reach - expected).abs() < 0.001,
-                "hexagon {index} reaches {reach} and the pulse asks for {expected}"
+                "hexagon {index} has a vertex {reach} from its centroid, want {expected}"
             );
         }
     }
@@ -208,20 +208,15 @@ fn the_stroke_follows_the_canvas_and_not_the_pulse() {
     }
 }
 
-// The mark in motion, pinned at three moments: at rest, at full swing,
-// and part way down a ramp. The vertices are this crate's own contract:
-// they are what every screen that draws the mark draws, and a moving
-// hexagon that lands anywhere else is a change of rhythm a person
-// watching would see.
-/// The canvas is 1920 by 1080, where the mark takes a third of the width and
-/// centers on the middle of the screen.
+// Pins what a viewer sees: a change to the placement or to the pulse
+// that moves a drawn vertex fails here.
 #[test]
-fn the_mark_holds_its_vertices_at_three_moments() {
+fn the_mark_places_vertices_at_three_energies_and_phases() {
     const CENTER: Point = Point::new(960.0, 540.0);
     const SPAN: f32 = 640.0;
 
-    // Each row is a hexagon, a moment, and that hexagon's first three
-    // vertices, in the order `liken.svg` writes them.
+    // Each row is a hexagon index, an energy, a phase, and the first
+    // three vertices of that hexagon in the order `liken.svg` lists them.
     let expected = [
         (
             0,
@@ -268,7 +263,7 @@ fn the_mark_holds_its_vertices_at_three_moments() {
             assert!(
                 (drawn.x - x).abs() < 0.01 && (drawn.y - y).abs() < 0.01,
                 "hexagon {index} at energy {energy} phase {phase} \
-                 draws {drawn:?} off its pinned vertex ({x}, {y})"
+                 draws {drawn:?}, want the vertex ({x}, {y})"
             );
         }
     }

@@ -1,18 +1,13 @@
-// apiref generates a manual's route reference page.
+// apiref writes a manual's HTTP route reference page, as Markdown for
+// Hugo, from an OpenAPI document. A manual's docs Makefile runs it as
+// `go tool apiref`, which the docs module's go.mod declares as a tool:
 //
-// The docs Makefile runs it once per API:
+//	go tool apiref [-title <title>] [-weight <n>] [-postamble <file>] <openapi.json> <out.md> [preamble.md]
 //
-//	go run ./apiref [-title <title>] [-weight <n>] [-postamble <file>] <openapi.json> <out.md> [preamble.md]
-//
-// The output lands in the Hugo content tree beside the hand-written
-// page that tells the API's story. The document is the source of
-// truth, and the page is a build product, regenerated whenever the
-// document or this program changes.
-//
-// The liken repositories run this program with `go tool apiref`,
-// pinned as a tool dependency of each docs module, the way they pin
-// crdref and Hugo. Their reference sections already hold
-// hand-written pages, so -title and -weight name and order this one.
+// Do not edit the output by hand. Regenerate it when the OpenAPI
+// document or this program changes. The page shares its reference
+// section with other pages, so -title and -weight set its title and
+// its place in the section's order.
 package main
 
 import (
@@ -22,8 +17,8 @@ import (
 	"os"
 )
 
-// usage is both the -h help text and the error a wrong argument
-// count returns, so one line stays true for both.
+// usage is the -h help text and also ends the error for a wrong number
+// of arguments, so the two cannot differ.
 const usage = "usage: apiref [-title <title>] [-weight <n>] " +
 	"[-postamble <file>] <openapi.json> <out.md> [preamble.md]"
 
@@ -40,12 +35,11 @@ func run(args []string) error {
 		fmt.Fprintln(flags.Output(), usage)
 		flags.PrintDefaults()
 	}
-	postamble := flags.String("postamble", "", "append this file after the generated tables")
+	postamble := flags.String("postamble", "", "append this file after the generated sections")
 	title := flags.String("title", "", "the front matter title, in place of the document's own")
 	weight := flags.Int("weight", defaultWeight, "the front matter weight, which orders the page in its section")
 	if err := flags.Parse(args); err != nil {
-		// flags.Usage wrote the help text already, so -h is done and
-		// is not a failure.
+		// flags.Usage has printed the help for -h, which is not an error.
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -54,7 +48,7 @@ func run(args []string) error {
 
 	args = flags.Args()
 	if len(args) < 2 || len(args) > 3 {
-		return errors.New(usage)
+		return fmt.Errorf("expected 2 or 3 arguments, got %d\n%s", len(args), usage)
 	}
 	openAPIJSON, err := os.ReadFile(args[0])
 	if err != nil {

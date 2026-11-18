@@ -7,21 +7,21 @@ import (
 	"testing"
 )
 
-// The report the tests read: the fixture module and the fixture Rust
-// file, in the order the command line would give them.
+// fixtureReport renders the report for the fixture Go profile and the
+// fixture Cobertura report, in that order.
 func fixtureReport(t *testing.T) string {
 	t.Helper()
 	var sources []*Source
 	for _, input := range []string{"testdata/go.out", "testdata/cobertura.xml"} {
 		source, err := Read(input, tree)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading %s: %v", input, err)
 		}
 		sources = append(sources, source)
 	}
 	page, err := Render("widget", sources)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the report: %v", err)
 	}
 	return string(page)
 }
@@ -35,9 +35,9 @@ func TestRenderNamesTheReport(t *testing.T) {
 	}
 }
 
-// The summary says what each input is, in which unit it counts, and
-// what it totals. Go counts statements and Cobertura counts lines, so
-// the unit belongs beside every number.
+// The summary shows each input's label, unit, and totals. Go counts
+// statements and Cobertura counts lines, so the unit appears beside
+// every number.
 func TestRenderSummarizesEveryInput(t *testing.T) {
 	page := fixtureReport(t)
 	for _, want := range []string{
@@ -63,9 +63,8 @@ func TestRenderCountsEveryFile(t *testing.T) {
 	}
 }
 
-// Every file name in a table is a link to that file's own source
-// block further down the one page, so a reader lands on the code
-// instead of scrolling for it.
+// Every file name in a table links to that file's source block on the
+// same page.
 func TestRenderLinksEveryNameToItsSource(t *testing.T) {
 	page := fixtureReport(t)
 	ids := map[string]bool{}
@@ -78,13 +77,13 @@ func TestRenderLinksEveryNameToItsSource(t *testing.T) {
 	}
 	for _, match := range links {
 		if !ids[match[1]] {
-			t.Errorf("the link to #%s lands on nothing", match[1])
+			t.Errorf("the page links to #%s, which is the id of no element on it", match[1])
 		}
 	}
 }
 
-// The source block colors the code the tests reached and the code
-// they missed. Everything else, such as a comment, stays plain.
+// A line that the coverage data does not mention, such as a comment,
+// has only the line class.
 func TestRenderColorsTheLines(t *testing.T) {
 	widget := blockOf(t, fixtureReport(t), "f0-widget-go")
 	for _, tc := range []struct {
@@ -106,16 +105,15 @@ func TestRenderColorsTheLines(t *testing.T) {
 func TestRenderNumbersTheLines(t *testing.T) {
 	widget := blockOf(t, fixtureReport(t), "f0-widget-go")
 	if !strings.Contains(widget, "func Add(a, b int) int {") {
-		t.Errorf("the block does not hold widget.go's text:\n%s", widget)
+		t.Errorf("the block does not contain widget.go's text:\n%s", widget)
 	}
 	if classOfLine(t, widget, 10) != "line" {
 		t.Errorf("the block ends before widget.go does:\n%s", widget)
 	}
 }
 
-// A file with nothing missing is still on the page, because a
-// reader looking for a file must find it. It opens closed, so the
-// files that need reading are the ones on show.
+// A fully covered file stays on the page, in a details element that
+// starts closed.
 func TestRenderCollapsesAFullyCoveredFile(t *testing.T) {
 	page := fixtureReport(t)
 	if !strings.Contains(page, `<details class="file" id="f0-count-go">`) {
@@ -126,13 +124,13 @@ func TestRenderCollapsesAFullyCoveredFile(t *testing.T) {
 	}
 }
 
-// The report is one file. A site publishes it and a release ships
-// it, so it must draw itself with nothing else beside it.
+// The report must render with no other file, so it has no script,
+// linked stylesheet, image, or external URL.
 func TestRenderIsSelfContained(t *testing.T) {
 	page := fixtureReport(t)
 	for _, forbidden := range []string{"<script", "<link", "<img", "url(http"} {
 		if strings.Contains(page, forbidden) {
-			t.Errorf("the page holds %q, so it asks for a second file", forbidden)
+			t.Errorf("the page contains %q, so the report needs a second file", forbidden)
 		}
 	}
 	if !strings.Contains(page, "--link:") {
@@ -143,17 +141,17 @@ func TestRenderIsSelfContained(t *testing.T) {
 func TestRenderEscapesTheSource(t *testing.T) {
 	page := fixtureReport(t)
 	if strings.Contains(page, `println("negative")`) {
-		t.Error("the source text lands in the page unescaped")
+		t.Error("the page contains the source text unescaped")
 	}
 }
 
-// blockOf cuts one file's source block out of the page, so a test
-// reads the lines of the file it names and not of another.
+// blockOf returns the part of the page that holds the source block
+// with the given id.
 func blockOf(t *testing.T, page, id string) string {
 	t.Helper()
 	start := strings.Index(page, `id="`+id+`"`)
 	if start < 0 {
-		t.Fatalf("the page has no block with id %s", id)
+		t.Fatalf("the page has no block with the id %s", id)
 	}
 	end := strings.Index(page[start:], "</details>")
 	if end < 0 {
@@ -164,8 +162,8 @@ func blockOf(t *testing.T, page, id string) string {
 
 var lineSpan = regexp.MustCompile(`<span class="([^"]+)"><span class="number">\s*(\d+)</span>`)
 
-// classOfLine reports how one numbered line of a source block is
-// colored.
+// classOfLine returns the CSS class of the numbered line in a source
+// block.
 func classOfLine(t *testing.T, block string, number int) string {
 	t.Helper()
 	for _, match := range lineSpan.FindAllStringSubmatch(block, -1) {

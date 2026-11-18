@@ -1,24 +1,15 @@
-# This Makefile builds the mark (liken.svg) and everything derived
-# from it, then installs the copies that the Hugo theme serves.
-# liken.svg and liken.css are the originals; every other image file
-# comes from liken.svg, and every file under static/ and assets/ is a
-# copy of one of the originals.
+# Builds the images derived from the mark, liken.svg, and copies the
+# mark and the stylesheet, liken.css, into static/ and assets/, where
+# the Hugo theme serves them. Every generated file is committed,
+# because a site uses this directory as its theme and runs nothing
+# inside it. After you change the mark or the stylesheet, run `make`
+# and commit what changes. CI runs only the test targets.
 #
-# Every derived file is committed. A site reads this directory as its
-# theme and runs nothing inside it, so the tree itself must already
-# hold everything the theme serves. The default target
-# is for a person who changes the mark or the stylesheet: edit an
-# original, run `make`, and commit the files that change. CI runs the
-# check targets below, `test-go` and `test-rust`, and none of the
-# rules above them.
-#
-# rsvg-convert (from librsvg) turns the vector image into pixels, and
-# ImageMagick packs the multi-size .ico file.
+# rsvg-convert (from librsvg) rasterizes the mark, and ImageMagick
+# packs the .ico file.
 
-# A recipe that fails, or a build that is killed during one, leaves its
-# target partly written and newer than its inputs. make deletes that
-# target, so the next build makes it again and does not take it as
-# current.
+# Delete the target of a recipe that fails, so that the next build
+# does not take a partly written file as current.
 .DELETE_ON_ERROR:
 
 COPIES := static/favicon.ico static/icon.svg \
@@ -27,11 +18,8 @@ COPIES := static/favicon.ico static/icon.svg \
 
 all: favicon.ico liken.png $(COPIES)
 
-# This is the browser-tab icon, packed at three sizes so the tab stays
-# sharp whether the browser asks for 16, 32, or 48 pixels.
-# rsvg-convert rasterizes each size straight from the vector image.
-# Rasterizing one large image and downscaling it would blur the
-# 16-pixel size.
+# Each size is rasterized from the vector image, because downscaling
+# one large raster blurs the 16-pixel size.
 favicon.ico: liken.svg
 	rsvg-convert -w 16 -h 16 $< -o favicon-16.png
 	rsvg-convert -w 32 -h 32 $< -o favicon-32.png
@@ -39,20 +27,16 @@ favicon.ico: liken.svg
 	magick favicon-16.png favicon-32.png favicon-48.png $@
 	rm -f favicon-16.png favicon-32.png favicon-48.png
 
-# This is a raster export for places that will not accept a vector
-# image, mainly a GitHub organization avatar. The image is transparent
-# and square, so the host's own background shows through.
+# For places that do not accept a vector image, such as a GitHub
+# organization avatar.
 liken.png: liken.svg
 	rsvg-convert -w 1024 -h 1024 $< -o $@
 
-# These are the theme's public files. Hugo merges a theme's static/
-# tree into every consuming site's output, so these copies give each
-# site the same URLs. The two icon names are the ones browsers fetch
-# on their own. The brand/ directory gives the mark a stable public
-# URL, so a page anywhere can embed the image without a deep link
-# into the forge. The stylesheet goes to assets/ rather than static/,
-# because the theme inlines it into every page instead of serving it
-# as a file, and assets/ is the tree Hugo reads for that.
+# Hugo copies a theme's static/ tree into every site that uses the
+# theme, so every site serves these files at the same URLs.
+# static/brand/ gives the mark a URL that any page can embed without
+# linking into the forge. The stylesheet goes in assets/, because the
+# theme inlines it with resources.Get, which reads assets/.
 static/favicon.ico: favicon.ico
 	mkdir -p static
 	cp $< $@
@@ -73,17 +57,11 @@ assets/liken.css: liken.css
 	mkdir -p assets
 	cp $< $@
 
-# The checks for this module's Go packages, linkcheck, crdref, and skills.
-# staticcheck and go-test-coverage are pinned tool dependencies in
-# go.mod, the way the sites pin Hugo, so `go tool` is the whole
-# toolchain.
-#
-# One run of the tests gives both the race check and the coverage
-# profile, because -race with -covermode=atomic does both.
+# staticcheck and go-test-coverage are tool dependencies in go.mod.
 
-# A package with no test file writes no rows to the profile, so the
-# gate never counts it: its number is not low, it is missing. This
-# lists such packages, and test-go fails on the first one.
+# A package with no test file writes nothing to the coverage profile,
+# so the coverage gate cannot fail it. test-go fails on such a package
+# instead.
 UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./...
 
 test: test-go test-rust
@@ -97,10 +75,8 @@ test-go:
 	go test -race -covermode=atomic -coverprofile=coverage.out ./...
 	go tool go-test-coverage --config=.testcoverage.yml
 
-# The checks for liken-iced, the Rust crate under iced/. It parses the
-# mark and the stylesheet, so a change to liken.svg or liken.css that
-# the crate cannot read fails here. iced/Makefile holds the coverage
-# floor, and iced/rust-toolchain.toml pins the compiler.
+# liken-iced parses liken.svg and liken.css, so this also fails on a
+# change to either that the crate cannot read.
 test-rust:
 	$(MAKE) -C iced test
 

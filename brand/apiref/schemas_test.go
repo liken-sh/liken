@@ -28,18 +28,16 @@ func TestTypeCell(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := typeCell(parseSchema(t, tc.schema), "spec.field"); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
+				t.Errorf("the result is %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-// A table outside the schemas section has no section to link an
-// object to, so an object declared inline there renders as a word.
 func TestTypeCellLinksNoSectionWithoutAPath(t *testing.T) {
 	schema := parseSchema(t, `{"type":"object","properties":{"a":{"type":"string"}}}`)
 	if got := typeCell(schema, ""); got != "object" {
-		t.Errorf("got %q, want %q", got, "object")
+		t.Errorf("the result is %q, want %q", got, "object")
 	}
 }
 
@@ -60,7 +58,7 @@ func TestCellText(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := cellText(parseSchema(t, tc.schema)); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
+				t.Errorf("the result is %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -79,57 +77,49 @@ func TestRowAnchor(t *testing.T) {
 	}
 }
 
-// A reference that points back to itself resolves to the reference
-// rather than to a program that never finishes.
 func TestResolveStopsOnALoop(t *testing.T) {
 	document := parseSchema(t, `{"components":{"schemas":{"A":{"$ref":"#/components/schemas/A"}}}}`)
 	resolved := resolve(document, parseSchema(t, `{"$ref":"#/components/schemas/A"}`))
 	if got := resolved.member("$ref").value(); got != "#/components/schemas/A" {
-		t.Errorf("got %q, want the reference itself", got)
+		t.Errorf("the result is %q, want the reference itself", got)
 	}
 }
 
-func TestResolveKeepsAReferenceTheDocumentDoesNotHold(t *testing.T) {
+func TestResolveKeepsAReferenceTheDocumentDoesNotDefine(t *testing.T) {
 	document := parseSchema(t, `{"components":{"schemas":{}}}`)
 	resolved := resolve(document, parseSchema(t, `{"$ref":"#/components/schemas/Missing"}`))
 	if got := resolved.member("$ref").value(); got != "#/components/schemas/Missing" {
-		t.Errorf("got %q, want the reference itself", got)
+		t.Errorf("the result is %q, want the reference itself", got)
 	}
 }
 
-// RFC 6901 writes a slash in a name as ~1 and a tilde as ~0, so a
-// component whose name holds either is still reached.
 func TestResolveReadsAnEscapedPointer(t *testing.T) {
 	document := parseSchema(t, `{"components":{"schemas":{"a/b":{"description":"the one"}}}}`)
 	resolved := resolve(document, parseSchema(t, `{"$ref":"#/components/schemas/a~1b"}`))
 	if got := resolved.member("description").value(); got != "the one" {
-		t.Errorf("got %q, want %q", got, "the one")
+		t.Errorf("the result is %q, want %q", got, "the one")
 	}
 }
 
-// parseSchema turns an inline JSON fragment into the node the
-// renderers take, so each row above stays one line instead of a
-// fixture file.
 func parseSchema(t *testing.T, fragment string) *node {
 	t.Helper()
 	parsed, err := parse([]byte(fragment))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the schema fragment: %v", err)
 	}
 	return parsed
 }
 
-// The rendered page is Markdown, and a table row that loses a column
-// separator loses its columns, so every cell the page writes stays
-// on one line.
-func TestNoCellHoldsALineBreak(t *testing.T) {
+// A line break inside a cell ends the Markdown table row early, so
+// every line that starts a row must end it with "|".
+func TestNoCellContainsALineBreak(t *testing.T) {
 	page := generateDisplayPage(t)
 	for _, line := range strings.Split(page, "\n") {
 		if !strings.HasPrefix(line, "|") {
 			continue
 		}
 		if !strings.HasSuffix(line, "|") {
-			t.Errorf("this row does not end the table row: %q", line)
+			t.Errorf("the table row does not end with a pipe: %q", line)
 		}
 	}
 }

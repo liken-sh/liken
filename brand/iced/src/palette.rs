@@ -1,22 +1,28 @@
-//! Five of the color tokens of `liken.css`, in both of its schemes. The others,
-//! such as `--panel`, the fill behind a code block, color parts of a page that
-//! a canvas does not have. `--rule` is the border of a table on a page, and a
-//! display draws it under a heading or between the groups of a table.
+//! Five color tokens of `liken.css`, in its light and dark schemes.
 //!
-//! `liken.css` is the original. Its `:root` block holds the light scheme, and
-//! the block under the `prefers-color-scheme: dark` query holds the dark one. A
-//! program that draws with `iced` reads the same values a page reads, so a
-//! color changes in the stylesheet and nowhere else.
+//! The stylesheet has other tokens, such as `--panel`, the background
+//! of a code block, but they style parts of a web page that a canvas
+//! does not have. The crate also reads `--rule`, a table border on a
+//! page, because a display can use it for a line under a heading or
+//! between groups of rows.
 //!
-//! The crate gives a token no role. A display names the roles it needs, and two
-//! displays name them differently. `liken`'s idle screen draws its text in the
-//! dark `ink` and its accent in the dark `link`.
+//! `liken.css` is the source of the values. Its `:root` block is the
+//! light scheme, and the `:root` block inside the
+//! `prefers-color-scheme: dark` media query is the dark one. This
+//! module parses those blocks instead of copying the values, so each
+//! color is defined only in the stylesheet.
+//!
+//! The crate does not assign roles to tokens. Each display decides
+//! which token it uses for what. `liken`'s idle screen draws text in
+//! the dark scheme's `ink`, fills its bar with the dark scheme's `link`,
+//! and draws the bar's track in the light scheme's `link`.
 
 use std::sync::LazyLock;
 
 use iced_widget::core::Color;
 
-/// The stylesheet, embedded so a consumer needs no file at run time.
+/// The stylesheet is compiled in, so a consumer needs no file at run
+/// time.
 const CSS: &str = include_str!("../../liken.css");
 
 /// One color scheme.
@@ -24,15 +30,15 @@ const CSS: &str = include_str!("../../liken.css");
 pub struct Palette {
     /// `--ink`, the color of body text.
     pub ink: Color,
-    /// `--ink-muted`, the color of text that reads under body text.
+    /// `--ink-muted`, the color of secondary text.
     pub ink_muted: Color,
-    /// `--page`, the color of the ground behind everything.
+    /// `--page`, the background color.
     pub page: Color,
-    /// `--link`, the accent. It is the darkest lichen green on a light page
-    /// and the palest on a dark one, so the accent is one color family in both
-    /// schemes.
+    /// `--link`, the accent color. It is the darkest green of the mark
+    /// in the light scheme and the palest in the dark one.
     pub link: Color,
-    /// `--rule`, the color of a thin line that divides a table.
+    /// `--rule`, the color of thin dividing lines, such as table
+    /// borders.
     pub rule: Color,
 }
 
@@ -42,23 +48,21 @@ static DARK: LazyLock<Palette> = LazyLock::new(|| {
     let css = stripped();
     let query = css
         .find("prefers-color-scheme: dark")
-        .expect("liken.css declares no dark scheme");
+        .expect("liken.css has no prefers-color-scheme: dark block");
 
     Palette::read(&root_block(&css, query))
 });
 
-/// The scheme a reader with a light system setting gets.
 pub fn light() -> &'static Palette {
     &LIGHT
 }
 
-/// The scheme a reader with a dark system setting gets.
 pub fn dark() -> &'static Palette {
     &DARK
 }
 
 impl Palette {
-    /// The four tokens of one block of declarations.
+    /// Reads the five tokens from the declarations of one block.
     fn read(block: &str) -> Self {
         Self {
             ink: token(block, "--ink"),
@@ -72,9 +76,8 @@ impl Palette {
 
 /// The stylesheet with its comments removed.
 ///
-/// A comment can hold the text this module searches for, `:root` or the dark
-/// query, and a comment declares nothing. Removing the comments first keeps the
-/// search on the rules.
+/// A comment can contain `:root` or the dark media query as text, and
+/// the searches below would match it.
 fn stripped() -> String {
     let mut out = String::with_capacity(CSS.len());
     let mut rest = CSS;
@@ -88,7 +91,8 @@ fn stripped() -> String {
     out
 }
 
-/// The declarations inside the first `:root` block at or after `from`.
+/// The declarations inside the first `:root` block at or after byte
+/// offset `from`.
 fn root_block(css: &str, from: usize) -> String {
     let start = from
         + css[from..]
@@ -97,19 +101,19 @@ fn root_block(css: &str, from: usize) -> String {
     let open = start
         + css[start..]
             .find('{')
-            .expect("a :root block opens no braces");
+            .expect("a :root block has no opening brace");
     let close = open
         + css[open..]
             .find('}')
-            .expect("a :root block closes no braces");
+            .expect("a :root block has no closing brace");
 
     css[open + 1..close].to_string()
 }
 
-/// The color one custom property declares.
+/// The color a custom property is declared as.
 ///
-/// The name carries its colon, so the search for `--ink` does not match the
-/// declaration of `--ink-muted`.
+/// The search includes the colon, so `--ink` does not match inside
+/// `--ink-muted`.
 fn token(block: &str, name: &str) -> Color {
     let value = block
         .split_once(&format!("{name}:"))
@@ -117,26 +121,27 @@ fn token(block: &str, name: &str) -> Color {
         .1;
     let value = value
         .split_once(';')
-        .unwrap_or_else(|| panic!("the declaration of {name} ends in no semicolon"))
+        .unwrap_or_else(|| panic!("the declaration of {name} has no closing semicolon"))
         .0;
 
     hex(value.trim())
 }
 
-/// A CSS or SVG hex color, in the three-digit form or the six-digit one.
+/// Parses a CSS or SVG hex color, in `#rgb` or `#rrggbb` form.
 ///
-/// The mark and the stylesheet both write their colors this way, so the SVG
-/// parser reads them through this function too.
+/// The mark's SVG and the stylesheet both write colors this way, so the
+/// SVG parser uses this function too.
 pub(crate) fn hex(text: &str) -> Color {
     let digits = text
         .strip_prefix('#')
-        .unwrap_or_else(|| panic!("{text} is no hex color"));
+        .unwrap_or_else(|| panic!("{text:?} is not a hex color"));
     let byte = |at: usize, width: usize| {
         let digit = &digits[at * width..at * width + width];
         let value =
-            u8::from_str_radix(digit, 16).unwrap_or_else(|_| panic!("{text} is no hex color"));
+            u8::from_str_radix(digit, 16).unwrap_or_else(|_| panic!("{text:?} is not a hex color"));
 
-        // The three-digit form repeats each digit, so #fff is #ffffff.
+        // In the three-digit form each digit is doubled, so #fff is
+        // #ffffff. Multiplying by 17 doubles a hex digit.
         let value = if width == 1 { value * 17 } else { value };
 
         f32::from(value) / 255.0
@@ -145,6 +150,6 @@ pub(crate) fn hex(text: &str) -> Color {
     match digits.len() {
         3 => Color::from_rgb(byte(0, 1), byte(1, 1), byte(2, 1)),
         6 => Color::from_rgb(byte(0, 2), byte(1, 2), byte(2, 2)),
-        _ => panic!("{text} is no hex color"),
+        _ => panic!("{text:?} is not a hex color, which has 3 or 6 digits"),
     }
 }

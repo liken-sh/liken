@@ -3,18 +3,17 @@ name = "liken-iced"
 version = "0.1.0"
 edition = "2024"
 
-# The crate reads liken.svg and liken.css from brand/, one directory up, so a
-# consumer names the crate as a path dependency and has the whole of brand/
-# beside it: in the tree, and at /brand in an image build.
+# The crate includes liken.svg and liken.css from the directory above,
+# so a consumer depends on it by path, and an image build copies all
+# of brand/ to /brand.
 #
-# iced_widget carries the canvas the mark draws into, and it re-exports
-# iced_core and iced_graphics, so this is the only dependency the crate needs.
-# The canvas feature alone builds no renderer, because a consumer picks the
-# renderer and this crate draws through whichever one it picks.
+# The canvas feature builds no renderer, because the consumer picks
+# the renderer and this crate draws through it.
 #
-# The version is exact, and it is the one library-operator's media browser
-# names. Two versions of iced in one binary do not compile, so a bump moves
-# both manifests in one change.
+# library-operator's media browser and media-operator's screens pin
+# the same exact iced_widget. Cargo resolves one 0.14 release of a
+# crate per build, so two different exact pins fail to resolve, and a
+# bump changes every manifest in one commit.
 [dependencies]
 iced_widget = { version = "=0.14.2", default-features = false, features = [
     "canvas",

@@ -1,10 +1,7 @@
-// The model: what one coverage input says about one source tree.
-//
-// Two formats reach this program, and a repository may hand it both
-// at once. A Go profile counts statements, and a Cobertura report
-// counts lines. The two numbers answer different questions, so
-// nothing here adds them together. Each input keeps its own unit,
-// and the page says which unit every number is in.
+// A Go profile counts statements and a Cobertura report counts lines,
+// so the totals of two inputs cannot be added. Each Source keeps its
+// own Unit, and the report shows the unit beside every number.
+
 package main
 
 import (
@@ -15,12 +12,12 @@ import (
 	"sort"
 )
 
-// Mark says what the tests did with one line of source.
+// Mark records whether the tests ran one line of source.
 type Mark int
 
 const (
-	// Unmarked is a line the coverage data says nothing about: a
-	// comment, a blank line, or a declaration.
+	// Unmarked is a line that the coverage data does not mention, such
+	// as a comment, a blank line, or a declaration.
 	Unmarked Mark = iota
 	Covered
 	Uncovered
@@ -36,9 +33,9 @@ func (m Mark) String() string {
 	return "unmarked"
 }
 
-// File is one source file's coverage. Covered and Total are in the
-// unit of the Source that holds the file. Text is the file as it
-// stands in the tree, and is empty when the tree does not hold it.
+// File is the coverage of one source file. Covered and Total use the
+// unit of the Source that contains the file. Text is the file's content
+// in the tree, or empty when the tree does not have the file.
 type File struct {
 	Name    string
 	Covered int
@@ -47,10 +44,10 @@ type File struct {
 	Text    string
 }
 
-// mark colors one line. A line that any test reached is covered,
-// whatever else the data says about it. Two blocks meet on the line
-// that opens a branch, and one of them is often the branch nothing
-// ran. That line still ran, so the covered mark wins.
+// mark sets the mark of one line, but never replaces Covered. In a Go
+// profile, the line that opens a branch ends one block and starts the
+// next. When the first block ran and the branch did not, the line ran,
+// so it stays Covered.
 func (f *File) mark(line int, m Mark) {
 	if f.Marks[line] == Covered {
 		return
@@ -58,7 +55,7 @@ func (f *File) mark(line int, m Mark) {
 	f.Marks[line] = m
 }
 
-// Source is one input file, read.
+// Source is the parsed contents of one coverage input file.
 type Source struct {
 	Label   string
 	Unit    string
@@ -67,13 +64,9 @@ type Source struct {
 	Files   []File
 }
 
-// Read reads one coverage input and resolves the files it names
-// against root, the tree the input describes.
-//
-// The format comes from the content and not from the name, because a
-// repository names these files what it likes. A Go profile always
-// opens with its mode line, and a Cobertura report is XML with one
-// coverage element.
+// Read parses one coverage input and reads the source files it lists
+// from root. It detects the format from the content and not from the
+// file name, because repositories name these files differently.
 func Read(path, root string) (*Source, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -88,8 +81,8 @@ func Read(path, root string) (*Source, error) {
 	return nil, fmt.Errorf("%s is neither a Go coverage profile nor a Cobertura report", path)
 }
 
-// sortedFiles puts the files in name order, which is the order a
-// reader looks for one in.
+// sortedFiles returns the files in name order, so a reader can find
+// one in the report's table.
 func sortedFiles(byName map[string]*File) []File {
 	files := make([]File, 0, len(byName))
 	for _, file := range byName {
@@ -99,10 +92,10 @@ func sortedFiles(byName map[string]*File) []File {
 	return files
 }
 
-// readText returns the first of the candidate paths that holds a
-// file. A path that holds nothing is not an error: the numbers for a
-// file are still true where its text is missing, and a report built
-// on one machine from another machine's data still counts.
+// readText returns the content of the first candidate path that can
+// be read, or an empty string when none can. A missing file is not an
+// error, because the input can come from another machine whose source
+// tree is not here, and its numbers are still valid.
 func readText(candidates ...string) string {
 	for _, candidate := range candidates {
 		if text, err := os.ReadFile(candidate); err == nil {
@@ -112,9 +105,8 @@ func readText(candidates ...string) string {
 	return ""
 }
 
-// percent is the one place a ratio becomes a number a reader sees.
-// A file with nothing to count is complete, not empty, so it reads
-// as 100 percent.
+// percent shows a total of zero as 100.0%, because nothing is left to
+// cover.
 func percent(covered, total int) string {
 	if total == 0 {
 		return "100.0%"

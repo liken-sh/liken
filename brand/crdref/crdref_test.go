@@ -9,88 +9,79 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The golden test is the contract: one small CRD that exercises every
-// shape the walker supports (required fields, enums, defaults,
-// patterns, arrays of scalars and of objects, maps, and a pipe that
-// must be escaped), and the exact page it must produce.
+// testdata/sample-crd.yaml has each shape that Generate handles:
+// required fields, enums, defaults, patterns, arrays of scalars and of
+// objects, maps, and a pipe that must be escaped.
 func TestGenerateMatchesGolden(t *testing.T) {
 	crd, err := os.ReadFile("testdata/sample-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/sample-crd.yaml: %v", err)
 	}
 	want, err := os.ReadFile("testdata/sample.md")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/sample.md: %v", err)
 	}
 	got, err := Generate(crd, "testdata/sample-crd.yaml", Options{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the page: %v", err)
 	}
 	if string(got) != string(want) {
-		t.Errorf("generated page does not match testdata/sample.md:\n%s", string(got))
+		t.Errorf("the generated page differs from testdata/sample.md:\n%s", string(got))
 	}
 }
 
-// A preamble is hand-written prose the schema cannot hold, such as a
-// link into the guides. It lands verbatim between the generated-from
-// comment and the schema's own description, so the page opens with
-// the words a person wrote for it.
+// The preamble appears unchanged after the kind heading and before
+// the schema's description.
 func TestGenerateInsertsThePreamble(t *testing.T) {
 	crd, err := os.ReadFile("testdata/sample-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/sample-crd.yaml: %v", err)
 	}
 	preamble, err := os.ReadFile("testdata/sample-preamble.md")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/sample-preamble.md: %v", err)
 	}
 	want, err := os.ReadFile("testdata/sample-with-preamble.md")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/sample-with-preamble.md: %v", err)
 	}
 	got, err := Generate(crd, "testdata/sample-crd.yaml", Options{Preamble: preamble})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the page: %v", err)
 	}
 	if string(got) != string(want) {
-		t.Errorf("generated page does not match testdata/sample-with-preamble.md:\n%s", string(got))
+		t.Errorf("the generated page differs from testdata/sample-with-preamble.md:\n%s", string(got))
 	}
 }
 
-// A postamble is the other half of the preamble:
-// hand-written sections that belong under the field tables, such as
-// the messages a resource answers on a bus. It lands verbatim after
-// the last generated table, with one blank line before it.
+// The postamble appears unchanged after the last generated table,
+// separated from it by one blank line.
 func TestGenerateAppendsThePostamble(t *testing.T) {
 	crd, err := os.ReadFile("testdata/sample-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/sample-crd.yaml: %v", err)
 	}
 	postamble, err := os.ReadFile("testdata/sample-postamble.md")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/sample-postamble.md: %v", err)
 	}
 	want, err := os.ReadFile("testdata/sample-with-postamble.md")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/sample-with-postamble.md: %v", err)
 	}
 	got, err := Generate(crd, "testdata/sample-crd.yaml", Options{Postamble: postamble})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the page: %v", err)
 	}
 	if string(got) != string(want) {
-		t.Errorf("generated page does not match testdata/sample-with-postamble.md:\n%s", string(got))
+		t.Errorf("the generated page differs from testdata/sample-with-postamble.md:\n%s", string(got))
 	}
 }
 
-// An operator repository ships every CRD it
-// serves in one manifest file, so the page for one resource names the
-// kind it documents and the walker skips the rest of the stream, and
-// the documents in it that are not CRDs.
 func TestGenerateSelectsTheNamedKind(t *testing.T) {
 	crd, err := os.ReadFile("testdata/multi-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/multi-crd.yaml: %v", err)
 	}
 	for _, tc := range []struct {
 		kind string
@@ -103,13 +94,13 @@ func TestGenerateSelectsTheNamedKind(t *testing.T) {
 		t.Run(tc.kind, func(t *testing.T) {
 			got, err := Generate(crd, "testdata/multi-crd.yaml", Options{Kind: tc.kind})
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("generating the page: %v", err)
 			}
 			if !strings.Contains(string(got), "title: "+tc.kind+"\n") {
-				t.Errorf("page is not titled %s:\n%s", tc.kind, string(got))
+				t.Errorf("the page title is not %s, want it in:\n%s", tc.kind, string(got))
 			}
 			if !strings.Contains(string(got), tc.row) {
-				t.Errorf("page is missing %s, the %s field:\n%s", tc.row, tc.kind, string(got))
+				t.Errorf("the page has no row %s for the %s field:\n%s", tc.row, tc.kind, string(got))
 			}
 		})
 	}
@@ -118,38 +109,37 @@ func TestGenerateSelectsTheNamedKind(t *testing.T) {
 func TestGenerateRefusesAStreamWithNoKindNamed(t *testing.T) {
 	crd, err := os.ReadFile("testdata/multi-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/multi-crd.yaml: %v", err)
 	}
 	_, err = Generate(crd, "testdata/multi-crd.yaml", Options{})
 	if err == nil {
-		t.Fatal("a file of several CRDs must be refused when no kind names one")
+		t.Fatal("Generate returned no error for a file of several CustomResourceDefinitions with no Kind, want one")
 	}
 	for _, kind := range []string{"Widget", "Gadget", "Sprocket"} {
 		if !strings.Contains(err.Error(), kind) {
-			t.Errorf("error does not name %s: %v", kind, err)
+			t.Errorf("the error does not name %s: %v", kind, err)
 		}
 	}
 }
 
-func TestGenerateRefusesAKindTheStreamDoesNotHold(t *testing.T) {
+func TestGenerateRefusesAKindTheStreamDoesNotContain(t *testing.T) {
 	crd, err := os.ReadFile("testdata/multi-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/multi-crd.yaml: %v", err)
 	}
 	_, err = Generate(crd, "testdata/multi-crd.yaml", Options{Kind: "Doohickey"})
 	if err == nil {
-		t.Fatal("a kind the file does not hold must be refused")
+		t.Fatal("Generate returned no error for a Kind that the file does not contain, want one")
 	}
 	for _, kind := range []string{"Widget", "Gadget", "Sprocket"} {
 		if !strings.Contains(err.Error(), kind) {
-			t.Errorf("error does not name %s: %v", kind, err)
+			t.Errorf("the error does not name %s: %v", kind, err)
 		}
 	}
 }
 
-// A stream with one CRD in it needs no kind,
-// which keeps the single-CRD call the manual's own pages make.
-func TestGenerateTakesTheOnlyKindWithoutBeingTold(t *testing.T) {
+// A manifest with one CRD and other objects needs no Kind.
+func TestGenerateSelectsTheOnlyKindWhenNoKindIsNamed(t *testing.T) {
 	doc := `
 apiVersion: v1
 kind: ConfigMap
@@ -170,21 +160,17 @@ spec:
 `
 	got, err := Generate([]byte(doc), "x.yaml", Options{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the page: %v", err)
 	}
 	if !strings.Contains(string(got), "title: Widget\n") {
-		t.Errorf("page is not titled Widget:\n%s", string(got))
+		t.Errorf("the page title is not Widget:\n%s", string(got))
 	}
 }
 
-// The front matter title and weight order a
-// repository's generated pages against each other, so both are
-// settable, and both keep the value this repository's pages already
-// carry when nothing sets them.
 func TestGenerateTitlesAndWeightsThePage(t *testing.T) {
 	crd, err := os.ReadFile("testdata/sample-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/sample-crd.yaml: %v", err)
 	}
 	for _, tc := range []struct {
 		name string
@@ -199,23 +185,20 @@ func TestGenerateTitlesAndWeightsThePage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := Generate(crd, "testdata/sample-crd.yaml", tc.opts)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("generating the page: %v", err)
 			}
 			if !strings.Contains(string(got), tc.want) {
-				t.Errorf("front matter is missing %q:\n%s", tc.want, string(got))
+				t.Errorf("the front matter has no %q:\n%s", tc.want, string(got))
 			}
 		})
 	}
 }
 
-// The page template prints no heading of its own, so the page names
-// the kind it documents in its first heading, in the code face like
-// every kind in the prose. A Title changes the sidebar's label, and
-// the heading stays the kind.
-func TestGenerateHeadsThePageWithTheKind(t *testing.T) {
+// A Title changes only the front matter, not the heading.
+func TestGenerateWritesTheKindAsTheFirstHeading(t *testing.T) {
 	crd, err := os.ReadFile("testdata/sample-crd.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading testdata/sample-crd.yaml: %v", err)
 	}
 	for _, tc := range []struct {
 		name string
@@ -227,7 +210,7 @@ func TestGenerateHeadsThePageWithTheKind(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := Generate(crd, "testdata/sample-crd.yaml", tc.opts)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("generating the page: %v", err)
 			}
 			if !strings.Contains(string(got), "-->\n\n# `Widget`\n\n") {
 				t.Errorf("the page does not open with the kind as its heading:\n%s", string(got))
@@ -239,14 +222,14 @@ func TestGenerateHeadsThePageWithTheKind(t *testing.T) {
 func TestGenerateRefusesANonCRD(t *testing.T) {
 	_, err := Generate([]byte("apiVersion: v1\nkind: ConfigMap\n"), "x.yaml", Options{})
 	if err == nil {
-		t.Error("a non-CRD document must be refused")
+		t.Error("Generate returned no error for a document that is not a CustomResourceDefinition, want one")
 	}
 }
 
 func TestGenerateRefusesAnEmptyFile(t *testing.T) {
 	_, err := Generate(nil, "x.yaml", Options{})
 	if err == nil {
-		t.Error("a file with no YAML document must be refused")
+		t.Error("Generate returned no error for input with no YAML document, want one")
 	}
 }
 
@@ -262,7 +245,7 @@ spec:
 `
 	_, err := Generate([]byte(doc), "x.yaml", Options{})
 	if err == nil {
-		t.Error("a CRD without a schema must be refused")
+		t.Error("Generate returned no error for a CustomResourceDefinition with no schema, want one")
 	}
 }
 
@@ -284,7 +267,7 @@ func TestFieldType(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := fieldType(parseSchema(t, tc.schema)); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
+				t.Errorf("the result is %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -329,29 +312,24 @@ func TestCellText(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := cellText(parseSchema(t, tc.schema)); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
+				t.Errorf("the result is %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-// parseSchema turns an inline YAML fragment into the schema node the
-// walker's helpers take, so each table row above stays one line of
-// YAML instead of a fixture file.
 func parseSchema(t *testing.T, fragment string) *yaml.Node {
 	t.Helper()
 	var doc yaml.Node
 	if err := yaml.Unmarshal([]byte(fragment), &doc); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the schema fragment: %v", err)
 	}
 	return doc.Content[0]
 }
 
-// The Makefile rules in this repository pass
-// three positional arguments and no flag, and they must keep working
-// exactly as they are. The flags all come before the positional
-// arguments.
-func TestRunTakesTheFlagsBeforeThePositionalArguments(t *testing.T) {
+// The docs Makefiles pass the positional arguments with and without
+// flags, and the flags come first.
+func TestRunAcceptsFlagsBeforeThePositionalArguments(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -382,14 +360,14 @@ func TestRunTakesTheFlagsBeforeThePositionalArguments(t *testing.T) {
 				}
 			}
 			if err := run(args); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running crdref: %v", err)
 			}
 			page, err := os.ReadFile(out)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the generated page: %v", err)
 			}
 			if !strings.Contains(string(page), tc.want) {
-				t.Errorf("page is missing %q:\n%s", tc.want, string(page))
+				t.Errorf("the page has no %q:\n%s", tc.want, string(page))
 			}
 		})
 	}
@@ -402,7 +380,7 @@ func TestRunRefusesTheWrongArgumentCount(t *testing.T) {
 		{"a", "b", "c", "d"},
 	} {
 		if err := run(args); err == nil {
-			t.Errorf("run(%q) must be refused", args)
+			t.Errorf("run(%q) returned no error, want one", args)
 		}
 	}
 }

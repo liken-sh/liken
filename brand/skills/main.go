@@ -1,13 +1,14 @@
 // skills turns a site's guides into Agent Skills, one SKILL.md per
 // guide.
 //
-// The docs Makefile of each liken repository runs it as
+// Each component's docs module declares it as a tool, and the docs
+// Makefile runs it as
 //
 //	go tool skills -base <baseURL> <guides dir> <out dir>
 //
-// pinned as a tool dependency the way crdref is. The output is
-// committed in each repository, so a checkout carries its skills
-// and CI fails when they are stale.
+// The output is committed in the component's skills/ directory, so a
+// checkout has the skills, and the component's check fails when a
+// guide changed and its skill was not generated again.
 // plans/completed/01-guides-as-skills.md in this component is the
 // design.
 package main
@@ -19,8 +20,8 @@ import (
 	"os"
 )
 
-// usage is both the -h help text and the error a wrong argument
-// count returns, so one line stays true for both.
+// usage is the -h help text, and the error of a wrong command line
+// ends with it.
 const usage = "usage: skills -base <baseURL> <guides dir> <out dir>"
 
 func main() {
@@ -30,9 +31,9 @@ func main() {
 	}
 }
 
-// run parses the flags and emits the skills. -base is required,
-// because every link in a skill becomes a full URL, and there is no
-// site to take the base from when the skill is read from disk.
+// run parses the flags and writes the skills. -base is required,
+// because every link in a skill becomes a full URL, and an agent that
+// reads the skill from disk has no site to resolve a path against.
 func run(args []string) error {
 	flags := flag.NewFlagSet("skills", flag.ContinueOnError)
 	flags.Usage = func() {
@@ -50,8 +51,11 @@ func run(args []string) error {
 	}
 
 	args = flags.Args()
-	if len(args) != 2 || *base == "" {
-		return errors.New(usage)
+	if *base == "" {
+		return fmt.Errorf("-base is required\n%s", usage)
+	}
+	if len(args) != 2 {
+		return fmt.Errorf("expected 2 arguments, got %d\n%s", len(args), usage)
 	}
 	return Emit(args[0], args[1], *base)
 }

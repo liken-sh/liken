@@ -6,12 +6,10 @@
 name = "brand"
 license = "MIT"
 
-# The voice rules, the motion rules, and the editing prompt are prose that
-# people and agents read. No build reads them: the images take the iced
-# crate, the mark, the stylesheet, and the fonts, and the OS takes the mark
-# and the stylesheet. So an edit to them releases no component that depends
-# on brand. The manuals still check against them, because every component
-# with a manual runs its checks on any change in brand/.
+# No build reads voice.md, motion.md, or editing-prompt.md, so a change
+# to them releases no component that depends on brand. A component
+# with a manual still runs its checks on a change to them, because CI
+# runs those checks on any change in brand/ outside its plans.
 [outputs]
 exclude = ["voice.md", "motion.md", "editing-prompt.md"]
 
@@ -21,8 +19,6 @@ toolchain = "go"
 run = "make test-go"
 timeout = 20
 
-# liken-iced is the crate that the screens of media-operator and
-# library-operator draw with.
 [[jobs]]
 name = "rust"
 toolchain = "rust"
@@ -31,11 +27,8 @@ run = "make test"
 timeout = 45
 env = { CARGO_INCREMENTAL = "0" }
 
-# The hooks in .pre-commit-config.yaml: the formatters, the linters,
-# and the hygiene checks. The jobs above run the tests and the
-# coverage gates.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-# The go and rust jobs run the same checks as these hooks.
+# The go and rust jobs already run these checks.
 skip = ["gofmt", "go-vet", "staticcheck", "go-mod-tidy", "cargo-fmt-iced"]

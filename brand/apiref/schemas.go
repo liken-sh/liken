@@ -1,11 +1,8 @@
-// The schemas: a JSON Schema rendered as the field tables the CRD
-// reference pages use.
-//
-// A reader moves between the pages of a manual, so the two
-// generators write the same kind of table. crdref renders a CRD's
-// schema and this file renders an OpenAPI component schema, with the
-// same four columns, the same dotted heading for a nested object,
-// and the same id on each row.
+// This file renders the component schemas of an OpenAPI document as
+// field tables. The columns, the dotted headings, and the row ids are
+// the same as in the tables that crdref writes for a CRD, so a reader
+// and a link find a field the same way on both kinds of page.
+
 package main
 
 import (
@@ -15,16 +12,15 @@ import (
 	"github.com/liken-sh/liken/brand/linkcheck"
 )
 
-// componentPrefix is the pointer every $ref in these documents
-// writes. OpenAPI allows a reference to any URI. The operators
-// reference their own components and nothing else, so a $ref that
-// leaves the document renders as its type word and links to
-// nothing.
+// componentPrefix starts a $ref to a schema of the same document.
+// OpenAPI allows a $ref to any URI, but the operators' documents refer
+// only to their own schemas, so the page links only these. Any other
+// $ref renders as "object" with no link.
 const componentPrefix = "#/components/schemas/"
 
-// emitSchemas writes the section that every response and parameter
-// table links into. The schemas come in the document's order, which
-// is the order the program that wrote the document declared them.
+// emitSchemas writes the Schemas section, which the Type cells of the
+// route tables link to, in the order the document declares the
+// schemas.
 func emitSchemas(b *strings.Builder, document *node) {
 	schemas := document.member("components").member("schemas")
 	if schemas == nil || len(schemas.members) == 0 {
@@ -36,13 +32,10 @@ func emitSchemas(b *strings.Builder, document *node) {
 	})
 }
 
-// emitSchemaSection writes one object's heading, its description, a
-// table of its direct fields, and then a section for each field that
-// is an object of its own. The heading carries the schema's name, and
-// under it the whole dotted path of each nested object, so every path
-// on the page is searchable text. The heading level follows the
-// depth, capped at four the way crdref caps it, because below four
-// the headings would be too small to read.
+// emitSchemaSection writes a heading, the description, and a table of
+// fields for one object, then a section for each field that is an
+// inline object. The heading level is depth, capped at 4 as in crdref,
+// so a deeply nested path does not render in tiny type.
 func emitSchemaSection(b *strings.Builder, document *node, path string, schema *node, depth int) {
 	fmt.Fprintf(b, "%s %s\n\n", strings.Repeat("#", min(depth, 4)), path)
 	if d := foldText(schema.member("description").value()); d != "" {
@@ -51,9 +44,8 @@ func emitSchemaSection(b *strings.Builder, document *node, path string, schema *
 
 	properties := schema.member("properties")
 	if properties == nil || len(properties.members) == 0 {
-		// A schema with no fields is a scalar, an array, or a free
-		// object. It has no table, so the type and the values it
-		// takes are a sentence.
+		// A scalar, an array, or an object with no declared properties
+		// has no fields to tabulate, so describe its type in a sentence.
 		fmt.Fprintf(b, "%s\n\n", strings.TrimSpace(
 			fmt.Sprintf("The type is %s. %s", typeCell(schema, path), facts(schema))))
 		return
@@ -67,9 +59,8 @@ func emitSchemaSection(b *strings.Builder, document *node, path string, schema *
 	b.WriteString("| Field | Type | Required | Description |\n")
 	b.WriteString("| --- | --- | --- | --- |\n")
 	properties.each(func(name string, field *node) {
-		// A field written as a reference alone has no description of
-		// its own, so its cell uses the description of the component it
-		// names.
+		// A field that is only a $ref has no description, so use the
+		// description of the component it references.
 		text := cellText(field)
 		if text == "" {
 			text = cellText(resolve(document, field))
@@ -88,22 +79,17 @@ func emitSchemaSection(b *strings.Builder, document *node, path string, schema *
 	})
 }
 
-// rowAnchor gives one field's table row its own id: the section's
-// anchor, two hyphens, then the field's, as in problem--instance. A
-// link then lands on exactly one field. The two hyphens keep a row
-// id apart from a heading id, because a heading id here comes from a
-// dotted path and holds no hyphen.
+// rowAnchor returns the HTML id of a field's table row, such as
+// problem--instance, so a link can point to one field. The two hyphens
+// keep a row id apart from a heading id, because the id of a dotted
+// path has no hyphen unless a name in the path contains one.
 func rowAnchor(path, name string) string {
 	return linkcheck.Anchor(path) + "--" + linkcheck.Anchor(name)
 }
 
-// typeCell renders a schema's type for a table column. A named
-// component becomes a link to its own section, and an object
-// declared inline becomes a link to the section this page writes for
-// it, so a reader lands on the definition instead of scanning for
-// it. The brackets of an array or a map are escaped where the cell
-// also holds a link, because they would otherwise read as part of
-// the link's own syntax.
+// typeCell renders a schema's type for the Type column. When the cell
+// has a link, the brackets of [] and map[string] are escaped, so
+// Markdown does not read them as part of the link.
 func typeCell(schema *node, path string) string {
 	wrapper, leaf, leafPath := unwrap(schema, path)
 	cell := leafCell(leaf, leafPath)
@@ -113,10 +99,10 @@ func typeCell(schema *node, path string) string {
 	return wrapper + cell
 }
 
-// unwrap peels the arrays and maps off a schema and returns the text
-// that stands in front of the element's own type, as in []
-// or map[string][]. The schemas use additionalProperties exactly
-// when an object is a map, so its presence is the map test.
+// unwrap removes the array and map layers from a schema. It returns
+// their notation, such as map[string][], the innermost schema, and
+// that schema's path. The operators' schemas set additionalProperties
+// to a schema only on maps, so isMap treats every such object as a map.
 func unwrap(schema *node, path string) (wrapper string, leaf *node, leafPath string) {
 	var b strings.Builder
 	for {
@@ -135,15 +121,15 @@ func unwrap(schema *node, path string) (wrapper string, leaf *node, leafPath str
 	}
 }
 
-// leafCell renders the innermost type: a link to a named component,
-// a link to the section for an object declared inline, or the type
-// word with the format beside it.
+// leafCell renders the innermost type of a field: a link to a
+// referenced component, a link to the section of an inline object,
+// or the type word followed by its format.
 func leafCell(schema *node, path string) string {
 	if name := refName(schema); name != "" {
 		return fmt.Sprintf("[%s](#%s)", name, linkcheck.Anchor(name))
 	}
-	// An empty path is a table outside the schemas section, where an
-	// object declared inline has no section to link to.
+	// Tables outside the Schemas section pass an empty path, because
+	// an inline object there has no section to link to.
 	if hasProperties(schema) && path != "" {
 		return fmt.Sprintf("[object](#%s)", linkcheck.Anchor(path))
 	}
@@ -157,9 +143,9 @@ func leafCell(schema *node, path string) string {
 	return word
 }
 
-// typeWord renders the type member. OpenAPI 3.1 is JSON Schema
-// 2020-12, where type may be a list, which is how a document states
-// that a field may also be null.
+// typeWord returns the type member. In OpenAPI 3.1, type can be a
+// list such as ["string", "null"], which typeWord joins as
+// "string or null".
 func typeWord(schema *node) string {
 	member := schema.member("type")
 	if member == nil {
@@ -175,9 +161,8 @@ func typeWord(schema *node) string {
 	return member.value()
 }
 
-// refName is the component's name for a $ref into this document's
-// own components, and "" for anything else, including a reference
-// this page cannot link.
+// refName returns the schema name of a $ref that starts with
+// componentPrefix, and "" for any other schema.
 func refName(schema *node) string {
 	pointer := schema.member("$ref").value()
 	if !strings.HasPrefix(pointer, componentPrefix) {
@@ -186,12 +171,11 @@ func refName(schema *node) string {
 	return strings.TrimPrefix(pointer, componentPrefix)
 }
 
-// resolve follows a chain of references to the value that holds the
-// fields, so a parameter or a response written as a component is
-// rendered from the component itself. A reference this document does
-// not hold resolves to the reference, which renders as an empty row
-// rather than as nothing at all. The hop limit stops a document
-// whose references form a loop.
+// resolve follows a chain of $refs inside the document and returns
+// the value at the end, so a parameter or response declared under
+// components renders from its declaration. It returns a $ref that it
+// cannot follow unchanged. The limit of 10 hops ends a cycle of
+// references.
 func resolve(document *node, value *node) *node {
 	for hops := 0; hops < 10; hops++ {
 		pointer := value.member("$ref").value()
@@ -207,9 +191,9 @@ func resolve(document *node, value *node) *node {
 	return value
 }
 
-// pointerTarget walks one local JSON pointer, as in
-// #/components/schemas/Problem. RFC 6901 writes a slash in a name as
-// ~1 and a tilde as ~0.
+// pointerTarget returns the node at a JSON pointer such as
+// #/components/schemas/Problem, or nil when a step is missing. RFC 6901
+// escapes "/" in a name as ~1 and "~" as ~0.
 func pointerTarget(document *node, pointer string) *node {
 	unescape := strings.NewReplacer("~1", "/", "~0", "~")
 	for _, step := range strings.Split(strings.TrimPrefix(pointer, "#/"), "/") {
@@ -218,11 +202,11 @@ func pointerTarget(document *node, pointer string) *node {
 	return document
 }
 
-// childSection finds the object a field's own section describes: the
-// field itself, one element of an array, or one value of a map. The
-// path suffix says which: [] for an element, .* for a value under
-// any key. A field that names a component has no section of its own,
-// because the component has one.
+// childSection returns the path and the schema of the section that a
+// field gets: the field itself, an array's items with a path ending in
+// [], or a map's values with a path ending in .*. It returns "" and nil
+// for a field with no inline object, and for a $ref, because the
+// referenced schema has its own section.
 func childSection(field *node, childPath string) (string, *node) {
 	if refName(field) != "" {
 		return "", nil
@@ -239,30 +223,25 @@ func childSection(field *node, childPath string) (string, *node) {
 	return "", nil
 }
 
-// hasProperties reports whether a schema is an object with declared
-// fields: the shape that earns a section of its own.
 func hasProperties(schema *node) bool {
 	properties := schema.member("properties")
 	return properties != nil && len(properties.members) > 0
 }
 
-// isMap reports whether a schema is an object used as a map.
 func isMap(schema *node) bool {
 	values := schema.member("additionalProperties")
 	return values != nil && values.kind == objectNode
 }
 
-// cellText renders one schema's table cell: the description, then
-// the machine-checkable facts beside it, folded onto one line and
-// with the pipes escaped so the Markdown table survives.
+// cellText renders a Description cell on one line, with its pipes
+// escaped, so it does not break the Markdown table.
 func cellText(schema *node) string {
 	text := strings.TrimSpace(foldText(schema.member("description").value()) + " " + facts(schema))
 	return strings.ReplaceAll(text, "|", `\|`)
 }
 
-// facts renders what a schema states about its own values: the
-// values it accepts, the value it takes when a caller states none,
-// and the expression a string must match.
+// facts renders the enum, default, and pattern of a schema as
+// sentences.
 func facts(schema *node) string {
 	var parts []string
 	if values := schema.member("enum").elements(); len(values) > 0 {
@@ -281,7 +260,6 @@ func facts(schema *node) string {
 	return strings.Join(parts, " ")
 }
 
-// yesNo renders a required column.
 func yesNo(required bool) string {
 	if required {
 		return "yes"
@@ -289,8 +267,8 @@ func yesNo(required bool) string {
 	return "no"
 }
 
-// foldText collapses text onto one line, because a Markdown table
-// cell cannot hold a line break.
+// foldText joins the lines of s into one line, because a Markdown
+// table cell cannot contain a line break.
 func foldText(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }

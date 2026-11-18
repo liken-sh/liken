@@ -1,11 +1,8 @@
-// The reader for an OpenAPI document.
-//
-// The page follows the document's own order: the paths in the order
-// the file writes them, the methods under each path in that order,
-// and the statuses under each method in that order. Go's
-// encoding/json decodes an object into a map, and a map has no
-// order, so this reader keeps each object's members as a list
-// instead.
+// This file reads an OpenAPI document into a tree that keeps the
+// order of each object's keys. The page lists paths, methods, and
+// statuses in the order the document writes them, and a map from
+// encoding/json loses that order.
+
 package main
 
 import (
@@ -16,9 +13,8 @@ import (
 	"io"
 )
 
-// nodeKind says which of the three shapes a node holds. An empty
-// object, an empty array, and an empty string are all worth telling
-// apart, so the shape is a field and not a count of members.
+// nodeKind is the JSON type of a node, so that an empty object, an
+// empty array, and an empty string are different values.
 type nodeKind int
 
 const (
@@ -27,17 +23,15 @@ const (
 	arrayNode
 )
 
-// member is one key and its value, in the position the document
-// writes them.
+// member is one key of an object and its value.
 type member struct {
 	name  string
 	value *node
 }
 
-// node is one JSON value. A scalar keeps the text the document
-// writes, because every scalar this page renders lands in a table
-// cell as text: a number, a boolean, and a string all read the same
-// there.
+// node is one JSON value. A scalar keeps its text as the document
+// writes it, because the page prints every scalar as text in a table
+// cell.
 type node struct {
 	kind    nodeKind
 	members []member
@@ -45,22 +39,20 @@ type node struct {
 	text    string
 }
 
-// parse reads one JSON document. It refuses trailing content after
-// the top-level value, so a truncated or doubled file fails here
-// rather than rendering a page from half of it.
+// parse reads one JSON document. It fails on content after the
+// top-level value, so a truncated or doubled file fails here and the
+// page is not rendered from part of it.
 func parse(data []byte) (*node, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	// UseNumber keeps a number as the digits the file holds. Decoding
-	// into float64 would render 3.1 as 3.1 and 200 as 200, but a
-	// large or precise number would come back in a spelling the
-	// document never wrote.
+	// UseNumber keeps a number as the digits in the file. A float64
+	// would rewrite a large or precise number.
 	decoder.UseNumber()
 	root, err := parseValue(decoder)
 	if err != nil {
 		return nil, err
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		return nil, errors.New("the file holds more than one JSON document")
+		return nil, errors.New("the file has content after its first JSON document")
 	}
 	return root, nil
 }
@@ -110,9 +102,9 @@ func parseArray(decoder *json.Decoder) (*node, error) {
 	}
 }
 
-// parseToken builds the value whose first token is already read.
-// An array's loop reads a token to test it for the closing bracket,
-// and hands the token here when it is not one.
+// parseToken builds the value that starts with token, which the
+// caller has already read. parseArray reads each token to check for
+// the closing bracket first.
 func parseToken(decoder *json.Decoder, token json.Token) (*node, error) {
 	delimiter, isDelimiter := token.(json.Delim)
 	if !isDelimiter {
@@ -124,7 +116,7 @@ func parseToken(decoder *json.Decoder, token json.Token) (*node, error) {
 	case '[':
 		return parseArray(decoder)
 	}
-	return nil, fmt.Errorf("unexpected %q", delimiter)
+	return nil, fmt.Errorf("the document has %q where a value should start", delimiter)
 }
 
 func scalarText(token json.Token) string {
@@ -142,8 +134,9 @@ func scalarText(token json.Token) string {
 	return "null"
 }
 
-// member finds one key's value. A nil node and a missing key both
-// return nil, so lookups chain without a check at each step.
+// member returns the value of a key. It returns nil for a missing key
+// and for a node that is nil or not an object, so lookups can chain
+// without a check at each step.
 func (n *node) member(name string) *node {
 	if n == nil || n.kind != objectNode {
 		return nil
@@ -156,7 +149,7 @@ func (n *node) member(name string) *node {
 	return nil
 }
 
-// each visits an object's members in document order.
+// each calls visit for each member of an object, in document order.
 func (n *node) each(visit func(name string, value *node)) {
 	if n == nil || n.kind != objectNode {
 		return
@@ -166,7 +159,7 @@ func (n *node) each(visit func(name string, value *node)) {
 	}
 }
 
-// elements returns an array's values, and nothing for anything else.
+// elements returns the values of an array, and nil for any other node.
 func (n *node) elements() []*node {
 	if n == nil || n.kind != arrayNode {
 		return nil
@@ -174,7 +167,7 @@ func (n *node) elements() []*node {
 	return n.items
 }
 
-// value returns a scalar's text, and "" for an object or an array.
+// value returns the text of a scalar, and "" for any other node.
 func (n *node) value() string {
 	if n == nil || n.kind != scalarNode {
 		return ""

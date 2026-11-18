@@ -1,7 +1,8 @@
-//! `mark::draw` fills fourteen paths on a canvas frame. A frame
-//! needs a renderer, and the renderers `iced` ships draw through a GPU or a
-//! window. The recorder below is a renderer that keeps every call instead, so
-//! the test reads the calls the mark made on the frame and opens nothing.
+//! Tests of what `mark::draw` calls on a canvas frame.
+//!
+//! A frame needs a renderer, and the renderers `iced` ships need a GPU
+//! or a window. `Recorder` is a renderer that only records the fill and
+//! stroke calls, so these tests run without either.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -37,8 +38,9 @@ struct Recorder {
     log: Log,
 }
 
-/// The frame the recorder hands out. Every frame writes to the recorder's one
-/// log, so a nested frame lands in the same list in the order it was drawn.
+/// The frame that `Recorder` creates. All frames append to the
+/// recorder's single log, so a nested frame's calls appear in drawing
+/// order.
 struct Recording {
     log: Log,
 }
@@ -63,10 +65,8 @@ impl frame::Backend for Recording {
         self.log.borrow_mut().push(Call::Fill {
             style: fill.into().style,
             segments: path.raw().iter().count(),
-            // The corner of the path each segment lands on, in the order
-            // the path draws them. `move_to` opens the path and every
-            // `line_to` adds one, so the close carries no corner of its
-            // own and this list is one shorter than `segments`.
+            // The point each path event ends at. `close` adds no point,
+            // so this list is one shorter than `segments`.
             points: path
                 .raw()
                 .iter()
@@ -143,12 +143,12 @@ impl renderer::Renderer for Recorder {
     }
 }
 
-/// Where the tests place the mark: the middle of a 1920 by 1080 canvas, at the
-/// third of the width `liken`'s idle screen gives it.
+/// The mark is placed at the middle of a 1920 by 1080 canvas, at one
+/// third of its width.
 const CENTER: Point = Point::new(960.0, 540.0);
 const SPAN: f32 = 640.0;
 
-/// The calls one drawing of the mark made.
+/// The calls recorded while drawing the mark once.
 fn calls(energy: f64, phase: f64, alpha: f32) -> Vec<Call> {
     let recorder = Recorder::default();
     let mut frame = Frame::new(&recorder, Size::new(1920.0, 1080.0));
@@ -158,12 +158,11 @@ fn calls(energy: f64, phase: f64, alpha: f32) -> Vec<Call> {
     recorder.log.take()
 }
 
-/// Every hexagon is one filled path, and its corners are in the path rather
-/// than in a stroke over it. `mark::outline` says why: a stroke is centered on
-/// its path, so half of it would land on the fill, and two translucent layers
-/// composite brighter than one.
+/// Each hexagon is one fill and no stroke, because a stroke over a
+/// translucent fill would composite brighter where they overlap. The
+/// reason is in the comment on `mark::outline`.
 #[test]
-fn the_mark_fills_every_hexagon_once() {
+fn each_hexagon_is_drawn_as_one_fill_with_rounded_corners_in_the_path() {
     let calls = calls(0.0, 0.0, 1.0);
 
     assert_eq!(calls.len(), mark::hexagons().len());
@@ -173,12 +172,12 @@ fn the_mark_fills_every_hexagon_once() {
             style, segments, ..
         } = call
         else {
-            panic!("the mark strokes where it should fill: {call:?}");
+            panic!("the call is {call:?}, want a fill");
         };
 
         assert_eq!(*style, Style::Solid(hexagon.fill));
-        // Six offset edges, an arc of six segments at each of the six
-        // vertices, the start, and the close.
+        // A start point, then six offset edges with a six-segment arc
+        // at each of the six vertices, then the close.
         assert_eq!(*segments, 6 + 6 * 6 + 2);
     }
 }
@@ -189,12 +188,11 @@ fn style_of(call: &Call) -> Style {
     }
 }
 
-/// A mark in motion, drawn under an alpha. The energy moves the vertices, and
-/// it adds no shape and drops none, so the call list holds one fill for each
-/// hexagon. Each call carries the hexagon's own fill at the alpha the caller
-/// asked for, so a fade changes the alpha and no other channel.
+/// With energy above zero and alpha below one, the mark still makes one
+/// fill per hexagon. Each fill has the hexagon's own color with only
+/// the alpha channel replaced.
 #[test]
-fn the_alpha_reaches_every_fill() {
+fn alpha_replaces_only_the_alpha_channel_of_every_fill() {
     let calls = calls(0.5, 41.75, 0.25);
 
     assert_eq!(calls.len(), mark::hexagons().len());
@@ -205,64 +203,63 @@ fn the_alpha_reaches_every_fill() {
             ..hexagon.fill
         });
 
-        assert_eq!(style_of(call), faded, "hexagon {index} fills");
+        assert_eq!(style_of(call), faded, "the fill of hexagon {index}");
     }
 }
 
 fn points_of(call: &Call) -> &[Point] {
     match call {
         Call::Fill { points, .. } => points,
-        Call::Stroke { .. } => panic!("the mark strokes where it should fill: {call:?}"),
+        Call::Stroke { .. } => panic!("the call is {call:?}, want a fill"),
     }
 }
 
-// The tolerance is a hundredth of a pixel. The derived numbers hold to
-// under 0.0005 px: liken.svg rounds its vertices to two decimals, so the
-// hexagon is 0.005 degrees off regular and an arc midpoint lands about
-// 0.0003 px from the whole-degree position. The errors this test exists
-// for move a corner by whole pixels: an inverted normal by 14, a doubled
-// offset by 7, a dropped sweep normalization by 14.
+// The tolerance is a hundredth of a pixel. The hand-derived values
+// below treat the hexagon as regular, but `liken.svg` rounds its
+// vertices to two decimals, so they are off by under 0.0005 px. The
+// mistakes this test targets move a corner by whole pixels: an inverted
+// normal by 14, a doubled offset by 7, and a missing angle wrap by 14.
 const TOLERANCE: f64 = 0.01;
 
-// The numbers below are derived by hand from the first polygon of
+// The expected values are derived by hand from the first polygon of
 // liken.svg. Its six vertices are (-4.33,-9.27), (2.77,-5.17),
 // (2.77,3.03), (-4.33,7.13), (-11.43,3.03), and (-11.43,-5.17), and its
 // stroke-width is 1.40. mark::bounds is 64.03 wide, so SPAN 640 scales
 // by 9.995315, and the placed vertices are v0 (956.45166,453.94034),
 // v1 (1027.41850,494.92114), v2 (1027.41850,576.88270),
 // v3 (956.45166,617.86350), v4 (885.48490,576.88270), and
-// v5 (885.48490,494.92114), with round = 1.40 * 9.995315 / 2 = 6.996720.
+// v5 (885.48490,494.92114), with round = 1.40 * 9.995315 / 2 =
+// 6.996720.
 //
-// The hexagon is pointy-top and regular, so each edge normal stands 60
-// degrees from the last. Edge 0 (v0 to v1) runs (7.1,4.1) over a length
-// of 8.198780, which gives the outward normal (0.500074,-0.865982) and
+// The hexagon is pointy-top and regular, so each edge normal is 60
+// degrees from the previous one. Edge 0 (v0 to v1) runs (7.1,4.1) over a
+// length of 8.198780, which gives the outward normal (0.500074,-0.865982) and
 // the displacement (3.498881,-6.059036). Edge 1 (v1 to v2) is the
 // vertical right side, normal (1,0), displacement (6.996720,0). Edge 2
 // (v2 to v3) mirrors edge 0 across the horizontal, displacement
 // (3.498881,6.059036). Edge 4 (v4 to v5) is the vertical left side,
-// normal (-1,0), displacement (-6.996720,0), and its sign is what an
-// unoriented normal would get wrong.
+// normal (-1,0), displacement (-6.996720,0). A normal that is not
+// oriented away from the centroid gets this sign wrong.
 //
-// Each arc turns 60 degrees on a circle of radius `round` about its
-// vertex, so its midpoint sits 30 degrees along. At v1 the arc runs from
+// Each arc turns 60 degrees on a circle of radius `round` around its
+// vertex, so its midpoint is 30 degrees along. At v1 the arc runs from
 // -60 to 0 degrees, and its midpoint is v1 + 6.996720 * (cos -30,
 // sin -30) = (1033.47784,491.42278). At v5 the arc runs from 180 to 240
 // degrees, which atan2 reports as +180 and -120, so the raw sweep is
-// -300 degrees and only the normalization turns it back into +60. Its
-// midpoint is v5 + 6.996720 * (cos 210, sin 210) =
-// (879.42556,491.42278), the one number here that a dropped
-// normalization moves.
+// -300 degrees and only the angle wrap turns it into +60. Its midpoint
+// is v5 + 6.996720 * (cos 210, sin 210) = (879.42556,491.42278), the
+// only expected value that a missing wrap changes.
 //
-// `outline` opens at edge 0's start, then writes each edge's end and six
-// arc corners, so edge i's end is corner 1+7i and the arc midpoint after
-// it is corner 4+7i.
+// `outline` starts at the start of edge 0, then for each edge adds its
+// end point and six arc points. Edge i therefore ends at point 1+7i,
+// and the midpoint of the arc after it is point 4+7i.
 #[test]
 fn the_outline_offsets_each_edge_outward_and_rounds_each_vertex() {
     let calls = calls(0.0, 0.0, 1.0);
     let points = points_of(&calls[0]);
 
-    // Each row is a corner of the path, counting from the one `move_to`
-    // opens with, and where the offset outline puts it.
+    // Each row is a path point index, counted from the starting point,
+    // with its expected x and y.
     let expected = [
         (0, 959.95054, 447.88130),
         (1, 1030.91738, 488.86210),
@@ -282,7 +279,7 @@ fn the_outline_offsets_each_edge_outward_and_rounds_each_vertex() {
         assert!(
             (f64::from(drawn.x) - x).abs() < TOLERANCE
                 && (f64::from(drawn.y) - y).abs() < TOLERANCE,
-            "corner {at} draws {drawn:?} where the outline puts ({x}, {y})"
+            "corner {at} is {drawn:?}, want ({x}, {y})"
         );
     }
 }

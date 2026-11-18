@@ -1,20 +1,17 @@
-// This crate defines the motion, so the numbers below are arithmetic
-// this file works out from PHI, RATE_MIN, and RATE_SPAN, and not
-// readings taken off another implementation.
+// This crate is the only implementation of the pulse, so the expected
+// values below are computed from `PHI`, `RATE_MIN`, and `RATE_SPAN`,
+// with no other implementation to copy them from.
 
 use liken_iced::mark;
 use liken_iced::pulse::{PHI, Pulse, RATE_MIN, RATE_SPAN, SWING};
 
-/// A sine is a library function whose last bits belong to the platform, and the
-/// numbers below are written to twelve decimal places. Both comparisons
-/// therefore take a tolerance. One part in a million million is far under what
-/// an `f32` vertex or a screen can hold.
+/// The last bits of a sine can differ between platforms, so the tests
+/// compare within a tolerance far below the precision of an `f32` vertex.
 const TOLERANCE: f64 = 1e-12;
 
-// The rates and the offset of the first hexagon, the seventh, and the
-// last, in cycles a second and in radians. Nothing in the motion is
-// random, so each value is arithmetic, and the properties below hold for
-// the eleven hexagons this table leaves out.
+// For hexagons 0, 6, and 13: the first rate and the second rate in cycles
+// a second, and the offset in radians. The other tests check the
+// properties of the remaining hexagons.
 const NUMBERS: [(usize, f64, f64, f64); 3] = [
     (0, 0.331246117975, 0.535967477525, 3.883222077451),
     (6, 0.278722825825, 0.450983005625, 2.049813313438),
@@ -22,7 +19,7 @@ const NUMBERS: [(usize, f64, f64, f64); 3] = [
 ];
 
 #[test]
-fn a_hexagon_runs_the_rates_and_the_offset_its_ordinal_gives() {
+fn a_hexagon_takes_its_rates_and_offset_from_its_index() {
     for (index, first_rate, second_rate, offset) in NUMBERS {
         let pulse = Pulse::for_index(index);
         let measured = [pulse.first_rate, pulse.second_rate, pulse.offset];
@@ -30,27 +27,27 @@ fn a_hexagon_runs_the_rates_and_the_offset_its_ordinal_gives() {
         for (measured, expected) in measured.into_iter().zip([first_rate, second_rate, offset]) {
             assert!(
                 (measured - expected).abs() < TOLERANCE,
-                "hexagon {index} runs at {measured}, and the numbers state {expected}"
+                "hexagon {index} has {measured}, want {expected}"
             );
         }
     }
 }
 
 #[test]
-fn the_mark_carries_one_pulse_for_each_hexagon() {
+fn each_hexagon_of_the_mark_has_the_pulse_for_its_index() {
     for (index, hexagon) in mark::hexagons().iter().enumerate() {
         assert_eq!(hexagon.pulse, Pulse::for_index(index), "hexagon {index}");
     }
 }
 
 #[test]
-fn the_first_rates_run_from_the_slowest_to_the_fastest() {
+fn every_first_rate_is_within_the_rate_range() {
     for index in 0..mark::hexagons().len() {
         let rate = Pulse::for_index(index).first_rate;
 
         assert!(
             (RATE_MIN..=RATE_MIN + RATE_SPAN).contains(&rate),
-            "hexagon {index} runs at {rate}"
+            "hexagon {index} has first rate {rate}, want a rate in the range"
         );
     }
 }
@@ -64,10 +61,10 @@ fn the_second_rate_is_the_first_times_the_golden_ratio() {
     }
 }
 
-// The scale of hexagons 0, 6, and 13 at four moments, as phase, energy,
-// and the three scales. Each value is the two-sine arithmetic worked out
-// at sixty digits from the exact golden ratio and rounded to an `f64`, and
-// it holds `Pulse::scale_at` to twelve decimal places.
+// Each row is a phase, an energy, and the scales of hexagons 0, 6, and 13.
+// The scales come from the two-sine formula computed to sixty digits with
+// the exact golden ratio and rounded to `f64`. They pin `Pulse::scale_at`
+// to twelve decimal places.
 const MOMENTS: [(f64, f64, [f64; 3]); 4] = [
     (
         0.0,
@@ -92,7 +89,7 @@ const MOMENTS: [(f64, f64, [f64; 3]); 4] = [
 ];
 
 #[test]
-fn a_moment_renders_the_mean_of_the_two_sines() {
+fn the_scale_is_the_mean_of_the_two_sines() {
     for (phase, energy, expected) in MOMENTS {
         for (index, expected) in [0, 6, 13].into_iter().zip(expected) {
             let scale = Pulse::for_index(index).scale_at(energy, phase);
@@ -100,14 +97,14 @@ fn a_moment_renders_the_mean_of_the_two_sines() {
             assert!(
                 (scale - expected).abs() < TOLERANCE,
                 "hexagon {index} at phase {phase} and energy {energy} \
-                 scales to {scale}, and the arithmetic states {expected}"
+                 scales to {scale}, want {expected}"
             );
         }
     }
 }
 
 #[test]
-fn a_resting_mark_holds_every_hexagon_at_its_still_size() {
+fn at_energy_zero_every_hexagon_has_scale_one() {
     for phase in [0.0, 1.0, 3.5, 12.25, 900.0] {
         for index in 0..mark::hexagons().len() {
             let scale = Pulse::for_index(index).scale_at(0.0, phase);
@@ -118,21 +115,21 @@ fn a_resting_mark_holds_every_hexagon_at_its_still_size() {
 }
 
 #[test]
-fn the_swing_never_passes_ten_percent() {
+fn at_full_energy_the_scale_stays_within_the_swing() {
     for phase in [0.0, 0.25, 1.0, 3.5, 12.25, 900.0] {
         for index in 0..mark::hexagons().len() {
             let scale = Pulse::for_index(index).scale_at(1.0, phase);
 
             assert!(
                 (scale - 1.0).abs() <= SWING,
-                "hexagon {index} at phase {phase} scales to {scale}"
+                "hexagon {index} at phase {phase} scales to {scale}, want within {SWING} of 1.0"
             );
         }
     }
 }
 
 #[test]
-fn the_phase_moves_the_mark() {
+fn a_different_phase_gives_a_different_scale() {
     let pulse = Pulse::for_index(0);
 
     assert_ne!(pulse.scale_at(1.0, 0.0), pulse.scale_at(1.0, 1.0));

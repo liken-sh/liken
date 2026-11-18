@@ -10,54 +10,51 @@ import (
 	"github.com/liken-sh/liken/brand/linkcheck"
 )
 
-// The golden test is the contract: one small document that exercises
-// every shape the walker supports (an operation with no parameters, a
-// path parameter an operation overrides, several media types under
-// one status, an enum, a reference chain, a request body, response
-// headers, a link relation, a nested object, a map, a type that may
-// be null, and a pipe that must be escaped), and the exact page it
-// must produce.
+// The golden file is the exact page that the sample document must
+// produce. The sample covers each construct that apiref renders: an
+// operation with no parameters, a path parameter that an operation
+// overrides, several media types under one status, an enum, a chain of
+// references, a request body, response headers, a link, a nested
+// object, a map, a nullable type, and a pipe character that must be
+// escaped.
 func TestGenerateMatchesGolden(t *testing.T) {
 	got, err := Generate(read(t, "testdata/sample-openapi.json"), "testdata/sample-openapi.json", Options{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the page: %v", err)
 	}
 	if string(got) != string(read(t, "testdata/sample.md")) {
 		t.Errorf("generated page does not match testdata/sample.md:\n%s", string(got))
 	}
 }
 
-// A preamble is hand-written prose the document cannot hold, such as
-// a link to the narrative page beside this one. It lands verbatim
-// between the generated-from comment and the document's own summary.
+// The preamble is copied unchanged between the title and the
+// document's summary.
 func TestGenerateInsertsThePreamble(t *testing.T) {
 	got, err := Generate(read(t, "testdata/sample-openapi.json"), "testdata/sample-openapi.json",
 		Options{Preamble: read(t, "testdata/sample-preamble.md")})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the page: %v", err)
 	}
 	if string(got) != string(read(t, "testdata/sample-with-preamble.md")) {
 		t.Errorf("generated page does not match testdata/sample-with-preamble.md:\n%s", string(got))
 	}
 }
 
-// A postamble is the other half of the preamble: hand-written
-// sections that belong under the generated tables, such as where to
-// fetch the document itself.
+// The postamble is copied unchanged to the end of the page, after
+// the generated sections.
 func TestGenerateAppendsThePostamble(t *testing.T) {
 	got, err := Generate(read(t, "testdata/sample-openapi.json"), "testdata/sample-openapi.json",
 		Options{Postamble: read(t, "testdata/sample-postamble.md")})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the page: %v", err)
 	}
 	if string(got) != string(read(t, "testdata/sample-with-postamble.md")) {
 		t.Errorf("generated page does not match testdata/sample-with-postamble.md:\n%s", string(got))
 	}
 }
 
-// The front matter title and weight place the page among the pages a
-// repository already has, so both are settable. The title falls back
-// to the name the document gives itself.
+// Options.Title and Options.Weight set the front matter. The title
+// defaults to the title in the OpenAPI document.
 func TestGenerateTitlesAndWeightsThePage(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -72,7 +69,7 @@ func TestGenerateTitlesAndWeightsThePage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := Generate(read(t, "testdata/sample-openapi.json"), "testdata/sample-openapi.json", tc.opts)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("generating the page: %v", err)
 			}
 			if !strings.Contains(string(got), tc.want) {
 				t.Errorf("front matter is missing %q:\n%s", tc.want, string(got))
@@ -81,9 +78,9 @@ func TestGenerateTitlesAndWeightsThePage(t *testing.T) {
 	}
 }
 
-// The page template prints no heading of its own, so the page opens
-// with its title as its first heading.
-func TestGenerateHeadsThePageWithItsTitle(t *testing.T) {
+// The page template does not print a heading, so Generate writes the
+// title as the first heading.
+func TestGenerateWritesTheTitleAsTheFirstHeading(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		opts Options
@@ -95,7 +92,7 @@ func TestGenerateHeadsThePageWithItsTitle(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := Generate(read(t, "testdata/sample-openapi.json"), "testdata/sample-openapi.json", tc.opts)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("generating the page: %v", err)
 			}
 			if !strings.Contains(string(got), tc.want) {
 				t.Errorf("the page does not open with %q:\n%s", tc.want, string(got))
@@ -104,10 +101,8 @@ func TestGenerateHeadsThePageWithItsTitle(t *testing.T) {
 	}
 }
 
-// The real document from one of the operator manuals is the test for
-// the whole page: it holds every route, every header, and the problem
-// schema the manuals link, and it is the file the Makefile rules
-// feed this program.
+// testdata/display-openapi.json has routes with several
+// methods on one path, and the Problem schema that the manuals link to.
 func TestGenerateWritesASectionForEveryOperation(t *testing.T) {
 	page := generateDisplayPage(t)
 	for _, heading := range []string{
@@ -131,11 +126,11 @@ func TestGenerateWritesASectionForEveryOperation(t *testing.T) {
 	}
 }
 
-// Every table cell that names a schema links to a section of this
-// same page, and the manual's link check resolves those links with
-// linkcheck.Anchor. This test holds the two together: each link
-// target the page writes must be an id the page renders.
-func TestEveryLinkOnThePageLandsOnThisPage(t *testing.T) {
+// A table cell that names a schema links to a section of the same
+// page. The manual's link check computes heading ids with
+// linkcheck.Anchor, so each link target must be an id that a heading
+// or an explicit id attribute on the page produces.
+func TestEveryLinkOnThePageHasATargetOnThePage(t *testing.T) {
 	page := generateDisplayPage(t)
 	ids := map[string]bool{}
 	for _, line := range strings.Split(page, "\n") {
@@ -148,7 +143,7 @@ func TestEveryLinkOnThePageLandsOnThisPage(t *testing.T) {
 	}
 	for _, match := range regexp.MustCompile(`\]\(#([^)]+)\)`).FindAllStringSubmatch(page, -1) {
 		if !ids[match[1]] {
-			t.Errorf("the page links #%s, which no heading and no row on it renders", match[1])
+			t.Errorf("the page links #%s, but no heading and no id attribute on it has that id", match[1])
 		}
 	}
 }
@@ -173,10 +168,9 @@ func TestGenerateRefuses(t *testing.T) {
 	}
 }
 
-// The Makefile rules pass the flags before the positional arguments,
-// and the preamble is the third positional argument, the way crdref
-// takes it.
-func TestRunTakesTheFlagsBeforeThePositionalArguments(t *testing.T) {
+// The Makefile rules put the flags before the positional arguments,
+// and the preamble is the third positional argument, as in crdref.
+func TestRunAcceptsFlagsBeforeThePositionalArguments(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -207,11 +201,11 @@ func TestRunTakesTheFlagsBeforeThePositionalArguments(t *testing.T) {
 				}
 			}
 			if err := run(args); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running apiref: %v", err)
 			}
 			page, err := os.ReadFile(out)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the generated page: %v", err)
 			}
 			if !strings.Contains(string(page), tc.want) {
 				t.Errorf("page is missing %q:\n%s", tc.want, string(page))
@@ -255,13 +249,13 @@ func TestDisplayPath(t *testing.T) {
 	}
 }
 
-// generateDisplayPage renders the page for display-api, whose
-// document is the copy that manual publishes.
+// generateDisplayPage generates the page for
+// testdata/display-openapi.json.
 func generateDisplayPage(t *testing.T) string {
 	t.Helper()
 	page, err := Generate(read(t, "testdata/display-openapi.json"), "testdata/display-openapi.json", Options{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the page: %v", err)
 	}
 	return string(page)
 }
@@ -270,7 +264,7 @@ func read(t *testing.T, path string) []byte {
 	t.Helper()
 	content, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading %s: %v", path, err)
 	}
 	return content
 }

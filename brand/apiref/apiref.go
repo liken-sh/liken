@@ -1,13 +1,11 @@
-// The walker: from an OpenAPI 3.1 document to a Markdown reference
-// page.
+// apiref turns an OpenAPI 3.1 document into a Markdown reference page.
 //
-// Each operator's API describes itself. The document is generated
-// from the router the program serves, so every served route appears
-// in it, and a description in it is written to be
-// read. This program arranges those descriptions into a page, so a
-// manual's route reference can never drift from the routes the API
-// serves. The page is Markdown and nothing else: a reader needs no
-// JavaScript, and the site's own link check reaches every section.
+// An operator generates its OpenAPI document from the router it
+// serves, so a page generated from that document lists the routes the
+// operator serves, with the descriptions written in its code. The page
+// is plain Markdown, so it needs no JavaScript and the site's link
+// check can read every link and heading on it.
+
 package main
 
 import (
@@ -15,12 +13,12 @@ import (
 	"strings"
 )
 
-// Options are the per-page choices the command line makes. Preamble
-// opens the page and Postamble closes it, both hand-written files
-// that land verbatim, because the document cannot hold that prose.
-// Title and Weight set the two front matter values a repository
-// orders its pages with. The zero values are the document's own
-// title and defaultWeight.
+// Options are the per-page settings from the command line. Preamble
+// and Postamble are hand-written Markdown that Generate copies onto
+// the page, the preamble under the title and the postamble at the end.
+// Title and Weight set the front matter.
+// An empty Title uses the document's info.title, and a zero Weight uses
+// defaultWeight.
 type Options struct {
 	Title     string
 	Weight    int
@@ -28,23 +26,17 @@ type Options struct {
 	Postamble []byte
 }
 
-// defaultWeight puts a generated page ahead of the hand-written
-// reference pages in its section listing. A repository passes
-// -weight to place the page against the pages it already has.
+// defaultWeight is the front matter weight when the caller sets none.
+// Hugo lists the pages of a section in ascending weight.
 const defaultWeight = 10
 
 // Generate renders one OpenAPI document as a Markdown page with Hugo
-// front matter. The source path appears in a comment so a reader of
-// the page knows where the words come from.
+// front matter. An HTML comment on the page names source, so a reader
+// can find the file the page was generated from.
 //
-// The page opens with the document's own summary and description,
-// then gives one section for each operation, then the schemas the
-// operations name, then the credentials. The preamble is
-// hand-written prose that opens the page: the document describes the
-// routes, but only a person can say how the page relates to the
-// narrative beside it, so that paragraph is a file in the repository
-// and lands here verbatim. The postamble is the same for prose that
-// belongs under the tables.
+// After the title, the page has the preamble, the document's summary
+// and description, one section for each operation, the schemas, the
+// security schemes, and the postamble.
 func Generate(openAPIJSON []byte, source string, opts Options) ([]byte, error) {
 	document, err := parse(openAPIJSON)
 	if err != nil {
@@ -69,13 +61,11 @@ func Generate(openAPIJSON []byte, source string, opts Options) ([]byte, error) {
 	}
 
 	var b strings.Builder
-	// toc asks the page template for an "On this page" table of
-	// contents, which lists every route and every schema on a page
-	// this long.
+	// toc: true makes the page template add an "On this page" list of
+	// the headings, because these pages are long.
 	fmt.Fprintf(&b, "---\ntitle: %s\nweight: %d\ntoc: true\n---\n\n", title, weight)
 	fmt.Fprintf(&b, "<!-- Generated from %s by apiref. Do not edit. -->\n\n", displayPath(source))
-	// The page template prints no heading, so the page carries its
-	// own.
+	// The page template does not print the title as a heading.
 	fmt.Fprintf(&b, "# %s\n\n", title)
 	if preamble := strings.Trim(string(opts.Preamble), "\n"); preamble != "" {
 		b.WriteString(preamble + "\n\n")
@@ -90,11 +80,10 @@ func Generate(openAPIJSON []byte, source string, opts Options) ([]byte, error) {
 	return []byte(strings.TrimRight(b.String(), "\n") + "\n"), nil
 }
 
-// emitInfo writes what the document says about itself. The version
-// is here because a released API and a development build serve
-// different ones, and a reader of the page needs to know which
-// document it was made from. The summary and the description land
-// verbatim: they are prose already, written for this page's reader.
+// emitInfo writes the title, the API version, the OpenAPI version, and
+// the document's summary and description. The API version tells the
+// reader which build the page describes, because a release and a
+// development build serve different versions.
 func emitInfo(b *strings.Builder, release string, info *node) {
 	fmt.Fprintf(b, "`%s`, version `%s`, described in OpenAPI %s.\n\n",
 		info.member("title").value(), info.member("version").value(), release)
@@ -106,9 +95,8 @@ func emitInfo(b *strings.Builder, release string, info *node) {
 	}
 }
 
-// displayPath strips the ../ prefixes a Makefile invocation adds, so
-// the generated comment names the file by its path in the
-// repository, which is the name a reader can find.
+// displayPath removes the leading ../ segments that a docs Makefile
+// puts in the path of a document outside its docs directory.
 func displayPath(p string) string {
 	for strings.HasPrefix(p, "../") {
 		p = strings.TrimPrefix(p, "../")

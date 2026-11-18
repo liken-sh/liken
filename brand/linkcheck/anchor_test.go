@@ -2,10 +2,10 @@ package linkcheck
 
 import "testing"
 
-// These cases mirror ids taken from a site built with the pinned Hugo
-// binary, so the test asserts Hugo's behavior, not this package's
-// opinion of it. The dotted paths are the headings crdref generates;
-// the sentence cases are headings from the hand-written guides.
+// The expected ids come from a site built with the pinned Hugo
+// binary, so the test checks that Anchor matches Hugo. The dotted
+// paths are headings that crdref writes, and the sentences are
+// headings of the hand-written guides.
 func TestAnchor(t *testing.T) {
 	for text, want := range map[string]string{
 		"spec.releases.catalog":               "specreleasescatalog",

@@ -1,11 +1,9 @@
-// The routes: one section for each operation the document declares.
-//
-// A section is one method on one path, because that is the unit the
-// document describes and the unit a caller writes: the parameters, the
-// responses, and the fields of a GET are not the ones of an OPTIONS on
-// the same path. The heading is the method and the path together, so
-// the text a reader searches for is the text they would type into
-// curl.
+// The route sections of the page. An operation is one method on one
+// path, and each operation gets its own section, because a GET and an
+// OPTIONS on the same path have different parameters and responses.
+// The heading is the method and the path, which is what a reader types
+// into curl and searches for.
+
 package main
 
 import (
@@ -13,17 +11,14 @@ import (
 	"strings"
 )
 
-// methods are the operations a path item may declare, in the order
-// OpenAPI lists them. A path item also holds members that are not
-// operations, such as parameters and summary, so a section is
-// written only for a member in this set.
+// methods are the HTTP methods that OpenAPI allows in a path item. A
+// path item also has members that are not operations, such as
+// parameters and summary, and emitPaths skips them.
 var methods = map[string]bool{
 	"get": true, "put": true, "post": true, "delete": true,
 	"options": true, "head": true, "patch": true, "trace": true,
 }
 
-// emitPaths writes a section for every operation, with the paths in
-// the document's order and the methods in each path item's order.
 func emitPaths(b *strings.Builder, document *node, paths *node) {
 	paths.each(func(path string, item *node) {
 		item.each(func(name string, operation *node) {
@@ -35,12 +30,11 @@ func emitPaths(b *strings.Builder, document *node, paths *node) {
 	})
 }
 
-// emitOperation writes one section. The heading holds the method and
-// the path in the code face, and an attribute with the method, which
-// the theme draws the badge from. Goldmark strips the attribute
-// before it computes the heading's id, and the code marks render as
-// nothing, so the id is the one a plain "GET /v1/thing" heading gets
-// and the page's table of contents still lists the route.
+// emitOperation writes one section. The heading sets a data-method
+// attribute, which the theme's stylesheet uses to style the method as
+// a badge. Goldmark removes the attribute block and the backticks
+// before it computes the heading's id, so the id is the same as for a
+// plain "GET /v1/thing" heading.
 func emitOperation(b *strings.Builder, document *node, method, path string, item, operation *node) {
 	fmt.Fprintf(b, "## `%s` `%s` {data-method=%s}\n\n", method, path, method)
 	if summary := foldText(operation.member("summary").value()); summary != "" {
@@ -49,8 +43,9 @@ func emitOperation(b *strings.Builder, document *node, method, path string, item
 	if description := strings.TrimSpace(operation.member("description").value()); description != "" {
 		b.WriteString(description + "\n\n")
 	}
-	// A route that states its own security stands apart from the
-	// document's requirement, so its section says what it takes.
+	// The Security section gives the document-wide requirement. An
+	// operation's own security field overrides it, so the section of
+	// that operation states the override.
 	if phrase := requirementPhrase(operation.member("security")); phrase != "" {
 		fmt.Fprintf(b, "This route requires %s.\n\n", phrase)
 	}
@@ -62,11 +57,10 @@ func emitOperation(b *strings.Builder, document *node, method, path string, item
 	emitResponseLinks(b, document, responses)
 }
 
-// emitParameters writes the parameters of one operation: the ones
-// the path item declares for every method, then the ones the
-// operation declares for itself. OpenAPI says an operation's
-// parameter replaces the path item's parameter of the same name and
-// place, which is what the replacement below does.
+// emitParameters writes the parameters that the path item declares for
+// every method, then those that the operation declares. As OpenAPI
+// specifies, an operation's parameter replaces a path item parameter
+// with the same name and location.
 func emitParameters(b *strings.Builder, document *node, item, operation *node) {
 	var merged []*node
 	add := func(parameter *node) {
@@ -95,9 +89,8 @@ func emitParameters(b *strings.Builder, document *node, item, operation *node) {
 	b.WriteString("| --- | --- | --- | --- | --- |\n")
 	for _, parameter := range merged {
 		schema := parameter.member("schema")
-		// A parameter carries its own description, and the facts the
-		// schema holds, the enum and the default, belong in the same
-		// cell.
+		// The schema adds its own description, enum, default, and
+		// pattern to the parameter's description.
 		text := strings.TrimSpace(cellText(parameter) + " " + cellText(schema))
 		fmt.Fprintf(b, "| `%s` | %s | %s | %s | %s |\n",
 			parameter.member("name").value(),
@@ -109,9 +102,9 @@ func emitParameters(b *strings.Builder, document *node, item, operation *node) {
 	b.WriteString("\n")
 }
 
-// emitRequestBody writes what an operation takes. The description is
-// a paragraph rather than a cell, because it describes the body and
-// not one of its forms.
+// emitRequestBody writes the body's description as a paragraph and
+// not as a table cell, because it describes the whole body and not one
+// media type.
 func emitRequestBody(b *strings.Builder, document *node, body *node) {
 	body = resolve(document, body)
 	content := body.member("content")
@@ -135,10 +128,10 @@ func emitRequestBody(b *strings.Builder, document *node, body *node) {
 	b.WriteString("\n")
 }
 
-// emitResponses writes each operation's response data, one row per media
-// type, in the document's order. When no response declares OpenAPI
-// content, the table needs only two columns. This includes APIs whose
-// bodies are live captures or documents described elsewhere in the manual.
+// emitResponses writes one table row for each media type of each
+// response. When no response of the operation declares content, the
+// table has no media type and schema columns, because they would say
+// "none" on every row.
 func emitResponses(b *strings.Builder, document *node, responses *node) {
 	if responses == nil || len(responses.members) == 0 {
 		return
@@ -181,9 +174,9 @@ func anyResponseHasContent(document *node, responses *node) bool {
 	return found
 }
 
-// emitResponseHeaders writes the response header fields. The table
-// has no type column: every header value is text, and the grammar a
-// field follows is in the field's own description.
+// emitResponseHeaders writes a table with no type column, because
+// every header value is text and the header's description states its
+// format.
 func emitResponseHeaders(b *strings.Builder, document *node, responses *node) {
 	var rows []string
 	responses.each(func(status string, response *node) {
@@ -202,9 +195,9 @@ func emitResponseHeaders(b *strings.Builder, document *node, responses *node) {
 	b.WriteString("\n")
 }
 
-// emitResponseLinks writes the link relations a response declares:
-// the other operation a caller reaches from this one, which OpenAPI
-// names by operationId or by a reference to it.
+// emitResponseLinks writes the OpenAPI links of each response. A link
+// names an operation that the caller can call next, by operationId or
+// by operationRef.
 func emitResponseLinks(b *strings.Builder, document *node, responses *node) {
 	var rows []string
 	responses.each(func(status string, response *node) {

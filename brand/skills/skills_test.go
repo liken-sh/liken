@@ -12,8 +12,8 @@ import (
 // file is written against it.
 const base = "https://liken.sh/media"
 
-// The golden file is the contract: one guide that holds every link
-// shape, and the exact skill it must produce.
+// The golden file is one guide with every kind of link, and the exact
+// skill that Generate must write for it.
 func TestGenerateMatchesGolden(t *testing.T) {
 	got, err := Generate(read(t, "testdata/guides/pair-a-remote.md"), "pair-a-remote", base)
 	if err != nil {
@@ -232,9 +232,9 @@ func TestEmitWritesOneSkillPerGuide(t *testing.T) {
 	}
 }
 
-// The fixture directory holds _index.md, the section page; notes.txt,
-// which is not Markdown; and sub/, a directory. Emit skips all three
-// and reports no error.
+// The fixture directory has _index.md, the section page, notes.txt,
+// which is not Markdown, and sub/, a directory. Emit skips them and
+// returns no error.
 func TestEmitSkipsWhatIsNotAGuide(t *testing.T) {
 	out := t.TempDir()
 	if err := Emit("testdata/guides", out, base); err != nil {
@@ -243,7 +243,7 @@ func TestEmitSkipsWhatIsNotAGuide(t *testing.T) {
 	got := names(t, out)
 	want := []string{"pair-a-remote", "roll-back"}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("the output directory holds %v, want %v", got, want)
+		t.Errorf("the output directory has %v, want %v", got, want)
 	}
 }
 
@@ -264,7 +264,7 @@ func names(t *testing.T, dir string) []string {
 
 // A renamed or deleted guide leaves a stale skill directory, and the
 // run removes it. A file at the top of the output directory stays,
-// because it is the repository's.
+// because a person wrote it.
 func TestEmitSweepsAStaleSkillAndKeepsFiles(t *testing.T) {
 	out := t.TempDir()
 	stale(t, out)
@@ -274,7 +274,7 @@ func TestEmitSweepsAStaleSkillAndKeepsFiles(t *testing.T) {
 	got := names(t, out)
 	want := []string{"README.md", "pair-a-remote", "roll-back"}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("the output directory holds %v, want %v", got, want)
+		t.Errorf("the output directory has %v, want %v", got, want)
 	}
 }
 
@@ -341,7 +341,7 @@ func TestRunRefusesTheWrongArguments(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := run(tc.args); err == nil {
-				t.Errorf("run(%q) must be refused", tc.args)
+				t.Errorf("run(%q) returned no error, want one", tc.args)
 			}
 		})
 	}

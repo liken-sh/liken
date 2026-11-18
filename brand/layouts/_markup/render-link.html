@@ -6,8 +6,8 @@ puts the site's base path in front of a root-relative link. Without
 it, /docs/guides/install/ on the media manual would open the OS
 manual's install guide. A link to another host, a protocol-relative
 link, a relative link, and a fragment pass through as written. The
-Markdown twin keeps the authored link, because it renders from
-RawContent. */ -}}
+Markdown version keeps the link as written, because Hugo renders it
+from RawContent. */ -}}
 {{- $dest := .Destination -}}
 {{- if and (hasPrefix $dest "/") (not (hasPrefix $dest "//")) -}}
 {{- $dest = relURL (strings.TrimPrefix "/" $dest) -}}

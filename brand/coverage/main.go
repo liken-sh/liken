@@ -1,16 +1,15 @@
-// coverage turns the coverage data a repository's tests produce into
-// one self-contained HTML report.
+// coverage turns the coverage data from a repository's tests into one
+// self-contained HTML report.
 //
-// The liken repositories run it as `go tool coverage`, pinned as a
-// tool dependency of the docs module:
+// Each component's Makefile runs it from the component's docs module,
+// which declares it as a tool:
 //
 //	go tool coverage -title <name> -out coverage.html [-root <dir>] [-label <name>] <input>...
 //
-// An input is a Go coverage profile or a Cobertura report. A
-// repository with a Go operator and a Rust program hands it both at
-// once, and the two come out in one page with one look. The page
-// goes onto the repository's documentation site and into its
-// releases, so it is one file that carries its own stylesheet.
+// An input is a Go coverage profile or a Cobertura report, so a
+// component with Go and Rust code gets one page for both. The manual's
+// site and the release channel publish the page, so it is one file
+// with its stylesheet inline.
 package main
 
 import (
@@ -21,8 +20,7 @@ import (
 	"strings"
 )
 
-// usage is both the -h help text and the error a wrong command line
-// returns, so one line stays true for both.
+// usage is the -h help text and the error for a wrong command line.
 const usage = "usage: coverage [-title <name>] [-label <name>] [-root <dir>] " +
 	"-out <file> <input> [<input>...]"
 
@@ -33,9 +31,9 @@ func main() {
 	}
 }
 
-// labels collects the repeated -label flag. A Cobertura report says
-// nothing about the language that wrote it, so a repository names
-// its inputs itself. The names pair with the inputs in order.
+// labels collects the repeated -label flag, which names the inputs on
+// the page in order. A Cobertura report does not record its language,
+// so without a label the page shows the input's file name.
 type labels []string
 
 func (l *labels) String() string { return strings.Join(*l, ", ") }
@@ -57,8 +55,7 @@ func run(args []string) error {
 	root := flags.String("root", ".", "the source tree the inputs describe")
 	title := flags.String("title", "Test coverage", "the report's heading")
 	if err := flags.Parse(args); err != nil {
-		// flags.Usage wrote the help text already, so -h is done and
-		// is not a failure.
+		// flags.Usage has printed the help text, so -h succeeds.
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -67,10 +64,10 @@ func run(args []string) error {
 
 	inputs := flags.Args()
 	if len(inputs) == 0 || *out == "" {
-		return errors.New(usage)
+		return fmt.Errorf("coverage needs -out and at least one input\n%s", usage)
 	}
 	if len(names) > len(inputs) {
-		return fmt.Errorf("%d labels name %d inputs", len(names), len(inputs))
+		return fmt.Errorf("the command line has %d -label flags and %d inputs, and each -label names one input", len(names), len(inputs))
 	}
 
 	sources := make([]*Source, 0, len(inputs))

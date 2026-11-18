@@ -1,9 +1,7 @@
-{{- /* This is the top nav, one line of links shared by every liken site.
-The entries come from data/nav.yaml, which explains which
-destinations are family-wide and which are site-scoped. An entry
-that names a site parameter renders only when the site sets it; the
-data file explains why there is no fallback. A label marked code
-renders in the code face. */ -}}
+{{- /* The top nav, one line of links on every liken site. The entries
+come from data/nav.yaml. An entry with param in place of url renders
+only when the site sets that parameter, and data/nav.yaml gives the
+reason. An entry with code: true renders its label in the code face. */ -}}
 <nav class="site">
   {{- range hugo.Data.nav }}
   {{- $entry := . }}

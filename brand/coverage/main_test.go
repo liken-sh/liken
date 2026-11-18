@@ -7,9 +7,8 @@ import (
 	"testing"
 )
 
-// The command writes one file and no other. A site publishes that
-// file and a release ships it, so a second file beside it would be a
-// file nobody carries.
+// The site and the release publish only the report file, so the
+// command must write nothing else.
 func TestRunWritesOneFile(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "coverage.html")
@@ -18,18 +17,18 @@ func TestRunWritesOneFile(t *testing.T) {
 		"testdata/go.out", "testdata/cobertura.xml",
 	}
 	if err := run(args); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running coverage: %v", err)
 	}
 	written, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the output directory: %v", err)
 	}
 	if len(written) != 1 {
 		t.Errorf("the run wrote %d files, want 1", len(written))
 	}
 	page, err := os.ReadFile(out)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the report: %v", err)
 	}
 	for _, want := range []string{"<h1>widget</h1>", "60.0%", "75.0%"} {
 		if !strings.Contains(string(page), want) {
@@ -38,9 +37,6 @@ func TestRunWritesOneFile(t *testing.T) {
 	}
 }
 
-// A Cobertura report says nothing about which language wrote it, so
-// a label names the input on the page. The labels pair with the
-// inputs in order.
 func TestRunLabelsTheInputsInOrder(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "coverage.html")
 	args := []string{
@@ -48,11 +44,11 @@ func TestRunLabelsTheInputsInOrder(t *testing.T) {
 		"testdata/go.out", "testdata/cobertura.xml",
 	}
 	if err := run(args); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running coverage: %v", err)
 	}
 	page, err := os.ReadFile(out)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the report: %v", err)
 	}
 	for _, want := range []string{">Rust</a>", ">Rust</h2>", "<h1>Test coverage</h1>"} {
 		if !strings.Contains(string(page), want) {
@@ -75,7 +71,7 @@ func TestRunRefusesAnIncompleteCommandLine(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := run(tc.args); err == nil {
-				t.Errorf("run(%q) must be refused", tc.args)
+				t.Errorf("run(%q) returned no error, want one", tc.args)
 			}
 		})
 	}

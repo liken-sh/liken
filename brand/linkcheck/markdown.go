@@ -1,11 +1,11 @@
 package linkcheck
 
-// The manual is Markdown, and the link check reads it the way the
-// renderer does: front matter and fenced code hold no headings and no
-// links, a heading's id comes from its rendered text, and a repeated
-// heading gets a numbered id. This file holds that reading. It covers
-// the Markdown this manual writes, not the whole of CommonMark: ATX
-// headings, inline links, and backtick fences are the grammar in use.
+// The link check reads the manual's Markdown the way Hugo's renderer,
+// Goldmark, does: front matter and fenced code contain no headings and
+// no links, a heading's id comes from its rendered text, and a
+// repeated heading gets a numbered id. This file parses only the
+// Markdown that the manual uses: ATX headings, inline links, and
+// backtick fences.
 
 import (
 	"fmt"
@@ -14,44 +14,41 @@ import (
 )
 
 var (
-	// A whole inline link renders as its text, so the id of a heading
-	// that contains one keeps the text and drops the target.
+	// A link renders as its text, so the id of a heading that
+	// contains one comes from the text and ignores the target.
 	inlineLink = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
 
-	// Underscore emphasis only opens and closes at a word's edge, so
-	// an underscore inside a word, which Anchor keeps, is unchanged.
+	// Underscore emphasis starts and ends only at a word boundary.
+	// An underscore inside a word is not emphasis, and Anchor keeps
+	// it.
 	underscoreEmphasis = regexp.MustCompile(`(^|[\s(])_+([^_]+?)_+($|[\s).,:;!?])`)
 
 	atxHeading = regexp.MustCompile(`^(#{1,6})\s+(.*?)\s*$`)
 
-	// The generated reference pages put an id on each field's table
-	// row as a raw-HTML span, so a link can land on one field. Those
-	// ids are link targets exactly like heading ids.
+	// The generated reference pages put a raw-HTML span with an id in
+	// each field's table row, so a link can point at one field. Those
+	// ids are link targets like heading ids.
 	explicitID = regexp.MustCompile(`\bid="([^"]+)"`)
 
-	// A heading may end in an attribute block, which sets attributes
-	// on the rendered heading and renders no text of its own. apiref
-	// writes one on every route heading to hold the method. The
-	// renderer takes the block off before it computes the id, so this
-	// reading takes it off too. A block counts only when it holds an
-	// id, a class, or a key and a value, which is what the renderer
-	// accepts. A route path ends in a braced template such as
-	// {name}, and that is text.
+	// A heading can end in an attribute block such as
+	// {data-method=GET}, which apiref writes on each route heading.
+	// The renderer removes the block before it computes the id. The
+	// pattern matches only a block with an id, a class, or a key=value
+	// pair, because a route path can end in a template such as {name},
+	// which is heading text.
 	headingAttributes = regexp.MustCompile(`\s*\{\s*(?:[#.][^{}]*|[^{}]*=[^{}]*)\}\s*$`)
 
-	// A link's target is at its end, so matching from the closing
-	// bracket finds a link whose text wraps across lines. The three
-	// groups are the opening, the target, and the optional quoted
-	// title with the closing parenthesis, so a caller can put a new
-	// target between the outer two. Every target matches, external
-	// ones included; the scan below keeps the absolute ones.
+	// The pattern starts at the closing bracket of the link text, so it
+	// also matches a link whose text wraps across lines. Its groups are
+	// the opening "](", the target, and the optional title with the
+	// closing parenthesis, so RewriteTargets can replace the target
+	// alone.
 	linkTarget = regexp.MustCompile(`(\]\(\s*)([^)\s]*)((?:\s+"[^"]*")?\))`)
 )
 
-// stripInline reduces a heading line to its rendered text: an
-// attribute block and the backticks and asterisks render as nothing,
-// a link renders as its text, and underscore emphasis renders as its
-// content.
+// stripInline returns the text a heading line renders. It removes the
+// attribute block, backticks, and asterisks, replaces a link with its
+// text, and removes underscore emphasis markers.
 func stripInline(s string) string {
 	s = headingAttributes.ReplaceAllString(s, "")
 	s = inlineLink.ReplaceAllString(s, "$1")
@@ -60,9 +57,9 @@ func stripInline(s string) string {
 	return s
 }
 
-// proseLines returns the lines the renderer reads as prose: the front
-// matter block and every fenced code block drop out. A fence line
-// itself belongs to no one, so it drops too.
+// proseLines returns the lines of a page that the renderer reads as
+// Markdown. It leaves out the front matter, the fenced code blocks,
+// and the fence lines.
 func proseLines(page []byte) []string {
 	lines := strings.Split(string(page), "\n")
 	if len(lines) > 0 && lines[0] == "---" {
@@ -87,9 +84,10 @@ func proseLines(page []byte) []string {
 	return prose
 }
 
-// pageAnchors returns every heading id the rendered page has.
-// When two headings render to the same id, the renderer numbers the
-// later ones, so both stay addressable and this map holds both.
+// pageAnchors returns every id that the rendered page defines, from
+// headings and from explicit id attributes. When two headings render
+// to the same id, the renderer appends -1, -2, and so on to the later
+// ones, and the result contains each of those ids.
 func pageAnchors(page []byte) map[string]bool {
 	ids := map[string]bool{}
 	for _, line := range proseLines(page) {
@@ -109,11 +107,10 @@ func pageAnchors(page []byte) map[string]bool {
 	return ids
 }
 
-// RewriteTargets replaces every link target on one line with what
-// rewrite returns for it. This is the one place that knows what a
-// Markdown link is, so the link check and the skills generator read
-// the same grammar. The caller decides which targets change and
-// returns the rest as they are.
+// RewriteTargets replaces every link target on one line with the
+// result of rewrite. The link check and the skills generator both use
+// it, so they parse links the same way. rewrite returns a target
+// unchanged to keep it.
 func RewriteTargets(line string, rewrite func(target string) string) string {
 	return linkTarget.ReplaceAllStringFunc(line, func(link string) string {
 		m := linkTarget.FindStringSubmatch(link)
@@ -121,15 +118,12 @@ func RewriteTargets(line string, rewrite func(target string) string) string {
 	})
 }
 
-// internalLinks returns every absolute link target on the page, in
-// document order, fragments included.
+// internalLinks returns the link targets on the page that start with a
+// slash, in document order, with their fragments.
 func internalLinks(page []byte) []string {
 	var targets []string
 	for _, line := range proseLines(page) {
 		RewriteTargets(line, func(target string) string {
-			// An external target starts with its scheme, not a slash,
-			// so the leading slash is what makes a link the manual's
-			// own to check.
 			if strings.HasPrefix(target, "/") {
 				targets = append(targets, target)
 			}
