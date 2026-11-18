@@ -1,8 +1,6 @@
 package main
 
-// These tests cover the restarts inside the PipeWire and WirePlumber
-// containers. Each daemon is a real child process that runs until a
-// signal ends it.
+// Each daemon in these tests is a real child process.
 
 import (
 	"net"
@@ -13,8 +11,8 @@ import (
 	"testing"
 )
 
-// daemons starts the command it is given, and reports each process it
-// starts.
+// daemons returns a start function for superviseDaemon, and a channel
+// that receives each process it starts.
 func daemons(t *testing.T, name string, args ...string) (func() (*exec.Cmd, error), chan *exec.Cmd) {
 	t.Helper()
 	started := make(chan *exec.Cmd, 4)
@@ -29,8 +27,6 @@ func daemons(t *testing.T, name string, args ...string) (func() (*exec.Cmd, erro
 	}, started
 }
 
-// supervising runs the first process and reports the status it exits
-// with.
 func supervising(run func() int) chan int {
 	status := make(chan int, 1)
 	go func() { status <- run() }()
@@ -39,46 +35,46 @@ func supervising(run func() int) chan int {
 
 func TestANewDeclarationRestartsPipeWireInPlace(t *testing.T) {
 	start, started := daemons(t, "sleep", "60")
-	wakes := make(chan struct{}, 1)
+	changes := make(chan struct{}, 1)
 	stale := true
 	status := supervising(func() int {
-		return superviseDaemon("PipeWire", "", start, wakes, func() bool { return stale }, nil, nil)
+		return superviseDaemon("PipeWire", "", start, changes, func() bool { return stale }, nil, nil)
 	})
 	<-started
 
-	wakes <- struct{}{}
+	changes <- struct{}{}
 	second := <-started
 	stale = false
 
-	// The new PipeWire crashes, and the container exits with it.
+	// A crash of the new PipeWire ends the container.
 	_ = second.Process.Signal(syscall.SIGSEGV)
 	if got, want := <-status, 128+int(syscall.SIGSEGV); got != want {
 		t.Errorf("the container exited with %d, want %d", got, want)
 	}
 	if len(started) != 0 {
-		t.Error("the first process started PipeWire again after a crash")
+		t.Error("the first process started PipeWire again after a crash, want no start")
 	}
 }
 
-// A wake whose drop-in PipeWire already runs, such as the second event
-// of one write, restarts nothing.
-func TestAWakeForTheDeclarationPipeWireRunsRestartsNothing(t *testing.T) {
+// One write of the drop-in can deliver two changes, and the second one
+// finds a PipeWire that already loaded it.
+func TestAChangeToTheDeclarationPipeWireRunsRestartsNothing(t *testing.T) {
 	start, started := daemons(t, "sleep", "60")
-	wakes := make(chan struct{}, 1)
+	changes := make(chan struct{}, 1)
 	stop := make(chan os.Signal, 1)
 	status := supervising(func() int {
-		return superviseDaemon("PipeWire", "", start, wakes, func() bool { return false }, nil, stop)
+		return superviseDaemon("PipeWire", "", start, changes, func() bool { return false }, nil, stop)
 	})
 	<-started
 
-	wakes <- struct{}{}
+	changes <- struct{}{}
 	stop <- syscall.SIGTERM
 
 	if got, want := <-status, 128+int(syscall.SIGTERM); got != want {
 		t.Errorf("the container exited with %d, want %d", got, want)
 	}
 	if len(started) != 0 {
-		t.Error("the first process started PipeWire again for a declaration it runs")
+		t.Error("the first process started PipeWire again for a declaration it runs, want no start")
 	}
 }
 
@@ -123,33 +119,33 @@ func TestAStartThatFailsEndsTheContainer(t *testing.T) {
 	}
 }
 
-// A PipeWire is the socket it bound: a new bind at the same path is a
-// new PipeWire, and a socket nobody listens on is none.
+// A new bind at the same path is a new identity, and a missing socket
+// is the zero identity.
 func TestAPipeWireIsTheSocketItBound(t *testing.T) {
 	socket := filepath.Join(t.TempDir(), "pipewire-0")
 	if got := currentPipewire(socket); got != (pipewireIdentity{}) {
-		t.Fatalf("a missing socket reads as %+v", got)
+		t.Fatalf("a missing socket reads as %+v, want the zero identity", got)
 	}
 	if awaitPipewire(socket, 0) {
-		t.Fatal("the wait found a PipeWire at a missing socket")
+		t.Fatal("awaitPipewire on a missing socket = true, want false")
 	}
 
 	first, err := net.Listen("unix", socket)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listening on the socket: %v", err)
 	}
 	before := currentPipewire(socket)
 	if before == (pipewireIdentity{}) || !awaitPipewire(socket, 0) {
-		t.Fatal("a listening socket reads as no PipeWire")
+		t.Fatal("a listening socket reads as no PipeWire, want a PipeWire")
 	}
 	_ = first.Close()
 
 	second, err := net.Listen("unix", socket)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listening on the socket again: %v", err)
 	}
 	defer func() { _ = second.Close() }()
 	if after := currentPipewire(socket); after == before {
-		t.Errorf("a new bind reads as the same PipeWire, %+v", after)
+		t.Errorf("a new bind reads as %+v, the same PipeWire as before, want a new identity", after)
 	}
 }

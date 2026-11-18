@@ -8,19 +8,18 @@ import (
 	"testing"
 )
 
-// The lab card's endpoints, by the names a reconcile pass stamps on
-// them. The HDMI slot's PCM device is 3 and the analog jack's is 0,
-// which is what the graph fixtures key on, and the capture side of
-// the analog jack is the source.
+// The device names of the test card's endpoints. The HDMI output is PCM
+// device 3 and the analog jack is PCM device 0, and the graphs in these
+// tests use the same numbers.
 const (
 	testSinkName   = "liken-1-pci-0000-00-1f-3-hdmi-0"
 	testAnalogName = "liken-1-pci-0000-00-1f-3-alc236-analog"
 	testSourceName = testAnalogName + captureSuffix
 )
 
-// testInventory is what a reconcile pass would have published for
-// that card. The refresh and the prepare call both resolve a device
-// name through it, because the name holds no card and no PCM number.
+// testInventory returns the inventory that a reconcile pass would
+// publish for that card. A refresh resolves a device name through it,
+// because the name has no card number and no PCM number.
 func testInventory() *endpointInventory {
 	inventory := &endpointInventory{}
 	inventory.publish([]alsaEndpoint{
@@ -50,22 +49,22 @@ func TestEndpointEdits(t *testing.T) {
 	if !slices.Equal(edits.Env, want) {
 		t.Errorf("env = %v, want %v", edits.Env, want)
 	}
-	// A remote that starts with a slash is used as an absolute socket
-	// path, so the mount and the variable name the same directory.
+	// PIPEWIRE_REMOTE is an absolute socket path, so the mount must
+	// cover the directory that holds the socket.
 	if len(edits.Mounts) != 1 {
 		t.Fatalf("mounts = %+v, want one", edits.Mounts)
 	}
 	mount := edits.Mounts[0]
 	if mount.HostPath != runtimeDir || mount.ContainerPath != runtimeDir {
-		t.Errorf("mount = %+v", mount)
+		t.Errorf("mount = %+v, want %s mounted at the same path", mount, runtimeDir)
 	}
 	if !slices.Contains(mount.Options, "ro") {
 		t.Errorf("options = %v, want a read-only mount", mount.Options)
 	}
-	// No device node reaches the consumer. The operator holds every PCM
-	// on the card, and a consumer connects to PipeWire instead.
+	// The spec sets only the two PipeWire variables, because the consumer
+	// connects to PipeWire and opens no PCM device.
 	if len(edits.Env) != 2 {
-		t.Errorf("env = %v", edits.Env)
+		t.Errorf("env = %v, want only the two PipeWire variables", edits.Env)
 	}
 }
 
@@ -83,7 +82,7 @@ func TestClaimUIDFromSpecName(t *testing.T) {
 	for _, c := range cases {
 		uid, ok := claimUIDFromSpecName(c.name)
 		if ok != c.ok || uid != c.uid {
-			t.Errorf("claimUIDFromSpecName(%q) = %q, %v", c.name, uid, ok)
+			t.Errorf("claimUIDFromSpecName(%q) = %q, %v, want %q, %v", c.name, uid, ok, c.uid, c.ok)
 		}
 	}
 }
@@ -94,7 +93,7 @@ func TestRefreshRewritesASinkThatCameBackUnderANewName(t *testing.T) {
 		Name:           "claim-1-" + testSinkName,
 		ContainerEdits: endpointEdits("alsa_output.old-name"),
 	}}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the spec: %v", err)
 	}
 
 	refreshCDISpecs(testInventory(),
@@ -109,14 +108,13 @@ func TestRefreshRewritesASinkThatCameBackUnderANewName(t *testing.T) {
 
 func TestRefreshKeepsTheNameWhenTheSinkIsGone(t *testing.T) {
 	// An empty PIPEWIRE_NODE would start the next pod against
-	// PipeWire's default sink with no error. The taints on the device
-	// hold that pod back until the output can play again.
+	// PipeWire's default sink with no error, so the old name stays.
 	dir := specDirectory(t)
 	if err := writeCDISpec("claim-1", []cdiDevice{{
 		Name:           "claim-1-" + testSinkName,
 		ContainerEdits: endpointEdits("alsa_output.old-name"),
 	}}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the spec: %v", err)
 	}
 
 	refreshCDISpecs(testInventory(), outputGraph(map[pcmAddress]string{}))
@@ -128,16 +126,15 @@ func TestRefreshKeepsTheNameWhenTheSinkIsGone(t *testing.T) {
 	}
 }
 
-// WirePlumber names a Bluetooth sink with the SPA object id on
-// the end, and that id changes when the speaker reconnects, so a
-// speaker's node renames more often than an output's does.
+// WirePlumber ends the node name of a Bluetooth sink with an SPA object
+// id, and that id changes when the speaker reconnects.
 func TestRefreshRewritesASpeakersNodeAfterAReconnect(t *testing.T) {
 	dir := specDirectory(t)
 	if err := writeCDISpec("claim-1", []cdiDevice{{
 		Name:           "claim-1-" + testSpeakerName,
 		ContainerEdits: endpointEdits("bluez_output.A0_AB_51_33_B7_12.1"),
 	}}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the spec: %v", err)
 	}
 
 	refreshCDISpecs(testInventory(), speakerGraph(map[string]bluezSink{
@@ -155,7 +152,7 @@ func TestRefreshLeavesAnotherDriversSpecAlone(t *testing.T) {
 	dir := specDirectory(t)
 	other := filepath.Join(dir, "liken.sh-claim-1.json")
 	if err := os.WriteFile(other, []byte(`{"cdiVersion":"0.6.0"}`), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing liken's spec: %v", err)
 	}
 
 	refreshCDISpecs(testInventory(),
@@ -163,25 +160,25 @@ func TestRefreshLeavesAnotherDriversSpecAlone(t *testing.T) {
 
 	raw, err := os.ReadFile(other)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading liken's spec: %v", err)
 	}
 	if string(raw) != `{"cdiVersion":"0.6.0"}` {
-		t.Fatalf("liken's spec = %s", raw)
+		t.Fatalf("liken's spec is %s, want it unchanged", raw)
 	}
 }
 
 func TestRemoveCDISpecIsIdempotent(t *testing.T) {
-	// The kubelet repeats unprepare whenever it has no record that the
-	// call succeeded.
+	// The kubelet repeats unprepare when it has no record that the call
+	// succeeded.
 	specDirectory(t)
 	if err := writeCDISpec("claim-1", []cdiDevice{{Name: "claim-1-" + testSinkName}}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the spec: %v", err)
 	}
 	if err := removeCDISpec("claim-1"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the spec: %v", err)
 	}
 	if err := removeCDISpec("claim-1"); err != nil {
-		t.Fatalf("a second unprepare failed: %v", err)
+		t.Fatalf("the second removeCDISpec returned %v, want nil", err)
 	}
 }
 
@@ -189,11 +186,11 @@ func readSpec(t *testing.T, path string) cdiSpec {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the spec: %v", err)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the spec: %v", err)
 	}
 	if len(spec.Devices) != 1 {
 		t.Fatalf("devices = %+v, want one", spec.Devices)

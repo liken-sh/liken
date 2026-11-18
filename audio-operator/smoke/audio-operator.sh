@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Proves the closure of the audio-operator image before it ships.
+# Checks that the audio-operator image contains every file that
+# PipeWire and WirePlumber load at runtime, before the image ships.
 #
 # Usage: audio-operator.sh <image>
 #
@@ -8,52 +9,47 @@
 #            The image must be in the local Docker daemon.
 #
 # The check reads /proc/<pid>/maps of the daemons with `sudo`, so the
-# user that runs it needs `sudo` with no password.
+# user that runs it needs `sudo` without a password.
 #
-# This check makes a missing runtime load impossible to ship. PipeWire
-# and WirePlumber open every module by file name, so `ldd` reports
-# none of them and `go test` covers none of them either. This check
-# starts both daemons, reads what the running processes mapped, and
-# fails on any mapped file the image does not contain.
+# PipeWire and WirePlumber open their modules by file name, so ldd
+# does not list them and go test does not cover them. This check
+# starts both daemons, reads the files that the running processes
+# mapped, and fails on any mapped file that is not in the image.
 #
-# The runner has no sound card and needs none. A cardless PipeWire
-# still loads every module its configuration names, and that is the set
-# this image exists to ship. `libspa-alsa.so` is the one load no
-# cardless run reaches, so the check asserts it by name instead.
+# The runner needs no sound card. PipeWire without a card still loads
+# every module its configuration names, which are the modules this
+# image exists to ship. The exception is `libspa-alsa.so`, which is
+# loaded only when a card exists, so the check looks for it by name.
 #
-# The bluez5 plugin, its SBC codec, and its quirks database are
-# asserted by name for the same reason. This run's WirePlumber has no
-# Bluetooth fragment and no media bus, so it opens none of them, and a
-# pod that has both opens all three.
+# The check also looks for these files by name, because no process in
+# this run maps them:
 #
-# `pw-top`, `pw-cli`, and `pw-metadata` are asserted by name too. No
-# daemon maps them, because a person runs each one with `kubectl exec`
-# during a debugging session, so the map check reports nothing when one
-# drops out of the closure.
+# - The bluez5 plugin, its SBC codec, and its quirks database
+#   (bluez-hardware.conf). WirePlumber here has no Bluetooth fragment
+#   and no media bus, but in a pod that has both it opens all three.
+# - `pw-top`, `pw-cli`, and `pw-metadata`, which a person runs with
+#   `kubectl exec` while debugging.
+# - `pw-record`, `flac`, `opusenc`, and `libstdbuf.so`, which the
+#   capture container runs for each tap. `libstdbuf.so` is loaded
+#   through `LD_PRELOAD`, so ldd does not find it either.
 #
-# `pw-record`, `flac`, `opusenc`, and `libstdbuf.so` are asserted by
-# name for the same reason: the capture container runs each one per
-# tap, no daemon in this check maps any of them, and `libstdbuf.so`
-# arrives through `LD_PRELOAD` rather than through any library graph
-# `ldd` walks.
-#
-# The two daemons run as separate containers sharing one volume, the
-# same shape the pod uses. The image has no shell, so every container
-# names a binary directly.
+# The two daemons run in separate containers that share one volume, as
+# in the pod. The image has no shell, so each container runs a binary
+# directly.
 set -euo pipefail
 export LC_ALL=C
 
 image=$1
 
-# The image must hold the notices of the third-party software in it,
-# as notices/check.sh describes.
+# Fails when the image lacks the license notices of the third-party
+# software in it. See notices/check.sh.
 "$(dirname "$0")/../../notices/check.sh" "$image" \
   usr/share/doc/go/LICENSE
 runtime=/var/run/audio.liken.sh
 
-# Every container and the volume carry this run's name, so a run on a
-# workstation does not collide with other containers, and the trap
-# removes them when a check fails part way.
+# Each container and the volume are named with this run's PID, so runs
+# on one workstation do not collide, and the trap removes them if the
+# script fails part way.
 run="audio-smoke-$$"
 work=$(mktemp -d)
 # shellcheck disable=SC2329 # the EXIT trap below calls it
@@ -64,7 +60,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Every path in the image, as the paths a process sees.
+# The path of every file in the image, as a process inside the
+# container sees it.
 container=$(docker create "$image")
 docker export "$container" | tar -t | sed 's|^|/|; s|/$||' | sort -u > "$work/image-files.txt"
 docker rm "$container" > /dev/null
@@ -93,7 +90,8 @@ do
 done
 
 docker volume create "$run" > /dev/null
-# A container of this image, named for the binary it runs.
+# start NAME BINARY [ARGS...] runs BINARY from the image in a
+# container named $run-NAME, with the shared runtime volume.
 start() {
   name=$1
   shift
@@ -101,9 +99,9 @@ start() {
     -e PIPEWIRE_RUNTIME_DIR="$runtime" -e XDG_RUNTIME_DIR="$runtime" \
     --entrypoint "$1" "$image" "${@:2}" > /dev/null
 }
-# One client run, to completion, under a bound. A client that never
-# returns is the failure this check exists to catch, so the wait for it
-# cannot be unbounded.
+# Runs one client to completion, and succeeds only if it exits 0
+# within 20 seconds. A client that never returns is a failure this
+# check must catch, so the wait has a limit.
 probe() {
   docker rm -f "$run-probe" > /dev/null 2>&1 || true
   start probe "$@"
@@ -111,8 +109,8 @@ probe() {
   docker rm -f "$run-probe" > /dev/null
   [ "$code" = 0 ]
 }
-# One `pw-dump` into a file, for the checks that read the graph rather
-# than an exit status.
+# Writes one `pw-dump` of the graph to the file in $1, for checks that
+# read the graph instead of an exit status.
 graph() {
   docker rm -f "$run-probe" > /dev/null 2>&1 || true
   start probe /usr/bin/pw-dump
@@ -120,8 +118,9 @@ graph() {
   docker logs "$run-probe" > "$1" 2> /dev/null || true
   docker rm -f "$run-probe" > /dev/null
 }
-# The probe the pod's startupProbe runs. A socket nobody can reach is a
-# broken image.
+# Runs a probe up to 10 times, 2 seconds apart, while a daemon starts,
+# as the pod's startup probe does. A socket that no client can reach
+# means the image is broken.
 answers() {
   for _ in $(seq 10); do
     probe "$@" && return 0
@@ -137,13 +136,12 @@ start wireplumber /usr/bin/wireplumber --profile=main-embedded
 answers /usr/bin/wpctl status \
   || { docker logs "$run-wireplumber"; echo "wpctl never connected"; exit 1; }
 
-# Each of the three runs once against the live graph. The listing above
-# proves the binary is in the image, and this proves every library it
-# opens is there too: `pw-top` needs `libncursesw` and `libtinfo`, and
-# `pw-cli` needs `libreadline` over the same `libtinfo`. `pw-top`'s
-# `-b` writes plain lines and calls no terminfo routine, so it runs
-# with no terminal and no `TERM`, and `-n 1` stops it after one
-# reading.
+# The file list above shows that these tools are in the image, and a
+# run against the live graph shows that their libraries are too:
+# `pw-top` needs `libncursesw` and `libtinfo`, and `pw-cli` needs
+# `libreadline` and `libtinfo`. `pw-top -b` writes plain lines and
+# calls no terminfo routine, so it needs no terminal or `TERM`, and
+# `-n 1` makes it stop after one reading.
 probe /usr/bin/pw-top -b -n 1 \
   || { echo "pw-top did not read the graph"; exit 1; }
 probe /usr/bin/pw-cli info 0 \
@@ -151,13 +149,12 @@ probe /usr/bin/pw-cli info 0 \
 probe /usr/bin/pw-metadata -n settings \
   || { echo "pw-metadata did not read the settings"; exit 1; }
 
-# A sink for the recorder below to tap. The runner has no sound card,
-# so the graph has no sink at all and a capture stream with nowhere to
-# link fails with "no target node available" before it ever settles
-# into the graph. A null sink is a node the support plugin builds in
-# software, needs no hardware, and carries monitor ports like any other
-# sink, so the tap below is the tap the capture container makes.
-# `object.linger` keeps the node after `pw-cli` exits.
+# The runner has no sound card, so the graph has no sink, and a
+# capture stream with nothing to link to fails with "no target node
+# available". The null sink from the support plugin needs no hardware
+# and has monitor ports like any sink, so the recorder below taps it
+# as the capture container taps a real sink. `object.linger` keeps the
+# node after `pw-cli` exits.
 probe /usr/bin/pw-cli create-node adapter \
   '{ factory.name=support.null-audio-sink node.name=gate-sink media.class=Audio/Sink object.linger=true audio.position=[FL FR] }' \
   || { docker logs "$run-pipewire"; echo "pw-cli did not create the null sink"; exit 1; }
@@ -172,18 +169,17 @@ grep -q '"node.name": "gate-sink"' "$work/graph.json" || {
   exit 1
 }
 
-# The listing above proves the files exist. This proves they load:
 # `pw-record` opens `libsndfile` and the PipeWire client libraries,
-# and each encoder opens its own codec library, so a run of each one
-# against the live graph is what reports a library the closure lost.
-# The loader's own complaint on stderr is one signal.
+# and each encoder opens its own codec library, so a run shows a
+# library that the closure missed, through the dynamic loader's error
+# on stderr.
 #
-# The `-P` line is the one the capture container builds: a SPA JSON
-# object carrying the name the confirmation matches on and, for a sink,
-# PipeWire's own monitor key. A `pw-cat` that refused that object would
-# leave every tap unconfirmed, and the graph is the only place that
-# shows, so the graph is read while the recorder still runs and asked
-# whether the node arrived under its name.
+# The `-P` argument is the properties object that the capture
+# container builds: the node name that the container uses to confirm
+# the tap, and `stream.capture.sink`, which selects a sink's monitor
+# ports. If `pw-cat` rejected that object, the container could never
+# confirm a tap, and only the graph shows that, so the check looks for
+# a node of that name in the graph while the recorder runs.
 docker run -d --name "$run-recorder" -v "$run:$runtime" \
   -e PIPEWIRE_RUNTIME_DIR="$runtime" -e XDG_RUNTIME_DIR="$runtime" \
   --entrypoint /usr/bin/pw-record "$image" \
@@ -223,20 +219,20 @@ do
     || { echo "$1 did not encode"; exit 1; }
 done
 
-# `wpctl` connects to PipeWire, not to WirePlumber, so it answers even
-# when the session manager has left. Both daemons must still be up
-# before their maps mean anything.
+# `wpctl` connects to PipeWire, not to WirePlumber, so it succeeds
+# even when WirePlumber has exited, and the daemons' maps are read
+# only after this check that both still run.
 for name in pipewire wireplumber; do
   [ "$(docker inspect -f '{{.State.Running}}' "$run-$name")" = true ] \
     || { docker logs "$run-$name"; echo "$name is not running"; exit 1; }
 done
 
-# What the two live processes mapped. The kernel writes the paths as
-# the process sees them, so they compare against the listing above.
-# The volume and the kernel's own filesystems are not the image. grep
-# exits 1 when it selects no line, and pipefail would then end the
-# check before the "mapped nothing" message below, so the filter
-# accepts that exit.
+# /proc/<pid>/maps shows paths as the process sees them, so they match
+# the image's file list. The filter drops the shared volume and the
+# kernel's pseudo-filesystems, which are not in the image. grep exits 1
+# when it selects no line, and pipefail would then end the script
+# before the "mapped nothing" message below, so the filter accepts
+# that exit.
 missing=0
 for name in pipewire wireplumber; do
   pid=$(docker inspect -f '{{.State.Pid}}' "$run-$name")

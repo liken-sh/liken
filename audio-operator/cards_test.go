@@ -6,11 +6,11 @@ import (
 	"unsafe"
 )
 
-// machineFixture points the three trees this operator reads at a
-// captured copy of one machine's own. The trees under testdata mirror
-// the real ones, symbolic links included, because the card's place is
-// a chain of links and a fixture that flattened it would test
-// nothing.
+// machineFixture points sndDir, sysDir, and procDir at the trees
+// captured from one machine under testdata. The captures keep the
+// symbolic links, because a card's location is at the end of a chain
+// of links, and a flattened tree would not test the code that follows
+// them.
 func machineFixture(t *testing.T, machine string) {
 	t.Helper()
 	sndDir = filepath.Join("testdata", machine, "snd")
@@ -21,8 +21,8 @@ func machineFixture(t *testing.T, machine string) {
 	})
 }
 
-// The identity of each card on the two lab machines, read the way
-// udev's 60-persistent-alsa.rules reads it and with no udev running.
+// Each tree was captured with no udev running, from a real machine or,
+// for the no-serial case, from a USB dongle.
 func TestReadCardIdentityReadsWhereTheCardIs(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -37,9 +37,9 @@ func TestReadCardIdentityReadsWhereTheCardIs(t *testing.T) {
 			want:    cardIdentity{Bus: "pci", Location: "0000:00:1f.3"},
 		},
 		{
-			// The USB device above the interface carries the identity,
-			// and the serial is what tells two identical dongles on
-			// one machine apart.
+			// Vendor, product, and serial are attributes of the USB
+			// device above the interface. The serial tells two identical
+			// dongles on one machine apart.
 			name:    "the USB card on liken-1",
 			machine: "liken-1",
 			card:    1,
@@ -58,8 +58,8 @@ func TestReadCardIdentityReadsWhereTheCardIs(t *testing.T) {
 			want:    cardIdentity{Bus: "pci", Location: "0000:00:0e.0"},
 		},
 		{
-			// A dongle that states no serial. The port path is the whole
-			// of what identifies it.
+			// A dongle with no serial attribute is identified by its port
+			// path alone.
 			name:    "a USB card with no serial",
 			machine: "no-serial",
 			card:    0,
@@ -75,18 +75,17 @@ func TestReadCardIdentityReadsWhereTheCardIs(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			machineFixture(t, c.machine)
 			if got := readCardIdentity(c.card); got != c.want {
-				t.Errorf("identity = %+v, want %+v", got, c.want)
+				t.Errorf("readCardIdentity(%d) = %+v, want %+v", c.card, got, c.want)
 			}
 		})
 	}
 }
 
-// A card that sysfs says nothing about reports no bus, and the name
-// builder is what refuses it.
-func TestReadCardIdentityReportsNothingForACardSysfsDoesNotHold(t *testing.T) {
+// names.go refuses the empty identity.
+func TestReadCardIdentityIsEmptyForACardMissingFromSysfs(t *testing.T) {
 	machineFixture(t, "liken-1")
 	if got := readCardIdentity(7); got != (cardIdentity{}) {
-		t.Errorf("identity = %+v, want an empty one", got)
+		t.Errorf("readCardIdentity(7) = %+v, want an empty identity", got)
 	}
 }
 
@@ -102,10 +101,10 @@ func TestReadPCMID(t *testing.T) {
 		{name: "the first HDMI slot", card: 0, pcm: 3, want: "HDMI 0"},
 		{name: "the last HDMI slot", card: 0, pcm: 9, want: "HDMI 3"},
 		{name: "the DAC's playback side", card: 1, pcm: 0, want: "USB Audio"},
-		// One PCM device of a USB card runs in both directions, and the
-		// driver gives the two the same id. That is why a capture
-		// endpoint's device name carries a word the playback one does
-		// not.
+		// A USB card's PCM device runs in both directions and the
+		// driver gives both streams the same id, so the device name of a
+		// capture endpoint needs an extra word to differ from the
+		// playback one.
 		{name: "the DAC's capture side", card: 1, pcm: 0, capture: true, want: "USB Audio"},
 		{name: "a PCM device the card does not have", card: 0, pcm: 1},
 	}
@@ -118,21 +117,19 @@ func TestReadPCMID(t *testing.T) {
 	}
 }
 
-// The control device fills the three fixed-length fields, and a value
-// that fills one has no terminator.
 func TestCardInfoReadsTheKernelsFixedFields(t *testing.T) {
 	var info ctlCardInfo
 	copy(info.ID[:], "PCH")
 	copy(info.Driver[:], "HDA-Intel")
 	copy(info.Name[:], "HDA Intel PCH")
 	if got := cText(info.ID[:]); got != "PCH" {
-		t.Errorf("id = %q", got)
+		t.Errorf("the id is %q, want PCH", got)
 	}
 	if got := cText(info.Driver[:]); got != "HDA-Intel" {
-		t.Errorf("driver = %q", got)
+		t.Errorf("the driver is %q, want HDA-Intel", got)
 	}
 	if got := cText(info.Name[:]); got != "HDA Intel PCH" {
-		t.Errorf("name = %q", got)
+		t.Errorf("the name is %q, want HDA Intel PCH", got)
 	}
 
 	filled := [16]byte{}
@@ -140,13 +137,12 @@ func TestCardInfoReadsTheKernelsFixedFields(t *testing.T) {
 		filled[i] = 'x'
 	}
 	if got := len(cText(filled[:])); got != len(filled) {
-		t.Errorf("length = %d, want %d", got, len(filled))
+		t.Errorf("the text of a full field is %d bytes, want %d", got, len(filled))
 	}
 }
 
-// The PCM info request carries its argument size, so a structure
-// that disagrees with the kernel's builds a number the kernel does
-// not answer.
+// The ioctl request number encodes sizeof(struct snd_pcm_info), so a Go
+// struct of a different size produces a number that the kernel rejects.
 func TestPCMInfoLayout(t *testing.T) {
 	if got := unsafe.Sizeof(sndPCMInfo{}); got != pcmInfoSize {
 		t.Errorf("sizeof(snd_pcm_info) = %d, want %d", got, pcmInfoSize)

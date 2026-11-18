@@ -1,70 +1,57 @@
-# One image, and the pod runs it four times: the declaration that
-# runs before PipeWire, the two daemons, and the operator. The daemons
-# ship here, in a workload's image, and not in the read-only root that
-# every liken machine boots. That pairing is the device operator
-# pattern's whole reason for a separate repository.
+# The image for every container of the audio-operator pod and of the
+# audio-api Deployment. PipeWire and WirePlumber ship in this image, not
+# in the read-only OS image that liken machines boot.
 
 FROM golang AS build
-# proxy.golang.org sometimes drops a module download partway through
-# the stream. With the default comma, `go` tries the origin only when
-# the proxy answers 404 or 410, so a dropped stream fails the build.
-# With a pipe, `go` fetches the module from its origin after any proxy
-# error, with the git that this image includes. `GOSUMDB` keeps its
-# default, so the checksum database still verifies a module that `go`
-# fetched from its origin.
+# proxy.golang.org sometimes drops a module download partway through.
+# With the default comma separator, go falls back to the origin only
+# when the proxy returns 404 or 410, so a dropped download fails the
+# build. With a pipe, go falls back to the origin after any proxy
+# error, using the git in this image. GOSUMDB keeps its default, so
+# the checksum database still verifies modules fetched from the origin.
 ENV GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src
-# The module files come first, so a source edit reuses the cached
-# download layer.
 COPY go.mod go.sum ./
-# go.mod replaces the shared kubernetes module with ../kubernetes, and
-# the build takes that directory as a second build context named
-# kubernetes. It lands at /kubernetes, the same place relative to /src
-# that kubernetes/ has relative to this component. Its module file
-# comes first for the same reason as this module's.
+# go.mod replaces the kubernetes module with ../kubernetes. The build
+# copies the build context named kubernetes to /kubernetes, so
+# ../kubernetes resolves from /src as it does from this component.
 COPY --from=kubernetes go.mod go.sum /kubernetes/
 RUN go mod download
 COPY --from=kubernetes . /kubernetes/
 COPY *.go ./
-# The version reaches the binary through -ldflags, so liken_build_info
-# names the release a running pod was built from.
+# -ldflags sets main.version, which the liken_build_info metric
+# reports, so a running pod shows which release it was built from.
 ARG VERSION=dev
-# CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
-# static binary with no paths from the build machine in it. The binary
-# runs beside a closure that holds a loader and a libc, and it needs
-# neither.
+# The binary is static, so it does not use the loader and libc that
+# the closure ships.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /audio-operator .
-# The license files of the Go standard library and of each module that
-# the binary links. notices/go.sh says why the image needs them.
+# The license files of the Go standard library and of each module the
+# binary links. See notices/go.sh.
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices .
 
-# The closure installs from the same Debian image and the same
-# snapshot date as the base images. The closure script names pipewire
-# 0.3, spa 0.2, and wireplumber 0.5, so a snapshot that moves one of
-# them fails this build. That failure is the report that the module
-# set needs reading again. snapshot.sh and closure.sh, the closure
-# library, come from the vulkan directory, the build context named
-# builder, and SNAPSHOT is vulkan's version.
+# The packages come from the same Debian image and snapshot date as
+# the base images. audio-closure.sh names module paths under
+# pipewire-0.3, spa-0.2, and wireplumber-0.5, so a snapshot that moves
+# one of those versions fails this build, which means the module list
+# needs review. snapshot.sh and closure.sh come from vulkan/, passed
+# as the build context named builder. SNAPSHOT is vulkan's version.
 FROM debian AS closure
 ARG SNAPSHOT
 COPY --from=builder snapshot.sh snapshot.sha256 closure.sh /
-# pipewire-bin provides the daemon, pw-dump, which is how the operator
-# reads the graph, and pw-cli's family. The daemon creates every sink,
-# from the node declarations the declare container writes before it
-# starts, because WirePlumber's ALSA monitor needs udev and a liken
-# machine runs no udevd. wireplumber links each client's stream to the
-# sink it names, and provides wpctl.
+# pipewire-bin provides pw-dump, which the operator runs to read the
+# graph, and the other pw-* tools. wireplumber links each client's
+# stream to the sink the client names, and provides wpctl.
 #
-# libspa-0.2-bluetooth carries the bluez5 SPA plugin and the A2DP
-# codec plugins beside it. The plugin registers the media endpoint
-# with bluetoothd, holds the transport descriptor, and encodes the
-# samples, so Bluetooth playback takes nothing else from the host.
+# libspa-0.2-bluetooth provides the bluez5 SPA plugin and the A2DP
+# codec plugins. The plugin registers the media endpoint with
+# bluetoothd, receives the transport file descriptor, and encodes the
+# audio, so Bluetooth playback needs nothing else from the host.
 #
-# flac and opus-tools carry the two encoders the capture container
-# pipes pw-record into. pw-record itself is pw-cat from pipewire-bin
-# above, and libopus is already here under the bluez5 codec plugin,
-# so opus-tools adds the encoder alone.
+# flac and opus-tools provide the two encoders that the capture
+# container pipes pw-record into. pw-record is pw-cat from
+# pipewire-bin. libopus is already installed for the bluez5 codec
+# plugin, so opus-tools only adds the opusenc encoder.
 RUN sh /snapshot.sh "$SNAPSHOT" \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
@@ -75,59 +62,37 @@ RUN sh /snapshot.sh "$SNAPSHOT" \
         flac \
         opus-tools \
     && rm -rf /var/lib/apt/lists/*
-# The closure script sources closure.sh, which also writes the
-# copyright file of each Debian package that the closure took files
-# from, the list of those packages and their sources, and the dpkg
-# record of each package that syft and Trivy read.
+# closure.sh also writes the copyright file of each Debian package
+# that supplied files to the closure, the list of those packages and
+# their sources, and the dpkg record of each package, which syft and
+# Trivy read.
 COPY audio-closure.sh /
 RUN sh /audio-closure.sh /out
 
 FROM scratch
 COPY --from=closure /out /
 
-# WirePlumber's profile is baked in, not mounted. It is a requirement
-# of this operator rather than a choice a deployment makes: the pod
-# manages every sound card its claim allocated, so every hardware
-# monitor is off, including the ALSA one that finds nothing without
-# udev. The file says why.
+# The operator depends on this configuration, so it is part of the
+# image and a deployment cannot change it. Each file gives its reasons.
+# The files go under /usr/share because the pod mounts an emptyDir over
+# /etc/pipewire/pipewire.conf.d and /etc/wireplumber/wireplumber.conf.d,
+# which would hide anything placed there. WirePlumber reads /usr/share
+# before /etc, so the declare container's fragment overrides these.
 #
-# Both files go under /usr/share, because the pod mounts an emptyDir
-# over /etc/wireplumber/wireplumber.conf.d and that mount would hide
-# anything placed there. WirePlumber merges the fragments of
-# /usr/share first and /etc second, so the declare container's
-# fragment in the emptyDir is read after these two and overrides
-# them.
+# The PipeWire node declarations and the fragment that enables
+# WirePlumber's Bluetooth monitor are not in the image. The declare
+# container writes them into those emptyDirs at pod start, from the
+# cards and the media bus that the claim allocated.
 COPY config/50-audio-operator.conf /usr/share/wireplumber/wireplumber.conf.d/
-# The access rule beside it stops WirePlumber's default policy from
-# restricting this pod's clients, itself included. The file says why.
 COPY config/51-access-rules.conf /usr/share/wireplumber/wireplumber.conf.d/
-# The one linking hook of this operator's own, which the profile above
-# requires. WirePlumber finds a script by its path under
-# /usr/share/wireplumber/scripts, beside its own. The file says what
-# the hook restores.
+# The linking hook that 50-audio-operator.conf requires. WirePlumber
+# finds a script by its path under /usr/share/wireplumber/scripts.
 COPY config/restore-device-ports.lua /usr/share/wireplumber/scripts/liken/
-
-# PipeWire's access mode is baked in for the same reason. It goes
-# under /usr/share because the pod mounts an emptyDir over
-# /etc/pipewire/pipewire.conf.d, and that mount would hide anything
-# placed there. The file says why the legacy mode cannot work in a
-# pod.
 COPY config/50-pipewire-access.conf /usr/share/pipewire/pipewire.conf.d/
-#
-# PipeWire's node declarations are not baked in. The declare init
-# container generates them from the cards the claim allocated and
-# writes them into /etc/pipewire/pipewire.conf.d/, an emptyDir the
-# PipeWire container mounts at the same path.
-#
-# WirePlumber's Bluetooth monitor is not baked in either. The same
-# declare container writes the fragment that turns it on into
-# /etc/wireplumber/wireplumber.conf.d/, and only when the claim
-# delivered a Bluetooth media bus.
 
 COPY --from=build /audio-operator /audio-operator
 COPY --from=build /notices /
 
-# The operator is the default entrypoint, and the three other
-# containers name their own program. The image holds no shell, so
-# every command in the pod spec is a binary path.
+# The pod's other containers set their own command or args. The image
+# has no shell, so every command in a pod spec is a binary path.
 ENTRYPOINT ["/audio-operator"]

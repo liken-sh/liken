@@ -1,17 +1,16 @@
 package main
 
-// The OpenAPI 3.1 document, rendered from the router table in
-// apiroutes.go so the published contract and the served routes cannot
-// drift.
+// The OpenAPI document is built from the route table in apiroutes.go,
+// which the router also reads, so the document cannot differ from the
+// routes that the API serves.
 //
-// OpenAPI has no label expansion, so each extension path is its own
-// path item with a single-entry content map, where the discovery
-// document publishes one template with {.ext}.
+// OpenAPI has no equivalent of the RFC 6570 {.ext} expansion that the
+// discovery document uses, so each extension path is its own path item.
 //
-// The served copy injects the configured public base into servers,
-// else the request's own origin. The committed copy at
-// docs/static/v1/audio/openapi.json holds a placeholder, and a test
-// asserts the two are equal apart from servers.
+// The served copy sets servers to the configured public base, or to the
+// origin of the request when none is configured. The copy committed at
+// docs/static/v1/audio/openapi.json names a placeholder origin, and a
+// test checks that the two copies differ only in servers.
 
 import (
 	"encoding/json"
@@ -19,20 +18,15 @@ import (
 	"strings"
 )
 
-// openAPIPlaceholderServer is what the committed copy carries in
-// place of a real origin. A reader of the published document replaces
-// it with the origin they reach the API at, and the equality test
-// ignores this member.
+// A reader of the committed copy replaces this origin with the one
+// where they reach the API.
 const openAPIPlaceholderServer = "https://audio-api.liken-system.svc"
 
-// openAPIVersion is the OpenAPI release this document is written
-// against. 3.1 is the release whose schema dialect is JSON Schema
-// 2020-12.
+// OpenAPI 3.1 uses JSON Schema 2020-12 for its schemas.
 const openAPIVersion = "3.1.1"
 
-// openAPIDocument is the shape this API publishes. The members are
-// ordered maps in JSON, so they are written as map[string]any and
-// marshalled by encoding/json, which sorts a map's keys.
+// Paths and the components are maps, and encoding/json writes map keys
+// in sorted order, so the rendered bytes are the same on every run.
 type openAPIDocument struct {
 	OpenAPI string             `json:"openapi"`
 	Info    openAPIInfo        `json:"info"`
@@ -65,28 +59,25 @@ type openAPIComponents struct {
 	Responses       map[string]any `json:"responses"`
 }
 
-// newOpenAPI renders the document. server is the origin the served
-// copy names; the committed copy passes the placeholder.
-//
-// info.version is the API's own version and not the build's, so two
-// builds of one commit render the same bytes and the committed copy
-// holds. The build version is on every document's ETag, which is
-// where a client reads it.
+// info.version is the version of the API, not of the build, because a
+// build version would make the committed copy differ from the rendered
+// one on every build. A client reads the build version from the ETag.
 func newOpenAPI(server string) openAPIDocument {
 	document := openAPIDocument{
 		OpenAPI: openAPIVersion,
 		Info: openAPIInfo{
 			Title:   "audio.liken.sh capture API",
 			Version: "v1",
-			Summary: "Capture audio from a Sink or Source, and stream it as " +
+			Summary: "Streams the sound of a `Sink` or a `Source` as " +
 				"WAV, FLAC, or Ogg Opus.",
-			Description: "The path identifies the Sink or Source. The extension or Accept " +
-				"header selects the format. A W3C Media Fragments t= query parameter " +
-				"selects the time span. Authenticate with a client certificate signed " +
-				"by the cluster's authority, or with a ServiceAccount token for the " +
-				"audio-api audience. A tap requires get on sinks/audio or sources/audio " +
-				"in the audio.liken.sh group. The API stores no audio. Each response " +
-				"streams from the node that hosts the endpoint.",
+			Description: "The path names the `Sink` or `Source` to tap. You choose the format " +
+				"with the extension of the path or with the `Accept` header, and a W3C " +
+				"Media Fragments `t=` query parameter limits the time span. Authenticate " +
+				"with a client certificate that the cluster's certificate authority " +
+				"signed, or with a `ServiceAccount` token that has the audience " +
+				"`audio-api`. A tap requires `get` on `sinks/audio` or `sources/audio` " +
+				"in the `audio.liken.sh` API group. The capture container on the node that " +
+				"has the `Sink` or `Source` records the sound, and nothing stores it.",
 		},
 		Servers: []openAPIServer{{URL: server}},
 		Paths:   map[string]any{},
@@ -95,9 +86,8 @@ func newOpenAPI(server string) openAPIDocument {
 			SecuritySchemes: openAPISecuritySchemes(),
 			Responses:       openAPIResponses(),
 		},
-		// A list of two requirement objects is OpenAPI's OR, so a
-		// route takes the client certificate or the token, in the
-		// order this API reads them.
+		// The entries are alternatives, so a request needs either the
+		// client certificate or the bearer token.
 		Secure: []map[string][]any{{"mutualTLS": {}}, {"bearerToken": {}}},
 	}
 	for _, route := range apiRoutes {
@@ -106,19 +96,16 @@ func newOpenAPI(server string) openAPIDocument {
 	return document
 }
 
-// openAPIPath is the route's template in OpenAPI's own spelling, which
-// is the same {name} the RFC 6570 template uses for simple expansion.
+// OpenAPI path templating and RFC 6570 simple expansion both write a
+// variable as {name}, so the template needs no conversion.
 func openAPIPath(route apiRoute) string {
 	return route.Template
 }
 
-// openAPIPathItem renders one row: the three methods, the query
-// parameters the row takes, the content map of the forms it serves,
-// and the problem responses it can answer with.
 func openAPIPathItem(route apiRoute) map[string]any {
 	operation := map[string]any{
 		"operationId": openAPIOperationID(route),
-		"summary":     route.Answers,
+		"summary":     route.Summary,
 		"parameters":  openAPIParameters(route),
 		"responses":   openAPIRouteResponses(route),
 	}
@@ -126,22 +113,22 @@ func openAPIPathItem(route apiRoute) map[string]any {
 		"get": operation,
 		"head": map[string]any{
 			"operationId": openAPIOperationID(route) + "Head",
-			"summary": "The headers of " + lowerFirst(route.Answers) +
-				" HEAD takes no sample and makes no call to the capture container " +
+			"summary": "The headers that GET returns for this route, with no body. HEAD " +
+				"records no sound and makes no request to the capture container " +
 				"(RFC 9110 section 9.3.2).",
 			"parameters": openAPIParameters(route),
 			"responses":  openAPIRouteResponses(route),
 		},
 		"options": map[string]any{
 			"operationId": openAPIOperationID(route) + "Options",
-			"summary": "The methods this route allows, as a 204 with Allow " +
-				"(RFC 9110 section 10.2.1).",
+			"summary": "Returns 204 with an `Allow` header that lists the methods this " +
+				"route accepts (RFC 9110 section 10.2.1).",
 			"responses": map[string]any{
 				"204": map[string]any{
-					"description": "The methods this route allows.",
+					"description": "No body. The `Allow` header lists the methods.",
 					"headers": map[string]any{
 						"Allow": map[string]any{
-							"description": "GET, HEAD, OPTIONS.",
+							"description": "Always `GET, HEAD, OPTIONS`.",
 							"schema":      map[string]any{"type": "string"},
 						},
 					},
@@ -154,17 +141,16 @@ func openAPIPathItem(route apiRoute) map[string]any {
 			"name":     "name",
 			"in":       "path",
 			"required": true,
-			"description": "The Sink or Source name. The operator builds this name from " +
-				"the hardware identity.",
+			"description": "The name of the `Sink` or `Source`. The operator builds the name " +
+				"from the hardware identity of the device.",
 			"schema": map[string]any{"type": "string"},
 		}}
 	}
 	return item
 }
 
-// openAPIOperationID names one operation. A reader of a generated
-// client sees these names, so they read as the route does: the plural,
-// the aspect, and the format.
+// openAPIOperationID returns the operationId of a route's GET, such as
+// getSinkAudioWav, which a client generator uses as the method name.
 func openAPIOperationID(route apiRoute) string {
 	switch route.Kind {
 	case routeDiscovery:
@@ -193,18 +179,19 @@ func title(word string) string {
 	return strings.ToUpper(word[:1]) + word[1:]
 }
 
-// openAPIParameters renders the query knobs the row takes.
+// openAPIParameters never returns nil, because a nil slice marshals as
+// null and OpenAPI requires an array.
 func openAPIParameters(route apiRoute) []any {
 	var parameters []any
-	for _, knob := range route.Query {
-		if !route.takes(knob.Name) {
+	for _, parameter := range route.Query {
+		if !route.accepts(parameter.Name) {
 			continue
 		}
 		parameters = append(parameters, map[string]any{
-			"name":        knob.Name,
+			"name":        parameter.Name,
 			"in":          "query",
 			"required":    false,
-			"description": knob.Summary,
+			"description": parameter.Summary,
 			"schema":      map[string]any{"type": "string"},
 		})
 	}
@@ -214,8 +201,6 @@ func openAPIParameters(route apiRoute) []any {
 	return parameters
 }
 
-// openAPIRouteResponses renders the 200 and the problems one row can
-// answer with. The problem list is the row's own, from the table.
 func openAPIRouteResponses(route apiRoute) map[string]any {
 	content := map[string]any{}
 	for _, form := range route.Serves {
@@ -230,7 +215,7 @@ func openAPIRouteResponses(route apiRoute) map[string]any {
 	}
 	responses := map[string]any{
 		"200": map[string]any{
-			"description": route.Answers,
+			"description": route.Summary,
 			"content":     content,
 			"headers":     openAPIResponseHeaders(route),
 		},
@@ -241,7 +226,7 @@ func openAPIRouteResponses(route apiRoute) map[string]any {
 	return responses
 }
 
-// lowerFirst starts a sentence's words in the middle of another one.
+// lowerFirst lets a route's summary continue a sentence.
 func lowerFirst(text string) string {
 	if text == "" {
 		return ""
@@ -249,20 +234,20 @@ func lowerFirst(text string) string {
 	return strings.ToLower(text[:1]) + text[1:]
 }
 
-// openAPIStatuses maps the row's problem types onto the statuses that
-// carry them, plus the statuses every row can answer.
+// openAPIStatuses maps each status that a route can return to the name
+// of its entry in components.responses.
 func openAPIStatuses(route apiRoute) map[string]string {
 	statuses := map[string]string{
-		// parseKnobs runs for every route, so an unknown query
-		// parameter is a 400 on all of them.
+		// parseCaptureQuery runs for every route, so an unknown query
+		// parameter is a 400 on every route.
 		"400": "badRequest",
 		"401": "unauthorized",
 		"403": "forbidden",
 		"405": "methodNotAllowed",
 		"406": "notAcceptable",
 	}
-	// Every route that carries an ETag answers If-None-Match with a
-	// 304, which is the two documents and the info route.
+	// Every route except a tap has an ETag, and returns 304 when
+	// If-None-Match matches it.
 	if route.Kind != routeTap {
 		statuses["304"] = "notModified"
 	}
@@ -281,9 +266,9 @@ func openAPIStatuses(route apiRoute) map[string]string {
 			statuses["500"] = "wrongTarget"
 		}
 	}
-	// An info route reads the object and the node's graph, so it
-	// answers everything a tap answers short of the tap's own
-	// failures.
+	// An info route reads the Sink or Source from the API server and the
+	// format from the capture container, so it can fail with 502, 503,
+	// and 504 as a tap does. Only a tap returns 500.
 	if route.Kind == routeInfo {
 		statuses["503"] = "unavailable"
 		statuses["502"] = "badGateway"
@@ -292,34 +277,33 @@ func openAPIStatuses(route apiRoute) map[string]string {
 	return statuses
 }
 
-// openAPIResponseHeaders names the headers a 200 carries, which differ
-// between a document and a tap.
 func openAPIResponseHeaders(route apiRoute) map[string]any {
 	headers := map[string]any{
-		"Vary": openAPIHeader("Always Accept. RFC 9110 section 12.5.5's second purpose: " +
-			"this answer was subject to negotiation, and an Accept could have made it a 406."),
-		"Link": openAPIHeader("The service-desc and service-doc relations on every answer, " +
-			"describedby on every route that names an object, alternate on the " +
-			"extensionless route, and related from an info document to its capture routes."),
+		"Vary": openAPIHeader("Always `Accept`. The response depends on negotiation, because an " +
+			"`Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5)."),
+		"Link": openAPIHeader("Every response has the `service-desc` and `service-doc` " +
+			"relations. A route that names an object adds `describedby`. The route with no " +
+			"extension adds `alternate` for each format, and the info document of a `Sink` or " +
+			"`Source` adds `related` for each tap route."),
 	}
 	if route.Kind == routeTap {
-		headers["Cache-Control"] = openAPIHeader("Always no-store. A capture is never cacheable.")
-		headers["Accept-Ranges"] = openAPIHeader("Always none. A live capture has no byte " +
-			"identity: offset 44 of two requests is two different moments.")
-		headers["X-Content-Type-Options"] = openAPIHeader("Always nosniff. A browser uses the " +
-			"Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).")
-		headers["Content-Disposition"] = openAPIHeader("The save name a browser gets, with " +
-			"the RFC 3339 time's colons replaced by dashes.")
+		headers["Cache-Control"] = openAPIHeader("Always `no-store`, because a live capture never returns the same bytes twice.")
+		headers["Accept-Ranges"] = openAPIHeader("Always `none`, because a live capture has no fixed " +
+			"bytes: byte 44 of two requests comes from two different moments.")
+		headers["X-Content-Type-Options"] = openAPIHeader("Always `nosniff`, so a browser uses the " +
+			"`Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6).")
+		headers["Content-Disposition"] = openAPIHeader("The file name that a browser saves: `<name>-<time>.<ext>`, " +
+			"where the time is RFC 3339 UTC with the colons replaced by dashes.")
 		if route.negotiated() {
 			headers["Content-Location"] = openAPIHeader("The extension route that serves " +
-				"the representation the negotiation chose.")
+				"the format that negotiation chose.")
 		}
 		return headers
 	}
-	headers["Cache-Control"] = openAPIHeader("Always no-cache. A client revalidates with " +
-		"If-None-Match and gets a 304.")
-	headers["ETag"] = openAPIHeader("The build this API was made from. The router table is " +
-		"compiled in, so the build is the whole of a document's identity.")
+	headers["Cache-Control"] = openAPIHeader("Always `no-cache`. A client revalidates with " +
+		"`If-None-Match` and gets a 304.")
+	headers["ETag"] = openAPIHeader("The version of the build of this API. The route table is " +
+		"compiled in, so the build version identifies the document.")
 	return headers
 }
 
@@ -330,15 +314,15 @@ func openAPIHeader(description string) map[string]any {
 	}
 }
 
-// openAPISchemas holds the two documents this API answers with.
 func openAPISchemas() map[string]any {
 	return map[string]any{
 		"problem": map[string]any{
 			"type": "object",
-			"description": "The RFC 9457 problem document every error answers with. detail " +
-				"carries the source's own words: pw-record's stderr, an encoder's " +
-				"stderr, or the API server's status message. instance is the request " +
-				"path, a number sign, and the request id the log line carries.",
+			"description": "The RFC 9457 problem document that every error response contains. " +
+				"`detail` contains the error text of the part that failed, word for word: the `stderr` of " +
+				"`pw-record` or of an encoder, or the status message of the API server. " +
+				"`instance` is the request path, a `#`, and the request ID, which the log " +
+				"line of the request also has.",
 			"required": []any{"type", "title", "status", "instance"},
 			"properties": map[string]any{
 				"type":     map[string]any{"type": "string", "format": "uri"},
@@ -361,7 +345,7 @@ func openAPISchemas() map[string]any {
 		},
 		"discovery": map[string]any{
 			"type":        "object",
-			"description": "The discovery document the three capture APIs share.",
+			"description": "The discovery document. The audio, display, and media capture APIs use the same shape.",
 			"required":    []any{"resources", "openapi"},
 			"properties": map[string]any{
 				"resources": map[string]any{"type": "object"},
@@ -370,9 +354,10 @@ func openAPISchemas() map[string]any {
 		},
 		"endpoint": map[string]any{
 			"type": "object",
-			"description": "One endpoint's own document: the node a tap targets, the rate " +
-				"and channel count it would use, the format the node reports now, and " +
-				"the forms served.",
+			"description": "The info document of a `Sink` or `Source`: the node that a tap runs " +
+				"on, the rate and channel count that a tap uses, the format that the node " +
+				"reports now, and the media types and extensions that the capture routes " +
+				"serve.",
 			"required": []any{"name", "kind", "node", "mediaTypes", "extensions"},
 			"properties": map[string]any{
 				"name":           map[string]any{"type": "string"},
@@ -390,52 +375,53 @@ func openAPISchemas() map[string]any {
 	}
 }
 
-// openAPISecuritySchemes names the two credentials this API takes.
 func openAPISecuritySchemes() map[string]any {
 	return map[string]any{
 		"mutualTLS": map[string]any{
 			"type": "mutualTLS",
-			"description": "A client certificate the cluster's own authority signed. " +
-				"The subject's common name is the user and its organization values are " +
-				"the groups, which is how the API server reads one.",
+			"description": "A client certificate that the cluster's own certificate authority " +
+				"signed. The subject's common name is the user name and its organization " +
+				"values are the groups, as the Kubernetes API server reads a certificate.",
 		},
 		"bearerToken": map[string]any{
 			"type":         "http",
 			"scheme":       "bearer",
 			"bearerFormat": "JWT",
-			"description": "A ServiceAccount token minted with the audience audio-api, " +
-				"which this API checks with a TokenReview.",
+			"description": "A `ServiceAccount` token with the audience `audio-api`. This API " +
+				"validates it with a `TokenReview`.",
 		},
 	}
 }
 
-// openAPIResponses holds every problem answer once, so a path item
-// names it rather than repeating it.
+// openAPIResponses returns the problem responses that path items refer
+// to with $ref.
 func openAPIResponses() map[string]any {
 	responses := map[string]any{}
 	noBody := map[string]bool{"notModified": true}
 	for name, described := range map[string]string{
-		"badRequest": "A t= the grammar refuses, a t=a,b with a at or after b, a begin " +
-			"over 60 seconds, a repeated dimension, an unknown query parameter, or a " +
-			"knob the format does not take.",
-		"unauthorized": "No client certificate and no token, or a token the " +
-			"TokenReview refuses. The WWW-Authenticate header carries the review's " +
-			"own words.",
-		"forbidden": "The SubjectAccessReview said no. The WWW-Authenticate header names " +
-			"the scope the caller would need.",
-		"notFound":         "No Sink or Source of that name, or PipeWire holds no node for it.",
-		"methodNotAllowed": "A method other than GET, HEAD, and OPTIONS.",
-		"notAcceptable": "Accept excludes every representation the route serves. The " +
-			"acceptable member lists what it does serve, with the URI of each.",
-		"away":        "The endpoint has no status.node. The detail says to power the device on.",
-		"notModified": "The If-None-Match field matches this document's ETag.",
-		"wrongTarget": "The tap's link landed on a node other than the one asked for.",
-		"badGateway": "The capture container answered something that is not HTTP or not a " +
-			"problem document.",
-		"unavailable": "The capture container is at its tap limit, refused the connection, " +
-			"is not ready, has no certificate this API trusts, or PipeWire refused " +
-			"pw-record.",
-		"gatewayTimeout": "The capture container sent no headers within the header timeout.",
+		"badRequest": "The `t=` value does not match the grammar, `t=a,b` has `a` at or " +
+			"after `b`, the begin is over 60 seconds, a dimension is repeated, a query " +
+			"parameter is unknown, or the format does not accept the parameter.",
+		"unauthorized": "The request has no client certificate and no token, or the " +
+			"`TokenReview` refuses the token. The `WWW-Authenticate` header contains " +
+			"the review's message.",
+		"forbidden": "The `SubjectAccessReview` denied the request. The " +
+			"`WWW-Authenticate` header names the scope that the caller needs.",
+		"notFound":         "No `Sink` or `Source` has that name, or PipeWire has no node for it.",
+		"methodNotAllowed": "The method is not GET, HEAD, or OPTIONS.",
+		"notAcceptable": "`Accept` excludes every representation that the route serves. The " +
+			"`acceptable` member lists the representations that it does serve, each " +
+			"with its URI.",
+		"away":        "The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device.",
+		"notModified": "`If-None-Match` matches the `ETag` of this document.",
+		"wrongTarget": "The tap connected to a node other than the one that the request asked for.",
+		"badGateway": "The capture container returned a response that is not HTTP, or an " +
+			"error response that is not a problem document.",
+		"unavailable": "The API could not read the `Sink` or `Source` from the API server, " +
+			"the node has no Ready capture container, or the capture container is at its " +
+			"tap limit, refused the connection, has no certificate that this API trusts, " +
+			"or could not read the PipeWire graph, or PipeWire refused `pw-record`.",
+		"gatewayTimeout": "The capture container sent no response headers within the header timeout.",
 	} {
 		answer := map[string]any{"description": described}
 		if !noBody[name] {
@@ -450,9 +436,8 @@ func openAPIResponses() map[string]any {
 	return responses
 }
 
-// renderOpenAPI writes the document as the bytes both copies hold:
-// two-space indent, sorted keys, and a trailing newline, so the served
-// copy and the committed copy compare byte for byte.
+// renderOpenAPI writes the format that both the served copy and the
+// committed copy use.
 func renderOpenAPI(document openAPIDocument) ([]byte, error) {
 	body, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
@@ -461,9 +446,6 @@ func renderOpenAPI(document openAPIDocument) ([]byte, error) {
 	return append(body, '\n'), nil
 }
 
-// openAPIPaths lists the path items a document holds, in order. The
-// coverage test reads it to assert that every row of the router table
-// is published.
 func openAPIPaths(document openAPIDocument) []string {
 	paths := make([]string, 0, len(document.Paths))
 	for path := range document.Paths {
@@ -473,9 +455,6 @@ func openAPIPaths(document openAPIDocument) []string {
 	return paths
 }
 
-// sameApartFromServers is the equality the committed copy is held to.
-// The served copy names the origin it was fetched from, and that one
-// member is the only difference a reader may see.
 func sameApartFromServers(left, right []byte) (bool, error) {
 	strip := func(raw []byte) (map[string]any, error) {
 		var document map[string]any

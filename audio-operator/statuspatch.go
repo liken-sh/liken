@@ -1,24 +1,19 @@
 package main
 
-// A Sink's status has two writers. This operator writes the endpoint's
-// facts, and the media operator writes status.session by server-side
-// apply under its own field manager. A write that replaced the whole
-// status would remove the session, so this operator writes a Sink's
-// status as a JSON merge patch (RFC 7386) that states only the fields
-// it changes, and null for each field it removes.
+// This operator and media-operator both write a Sink's status.
+// media-operator writes status.session by server-side apply, so this
+// operator does not replace the whole status, which would delete the
+// session. It sends a JSON merge patch (RFC 7386) that names only the
+// fields it changes, with null for each field it removes.
 //
-// A merge patch and not a server-side apply, because the Sinks this
-// operator wrote with an update hold their status fields under that
-// update's manager. An apply removes a field only when no other manager
-// owns it, so a status.claims or a condition that an update wrote would
-// stay after the apply stopped stating it. A merge patch removes a
-// field by naming it.
+// It does not use server-side apply, because an apply removes a field
+// only when no other field manager owns it. A field such as
+// status.claims or a condition can be owned by the manager of an
+// earlier update, and would stay after the operator stopped setting it.
 //
-// The patch carries the resourceVersion of the copy it was computed
-// from, so the API server refuses it with 409 Conflict when another
-// writer changed the Sink since. The caller then reads the Sink again
-// and computes the patch from the fresh copy, the way a status update
-// does (memo.SettleStatus).
+// The patch includes the resourceVersion of the copy it was computed
+// from, so the API server returns 409 Conflict when another writer has
+// changed the Sink since.
 
 import (
 	"encoding/json"
@@ -31,12 +26,8 @@ import (
 
 const mergePatchType = "application/merge-patch+json"
 
-// mergeDiff answers the merge patch that turns before into after. A
-// field after holds and before does not, or holds with another value,
-// is stated. A field before holds and after does not is null. An
-// object in both is compared field by field, and every other value,
-// a list included, is stated whole, because a merge patch replaces a
-// list whole.
+// mergeDiff returns the merge patch that turns before into after. It
+// sets a changed list whole, because a merge patch cannot edit a list.
 func mergeDiff(before, after map[string]any) map[string]any {
 	patch := map[string]any{}
 	for key := range before {
@@ -60,7 +51,6 @@ func mergeDiff(before, after map[string]any) map[string]any {
 	return patch
 }
 
-// asFields answers a value as the JSON object it encodes to.
 func asFields(value any) (map[string]any, error) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
@@ -70,8 +60,8 @@ func asFields(value any) (map[string]any, error) {
 	return fields, json.Unmarshal(encoded, &fields)
 }
 
-// statusPatch answers the merge patch that turns the published facts
-// into the composed ones, on the copy of the given resourceVersion.
+// statusPatch returns the request body that turns published into
+// composed, for the copy at the resourceVersion version.
 func statusPatch(version string, published, composed EndpointStatus) ([]byte, error) {
 	before, err := asFields(published)
 	if err != nil {
@@ -87,11 +77,12 @@ func statusPatch(version string, published, composed EndpointStatus) ([]byte, er
 	})
 }
 
-// patchSinkStatus writes the facts that apply composes from the
-// Sink's copy, when they differ from the copy's. A copy older than the
-// API server's is read again and composed again once, and the written
-// copy replaces the caller's. It reports whether a write landed, and a
-// Sink the API server no longer holds answers apiclient.ErrNotFound.
+// patchSinkStatus writes the status that apply composes from the
+// Sink's status, unless apply returns false. After a 409 or a 404 it
+// reads the Sink again, calls apply on the new copy, and tries once
+// more. After a successful write, *sink is the API server's copy. A
+// true result with a nil error means that a write succeeded. It
+// returns apiclient.ErrNotFound when the Sink has been deleted.
 func patchSinkStatus(c *apiclient.Client, versions *memo.Versions, sink *Sink,
 	apply func(published EndpointStatus) (EndpointStatus, bool)) (bool, error) {
 	name := sink.Metadata.Name

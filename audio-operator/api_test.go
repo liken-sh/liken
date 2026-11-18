@@ -19,10 +19,10 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
-// clusterFake stands in for the API server: the two reviews, the two
-// collections, and the events the API writes. It is one server rather
-// than a mock per call, so the API under test speaks the same HTTP it
-// speaks in a cluster.
+// clusterFake is a fake Kubernetes API server for the API under test.
+// It reviews tokens and access, serves Sinks and Sources, and records
+// the Events that the API posts. It is an HTTP server and not a mock of
+// each call, so the API makes the same HTTP requests as in a cluster.
 type clusterFake struct {
 	mu sync.Mutex
 
@@ -36,7 +36,6 @@ type clusterFake struct {
 	sources  map[string]Source
 	accesses []accessReview
 
-	// events holds the Events the API posted.
 	events *eventstest.Events
 
 	server *apiservertest.Server
@@ -103,17 +102,17 @@ func (f *clusterFake) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// recorded answers the Events the API posted, once the recorder has
-// written every one it queued. The caller runs in a synctest bubble,
-// where synctest.Wait returns when the recorder's goroutine waits on
-// an empty queue.
+// recorded returns the Events that the API posted, after the recorder
+// writes every queued Event. synctest.Wait returns when the recorder's
+// goroutine blocks on an empty queue, so the caller must run inside a
+// synctest bubble.
 func (f *clusterFake) recorded() []events.Event {
 	synctest.Wait()
 	return f.events.List()
 }
 
-// reviewed is every SubjectAccessReview the API sent. A test reads
-// the caller the API named out of it.
+// reviewed returns the SubjectAccessReviews that the API sent, so a
+// test can check which caller they name.
 func (f *clusterFake) reviewed() []accessReview {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -126,8 +125,8 @@ func (f *clusterFake) refuses(reason string) {
 	f.allowed, f.denyReason = false, reason
 }
 
-// apiHarness is the API under test with a fake cluster behind it and a
-// fake capture container beside it.
+// apiHarness is the API under test, with a fake cluster and a fake
+// capture container that it talks to.
 type apiHarness struct {
 	cluster   *clusterFake
 	container *containerFake
@@ -136,8 +135,8 @@ type apiHarness struct {
 	lines     *loggedLines
 }
 
-// loggedLines holds what the API wrote, so a test reads the one line
-// per request rather than the process's own output.
+// loggedLines collects the request log lines of the API, so a test
+// reads them instead of the process's standard output.
 type loggedLines struct {
 	mu    sync.Mutex
 	lines []string
@@ -158,8 +157,8 @@ func (l *loggedLines) last() string {
 	return l.lines[len(l.lines)-1]
 }
 
-// containerFake stands in for one node's capture container on the
-// private leg.
+// containerFake is a fake capture container that the forwarder reaches
+// in place of a pod's IP address.
 type containerFake struct {
 	mu       sync.Mutex
 	status   int
@@ -185,9 +184,9 @@ func newContainerFake(t *testing.T) *containerFake {
 		fake.mu.Lock()
 		fake.requests = append(fake.requests, r.URL)
 		fake.token = r.Header.Get("Authorization")
-		// A test that drives timing owns the whole answer, and it
-		// writes it without the lock so the handler does not hold it
-		// for the life of the stream.
+		// A test that sets stream writes the whole response. The lock is
+		// released first, so a long stream does not block the fake's
+		// other methods.
 		if write := fake.stream; write != nil {
 			fake.mu.Unlock()
 			write(w)
@@ -225,14 +224,14 @@ func (f *containerFake) called() []*url.URL {
 	return append([]*url.URL(nil), f.requests...)
 }
 
-func (f *containerFake) answers(document problem) {
+func (f *containerFake) returnsProblem(document problem) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.problem = &document
 }
 
-// streams hands the tap route over to one function, for the tests that
-// drive how an answer arrives in time rather than what it holds.
+// streams makes write produce the response to each request that the
+// fake receives, for a test that controls when the bytes arrive.
 func (f *containerFake) streams(write func(http.ResponseWriter)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -247,7 +246,7 @@ func newAPIHarness(t *testing.T) *apiHarness {
 	work := t.TempDir()
 	tokenFile := filepath.Join(work, "token")
 	if err := os.WriteFile(tokenFile, []byte("private.leg.token"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the capture token: %v", err)
 	}
 
 	client := apiclient.New(apiservertest.Host, cluster.server.Client(), "")
@@ -260,9 +259,8 @@ func newAPIHarness(t *testing.T) *apiHarness {
 		publicBase: "",
 		now:        time.Now,
 	}
-	// The private leg is the container's own test server, reached
-	// over plain HTTP: the TLS the real forwarder speaks is proved by
-	// the certificate tests, and this one proves the relay.
+	// The forwarder reaches the fake container over plain HTTP. The
+	// certificate tests cover the forwarder's TLS.
 	server.relay = &forwarder{tokenFile: tokenFile}
 	server.relay.client = container.server.Client()
 	server.relay.scheme = "http"
@@ -294,11 +292,10 @@ func samplePod(node string) pod {
 	return held
 }
 
-// holds puts one Sink in the fake cluster. The two names it takes are
-// the two the status carries and they are never the same thing:
-// machine is status.node, the Kubernetes node the endpoint is on, and
-// pipewireNode is status.nodeName, the node a stream targets.
-func (h *apiHarness) holds(name, machine, pipewireNode string) {
+// addSink adds a Sink to the fake cluster. machine is status.node, the
+// Kubernetes node of the endpoint, and pipewireNode is status.nodeName,
+// the PipeWire node that a stream targets.
+func (h *apiHarness) addSink(name, machine, pipewireNode string) {
 	h.cluster.mu.Lock()
 	defer h.cluster.mu.Unlock()
 	h.cluster.sinks[name] = Sink{
@@ -311,9 +308,9 @@ func (h *apiHarness) holds(name, machine, pipewireNode string) {
 	}
 }
 
-// The two names the drill on liken-1 read, which look nothing alike on
-// purpose: a build that swaps them finds no pod and asks the container
-// for a machine.
+// drillMachine and drillPipeWireNode are a status.node and a
+// status.nodeName that a Sink on liken-1 reported. The values differ in
+// form, so a test fails when the API uses one in place of the other.
 const (
 	drillMachine      = "liken-1"
 	drillPipeWireNode = "liken.audio.card1-pcm0"
@@ -323,7 +320,7 @@ func (h *apiHarness) call(t *testing.T, method, target string, headers http.Head
 	t.Helper()
 	request, err := http.NewRequest(method, apiservertest.Host+target, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the request: %v", err)
 	}
 	request.Header.Set("Authorization", "Bearer a.b.c")
 	for key, values := range headers {
@@ -331,7 +328,7 @@ func (h *apiHarness) call(t *testing.T, method, target string, headers http.Head
 	}
 	answer, err := h.serving.Client().Do(request)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("calling %s %s: %v", method, target, err)
 	}
 	t.Cleanup(func() { _ = answer.Body.Close() })
 	return answer
@@ -343,27 +340,27 @@ func TestTheDiscoveryDocumentNeedsATokenAndNoGrant(t *testing.T) {
 
 	answer := harness.call(t, http.MethodGet, "/v1/audio", nil)
 	if answer.StatusCode != http.StatusOK {
-		t.Fatalf("the discovery document answered %s", answer.Status)
+		t.Fatalf("the discovery document returned %s, want 200 OK", answer.Status)
 	}
 	if got := answer.Header.Get("Content-Type"); got != documentType {
-		t.Errorf("the type is %q", got)
+		t.Errorf("the type is %q, want %s", got, documentType)
 	}
 	if got := answer.Header.Get("Cache-Control"); got != "no-cache" {
-		t.Errorf("a document says Cache-Control: %q", got)
+		t.Errorf("a document says Cache-Control: %q, want no-cache", got)
 	}
 	if answer.Header.Get("ETag") == "" {
 		t.Error("a document carries no ETag")
 	}
 	var document discoveryDocument
 	if err := json.NewDecoder(answer.Body).Decode(&document); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the discovery document: %v", err)
 	}
 	if document.OpenAPI != "/v1/audio/openapi.json" {
-		t.Errorf("the discovery document names %q", document.OpenAPI)
+		t.Errorf("the discovery document names %q, want /v1/audio/openapi.json", document.OpenAPI)
 	}
 }
 
-func TestADocumentAnswersIfNoneMatchWithA304(t *testing.T) {
+func TestADocumentRespondsToIfNoneMatchWithA304(t *testing.T) {
 	harness := newAPIHarness(t)
 	first := harness.call(t, http.MethodGet, "/v1/audio", nil)
 	tag := first.Header.Get("ETag")
@@ -372,17 +369,17 @@ func TestADocumentAnswersIfNoneMatchWithA304(t *testing.T) {
 	second := harness.call(t, http.MethodGet, "/v1/audio",
 		http.Header{"If-None-Match": {tag}})
 	if second.StatusCode != http.StatusNotModified {
-		t.Fatalf("If-None-Match answered %s", second.Status)
+		t.Fatalf("If-None-Match returned %s, want 304 Not Modified", second.Status)
 	}
 	if got := second.Header.Get("ETag"); got != tag {
 		t.Errorf("the 304 says ETag: %q, want %q", got, tag)
 	}
 	if got := second.Header.Get("Vary"); got != "Accept" {
-		t.Errorf("the 304 says Vary: %q", got)
+		t.Errorf("the 304 says Vary: %q, want Accept", got)
 	}
 	body, _ := io.ReadAll(second.Body)
 	if len(body) != 0 {
-		t.Errorf("the 304 carried %d bytes", len(body))
+		t.Errorf("the 304 carried %d bytes, want none", len(body))
 	}
 }
 
@@ -390,7 +387,7 @@ func TestTheServedOpenAPINamesTheRequestsOwnOrigin(t *testing.T) {
 	harness := newAPIHarness(t)
 	answer := harness.call(t, http.MethodGet, "/v1/audio/openapi.json", nil)
 	if answer.StatusCode != http.StatusOK {
-		t.Fatalf("the OpenAPI document answered %s", answer.Status)
+		t.Fatalf("the OpenAPI document returned %s, want 200 OK", answer.Status)
 	}
 	if got := answer.Header.Get("Content-Type"); got != openAPIType {
 		t.Errorf("the type is %q, want %q", got, openAPIType)
@@ -401,10 +398,10 @@ func TestTheServedOpenAPINamesTheRequestsOwnOrigin(t *testing.T) {
 		} `json:"servers"`
 	}
 	if err := json.NewDecoder(answer.Body).Decode(&document); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the OpenAPI document: %v", err)
 	}
 	if len(document.Servers) != 1 || !strings.HasPrefix(document.Servers[0].URL, "http://") {
-		t.Errorf("the served document names %v", document.Servers)
+		t.Errorf("the served document names the servers %v, want one http:// origin", document.Servers)
 	}
 }
 
@@ -418,10 +415,10 @@ func TestAConfiguredPublicBaseWinsOverTheRequestsOrigin(t *testing.T) {
 		} `json:"servers"`
 	}
 	if err := json.NewDecoder(answer.Body).Decode(&document); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the OpenAPI document: %v", err)
 	}
 	if len(document.Servers) != 1 || document.Servers[0].URL != "https://audio.example.test" {
-		t.Errorf("the served document names %v", document.Servers)
+		t.Errorf("the served document names the servers %v, want https://audio.example.test", document.Servers)
 	}
 }
 
@@ -430,14 +427,14 @@ func TestARequestWithNoTokenIsAChallengeWithTheRealmAlone(t *testing.T) {
 	request, _ := http.NewRequest(http.MethodGet, apiservertest.Host+"/v1/audio", nil)
 	answer, err := harness.serving.Client().Do(request)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("calling with no token: %v", err)
 	}
 	defer func() { _ = answer.Body.Close() }()
 	if answer.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("a request with no token answered %s", answer.Status)
+		t.Fatalf("a request with no token returned %s, want 401 Unauthorized", answer.Status)
 	}
 	if got := answer.Header.Get("WWW-Authenticate"); got != `Bearer realm="audio-api"` {
-		t.Errorf("the challenge is %q", got)
+		t.Errorf("the challenge is %q, want Bearer realm=\"audio-api\"", got)
 	}
 }
 
@@ -449,23 +446,23 @@ func TestARefusedTokenCarriesTheReviewsWords(t *testing.T) {
 
 	answer := harness.call(t, http.MethodGet, "/v1/audio", nil)
 	if answer.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("a refused token answered %s", answer.Status)
+		t.Fatalf("a refused token returned %s, want 401 Unauthorized", answer.Status)
 	}
 	got := answer.Header.Get("WWW-Authenticate")
 	if !strings.Contains(got, `error="invalid_token"`) ||
 		!strings.Contains(got, "invalid bearer token") {
-		t.Errorf("the challenge is %q", got)
+		t.Errorf("the challenge is %q, want error=\"invalid_token\" with the review's words", got)
 	}
 }
 
 func TestATapWithoutTheGrantIsRefusedBeforeAnythingIsRead(t *testing.T) {
 	harness := newAPIHarness(t)
 	harness.cluster.refuses(`no RBAC policy matched`)
-	// The Sink does not exist. A 403 must come back anyway, so nothing
-	// about what exists leaks through the answer.
+	// The Sink does not exist. The response must still be 403, so it
+	// does not reveal which names exist.
 	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 	if answer.StatusCode != http.StatusForbidden {
-		t.Fatalf("a request with no grant answered %s", answer.Status)
+		t.Fatalf("a request with no grant returned %s, want 403 Forbidden", answer.Status)
 	}
 	want := `Bearer realm="audio-api", error="insufficient_scope", scope="sinks/audio"`
 	if got := answer.Header.Get("WWW-Authenticate"); got != want {
@@ -476,9 +473,10 @@ func TestATapWithoutTheGrantIsRefusedBeforeAnythingIsRead(t *testing.T) {
 	}
 }
 
-// The plan and the rulings both say Vary and the two service links are
-// on every response. These are the answers that carry no body a client
-// could read them from, so they are the ones worth driving.
+// Every response carries a Vary header and the service-desc and
+// service-doc Link headers (plans/completed/09-capture-audio-over-http.md).
+// The body of an error response does not carry the links, so the
+// headers are the only place a client finds them.
 func TestEveryErrorCarriesVaryAndTheServiceLinks(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -488,14 +486,14 @@ func TestEveryErrorCarriesVaryAndTheServiceLinks(t *testing.T) {
 		{"an unmatched path", http.StatusNotFound, func(h *apiHarness) *http.Response {
 			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/levels", nil)
 		}},
-		{"a method the API does not answer", http.StatusMethodNotAllowed, func(h *apiHarness) *http.Response {
+		{"a method the API does not serve", http.StatusMethodNotAllowed, func(h *apiHarness) *http.Response {
 			return h.call(t, http.MethodPost, "/v1/audio/sinks/kitchen/audio.wav", nil)
 		}},
 		{"a request with no token", http.StatusUnauthorized, func(h *apiHarness) *http.Response {
 			request, _ := http.NewRequest(http.MethodGet, apiservertest.Host+"/v1/audio", nil)
 			answer, err := h.serving.Client().Do(request)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("calling with no token: %v", err)
 			}
 			t.Cleanup(func() { _ = answer.Body.Close() })
 			return answer
@@ -507,25 +505,25 @@ func TestEveryErrorCarriesVaryAndTheServiceLinks(t *testing.T) {
 		{"a query the grammar refuses", http.StatusBadRequest, func(h *apiHarness) *http.Response {
 			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav?t=7,5", nil)
 		}},
-		{"a name the cluster does not hold", http.StatusNotFound, func(h *apiHarness) *http.Response {
+		{"a name the cluster does not have", http.StatusNotFound, func(h *apiHarness) *http.Response {
 			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 		}},
 		{"an endpoint that is away", http.StatusConflict, func(h *apiHarness) *http.Response {
-			h.holds("kitchen", "", "")
+			h.addSink("kitchen", "", "")
 			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 		}},
 		{"a node with no container", http.StatusServiceUnavailable, func(h *apiHarness) *http.Response {
-			h.holds("kitchen", "node-9", drillPipeWireNode)
+			h.addSink("kitchen", "node-9", drillPipeWireNode)
 			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 		}},
 		{"an Accept the route cannot serve", http.StatusNotAcceptable, func(h *apiHarness) *http.Response {
-			h.holds("kitchen", "node-1", drillPipeWireNode)
+			h.addSink("kitchen", "node-1", drillPipeWireNode)
 			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio",
 				http.Header{"Accept": {"audio/mpeg"}})
 		}},
-		{"a problem the container answered", http.StatusInternalServerError, func(h *apiHarness) *http.Response {
-			h.holds("kitchen", "node-1", drillPipeWireNode)
-			h.container.answers(problem{
+		{"a problem the container returned", http.StatusInternalServerError, func(h *apiHarness) *http.Response {
+			h.addSink("kitchen", "node-1", drillPipeWireNode)
+			h.container.returnsProblem(problem{
 				Type: problemWrongTarget, Title: "Wrong target",
 				Status: http.StatusInternalServerError, Detail: "pw-record linked elsewhere",
 			})
@@ -539,22 +537,22 @@ func TestEveryErrorCarriesVaryAndTheServiceLinks(t *testing.T) {
 		harness := newAPIHarness(t)
 		answer := row.drive(harness)
 		if answer.StatusCode != row.status {
-			t.Errorf("%s answered %s, want %d", row.name, answer.Status, row.status)
+			t.Errorf("%s returned %s, want %d", row.name, answer.Status, row.status)
 		}
 		if got := answer.Header.Get("Vary"); got != "Accept" {
-			t.Errorf("%s says Vary: %q", row.name, got)
+			t.Errorf("%s says Vary: %q, want Accept", row.name, got)
 		}
 		link := answer.Header.Get("Link")
 		if !strings.Contains(link, `rel="service-desc"`) ||
 			!strings.Contains(link, `rel="service-doc"`) {
-			t.Errorf("%s says Link: %q", row.name, link)
+			t.Errorf("%s says Link: %q, want service-desc and service-doc links", row.name, link)
 		}
 		_, _ = io.Copy(io.Discard, answer.Body)
 	}
 }
 
-// Authentication runs before the query is parsed, so a 400 already
-// knows who asked. The drill found every 400 logging user=-.
+// Authentication runs before the query is parsed, so the log line of a
+// 400 for a bad query still names the caller.
 func TestTheLogNamesTheCallerOnEveryStatus(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -572,11 +570,11 @@ func TestTheLogNamesTheCallerOnEveryStatus(t *testing.T) {
 			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio",
 				http.Header{"Accept": {"audio/mpeg"}})
 		}},
-		{"a name the cluster does not hold", http.StatusNotFound, func(h *apiHarness) *http.Response {
+		{"a name the cluster does not have", http.StatusNotFound, func(h *apiHarness) *http.Response {
 			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 		}},
 		{"an endpoint that is away", http.StatusConflict, func(h *apiHarness) *http.Response {
-			h.holds("kitchen", "", drillPipeWireNode)
+			h.addSink("kitchen", "", drillPipeWireNode)
 			return h.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 		}},
 	}
@@ -584,15 +582,15 @@ func TestTheLogNamesTheCallerOnEveryStatus(t *testing.T) {
 		harness := newAPIHarness(t)
 		answer := row.drive(harness)
 		if answer.StatusCode != row.status {
-			t.Errorf("%s answered %s, want %d", row.name, answer.Status, row.status)
+			t.Errorf("%s returned %s, want %d", row.name, answer.Status, row.status)
 		}
 		_, _ = io.Copy(io.Discard, answer.Body)
 		line := harness.lines.last()
 		if !strings.Contains(line, "user=system:serviceaccount:liken-system:listener") {
-			t.Errorf("%s logged %q", row.name, line)
+			t.Errorf("%s logged %q, want user=system:serviceaccount:liken-system:listener", row.name, line)
 		}
 		if strings.Contains(line, "user=-") {
-			t.Errorf("%s named no caller: %q", row.name, line)
+			t.Errorf("%s logged %q, want a line that names the caller and not user=-", row.name, line)
 		}
 	}
 }

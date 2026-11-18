@@ -1,26 +1,21 @@
 package main
 
-// Parsing an ELD block.
+// The ELD (EDID-Like Data) block is what the graphics driver writes
+// into the audio driver while a monitor is connected. It is the only
+// record of which PCM device plays into which monitor, and it exists
+// only while the driver runs and a monitor is attached, so a walk of
+// the buses cannot report it.
 //
-// The ELD, the EDID-Like Data block, is what the graphics driver
-// writes into the audio driver when a monitor is connected. It is the
-// only place that says which PCM device plays into which monitor, and
-// a running driver is what makes it true, so no inventory walk of the
-// buses can report it.
-//
-// The layout is the kernel's. snd_hdmi_parse_eld in
-// sound/pci/hda/hda_eld.c reads the same bytes this file reads, and
+// The layout is the kernel's: snd_hdmi_parse_eld in
+// sound/pci/hda/hda_eld.c reads the same bytes, and
 // snd_hdmi_print_eld_info prints them into
-// /proc/asound/card<N>/eld#<codec>.<pin> for a person. The first 20
-// bytes are fixed, the monitor name follows for MNL bytes, and the
-// short audio descriptors follow that, three bytes each.
+// /proc/asound/card<N>/eld#<codec>.<pin>. The first 20 bytes are
+// fixed, then come MNL bytes of monitor name, then the short audio
+// descriptors of three bytes each.
 //
-// Two of the fields this operator publishes are in the block and not
-// in what PipeWire keeps. PipeWire's pa_hdmi_eld struct holds the
-// monitor name, the speaker allocation, the IEC958 codec list, and
-// the LPCM channel count, and drops the manufacturer and product
-// codes. Those two are half of the pairing identity, so the operator
-// reads the raw block itself.
+// The operator reads the raw block because PipeWire's pa_hdmi_eld
+// struct drops the manufacturer and product codes, and monitorID needs
+// both to pair an audio sink with a display.
 
 import (
 	"encoding/binary"
@@ -29,33 +24,32 @@ import (
 	"strings"
 )
 
-// The fixed part of the block, and the limits the kernel enforces on
-// what follows it.
+// The size of the fixed part of the block, and the largest monitor name
+// length (MNL) the kernel accepts.
 const (
 	eldFixedBytes = 20
 	eldMaxMNL     = 16
 )
 
-// The two ELD versions the kernel accepts. Version 2 is CEA-861D or
-// below, and version 31 says the block holds the baseline fields
-// only. snd_hdmi_parse_eld rejects every other value, and so does
-// this parser, because a version it does not read may lay the bytes
-// out differently.
+// The ELD versions the kernel accepts: 2 is CEA-861D or earlier, and 31
+// is a block with only the baseline fields. snd_hdmi_parse_eld rejects
+// every other version, and so does parseELD, because another version
+// may lay out the bytes differently.
 const (
 	eldVersionCEA861D = 2
 	eldVersionPartial = 31
 )
 
-// The connection types the two-bit field names. Values 2 and 3 are
-// reserved, and a block that has one publishes no connection type.
+// The values of the two-bit connection type field. Values 2 and 3 are
+// reserved, so a block with one gets an empty ConnectionType.
 var eldConnectionTypes = map[byte]string{
 	0: "hdmi",
 	1: "displayport",
 }
 
-// The speaker allocation bits, in CEA-861 order. The names are the
-// kernel's own, from cea_speaker_allocation_names in hda_eld.c, so a
-// value published here reads the same as the one in the proc file.
+// The names of the speaker allocation bits, in CEA-861 order. They are
+// copied from cea_speaker_allocation_names in hda_eld.c, so a value
+// published here matches the one in the proc file.
 var eldSpeakerNames = []string{
 	"FL/FR",
 	"LFE",
@@ -66,31 +60,30 @@ var eldSpeakerNames = []string{
 	"RLC/RRC",
 }
 
-// audioCodingTypeLPCM is the short audio descriptor format for
-// uncompressed stereo and multichannel audio. It is the only
-// format whose channel count this operator publishes, because it is
-// the one a workload plays through a PipeWire sink.
+// audioCodingTypeLPCM is the coding type of an uncompressed audio
+// descriptor. Only LPCM descriptors set the published channel count,
+// rate, and depths, because LPCM is what a workload plays through a
+// PipeWire sink. Every other type goes into EncodedTypes.
 const audioCodingTypeLPCM = 1
 
-// eldSampleRates maps a descriptor's rate bits to hertz, in
-// CEA-861's bit order: bit 0 is 32 kHz and bit 6 is 192 kHz.
+// eldSampleRates gives the rate in hertz of each bit of a descriptor's
+// second byte.
 var eldSampleRates = []int{32000, 44100, 48000, 88200, 96000, 176400, 192000}
 
-// eldBitDepths maps the third byte's depth bits, which CEA-861
-// defines only for LPCM. A compressed format uses that byte for its
-// bitrate instead, which is why the parser reads it under the format
-// check below.
+// eldBitDepths lists the depth of each low bit of a descriptor's third
+// byte. CEA-861 defines those bits as depths only for LPCM. For a
+// compressed format the byte holds a bitrate, so parseELD reads it
+// only for LPCM descriptors.
 var eldBitDepths = []int{16, 20, 24}
 
-// eld holds what this operator publishes out of one block. The block
-// holds more, including the audio sync delay and the HDCP and AI
-// flags. None of those select an output.
+// eld is the part of an ELD block that the operator publishes as device
+// attributes. The block has more fields, such as the audio sync delay
+// and the HDCP and AI flags, but none of them help a claim select an
+// output.
 //
-// The block has no serial number. snd_hdmi_print_eld_info prints
-// every field, and there is no EDID serial among them, so an audio
-// device says which model of monitor it plays into and cannot say
-// which unit. That limit is why the pairing attribute is built from
-// the manufacturer, the product, and the name.
+// The block has no EDID serial number, so monitorID is built from the
+// manufacturer, product, and name. It identifies the model of the
+// monitor, and two monitors of one model get the same ID.
 type eld struct {
 	Version        byte
 	ConnectionType string
@@ -98,29 +91,25 @@ type eld struct {
 	Product        uint16
 	MonitorName    string
 	LPCMChannels   int
-	// LPCMMaxRateHz is the highest sample rate any LPCM descriptor
-	// names. LPCMDepths is the union of their depth bits, held as
-	// the raw mask because the parser keeps what it read when it
-	// stops at a truncated descriptor; bitDepths renders the mask
-	// at the publish site.
+	// LPCMMaxRateHz is the highest sample rate of any LPCM
+	// descriptor. LPCMDepths has bit N set when any LPCM descriptor
+	// supports the depth eldBitDepths[N].
 	LPCMMaxRateHz int
 	LPCMDepths    byte
-	// Speakers names the speaker allocation for a person, and
-	// SpeakerAllocation holds the same seven bits as the block
-	// states them, which is what layout.go reads.
+	// Speakers is the speaker allocation as the kernel prints it, and
+	// SpeakerAllocation is the same seven bits, which layout.go reads.
 	Speakers          string
 	SpeakerAllocation byte
 	PortID            uint64
-	// EncodedTypes has one bit for each audio coding type that a
-	// descriptor other than LPCM names, at the bit of the type's own
-	// number. bitstream.go names the types a sink passes through.
+	// EncodedTypes has bit N set when a non-LPCM descriptor has coding
+	// type N. bitstream.go maps the bits to format names.
 	EncodedTypes uint16
 }
 
-// parseELD reads one raw block. A block that is too short, or that
-// gives a version this parser does not read, is an error: the
-// caller treats the output as one whose monitor it cannot identify,
-// which is the same handling an absent monitor gets.
+// parseELD returns an error for a block that it cannot read, and
+// alsa.go then treats the device as one with no monitor. When a
+// descriptor runs past the end of the block, parseELD also returns the
+// fields that it read before that descriptor.
 func parseELD(raw []byte) (eld, error) {
 	if len(raw) < eldFixedBytes {
 		return eld{}, fmt.Errorf("the block is %d bytes, and the fixed part is %d", len(raw), eldFixedBytes)
@@ -128,12 +117,14 @@ func parseELD(raw []byte) (eld, error) {
 
 	version := raw[0] >> 3
 	if version != eldVersionCEA861D && version != eldVersionPartial {
-		return eld{}, fmt.Errorf("ELD version %d is not one this parser reads", version)
+		return eld{}, fmt.Errorf("ELD version %d is not %d or %d, the versions this parser reads",
+			version, eldVersionCEA861D, eldVersionPartial)
 	}
 
 	monitorNameLength := int(raw[4] & 0x1f)
 	if monitorNameLength > eldMaxMNL {
-		return eld{}, fmt.Errorf("the monitor name length %d is a reserved value", monitorNameLength)
+		return eld{}, fmt.Errorf("the monitor name length is %d, and the block allows at most %d",
+			monitorNameLength, eldMaxMNL)
 	}
 	if eldFixedBytes+monitorNameLength > len(raw) {
 		return eld{}, fmt.Errorf("the monitor name runs past the end of a %d byte block", len(raw))
@@ -142,10 +133,8 @@ func parseELD(raw []byte) (eld, error) {
 	parsed := eld{
 		Version:        version,
 		ConnectionType: eldConnectionTypes[(raw[5]>>2)&0x3],
-		// The manufacturer bytes are the EDID's own two bytes, copied
-		// into the block in EDID order, so the decoding reads them
-		// big-endian. The product code is little-endian in EDID and
-		// stays that way here.
+		// The ELD copies the EDID's manufacturer ID, which is
+		// big-endian, and its product code, which is little-endian.
 		Manufacturer:      pnpID(binary.BigEndian.Uint16(raw[16:18])),
 		Product:           binary.LittleEndian.Uint16(raw[18:20]),
 		MonitorName:       strings.TrimRight(string(raw[eldFixedBytes:eldFixedBytes+monitorNameLength]), "\x00 \t\r\n"),
@@ -154,9 +143,10 @@ func parseELD(raw []byte) (eld, error) {
 		PortID:            binary.LittleEndian.Uint64(raw[8:16]),
 	}
 
-	// The channel count comes from the LPCM descriptor. A monitor may
-	// publish several descriptors, and the highest LPCM count is the
-	// one a workload can use.
+	// A monitor can list LPCM more than once, one descriptor per
+	// channel layout, each with its own rates and depths. The
+	// operator publishes the most the monitor supports: the highest
+	// channel count and rate, and the union of the depths.
 	descriptors := int((raw[5] >> 4) & 0xf)
 	for i := range descriptors {
 		start := eldFixedBytes + monitorNameLength + 3*i
@@ -171,11 +161,6 @@ func parseELD(raw []byte) (eld, error) {
 		if channels := int(descriptor[0]&0x7) + 1; channels > parsed.LPCMChannels {
 			parsed.LPCMChannels = channels
 		}
-		// A monitor can state LPCM more than once, one descriptor
-		// per channel layout, each with its own rates and depths.
-		// The slice answers for the monitor at its best, so the rate
-		// takes the maximum and the depths take the union, the same
-		// way the channel count above takes the maximum.
 		if rate := maxSampleRate(descriptor[1]); rate > parsed.LPCMMaxRateHz {
 			parsed.LPCMMaxRateHz = rate
 		}
@@ -184,9 +169,8 @@ func parseELD(raw []byte) (eld, error) {
 	return parsed, nil
 }
 
-// speakerNames turns the speaker allocation bitmap into the names the
-// kernel prints for it, in bit order, separated by spaces. A monitor
-// with stereo speakers gives "FL/FR".
+// speakerNames returns the names of the set allocation bits, in bit
+// order and separated by spaces, as the kernel prints them.
 func speakerNames(allocation byte) string {
 	var names []string
 	for bit, name := range eldSpeakerNames {
@@ -197,8 +181,6 @@ func speakerNames(allocation byte) string {
 	return strings.Join(names, " ")
 }
 
-// maxSampleRate reads the highest rate one descriptor's bitmap
-// names, or zero when it names none.
 func maxSampleRate(rates byte) int {
 	highest := 0
 	for bit, rate := range eldSampleRates {
@@ -209,9 +191,8 @@ func maxSampleRate(rates byte) int {
 	return highest
 }
 
-// bitDepths renders the depth mask as ascending names joined by
-// spaces, "16 20 24", the list form the speakers attribute already
-// uses.
+// bitDepths returns the depths in LPCMDepths in ascending order,
+// separated by spaces, such as "16 24".
 func (e eld) bitDepths() string {
 	var names []string
 	for bit, depth := range eldBitDepths {
@@ -222,7 +203,6 @@ func (e eld) bitDepths() string {
 	return strings.Join(names, " ")
 }
 
-// monitorID builds the pairing value for this block.
 func (e eld) monitorID() string {
 	return monitorID(e.Manufacturer, e.Product, e.MonitorName)
 }

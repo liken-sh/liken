@@ -8,18 +8,19 @@ import (
 	"testing"
 )
 
-// Every pod writes the fragment, radio or not, because every sink
-// PipeWire builds is born at the setting's value.
-func TestWriteVolumeConfigDoesNotFollowTheDeliveredBus(t *testing.T) {
+// The volume fragment is written whether or not the claim includes a
+// Bluetooth media bus, because the setting applies to every sink that
+// PipeWire creates.
+func TestWriteVolumeConfigIsWrittenWithOrWithoutAMediaBus(t *testing.T) {
 	cases := []struct {
 		name    string
 		address string
 	}{
 		{
-			name:    "the claim delivered a media bus",
+			name:    "the claim includes a media bus",
 			address: "unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket",
 		},
-		{name: "the claim delivered none"},
+		{name: "the claim includes none"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -27,42 +28,37 @@ func TestWriteVolumeConfigDoesNotFollowTheDeliveredBus(t *testing.T) {
 			t.Setenv(busAddressVariable, c.address)
 
 			if err := writeVolumeConfig(); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing the volume fragment: %v", err)
 			}
-			written, err := os.ReadFile(filepath.Join(dir, volumeDropInName))
+			written, err := os.ReadFile(filepath.Join(dir, volumeFragmentName))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the volume fragment back: %v", err)
 			}
 			if string(written) != volumeConfig {
-				t.Fatalf("the file holds something other than the fragment:\n%s", written)
+				t.Fatalf("the file contains\n%s\nwant the fragment volumeConfig", written)
 			}
 		})
 	}
 }
 
-// The setting's name is WirePlumber 0.5's own. A name that drifts
-// here leaves every sink at the stock 40 percent with no error
-// anywhere, so the test pins it.
+// device.routes.default-sink-volume is the setting name in WirePlumber
+// 0.5. A wrong name raises no error and leaves every sink at the stock
+// 40 percent, so the test checks the text of the fragment.
 func TestVolumeConfigStatesTheDefaultSinkVolume(t *testing.T) {
 	if !strings.Contains(volumeConfig, "device.routes.default-sink-volume = 1.0") {
-		t.Errorf("the fragment does not state the setting:\n%s", volumeConfig)
+		t.Errorf("the fragment is\n%s\nwant it to set device.routes.default-sink-volume = 1.0", volumeConfig)
 	}
 	if !strings.Contains(volumeConfig, "wireplumber.settings = {") {
-		t.Errorf("the fragment does not open a settings block:\n%s", volumeConfig)
+		t.Errorf("the fragment is\n%s\nwant it to open a wireplumber.settings block", volumeConfig)
 	}
 }
 
-// The two fragments are separate files, because one is written on
-// every machine and the other only when the claim delivered a bus.
 func TestVolumeConfigIsItsOwnFragment(t *testing.T) {
-	if volumeDropInName == monitorDropInName {
-		t.Fatalf("both fragments are named %s", volumeDropInName)
+	if volumeFragmentName == monitorFragmentName {
+		t.Fatalf("both fragments are named %s, want two different names", volumeFragmentName)
 	}
 }
 
-// The map both ways: a percent of unity onto the
-// linear gain PipeWire applies, and back. It is linear and not cubed,
-// because channelVolumes is the applied gain.
 func TestVolumeMapsAPercentOntoLinearGain(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -90,12 +86,12 @@ func TestVolumeMapsAPercentOntoLinearGain(t *testing.T) {
 	}
 }
 
-// The status reports a level only when the graph
-// held one, because a node that reports no levels is not a node at
-// zero, and that a level between two percents rounds to the nearer.
-func TestVolumePercentReadsWhatTheGraphHeld(t *testing.T) {
+// The status reports a level only when the graph reported one, because
+// a node with no levels is not a node at zero. A level between two
+// percents rounds to the nearer one.
+func TestVolumePercentReadsWhatTheGraphReported(t *testing.T) {
 	if _, read := volumePercent(nil); read {
-		t.Error("a node with no levels reported a percent")
+		t.Error("a node with no levels reported a percent, want none")
 	}
 	if got, _ := volumePercent([]float64{0.064, 0.064}); got != 6 {
 		t.Errorf("percent = %d, want 6", got)
@@ -105,9 +101,6 @@ func TestVolumePercentReadsWhatTheGraphHeld(t *testing.T) {
 	}
 }
 
-// A level write covers every channel the node
-// has, and that a node whose graph read reported none is written as
-// stereo rather than not written at all.
 func TestChannelCountFallsBackToStereo(t *testing.T) {
 	if got := channelCount(nil); got != stereoChannels {
 		t.Errorf("count = %d, want %d", got, stereoChannels)
@@ -120,9 +113,8 @@ func TestChannelCountFallsBackToStereo(t *testing.T) {
 	}
 }
 
-// The level and the mute go in one pod, and that
-// this is the write behind spec.volume and spec.mute on an ALSA
-// endpoint.
+// levelProps writes spec.volume and spec.mute of an ALSA endpoint in
+// one POD.
 func TestLevelProps(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -148,8 +140,6 @@ func TestLevelProps(t *testing.T) {
 	}
 }
 
-// The prepare's unity write is the same map at a
-// hundred percent, and that the channel count is the node's own.
 func TestUnityLevels(t *testing.T) {
 	cases := []struct {
 		name string
@@ -173,10 +163,9 @@ func TestUnityLevels(t *testing.T) {
 	}
 }
 
-// A speaker's node answers the same level write
-// an ALSA node does, and that the operator takes it from the graph
-// value rather than building one.
-func TestSpeakerSinkNodeCarriesTheNodeFacts(t *testing.T) {
+// sinkNode copies a speaker's sink into a pwNode, so setNodeLevel
+// writes a speaker's node the same way as an ALSA node.
+func TestSpeakerSinkNodeCopiesTheNodeFacts(t *testing.T) {
 	sink := bluezSink{
 		Node:    testSpeakerNode,
 		NodeID:  63,
@@ -196,8 +185,6 @@ func TestSpeakerSinkNodeCarriesTheNodeFacts(t *testing.T) {
 	}
 }
 
-// The pod is what pw-cli parses, and the numbers are the levels the
-// old node held.
 func TestVolumeProps(t *testing.T) {
 	cases := []struct {
 		name    string

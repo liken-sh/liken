@@ -167,7 +167,7 @@ func TestPickReadyPodWithNoneReady(t *testing.T) {
 
 func TestBearerToken(t *testing.T) {
 	if got, err := bearerToken(&rest.Config{BearerToken: "inline"}); err != nil || got != "inline" {
-		t.Fatalf("bearerToken(inline) = (%q, %v)", got, err)
+		t.Fatalf("bearerToken(inline) = (%q, %v), want (inline, nil)", got, err)
 	}
 
 	file := filepath.Join(t.TempDir(), "token")
@@ -175,7 +175,7 @@ func TestBearerToken(t *testing.T) {
 		t.Fatalf("writing the token file: %v", err)
 	}
 	if got, err := bearerToken(&rest.Config{BearerTokenFile: file}); err != nil || got != "from-file" {
-		t.Fatalf("bearerToken(file) = (%q, %v)", got, err)
+		t.Fatalf("bearerToken(file) = (%q, %v), want (from-file, nil)", got, err)
 	}
 
 	if got, err := bearerToken(&rest.Config{}); err != nil || got != "" {
@@ -183,9 +183,6 @@ func TestBearerToken(t *testing.T) {
 	}
 }
 
-// clientKeyPairPEM returns a self-signed certificate and its private
-// key, both PEM, for a config that authenticates with a client
-// certificate.
 func clientKeyPairPEM(t *testing.T) (certPEM, keyPEM []byte) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// The three name forms, against the identities the two lab machines
-// really report. A name that changed here would strand every claim
-// that holds the endpoint.
+// The expected names come from the identities that two test machines
+// report. If a name changed, every claim that holds that endpoint
+// would name a device that no longer exists.
 func TestEndpointName(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -26,9 +26,9 @@ func TestEndpointName(t *testing.T) {
 			want:    "liken-1-pci-0000-00-1f-3-hdmi-0",
 		},
 		{
-			// The serial tells two identical dongles on one machine
-			// apart, and the machine name tells apart two machines
-			// whose dongles of one model report the same serial.
+			// The serial tells apart two dongles of one model on one
+			// machine, and the machine name tells apart two machines
+			// whose dongles report the same serial.
 			name:    "a USB card with a serial",
 			machine: "liken-1",
 			card: cardIdentity{
@@ -39,9 +39,8 @@ func TestEndpointName(t *testing.T) {
 			want:  "liken-1-usb-0573-1573-a34004801402-usb-audio",
 		},
 		{
-			// A USB serial is not unique across machines. Dongles of
-			// one model can all report one serial, and without the
-			// machine in the name every machine that holds one would
+			// Dongles of one model can report the same serial. Without
+			// the machine name, every machine with such a dongle would
 			// write the same cluster-scoped Sink.
 			name:    "the same dongle model and serial on a second machine",
 			machine: "stick-1",
@@ -53,9 +52,9 @@ func TestEndpointName(t *testing.T) {
 			want:  "stick-1-usb-0573-1573-a34004801402-usb-audio",
 		},
 		{
-			// One PCM device of that card records as well as plays, and
-			// both directions report the same id, so the capture
-			// endpoint carries a word that keeps the two names apart.
+			// The card plays and records through one PCM device with
+			// one id, so only the capture suffix makes the names
+			// differ.
 			name:    "the capture side of the same PCM device",
 			machine: "liken-1",
 			card: cardIdentity{
@@ -67,8 +66,8 @@ func TestEndpointName(t *testing.T) {
 			want:    "liken-1-usb-0573-1573-a34004801402-usb-audio-capture",
 		},
 		{
-			// With no serial the port path is the identity, so moving
-			// the dongle to another port makes a new object.
+			// Without a serial the identity is the port path, so a
+			// dongle that moves to another port gets a new name.
 			name:    "a USB card with no serial",
 			machine: "liken-1",
 			card:    cardIdentity{Bus: "usb", Location: "1-6", Vendor: "1b3f", Product: "2008"},
@@ -87,21 +86,20 @@ func TestEndpointName(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got, err := endpointName(c.machine, c.card, c.pcmID, c.capture)
 			if err != nil {
-				t.Fatalf("endpointName reported %v", err)
+				t.Fatalf("endpointName returned the error %v, want %q", err, c.want)
 			}
 			if got != c.want {
-				t.Errorf("name = %q, want %q", got, c.want)
+				t.Errorf("endpointName = %q, want %q", got, c.want)
 			}
 		})
 	}
 }
 
-// A name that would pass 63 characters keeps the machine, the vendor,
-// the product, and the PCM id, and holds the first eight hex digits of
-// the serial's SHA-256 in place of the serial. A name that fits keeps
-// the serial itself. The two 23-character serials are the length a
-// common webcam microphone reports.
-func TestAUSBNamePastALabelHoldsAHashOfTheSerial(t *testing.T) {
+// A USB name with the serial that is longer than 63 characters uses
+// serialHash in place of the serial and keeps every other part. The
+// 23-character serials are the length that a common webcam microphone
+// reports.
+func TestAUSBNameLongerThanADNSLabelUsesAHashOfTheSerial(t *testing.T) {
 	webcam := func(serial string) cardIdentity {
 		return cardIdentity{Bus: "usb", Location: "1-6", Vendor: "046d", Product: "0a44", Serial: serial}
 	}
@@ -120,17 +118,16 @@ func TestAUSBNamePastALabelHoldsAHashOfTheSerial(t *testing.T) {
 			want:    "node-100-usb-046d-0a44-abcdef0123456789abcdef-usb-audio-capture",
 		},
 		{
-			name:    "64 characters holds the hash",
+			name:    "64 characters uses the hash",
 			machine: "node-100",
 			serial:  "ABCDEF0123456789ABCDEF0",
 			capture: true,
 			want:    "node-100-usb-046d-0a44-" + serialHash("ABCDEF0123456789ABCDEF0") + "-usb-audio-capture",
 		},
 		{
-			// The capture suffix adds eight characters, so a playback
-			// name of 56 to 63 characters keeps the serial while the
-			// capture name of the same dongle holds the hash.
-			name:    "the playback side of the dongle whose capture name holds the hash",
+			// The capture name of this dongle is 64 characters with
+			// the serial, and uses the hash in the row above.
+			name:    "the playback side of the dongle whose capture name uses the hash",
 			machine: "node-100",
 			serial:  "ABCDEF0123456789ABCDEF0",
 			want:    "node-100-usb-046d-0a44-abcdef0123456789abcdef0-usb-audio",
@@ -146,48 +143,47 @@ func TestAUSBNamePastALabelHoldsAHashOfTheSerial(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got, err := endpointName(c.machine, webcam(c.serial), "USB Audio", c.capture)
 			if err != nil {
-				t.Fatalf("endpointName reported %v", err)
+				t.Fatalf("endpointName returned the error %v, want %q", err, c.want)
 			}
 			if got != c.want {
-				t.Errorf("name = %q, want %q", got, c.want)
+				t.Errorf("endpointName = %q, want %q", got, c.want)
 			}
 			if len(got) > maxDeviceName {
-				t.Errorf("name %q is %d characters", got, len(got))
+				t.Errorf("name %q is %d characters, want at most %d", got, len(got), maxDeviceName)
 			}
 		})
 	}
 }
 
-// The hash is the contract a person can compute by hand from the
-// serial the card reports, so the digits are pinned here.
+// A person can compute the hash by hand from the serial that the card
+// reports, so the test pins the digits.
 func TestSerialHash(t *testing.T) {
 	// printf %s ABCDEF0123456789ABCDEF0 | sha256sum | cut -c1-8
 	if got := serialHash("ABCDEF0123456789ABCDEF0"); got != "5fe3de05" {
-		t.Errorf("serialHash = %q", got)
+		t.Errorf("serialHash = %q, want 5fe3de05", got)
 	}
 }
 
-// Two dongles of one model on one machine keep two names when both
-// names hold a hash, because their serials differ.
+// Two dongles of one model on one machine get two names when both names
+// use a hash, because their serials differ.
 func TestTwoHashedSerialsGiveTwoNames(t *testing.T) {
 	first, err := endpointName("studio-screen-12",
 		cardIdentity{Bus: "usb", Vendor: "046d", Product: "0a44", Serial: "ABCDEF0123456789ABCDEF0"}, "USB Audio", false)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("naming the first dongle: %v", err)
 	}
 	second, err := endpointName("studio-screen-12",
 		cardIdentity{Bus: "usb", Vendor: "046d", Product: "0a44", Serial: "ABCDEF0123456789ABCDEF1"}, "USB Audio", false)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("naming the second dongle: %v", err)
 	}
 	if first == second {
-		t.Errorf("two serials both named %q", first)
+		t.Errorf("two serials both named %q, want two names", first)
 	}
 }
 
-// A name this operator cannot build is a device it does not publish,
-// and the reason reaches the log rather than a shortened name that
-// nobody can predict.
+// endpointName returns an error instead of a shortened or partial
+// name, and the caller does not publish the endpoint.
 func TestEndpointNameRefusesWhatItCannotBuild(t *testing.T) {
 	pci := cardIdentity{Bus: "pci", Location: "0000:00:1f.3"}
 	cases := []struct {
@@ -195,59 +191,57 @@ func TestEndpointNameRefusesWhatItCannotBuild(t *testing.T) {
 		machine string
 		card    cardIdentity
 		pcmID   string
-		says    string
+		wantErr string
 	}{
 		{
-			name:    "the driver states no PCM id",
+			name:    "the driver reports no PCM id",
 			machine: "liken-1",
 			card:    pci,
-			says:    "no id for the PCM device",
+			wantErr: "no id for the PCM device",
 		},
 		{
 			name: "the card is on no bus this operator names",
-			// A virtual card, such as the loopback, has no device link
-			// in sysfs at all.
+			// A virtual card, such as the loopback card, has no device
+			// link in sysfs.
 			machine: "liken-1",
 			card:    cardIdentity{},
 			pcmID:   "Loopback PCM",
-			says:    "no bus this operator can name it by",
+			wantErr: "no bus this operator can name it by",
 		},
 		{
-			name:    "sysfs states no address",
+			name:    "sysfs reports no address",
 			machine: "liken-1",
 			card:    cardIdentity{Bus: "pci"},
 			pcmID:   "HDMI 0",
-			says:    "no pci address",
+			wantErr: "no pci address",
 		},
 		{
-			name:  "the machine has no name",
-			card:  pci,
-			pcmID: "HDMI 0",
-			says:  "this machine has no name",
+			name:    "the machine has no name",
+			card:    pci,
+			pcmID:   "HDMI 0",
+			wantErr: "this machine has no name",
 		},
 		{
 			name:    "the name is longer than a DNS label",
 			machine: strings.Repeat("long-machine-name", 4),
 			card:    pci,
 			pcmID:   "HDMI 0",
-			says:    "and a device name holds 63",
+			wantErr: "and a device name has at most 63",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			name, err := endpointName(c.machine, c.card, c.pcmID, false)
 			if err == nil {
-				t.Fatalf("endpointName built %q", name)
+				t.Fatalf("endpointName built %q, want an error", name)
 			}
-			if !strings.Contains(err.Error(), c.says) {
-				t.Errorf("error = %v, want it to say %q", err, c.says)
+			if !strings.Contains(err.Error(), c.wantErr) {
+				t.Errorf("error = %v, want it to contain %q", err, c.wantErr)
 			}
 		})
 	}
 }
 
-// Every part of a name is a piece of a DNS label: lowercase letters,
-// digits, and one dash for each run of anything else.
 func TestSlug(t *testing.T) {
 	cases := []struct {
 		value string
@@ -269,9 +263,8 @@ func TestSlug(t *testing.T) {
 	}
 }
 
-// The plugin resolves a prepare call's device name against what the
-// last reconcile pass read, because the name holds no card and no PCM
-// number to parse.
+// A device name contains no card or PCM number, so the plugin looks the
+// name up in the endpoints that the last reconcile pass published.
 func TestEndpointInventoryResolvesAName(t *testing.T) {
 	inventory := &endpointInventory{}
 	inventory.publish([]alsaEndpoint{
@@ -281,48 +274,47 @@ func TestEndpointInventoryResolvesAName(t *testing.T) {
 
 	sink, published := inventory.lookup("liken-1-usb-0573-1573-a34004801402-usb-audio")
 	if !published || sink.Capture || sink.Card != 1 || sink.PCM != 0 {
-		t.Errorf("the sink resolved to %+v, %v", sink, published)
+		t.Errorf("the sink resolved to %+v (published %v), want the playback endpoint of card 1, PCM 0", sink, published)
 	}
 	source, published := inventory.lookup("liken-1-usb-0573-1573-a34004801402-usb-audio-capture")
 	if !published || !source.Capture {
-		t.Errorf("the source resolved to %+v, %v", source, published)
+		t.Errorf("the source resolved to %+v (published %v), want the capture endpoint", source, published)
 	}
-	// A name that this operator never published resolves to nothing,
-	// and the prepare call fails with that name in its message.
+	// An ALSA address is not a device name.
 	if _, published := inventory.lookup("card1-pcm0"); published {
-		t.Error("a name this operator never published resolved to an endpoint")
+		t.Error("a name this operator never published resolved to an endpoint, want nothing")
 	}
 }
 
-// A pass replaces the whole inventory, so a card that left the
-// machine leaves no name behind for a prepare call to resolve.
-func TestEndpointInventoryHoldsOnlyTheLastPass(t *testing.T) {
+// Each pass replaces the whole inventory, so the name of a card that
+// left the machine no longer resolves in a prepare call.
+func TestEndpointInventoryContainsOnlyTheLastPass(t *testing.T) {
 	inventory := &endpointInventory{}
 	inventory.publish([]alsaEndpoint{{Card: 1, DeviceName: "liken-1-usb-0573-1573-a34004801402-usb-audio"}})
 	inventory.publish([]alsaEndpoint{{Card: 0, DeviceName: "liken-1-pci-0000-00-1f-3-hdmi-0"}})
 
 	if _, published := inventory.lookup("liken-1-usb-0573-1573-a34004801402-usb-audio"); published {
-		t.Error("a card that left the machine still resolves")
+		t.Error("a card that left the machine still resolves, want nothing")
 	}
 	if _, published := inventory.lookup("liken-1-pci-0000-00-1f-3-hdmi-0"); !published {
-		t.Error("the card that is there does not resolve")
+		t.Error("the card that is there does not resolve, want its endpoint")
 	}
 }
 
-// An operator that holds no inventory yet resolves nothing, rather
-// than failing the prepare call in a way a reader cannot place.
+// An operator with no inventory yet resolves no name, and publish does
+// not panic on a nil inventory.
 func TestNilInventoryResolvesNothing(t *testing.T) {
 	var inventory *endpointInventory
 	inventory.publish([]alsaEndpoint{{DeviceName: "liken-1-pci-0000-00-1f-3-hdmi-0"}})
 	if _, published := inventory.lookup("liken-1-pci-0000-00-1f-3-hdmi-0"); published {
-		t.Error("an inventory that does not exist resolved a name")
+		t.Error("an inventory that does not exist resolved a name, want nothing")
 	}
 }
 
-// nameEndpoints holds back what it cannot name and says why, so a
-// person reading the log can tell a missing endpoint from a missing
-// card.
-func TestNameEndpointsHoldsBackWhatItCannotName(t *testing.T) {
+// nameEndpoints returns a reason for each endpoint it cannot name,
+// under the endpoint's ALSA address, because that endpoint has no
+// device name.
+func TestNameEndpointsLeavesOutWhatItCannotName(t *testing.T) {
 	named, refused := nameEndpoints("liken-1", []alsaEndpoint{
 		{
 			Card: 0, PCM: 3,
@@ -340,7 +332,7 @@ func TestNameEndpointsHoldsBackWhatItCannotName(t *testing.T) {
 		t.Fatalf("named = %v, want %v", names, want)
 	}
 	if len(refused) != 1 || !strings.HasPrefix(refused[0], "card1-pcm0: ") {
-		t.Fatalf("refused = %v", refused)
+		t.Fatalf("refused = %v, want one reason for card1-pcm0", refused)
 	}
 }
 
@@ -349,8 +341,8 @@ func TestPNPID(t *testing.T) {
 		id   uint16
 		want string
 	}{
-		// The two bytes in EDID order. The kernel prints the ELD's own
-		// manufacture_id in the other byte order, 0x6d1e for this one.
+		// These values are in EDID byte order. The kernel prints the
+		// ELD's manufacture_id with the bytes swapped, 0x6d1e for GSM.
 		{id: 0x1e6d, want: "GSM"},
 		{id: 0x10ac, want: "DEL"},
 		{id: 0x0000, want: ""},
@@ -363,10 +355,9 @@ func TestPNPID(t *testing.T) {
 	}
 }
 
-// The pairing vectors. The display operator's suite holds the same
-// table, because the two operators must publish the same value for
-// the same monitor. A change to either derivation that broke the
-// parity fails a test in both repositories.
+// display-operator's tests contain the same table, because both
+// operators must publish the same value for one monitor. A change to
+// either derivation that breaks the match fails a test in both.
 func TestMonitorID(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -381,26 +372,21 @@ func TestMonitorID(t *testing.T) {
 			want: "gsm-5b09-lg-ultrawide",
 		},
 		{
-			// A panel with no name descriptor. The value is the
-			// manufacturer and the product alone, and not nothing,
-			// because the display operator reads the same monitor and
-			// must build the same value.
+			// A panel with no name descriptor still gets a value, so
+			// that both operators publish the attribute.
 			name:         "no monitor name",
 			manufacturer: "BOE", product: 0x095f, monitor: "",
 			want: "boe-095f",
 		},
 		{
-			// EDID pads a descriptor with spaces, and the padding must
-			// not reach the value.
-			name:         "padding does not reach the value",
+			// EDID pads a name descriptor with spaces.
+			name:         "a name padded with spaces",
 			manufacturer: "DEL", product: 0xa0c5, monitor: "  DELL U2415  ",
 			want: "del-a0c5-dell-u2415",
 		},
 		{
-			// Two bytes that decode to something other than three
-			// letters do not identify a monitor, so the caller publishes
-			// no pairing attribute, and a constraint on that attribute
-			// never allocates a device.
+			// The caller publishes no pairing attribute for an empty
+			// value, so a claim that matches on it allocates nothing.
 			name:         "the manufacturer did not decode",
 			manufacturer: pnpID(0x0000), product: 0x5b09, monitor: "LG ULTRAWIDE",
 			want: "",

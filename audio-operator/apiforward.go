@@ -1,22 +1,18 @@
 package main
 
-// The private leg: the API's call into one node's capture container.
+// The request from the API to the capture container on one node. The
+// caller's request to the API is the public leg, and the API's request
+// to the container is the private leg.
 //
-// The API sends its own ServiceAccount token, projected with the
-// audience audio-capture and a ten-minute life. It reads the file on
-// every request, because the kubelet refreshes it in place.
+// The API authenticates with a ServiceAccount token that the kubelet
+// projects for the audience audio-capture. It reads the token file on
+// every request, because the kubelet rewrites the file when it
+// refreshes the token.
 //
-// The connection goes to the pod's own address, with the ServerName
-// audio-capture and the domain's CA as the only trust anchor, so the
-// API reaches the container it minted the leaf for and nothing else
-// that answers on the address.
-//
-// Two bounds apply. The header timeout is ten seconds plus begin, so
-// it never fires while the container is discarding. The idle timeout
-// on the body is thirty seconds, counted from the first body byte or
-// from begin, whichever is later. A stream that keeps delivering has
-// no bound at all, because an open-ended tap runs until the client
-// closes.
+// The API dials the pod's IP address and verifies the container's
+// certificate for the name audio-capture against the API's own CA, so
+// another process that listens on that address cannot pass as the
+// container.
 
 import (
 	"context"
@@ -35,71 +31,59 @@ import (
 	"time"
 )
 
-// capturePort is where the container listens, which is the container
-// port named capture in the DaemonSet.
+// capturePort is the containerPort named capture in the operator's
+// DaemonSet.
 const capturePort = 9201
 
-// captureTokenVariable names the projected token's file.
 const captureTokenVariable = "CAPTURE_TOKEN_FILE"
 
-// captureTokenFile is where the projected volume mounts when nothing
-// names another path.
+// captureTokenFile is the mount path of the projected token in
+// deploy/api.yaml.
 const captureTokenFile = "/var/run/secrets/audio.liken.sh/capture/token"
 
-// headerTimeout and idleTimeout are the two bounds on the private
-// leg. The three capture APIs share both numbers.
+// headerTimeout is how long the container has to send its response
+// headers, and forward adds the tap's begin offset to it. idleTimeout
+// is how long a body may send nothing before the API ends it. A body
+// that keeps sending has no limit, because an open-ended tap runs until
+// the caller closes it.
 const (
 	headerTimeout = 10 * time.Second
 	idleTimeout   = 30 * time.Second
 )
 
-// The three ways the private leg fails, and the status each one is.
+// The errors of forward. relayFailure returns ErrCaptureRefused as a
+// 503, ErrCaptureMalformed as a 502, and ErrCaptureTimeout as a 504.
 //
-// The split is by how far the request got, not by what the error says.
-// A connection that was never made, or never trusted, is a 503: the
-// container is coming up, or its leaf has yet to be minted, and both
-// clear on their own. Once the connection stands, anything that goes
-// wrong is the container's answer going wrong, and that is a 502
-// whatever words the transport puts on it. A container that answered
-// nothing in time is a 504.
-//
-// Reading the words was the first cut at this and it was wrong: Go's
-// transport reports a server that writes garbage and closes as a
-// malformed response, a peek failure, or an unexpected EOF depending
-// on which side of the read the close lands, so a classifier that
-// matched on the text answered differently for one failure.
+// forward picks the error by how far the request got, not by the error's
+// text, because Go's transport reports a server that writes garbage and
+// closes as a malformed response, a peek failure, or an unexpected EOF,
+// depending on when the close arrives. A connection that was never made
+// and a certificate that the API's CA did not sign are ErrCaptureRefused,
+// because the container is still starting or has no certificate yet, and
+// both clear on their own.
 var (
 	ErrCaptureRefused   = errors.New("the capture container refused the connection")
-	ErrCaptureMalformed = errors.New("the capture container's answer could not be read")
+	ErrCaptureMalformed = errors.New("the API cannot read the capture container's response")
 	ErrCaptureTimeout   = errors.New("the capture container sent no headers in time")
 )
 
-// forwarder dials one node's capture container.
 type forwarder struct {
-	// anchor is the CA the container's leaf is signed by. It is read
-	// per request because the API mints a new one when the old one
-	// nears its end.
+	// anchor returns the PEM of the CA that signs the container's
+	// certificate. transport calls it on each request, because the API
+	// mints a new CA when the old one is missing or expiring.
 	anchor func() []byte
 
-	// tokenFile is where the projected token lands.
 	tokenFile string
 
-	// port is the container's own, a field so a test points the
-	// forwarder at an httptest server.
-	port int
-
-	// scheme and address stand in for the pod's own address. They are
-	// fields for the port's reason: a test points the forwarder at an
-	// httptest server, where the TLS this file speaks in a cluster is
-	// proved by the certificate tests instead.
+	// A test sets scheme, address, and dial to point the forwarder at an
+	// httptest server. address replaces the pod's IP and port.
+	port    int
 	scheme  string
 	address string
-
-	// dial is how the connection is made, a field for the same reason.
-	dial func(ctx context.Context, network, address string) (net.Conn, error)
+	dial    func(ctx context.Context, network, address string) (net.Conn, error)
 
 	mu       sync.Mutex
-	anchored string
+	clientCA string
 	client   *http.Client
 }
 
@@ -111,37 +95,37 @@ func newForwarder(anchor func() []byte) *forwarder {
 	return &forwarder{anchor: anchor, tokenFile: file, port: capturePort}
 }
 
-// transport builds the client, and builds it again when the CA has
-// changed. One client holds the connection pool, so a second tap on a
-// node reuses the first one's connection and its handshake.
+// transport returns the HTTP client for the current CA and builds a new
+// one when the CA changes. Each client keeps its connection pool, so
+// taps on the same node reuse a connection and its TLS handshake.
 func (f *forwarder) transport() (*http.Client, error) {
 	f.mu.Lock()
-	held := f.client
-	anchored := f.anchored
+	cached := f.client
+	clientCA := f.clientCA
 	f.mu.Unlock()
 	if f.anchor == nil {
-		if held == nil {
+		if cached == nil {
 			return nil, ErrNoCertificate
 		}
-		return held, nil
+		return cached, nil
 	}
 	anchor := string(f.anchor())
 	if anchor == "" {
 		return nil, ErrNoCertificate
 	}
-	if held != nil && anchored == anchor {
-		return held, nil
+	if cached != nil && clientCA == anchor {
+		return cached, nil
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	// The lock was dropped to read the anchor, so another request may
-	// have built the client in between.
-	if f.client != nil && f.anchored == anchor {
+	// Another request can build the client while this one reads the
+	// anchor without the lock.
+	if f.client != nil && f.clientCA == anchor {
 		return f.client, nil
 	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM([]byte(anchor)) {
-		return nil, errors.New("the capture CA holds no certificates")
+		return nil, errors.New("the capture CA's PEM contains no certificates")
 	}
 	dial := f.dial
 	if dial == nil {
@@ -152,23 +136,24 @@ func (f *forwarder) transport() (*http.Client, error) {
 			DialContext: dial,
 			TLSClientConfig: &tls.Config{
 				RootCAs: roots,
-				// The leaf carries this one name, and the API dials the
-				// pod's address, so the name has to be stated.
+				// The API dials an IP address, and the container's
+				// certificate is for the name audio-capture.
 				ServerName: captureAudience,
 				MinVersion: tls.VersionTLS12,
 			},
-			// A stream holds its response open for as long as the
-			// client reads it, so the whole-request timeout that bounds
-			// an ordinary read has no place here.
+			// The client has no whole-request timeout, because a tap
+			// streams for as long as the caller reads it.
 			IdleConnTimeout: 60 * time.Second,
 		},
 	}
-	f.anchored = anchor
+	f.clientCA = anchor
 	return f.client, nil
 }
 
-// forward makes one call. The caller owns the answer's body.
-func (f *forwarder) forward(ctx context.Context, held capturePod,
+// forward sends a GET to the container on pod and returns its response.
+// The caller closes the response body, which also cancels the request's
+// context.
+func (f *forwarder) forward(ctx context.Context, pod capturePod,
 	path, rawQuery string, begin time.Duration) (*http.Response, error) {
 	client, err := f.transport()
 	if err != nil {
@@ -179,7 +164,7 @@ func (f *forwarder) forward(ctx context.Context, held capturePod,
 		return nil, fmt.Errorf("reading the capture token: %w", err)
 	}
 
-	target := f.origin(held) + path
+	target := f.origin(pod) + path
 	if rawQuery != "" {
 		target += "?" + rawQuery
 	}
@@ -189,20 +174,17 @@ func (f *forwarder) forward(ctx context.Context, held capturePod,
 	}
 	request.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(token)))
 
-	// The header bound is ten seconds plus begin, so a tap that
-	// discards a minute is not cut off before its first byte.
-	// The bound covers the wait for the status line and the headers and
-	// nothing after it. A deadline on the request context would cut the
-	// body as well, and a tap is unbounded on purpose: what bounds the
-	// body is the idle watchdog in serveTap and the caller hanging up.
-	// So the bound is a timer this code stops the moment the headers
-	// arrive.
+	// A deadline on the request context would also cut off the body, so
+	// a timer cancels the request when the headers are late, and forward
+	// stops the timer when client.Do returns. The timeout includes begin
+	// so that a tap with a begin offset is not cut off before the
+	// container responds.
 	headers, cancel := context.WithCancel(ctx)
 	bound := headerTimeout + begin
 	deadline := time.AfterFunc(bound, cancel)
-	answer, err := client.Do(request.WithContext(headers))
-	// Stop answers false when the timer has already run, which is the
-	// one case that is a 504.
+	response, err := client.Do(request.WithContext(headers))
+	// The timer caused the error only when it already fired and the
+	// caller's context is still live.
 	expired := !deadline.Stop() && ctx.Err() == nil
 	if err != nil {
 		cancel()
@@ -212,22 +194,19 @@ func (f *forwarder) forward(ctx context.Context, held capturePod,
 		case !reachable(err), !trusted(err), ctx.Err() != nil:
 			return nil, fmt.Errorf("%w: %w", ErrCaptureRefused, err)
 		default:
-			// The connection stood and the answer on it did not read.
+			// The connection was made, and the response could not be
+			// read.
 			return nil, fmt.Errorf("%w: %w", ErrCaptureMalformed, err)
 		}
 	}
-	answer.Body = &cancellingBody{ReadCloser: answer.Body, cancel: cancel}
-	return answer, nil
+	response.Body = &cancellingBody{ReadCloser: response.Body, cancel: cancel}
+	return response, nil
 }
 
-// reachable says whether the connection to the container was made at
-// all. Only these failures are a 503, because only these are a
-// container that is not there yet.
-//
-// A dial that failed reports itself as a net.OpError whose Op is dial,
-// and the three errno values below are what the kernel answers with
-// when nothing is listening, when the node is gone, and when the pod
-// network has not come up.
+// reachable reports whether the connection to the container was made.
+// Go reports a failed dial as a net.OpError with Op "dial". The errno
+// values are what the kernel returns when nothing listens on the port,
+// when the node is gone, and when the pod network is not up.
 func reachable(err error) bool {
 	var operation *net.OpError
 	if errors.As(err, &operation) && operation.Op == "dial" {
@@ -242,14 +221,13 @@ func reachable(err error) bool {
 	return true
 }
 
-// trusted says whether the certificate the container served is one
-// this API's own CA signed.
+// trusted reports whether the container's certificate chains to the
+// API's CA. A listener that does not speak TLS is untrusted.
 //
-// A container whose Secret has yet to arrive serves a certificate it
-// signed itself, so this is the state the plan names as "has no
-// certificate yet": it clears the moment the API mints the leaf and
-// the kubelet refreshes the volume, which makes it a 503 with a
-// Retry-After rather than a 502 about a broken upstream.
+// Until the Secret audio-capture-server reaches the container, the
+// container serves a self-signed certificate. That clears when the API
+// mints the certificate and the kubelet updates the volume, so forward
+// returns ErrCaptureRefused, a 503 with Retry-After, and not a 502.
 func trusted(err error) bool {
 	var unverified *tls.CertificateVerificationError
 	if errors.As(err, &unverified) {
@@ -259,9 +237,7 @@ func trusted(err error) bool {
 	return !errors.As(err, &record)
 }
 
-// origin is where one node's container answers. The pod's own address
-// and the container's port are the whole of it.
-func (f *forwarder) origin(held capturePod) string {
+func (f *forwarder) origin(pod capturePod) string {
 	scheme := f.scheme
 	if scheme == "" {
 		scheme = "https"
@@ -269,11 +245,11 @@ func (f *forwarder) origin(held capturePod) string {
 	if f.address != "" {
 		return scheme + "://" + f.address
 	}
-	return scheme + "://" + net.JoinHostPort(held.IP, strconv.Itoa(f.port))
+	return scheme + "://" + net.JoinHostPort(pod.IP, strconv.Itoa(f.port))
 }
 
-// cancellingBody releases the header bound when the body is closed, so
-// the context that bounded the headers does not outlive the request.
+// cancellingBody cancels the request's context when the caller closes
+// the body, so the context does not outlive the request.
 type cancellingBody struct {
 	io.ReadCloser
 	cancel context.CancelFunc
@@ -284,22 +260,19 @@ func (b *cancellingBody) Close() error {
 	return b.ReadCloser.Close()
 }
 
-// idleReader ends a stream that has delivered nothing for idleTimeout.
+// idleReader ends a body that has sent nothing for after. The silence
+// counts from the last byte read or, before the first byte, from the
+// time given to newIdleReader. serveTap gives the end of the begin
+// offset, so the timeout cannot fire while the container discards.
 //
-// The count starts at the first body byte or at the end of begin,
-// whichever is later, so it never fires while the container is
-// discarding.
-//
-// There is a timer as well as a clock. A read on a connection that
-// went silent blocks inside the transport, and a check that runs when
-// the read returns would never run at all, so the timer ends the
-// request from outside and the read comes back with the reason.
+// A read on a silent connection blocks inside the transport, so Read
+// alone cannot end it. The timer that watch starts cancels the request,
+// and the blocked read then returns.
 type idleReader struct {
 	from  io.Reader
 	after time.Duration
 
-	// now is a field so a test drives the timeout without waiting
-	// thirty seconds.
+	// Tests replace now to move the clock.
 	now func() time.Time
 
 	mu    sync.Mutex
@@ -308,15 +281,12 @@ type idleReader struct {
 	fired bool
 }
 
-// newIdleReader bounds one body. started is when the count begins, and
-// stop ends the request when the bound passes.
 func newIdleReader(from io.Reader, after time.Duration, started time.Time) *idleReader {
 	return &idleReader{from: from, after: after, now: time.Now, last: started}
 }
 
-// watch arms the timer that ends a read blocked on a silent
-// connection. stop is what cuts the request off, which is the
-// forward's own cancel.
+// watch starts a timer that calls stop, the cancel function of the
+// request, when the body has been silent for r.after.
 func (r *idleReader) watch(stop func()) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -324,8 +294,9 @@ func (r *idleReader) watch(stop func()) {
 	r.rearm()
 }
 
-// expire ends the stream, unless a block arrived while the timer was
-// running, in which case the bound starts again from that block.
+// expire calls stop when the body is still silent. A byte can arrive
+// after the timer fires and before expire takes the lock, so expire
+// checks the silence again and resets the timer when it is too short.
 func (r *idleReader) expire(stop func()) {
 	r.mu.Lock()
 	if r.now().Sub(r.last) < r.after {
@@ -338,8 +309,8 @@ func (r *idleReader) expire(stop func()) {
 	stop()
 }
 
-// rearm sets the timer to the moment the current quiet would reach the
-// bound. The caller holds the lock.
+// rearm sets the timer to fire when the current silence reaches
+// r.after. The caller holds r.mu.
 func (r *idleReader) rearm() {
 	if r.timer == nil {
 		return
@@ -351,7 +322,6 @@ func (r *idleReader) rearm() {
 	r.timer.Reset(remaining)
 }
 
-// stopWatching releases the timer when the stream ends for any reason.
 func (r *idleReader) stopWatching() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -361,8 +331,9 @@ func (r *idleReader) stopWatching() {
 	}
 }
 
-// Read answers what the stream delivered, and reports the idle end as
-// the error the log line carries.
+// Read reads from the body. When it reads no bytes after the timer
+// fired, or after a silence longer than r.after, it returns an error
+// that names the timeout in place of the body's error.
 func (r *idleReader) Read(into []byte) (int, error) {
 	read, err := r.from.Read(into)
 	r.mu.Lock()
@@ -378,13 +349,10 @@ func (r *idleReader) Read(into []byte) (int, error) {
 	return read, err
 }
 
-// relayed is the set of headers the API copies from a problem the
-// container answered with. On a 200 the API writes the type and the
-// cache directives itself, because it chose the representation in
-// the negotiation, so nothing of the container's is copied onto it.
-// On a problem the container's own answer is what the caller gets,
-// and Retry-After is the one field whose meaning the API cannot
-// derive on its own.
+// relayed lists the headers that relayHeaders copies from a container's
+// problem response. The API cannot derive the container's Retry-After
+// on its own. On a 200, serveTap copies none of the container's headers
+// and sets its own.
 var relayed = []string{"Content-Type", "Cache-Control", "Accept-Ranges", "Retry-After"}
 
 func relayHeaders(from, to http.Header) {

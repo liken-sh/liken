@@ -1,11 +1,5 @@
 package main
 
-// These tests cover the two resources' own client: the create that
-// carries an empty spec, the status write that goes to the
-// subresource, and the list of one machine's resources. They run
-// against a small API server that holds the Sinks and the Sources this
-// operator writes. endpointwatch_test.go covers the watch.
-
 import (
 	"encoding/json"
 	"net/http"
@@ -17,19 +11,19 @@ import (
 	"time"
 )
 
-// endpointAPI is an API server that holds one collection of each
-// kind. It records every request, because a pass that writes nothing
-// is one of the outcomes these tests assert.
+// endpointAPI is a fake API server that stores Sinks and Sources. It
+// records every request, because some tests check that a pass writes
+// nothing.
 type endpointAPI struct {
-	// The handler answers on the API server's own goroutines, so every
-	// read and write of what the fixture holds takes the lock.
+	// The handler runs on the test server's goroutines, so mutex guards
+	// every field below it.
 	mutex    sync.Mutex
 	sinks    map[string]*Sink
 	sources  map[string]*Source
 	requests []string
-	// version is the last resourceVersion the fixture stored. A PUT
-	// that carries another version than the stored one is answered
-	// 409, the way the API server answers a write from an older copy.
+	// version is the last resourceVersion that the fake stored. A PUT
+	// whose resourceVersion differs from the stored object's gets a 409,
+	// as a write from a stale copy does from the real API server.
 	version int
 }
 
@@ -53,8 +47,8 @@ func (a *endpointAPI) handler(t *testing.T) http.Handler {
 	})
 }
 
-// SinkList and SourceList are the lists the fake answers, the way the
-// API server wraps a collection's items.
+// SinkList and SourceList wrap items the way the API server returns a
+// collection.
 type SinkList struct {
 	Items []Sink `json:"items"`
 }
@@ -77,8 +71,8 @@ func (a *endpointAPI) serveSinks(t *testing.T, w http.ResponseWriter, r *http.Re
 		}
 		_ = json.NewEncoder(w).Encode(list)
 	case r.Method == http.MethodGet:
-		sink, held := a.sinks[name]
-		if !held {
+		sink, found := a.sinks[name]
+		if !found {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -88,8 +82,8 @@ func (a *endpointAPI) serveSinks(t *testing.T, w http.ResponseWriter, r *http.Re
 	case r.Method == http.MethodPost, r.Method == http.MethodPut:
 		stored := &Sink{}
 		_ = json.NewDecoder(r.Body).Decode(stored)
-		if held, found := a.sinks[stored.Metadata.Name]; r.Method == http.MethodPut && found &&
-			held.Metadata.ResourceVersion != stored.Metadata.ResourceVersion {
+		if current, found := a.sinks[stored.Metadata.Name]; r.Method == http.MethodPut && found &&
+			current.Metadata.ResourceVersion != stored.Metadata.ResourceVersion {
 			w.WriteHeader(http.StatusConflict)
 			return
 		}
@@ -97,7 +91,7 @@ func (a *endpointAPI) serveSinks(t *testing.T, w http.ResponseWriter, r *http.Re
 		a.sinks[stored.Metadata.Name] = stored
 		_ = json.NewEncoder(w).Encode(stored)
 	default:
-		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		t.Errorf("the fixture received %s %s, want a request it serves for Sinks", r.Method, r.URL.Path)
 	}
 }
 
@@ -115,8 +109,8 @@ func (a *endpointAPI) serveSources(t *testing.T, w http.ResponseWriter, r *http.
 		}
 		_ = json.NewEncoder(w).Encode(list)
 	case r.Method == http.MethodGet:
-		source, held := a.sources[name]
-		if !held {
+		source, found := a.sources[name]
+		if !found {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -124,8 +118,8 @@ func (a *endpointAPI) serveSources(t *testing.T, w http.ResponseWriter, r *http.
 	case r.Method == http.MethodPost, r.Method == http.MethodPut:
 		stored := &Source{}
 		_ = json.NewDecoder(r.Body).Decode(stored)
-		if held, found := a.sources[stored.Metadata.Name]; r.Method == http.MethodPut && found &&
-			held.Metadata.ResourceVersion != stored.Metadata.ResourceVersion {
+		if current, found := a.sources[stored.Metadata.Name]; r.Method == http.MethodPut && found &&
+			current.Metadata.ResourceVersion != stored.Metadata.ResourceVersion {
 			w.WriteHeader(http.StatusConflict)
 			return
 		}
@@ -133,69 +127,64 @@ func (a *endpointAPI) serveSources(t *testing.T, w http.ResponseWriter, r *http.
 		a.sources[stored.Metadata.Name] = stored
 		_ = json.NewEncoder(w).Encode(stored)
 	default:
-		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		t.Errorf("the fixture received %s %s, want a request it serves for Sources", r.Method, r.URL.Path)
 	}
 }
 
-// patchSink applies a merge patch to a Sink's status, the way the API
-// server applies one to the status subresource: a patch that states
-// another resourceVersion than the stored one is answered 409, and the
-// fields the patch does not name keep their values. The caller holds
-// the lock.
+// patchSink applies a merge patch to a Sink's status, as the API
+// server does for the status subresource. A patch whose resourceVersion
+// differs from the stored object's gets a 409, and fields that the patch
+// omits keep their values. The caller holds the lock.
 func (a *endpointAPI) patchSink(t *testing.T, w http.ResponseWriter, r *http.Request, name string) {
-	held, found := a.sinks[name]
+	current, found := a.sinks[name]
 	if !found {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	if r.Header.Get("Content-Type") != mergePatchType {
-		t.Errorf("a patch of %s carried %q", name, r.Header.Get("Content-Type"))
+		t.Errorf("a patch of %s carried the content type %q, want %q", name, r.Header.Get("Content-Type"), mergePatchType)
 	}
 	var patch map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-		t.Errorf("a patch of %s does not decode: %v", name, err)
+		t.Errorf("decoding the patch of %s: %v", name, err)
 		return
 	}
 	stated, _ := patch["metadata"].(map[string]any)["resourceVersion"].(string)
-	if stated != "" && stated != held.Metadata.ResourceVersion {
+	if stated != "" && stated != current.Metadata.ResourceVersion {
 		w.WriteHeader(http.StatusConflict)
 		return
 	}
-	fields, err := asFields(held)
+	fields, err := asFields(current)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the fields of the stored Sink %s: %v", name, err)
 	}
 	fields["status"] = applyMergePatch(fields["status"], patch["status"])
 	stored := &Sink{}
 	if err := remarshal(fields, stored); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the patched Sink %s: %v", name, err)
 	}
 	stored.Metadata.ResourceVersion = a.nextVersion()
 	a.sinks[name] = stored
 	_ = json.NewEncoder(w).Encode(stored)
 }
 
-// sinkStatus is a Sink's status with the facts alone and no session.
 func sinkStatus(facts EndpointStatus) SinkStatus {
 	return SinkStatus{EndpointStatus: facts}
 }
 
-// declaredLevel is a Sink's volume declaration with a level and no
-// bounds, the way a person writes it.
 func declaredLevel(level int) *SinkVolume {
 	return &SinkVolume{Level: pointerTo(level)}
 }
 
-// nextVersion answers a new resourceVersion. The caller holds the
-// lock.
+// The caller of nextVersion holds the lock.
 func (a *endpointAPI) nextVersion() string {
 	a.version++
 	return strconv.Itoa(a.version)
 }
 
-// selects answers whether a list's field selector takes a resource,
-// the way the API server answers it for the selectable field
-// status.node. A list with no selector takes every resource.
+// selects reports whether the request's fieldSelector matches the
+// status, as the API server filters on the selectable field
+// status.node. A request with no selector matches every resource.
 func selects(r *http.Request, status EndpointStatus) bool {
 	selector := r.URL.Query().Get("fieldSelector")
 	if selector == "" {
@@ -204,39 +193,35 @@ func selects(r *http.Request, status EndpointStatus) bool {
 	return selector == "status.node="+status.Node
 }
 
-// The create states nothing about how the endpoint rests. A spec with
-// a field in it would be the operator declaring policy, and the
-// resource exists so that a person can.
 func TestCreateCarriesAnEmptySpec(t *testing.T) {
 	api := newEndpointAPI()
 	client := testClient(t, api.handler(t))
 
 	sink, err := createSink(client, testSinkName)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the Sink: %v", err)
 	}
 	if sink.Metadata.Name != testSinkName {
-		t.Errorf("name = %q", sink.Metadata.Name)
+		t.Errorf("the created Sink is named %q, want %q", sink.Metadata.Name, testSinkName)
 	}
 	if !reflect.DeepEqual(sink.Spec, SinkSpec{}) {
 		t.Errorf("spec = %+v, want an empty one", sink.Spec)
 	}
 	if got := api.requests; len(got) != 1 || got[0] != "POST "+SinksPath {
-		t.Errorf("requests = %v", got)
+		t.Errorf("the fixture received %v, want one POST %s", got, SinksPath)
 	}
 
 	source, err := createSource(client, testSourceName)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the Source: %v", err)
 	}
 	if source.Metadata.Name != testSourceName {
-		t.Errorf("name = %q", source.Metadata.Name)
+		t.Errorf("the created Source is named %q, want %q", source.Metadata.Name, testSourceName)
 	}
 }
 
-// Before the watches finish their first read, the pass lists this
-// machine's Sinks and Sources from the API server by the watches'
-// field selector, so it reads no other machine's resources.
+// A pass lists this machine's Sinks and Sources with the field selector
+// that the watches use, so it never reads another machine's resources.
 func TestListReadsThisMachinesResourcesInBothCollections(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
@@ -251,23 +236,23 @@ func TestListReadsThisMachinesResourcesInBothCollections(t *testing.T) {
 
 	sinks, err := control.readSinks()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the Sinks: %v", err)
 	}
 	if len(sinks) != 1 || sinks[0].Metadata.Name != testSinkName {
-		t.Errorf("sinks = %+v", sinks)
+		t.Errorf("the list returned the Sinks %+v, want only %s", sinks, testSinkName)
 	}
 	sources, err := control.readSources()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the Sources: %v", err)
 	}
 	if len(sources) != 1 || sources[0].Metadata.Name != testSourceName {
-		t.Errorf("sources = %+v", sources)
+		t.Errorf("the list returned the Sources %+v, want only %s", sources, testSourceName)
 	}
 }
 
-// A condition that says the same thing keeps the time it changed
-// last. A timestamp that moved on every pass would make every pass a
-// write, and every write reaches every reader of the resource.
+// A condition whose status is unchanged keeps its lastTransitionTime.
+// Otherwise every pass would write the status, and each write notifies
+// every watcher of the resource.
 func TestConditionsKeepTheirTimestampUntilTheyChange(t *testing.T) {
 	first := time.Date(2026, 8, 28, 9, 0, 0, 0, time.UTC)
 	later := first.Add(time.Hour)
@@ -275,14 +260,14 @@ func TestConditionsKeepTheirTimestampUntilTheyChange(t *testing.T) {
 	conditions := setCondition(nil, condition(ConnectedCondition, true, "MonitorPresent", "a monitor answers", first))
 	conditions = setCondition(conditions, condition(ConnectedCondition, true, "MonitorPresent", "a monitor answers", later))
 	if got := conditions[0].LastTransitionTime; !got.Equal(first) {
-		t.Errorf("an unchanged condition moved its timestamp to %s", got)
+		t.Errorf("an unchanged condition moved its timestamp to %s, want %s", got, first)
 	}
 
 	conditions = setCondition(conditions, condition(ConnectedCondition, false, "NoMonitor", "no monitor answers", later))
 	if got := conditions[0].LastTransitionTime; !got.Equal(later) {
-		t.Errorf("a condition that changed kept the timestamp %s", got)
+		t.Errorf("a condition that changed has the timestamp %s, want %s", got, later)
 	}
 	if len(conditions) != 1 {
-		t.Errorf("conditions = %+v, want the one type", conditions)
+		t.Errorf("conditions = %+v, want one Connected condition", conditions)
 	}
 }

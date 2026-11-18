@@ -1,21 +1,19 @@
 package main
 
-// audio-api: the Deployment in liken-system that identifies the
-// target of a request and forwards the stream.
+// audio-api is the Deployment in liken-system that serves the capture
+// API. For each request it authenticates and authorizes the caller,
+// reads the Sink or Source, finds the pod of the capture container on
+// the endpoint's node, and relays the stream from that pod. audio-api
+// keeps no state, and only the capture container touches PipeWire.
 //
-// It authenticates, authorizes, reads the object, finds the node's
-// pod, and relays. Every fact about PipeWire is in the capture
-// container. Nothing is stored on either side.
+// The public listener serves HTTPS, because anything on the network
+// path can replay a bearer token sent over plain HTTP, and because Go
+// serves HTTP/2 only over TLS.
 //
-// The public leg is HTTPS because a bearer token on a plain listener
-// is replayable by anything on the path, and because Go speaks HTTP/2
-// only over TLS. Over HTTP/1.1 a stream is chunked with no
-// Content-Length (RFC 9112 sections 7.1 and 6.2); over HTTP/2 it is
-// DATA frames (RFC 9113 section 8.1).
-//
-// The API server's services/proxy door strips the caller's identity
-// and is not supported. v1 has no CORS: a browser reaches this API
-// only on the same origin through a port-forward.
+// Requests through the API server's services/proxy are not supported,
+// because the proxy strips the caller's identity. Version 1 of the API
+// sends no CORS headers, so a browser can reach it only from the same
+// origin, through a port-forward.
 
 import (
 	"context"
@@ -37,32 +35,34 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// The settings this Deployment reads from its environment: where the
-// public listener binds, and the origin the served OpenAPI document
-// names when an ingress puts the API behind another host name.
+// Environment variables of this Deployment. API_ADDRESS is the address
+// the public listener binds. PUBLIC_BASE is the origin that the served
+// OpenAPI document names, for an ingress that puts the API under a
+// different host name.
 const (
 	apiAddressVariable = "API_ADDRESS"
 	publicBaseVariable = "PUBLIC_BASE"
 )
 
-// apiService is the Service's own name, which is also the common name
-// on the public leaf.
+// apiService is the name of the audio-api Service, and the common name
+// on the public leaf certificate.
 const apiService = "audio-api"
 
-// certificateCheck is how often the API looks at the lives of the
-// certificates it holds and mints a leaf again when one is nearing its
-// end. No object changes when a certificate nears its end, so this is
-// a clock and not a watch. A year of life needs no closer look than
-// this.
+// certificateCheck is the interval between checks of the certificates'
+// remaining life. No object changes when a certificate nears its
+// expiry, so a timer is the only trigger. A leaf is renewed months
+// before it expires (leafRenewalShare), so an hourly check is far more
+// often than needed.
 //
-// The pass reads the three objects again, which costs three gets an
-// hour. That read is also the backstop for the Secret audio-api-tls
-// and the ConfigMap audio-api-ca, which no watch follows: a person
-// who deletes or edits one sees it written back on the next pass. The
-// capture Secret and the client authority have watches of their own.
+// Each check also reads the Secret audio-api-tls, the ConfigMap
+// audio-api-ca, and the capture Secret. No watch follows the first two,
+// so the check is also their only repair: a person who deletes or edits
+// one sees it written again at the next check. followCertificateObjects
+// watches the capture Secret and the client CA ConfigMap.
 const certificateCheck = time.Hour
 
-// apiServer is the whole of this mode's state.
+// apiServer is the http.Handler of the public listener, with the
+// clients and caches behind it.
 type apiServer struct {
 	client   *apiclient.Client
 	review   *reviewer
@@ -73,38 +73,39 @@ type apiServer struct {
 	anchors  *clientAnchors
 	readings *apiMetrics
 
-	// publicBase is the origin the served OpenAPI document names. An
-	// empty value means the request's own origin.
+	// publicBase is the origin the served OpenAPI document names. When
+	// it is empty, the document names the request's own origin.
 	publicBase string
 
-	// now is a field so a test reads a fixed accept instant off a save
-	// name instead of a moving one.
+	// now is the clock that times each request and each stream for the
+	// metrics and the log line.
 	now func() time.Time
 
-	// recorder posts the Captured Events.
+	// recorder posts the Captured Events (apievents.go).
 	recorder *events.Recorder
 
-	// log is where the one line per request goes. It is a field for
-	// the same reason.
+	// log receives the line that each request writes. When it is nil,
+	// the line goes to standard output. A test sets it to read the lines.
 	log func(string)
 }
 
-// serveAPI is the mode's entry point.
+// serveAPI runs the audio-api mode until SIGINT or SIGTERM.
 func serveAPI() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
-		fatal("in-cluster config: %v", err)
+		fatal("reading the in-cluster config: %v", err)
 	}
 	namespace := podNamespace()
 	server := newAPIServer(client, namespace)
 	server.recorder = events.New(ctx, client, apiComponent, events.Options{})
 
-	// The certificates come before the listener: the API serves the
-	// public leaf, and the container's leaf has to exist before the
-	// first tap reaches a node.
+	// The certificates must exist before the listener starts, because
+	// the listener serves the public leaf, and the capture container's
+	// leaf must be in its Secret before the first capture request
+	// reaches a node.
 	leaf, err := server.certs.ensure()
 	if err != nil {
 		fatal("preparing the API's certificates: %v", err)
@@ -114,18 +115,17 @@ func serveAPI() {
 	held.set(leaf)
 	go server.keepCertificates(ctx, held)
 
-	// The cluster's client authority is read before the listener
-	// starts, so the first handshake verifies against it, and again on
-	// every change the watch reports. A read that fails is reported and
-	// never fatal: an API that cannot read the ConfigMap still answers
-	// every caller that sends a Bearer token, and the watch loads the
-	// authority once the grant or the API server is back.
+	// The cluster's client CA loads before the listener starts, so the
+	// first handshake verifies against it. A failed load is logged and
+	// not fatal, because a caller that sends a bearer token does not need
+	// the CA, and the watch below loads it when the RBAC grant or the API
+	// server is back.
 	if err := server.anchors.load(client); err != nil {
 		fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
 	}
 	watcher, err := informer.InCluster()
 	if err != nil {
-		fatal("in-cluster config for the watches: %v", err)
+		fatal("reading the in-cluster config for the watches: %v", err)
 	}
 	server.followCertificateObjects(ctx, watcher, func(err error) {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
@@ -153,7 +153,7 @@ func serveAPI() {
 
 	serving := &http.Server{
 		Handler:           server,
-		ReadHeaderTimeout: metricsDeadline,
+		ReadHeaderTimeout: readHeaderTimeout,
 		TLSConfig:         apiTLSConfig(held, server.anchors),
 	}
 	go func() {
@@ -181,8 +181,8 @@ func newAPIServer(client *apiclient.Client, namespace string) *apiServer {
 	}
 }
 
-// keepCertificates mints a leaf again when under a third of its life
-// remains, and reports the nearest expiry on every pass.
+// keepCertificates mints a leaf again when it is expiring, and reports
+// the nearest expiry after each check that succeeds.
 func (s *apiServer) keepCertificates(ctx context.Context, held *servedLeaf) {
 	lifetimes := time.NewTicker(certificateCheck)
 	defer lifetimes.Stop()
@@ -202,31 +202,27 @@ func (s *apiServer) keepCertificates(ctx context.Context, held *servedLeaf) {
 	}
 }
 
-// followCertificateObjects watches the two objects whose changes the
-// API acts on at once, not on the hourly pass.
+// followCertificateObjects watches the capture Secret and the ConfigMap
+// of the cluster's client CA, so a change to either takes effect before
+// the next hourly check.
 //
-// The first is the Secret the capture containers mount. A capture
-// container with no leaf serves a certificate no client trusts, so
-// every tap on its node is a 503 until the Secret is back. A change or
-// a delete of the Secret runs the capture leaf check, which mints the
-// leaf again when the Secret is gone, is expiring, or holds a leaf
-// another CA signed, and writes nothing when the Secret is in order.
-// The check reads the Secret from the API server, not the watch's
-// copy, because the check writes the Secret. The watch delivers that
-// write a moment later, and a check that read the older copy in
-// between would mint a second leaf.
+// The capture containers mount the capture Secret. A capture container
+// with no valid leaf serves a certificate that no client trusts, so
+// each capture request for an endpoint on its node fails with 503. On
+// each change or delete, keepCaptureLeaf mints a new leaf when the
+// Secret is missing, expiring, or holds a leaf that another CA signed.
+// It reads the Secret from the API server and ignores the watch's copy,
+// because it writes the Secret itself: a check that read the watch's
+// copy before the watch delivered that write would mint a second leaf.
 //
-// The second is the ConfigMap that holds the cluster's client
-// certificate authority, so a rotation of that authority takes effect
-// with no restart. The API never writes it, so the copy the watch
-// delivers is the one the pool takes, and a change costs no read.
+// The API never writes the client CA ConfigMap, so anchors.adopt uses
+// the watch's copy, and a rotation of the CA takes effect without a
+// restart. The callback converts the copy itself, so a copy that fails
+// to convert is reported through complain.
 //
-// Each watch reports an object that its first read does not find, as
-// nil, so a Secret that is absent at start is minted then. The owners
-// read each copy as unstructured.Unstructured, which every copy
-// converts to: the leaf check reads nothing from the copy, and the
-// client authority reports a copy that does not convert as a
-// complaint of its own.
+// WatchOne calls the callback with nil when the object does not exist
+// at the first read, so a capture Secret that is missing at startup is
+// minted then.
 func (s *apiServer) followCertificateObjects(ctx context.Context, watcher dynamic.Interface, complain func(error)) {
 	leaf := informer.One{Resource: secretResource, Namespace: s.certs.namespace, Name: captureTLSSecret,
 		What: "the Secret " + captureTLSSecret}
@@ -253,9 +249,9 @@ func (s *apiServer) followCertificateObjects(ctx context.Context, watcher dynami
 	}, nil)
 }
 
-// servedLeaf is the certificate the public listener serves, swapped in
-// place when the API mints a new one. A handshake reads it without a
-// lock, so a mint never blocks a caller.
+// servedLeaf is the certificate that the public listener serves. A new
+// leaf replaces it atomically, so a handshake reads it without a lock
+// and a mint never blocks a caller.
 type servedLeaf struct {
 	held atomic.Pointer[tls.Certificate]
 }
@@ -271,12 +267,12 @@ func (l *servedLeaf) certificate(*tls.ClientHelloInfo) (*tls.Certificate, error)
 
 func (l *servedLeaf) ready() bool { return l.held.Load() != nil }
 
-// serveAPIMetrics answers the registry and the two probes on the
-// metrics port until the run ends.
+// serveAPIMetrics serves the metrics registry and the health probes on
+// the metrics port until ctx ends.
 func serveAPIMetrics(ctx context.Context, listener net.Listener, readings *apiMetrics, ready func() bool) {
 	serving := &http.Server{
 		Handler:           apiRegistryHandler(readings, ready),
-		ReadHeaderTimeout: metricsDeadline,
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	go func() {
 		<-ctx.Done()

@@ -8,39 +8,39 @@ toc: true
 
 `audio-operator` publishes one
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-device for each PCM device on the sound card its pod claims from
-[`liken`](https://liken.sh/docs/): a sink for each HDMI or
-DisplayPort output, the analog jack, and a USB card's playback
-side, and a source for each capture side. Membership follows the
-card's PCM devices, whether or not a cable is plugged into each
-one. An output whose monitor is unplugged stays in the slice, with
-taints, so a claim on it parks instead of failing.
+device for each PCM device on the sound card that its pod claims from
+[`liken`](https://liken.sh/docs/). The playback devices are sinks: each
+HDMI or DisplayPort output, the analog jack, and the playback side of
+a USB card. The capture devices are sources. A PCM device is in the
+slice whether or not a cable is plugged into it. When the monitor of
+an output is unplugged, the output stays in the slice with taints, so
+a claim on it stays Pending instead of failing.
 
-Every device is also a resource of its own, a
-[`Sink`](/docs/reference/sinks/) or a
-[`Source`](/docs/reference/sources/) with the same name. A claim
-selects a device from the slice. The resource is where you read
-what the endpoint is doing and set what it should rest at, with no
-claim involved.
+Every device is also a [`Sink`](/docs/reference/sinks/) or a
+[`Source`](/docs/reference/sources/) resource with the same name. A
+claim selects a device from the slice. You read the endpoint's state
+from the resource, and you set the endpoint's volume and controls on
+it without a claim.
 
 On a machine whose pod also claimed a Bluetooth media bus from the
 `bluetooth.liken.sh` driver, the operator publishes one more device
-for each paired Bluetooth speaker. Membership there is the paired
-set: a speaker that is switched off stays in the slice with taints,
-and a speaker leaves it only when somebody unpairs it.
+for each paired Bluetooth speaker. A speaker that is switched off
+stays in the slice with taints, and it leaves the slice only when
+somebody unpairs it.
 
-To a consumer, a speaker, an HDMI output, and a microphone are the
-same kind of device. All publish under `audio.liken.sh`, all select
-the same way, and all deliver the same socket and a node name.
+A consumer claims a Bluetooth speaker, an HDMI output, and a
+microphone the same way. Each is a device of the `audio.liken.sh`
+driver, and each claim gives the container the same socket and a
+node name.
 
-The operator publishes only A2DP sinks. HFP and HSP, the headset
-profiles that add a microphone, would need a socket in the host's
-network namespace, and this pod has no host network.
+The operator publishes only A2DP sinks. The headset profiles HFP and
+HSP, which add a microphone, need a socket in the host's network
+namespace, and this pod has no host network.
 
-The operator publishes the devices into one
+The operator writes the devices into one
 [`ResourceSlice`](https://kubernetes.io/docs/reference/kubernetes-api/resource/resource-slice-v1/)
-per node, named `<node>-audio.liken.sh`, beside the slice `liken`
-itself publishes:
+for each node, named `<node>-audio.liken.sh`. It is separate from the
+slice that `liken` itself publishes for the node:
 
     kubectl get resourceslice <node>-audio.liken.sh -o yaml
     spec:
@@ -93,11 +93,11 @@ itself publishes:
 
 ## The device classes
 
-A consumer claims through a
+A workload claims a device through a
 [`DeviceClass`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
-that selects one direction of what this driver publishes. A sink
-carries the `sink` attribute and a source carries `source`, so a
-class selects on the presence of one:
+that selects one direction. A sink has the `sink` attribute and a
+source has the `source` attribute, so a class selects on whether one
+of them is present:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -117,37 +117,39 @@ class selects on the presence of one:
         - cel:
             expression: has(device.attributes["audio.liken.sh"].source)
 
-You create these classes, because a class a workload claims through
-is cluster policy, and this manual calls them `audio-sink` and
-`audio-source` throughout; they are yours to rename or narrow, the
-way a `StorageClass` is. A class alone allocates any endpoint of
-its direction. To name one, add a selector on the attributes
+You create these classes, because the classes that workloads claim
+through are cluster policy. This manual calls them `audio-sink` and
+`audio-source`. You can rename or narrow them, the way you can with a
+`StorageClass`. A claim that names only the class gets any endpoint of
+that direction. To pick one endpoint, add a selector on the attributes
 below, as [Play sound to an output](/docs/guides/claim/) shows.
 
-The base ships one class of its own, `sound-card`, and that one is
-not for consumers: the operator's own claim template names it, and
-its pod claims every sound device on its node through it, from the
-raw devices `liken`'s driver publishes.
+The base has one class of its own, `sound-card`, which workloads do
+not use. The operator's claim template names it, and the operator's
+pod claims every sound device on its node through it. Those are the
+raw devices that `liken`'s driver publishes.
 [Devices](https://liken.sh/docs/reference/devices/) in the `liken`
-manual describes those raw devices.
+manual describes them.
 
 ## The attributes
 
-The device name is built from the hardware's own identity, so it
-survives a reboot and a second card: the node and the PCI address
-for an onboard card, the node, vendor, product, and serial for a USB
-card that has one, and the driver's own name for the PCM on the end,
-`hdmi-0` or `usb-audio`. A capture endpoint's name ends in
-`-capture`. A USB name that would pass 63 characters holds a hash of
-the serial in place of the serial. The [`Sink` reference](/docs/reference/sinks/#the-name)
-gives the three forms. The name repeats as the `sink` or `source`
-attribute because a CEL selector reads attributes and never the
-device's name.
+The device name comes from the hardware's own identity, so it stays
+the same across a reboot and when you add a second card. For an
+onboard card it is the node and the PCI address. For a USB card it is
+the node, the vendor, the product, and the serial, when the card has
+one. The name ends with the driver's own name for the PCM device,
+`hdmi-0` or `usb-audio`. The name of a capture endpoint ends with
+`-capture`. When a USB name would be longer than 63 characters, the
+operator uses a hash of the serial in place of the serial. The
+[`Sink` reference](/docs/reference/sinks/#the-name) shows the three
+forms. The `sink` or `source` attribute repeats the name, because a
+CEL selector can read attributes but not the device name.
 
-A Bluetooth speaker's name is its peer MAC address in lowercase
-with dashes, `a0-ab-51-33-b7-12`, because a DRA device name must be
-a DNS label and a colon is not legal in one. The MAC is the one
-identity BlueZ carries that survives a reboot.
+The name of a Bluetooth speaker is its peer MAC address in lowercase,
+with dashes in place of colons: `a0-ab-51-33-b7-12`. A DRA device name
+must be a DNS label, and a colon is not allowed in one. BlueZ keeps
+the MAC address of a speaker across reboots, so the name stays the
+same.
 
 | Attribute | Type | What it is |
 |---|---|---|
@@ -155,58 +157,63 @@ identity BlueZ carries that survives a reboot.
 | `source` | string | a capture endpoint's name: `kitchen-usb-0573-1573-a34004801402-usb-audio-capture` |
 | `connectionType` | string | `hdmi`, `displayport`, `analog`, `usb`, or `bluetooth` |
 | `nodeName` | string | the PipeWire node name a consumer's streams target |
-| `card` | int | the ALSA card number, this boot |
+| `card` | int | the ALSA card number, which can change at a reboot |
 | `pcm` | int | the PCM device number on that card |
 | `manufacturer` | string | the monitor's three-letter PNP id, from the ELD: `GSM` is LG |
 | `product` | string | the monitor's product code, four lowercase hexadecimal digits |
-| `monitorName` | string | the monitor's name, the same EDID descriptor the display operator publishes as `model` |
+| `monitorName` | string | the monitor's name, from the same EDID descriptor that the display operator publishes as `model` |
 | `lpcmChannels` | int | the highest uncompressed channel count the monitor accepts |
 | `lpcmMaxRateHz` | int | the highest uncompressed sample rate the monitor accepts, in hertz |
 | `lpcmBitDepths` | string | the uncompressed depths the monitor accepts, ascending: `16 20 24` |
 | `speakers` | string | the speaker allocation, in the kernel's names: `FL/FR` |
 | `encodedFormats` | string | the encoded formats the monitor decodes itself, from the ELD, in PipeWire's names and separated by spaces: `AC3 DTS EAC3 DTS-HD TrueHD`. Absent when the monitor lists none |
-| `monitor.liken.sh/id` | string | the pairing identity, described below |
+| `eldVersion` | int | the version number of the ELD block |
+| `portID` | int | the `Port_ID` of the ELD block, which identifies the display connector that the output plays into. Absent when the block gives 0 |
+| `monitor.liken.sh/id` | string | the identity that pairs the speakers with the screen, described in [The pairing identity](#the-pairing-identity) |
 | `address` | string | the speaker's peer MAC, uppercase with colons: `A0:AB:51:33:B7:12` |
 | `name` | string | the speaker's name, the alias BlueZ reports |
-| `connected` | bool | whether `bluetoothd` has the speaker connected right now |
+| `connected` | bool | whether `bluetoothd` has the speaker connected now |
 | `codec` | string | the A2DP codec the transport negotiated: `sbc`, `aptx`, `ldac` |
-| `codecs` | string | every codec the speaker and this image both support, space separated, the one playing first, in the same spelling as `codec` |
+| `codecs` | string | the codecs that the speaker and this image both support, separated by spaces, with the codec that is playing first, spelled like `codec` |
 
-A selector reads an unqualified attribute through the driver's
-domain: `device.attributes["audio.liken.sh"].sink`. The pairing
-attribute is the one exception; it reads as the key `id` under the
-domain `monitor.liken.sh`.
+A selector reads an attribute through the driver's domain:
+`device.attributes["audio.liken.sh"].sink`. The pairing attribute is
+the exception. A selector reads it as the key `id` under the domain
+`monitor.liken.sh`.
 
-Every device carries exactly one of `sink` and `source`. The rest
-divide by the kind of device that carries them: `card`, `pcm`, and
-the monitor attributes are an ALSA endpoint's, and `address`,
-`name`, `connected`, and `codec` are a speaker's.
+Every device has exactly one of `sink` and `source`. The other
+attributes depend on the kind of device. `card`, `pcm`, and the
+monitor attributes belong to an ALSA endpoint. `address`, `name`,
+`connected`, `codec`, and `codecs` belong to a Bluetooth speaker.
 
 * The monitor attributes, `manufacturer` through
-  `monitor.liken.sh/id`, are present on an HDMI or DisplayPort
-  output whose monitor answers, and absent otherwise. They come from
-  the ELD (EDID-Like Data), the block the graphics driver writes
-  into the audio driver when a monitor answers.
-* `connectionType` is `analog` on the jack, `usb` on a USB card,
-  and `bluetooth` on a speaker. On an HDMI or DisplayPort output it
-  comes from the ELD block, so an output with no monitor publishes
-  no connection type.
-* `nodeName` is present while PipeWire holds a node for the device,
-  and left out when the name passes the API's 64-character limit on
-  a string attribute.
-* `codec` is present only while the speaker is connected, because a
-  codec is a property of a live transport, not of a pairing.
-* `codecs` is present under the same condition as `codec`, and
-  absent when the device answers no choice. It holds whole names
-  only, so a selector reads it with `.contains()`.
+  `monitor.liken.sh/id`, are present on an HDMI or DisplayPort output
+  whose monitor has responded, and absent otherwise. They come from the
+  ELD (EDID-Like Data), the block that the graphics driver writes into
+  the audio driver when a monitor responds.
+* `connectionType` is `analog` on the jack, `usb` on a USB card, and
+  `bluetooth` on a speaker. On an HDMI or DisplayPort output it comes
+  from the ELD block, so an output with no monitor has no connection
+  type.
+* `nodeName` is present while PipeWire has a node for the device. It
+  is left out when the name is longer than 64 characters, which is the
+  API's limit for a string attribute.
+* `codec` is present only while the speaker is connected and PipeWire
+  has its sink, because a codec belongs to a live connection and not
+  to a pairing.
+* `name` is absent when BlueZ reports no alias for the speaker.
+* `codecs` is present under the same condition as `codec`, and absent
+  when the device reports no choice of codecs. It has whole codec
+  names only, so a selector reads it with `.contains()`.
 
-A selector on the list asks for a name inside a string:
+This selector looks for one codec name inside the `codecs` string:
 
     has(device.attributes["audio.liken.sh"].codecs) &&
     device.attributes["audio.liken.sh"].codecs.contains("aptx")
 
-A selector that reads a missing attribute fails the whole
-allocation, so guard every attribute in the bullets above:
+A selector that reads an attribute that is absent makes the whole
+allocation fail. Guard each attribute that the bullets above say can
+be absent:
 
     has(device.attributes["monitor.liken.sh"].id) &&
     device.attributes["monitor.liken.sh"].id == "gsm-5b09-lg-ultrawide"
@@ -214,184 +221,190 @@ allocation, so guard every attribute in the bullets above:
 ## The pairing identity
 
 `monitor.liken.sh/id` pairs a monitor's speakers with that monitor's
-screen, which the [display operator](https://liken.sh/display/)
-publishes from the same monitor's EDID. Both drivers build the value
-the same way, byte for byte, because the scheduler compares them
-under a `matchAttribute` constraint. The value is the lowercase PNP
-id, the four-digit hexadecimal product code, then the lowercase
-monitor name with each run of spaces turned to one dash. An LG UltraWide reads
-`gsm-5b09-lg-ultrawide`. A monitor with no name keeps the two-part
-form, `boe-095f`. The name is optional because one driver can read a
-name the other cannot. If a missing name dropped the whole value,
-one driver would publish the attribute and the other none, and a
-constraint across the two would park forever.
+screen. The [display operator](https://liken.sh/display/) publishes
+the same attribute for the screen, from the same monitor's EDID. Both
+drivers build the value the same way, byte for byte, because the
+scheduler compares the two values in a `matchAttribute` constraint.
+The value is the lowercase PNP id, then the four-digit hexadecimal
+product code, then the lowercase monitor name with each run of spaces
+replaced by one dash. An LG UltraWide gives `gsm-5b09-lg-ultrawide`.
+A monitor with no name gives only the first two parts, `boe-095f`.
+The name is optional because one driver can read a name that the
+other cannot. If a missing name removed the whole value, one driver
+would publish the attribute and the other would not, and a constraint
+across the two would never be satisfied.
 
-The attribute has its own domain because an unqualified name
-belongs to the driver that published it. A bare `monitorName` here
-and a bare `model` in the display driver's slice would never match.
+The attribute has its own domain because a name with no domain
+belongs to the driver that publishes it. A `monitorName` in this
+driver's slice and a `model` in the display driver's slice would
+never match.
 
-The ELD has no serial number, so the identity names a model, not
-a unit. Two monitors of one model publish one value, and a
-constraint is satisfied by either pairing.
+The ELD has no serial number, so the identity names a model and not a
+single monitor. Two monitors of one model publish the same value, and
+a constraint accepts either pairing.
 
 ## The taints
 
-An output that cannot play is tainted, never deleted. Deleting it
-would strand the claim that names it: the kubelet retries its
-prepare call against a device in no slice, with no bound. A device
-leaves the slice only when the card does.
-
-A speaker leaves the slice only when somebody unpairs it.
+The operator never deletes an output that cannot play. It adds a taint
+instead. If the operator deleted the device while a claim still named
+it, the kubelet would retry the prepare call for a device that is in
+no slice, with no limit on the retries. A device leaves the slice only
+when its card leaves the machine, or when somebody unpairs a
+Bluetooth speaker.
 
 | Key | Effect | When it appears | Who tolerates it |
 |---|---|---|---|
 | `audio.liken.sh/disconnected` | `NoExecute` | the output cannot play now | the consumer, with its own `tolerationSeconds` |
-| `audio.liken.sh/no-monitor` | `NoSchedule` | no monitor has answered on this HDMI or DisplayPort output for 5 seconds | nobody |
-| `audio.liken.sh/no-sink` | `NoSchedule` | PipeWire holds no node for this device, sink or source | nobody |
+| `audio.liken.sh/no-monitor` | `NoSchedule` | no monitor has responded on this HDMI or DisplayPort output for 5 seconds | no consumer |
+| `audio.liken.sh/no-sink` | `NoSchedule` | PipeWire has no node for this device, sink or source | no consumer |
 
-A paired speaker that is switched off carries the `disconnected`
-and `no-sink` taints, which is what lets a consumer claim it before
-it exists to play into. The pod parks Unschedulable, somebody
-switches the speaker on, WirePlumber builds the node, the operator
-drops the taints, and the pod starts.
+A paired speaker that is switched off has the `disconnected` and
+`no-sink` taints. This lets a consumer claim the speaker before its
+node exists. The consumer's pod stays Unschedulable until somebody
+switches the speaker on. Then WirePlumber creates the node, the
+operator removes the taints, and the pod starts.
 
+The `disconnected` taint is `NoExecute`, so it evicts the pod that
+uses the claim when the claim's `tolerationSeconds` runs out. A
+consumer that should survive a short drop tolerates it for that long.
+The scheduler still allocates a device whose `NoExecute` taint the
+claim tolerates, so a card's output that cannot play also has a
+`NoSchedule` taint that no consumer tolerates. That taint keeps a new
+pod Unschedulable until the output can play. `no-monitor` and
+`no-sink` are separate keys because they clear in different ways.
+`no-monitor` clears when a monitor responds on the output again.
+`no-sink` on a card's output clears only when the pod is replaced and
+PipeWire declares its nodes again.
 
-The `NoExecute` taint ends the holder's pod after the claim's
-`tolerationSeconds`, so a consumer tolerates it to survive a short
-drop. A tolerated `NoExecute` taint still permits allocation, so one
-of the untolerated `NoSchedule` taints is always present with it,
-and that one holds a new pod `Unschedulable` until the output can
-play. The two reasons have separate keys because they have separate
-repairs: `no-monitor` clears when the cable returns, and `no-sink`
-clears only when the pod is replaced and PipeWire declares its nodes
-again.
+The operator reports that a monitor is gone only after the output has
+read no monitor for 5 seconds. An A/V receiver in standby can drop hot
+plug detect for a fraction of a second, several times a minute. Each
+time, the graphics driver clears the output's ELD, and it writes the
+same block again when the receiver responds. A drop shorter than 5
+seconds changes nothing in the slice or on the `Sink`, and the channel
+layout from the ELD stays, so PipeWire does not restart. While the output's ELD keeps
+changing, the operator can take up to 20 seconds to report that a
+monitor left.
 
-The operator reports a monitor gone only after its slot has read no
-monitor for 5 seconds. An A/V receiver in standby can drop hot plug
-detect for a fraction of a second several times a minute, and the
-graphics driver clears the slot's ELD on each drop and writes the
-same block again when the receiver answers. A drop that short changes
-nothing in the slice or on the `Sink`, and the channel layout that the
-ELD gives stays, so PipeWire does not restart for it. While the slot's
-ELD keeps changing, the report of a monitor that left can take up to
-20 seconds.
+When the operator's pod starts during such a drop, it has no earlier
+reading of the monitor, so it uses the monitor that the previous pod
+published for that output in the slice. The `declare` init container
+also waits up to 5 seconds for that monitor to respond before it
+declares the output's layout. It waits only for an output whose `Sink`
+reports a monitor, so the HDMI outputs that never had a monitor add no
+wait.
 
-An operator that starts while a slot is in a drop holds the slot from
-the monitor the previous operator published on it. Its init container
-waits up to 5 seconds for that monitor before it declares the slot's
-layout, and only for a slot whose `Sink` reports a monitor, so the
-HDMI slots that never had one cost no wait.
+The analog jack has none of these taints while its sink exists. Most
+codecs do not report whether a plug is in the jack, and no signal
+shows that the sound reaches a listener. So the operator publishes the
+jack whenever PipeWire has its sink, and you claim it when you have
+connected something to it.
 
-The analog jack has none of these while its sink is up. Most codecs
-report nothing about the socket, and no signal can prove that sound
-reaches anyone, so the operator publishes the port it reads and a
-person who wired something claims it.
+## What a prepared claim gives the container
 
-## What a prepared claim delivers
-
-The delivery is a mount and two environment variables, applied to
-the container by the runtime. There is no device node, because a
-consumer does not open a PCM device: it connects to PipeWire, which
-holds every PCM device on the card.
+When the operator prepares a claim, the container runtime adds a
+mount and two environment variables to the container. The container
+gets no device node, because a consumer does not open a PCM device. It
+connects to PipeWire, which owns every PCM device on the card.
 
 | What | Value |
 |---|---|
-| mount | `/var/run/audio.liken.sh`, read-only, the directory that holds PipeWire's socket |
+| mount | `/var/run/audio.liken.sh`, read-only, the directory that has PipeWire's socket |
 | `PIPEWIRE_REMOTE` | `/var/run/audio.liken.sh/pipewire-0` |
 | `PIPEWIRE_NODE` | the allocated device's node name |
 
-A Bluetooth speaker delivers the same three things, and so does a
-source: `PIPEWIRE_NODE` then names the capture node, which
-`target.object` honors for a capture stream as it does for
-playback. One PipeWire holds the card's nodes and the radio's, so a
-pod that claims an HDMI output and a speaker at once receives one
-socket and two node names.
+A claim on a Bluetooth speaker or a source gives the container the
+same mount and variables. For a source, `PIPEWIRE_NODE` names the
+capture node, and `target.object` selects it for a capture stream as
+it does for playback. One PipeWire serves both the card's nodes and
+the radio's, so a pod that claims an HDMI output and a speaker gets
+one socket and two node names.
 
+PipeWire's client library reads both variables. It uses a
+`PIPEWIRE_REMOTE` that starts with a slash as an absolute socket path,
+and it sets `target.object` on every stream from `PIPEWIRE_NODE`. The
+mount is read-only because connecting to a Unix socket needs write
+permission on the socket and not on the directory.
 
-PipeWire's own client library reads both variables. A
-`PIPEWIRE_REMOTE` that starts with a slash is used as an absolute
-socket path, and `PIPEWIRE_NODE` sets `target.object` on every
-stream. The mount is read-only because connecting to a Unix socket
-needs write permission on the socket, not on the directory.
+Each variable holds one value, so when two allocations reach one
+container, the last one overwrites the first. A container can use only
+one output. A pod that plays to two outputs needs two containers.
 
-Each variable holds one value, so two allocations delivered to one
-container overwrite, and the last wins. One container holds at most
-one output; a pod that plays into two outputs runs two containers.
+## The PipeWire nodes
 
-## The nodes PipeWire holds
-
-The node a consumer targets is one this operator declared.
-WirePlumber's ALSA monitor enumerates cards through libudev, and a
-`liken` machine runs no udevd, so the monitor would build nothing.
-Instead, the pod's `declare` init container enumerates the card's
-PCM devices through the ALSA control interface and writes one node
-declaration for each into a PipeWire configuration drop-in, before
-the daemons start: a sink for a playback PCM and a source for a
-capture PCM. The node name is derived from the ALSA address alone,
-`liken.audio.` plus the card and PCM numbers, with a `c` on a
-capture node, so it is the same at every start on the same card:
+The node that a consumer targets is a node that this operator
+declared. WirePlumber's ALSA monitor finds cards through libudev, and
+a `liken` machine runs no udevd, so the monitor would create no node.
+So the pod's `declare` init container reads the card's PCM devices
+through the ALSA control interface, before the daemons start. It
+writes one node declaration for each PCM device into a PipeWire
+drop-in: a sink for a playback PCM device and a source for a capture
+PCM device. The node name comes from the ALSA address alone. It is
+`liken.audio.` followed by the card and PCM numbers, with a `c` at the
+end for a capture node, so the same card gets the same names at every
+start:
 
     liken.audio.card0-pcm3
     liken.audio.card1-pcm0c
 
-Every PCM device is declared, monitor or not. PipeWire reads the
-declarations once, so the set is fixed while the daemon runs. A set
-that followed the cables would need a restart every time somebody
-moved one, and a card's PCM devices are fixed when its driver binds.
-A PCM device that appears or leaves after that publishes with the
-`no-sink` taint until the pod is replaced.
+The init container declares every PCM device, whether or not a monitor
+is connected. PipeWire reads the declarations once, so the set of
+nodes cannot change while the daemon runs. Because every PCM device
+is declared, moving a cable needs no restart, and a card's PCM
+devices do not change after its driver binds. A PCM device that
+appears or leaves after the pod starts has the `no-sink` taint until
+the pod is replaced.
 
-This path gives some things up. The card-profile machinery needs the
-ALSA monitor, so there is no profile switching. Each sink's channel
-layout comes from its `Sink`'s `spec.layout`, the monitor's ELD, or a
-USB device's channel map, as the
+Card profile switching is a job of WirePlumber's ALSA monitor, so
+the pod does not switch card profiles. Each sink's channel layout comes
+from its `Sink`'s `spec.layout`, the monitor's ELD, or a USB device's
+channel map, as the
 [`Sink` reference](/docs/reference/sinks/#the-channel-layout)
-describes, and a new layout restarts PipeWire. A node's
-volume is PipeWire's software gain. The card's own mixer controls
-are a separate surface, which the operator reads and writes through
-the ALSA control interface and publishes on the endpoint's
-[`Sink`](/docs/reference/sinks/) or
+describes, and a new layout restarts PipeWire. A node's volume is
+PipeWire's software gain. The operator reads and writes the card's own
+mixer controls through the ALSA control interface, and shows them on
+the endpoint's [`Sink`](/docs/reference/sinks/) or
 [`Source`](/docs/reference/sources/).
 
 ## The Bluetooth sinks
 
-A Bluetooth sink is built the other way round from an ALSA sink:
-WirePlumber's bluez monitor is its source, because a Bluetooth
-speaker creates nothing in the kernel. The audio exists only while
-a sound server holds `bluetoothd`'s D-Bus socket, registers a media
-endpoint, negotiates the codec, encodes the samples, and writes to
-the L2CAP socket `bluetoothd` passes it as a file descriptor.
+WirePlumber's bluez monitor creates each Bluetooth sink. The
+`declare` init container declares only the sinks and sources of the
+sound card. A Bluetooth speaker
+creates nothing in the kernel, so the sink exists only while a sound
+server uses `bluetoothd`'s D-Bus socket to register a media endpoint
+and negotiate the codec. The sound server then encodes the samples and
+writes them to the L2CAP socket that `bluetoothd` passes to it as a
+file descriptor.
 
-The pod reaches that socket through its claim. The
-`bluetooth.liken.sh` driver publishes its media bus as a device,
-this operator's class selects every device that stamps
-`sound.liken.sh/supportsSound`, and the claim's `allocationMode` of
-`All` takes the sound card and the media bus together. The delivery
-is a read-only mount of the bus socket's directory and
-`DBUS_SYSTEM_BUS_ADDRESS`. The pod's `declare` init container reads
-that variable, and writes the WirePlumber fragment that turns the
-bluez monitor on only when the variable is set.
+The pod reaches that socket through its claim. The `bluetooth.liken.sh`
+driver publishes its media bus as a device. This operator's class
+selects every device that has `sound.liken.sh/supportsSound`, and the
+claim's `allocationMode` of `All` allocates the sound card and the
+media bus together. The container runtime mounts the directory of the
+bus socket read-only and sets `DBUS_SYSTEM_BUS_ADDRESS`. The `declare`
+init container reads that variable, and it writes the WirePlumber
+fragment that turns the bluez monitor on only when the variable is
+set.
 
-WirePlumber names the node from `bluez_output`, the peer MAC with
-underscores, and an object id. The name can change when the
-speaker reconnects. The operator republishes the name and rewrites
-every prepared claim's file from the same graph read, the same way
-it does for a sink that a profile change renamed.
+WirePlumber names the node `bluez_output.`, then the peer MAC address
+with underscores, then an object id. The name can change when the
+speaker reconnects. When it does, the operator publishes the new name
+and rewrites the file of every prepared claim from the same read of
+the graph, as it does for a sink that a profile change renamed.
 
     bluez_output.A0_AB_51_33_B7_12.1
 
-A2DP is advertised on the radio exactly while this pod holds the
-media bus, because BlueZ advertises the profile only when an
-endpoint is registered. Pairing a speaker therefore works only
-while this pod runs and holds the bus.
-
+BlueZ advertises A2DP on the radio only while an endpoint is
+registered, which is only while this pod has the media bus. So you can
+pair a speaker only while this pod runs and has the bus.
 
 ## Choosing the codec
 
 WirePlumber picks the codec when a speaker connects. The `codecs`
-attribute says what else the speaker offers. A claim selects its
-codec in an opaque config block, the channel DRA gives a
-driver for its own parameters:
+attribute lists the other codecs that the speaker offers. A claim
+selects a codec in an opaque config block, which is how DRA passes a
+driver its own parameters:
 
     apiVersion: resource.k8s.io/v1
     kind: ResourceClaim
@@ -410,63 +423,66 @@ driver for its own parameters:
             exactly:
               deviceClassName: audio-sink
 
-`codec` is the only parameter this driver reads, and an unknown
-key fails the prepare, so a typo stops the pod instead of playing
-something nobody asked for. A block with no `requests` list applies
-to every request in the claim, and a `requests` list narrows it to
-the requests it names.
+`codec` is the only parameter that this driver reads. An unknown key
+makes the prepare fail, so a typo stops the pod and no stream plays
+with a setting that nobody chose. A block with no `requests` list
+applies to every request in the claim, and a `requests` list limits it
+to the requests that it names.
 
-A `DeviceClass` can carry the same opaque block, which makes a
-codec cluster policy for every claim that allocates through the
-class. The scheduler resolves the class's config and the claim's
-into one list on the allocation and marks each entry's source, and
-that list is what the driver reads. The claim's own choice wins
-over the class's, whichever order the two are listed in.
+A `DeviceClass` can have the same opaque block, which sets a codec for
+every claim that allocates through the class. The scheduler combines
+the class's config and the claim's config into one list on the
+allocation, and marks the source of each entry. The driver reads that
+list. The claim's choice overrides the class's, in whatever order the
+two are listed.
 
-When the requested codec is not the one playing, the prepare call
-writes it on the speaker's PipeWire device, waits for the rebuilt
-sink to report the new codec, and only then delivers
-`PIPEWIRE_NODE`. The wait is bounded at ten seconds, and the
-renegotiation itself takes one to four.
+When the requested codec is not the one that is playing, the prepare
+call writes the codec on the speaker's PipeWire device and waits for
+the rebuilt sink to report the new codec. Only then does it set
+`PIPEWIRE_NODE`. The wait ends after ten seconds.
 
-Three things refuse. A codec stated for an output that is not a
-Bluetooth speaker fails, because a sound card has no air codec. A
-codec the speaker does not offer fails, and the message names the
-offered list. A switch the graph never reports fails at the
-ten-second bound. Each failure holds the pod in `ContainerCreating`,
-and the claim's events carry the message.
+The prepare call fails when:
 
-Releasing the claim renegotiates nothing. The choice stands until
-the next claim states one, or until the speaker reconnects, which
-hands the pick back to WirePlumber.
+* the claim requests a codec for an output that is not a Bluetooth
+  speaker, because a sound card has no wireless codec,
+* the claim requests a codec that the speaker does not offer, and the
+  message names the codecs that it offers,
+* the graph does not report the new codec within the ten seconds.
+
+The pod then stays in `ContainerCreating`, and the events of the claim
+have the message.
+
+Releasing the claim does not renegotiate the codec. The chosen codec
+stays until the next claim requests another one, or until the speaker
+reconnects, when WirePlumber picks the codec again.
 
 ## The sink's volume
 
-Every sink this pod builds is born at unity. The pod stores no
-volumes, and WirePlumber's own default for an unstored sink is 40
-percent, a desktop guard that would cost resolution on a machine
-that plays only what a claim delivers. A consumer's stream fader is
-the consumer's own level. The endpoint's level is declared on its
-`Sink` as `spec.volume.level`, which
-[Set endpoint volume and controls](/docs/guides/rest/) shows, and an
-endpoint with no declaration rests at unity.
+The pod creates every sink at unity gain (100 percent), and it stores
+no volumes. WirePlumber's own default for a sink with no stored volume
+is 40 percent. That default suits a desktop. On a machine that plays
+only what its claims send, it would lower the resolution of the
+signal. A consumer's stream volume is the consumer's own
+setting. You set the endpoint's level in `spec.volume.level` on its
+`Sink`, as [Set endpoint volume and controls](/docs/guides/rest/)
+shows, and an endpoint with no declared level stays at unity.
 
-A prepare on a Bluetooth speaker also writes unity on every
-channel of the sink it delivers, switch or no switch, when no other
-claim holds the speaker. Any level that prepare finds is a leftover
-from an earlier tenant or a hand-run tool, never the arriving
-consumer's choice. A prepare of a share that arrives while another
-claim holds the speaker writes no level, because the stream of that
-claim plays at the level the speaker holds now. The card's own
-outputs take no such write.
+When no other claim has a Bluetooth speaker, a prepare on it writes
+unity on every channel of the sink that it gives to the consumer, even
+if the claim has no volume setting. Any level that the prepare finds
+was left by an earlier consumer or by a tool that somebody ran by
+hand, and the arriving consumer did not choose it. A prepare of a
+share that arrives while another claim has the speaker writes no
+level, because the stream of that claim plays at the level that the
+speaker has now. The card's own outputs get no such write.
 
 ## Shared endpoints
 
-A device allocates to one claim unless its `Sink` or `Source`
-declares `spec.sharedClaims`.
-[Share an endpoint between claims](/docs/guides/rest/#share-an-endpoint-between-claims)
-shows how to set it. A device whose resource declares the count
-publishes two more fields in the slice:
+A device allocates to one claim at a time, unless its `Sink` or
+`Source` sets `spec.sharedClaims`.
+[Share an endpoint between claims](/docs/guides/rest/#7-share-an-endpoint-between-claims)
+shows how to set it. When the resource sets `spec.sharedClaims`, the
+device in the slice has these fields too:
 
     - name: kitchen-pci-0000-00-1f-3-hdmi-0
       allowMultipleAllocations: true
@@ -474,11 +490,11 @@ publishes two more fields in the slice:
         claims:
           value: "4"
 
-The capacity has no `requestPolicy`. The scheduler charges a
-request that asks for none of a capacity all of it, so a claim
-written for an exclusive device takes the whole device and holds it
-alone. A request that asks for one claim shares the device with the
-other requests that asked for one, up to the count:
+The capacity has no `requestPolicy`, so the scheduler charges the
+whole capacity to a request that does not ask for `claims`. A claim
+that was written for an exclusive device therefore gets the whole
+device and shares it with nobody. A request that asks for one claim shares the device
+with the other requests that asked for one, up to the count:
 
     exactly:
       deviceClassName: audio-sink
@@ -486,34 +502,31 @@ other requests that asked for one, up to the count:
         requests:
           claims: "1"
 
-The scheduler keeps the count, through Kubernetes' consumable
+The scheduler enforces the count through Kubernetes' consumable
 capacity (the `DRAConsumableCapacity` feature gate, beta and on by
-default since Kubernetes 1.36). A request that asks for `claims`
-matches only a device that publishes the capacity, so a shared claim
-never lands on an exclusive device. Each allocation of a shared
-device carries its own `shareID` and `consumedCapacity` in the
-claim's status.
+default since Kubernetes 1.36). A request that asks for `claims` can
+match only a device that publishes the capacity, so a shared claim
+never lands on an exclusive device. Each allocation of a shared device
+has its own `shareID` and `consumedCapacity` in the claim's status.
 
-The operator treats a claim as a share when the request that
-allocated the device asks for `claims`. A share cannot state a codec,
-from the claim or from its `DeviceClass`: a codec switch rebuilds the
-speaker's sink, and every share plays through that sink. The prepare
-fails with a message that says so, and the pod waits in
-`ContainerCreating`. The `Sink`'s `spec.codec` sets the codec while no
-claim holds the speaker.
+The operator treats a claim as a share when the request that allocated
+the device asks for `claims`. A share cannot set a codec, in the claim
+or in its `DeviceClass`. A codec switch rebuilds the speaker's sink,
+and every share plays through that sink. The prepare fails with a
+message that says so, and the pod waits in `ContainerCreating`. The
+`Sink`'s `spec.codec` sets the codec while no claim has the speaker.
 
-`status.claims` on the resource lists every claim that holds the
-device. A change to `spec.sharedClaims` writes the slice again and
-applies to the next allocation. The claims that hold the device
-keep it.
+`status.claims` on the resource lists every claim that has the device.
+A change to `spec.sharedClaims` writes the slice again and applies to
+the next allocation. The claims that already have the device keep it.
 
 ## The slice's lifetime
 
-The operator creates its slice on the first pass, rewrites it when
-the card or the graph disagrees with it, and never deletes it. The
-`Node` owns the slice, so a node that leaves the cluster takes the
-slice with it. The slice outlives the operator's pod on purpose:
-prepared claims keep naming its devices across a restart. Removing
-the operator for good ends with:
+The operator creates its slice on the first reconcile pass and writes
+it again when the card or the PipeWire graph no longer matches it. It
+never deletes the slice. The `Node` owns the slice, so a node that
+leaves the cluster takes the slice with it. The slice stays after the
+operator's pod stops, because prepared claims keep naming its devices
+across a restart. To remove the operator for good, finish with:
 
     kubectl delete resourceslice <node>-audio.liken.sh

@@ -8,10 +8,9 @@ import (
 	"unsafe"
 )
 
-// The ioctl number encodes the size of its argument, so a Go
-// structure that disagrees with the kernel's builds a request the
-// kernel does not answer. These are the sizes from
-// include/uapi/sound/asound.h on a 64-bit kernel.
+// A Go structure whose size differs from the kernel's produces an ioctl
+// request number that the kernel rejects. The expected sizes are those
+// of include/uapi/sound/asound.h on a 64-bit kernel.
 func TestControlStructureSizes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -31,9 +30,8 @@ func TestControlStructureSizes(t *testing.T) {
 	}
 }
 
-// The request numbers the ALSA control interface publishes. A driver
-// that writes them by hand and a driver that computes them from the
-// structure sizes must agree.
+// The expected values are what the SNDRV_CTL_IOCTL_* macros of
+// include/uapi/sound/asound.h expand to on a 64-bit kernel.
 func TestControlIoctlNumbers(t *testing.T) {
 	cases := []struct {
 		name string
@@ -43,8 +41,8 @@ func TestControlIoctlNumbers(t *testing.T) {
 		{name: "SNDRV_CTL_IOCTL_ELEM_LIST", got: ctlIoctlElemList, want: 0xc0505510},
 		{name: "SNDRV_CTL_IOCTL_ELEM_INFO", got: ctlIoctlElemInfo, want: 0xc1105511},
 		{name: "SNDRV_CTL_IOCTL_ELEM_READ", got: ctlIoctlElemRead, want: 0xc4c85512},
-		// The card information is the one request that only reads, so
-		// its number carries the read bit alone.
+		// Card info only reads its argument, so its number has the
+		// read direction bit and not the write bit.
 		{name: "SNDRV_CTL_IOCTL_CARD_INFO", got: ctlIoctlCardInfo, want: 0x81785501},
 	}
 	for _, c := range cases {
@@ -58,10 +56,10 @@ func TestElementName(t *testing.T) {
 	var id ctlElemID
 	copy(id.Name[:], "ELD")
 	if got := id.name(); got != "ELD" {
-		t.Errorf("name = %q", got)
+		t.Errorf("name() = %q, want \"ELD\"", got)
 	}
 
-	// A name that fills the field has no terminator.
+	// A name that fills the field has no NUL terminator.
 	for i := range id.Name {
 		id.Name[i] = 'x'
 	}
@@ -70,16 +68,14 @@ func TestElementName(t *testing.T) {
 	}
 }
 
-// readEndpoints enumerates the PCM devices the claim delivered in both
-// directions. The fixture's control node is an ordinary file, so no
-// PCM device has an ELD element, which is what an analog jack looks
-// like.
-func TestReadOutputsFindsEveryPCMDeviceInBothDirections(t *testing.T) {
+// The fixture's control node is a regular file, so no PCM device has an
+// ELD element and every endpoint looks like an analog jack.
+func TestReadEndpointsFindsEveryPCMDeviceInBothDirections(t *testing.T) {
 	machineFixture(t, "lab")
 
 	outputs, err := readEndpoints()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the endpoints of the lab fixture: %v", err)
 	}
 	addresses := []string{}
 	for _, output := range outputs {
@@ -92,7 +88,7 @@ func TestReadOutputsFindsEveryPCMDeviceInBothDirections(t *testing.T) {
 			t.Errorf("%s reports a monitor with no ELD element", address)
 		}
 		if got := output.connectionType(); got != "analog" {
-			t.Errorf("%s connection type = %q", address, got)
+			t.Errorf("%s connection type = %q, want \"analog\"", address, got)
 		}
 	}
 	slices.Sort(addresses)
@@ -102,10 +98,9 @@ func TestReadOutputsFindsEveryPCMDeviceInBothDirections(t *testing.T) {
 	}
 }
 
-// The whole enumeration on each lab machine, named. These are the
-// names a claim holds and a person types, so a change to any part of
-// the derivation fails here.
-func TestReadOutputsNamesEveryEndpointOfAMachine(t *testing.T) {
+// A claim and a person refer to an endpoint by its name, so a change to
+// how names are built must fail this test.
+func TestReadEndpointsNamesEveryEndpointOfAMachine(t *testing.T) {
 	cases := []struct {
 		machine string
 		want    []string
@@ -135,7 +130,7 @@ func TestReadOutputsNamesEveryEndpointOfAMachine(t *testing.T) {
 			machineFixture(t, c.machine)
 			outputs, err := readEndpoints()
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the endpoints of %s: %v", c.machine, err)
 			}
 
 			named, refused := nameEndpoints(c.machine, outputs)
@@ -154,19 +149,19 @@ func TestReadOutputsNamesEveryEndpointOfAMachine(t *testing.T) {
 	}
 }
 
-// The USB card's endpoints publish the usb connection type in both
-// directions, and the onboard card's analog jack keeps analog.
+// The endpoints of the USB card publish usb in both directions, and the
+// analog jack of the onboard card publishes analog.
 func TestConnectionTypeNamesTheBus(t *testing.T) {
 	machineFixture(t, "liken-1")
 	outputs, err := readEndpoints()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the endpoints of liken-1: %v", err)
 	}
 	for _, output := range outputs {
 		want := "usb"
 		if output.Card == 0 {
-			// The fixture's control node is an ordinary file, so no HDMI
-			// slot reports an ELD element here.
+			// The fixture's control node is a regular file, so the HDMI
+			// slots of this card have no ELD element.
 			want = "analog"
 		}
 		if got := output.connectionType(); got != want {
@@ -175,10 +170,9 @@ func TestConnectionTypeNamesTheBus(t *testing.T) {
 	}
 }
 
-// A node with no sound card has no /dev/snd. The operator publishes no
-// output and keeps serving, so a missing directory is a clean idle and
-// not an error.
-func TestReadOutputsIdlesWithNoDirectory(t *testing.T) {
+// A Kubernetes node with no sound card has no /dev/snd, and
+// readEndpoints returns no endpoints and no error.
+func TestReadEndpointsIdlesWithNoDirectory(t *testing.T) {
 	sndDir = filepath.Join(t.TempDir(), "absent")
 	outputs, err := readEndpoints()
 	if err != nil {
@@ -189,19 +183,17 @@ func TestReadOutputsIdlesWithNoDirectory(t *testing.T) {
 	}
 }
 
-// deliveredNodes builds a directory that stands in for the /dev/snd
-// the claim delivers, and points the identity trees at the lab
-// fixture, whose card holds the same PCM devices these callers name.
-// A caller that varies the node list still gets an endpoint the
-// operator can name, because a name it cannot build is a device it
-// does not publish.
-func deliveredNodes(t *testing.T, names ...string) string {
+// sndDirWith creates a directory with an empty file for each name,
+// sets sndDir to it, and returns it. It loads the lab fixture first,
+// because endpointName needs a card identity for each PCM node, and the
+// operator does not publish an endpoint that it cannot name.
+func sndDirWith(t *testing.T, names ...string) string {
 	t.Helper()
 	machineFixture(t, "lab")
 	dir := t.TempDir()
 	for _, name := range names {
 		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing a fixture device node: %v", err)
 		}
 	}
 	sndDir = dir

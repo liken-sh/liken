@@ -1,28 +1,23 @@
 package main
 
-// Reading PipeWire's graph, and writing to the objects in it.
+// This file reads PipeWire's graph with pw-dump, and pwcli.go writes
+// to the objects in it.
 //
-// PipeWire and WirePlumber run in their own containers of this pod,
-// started before the operator and stopped after it, so nothing here
-// starts or supervises a daemon. The kubelet does both.
+// PipeWire and WirePlumber run as their own containers in this pod.
+// They start before the operator and stop after it, so the kubelet
+// supervises them and the operator starts no daemon.
 //
-// The operator needs facts from PipeWire that ALSA cannot give it:
-// the name of the node that plays or records through each PCM device,
-// which is the value a consumer's PIPEWIRE_NODE holds, and the gain,
-// mute, and format that node runs at now, which the endpoint's status
-// reports. A Bluetooth speaker's node is in the same graph, built by
-// WirePlumber's bluez monitor, so one read yields both kinds.
+// The graph has facts that ALSA cannot report: the name of the node
+// that plays or records through each PCM device, which a consumer sets
+// as PIPEWIRE_NODE, and the gain, mute, and format of that node, which
+// the endpoint's status reports. WirePlumber's bluez monitor builds a
+// Bluetooth speaker's node in the same graph, so one read returns both
+// kinds of endpoint.
 //
-// The operator reads the graph by running pw-dump, which ships with
-// PipeWire in the same image, and parsing the JSON it prints. The
-// alternative is to speak PipeWire's native protocol, which means
-// implementing its binary POD encoding for every message the graph
-// walk needs. A plain pw-dump is one process per read, and pwmonitor.go
-// keeps one pw-dump -m running so that a steady state costs no process
-// at all.
-//
-// The writes take the same path for the same reason, and pwcli.go
-// holds them.
+// The operator runs pw-dump, which prints the graph as JSON, because
+// PipeWire's native protocol would need an implementation of its binary
+// POD encoding. pwmonitor.go keeps one pw-dump -m running, so the
+// operator does not start a process for each read.
 
 import (
 	"context"
@@ -34,37 +29,32 @@ import (
 	"time"
 )
 
-// pwDumpTimeout bounds one graph read. pw-dump connects to the
-// socket, waits for the whole graph, and prints it, so a PipeWire
-// that stops answering would otherwise hold the reconcile pass
-// forever.
+// pwDumpTimeout limits one graph read. pw-dump waits for the whole
+// graph, so without a limit a PipeWire that stops responding blocks the
+// read forever.
 const pwDumpTimeout = 10 * time.Second
 
-// runtimeDir is where PipeWire creates its socket. It is a hostPath
-// mount, so that a consumer's CDI spec can bind the same directory
-// into a container on the same node.
-//
-// The PipeWire container and the operator container both mount it,
-// so the socket the operator reads is the socket a consumer gets.
+// runtimeDir is the directory where PipeWire creates its socket. The
+// PipeWire container and the operator container both mount it from a
+// hostPath, so a consumer's CDI spec can bind the same directory into
+// its container and reach the socket that the operator reads.
 const runtimeDir = "/var/run/audio.liken.sh"
 
-// socketPath is the absolute path of the socket a client connects to.
-// A PIPEWIRE_REMOTE that starts with a slash is used as a path, and
-// the runtime directory is not consulted, so one absolute path is the
-// whole of what a consumer needs.
+// socketPath is the socket that a consumer connects to. PipeWire reads
+// a PIPEWIRE_REMOTE that starts with a slash as a full path, so a
+// consumer needs no runtime directory setting.
 const socketPath = runtimeDir + "/pipewire-0"
 
-// pcmAddress names one PCM device, which is what ties a PipeWire node
-// to the ALSA endpoint the operator publishes.
+// pcmAddress identifies one ALSA PCM device. It is the key that joins a
+// PipeWire node to the ALSA endpoint that the operator publishes.
 type pcmAddress struct {
 	Card int
 	PCM  int
 }
 
-// pwDirection is the half of the graph a node's media class puts it
-// in. The two words are the same two the sink and source attributes
-// carry and the two resource kinds are named for, so one word runs
-// from the graph to the API without a translation.
+// pwDirection is whether a node plays (sink) or records (source), from
+// its media class. The values match the names of the Sink and Source
+// resources.
 type pwDirection string
 
 const (
@@ -72,29 +62,29 @@ const (
 	directionSource pwDirection = "source"
 )
 
-// mediaClassDirections is the filter on the graph. The operator reads
-// the two audio classes and nothing else: a video node, a MIDI node,
-// or a stream a client opened is not an endpoint.
+// mediaClassDirections maps the media class of an endpoint node to its
+// direction. A video node, a MIDI node, or a client's stream has
+// another media class and is not an endpoint.
 var mediaClassDirections = map[string]pwDirection{
 	"Audio/Sink":   directionSink,
 	"Audio/Source": directionSource,
 }
 
-// nodeAddress keys one node. A USB card serves playback and capture
-// through one PCM device number, and the two declared nodes carry the
-// same card and PCM properties, so the direction is part of the key.
+// nodeAddress identifies one node. A USB card plays and records through
+// one PCM device number, so its playback and capture nodes have the
+// same card and PCM properties, and the key needs the direction too.
 type nodeAddress struct {
 	pcmAddress
 	Direction pwDirection
 }
 
-// pwNode is what one audio node reports. Every field here is a fact
-// the endpoint's status carries: the name a consumer targets, the
-// gain and mute PipeWire applies, and the format the node negotiated.
+// pwNode holds the facts about one audio node that the endpoint's
+// status reports.
 //
-// Suspended is the node's state in its info block. A suspended node's
-// Props are not current: a write to one is applied and not announced,
-// so the node can print the levels it last ran at (sinkstatus.go).
+// Suspended is true when the node's state is suspended. PipeWire
+// applies a level written to a suspended node without updating its
+// Props, so its Props can print the levels it last ran at
+// (sinkstatus.go).
 type pwNode struct {
 	ID        int
 	Name      string
@@ -104,28 +94,27 @@ type pwNode struct {
 	Suspended bool
 }
 
-// pwFormat is the format a node negotiated and runs at now. The
-// positions are PipeWire's own channel names, FL, FR, LFE, and so on,
-// and the status reports them in the same spelling.
+// pwFormat is the format a node negotiated. Positions are PipeWire's
+// channel names (FL, FR, LFE), and the status reports them unchanged.
 type pwFormat struct {
 	Rate      int      `json:"rate"`
 	Channels  int      `json:"channels"`
 	Positions []string `json:"position"`
 }
 
-// pwGraph is what one read yields: every ALSA node by PCM device and
-// direction, and every Bluetooth speaker by peer MAC in the lowercase
-// colon form.
+// pwGraph is the result of one read: every ALSA node by PCM device and
+// direction, and every Bluetooth speaker by peer MAC address in
+// lowercase colon form.
 //
-// Linked holds the id of every node that a link touches, on either
-// side. A stream that plays into a sink, and a tap that records from
-// its monitor ports, each hold a link to the sink's node.
+// Linked has the id of every node at either end of a link. A stream
+// that plays into a sink and a tap that records from the sink's
+// monitor ports both link to the sink's node.
 //
-// Cookie is the random number the PipeWire daemon picks when it starts
-// (pw_rand32 in src/pipewire/impl-core.c), read from its Core object.
-// PipeWire hands out the same small object ids again after a restart,
-// so a node id names a node only together with the cookie of the
-// PipeWire that built it. Zero means the graph held no Core object.
+// Cookie is the random number that the PipeWire daemon chooses at
+// startup (pw_rand32 in src/pipewire/impl-core.c), read from its Core
+// object. A restarted PipeWire gives out the same small object ids
+// again, so a node id identifies a node only together with the cookie.
+// Zero means the graph had no Core object.
 type pwGraph struct {
 	Cookie   uint32
 	Nodes    map[nodeAddress]pwNode
@@ -133,21 +122,17 @@ type pwGraph struct {
 	Linked   map[int]bool
 }
 
-// bluezSink is one Bluetooth speaker as the graph reports it: its
-// node, and the device the node belongs to.
+// bluezSink is one Bluetooth speaker: the node that plays into it and
+// the device that the node belongs to.
 //
-// The node's part is the name a consumer's PIPEWIRE_NODE holds, the
-// node id and channel count a level write needs, the codec the
-// transport negotiated, and the gain, mute, and format the node runs
-// at. The device's part is its object id, the codecs it offers, and
-// its Route.
+// The fields up to Suspended come from the node. A consumer sets Node
+// as PIPEWIRE_NODE, and a level write on the node names it by NodeID
+// and reads the channel count from Volumes. Device, Codecs, and Route
+// come from the device.
 //
-// The two parts are kept apart in the mind because they have
-// different lives. A codec switch destroys the node and keeps the
-// device, so the codec choice is written on the device. The Route is
-// the device's too: it is where the speaker's own volume lives, and
-// a write to it goes over AVRCP, where a write to the node's gain
-// stays in software.
+// The operator writes the codec on the device because a codec switch
+// destroys the node and keeps the device. The device's Route has the
+// speaker's own volume (routes.go).
 type bluezSink struct {
 	Node      string
 	NodeID    int
@@ -161,74 +146,58 @@ type bluezSink struct {
 	Route     *pwRoute
 }
 
-// bluez5Device is the part of a bluez5 Device object this operator
-// reads: its own object id, the codecs it offers, and its current
-// Route. The name says bluez5 because bluez_test.go's bluezDevice is
-// the other thing with that name, the D-Bus object bluetoothd
-// publishes.
+// bluez5Device is the part of a PipeWire Device object of the bluez5
+// plugin that the operator reads. It is not the BlueZ D-Bus device that
+// bluetoothd publishes.
 //
-// The device object is read separately from the node and joined
-// to it by peer address, because PipeWire publishes them as two
-// objects and the address is the one property both carry.
+// The peer address is the only property that both the device and its
+// node carry, so buildGraph joins them on it.
 type bluez5Device struct {
 	ID     int
 	Codecs []bluezCodec
 	Route  *pwRoute
 }
 
-// The node properties the bluez5 SPA plugin sets on every node it
-// emits (spa/plugins/bluez5/bluez5-device.c in the pipewire this
-// image ships). The address is BlueZ's own uppercase colon form.
+// The bluez5 SPA plugin sets these properties on every node it creates
+// (spa/plugins/bluez5/bluez5-device.c in the PipeWire of this image).
+// The address is in BlueZ's uppercase colon form.
 const (
 	bluezAddressProperty = "api.bluez5.address"
 	bluezCodecProperty   = "api.bluez5.codec"
 )
 
-// The property keys that hold a node's ALSA address, in the order
-// this operator reads them. A playback node and a capture node of one
-// PCM device carry the same pair, and the media class tells them
-// apart.
+// The property keys that give a node's ALSA card and PCM numbers, tried
+// in order.
 //
-// The first key of each list is the one the operator writes itself,
-// which is the only pair it can rely on. It declares every node in a
-// configuration drop-in (see nodes.go), and a declared node has no
-// alsa.card and no alsa.device, because those two come from the udev
-// device that WirePlumber's ALSA monitor builds and this graph has no
-// monitor in it.
+// The operator sets the first key of each list on every node that it
+// declares in a configuration drop-in (nodes.go). A declared node has
+// no alsa.card or alsa.device, because WirePlumber's ALSA monitor sets
+// those from the udev device, and this graph has no ALSA monitor.
 //
-// The rest are kept so that a node from any other source still maps.
-// alsa.card and alsa.device are what the card profile code puts on a
-// node it creates from a profile, and the api.alsa.pcm pair is what
-// the ALSA plugin puts on a node that opens a PCM device directly, as
-// the Pro Audio profile does.
+// The other keys map a node from another source. The card profile code
+// sets alsa.card and alsa.device on a node that it creates from a
+// profile. The ALSA plugin sets the api.alsa.pcm keys on a node that
+// opens a PCM device directly, as the Pro Audio profile does.
 var (
 	nodeCardKeys = []string{nodeCardProperty, "alsa.card", "api.alsa.pcm.card", "api.alsa.card"}
 	nodePCMKeys  = []string{nodePCMProperty, "alsa.device", "api.alsa.pcm.device"}
 )
 
-// pwObject is the part of pw-dump's output this operator reads. Every
-// object in the dump has a type and, for the ones that came from a
-// remote interface, an info block with its properties.
+// pwObject is the part of a pw-dump object that the operator reads. A
+// pw-cli write names the object by ID.
 //
-// The info block is a pointer because its absence means something.
-// pw-dump -m prints a removed global as an object whose info is null,
-// and a global that never carried a block holds nothing this operator
-// reads, so the monitor drops both.
-//
-// The id is how a write names its object. Beside the properties,
-// params holds the object's parameters: Props is current state,
-// and PropInfo is what the object would accept.
+// Info is a pointer because pw-dump -m prints a removed global with a
+// null info block. The monitor removes an object with a nil Info, and
+// buildGraph skips it.
 type pwObject struct {
 	ID   int     `json:"id"`
 	Type string  `json:"type"`
 	Info *pwInfo `json:"info"`
 }
 
-// pwInfo is an object's properties and parameters.
-//
-// A link's info block holds the two node ids it joins, and the block
-// of every other object holds neither. A node's block holds its state:
-// creating, suspended, idle, running, or error.
+// pwInfo is an object's info block. A link's block has the ids of the
+// two nodes it joins, and no other object's block has them. A node's
+// block has its state: creating, suspended, idle, running, or error.
 type pwInfo struct {
 	Cookie       uint32                     `json:"cookie"`
 	State        string                     `json:"state"`
@@ -238,14 +207,11 @@ type pwInfo struct {
 	InputNodeID  *int                       `json:"input-node-id"`
 }
 
-// pwParams holds the parameter lists this operator reads. Every value
-// in any of them is a SPA POD that pw-dump printed as JSON.
-//
-// PropInfo describes the properties an object accepts, and Props
-// holds their current values. Format is what a node negotiated, and
-// Route is where a Bluetooth device's own volume lives. Every other
-// parameter stays unparsed, because parsing it would couple this
-// struct to pod shapes nothing here reads.
+// pwParams holds the parameter lists that the operator reads. Each
+// value is a SPA POD that pw-dump prints as JSON. PropInfo lists the
+// properties that an object accepts, and Props has their current
+// values. Format is what a node negotiated, and Route has a Bluetooth
+// device's own volume.
 type pwParams struct {
 	PropInfo []pwPropInfo      `json:"PropInfo"`
 	Props    []json.RawMessage `json:"Props"`
@@ -253,30 +219,28 @@ type pwParams struct {
 	Route    []json.RawMessage `json:"Route"`
 }
 
-// pwProps is the part of a node's current Props this operator reads.
-//
-// channelVolumes is the per-channel linear gain the node applies, and
-// mute is whether it applies silence instead. The single volume value
-// beside them is a separate multiplier: the lab's sink carried its 40
-// percent default in channelVolumes, cubed to 0.064, while volume
-// read 1.0.
+// pwProps is what the operator reads from a node's current Props.
+// ChannelVolumes is the linear gain of each channel. The Props also
+// have a separate volume, a further multiplier that the operator does
+// not read. A sink on the lab fleet read its 40 percent default as
+// 0.064, the cube of 0.4, in channelVolumes, with volume at 1.0.
 type pwProps struct {
 	Mute           bool
 	ChannelVolumes []float64
 }
 
-// readGraph runs pw-dump and returns the endpoints it holds, both the
-// card's and the radio's. One read answers every question a pass
-// asks, so the slice and a prepare call can never report different
-// node names for one device.
+// readGraph runs pw-dump and returns the sound cards' and the radio's
+// endpoints. One read has everything that a pass needs, so the
+// ResourceSlice and a prepare call cannot report different node names
+// for one device.
 func readGraph(ctx context.Context) (pwGraph, error) {
 	ctx, cancel := context.WithTimeout(ctx, pwDumpTimeout)
 	defer cancel()
 
 	command := exec.CommandContext(ctx, "pw-dump")
-	// The context's kill bounds the exec, and WaitDelay bounds the
-	// read after the kill: without it, Output blocks past the kill if
-	// anything inherited the stdout pipe.
+	// Cancelling the context kills pw-dump, and WaitDelay limits how long
+	// Output then waits for the stdout pipe. Without it, Output blocks
+	// past the kill when another process inherited the pipe.
 	command.WaitDelay = time.Second
 	raw, err := command.Output()
 	if err != nil {
@@ -285,10 +249,9 @@ func readGraph(ctx context.Context) (pwGraph, error) {
 	return parseGraph(raw)
 }
 
-// parseGraph reads the endpoints out of one pw-dump document. The
-// parse and the build are two steps because the monitor in
-// pwmonitor.go decodes its own stream and hands buildGraph the
-// objects it holds.
+// parseGraph decodes one pw-dump document. It is separate from
+// buildGraph because the monitor in pwmonitor.go decodes its own stream
+// and calls buildGraph with the objects it has collected.
 func parseGraph(document []byte) (pwGraph, error) {
 	var objects []pwObject
 	if err := json.Unmarshal(document, &objects); err != nil {
@@ -297,25 +260,19 @@ func parseGraph(document []byte) (pwGraph, error) {
 	return buildGraph(objects), nil
 }
 
-// buildGraph reads the endpoints out of a set of objects, in any
-// order. A node with no ALSA address and no Bluetooth address is not
-// an error. PipeWire publishes nodes that no hardware backs, such as
-// a null sink or a network stream, and this operator publishes only
-// the endpoints it declared.
+// buildGraph returns the endpoints in a set of objects, in any order.
+// The monitor passes the objects from a map, and a plain dump can print
+// a device after its node, so the loop collects the devices and joins
+// them to their speakers after it ends.
 //
-// The order is not a contract because the monitor hands over the
-// objects out of a map, and because a device may print after its
-// node in a plain dump. So a device's facts join its speaker after
-// the loop.
+// A node with neither an ALSA address nor a Bluetooth address is
+// skipped without an error. PipeWire publishes nodes that no hardware
+// backs, such as a null sink or a network stream.
 //
-// When two nodes name one PCM device and one direction, the first
-// name in alphabetical order wins. The pair is what a profile change
-// makes for a moment, and a stable choice keeps the operator from
-// writing the slice twice for one event.
-//
-// A Bluetooth speaker's node carries api.bluez5.address and no ALSA
-// address at all, so the address decides which of the two maps a node
-// joins.
+// When two nodes claim one PCM device and direction, or one speaker,
+// the name that sorts first wins. A profile change creates such a pair
+// for a moment, and a stable choice keeps the operator from writing the
+// ResourceSlice twice for one event.
 func buildGraph(objects []pwObject) pwGraph {
 	graph := pwGraph{
 		Nodes:    map[nodeAddress]pwNode{},
@@ -368,16 +325,15 @@ func buildGraph(objects []pwObject) pwGraph {
 			Mute:    props.Mute,
 			Volumes: props.ChannelVolumes,
 			Format:  nodeFormat(object.Info.Params.Format),
-			// The state is read as printed, and a document with no
-			// state reads as a node that is not suspended.
+			// A node with no state in the document reads as not
+			// suspended.
 			Suspended: object.Info.State == "suspended",
 		}
 		if address := normalizeMAC(property(object.Info.Props, bluezAddressProperty)); validMAC(address) {
 			// A Bluetooth capture node is a headset microphone over
-			// HFP, and this pod registers no headset profile, so the
-			// radio's nodes are sinks or nothing. A capture node that
-			// appears anyway is left out rather than published as a
-			// Source nobody can open.
+			// HFP. This pod registers no headset profile, so the
+			// operator skips such a node and does not publish a Source
+			// that no consumer can open.
 			if direction != directionSink {
 				continue
 			}
@@ -422,18 +378,16 @@ func buildGraph(objects []pwObject) pwGraph {
 	return graph
 }
 
-// nodeProps reads the gain and mute out of a node's Props.
+// nodeProps reads the gain and mute from a node's Props.
 //
-// An adapter node prints two Props blocks: the audioconvert one,
-// which carries volume, mute, and channelVolumes, and the ALSA one,
-// which carries the device and its latency. The audioconvert block is
-// the one with the channelVolumes key, and the key's presence is the
-// test, not the list's length: a suspended node can print
-// channelVolumes as an empty list, as on liken-1, and a length test
-// would fall through to the ALSA block and read a mute that is not
-// there. Another suspended node keeps printing the list it last ran
-// with, as on stick-1, so the list's contents say nothing about
-// whether the level is current either. The node's state does.
+// An adapter node prints two Props blocks: the audioconvert block, with
+// volume, mute, and channelVolumes, and the ALSA block, with the device
+// and its latency. nodeProps uses the first block that has a
+// channelVolumes key, even an empty list. A suspended node can print
+// channelVolumes as an empty list (seen on liken-1), and a test of the
+// list's length would read the ALSA block, which has no mute. Another
+// suspended node printed the list it last ran with (seen on stick-1),
+// so only pwNode.Suspended shows whether the level is current.
 func nodeProps(params []json.RawMessage) pwProps {
 	for _, raw := range params {
 		var block struct {
@@ -451,10 +405,8 @@ func nodeProps(params []json.RawMessage) pwProps {
 	return pwProps{}
 }
 
-// nodeFormat reads the format a node negotiated when it started. A
-// suspended node prints an empty Format list, and a rate above zero
-// is what says a format was read at all, so a node that is not
-// running reports no format.
+// nodeFormat returns the first Format param with a rate above zero. A
+// suspended node prints an empty Format list, so it reports no format.
 func nodeFormat(params []json.RawMessage) pwFormat {
 	for _, raw := range params {
 		var format pwFormat
@@ -468,10 +420,9 @@ func nodeFormat(params []json.RawMessage) pwFormat {
 	return pwFormat{}
 }
 
-// property reads one property as a string. pw-dump prints a property
-// whose value reads as a number or a boolean without quotes, even
-// though every value in PipeWire's property list is a string, so this
-// accepts both forms.
+// property returns one property as a string. PipeWire stores every
+// property as a string, but pw-dump prints a value that looks like a
+// number or a boolean without quotes, so property accepts both forms.
 func property(props map[string]json.RawMessage, key string) string {
 	raw, ok := props[key]
 	if !ok {
@@ -484,8 +435,6 @@ func property(props map[string]json.RawMessage, key string) string {
 	return text
 }
 
-// numericProperty reads the first of several keys that holds a whole
-// number.
 func numericProperty(props map[string]json.RawMessage, keys []string) (int, bool) {
 	for _, key := range keys {
 		value, err := strconv.Atoi(property(props, key))

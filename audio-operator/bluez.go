@@ -1,22 +1,17 @@
 package main
 
-// The Bluetooth half of this operator: the switch that turns it on,
-// the WirePlumber fragment that enables the bluez monitor, and the
-// read of bluetoothd's paired set.
+// A Bluetooth speaker has no device in the kernel. bluetoothd records
+// which speakers are paired, and PipeWire makes a sink for a speaker
+// only while PipeWire is connected to bluetoothd's D-Bus and has
+// registered a media endpoint there. The Bluetooth operator publishes
+// that D-Bus, the media bus, as a DRA device. This pod's ResourceClaim
+// allocates it, and the claim's CDI edits mount the directory of the
+// bus socket and set DBUS_SYSTEM_BUS_ADDRESS to the socket inside it.
 //
-// A Bluetooth speaker creates nothing in the kernel. The paired set
-// is only in bluetoothd, and the sink exists only while a sound
-// server holds bluetoothd's bus and keeps a media endpoint
-// registered. The Bluetooth operator publishes that bus as a DRA
-// device, this pod's claim allocates it, and the claim's CDI
-// delivery is a mount of the bus socket's directory plus
-// DBUS_SYSTEM_BUS_ADDRESS naming the socket inside it.
-//
-// Every signal here says only that something changed, and each one
-// starts a pass that re-reads the whole managed-object tree. A cache
-// built from signal payloads can fall out of step with the daemon; a
-// full re-read stays correct. The Bluetooth operator reads the same
-// daemon the same way, for the same reason.
+// A D-Bus signal only starts a reconcile pass, and the pass reads
+// bluetoothd's whole object tree again. The operator keeps no cache
+// built from signal payloads, because such a cache can drift from
+// bluetoothd.
 
 import (
 	"context"
@@ -38,45 +33,44 @@ const (
 	adapterInterface = "org.bluez.Adapter1"
 )
 
-// busAddressVariable is both the address of the delivered bus and
-// the switch. The Bluetooth media bus's CDI delivery sets it in
-// every container that names the claim, so when it is unset, the
-// claim allocated no bus and none of this code runs.
+// busAddressVariable holds the address of the media bus. The claim's
+// CDI edits set it in every container that names the claim, so when it
+// is unset, the claim allocated no media bus and the Bluetooth code
+// does not run.
 const busAddressVariable = "DBUS_SYSTEM_BUS_ADDRESS"
 
-// audioSinkUUID is the Bluetooth SIG's AudioSink profile, assigned
-// number 0x110b in the base UUID. A paired device that advertises it
-// accepts an A2DP stream, and that is what makes it a speaker to
-// this operator.
+// audioSinkUUID is the AudioSink service class, 0x110b in the Bluetooth
+// base UUID. A device that lists it accepts an A2DP stream.
 const audioSinkUUID = "0000110b-0000-1000-8000-00805f9b34fb"
 
-// busReadyTimeout bounds the wait for the delivered socket. Another
-// pod serves it and can be restarting while this one starts.
+// busReadyTimeout bounds the wait for the Bluetooth media bus at
+// startup. bluetooth-operator's pod serves the bus and can be
+// restarting while this pod starts.
 const busReadyTimeout = 30 * time.Second
 
-// busRetryDelay is how often that wait asks again. The bus raises no
-// event before it exists, so the wait has to poll.
+// busRetryDelay is the interval between attempts to connect to the
+// media bus. Nothing announces that the socket exists, so the attempts
+// poll.
 const busRetryDelay = time.Second
 
-// speaker is one paired A2DP sink as bluetoothd reports it, keyed
-// elsewhere by the normalized peer MAC.
+// speaker is a paired A2DP device. A map of speakers uses the speaker's
+// MAC address as the key, in lowercase with colons.
 type speaker struct {
 	Name      string
 	Connected bool
 }
 
-// ErrNoAdapter separates "no speaker is paired" from "there is
-// nothing to ask yet". bluetoothd answers with an empty tree in both
-// cases, and the second must never retract a published speaker.
+// ErrNoAdapter means that bluetoothd's object tree has no adapter. That
+// happens before bluetoothd creates the adapter and after the adapter
+// goes away. The tree then has no device objects either, but the
+// speakers are still paired, so the caller must not remove the
+// speakers it published.
 var ErrNoAdapter = errors.New("bluetoothd published no adapter")
 
-// bluetoothEnabled reports whether the claim delivered a media bus.
 func bluetoothEnabled() bool {
 	return os.Getenv(busAddressVariable) != ""
 }
 
-// pairedSpeakers reads every paired A2DP sink from bluetoothd in one
-// round trip, keyed by the normalized peer MAC.
 func pairedSpeakers(conn *dbus.Conn) (map[string]speaker, error) {
 	var objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 	err := conn.Object(bluezService, "/").
@@ -88,16 +82,12 @@ func pairedSpeakers(conn *dbus.Conn) (map[string]speaker, error) {
 	return speakersFrom(objects)
 }
 
-// speakersFrom reads the paired A2DP sinks out of one managed-object
-// tree. It is separate from the call so the rules test without a
-// bus.
-//
-// Only an org.bluez.Device1 object can become a speaker. The adapter
-// object carries the AudioSink UUID too once the endpoint registers,
-// and it is the machine's own radio, not a peer.
-//
-// A device with Paired false is one bluetoothd detected on the air
-// and holds no link key for, so it is not this machine's to offer.
+// speakersFrom returns the paired A2DP speakers in a GetManagedObjects
+// result. It reads only Device1 objects, because after PipeWire
+// registers its media endpoint, the Adapter1 object lists AudioSink
+// too, and the adapter is this machine's own radio. A device with
+// Paired false was found in a scan, and bluetoothd stores no link key
+// for it, so the operator does not offer it.
 func speakersFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant) (map[string]speaker, error) {
 	adapters := 0
 	speakers := map[string]speaker{}
@@ -133,26 +123,22 @@ func speakersFrom(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant
 	return speakers, nil
 }
 
-// acceptsA2DP reports whether the browsed profile UUIDs include
-// AudioSink, the one profile that makes a paired device a speaker
-// this operator can play into.
 func acceptsA2DP(uuids []string) bool {
 	return slices.ContainsFunc(uuids, func(uuid string) bool {
 		return strings.EqualFold(strings.TrimSpace(uuid), audioSinkUUID)
 	})
 }
 
-// variantString reads one string property, and gives an empty string
-// for a property bluetoothd did not report.
 func variantString(properties map[string]dbus.Variant, key string) string {
 	value, _ := properties[key].Value().(string)
 	return value
 }
 
-// watchBlueZ reports whenever the paired set or a connection state
-// may have changed: InterfacesAdded when bluetoothd creates a device
-// object, InterfacesRemoved for an unpairing, and PropertiesChanged
-// on a device for a connect or a disconnect.
+// watchBlueZ returns a channel that receives a value after each signal
+// that can change the paired speakers or their connections:
+// InterfacesAdded for a new device, InterfacesRemoved for an unpairing,
+// and PropertiesChanged on a Device1 object for a connect or a
+// disconnect.
 func watchBlueZ(ctx context.Context, conn *dbus.Conn) (<-chan struct{}, error) {
 	matches := [][]dbus.MatchOption{
 		{
@@ -177,17 +163,14 @@ func watchBlueZ(ctx context.Context, conn *dbus.Conn) (<-chan struct{}, error) {
 	return relayBlueZSignals(ctx, signals, func() { conn.RemoveSignal(signals) }), nil
 }
 
-// relayBlueZSignals is watchBlueZ's loop over a channel that is
-// already subscribed, separate from the subscription so a test can
-// drive it without a bus.
+// relayBlueZSignals sends a value on the returned channel for each
+// signal, and drops the value when the channel's buffer of one is
+// already full. The reader reads the whole tree again, so one value
+// covers any number of signals.
 //
-// The output channel is buffered to one, and a full channel drops
-// the signal, because the reader re-reads the whole tree and one
-// wake answers a burst.
-//
-// release unregisters the signal channel from the connection. A
-// connection keeps delivering to a registered channel, so a channel
-// nobody reads would hold godbus's delivery goroutine forever.
+// release unregisters signals from the connection when the relay ends,
+// because godbus blocks on a registered channel that nobody reads, and
+// then delivers no other signal on the connection.
 func relayBlueZSignals(ctx context.Context, signals <-chan *dbus.Signal, release func()) <-chan struct{} {
 	changed := make(chan struct{}, 1)
 	go func() {
@@ -211,23 +194,17 @@ func relayBlueZSignals(ctx context.Context, signals <-chan *dbus.Signal, release
 	return changed
 }
 
-// mediaBus is this operator's connection to the delivered media bus.
-// The reconcile pass reads the paired set through it, and followBus
-// replaces the connection when the bus closes.
-//
-// The bus belongs to the Bluetooth operator's pod. When that pod
-// restarts, its dbus-daemon exits, the connection closes, and godbus
-// closes every signal channel on it. The operator connects to the new
-// dbus-daemon and reads the paired set again, and the rest of the pod
-// runs on. A pass that runs while no connection is open gets an error,
-// and the pass keeps each paired speaker in the slice without its sink
-// (reconciler.lastSpeakers).
+// mediaBus holds the latest connection to the media bus. The
+// dbus-daemon runs in the Bluetooth operator's pod, so a restart of
+// that pod closes the connection, and subscribe stores a connection to
+// the new daemon. speakers returns errNoBus before the first
+// subscription, and an error from the read while the stored connection
+// is closed.
 type mediaBus struct {
 	mu   sync.Mutex
 	conn *dbus.Conn
 }
 
-// errNoBus is the answer of a read while no connection is open.
 var errNoBus = errors.New("no connection to the media bus is open")
 
 func (b *mediaBus) speakers() (map[string]speaker, error) {
@@ -240,22 +217,16 @@ func (b *mediaBus) speakers() (map[string]speaker, error) {
 	return pairedSpeakers(conn)
 }
 
-// subscribe connects to the bus, subscribes to bluetoothd's signals on
-// that connection, and only then makes the connection the one the pass
-// reads through. The subscription opens before the read, so a change
-// during the read is not lost.
+// subscribe subscribes to bluetoothd's signals before it stores the
+// connection for speakers, so a change during the first read still
+// produces a signal. dbus.SystemBus returns its cached connection while
+// that connection is open, so the first call returns the connection
+// that waitForBus opened, and a call after the bus closes dials again.
 //
-// dbus.SystemBus returns the connection it made before for as long as
-// that connection is open, so the first call uses the connection that
-// waitForBus opened at start. After the bus closes, the call opens a
-// new connection.
-//
-// godbus registers no signal channel on a connection that has already
-// closed, and never closes such a channel. A bus that closes between
-// the connect and the registration would leave a subscription that
-// never ends and never delivers, so the connection is checked after
-// the registration, and a closed one ends the relay and counts as a
-// failed subscription.
+// godbus does not register a signal channel on a closed connection, and
+// never closes that channel. A bus that closed before watchBlueZ
+// registered would leave a relay that never delivers and never ends, so
+// subscribe checks conn.Connected after registering.
 func (b *mediaBus) subscribe(ctx context.Context) (<-chan struct{}, error) {
 	conn, err := dbus.SystemBus()
 	if err != nil {
@@ -271,8 +242,8 @@ func (b *mediaBus) subscribe(ctx context.Context) (<-chan struct{}, error) {
 		stop()
 		return nil, errors.New("the media bus closed during the subscription")
 	}
-	// A relay that runs ends with ctx, or when the bus closes its
-	// channel.
+	// When the bus closes first, godbus closes the signal channel, and
+	// the relay ends without stop.
 	context.AfterFunc(ctx, stop)
 	b.mu.Lock()
 	b.conn = conn
@@ -280,27 +251,18 @@ func (b *mediaBus) subscribe(ctx context.Context) (<-chan struct{}, error) {
 	return changed, nil
 }
 
-// followBus keeps the operator subscribed to bluetoothd for the life
-// of ctx, and returns the channel that wakes the loop.
 func followBus(ctx context.Context, bus *mediaBus) <-chan struct{} {
 	return resubscribe(ctx, bus.subscribe, busRetryDelay, func(line string) { fmt.Println(line) })
 }
 
-// resubscribe keeps one subscription open until ctx ends. subscribe
-// opens a subscription and returns a channel that carries its events
-// and closes when the subscription fails. When it closes, resubscribe
-// opens a new one, and tries again every retry until one opens.
+// resubscribe keeps a subscription open until ctx ends. The channel
+// that subscribe returns closes when its subscription fails, and
+// resubscribe then calls subscribe every retry until one succeeds.
 //
-// Each subscription that opens sends one wake before its events. The
-// pass that the wake starts reads the whole state again, because the
-// subscription that closed missed every change made while no
+// The returned channel receives a value for each event, and one when
+// each new subscription opens, so the next pass reads the whole state
+// again and finds the changes that nothing delivered while no
 // subscription was open.
-//
-// The retry is a poll, because the bus sends no event before it
-// exists, the same limit that waitForBus has at start. The retry is
-// bounded only by ctx. A bus that never answers at start ends the
-// process, but a bus that closes while the operator runs costs only
-// the speakers' sinks, and the card's outputs publish as before.
 func resubscribe(ctx context.Context, subscribe func(context.Context) (<-chan struct{}, error),
 	retry time.Duration, report func(string)) <-chan struct{} {
 	out := make(chan struct{}, 1)
@@ -324,15 +286,16 @@ func resubscribe(ctx context.Context, subscribe func(context.Context) (<-chan st
 			if ctx.Err() != nil {
 				return
 			}
-			report("the Bluetooth media bus closed; connecting again")
+			report("the Bluetooth media bus closed, so the operator connects again")
 		}
 	}()
 	return out
 }
 
-// subscribeUntilOpen calls subscribe until it succeeds, and reports
-// the first failure of a run and the success that ends it. It returns
-// an error only when ctx ends first.
+// subscribeUntilOpen calls subscribe every retry until it succeeds, and
+// returns an error only when ctx ends first. It reports the first
+// failure of a run and the success that ends the run, so a bus that
+// stays down writes one log line.
 func subscribeUntilOpen(ctx context.Context, subscribe func(context.Context) (<-chan struct{}, error),
 	retry time.Duration, report func(string)) (<-chan struct{}, error) {
 	failed := false
@@ -348,7 +311,7 @@ func subscribeUntilOpen(ctx context.Context, subscribe func(context.Context) (<-
 			return nil, ctx.Err()
 		}
 		if !failed {
-			report(fmt.Sprintf("subscribing to bluetoothd on the Bluetooth media bus: %v; trying again every %s", err, retry))
+			report(fmt.Sprintf("subscribing to bluetoothd on the Bluetooth media bus, and trying again every %s: %v", retry, err))
 			failed = true
 		}
 		select {
@@ -359,23 +322,21 @@ func subscribeUntilOpen(ctx context.Context, subscribe func(context.Context) (<-
 	}
 }
 
-// waitForBus connects to the delivered system bus, and retries until
-// the socket answers or the timeout passes. The socket belongs to
-// the Bluetooth operator's pod, which can be restarting while this
-// pod starts. The wait is bounded because a bus that never arrives
-// is a failure to report, not one to sit in.
+// waitForBus connects to the bus at DBUS_SYSTEM_BUS_ADDRESS, and tries
+// again every busRetryDelay until the socket accepts a connection or
+// timeout passes. The Bluetooth operator's pod serves the socket and
+// can be restarting while this pod starts.
 func waitForBus(ctx context.Context, timeout time.Duration) (*dbus.Conn, error) {
 	deadline := time.Now().Add(timeout)
 	for {
-		// godbus caches the connection it returns and caches nothing
-		// on a failure, so a call after a failure opens a new
-		// connection.
+		// dbus.SystemBus caches only a connection that succeeded, so
+		// each retry dials again.
 		conn, err := dbus.SystemBus()
 		if err == nil {
 			return conn, nil
 		}
 		if !time.Now().Before(deadline) {
-			return nil, fmt.Errorf("no bus within %s: %w", timeout, err)
+			return nil, fmt.Errorf("the media bus accepted no connection within %s: %w", timeout, err)
 		}
 		select {
 		case <-ctx.Done():
@@ -385,33 +346,28 @@ func waitForBus(ctx context.Context, timeout time.Duration) (*dbus.Conn, error) 
 	}
 }
 
-// wireplumberConfigDir is where the declare container writes the
-// generated fragment. WirePlumber merges the fragments of
-// /usr/share/wireplumber/wireplumber.conf.d first and /etc second,
-// so a fragment here overrides the two the image bakes.
-//
-// It is a variable so the tests can point it at a directory they
-// control.
+// wireplumberConfigDir is where the declare init container writes
+// WirePlumber fragments. WirePlumber reads the fragments in
+// /usr/share/wireplumber/wireplumber.conf.d before the fragments here,
+// so a fragment here overrides the image's. Tests point it at a
+// temporary directory.
 var wireplumberConfigDir = "/etc/wireplumber/wireplumber.conf.d"
 
-// monitorDropInName is the generated fragment's file name. 60 sorts
-// it after the image's own 50 and 51 fragments.
-const monitorDropInName = "60-liken-bluetooth.conf"
+// monitorFragmentName starts with 60 so that it sorts after the image's
+// fragments, which start with 50 and 51.
+const monitorFragmentName = "60-liken-bluetooth.conf"
 
-// monitorConfig turns the bluez monitor on for the profile this pod
-// runs, and restricts it to the one role a speaker plays. The
-// image's baked fragment disables hardware.bluetooth, so this file
-// is the whole of what a delivered media bus changes about the pod.
+// monitorConfig turns on WirePlumber's bluez monitor, which the image's
+// fragment turns off, with only the A2DP source role.
 const monitorConfig = `# The declare init container writes this file only when the pod's
-# claim delivered a Bluetooth media bus. A pod with no bus has no
-# such file and loads no bluez monitor. The file is generated on
-# every pod start, so an edit here does not survive one.
+# claim includes a Bluetooth media bus. It is written again on every
+# pod start, so an edit here does not survive a restart.
 
-# main-embedded inherits main, which marks hardware.bluetooth
-# required, and the image's baked fragment disables it. WirePlumber
-# reads this fragment after the image's, so this is what turns the
-# monitor back on. The MIDI monitor stays off: a BLE MIDI instrument
-# is an input, not a sound output.
+# The image's fragment sets hardware.bluetooth to disabled in the
+# main-embedded profile. WirePlumber reads this fragment after that
+# one, so these lines turn the Bluetooth monitor back on. The MIDI
+# monitor stays off because a BLE MIDI instrument is an input, not a
+# sound output.
 wireplumber.profiles = {
   main-embedded = {
     hardware.bluetooth = required
@@ -420,50 +376,40 @@ wireplumber.profiles = {
   }
 }
 
-# The pod keeps no state directory, so nothing restores settings
-# across a restart, and there is no headset profile to switch to.
+# WirePlumber stores no Bluetooth settings, because the pod has no
+# state directory to keep them across a restart. It has no headset
+# profile to switch to either.
 wireplumber.settings = {
   bluetooth.autoswitch-to-headset-profile = false
   bluetooth.use-persistent-storage = false
 }
 
-# bluez5.roles is the A2DP-only rule, and it names the roles THIS
-# machine plays, not the peer's. a2dp_source is the role that plays
-# into a speaker: PipeWire registers /MediaEndpoint/A2DPSource
-# endpoints, the radio advertises AudioSource, and a speaker's own
-# sink connects to them. Do not write a2dp_sink here because "the
-# speaker is a sink": that is the role of receiving audio, it turns
-# this machine into a speaker for phones, and a real speaker's card
-# then offers no playback profile at all. The single role also
-# leaves the LE Audio and ASHA roles off, and the HFP and HSP
-# backend reads the same list, finds no headset role, and enables
-# nothing. hfphsp-backend states that choice where a reader can see
-# it: the headset profiles need an SCO socket in the host's network
-# namespace, and this pod has no host network.
+# bluez5.roles lists the roles of this machine, not of the speaker.
+# a2dp_source sends audio to a speaker, and a2dp_sink would make this
+# machine a speaker for phones. The headset roles stay off because they
+# need an SCO socket in the host's network namespace, and this pod
+# runs in its own.
 monitor.bluez.properties = {
   bluez5.roles = [ a2dp_source ]
   bluez5.hfphsp-backend = "none"
 }
 `
 
-// writeMonitorConfig writes the fragment when the claim delivered a
-// bus, and writes nothing when it did not. It reports whether it
-// wrote.
-//
-// The write must finish before WirePlumber starts, because
-// WirePlumber reads its configuration once. The declare init
-// container running to completion first is the kubelet's own
-// expression of that order.
+// writeMonitorConfig writes the fragment when the claim includes a
+// media bus, and returns whether it wrote. It runs in the declare init
+// container, because WirePlumber reads its configuration only at start,
+// and the kubelet starts the other containers only after the init
+// container exits.
 func writeMonitorConfig() (bool, error) {
 	if !bluetoothEnabled() {
 		return false, nil
 	}
 	if err := os.MkdirAll(wireplumberConfigDir, 0o755); err != nil {
-		return false, fmt.Errorf("making %s: %w", wireplumberConfigDir, err)
+		return false, err
 	}
-	path := filepath.Join(wireplumberConfigDir, monitorDropInName)
+	path := filepath.Join(wireplumberConfigDir, monitorFragmentName)
 	if err := os.WriteFile(path, []byte(monitorConfig), 0o644); err != nil {
-		return false, fmt.Errorf("writing %s: %w", path, err)
+		return false, err
 	}
 	fmt.Printf("enabled WirePlumber's Bluetooth monitor in %s\n", path)
 	return true, nil

@@ -1,22 +1,19 @@
 package main
 
-// Asking the API server whether the caller may have what the route
-// answers.
+// Each request is authorized with a SubjectAccessReview. A tap route
+// is checked as get on the subresource audio of sinks or sources in
+// the API group audio.liken.sh, so an ordinary RBAC rule grants taps,
+// resourceNames limits a rule to some sinks, and the API needs no
+// permission model of its own. An info route is checked as get on
+// sinks or sources. The discovery and OpenAPI documents need a valid
+// token and no authorization.
 //
-// The check is verb get on sinks/audio or sources/audio in the group
-// audio.liken.sh. That subresource shape lets an ordinary RBAC rule
-// grant a tap, per sink if wanted, with no vocabulary of this API's
-// own. An info route checks the ordinary resource instead, and the
-// discovery and OpenAPI documents need authentication and no
-// authorization.
+// Sinks and Sources are cluster-scoped, so the namespace is empty. The
+// review copies user, groups, uid, and extra from the caller, so the
+// API server applies the same rules as to the caller's own request.
 //
-// The namespace is empty because both kinds are cluster-scoped. user,
-// groups, uid, and extra are copied from the TokenReview's status, so
-// the decision the API server makes is the one it would make for the
-// caller itself.
-//
-// Every route authorizes before it reads, so a 403 never reveals that
-// a name exists.
+// Every route authorizes before it looks up the named Sink or Source,
+// so a 403 does not reveal whether the name exists.
 
 import (
 	"encoding/json"
@@ -26,10 +23,10 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// accessReviewPath is where a SubjectAccessReview is created.
 const accessReviewPath = "/apis/authorization.k8s.io/v1/subjectaccessreviews"
 
-// accessReview is the object sent and the object returned.
+// accessReview is both the request body and the response of the
+// SubjectAccessReview API.
 type accessReview struct {
 	APIVersion string             `json:"apiVersion"`
 	Kind       string             `json:"kind"`
@@ -61,8 +58,9 @@ type accessReviewStatus struct {
 	EvaluationError string `json:"evaluationError,omitempty"`
 }
 
-// scopeOf names what a route needs, which is also the scope the 403's
-// WWW-Authenticate header publishes (RFC 6750 section 3.1).
+// scopeOf returns the permission a route needs, as resource or
+// resource/aspect, for the scope of a 403's WWW-Authenticate header
+// (RFC 6750 section 3.1).
 func scopeOf(route apiRoute) string {
 	if route.Kind == routeTap {
 		return route.Resource + "/" + route.Aspect
@@ -70,13 +68,12 @@ func scopeOf(route apiRoute) string {
 	return route.Resource
 }
 
-// attributesFor builds the check one route and one name need.
+// attributesFor returns nil when the route needs no authorization.
 func attributesFor(route apiRoute, name string) *resourceAttributes {
 	if route.Resource == "" {
 		return nil
 	}
 	attributes := &resourceAttributes{
-		// Both kinds are cluster-scoped, so the namespace is empty.
 		Namespace: "",
 		Verb:      "get",
 		Group:     EndpointGroup,
@@ -89,10 +86,9 @@ func attributesFor(route apiRoute, name string) *resourceAttributes {
 	return attributes
 }
 
-// authorizer asks the API server one question per request. There is
-// no cache here where there is one on the token, because a grant can
-// be withdrawn at any moment, and the API server's own authorizer
-// caches on its side.
+// authorizer creates a SubjectAccessReview for every request and
+// caches no result, unlike the TokenReview, so a withdrawn grant
+// applies to the next request.
 type authorizer struct {
 	client *apiclient.Client
 }
@@ -101,9 +97,11 @@ func newAuthorizer(client *apiclient.Client) *authorizer {
 	return &authorizer{client: client}
 }
 
-// authorize answers whether the caller may have this route's answer.
-// A route that needs no authorization, which is the two documents,
-// answers yes with no call.
+// authorize reports whether the caller may read the route, and the API
+// server's reason when it may not. It returns an error when the review
+// fails, or when the API server reports an evaluation error and does
+// not allow the request. A route that needs no authorization returns
+// true without a review.
 func (a *authorizer) authorize(who caller, route apiRoute, name string) (bool, string, error) {
 	attributes := attributesFor(route, name)
 	if attributes == nil {
@@ -138,8 +136,8 @@ func (a *authorizer) authorize(who caller, route apiRoute, name string) (bool, s
 	return true, "", nil
 }
 
-// refusalReason is the authorizer's own words, or a stand-in when it
-// gave none. The 403's problem document carries it.
+// refusalReason returns the reason for the 403's problem document, with
+// a default when the API server gave none.
 func refusalReason(reason string) string {
 	if strings.TrimSpace(reason) == "" {
 		return "no RBAC policy allows this request"
@@ -147,8 +145,8 @@ func refusalReason(reason string) string {
 	return reason
 }
 
-// challenge is the WWW-Authenticate field a 401 or a 403 carries (RFC
-// 6750 section 3). A request with no token gets the realm alone.
+// challenge returns the WWW-Authenticate value for a 401 or a 403
+// (RFC 6750 section 3). A request with no token gets the realm alone.
 func challenge(parameters ...string) string {
 	value := `Bearer realm="` + apiAudience + `"`
 	if len(parameters) == 0 {
@@ -157,20 +155,20 @@ func challenge(parameters ...string) string {
 	return value + ", " + strings.Join(parameters, ", ")
 }
 
-// invalidTokenChallenge carries the TokenReview's own words back to
-// the caller, which is section 3's error_description.
+// invalidTokenChallenge puts the TokenReview's error text in
+// error_description (RFC 6750 section 3).
 func invalidTokenChallenge(words string) string {
 	return challenge(`error="invalid_token"`, `error_description="`+quoted(words)+`"`)
 }
 
-// insufficientScopeChallenge names what the caller would need, which
-// is section 3.1's scope.
+// insufficientScopeChallenge names the permission the caller lacks as
+// the scope (RFC 6750 section 3.1).
 func insufficientScopeChallenge(scope string) string {
 	return challenge(`error="insufficient_scope"`, `scope="`+quoted(scope)+`"`)
 }
 
-// quoted makes text safe inside a quoted-string: a field value cannot
-// carry a bare quote, a backslash, or a line break.
+// quoted escapes text for a quoted-string in a header value, and
+// replaces line breaks with spaces because a header cannot hold them.
 func quoted(text string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\r", " ", "\n", " ")
 	return replacer.Replace(text)

@@ -5,9 +5,10 @@ weight: 10
 
 # Guides
 
-Each guide gives the steps for one task: install the operator, play
-sound to an output, pair a monitor's speakers with its screen, set an
-output's volume and controls, and listen to an output.
+Each guide walks through one task: installing the operator, playing
+sound through an output, pairing a monitor's speakers with its
+screen, setting an output's volume and controls, and recording what
+an output plays.
 
-If the DRA objects are new to you, read
+If DRA objects are new to you, read
 [How a claim reaches your pod](/docs/concepts/how-the-pieces-fit/) first.

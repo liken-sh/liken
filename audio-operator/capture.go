@@ -1,22 +1,22 @@
 package main
 
-// The capture container: the fifth container of the operator's pod,
-// which is this binary in its capture mode.
+// The capture container runs this binary in capture mode, in the
+// operator's pod. For each tap, it finds the PipeWire node, records the
+// requested span with pw-record, encodes it, and streams it to the
+// audio API. The API relays the status, headers, and body unchanged,
+// and adds only the Vary, Content-Location, Link, and
+// Content-Disposition headers. So each 400, 404, 500, and 503 is
+// written here, and its detail carries the text of the error behind
+// it: the query parser's, pw-dump's, or pw-record's.
 //
-// Every fact about PipeWire and every encoder is here: node
-// resolution, the span, the bitrate knob, and the 400, 404, 500, and
-// 503 answers that carry pw-record's own words. The API relays this
-// container's status, headers, and body unchanged and adds Vary,
-// Content-Location, Link, and Content-Disposition.
+// The container listens on port 9201, which the DaemonSet names
+// capture, because the operator's own metrics use port 9200 and two
+// containers of a pod cannot share a port. The tap routes, /healthz,
+// /readyz, and /metrics share that TLS port, and only the tap routes
+// need a token.
 //
-// The listener is 9201, named capture in the DaemonSet, and it serves
-// the tap routes, /healthz, /readyz, and /metrics on that one TLS
-// port. The last three need no token. 9200 is the operator's own
-// metrics port, and liken gives each container of a pod one port.
-//
-// The container's route mirrors the public one with the extension
-// always present, so nothing here negotiates: the API chose the form
-// before it forwarded.
+// A tap route here always ends in a format extension, because the API
+// negotiates the format before it forwards a request.
 
 import (
 	"context"
@@ -32,25 +32,22 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The settings this container reads from its environment, which is
-// how every setting in this program arrives.
 const (
 	captureAddressVariable = "CAPTURE_ADDRESS"
 	captureTapsVariable    = "CAPTURE_TAPS"
 )
 
-// defaultCaptureTaps caps this container's own load. Taps on
-// different endpoints, and several taps on one endpoint, run at once,
-// because PipeWire links each stream to the monitor ports itself.
-// The cap bounds the processes on the node, not the fan-out, and the
-// tap past it is a 503.
+// defaultCaptureTaps is the limit on taps that run at once when
+// CAPTURE_TAPS is unset. Each tap runs a pw-record process and an
+// encoder on the node, and a request over the limit gets a 503. Several
+// taps can record one endpoint, because PipeWire links each stream to
+// the monitor ports on its own.
 const defaultCaptureTaps = 4
 
-// retryAfterSeconds is what a 503 tells a client to do. The three
-// capture APIs send the same number.
+// retryAfterSeconds is the Retry-After value of every 503, in this
+// container and in the audio API.
 const retryAfterSeconds = "5"
 
-// captureServer is the whole of this mode's state.
 type captureServer struct {
 	version  string
 	leaf     *leaf
@@ -58,30 +55,24 @@ type captureServer struct {
 	readings *captureMetrics
 	taps     chan struct{}
 
-	// graph reads the PipeWire graph. It is a field so a test drives
-	// the resolution and the confirmation from fixtures rather than
-	// from a running daemon.
+	// A test replaces graph and start, so that it needs no PipeWire
+	// daemon, and log, to read the line that each tap writes.
 	graph func(ctx context.Context) ([]byte, error)
-
-	// start runs one tap's processes. A field for the same reason.
 	start func(ctx context.Context, plan tapPlan) (*runningTap, error)
+	log   func(string)
 
-	// now is the accept instant, which is the span's zero.
+	// now gives the time that a request arrives. The begin and end
+	// offsets of the span count from that time.
 	now func() time.Time
-
-	// log is where the per-tap line goes. It is a field so a test
-	// reads the line rather than the process's own output.
-	log func(string)
 }
 
-// capture is the mode's entry point.
 func capture() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
-		fatal("in-cluster config: %v", err)
+		fatal("reading the in-cluster config: %v", err)
 	}
 
 	directory := os.Getenv(captureTLSDirVariable)
@@ -109,10 +100,10 @@ func capture() {
 	}
 }
 
-func newCaptureServer(readings *captureMetrics, held *leaf, review *reviewer, taps int) *captureServer {
+func newCaptureServer(readings *captureMetrics, tlsLeaf *leaf, review *reviewer, taps int) *captureServer {
 	return &captureServer{
 		version:  version,
-		leaf:     held,
+		leaf:     tlsLeaf,
 		review:   review,
 		readings: readings,
 		taps:     make(chan struct{}, taps),
@@ -123,7 +114,9 @@ func newCaptureServer(readings *captureMetrics, held *leaf, review *reviewer, ta
 	}
 }
 
-// captureTapLimit reads the cap from the environment.
+// captureTapLimit returns the tap limit from the environment. A value
+// that is not a positive integer gives the default, so a typo does not
+// leave the node unable to run any tap.
 func captureTapLimit() int {
 	if value := os.Getenv(captureTapsVariable); value != "" {
 		if limit, err := strconv.Atoi(value); err == nil && limit > 0 {
@@ -133,17 +126,15 @@ func captureTapLimit() int {
 	return defaultCaptureTaps
 }
 
-// serve answers on the listener until the run ends.
-//
-// The certificate comes from the leaf on every handshake, so a Secret
-// the API minted after this container started is served with no
-// restart. Before the file arrives the leaf answers with a
-// certificate this container signed itself, which the API refuses
-// and reports as a 503 with the reason.
+// The leaf supplies the certificate on every TLS handshake, so a
+// certificate that the API mints after this container starts is served
+// without a restart. Until the certificate files exist, the leaf
+// serves a self-signed certificate. The API does not trust it, and
+// returns a 503 that gives the reason to its caller.
 func (s *captureServer) serve(ctx context.Context, listener net.Listener) error {
 	serving := &http.Server{
 		Handler:           s.handler(),
-		ReadHeaderTimeout: metricsDeadline,
+		ReadHeaderTimeout: readHeaderTimeout,
 		TLSConfig:         s.leaf.tlsConfig(),
 	}
 	go func() {
@@ -156,9 +147,9 @@ func (s *captureServer) serve(ctx context.Context, listener net.Listener) error 
 	return nil
 }
 
-// handler is the whole of what this container answers. The three
-// plain routes come first so a scrape and a probe never reach the
-// token check.
+// ServeMux sends a request to its most specific pattern, so /metrics,
+// /healthz, and /readyz go to their own handlers, and a scrape or a
+// probe never reaches the token check in handleRequest.
 func (s *captureServer) handler() http.Handler {
 	served := http.NewServeMux()
 	served.Handle("/metrics", captureRegistryHandler(s.readings))
@@ -172,7 +163,7 @@ func (s *captureServer) handler() http.Handler {
 		}
 		writePlain(w, http.StatusOK, "ok")
 	})
-	served.HandleFunc("/", s.answer)
+	served.HandleFunc("/", s.handleRequest)
 	return served
 }
 
@@ -182,25 +173,24 @@ func writePlain(w http.ResponseWriter, status int, text string) {
 	_, _ = fmt.Fprintln(w, text)
 }
 
-// answer handles one request on the private leg. The order is the
-// API's own: route, method, caller, query, then the graph, so a
-// refusal that costs nothing comes before a read that costs a
-// process.
-func (s *captureServer) answer(w http.ResponseWriter, r *http.Request) {
+// handleRequest checks the route, the method, the token, and the query
+// in the order that the API checks them. It reads the PipeWire graph
+// only after those checks, because the read runs pw-dump.
+func (s *captureServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	at := s.now()
 	id := requestID()
 	route, name, found := matchRoute(r.URL.Path)
 	if !found || !s.serves(route) {
-		// A path this container does not serve is not a node that is
-		// absent, so it carries no type of its own.
+		// The no-node problem type means a missing endpoint, so a path
+		// that is no route gets the blank type.
 		s.refuse(w, r, http.StatusNotFound, problemBlank, id,
 			fmt.Sprintf("this container serves no route at %s", r.URL.Path))
 		return
 	}
-	if !answersMethod(r.Method) {
+	if !allowsMethod(r.Method) {
 		w.Header().Set("Allow", allowHeader())
 		s.refuse(w, r, http.StatusMethodNotAllowed, problemBlank, id,
-			fmt.Sprintf("%s is not one of the methods this route allows", r.Method))
+			fmt.Sprintf("%s is not one of the methods that this route allows: %s", r.Method, allowHeader()))
 		return
 	}
 	if r.Method == http.MethodOptions {
@@ -211,11 +201,11 @@ func (s *captureServer) answer(w http.ResponseWriter, r *http.Request) {
 	if reason, ok := s.authenticate(r); !ok {
 		w.Header().Set("WWW-Authenticate", reason)
 		s.refuse(w, r, http.StatusUnauthorized, problemBlank, id,
-			"the capture container accepts the audio-api ServiceAccount alone")
+			"the capture container accepts only the audio-api ServiceAccount")
 		return
 	}
 
-	knobs, err := parseKnobs(route, r.URL.RawQuery)
+	query, err := parseCaptureQuery(route, r.URL.RawQuery)
 	if err != nil {
 		s.refuse(w, r, http.StatusBadRequest, problemBlank, id, err.Error())
 		return
@@ -240,8 +230,8 @@ func (s *captureServer) answer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The info route answers with the graph read and nothing else. The
-	// API joins it to the object the API server holds.
+	// The info route returns only the rate and channel count from the
+	// graph. The API merges them with the Sink or Source.
 	if route.Kind == routeInfo {
 		writeJSON(w, r.Method, http.StatusOK, captureFormatDocument{
 			Node:     name,
@@ -251,8 +241,8 @@ func (s *captureServer) answer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A HEAD answers with the GET's headers, takes no sample, and
-	// starts no process (RFC 9110 section 9.3.2).
+	// A HEAD response has the headers of the GET response and no body
+	// (RFC 9110 section 9.3.2), so no pw-record or encoder starts.
 	if r.Method == http.MethodHead {
 		w.Header().Set("Content-Type", form.ContentType)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -269,7 +259,7 @@ func (s *captureServer) answer(w http.ResponseWriter, r *http.Request) {
 		s.readings.failed(failureLimit)
 		w.Header().Set("Retry-After", retryAfterSeconds)
 		s.refuse(w, r, http.StatusServiceUnavailable, problemCaptureBusy, id,
-			fmt.Sprintf("this node is running its %d taps", cap(s.taps)))
+			fmt.Sprintf("this node already runs its limit of %d taps", cap(s.taps)))
 		return
 	}
 
@@ -279,16 +269,16 @@ func (s *captureServer) answer(w http.ResponseWriter, r *http.Request) {
 		Direction: direction,
 		Form:      form,
 		Format:    format,
-		Knobs:     knobs,
+		Query:     query,
 		RequestID: id,
 		Stream:    streamName(id),
 	}, at)
 }
 
-// serves says whether this container answers a route at all. It
-// answers the tap routes with their extension, because the API always
-// forwards a fixed form, and the info route, because the rate and the
-// channel count are facts of the graph and the graph is here.
+// serves reports whether this container handles the route. A tap route
+// must have a format extension, because the API always forwards one.
+// The info route is served here because only this container reads the
+// PipeWire graph, which gives the rate and the channel count.
 func (s *captureServer) serves(route apiRoute) bool {
 	if route.Kind == routeInfo {
 		return true
@@ -296,18 +286,19 @@ func (s *captureServer) serves(route apiRoute) bool {
 	return route.Kind == routeTap && route.Extension != ""
 }
 
-// captureFormatDocument is what the info route answers on the private
-// leg: what a tap on this endpoint would run at.
+// captureFormatDocument is the body of the info route. A tap on the
+// endpoint records at this rate and channel count.
 type captureFormatDocument struct {
 	Node     string `json:"node"`
 	Rate     int    `json:"rate"`
 	Channels int    `json:"channels"`
 }
 
-// authenticate reviews the API's own projected token. The username
-// match is the whole of the rule: this container answers the
-// audio-api ServiceAccount and nothing else, and it never authorizes,
-// because the API did that before it forwarded.
+// authenticate sends the bearer token to a TokenReview. It returns true
+// when the token belongs to the audio-api ServiceAccount, and otherwise
+// false with the WWW-Authenticate challenge to send. It does no
+// authorization, because the API authorized the caller before it
+// forwarded the request.
 func (s *captureServer) authenticate(r *http.Request) (string, bool) {
 	token, found := bearerToken(r.Header.Get("Authorization"))
 	if !found {
@@ -325,14 +316,15 @@ func (s *captureServer) authenticate(r *http.Request) (string, bool) {
 	return "", true
 }
 
-// refuse writes one problem document.
+// refuse writes an RFC 9457 problem document with the status.
 func (s *captureServer) refuse(w http.ResponseWriter, r *http.Request,
 	status int, kind, id, detail string) {
 	writeProblem(w, r.Method, newProblem(kind, status, detail, instanceOf(r.URL.Path, id)))
 }
 
-// answersMethod says whether this API answers a method at all.
-func answersMethod(method string) bool {
+// allowsMethod reports whether the routes of this container and of the
+// audio API accept the method.
+func allowsMethod(method string) bool {
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return true
@@ -340,7 +332,6 @@ func answersMethod(method string) bool {
 	return false
 }
 
-// allowHeader is the Allow field a 405 and an OPTIONS both carry.
 func allowHeader() string {
 	return "GET, HEAD, OPTIONS"
 }

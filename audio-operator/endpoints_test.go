@@ -6,15 +6,13 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-// a2dpSourceUUID is the profile the pod's a2dp_source role
-// registers, and the one the adapter advertises while WirePlumber
-// holds its endpoints. The tests name it here because the code under
-// test names no profile at all.
+// a2dpSourceUUID is the UUID of AudioSource, the profile that the pod's
+// a2dp_source role registers. The tests define it because the code
+// under test names no profile.
 const a2dpSourceUUID = "0000110a-0000-1000-8000-00805f9b34fb"
 
-// managedObjects builds one BlueZ managed-object tree. The tests
-// state an adapter as the two lists that matter: what it advertises,
-// and what media profiles bluetoothd hosts on it.
+// managedObjects builds a BlueZ managed-object tree with one adapter.
+// A nil hosted list leaves out the Media1 interface.
 func managedObjects(advertised, hosted []string) map[dbus.ObjectPath]map[string]map[string]dbus.Variant {
 	adapter := map[string]map[string]dbus.Variant{
 		adapterInterface: {"UUIDs": dbus.MakeVariant(advertised)},
@@ -29,12 +27,10 @@ func managedObjects(advertised, hosted []string) map[dbus.ObjectPath]map[string]
 	}
 }
 
-// The two states the probe exists to tell apart, in the exact form
-// bluetoothd reported them on a machine with one radio and one
-// speaker. The healthy tree carries AudioSource because WirePlumber
-// registered an endpoint for it. The broken tree is the same radio
-// after the Bluetooth pod restarted, with every UUID that bluetoothd
-// publishes for itself and none that a client registers.
+// The cases use the UUIDs that bluetoothd reported on a machine with one
+// radio and one speaker. While the endpoint is registered, the adapter
+// advertises AudioSource. After the Bluetooth pod restarts, the adapter
+// advertises only the UUIDs that bluetoothd publishes for itself.
 func TestEndpointsFromReadsTheRegistration(t *testing.T) {
 	hosted := []string{a2dpSourceUUID, audioSinkUUID}
 	cases := []struct {
@@ -63,8 +59,8 @@ func TestEndpointsFromReadsTheRegistration(t *testing.T) {
 			registered: false,
 		},
 		{
-			// A role change from a2dp_source to a2dp_sink advertises
-			// AudioSink instead, and the check passes with no edit.
+			// A deployment that registers a2dp_sink advertises AudioSink,
+			// and the check passes.
 			name:       "a different role registered",
 			advertised: []string{audioSinkUUID},
 			hosted:     hosted,
@@ -72,8 +68,8 @@ func TestEndpointsFromReadsTheRegistration(t *testing.T) {
 			registered: true,
 		},
 		{
-			// An adapter with no Media1 hosts no media profile, so
-			// nothing about it can be missing.
+			// An adapter with no Media1 hosts no media profile, so it never
+			// counts as registered, and the probe fails.
 			name:       "an adapter that hosts no media profile",
 			advertised: []string{a2dpSourceUUID},
 			hosted:     nil,
@@ -94,9 +90,9 @@ func TestEndpointsFromReadsTheRegistration(t *testing.T) {
 	}
 }
 
-// A tree with no adapter is a radio that is unplugged, and the probe
-// passes on it rather than restarting a container that would find
-// nothing to register.
+// A tree with no adapter means that the radio is unplugged. The probe
+// passes, because a restart of the container has nothing to register
+// with.
 func TestEndpointsFromCountsNoAdapter(t *testing.T) {
 	objects := map[dbus.ObjectPath]map[string]map[string]dbus.Variant{
 		"/org/bluez": {"org.freedesktop.DBus.ObjectManager": {}},
@@ -106,14 +102,10 @@ func TestEndpointsFromCountsNoAdapter(t *testing.T) {
 		t.Errorf("adapters = %d, want 0", adapters)
 	}
 	if registered {
-		t.Error("a tree with no adapter reported a registration")
+		t.Error("registered = true for a tree with no adapter, want false")
 	}
 }
 
-// A second radio that holds the registration answers for the tree. A
-// machine with two adapters runs one Bluetooth operator pod, and a
-// live connection on either is a WirePlumber that still holds its
-// bus.
 func TestEndpointsFromReadsEitherAdapter(t *testing.T) {
 	objects := managedObjects(nil, []string{a2dpSourceUUID})
 	objects["/org/bluez/hci1"] = map[string]map[string]dbus.Variant{
@@ -125,12 +117,10 @@ func TestEndpointsFromReadsEitherAdapter(t *testing.T) {
 		t.Errorf("adapters = %d, want 2", adapters)
 	}
 	if !registered {
-		t.Error("a registration on the second adapter was not read")
+		t.Error("registered = false with a registration on the second adapter, want true")
 	}
 }
 
-// hostedProfiles states what the failure line counts, so a reader of
-// kubectl describe learns what the check looked for.
 func TestHostedProfilesCountsWhatBlueZHosts(t *testing.T) {
 	objects := managedObjects(nil, []string{a2dpSourceUUID, audioSinkUUID})
 	if got := hostedProfiles(objects); got != 2 {

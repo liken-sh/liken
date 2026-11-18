@@ -1,30 +1,28 @@
 package main
 
-// Restarting PipeWire and WirePlumber inside their containers.
+// PipeWire applies a channel layout only when it starts, and WirePlumber
+// exits when its PipeWire goes away. If a restart of either daemon ended
+// its container, the kubelet's crash backoff would apply whatever the exit
+// code, and every sink on the machine would stay silent for 10 seconds
+// on the second restart within ten minutes, 20 seconds on the third, and
+// so on up to 5 minutes. A receiver's ELD changes when the receiver
+// turns on or off, so turning a receiver off and on again within ten
+// minutes would reach that backoff.
 //
-// A new channel layout takes effect only in a new PipeWire, and a
-// PipeWire that goes away takes its WirePlumber with it. The kubelet
-// puts every exit of a container through its crash backoff, whatever
-// the exit code, so a restart that ended the containers would leave
-// every sink on the machine silent for 10 seconds the second time
-// within ten minutes, 20 seconds the third time, and so on up to 5
-// minutes. A receiver's ELD changes with its power, so turning a
-// receiver on and off again within ten minutes reaches that backoff.
-//
-// So each container's first process runs its daemon as a child and
-// starts it again in place:
+// So the first process of each container runs its daemon as a child
+// and restarts it in place:
 //
 //   - The PipeWire container watches the drop-in directory. When the
 //     drop-in is newer than PipeWire's socket (declarationloaded.go),
-//     it ends PipeWire and starts it again.
+//     it sends PipeWire SIGTERM and starts it again.
 //   - The WirePlumber container starts WirePlumber again when it exits
-//     because a new PipeWire replaced the one it served. PipeWire binds
-//     its socket again at each start, so a new PipeWire is a new file at
-//     the socket's path.
+//     because a new PipeWire replaced its old one. PipeWire binds its
+//     socket at each start, so a new PipeWire is a new file at the
+//     socket's path.
 //
-// Any other exit ends the container with the daemon's status, so the
-// kubelet's backoff still bounds a crash loop, and each container's
-// restart count is the count of crashes.
+// Any other exit ends the container with the daemon's status. The
+// kubelet's backoff then still limits a crash loop, and the restart
+// count of each container counts only crashes.
 
 import (
 	"fmt"
@@ -37,38 +35,40 @@ import (
 	"time"
 )
 
-// The arguments that select the two first processes.
+// The first argument of the operator binary selects the daemon that
+// the container's first process supervises.
 const (
 	pipewireMode    = "pipewire"
 	wireplumberMode = "wireplumber"
 )
 
-// The daemons, in full because the first process starts them with no
-// PATH lookup.
+// The first process starts the daemons by full path and does not
+// search PATH.
 const (
 	pipewireBinary    = "/usr/bin/pipewire"
 	wireplumberBinary = "/usr/bin/wireplumber"
 )
 
-// pipewireReturnLimit bounds the WirePlumber container's wait for a new
-// PipeWire to answer. A PipeWire that crashed waits in the kubelet's
-// crash backoff, which doubles up to 5 minutes, so the limit is past
-// that cap.
+// pipewireReturnLimit is how long the WirePlumber container waits for
+// PipeWire to accept connections again after WirePlumber exits. When
+// PipeWire crashes, its container restarts only after the kubelet's
+// crash backoff, which doubles up to 5 minutes, so the limit is longer
+// than that.
 const pipewireReturnLimit = 6 * time.Minute
 
-// The first and the longest pause between two looks at PipeWire's
-// socket while it does not answer. PipeWire writes no event a client
-// can wait on while it is down, so each look is one connect.
+// awaitPipewire polls the socket, because PipeWire sends no event that a
+// client can wait on while it is down. The pause doubles from
+// firstSocketPause up to longestSocketPause.
 const (
 	firstSocketPause   = 100 * time.Millisecond
 	longestSocketPause = 2 * time.Second
 )
 
-// runPipewire is the PipeWire container's first process.
+// runPipewire is the first process of the PipeWire container.
 func runPipewire() {
 	dropIn := filepath.Join(pipewireConfigDir, dropInName)
 	// The watch opens before PipeWire starts, so a drop-in written while
-	// PipeWire starts is not lost.
+	// PipeWire starts is not missed.
 	writes := newVolumeSwaps(pipewireConfigDir, dropInName)
 	if err := writes.arm(); err != nil {
 		fatal("watching %s: %v", pipewireConfigDir, err)
@@ -83,15 +83,14 @@ func runPipewire() {
 	os.Exit(superviseDaemon("PipeWire", socketPath, start, writes.swapped, stale, nil, stops()))
 }
 
-// runWireplumber is the WirePlumber container's first process. Its
-// arguments go to WirePlumber.
+// runWireplumber is the first process of the WirePlumber container.
 func runWireplumber(arguments []string) {
 	start := func() (*exec.Cmd, error) {
 		return startDaemon(wireplumberBinary, arguments...)
 	}
 	replaced := func(before pipewireIdentity) bool {
 		if !awaitPipewire(socketPath, pipewireReturnLimit) {
-			fmt.Fprintf(os.Stderr, "PipeWire did not answer within %s\n", pipewireReturnLimit)
+			fmt.Fprintf(os.Stderr, "PipeWire accepted no connection within %s\n", pipewireReturnLimit)
 			return false
 		}
 		return currentPipewire(socketPath) != before
@@ -99,32 +98,29 @@ func runWireplumber(arguments []string) {
 	os.Exit(superviseDaemon("WirePlumber", socketPath, start, nil, nil, replaced, stops()))
 }
 
+// startDaemon sends the daemon's output to the container's log.
 func startDaemon(binary string, arguments ...string) (*exec.Cmd, error) {
 	daemon := exec.Command(binary, arguments...)
 	daemon.Stdout, daemon.Stderr = os.Stdout, os.Stderr
 	return daemon, daemon.Start()
 }
 
-// stops is the kubelet's SIGTERM to the container, and a SIGINT.
 func stops() <-chan os.Signal {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 	return stop
 }
 
-// superviseDaemon runs one daemon and starts it again in place. It
-// returns the status the container exits with.
-//
-// When a wake arrives and stale answers true, it ends the daemon with
-// SIGTERM and starts it again. When the daemon exits on its own and
-// replaced answers true for the PipeWire the daemon started against, it
-// starts the daemon again. Every other exit, and a stop, returns the
-// daemon's status: its exit code, or 128 and the signal that ended it,
-// as a shell reports it.
+// superviseDaemon runs one daemon and returns the status that the
+// container exits with. When changes delivers and stale returns true,
+// it sends the daemon SIGTERM and starts it again. When the daemon exits
+// on its own and replaced returns true for the PipeWire that was running
+// when the daemon started, it starts the daemon again. After any other
+// exit, or a stop signal, it returns the daemon's status.
 func superviseDaemon(
 	name, socket string,
 	start func() (*exec.Cmd, error),
-	wakes <-chan struct{},
+	changes <-chan struct{},
 	stale func() bool,
 	replaced func(before pipewireIdentity) bool,
 	stop <-chan os.Signal,
@@ -141,7 +137,7 @@ func superviseDaemon(
 			_ = daemon.Wait()
 			close(exited)
 		}()
-		ordered := false
+		restartRequested := false
 	running:
 		for {
 			select {
@@ -151,28 +147,30 @@ func superviseDaemon(
 				_ = daemon.Process.Signal(signal)
 				<-exited
 				return daemonStatus(daemon.ProcessState)
-			case <-wakes:
-				if ordered || !stale() {
+			case <-changes:
+				if restartRequested || !stale() {
 					continue
 				}
-				ordered = true
+				restartRequested = true
 				fmt.Printf("the PipeWire declaration changed, so %s at pid %d restarts to load it\n", name, daemon.Process.Pid)
 				_ = daemon.Process.Signal(syscall.SIGTERM)
 			}
 		}
-		if ordered {
+		if restartRequested {
+			// The daemon exited because of the SIGTERM above.
 			continue
 		}
 		if replaced != nil && replaced(before) {
 			fmt.Printf("%s at pid %d exited because a new PipeWire started, so it starts again\n", name, daemon.Process.Pid)
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "%s at pid %d exited (%s), so its container exits\n", name, daemon.Process.Pid, daemon.ProcessState)
+		fmt.Fprintf(os.Stderr, "%s at pid %d exited, so its container exits: %s\n", name, daemon.Process.Pid, daemon.ProcessState)
 		return daemonStatus(daemon.ProcessState)
 	}
 }
 
-// daemonStatus is the status a shell reports for a daemon that ended.
+// daemonStatus returns the status that a shell reports: the exit code,
+// or 128 plus the number of the signal that ended the process.
 func daemonStatus(state *os.ProcessState) int {
 	if status, ok := state.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 		return 128 + int(status.Signal())
@@ -180,15 +178,17 @@ func daemonStatus(state *os.ProcessState) int {
 	return state.ExitCode()
 }
 
-// pipewireIdentity is one PipeWire: the device, the inode, and the
-// change time of the socket it bound, or the zero value while no
-// PipeWire answers. The kernel can give a new socket the inode of the
-// one it replaced, so the change time is what tells them apart.
+// pipewireIdentity identifies a PipeWire by the socket file it bound.
+// The kernel can give a new socket the inode of the one it replaced, so
+// the change time tells the two apart. The zero value means that no
+// PipeWire accepts connections.
 type pipewireIdentity struct {
 	device, inode uint64
 	changed       syscall.Timespec
 }
 
+// currentPipewire connects before it reads the file's attributes,
+// because a socket file can remain after PipeWire exits.
 func currentPipewire(socket string) pipewireIdentity {
 	connection, err := net.Dial("unix", socket)
 	if err != nil {
@@ -202,8 +202,8 @@ func currentPipewire(socket string) pipewireIdentity {
 	return pipewireIdentity{device: uint64(stat.Dev), inode: stat.Ino, changed: stat.Ctim}
 }
 
-// awaitPipewire waits until PipeWire accepts a connection, up to the
-// limit.
+// awaitPipewire returns false when PipeWire accepts no connection at
+// socket within limit.
 func awaitPipewire(socket string, limit time.Duration) bool {
 	deadline := time.Now().Add(limit)
 	pause := firstSocketPause

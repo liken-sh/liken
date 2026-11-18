@@ -1,8 +1,5 @@
 package main
 
-// The record of which claims hold each endpoint, which status.claims
-// reports.
-
 import (
 	"cmp"
 	"maps"
@@ -11,31 +8,31 @@ import (
 	"sync"
 )
 
-// preparedClaims is which claims hold each device now: one claim on
-// an exclusive endpoint, and up to the share count on a shared one.
+// preparedClaims records which claims hold each device, for
+// status.claims.
 //
-// The record is in memory and nowhere else. A prepare call is where
-// the claim's namespace and name arrive, and the CDI file the prepare
-// leaves behind carries the claim's UID alone, which names no claim a
-// reader can ask the API server for. So the plugin keeps the pair,
-// the resource reports it, and a pod that started before this pod
-// shows no claim until the kubelet prepares its claim again.
+// The record is only in memory, because the kubelet's prepare call is
+// the only source of a claim's namespace and name. The CDI spec that
+// prepare writes names only the claim's UID, and the API server cannot
+// look up a claim by UID. So after the operator pod restarts, status
+// leaves out the claims of running pods until the kubelet prepares them
+// again.
 //
-// The kubelet's calls and the reconcile pass both reach it, which is
-// why it holds a lock.
+// The kubelet's calls and the reconcile pass both use the record, so a
+// mutex guards it.
 type preparedClaims struct {
 	mutex sync.RWMutex
-	// held answers status.claims: for each allocated device name, the
-	// claims that hold it, by UID. devices is the other direction,
-	// because an unprepare call carries the claim's UID and no device
-	// at all.
+	// held maps a device name to the claims that hold it, keyed by claim
+	// UID. devices maps a claim UID to its device names, because an
+	// unprepare call names only the claim's UID.
 	held    map[string]map[string]EndpointClaim
 	devices map[string][]string
 }
 
-// prepared records one claim's devices. A nil record takes the write
-// and drops it, so a plugin built without one needs no branch.
-func (p *preparedClaims) prepared(uid string, claim EndpointClaim, devices []string) {
+// record records that the claim with this UID holds these devices.
+// A nil receiver does nothing, so a plugin built without a record needs
+// no nil check. The other methods treat a nil receiver the same way.
+func (p *preparedClaims) record(uid string, claim EndpointClaim, devices []string) {
 	if p == nil || len(devices) == 0 {
 		return
 	}
@@ -53,9 +50,9 @@ func (p *preparedClaims) prepared(uid string, claim EndpointClaim, devices []str
 	p.devices[uid] = devices
 }
 
-// released drops what one claim held. The other claims that share a
-// device keep it.
-func (p *preparedClaims) released(uid string) {
+// release removes the claim with this UID from each device it holds.
+// Other claims on a shared device keep it.
+func (p *preparedClaims) release(uid string) {
 	if p == nil {
 		return
 	}
@@ -70,8 +67,8 @@ func (p *preparedClaims) released(uid string) {
 	delete(p.devices, uid)
 }
 
-// holders answers the claims that hold one device, sorted by
-// namespace and name, and nothing between holders.
+// holders returns the claims that hold the device, sorted by namespace
+// and name, or nil when no claim holds it.
 func (p *preparedClaims) holders(device string) []EndpointClaim {
 	if p == nil {
 		return nil
@@ -88,8 +85,6 @@ func (p *preparedClaims) holders(device string) []EndpointClaim {
 	return claims
 }
 
-// heldByAnother reports whether a claim other than the one with this
-// UID holds the device now.
 func (p *preparedClaims) heldByAnother(device, uid string) bool {
 	if p == nil {
 		return false

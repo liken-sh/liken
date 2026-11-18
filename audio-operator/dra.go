@@ -1,30 +1,22 @@
 package main
 
-// The DRA driver's kubelet half: the plugin the kubelet calls before
-// it starts a pod that holds a claim on an output.
+// The kubelet calls NodePrepareResources before it starts a pod that
+// has a claim on an audio device, and NodeUnprepareResources when the
+// claim is released.
 //
-// The wire arrangement is the opposite of what the word "plugin"
-// suggests. The driver runs two gRPC servers and the kubelet is the
-// only client of both. The first is registration: the kubelet watches
-// a well-known directory for sockets, dials each one, and calls
-// GetInfo to read what is there. The second is the DRA plugin API
-// itself, on a socket of the driver's own, whose path GetInfo
-// announces. Unix sockets are the whole transport, and file
-// permissions on the kubelet's directories are the authentication.
+// The kubelet finds the driver through a registration socket in its
+// plugin registry directory. It calls GetInfo there, which returns the
+// path of the plugin socket that serves the DRA calls. Both are gRPC
+// servers on unix sockets, and the permissions on the kubelet's
+// directories are their only authentication.
 //
-// The prepare protocol tells the driver almost nothing: a claim's
-// namespace, name, and UID. What was allocated is on the claim's
-// status in the API server, so the driver reads that back, reads
-// PipeWire's graph again, and hands the claim the name the allocated
-// output's sink has now. A call signals that something happened,
-// and the driver acts on the durable record instead of on data
-// carried in the call.
+// A prepare request contains only the claim's namespace, name, and UID,
+// so the driver reads the allocation from the API server and the node
+// name from PipeWire's graph at prepare time.
 //
-// Failures are per-claim strings inside the response, not gRPC
-// errors. The kubelet holds the affected pod in ContainerCreating and
-// retries, which is the right behavior for an output whose monitor
-// is unplugged: the pod waits, visibly, and a describe of the pod
-// says why.
+// A failed claim gets an error string on its entry in the response, not
+// a gRPC error. The kubelet keeps the pod in ContainerCreating and
+// retries, and kubectl describe pod shows the error.
 
 import (
 	"context"
@@ -41,48 +33,37 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The kubelet's plugin directories. The registry is where the kubelet
-// discovers plugins, and the plugin's own directory holds the socket
-// that answers the prepare calls. These are variables so the tests
-// can substitute them.
+// These are variables so that tests can point them at a temporary
+// directory.
 var (
 	draRegistryDir = "/var/lib/kubelet/plugins_registry"
 	draPluginDir   = "/var/lib/kubelet/plugins/" + DriverName
 )
 
-// draPlugin answers the kubelet's DRA calls. The API client is its
-// only state, and it derives everything else again on each call, from
-// the claim and from PipeWire.
+// draPlugin serves the kubelet's DRA calls. It shares endpoints and
+// claims with the reconcile pass, and reads the claim and the graph
+// again on each call.
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
 	client *apiclient.Client
-	// endpoints is what the last reconcile pass read from the
-	// hardware. A prepare call carries a device name and nothing
-	// else, and the name no longer holds the card and PCM numbers, so
-	// this is what resolves one.
+	// endpoints is the inventory that the last reconcile pass read
+	// from the hardware. A device name contains no ALSA card or PCM
+	// number, so a prepare looks them up here.
 	endpoints *endpointInventory
-	// claims is which claim holds each device now. The plugin writes
-	// it and the reconcile pass reads it, so the two hold one object
-	// between them, the way they hold the inventory.
+	// claims records which claims hold each device. The plugin writes
+	// it, and the reconcile pass reads it to write status.claims.
 	claims *preparedClaims
-	// graph reads PipeWire's graph from the graph feed, the same feed
-	// the reconcile pass reads, so a prepare costs no pw-dump process
-	// while the feed runs. changes is the feed's signal that the next
-	// graph arrived, which the codec wait reads. Both are fields so
-	// that a test drives a prepare without a PipeWire behind it.
-	graph   func(context.Context) (pwGraph, error)
-	changes func() <-chan struct{}
-	// setCodec and setVolumes are the two writes a codec switch makes,
-	// fields for the same reason.
+	// graph and changes read the graph feed that the reconcile pass
+	// also reads, so a prepare starts no pw-dump process. A codec
+	// switch waits on changes for the rebuilt sink. These and the
+	// PipeWire writes below are fields so that a test can run a prepare
+	// without PipeWire.
+	graph      func(context.Context) (pwGraph, error)
+	changes    func() <-chan struct{}
 	setCodec   func(ctx context.Context, device, codec int) error
 	setVolumes func(ctx context.Context, node int, volumes []float64) error
 }
 
-// newDRAPlugin builds the plugin the kubelet talks to.
-//
-// Every seam takes its real implementation here and a stand-in
-// only in a test, so this is the one place the production graph
-// read and the two writes are named together.
 func newDRAPlugin(client *apiclient.Client, endpoints *endpointInventory, claims *preparedClaims, feed *graphFeed) *draPlugin {
 	return &draPlugin{
 		client:     client,
@@ -95,7 +76,7 @@ func newDRAPlugin(client *apiclient.Client, endpoints *endpointInventory, claims
 	}
 }
 
-// draRegistrar answers the kubelet's plugin-watcher handshake.
+// draRegistrar serves the kubelet's plugin registration handshake.
 type draRegistrar struct {
 	regv1.UnimplementedRegistrationServer
 	endpoint string
@@ -106,12 +87,10 @@ func (r *draRegistrar) GetInfo(ctx context.Context, req *regv1.InfoRequest) (*re
 		Type:     regv1.DRAPlugin,
 		Name:     DriverName,
 		Endpoint: r.endpoint,
-		// These strings name gRPC services, not semantic versions. The
-		// kubelet picks the newest version it also supports, and this
-		// driver serves exactly the v1 API.
-		// The list names no health service, so the kubelet opens no
-		// device-health stream. This operator reports health through
-		// the device taints, which evict a pod when an output goes silent.
+		// These are gRPC service names, not semantic versions, and
+		// the driver serves only the v1 API. The list has no health
+		// service, so the kubelet opens no device health stream. The
+		// operator reports health with device taints instead.
 		SupportedVersions: []string{drav1.DRAPluginService},
 	}, nil
 }
@@ -123,13 +102,12 @@ func (r *draRegistrar) NotifyRegistrationStatus(ctx context.Context, status *reg
 	return &regv1.RegistrationStatusResponse{}, nil
 }
 
-// serveDRAPlugin starts both servers and blocks until the context
-// ends or a server fails. The order matters: the plugin socket must
-// already be listening before the registration socket exists, because
-// the kubelet dials the announced endpoint as soon as it sees the
-// registration. The function removes stale sockets from a previous
-// pod first, because a bind to an orphaned socket file fails even
-// when nothing is listening on it.
+// serveDRAPlugin runs the plugin and registration servers until the
+// context ends or a server fails. The plugin socket listens before the
+// registration socket exists, because the kubelet dials the plugin
+// socket as soon as it finds the registration socket. A socket file
+// that a previous pod left is removed first, because binding a unix
+// socket fails when the file exists, even when nothing listens on it.
 func serveDRAPlugin(ctx context.Context, client *apiclient.Client, endpoints *endpointInventory, claims *preparedClaims, feed *graphFeed) error {
 	if err := os.MkdirAll(draPluginDir, 0o755); err != nil {
 		return err
@@ -138,7 +116,7 @@ func serveDRAPlugin(ctx context.Context, client *apiclient.Client, endpoints *en
 	_ = os.Remove(pluginSocket)
 	pluginListener, err := net.Listen("unix", pluginSocket)
 	if err != nil {
-		return fmt.Errorf("the plugin socket: %w", err)
+		return fmt.Errorf("listening on the plugin socket: %w", err)
 	}
 	pluginServer := grpc.NewServer()
 	drav1.RegisterDRAPluginServer(pluginServer, newDRAPlugin(client, endpoints, claims, feed))
@@ -147,7 +125,7 @@ func serveDRAPlugin(ctx context.Context, client *apiclient.Client, endpoints *en
 	_ = os.Remove(registrationSocket)
 	registrationListener, err := net.Listen("unix", registrationSocket)
 	if err != nil {
-		return fmt.Errorf("the registration socket: %w", err)
+		return fmt.Errorf("listening on the registration socket: %w", err)
 	}
 	registrationServer := grpc.NewServer()
 	regv1.RegisterRegistrationServer(registrationServer, &draRegistrar{endpoint: pluginSocket})
@@ -165,11 +143,9 @@ func serveDRAPlugin(ctx context.Context, client *apiclient.Client, endpoints *en
 	}
 }
 
-// NodePrepareResources prepares every claim in the request. The
-// response must include one entry for each claim, because the kubelet
-// treats a missing entry as a failure to retry. Each entry is
-// independent, so trouble with one claim never blocks another
-// claim's pod.
+// NodePrepareResources returns an entry for each claim, because the
+// kubelet treats a missing entry as a failure and retries. A failure of
+// one claim does not affect the others.
 func (p *draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePrepareResourcesRequest) (*drav1.NodePrepareResourcesResponse, error) {
 	resp := &drav1.NodePrepareResourcesResponse{Claims: map[string]*drav1.NodePrepareResourceResponse{}}
 	for _, claim := range req.Claims {
@@ -190,27 +166,27 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		return fail("reading the claim: %v", err)
 	}
 	if allocated.Metadata.UID != claim.Uid {
-		// The named claim was deleted and recreated after the kubelet
-		// asked. Whatever this new claim holds, it is not the grant
-		// this pod was scheduled against.
+		// The claim was deleted and created again after the kubelet
+		// sent the call, so this allocation is not the one that the
+		// pod was scheduled against.
 		return fail("the claim's UID changed (%s became %s)", claim.Uid, allocated.Metadata.UID)
 	}
 	if allocated.Status.Allocation == nil {
 		return fail("the claim has no allocation yet")
 	}
 
-	// The allocation's config is the resolved list: the claim's own
-	// blocks and the DeviceClass's, each marked with its source. The
-	// scheduler passed every opaque block through unread, so this is
-	// the first code anywhere that reads this driver's parameters.
+	// The API server stores this driver's opaque config without parsing
+	// it, and the scheduler copies it into the allocation, so a bad
+	// parameter fails here first.
 	selection, err := claimCodecs(allocated.Status.Allocation.Devices.Config)
 	if err != nil {
 		return fail("%v", err)
 	}
 
-	// One graph read answers every result in the claim, and it is the
-	// same read that publishes the slice, so the two always report the
-	// same sink for an output.
+	// The graph is read once, and every result in the claim uses that
+	// read. It comes from the feed that the ResourceSlice is published
+	// from, so the slice and the prepare agree on which node an output
+	// has.
 	graph, err := p.graph(ctx)
 	if err != nil {
 		return fail("reading PipeWire's graph: %v", err)
@@ -221,35 +197,28 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 	var held []string
 	for _, result := range allocated.Status.Allocation.Devices.Results {
 		if result.Driver != DriverName {
-			// This is another driver's allocation in the same claim.
-			// That driver's own plugin prepares it. A claim that pairs a
-			// screen with its speakers holds one of each.
+			// A claim can pair this driver's speakers with another
+			// driver's screen, and that driver's plugin prepares it.
 			continue
 		}
-		// A codec on anything but a Bluetooth speaker fails before
-		// the graph is asked for a sink: a sound card has no air
-		// codec, and failing here names the real mistake instead of
-		// whatever the graph happens to lack.
+		// Only a Bluetooth speaker has a codec to select. This check
+		// runs before the node lookup, so that the error names the
+		// mistake in the claim and not a missing node.
 		codec := selection.forRequest(result.Request)
 		address, isSpeaker := speakerFromDeviceName(result.Device)
 		if codec != "" && !isSpeaker {
-			return fail("the claim states the codec %s for %s, which is not a Bluetooth speaker",
+			return fail("the claim selects the codec %s for %s, which is not a Bluetooth speaker",
 				codec, result.Device)
 		}
-		// A codec switch rebuilds the speaker's sink, and every claim
-		// that shares the speaker plays through that sink. So a share
-		// states no codec: the codec belongs to the speaker, and the
-		// Sink's spec.codec sets it while no claim holds the speaker.
+		// A codec switch rebuilds the sink under every claim that
+		// shares the speaker, so a shared claim cannot select a codec.
+		// The Sink's spec.codec sets the codec of a shared speaker.
 		shared := claimShares(allocated, result.Request)
 		if codec != "" && shared {
-			return fail("the claim shares %s and states the codec %s; a codec switch rebuilds the sink "+
-				"under every claim that shares the speaker, so a shared claim cannot state one",
+			return fail("the claim shares %s and selects the codec %s, but a codec switch rebuilds the sink "+
+				"under every claim that shares the speaker, so a shared claim cannot select one",
 				result.Device, codec)
 		}
-		// A device with no node right now leaves no name to give the
-		// consumer. The pod waits in ContainerCreating, and the device's
-		// taints are what the scheduler and the eviction controller act
-		// on.
 		node, err := endpointNode(p.endpoints, result.Device, graph)
 		if err != nil {
 			return fail("%v", err)
@@ -257,11 +226,9 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		if isSpeaker {
 			speakerSink := graph.Speakers[address]
 			if codec != "" {
-				// The delivery waits for the switch. The rebuilt node
-				// keeps its name, but between the write and the
-				// rebuild the name names nothing, and a delivery that
-				// raced it could start the consumer against a sink
-				// still playing the old codec.
+				// Wait until the sink reports the new codec, because a
+				// pod that connects before the rebuild plays through the
+				// old codec.
 				switched, err := p.selectCodec(ctx, address, codec, speakerSink)
 				if err != nil {
 					return fail("%v", err)
@@ -269,14 +236,13 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 				speakerSink = switched
 				node = switched.Node
 			}
-			// The unity write is part of delivery, not codec switching.
-			// A claim with no codec and a claim that selects the codec
-			// already playing therefore receive the sink in the same state.
-			// A share that arrives while another claim holds the speaker
-			// plays into the level that claim's stream plays at, because a
-			// unity write then would change the level under that stream.
+			// Each prepare of a speaker sets its sink to unity volume,
+			// with or without a codec, so every claim starts from the
+			// same level. A claim that shares a speaker that another
+			// claim holds skips the write, because it would change the
+			// volume of the stream that already plays.
 			if !p.claims.heldByAnother(result.Device, claim.Uid) {
-				if err := p.deliverAtUnity(ctx, address, speakerSink); err != nil {
+				if err := p.setSinkToUnity(ctx, address, speakerSink); err != nil {
 					return fail("%v", err)
 				}
 			}
@@ -299,26 +265,22 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 			return fail("writing the CDI spec: %v", err)
 		}
 	}
-	// The record is written after the spec, so that a device the
-	// resource reports as held is a device whose consumer can start.
-	p.claims.prepared(claim.Uid, EndpointClaim{Namespace: claim.Namespace, Name: claim.Name}, held)
+	// Record the holders after writing the CDI spec, so status.claims
+	// never lists a device whose pod cannot start yet.
+	p.claims.record(claim.Uid, EndpointClaim{Namespace: claim.Namespace, Name: claim.Name}, held)
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
 }
 
-// deliverAtUnity sets every channel of one speaker's sink to 1.0.
+// setSinkToUnity sets every channel of a speaker's sink to 1.0. A
+// failed write fails the prepare, because the kubelet retries, and a
+// pod that started anyway would play at an unknown volume.
 //
-// A failed write fails the whole prepare: the kubelet retries and
-// a retry converges, where a delivery that went ahead would play
-// at a level nobody chose.
-//
-// Object 0 is the PipeWire core, never a node, so a graph read
-// that reported no id for this sink reported nothing to write to,
-// and the prepare proceeds without the write.
-//
-// The card's own outputs take no such write: their level lives on
-// a device route, which is a different write with different
-// semantics.
-func (p *draPlugin) deliverAtUnity(ctx context.Context, address string, sink bluezSink) error {
+// Object 0 in PipeWire is the core, so a NodeID of 0 means that the
+// graph had no id for this sink, and the prepare continues without the
+// write. A sound card's output gets no write at prepare. The reconcile
+// pass sets a sink node that PipeWire has just built to unity when its
+// spec declares no level (resting.go).
+func (p *draPlugin) setSinkToUnity(ctx context.Context, address string, sink bluezSink) error {
 	if sink.NodeID == 0 {
 		return nil
 	}
@@ -328,15 +290,11 @@ func (p *draPlugin) deliverAtUnity(ctx context.Context, address string, sink blu
 	return nil
 }
 
-// endpointNode resolves one allocated device name to the PipeWire
-// node a consumer's streams must target.
-//
-// The name is a lookup and not a parse. It is built from the
-// hardware's identity, so it holds no card and no PCM number, and
-// the inventory the reconcile pass published is what holds the
-// pair. A Bluetooth speaker is still six dashed hexadecimal octets
-// and still resolves from the name alone, because the address is
-// both the identity and the key.
+// endpointNode returns the name of the PipeWire node that the pod's
+// streams must target. A sound card device's name has no card or PCM
+// number, so it is looked up in the inventory. A Bluetooth speaker's
+// device name is its MAC address with dashes, so its sink is found from
+// the name alone.
 func endpointNode(endpoints *endpointInventory, device string, graph pwGraph) (string, error) {
 	if output, published := endpoints.lookup(device); published {
 		node, running := graph.Nodes[output.graphAddress()]
@@ -355,10 +313,9 @@ func endpointNode(endpoints *endpointInventory, device string, graph pwGraph) (s
 	return "", fmt.Errorf("%q does not name a device of this driver", device)
 }
 
-// NodeUnprepareResources removes each claim's CDI spec. As with
-// prepare, every claim gets an answer and failures stay specific to
-// each claim. Nothing else has to be given back: the socket belongs
-// to PipeWire, and the next claim reads its name again.
+// NodeUnprepareResources removes each claim's CDI spec and its record
+// in claims. Nothing else needs releasing, because the PipeWire socket
+// belongs to PipeWire and the next prepare looks up the node again.
 func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnprepareResourcesRequest) (*drav1.NodeUnprepareResourcesResponse, error) {
 	resp := &drav1.NodeUnprepareResourcesResponse{Claims: map[string]*drav1.NodeUnprepareResourceResponse{}}
 	for _, claim := range req.Claims {
@@ -366,16 +323,14 @@ func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeU
 			resp.Claims[claim.Uid] = &drav1.NodeUnprepareResourceResponse{Error: err.Error()}
 			continue
 		}
-		p.claims.released(claim.Uid)
+		p.claims.release(claim.Uid)
 		resp.Claims[claim.Uid] = &drav1.NodeUnprepareResourceResponse{}
 	}
 	return resp, nil
 }
 
-// ResourceClaim holds the part of a claim that the driver reads:
-// which devices were allocated, from which driver's pools. This
-// operator never writes a claim. Workloads create them and the
-// scheduler allocates them.
+// ResourceClaim is the part of a claim that the driver reads. The
+// operator never writes a claim.
 type ResourceClaim struct {
 	Metadata struct {
 		Name      string `json:"name"`
@@ -387,11 +342,10 @@ type ResourceClaim struct {
 	} `json:"spec"`
 	Status struct {
 		Allocation *struct {
-			// The driver reads the allocation's config and never the
-			// claim's own spec. The scheduler resolves the
-			// DeviceClass's blocks and the claim's into this one
-			// list and marks each entry's source, so cluster policy
-			// is visible here and nowhere else.
+			// The driver reads config from the allocation and not from
+			// the claim's spec, because the scheduler merges the
+			// DeviceClass's config into this list with the claim's and
+			// marks the source of each entry.
 			Devices struct {
 				Results []AllocatedDevice `json:"results"`
 				Config  []AllocatedConfig `json:"config"`
@@ -400,10 +354,9 @@ type ResourceClaim struct {
 	} `json:"status"`
 }
 
-// AllocatedDevice is one allocation result. The scheduler chose
-// Device from Pool, published by Driver, to satisfy the claim's named
-// Request. Driver matters because one claim can mix devices from
-// several drivers, which is what pairs a screen with its speakers.
+// AllocatedDevice is one allocation result. A claim can mix devices of
+// several drivers, such as a screen and speakers, so the driver checks
+// Driver.
 type AllocatedDevice struct {
 	Request string `json:"request"`
 	Driver  string `json:"driver"`
@@ -411,8 +364,6 @@ type AllocatedDevice struct {
 	Device  string `json:"device"`
 }
 
-// GetResourceClaim reads one claim. Claims are namespaced, because a
-// claim belongs to the workload that created it.
 func GetResourceClaim(c *apiclient.Client, namespace, name string) (*ResourceClaim, error) {
 	path := "/apis/resource.k8s.io/v1/namespaces/" + namespace + "/resourceclaims/" + name
 	claim := &ResourceClaim{}

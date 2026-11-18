@@ -1,13 +1,12 @@
 package main
 
-// Reading the declaration PipeWire runs back out of the drop-in.
-//
-// PipeWire reads context.objects once, while it loads its
-// configuration, so the drop-in on disk is the record of the nodes
-// the running graph was built from. The reconcile pass reads two
-// facts from it: which PCM devices have a node, and which channel
-// layout each sink was declared with. The file is the strict JSON
-// subset of SPA-JSON (nodes.go), so it reads back with encoding/json.
+// The reconcile pass parses the PipeWire drop-in that the operator
+// wrote, to find which PCM devices have a node and the channel layout
+// of each sink. PipeWire reads context.objects only when it loads its
+// configuration, so the drop-in lists the nodes that PipeWire created
+// at its start, unless the operator rewrote it since
+// (declarationloaded.go). nodes.go writes the node array as JSON, which
+// is also valid SPA-JSON, so encoding/json parses it.
 
 import (
 	"encoding/json"
@@ -18,21 +17,20 @@ import (
 	"strings"
 )
 
-// declaredNode is one node the declaration holds: the PCM device and
-// direction it serves, and the layout it was declared with. A source
-// node has no layout.
+// declaredNode is one node of the drop-in. A source node has no
+// layout.
 type declaredNode struct {
 	Address nodeAddress
 	Layout  channelLayout
 }
 
-// parseDeclaration reads every node out of one drop-in. A node whose
-// card or PCM device number does not read is an error, because every
-// node this operator writes carries both.
+// parseDeclaration fails on a node whose card or PCM device number is
+// missing or not a number, because the operator writes both for every
+// node.
 func parseDeclaration(document string) ([]declaredNode, error) {
 	start := strings.Index(document, configPrefix)
 	if start < 0 {
-		return nil, fmt.Errorf("the declaration holds no %q", strings.TrimSpace(configPrefix))
+		return nil, fmt.Errorf("the declaration contains no %q", strings.TrimSpace(configPrefix))
 	}
 	var objects []staticNode
 	if err := json.Unmarshal([]byte(document[start+len(configPrefix):]), &objects); err != nil {
@@ -55,9 +53,9 @@ func parseDeclaration(document string) ([]declaredNode, error) {
 	return nodes, nil
 }
 
-// declaredLayout reads the layout layoutArgs wrote. The position list
-// is in the "[ FL FR ]" form, and a sink with no source property was
-// declared with no layout.
+// declaredLayout parses the layout that layoutArgs wrote into a node's
+// args, with audio.position in the form "[ FL FR ]". A sink with no
+// layoutSourceProperty has layoutNone.
 func declaredLayout(args map[string]string) channelLayout {
 	source := layoutSource(args[layoutSourceProperty])
 	if source == "" {
@@ -70,8 +68,6 @@ func declaredLayout(args map[string]string) channelLayout {
 	return channelLayout{Source: source, Positions: positions, Encoded: declaredEncoded(args)}
 }
 
-// declaredLayouts holds the layout of every declared sink, keyed by
-// its address in the graph.
 func declaredLayouts(nodes []declaredNode) map[nodeAddress]channelLayout {
 	layouts := map[nodeAddress]channelLayout{}
 	for _, node := range nodes {
@@ -82,11 +78,10 @@ func declaredLayouts(nodes []declaredNode) map[nodeAddress]channelLayout {
 	return layouts
 }
 
-// declaredEndpoints rebuilds the endpoints a declaration was
-// generated from, so that nodeConfig writes the same set of nodes
-// with a new layout. A rewrite for a layout change keeps the set of
-// PCM devices PipeWire runs, and only a replacement pod declares a
-// new set.
+// declaredEndpoints returns the endpoints that the drop-in was written
+// for, so that a layout change rewrites it with nodeConfig and adds or
+// removes no node. PipeWire does not read a new set of PCM devices
+// until the pod is replaced.
 func declaredEndpoints(nodes []declaredNode) []alsaEndpoint {
 	endpoints := make([]alsaEndpoint, 0, len(nodes))
 	for _, node := range nodes {
@@ -99,8 +94,8 @@ func declaredEndpoints(nodes []declaredNode) []alsaEndpoint {
 	return endpoints
 }
 
-// samePCMDevices reports whether the card's endpoints now are the
-// endpoints the declaration holds a node for, whatever the layouts.
+// samePCMDevices compares PCM devices and directions, and ignores
+// layouts and order.
 func samePCMDevices(nodes []declaredNode, outputs []alsaEndpoint) bool {
 	declared := map[nodeAddress]bool{}
 	for _, node := range nodes {
@@ -113,8 +108,8 @@ func samePCMDevices(nodes []declaredNode, outputs []alsaEndpoint) bool {
 	return slices.Equal(sortedAddresses(declared), sortedAddresses(current))
 }
 
-// sortedAddresses lists a set of addresses in a fixed order, so two
-// sets compare as two lists.
+// sortedAddresses sorts by card, PCM device, and direction, so that
+// slices.Equal can compare two sets.
 func sortedAddresses(set map[nodeAddress]bool) []nodeAddress {
 	return slices.SortedFunc(maps.Keys(set), func(a, b nodeAddress) int {
 		if a.Card != b.Card {

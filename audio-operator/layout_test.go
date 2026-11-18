@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// eldWith assembles the smallest block parseELD reads: the fixed
+// eldWith builds the smallest ELD that parseELD accepts: the fixed
 // part, no monitor name, and one LPCM descriptor with the given
-// channel count. The speaker allocation is byte 7, in CEA-861 bit
+// channel count. Byte 7 is the speaker allocation, in CEA-861 bit
 // order.
 func eldWith(t *testing.T, channels int, allocation byte) eld {
 	t.Helper()
@@ -20,12 +20,11 @@ func eldWith(t *testing.T, channels int, allocation byte) eld {
 	raw[eldFixedBytes+2] = 0x07
 	block, err := parseELD(raw)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the assembled ELD: %v", err)
 	}
 	return block
 }
 
-// The speaker allocation bits, named for the table below.
 const (
 	frontPair      byte = 1 << 0
 	lfe            byte = 1 << 1
@@ -59,14 +58,14 @@ func TestTheELDSelectsOneOfPipeWiresHDMILayouts(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := eldPositions(eldWith(t, c.channels, c.allocation)); !slices.Equal(got, c.want) {
-				t.Errorf("positions = %v, want %v", got, c.want)
+				t.Errorf("eldPositions = %v, want %v", got, c.want)
 			}
 		})
 	}
 }
 
-// The parser keeps the raw allocation byte beside the names, because
-// the layout reads the bits and the names are for a person.
+// parseELD keeps the raw allocation byte beside the speaker names,
+// because eldPositions reads the bits and the names are for log lines.
 func TestParseKeepsTheSpeakerAllocation(t *testing.T) {
 	block := eldWith(t, 8, fiveOne|rearCenterPair)
 	if block.SpeakerAllocation != fiveOne|rearCenterPair {
@@ -120,15 +119,14 @@ func TestSelectLayoutTakesTheFirstSourceThatGivesOne(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got := selectLayout(c.output, c.spec, c.declared)
 			if !got.equal(c.want) {
-				t.Errorf("layout = %+v, want %+v", got, c.want)
+				t.Errorf("selectLayout = %+v, want %+v", got, c.want)
 			}
 		})
 	}
 }
 
-// Only a playback endpoint has a layout. A capture endpoint of a USB
-// card shares its PCM device number with the playback one, and the
-// declaration must not give the source the sink's channel map.
+// A USB card's capture endpoint has the same PCM number as its playback
+// endpoint, and must not receive the sink's channel map.
 func TestSelectLayoutsSkipsCaptureEndpoints(t *testing.T) {
 	outputs := []alsaEndpoint{
 		{Card: 1, PCM: 0, Identity: cardIdentity{Bus: usbBus}},
@@ -139,7 +137,7 @@ func TestSelectLayoutsSkipsCaptureEndpoints(t *testing.T) {
 		t.Fatalf("layouts = %+v, want the sink's alone", layouts)
 	}
 	if got := layouts[outputs[0].graphAddress()]; got.Source != layoutFromChannelMap {
-		t.Errorf("the sink's layout = %+v", got)
+		t.Errorf("the sink's layout = %+v, want the source ChannelMap", got)
 	}
 }
 
@@ -159,7 +157,7 @@ func TestLayoutsCompareBySourceAndPositions(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := c.a.equal(c.b); got != c.want {
-				t.Errorf("equal = %v, want %v", got, c.want)
+				t.Errorf("equal() = %v, want %v", got, c.want)
 			}
 		})
 	}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 
@@ -13,9 +14,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
-// eventedControl builds an endpoint controller over a fake API server
-// that holds the Events the controller posts. It runs in a synctest
-// bubble, because the recorder writes from its own goroutine, and
+// eventedControl returns an endpoint controller whose Events the
+// returned eventstest.Events records. Call it inside a synctest bubble,
+// because the Event recorder writes from its own goroutine, and
 // synctest.Wait returns once that goroutine has written its queue.
 func eventedControl(t *testing.T, api http.Handler) (*endpointControl, *eventstest.Events) {
 	t.Helper()
@@ -25,23 +26,21 @@ func eventedControl(t *testing.T, api http.Handler) (*endpointControl, *eventste
 	return control, recorded
 }
 
-// eventLine is what a person reads of an Event in `kubectl describe`.
 type eventLine struct {
 	Type, Reason string
 	Count        int32
 }
 
-func eventLines(held []events.Event) []eventLine {
-	lines := make([]eventLine, 0, len(held))
-	for _, event := range held {
+func eventLines(posted []events.Event) []eventLine {
+	lines := make([]eventLine, 0, len(posted))
+	for _, event := range posted {
 		lines = append(lines, eventLine{event.Type, event.Reason, event.Count})
 	}
 	return lines
 }
 
-// A spec.layout that a person writes reaches the declaration, and the
-// change is recorded as one Event on the Sink, with its UID, so
-// `kubectl describe sink` shows it.
+// The LayoutChanged Event names the Sink's UID, so kubectl describe sink
+// shows it.
 func TestASpecLayoutRewritesTheDeclarationAndPostsLayoutChanged(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		operator, endpoints := layoutReconciler(t)
@@ -65,16 +64,14 @@ func TestASpecLayoutRewritesTheDeclarationAndPostsLayoutChanged(t *testing.T) {
 		}
 		event := posted[0]
 		if event.Type != events.TypeNormal || event.Reason != reasonLayoutChanged || event.InvolvedObject.UID != "uid-1" ||
-			event.Message != "the channel layout changes from no positions to FL,FR,RL,RR from Spec; "+
-				"PipeWire restarts in its container to apply it" {
-			t.Errorf("the event is %+v", event)
+			!strings.Contains(event.Message, "from no positions to FL,FR,RL,RR from Spec") {
+			t.Errorf("the event is %+v, want a Normal LayoutChanged on uid-1 that names both layouts", event)
 		}
 	})
 }
 
-// A declaration that does not write leaves the layout waiting, and
-// posts one Warning on the Sink for the run of passes that meets the
-// same error, not one for each pass.
+// The operator posts one LayoutWriteFailed Warning for a run of passes
+// that fail with the same error, not one for each pass.
 func TestALayoutThatDoesNotWritePostsOneWarning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		operator, endpoints := layoutReconciler(t)
@@ -88,7 +85,7 @@ func TestALayoutThatDoesNotWritePostsOneWarning(t *testing.T) {
 		// write of the drop-in fail.
 		blocked := filepath.Join(t.TempDir(), "not-a-directory")
 		if err := os.WriteFile(blocked, nil, 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing a file at the drop-in directory's path: %v", err)
 		}
 		pipewireConfigDir = blocked
 

@@ -1,9 +1,8 @@
 package main
 
-// These tests compose the whole of one endpoint's status from the
-// facts a pass reads, on the machine the lab holds: an Intel HDMI
-// codec with a monitor on its first slot, and a USB DAC that plays and
-// records through one PCM device.
+// These tests build the status of one endpoint from facts, on the
+// liken-1 fixture machine: an Intel HDMI codec, and a USB DAC that plays
+// and records through one PCM device.
 
 import (
 	"reflect"
@@ -11,26 +10,24 @@ import (
 	"time"
 )
 
-// factsTime is the moment every condition below is stamped with.
+// factsTime is the transition time of every condition in these tests.
 var factsTime = time.Date(2026, 8, 28, 9, 0, 0, 0, time.UTC)
 
-// likenOne reads the machine's own enumeration and names it, and
-// answers with the endpoints by name.
-//
-// The card's own identity fields come from an ioctl on the control
-// device, and the fixture's control device is an ordinary file, so the
-// three the card would state are stamped here from what liken-1's card
-// reports. cards_test.go covers the read itself.
-func likenOne(t *testing.T) map[string]alsaEndpoint {
+// liken1Endpoints reads and names the endpoints of the liken-1 fixture and
+// returns them by name. The card ID, driver, and name come from an
+// ioctl on the control device, and the fixture's control device is a
+// regular file, so liken1Endpoints sets them to what the real cards of liken-1
+// report. cards_test.go tests the ioctl read.
+func liken1Endpoints(t *testing.T) map[string]alsaEndpoint {
 	t.Helper()
 	machineFixture(t, "liken-1")
 	endpoints, err := readEndpoints()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the endpoints of the liken-1 fixture: %v", err)
 	}
 	named, refused := nameEndpoints("liken-1", endpoints)
 	if len(refused) != 0 {
-		t.Fatalf("the operator refused to name %v", refused)
+		t.Fatalf("the operator refused to name %v, want every endpoint named", refused)
 	}
 	byName := map[string]alsaEndpoint{}
 	for _, endpoint := range named {
@@ -48,24 +45,24 @@ func likenOne(t *testing.T) map[string]alsaEndpoint {
 	return byName
 }
 
-// withMonitor puts the LG's ELD block on one slot, which is what the
-// card reports while that monitor is on the port.
+// withMonitor returns the endpoint as it is while the LG monitor is
+// connected: HDMI and Monitor set, with the ELD block of that monitor.
 func withMonitor(t *testing.T, endpoint alsaEndpoint) alsaEndpoint {
 	t.Helper()
 	block, err := parseELD(fixture(t, "eld-hdmi-lg-ultrawide.bin"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the ELD fixture: %v", err)
 	}
 	endpoint.HDMI, endpoint.Monitor, endpoint.ELD = true, true, block
 	return endpoint
 }
 
-// The whole status of the HDMI slot the monitor is on. An HDMI PCM
-// has no volume element, so the one control it lists is the IEC958
-// switch, and the monitor block is what ties the slot to the Display
-// the display operator publishes for the same screen.
+// The whole status of an HDMI slot with a monitor. An HDMI PCM has no
+// volume element, so its only control is the IEC958 switch. The monitor
+// field matches the slot to the Display that display-operator publishes
+// for the same screen.
 func TestSinkStatusOfAnHDMISlot(t *testing.T) {
-	endpoints := likenOne(t)
+	endpoints := liken1Endpoints(t)
 	slot := withMonitor(t, endpoints["liken-1-pci-0000-00-1f-3-hdmi-0"])
 	iec958 := switchControl("IEC958 Playback Switch", 0)
 
@@ -108,8 +105,8 @@ func TestSinkStatusOfAnHDMISlot(t *testing.T) {
 		},
 		Claims: []EndpointClaim{{Namespace: "media", Name: "kitchen"}},
 		Conditions: []EndpointCondition{
-			connectedCondition(true, "MonitorPresent", "a monitor answers on this slot"),
-			readyCondition(true, "PipeWire holds the node "+sinkNodeName(0, 3)),
+			connectedCondition(true, "MonitorPresent", "A monitor is connected to this output"),
+			readyCondition(true, "PipeWire has the node "+sinkNodeName(0, 3)),
 		},
 	}
 	if got := facts.status(EndpointStatus{}, factsTime); !reflect.DeepEqual(got, want) {
@@ -117,10 +114,10 @@ func TestSinkStatusOfAnHDMISlot(t *testing.T) {
 	}
 }
 
-// A slot with no monitor reports no monitor block and says so in the
-// condition, which is the same fact the no-monitor taint carries.
+// A slot with no monitor has no monitor field, and its Connected
+// condition is false, as its device has noMonitorTaint.
 func TestSinkStatusOfAnEmptyHDMISlot(t *testing.T) {
-	endpoints := likenOne(t)
+	endpoints := liken1Endpoints(t)
 	slot := endpoints["liken-1-pci-0000-00-1f-3-hdmi-1"]
 	slot.HDMI = true
 
@@ -131,25 +128,25 @@ func TestSinkStatusOfAnEmptyHDMISlot(t *testing.T) {
 	if status.Monitor != nil {
 		t.Errorf("monitor = %+v, want none", status.Monitor)
 	}
-	// The connection type comes from the ELD block, and a slot with no
-	// monitor has none, so the field is absent rather than guessed.
+	// The connection type comes from the ELD block. Without a monitor
+	// there is no block, so the field is empty and not guessed.
 	if status.ConnectionType != "" {
 		t.Errorf("connectionType = %q, want none", status.ConnectionType)
 	}
 	want := []EndpointCondition{
-		connectedCondition(false, "NoMonitor", "no monitor answers on this slot"),
-		readyCondition(false, "PipeWire holds no node for this endpoint"),
+		connectedCondition(false, "NoMonitor", "No monitor is connected to this output"),
+		readyCondition(false, "PipeWire has no node for this endpoint"),
 	}
 	if !reflect.DeepEqual(status.Conditions, want) {
 		t.Errorf("conditions = %+v, want %+v", status.Conditions, want)
 	}
 }
 
-// The whole status of the DAC's playback side. A USB card is
-// connected whenever it publishes an endpoint at all, because the
-// endpoint is gone the moment somebody unplugs the card.
+// The whole status of the DAC's playback side. A USB card is connected
+// whenever it has an endpoint, because the endpoint disappears when the
+// card is unplugged.
 func TestSinkStatusOfAUSBDAC(t *testing.T) {
-	endpoints := likenOne(t)
+	endpoints := liken1Endpoints(t)
 	dac := endpoints["liken-1-usb-0573-1573-a34004801402-usb-audio"]
 	volume := levelControl("PCM Playback Volume", 0)
 	mute := switchControl("PCM Playback Switch", 0)
@@ -188,8 +185,8 @@ func TestSinkStatusOfAUSBDAC(t *testing.T) {
 			Controls: map[string]string{"PCM Playback Volume": "64", "PCM Playback Switch": controlOn},
 		},
 		Conditions: []EndpointCondition{
-			connectedCondition(true, "CardPresent", "the card is on the bus"),
-			readyCondition(true, "PipeWire holds the node "+sinkNodeName(1, 0)),
+			connectedCondition(true, "CardPresent", "The card is on the USB bus"),
+			readyCondition(true, "PipeWire has the node "+sinkNodeName(1, 0)),
 		},
 	}
 	if got := facts.status(EndpointStatus{}, factsTime); !reflect.DeepEqual(got, want) {
@@ -197,11 +194,11 @@ func TestSinkStatusOfAUSBDAC(t *testing.T) {
 	}
 }
 
-// The whole status of the DAC's capture side. It is the same PCM
-// device in the other direction, so its name carries the capture word
-// and its controls are the card's capture controls.
+// The whole status of the DAC's capture side. It is the same PCM device
+// in the other direction, so its name ends in -capture and its controls
+// are the capture controls of the card.
 func TestSourceStatusOfAUSBDAC(t *testing.T) {
-	endpoints := likenOne(t)
+	endpoints := liken1Endpoints(t)
 	microphone := endpoints["liken-1-usb-0573-1573-a34004801402-usb-audio-capture"]
 	gain := levelControl("Mic Capture Volume", 0)
 
@@ -237,8 +234,8 @@ func TestSourceStatusOfAUSBDAC(t *testing.T) {
 			Controls: map[string]string{"Mic Capture Volume": "16"},
 		},
 		Conditions: []EndpointCondition{
-			connectedCondition(true, "CardPresent", "the card is on the bus"),
-			readyCondition(true, "PipeWire holds the node "+sourceNodeName(1, 0)),
+			connectedCondition(true, "CardPresent", "The card is on the USB bus"),
+			readyCondition(true, "PipeWire has the node "+sourceNodeName(1, 0)),
 		},
 	}
 	if got := facts.status(EndpointStatus{}, factsTime); !reflect.DeepEqual(got, want) {
@@ -246,9 +243,9 @@ func TestSourceStatusOfAUSBDAC(t *testing.T) {
 	}
 }
 
-// A speaker reports the Peripheral it belongs to and the codec the
-// transport negotiated, and its level comes from the device's Route,
-// which is the speaker's own volume.
+// A speaker reports its Peripheral and the codec that its transport
+// negotiated. Its level comes from the Route of the device, which is the
+// volume of the speaker itself.
 func TestSinkStatusOfASpeaker(t *testing.T) {
 	facts := endpointFacts{
 		Name:      testSpeakerName,
@@ -291,7 +288,7 @@ func TestSinkStatusOfASpeaker(t *testing.T) {
 		},
 		Conditions: []EndpointCondition{
 			connectedCondition(true, "SpeakerConnected", "bluetoothd reports the speaker connected"),
-			readyCondition(true, "PipeWire holds the node "+testSpeakerNode),
+			readyCondition(true, "PipeWire has the node "+testSpeakerNode),
 		},
 	}
 	if got := facts.status(EndpointStatus{}, factsTime); !reflect.DeepEqual(got, want) {
@@ -299,8 +296,8 @@ func TestSinkStatusOfASpeaker(t *testing.T) {
 	}
 }
 
-// What the Connected condition answers for each kind of endpoint, and
-// the two analog cases the card's own jacks decide.
+// The Connected condition for each kind of endpoint, including the
+// analog cases that depend on jack detection in the card.
 func TestConnectedCondition(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -320,9 +317,6 @@ func TestConnectedCondition(t *testing.T) {
 			reason: "JackEmpty",
 		},
 		{
-			// A card that senses no jack for this endpoint says nothing
-			// about whether a plug is in, and an endpoint that plays is
-			// the honest reading of nothing.
 			name:   "a card that senses no jack",
 			facts:  endpointFacts{},
 			met:    true,
@@ -350,9 +344,8 @@ func TestConnectedCondition(t *testing.T) {
 	}
 }
 
-// Where the level comes from: a speaker whose transport reports a
-// volume of its own answers from the Route, and every other endpoint
-// answers from the node's gain.
+// A speaker whose transport reports its own volume gets its level from
+// the Route. Every other endpoint gets it from the gain of the node.
 func TestObservedLevelComesFromTheRouteOnASpeakerThatReportsOne(t *testing.T) {
 	node := pwNode{ID: 63, Volumes: []float64{1, 1}}
 	absolute := endpointFacts{HasNode: true, Node: node, Speaker: &speakerFacts{
@@ -363,8 +356,8 @@ func TestObservedLevelComesFromTheRouteOnASpeakerThatReportsOne(t *testing.T) {
 		t.Errorf("volume = %d (known %v), want the Route's 40", volume, known)
 	}
 
-	// A speaker with no absolute volume publishes no volumeStep, and
-	// its level is the software gain on its node.
+	// A speaker with no absolute volume has no volumeStep on its Route,
+	// so its level is the software gain of its node.
 	software := endpointFacts{HasNode: true, Node: node, Speaker: &speakerFacts{
 		HasSink: true,
 		Sink:    bluezSink{Volumes: []float64{1, 1}, Route: &pwRoute{Volumes: []float64{0.4, 0.4}}},
@@ -374,8 +367,8 @@ func TestObservedLevelComesFromTheRouteOnASpeakerThatReportsOne(t *testing.T) {
 	}
 }
 
-// A suspended node reports no levels at all, so the status reports
-// none rather than zero, which a reader would take for silence.
+// A node that reports no levels gives the status no observed levels. A
+// zero would read as silence.
 func TestObservedIsAbsentWhileTheNodeReportsNoLevels(t *testing.T) {
 	facts := endpointFacts{HasNode: true, Node: pwNode{ID: 7, Name: sinkNodeName(0, 0)}}
 	status := facts.status(EndpointStatus{}, factsTime)
@@ -387,9 +380,9 @@ func TestObservedIsAbsentWhileTheNodeReportsNoLevels(t *testing.T) {
 	}
 }
 
-// A suspended node can report no level, and PipeWire announces no
-// change to one, so an idle endpoint reports the level the operator
-// last wrote, which is the level the node will run at.
+// A suspended node can report no level, and PipeWire does not announce
+// changes to one. An idle endpoint therefore reports the level that the
+// operator last wrote, which is the level the node will run at.
 func TestObservedIsTheLastWriteWhileTheNodeReportsNoLevels(t *testing.T) {
 	facts := endpointFacts{
 		HasNode: true,
@@ -405,11 +398,11 @@ func TestObservedIsTheLastWriteWhileTheNodeReportsNoLevels(t *testing.T) {
 	}
 }
 
-// A suspended node can keep printing the channelVolumes it last ran
-// at, after a write PipeWire applied and did not announce. So a
-// suspended node reports the level the operator last wrote, and the
-// graph's value only when the operator wrote none. A running node
-// reports the graph's value.
+// PipeWire applies a write to a suspended node without announcing it,
+// so the node can keep printing the channelVolumes it last ran at. A
+// suspended node reports the level that the operator last wrote, or the
+// graph's value when the operator wrote none. A running node reports
+// the graph's value.
 func TestObservedOfANodeThatPrintsAStaleLevel(t *testing.T) {
 	stale := pwNode{ID: 7, Name: sinkNodeName(0, 0), Volumes: []float64{1, 1}, Suspended: true}
 	running := pwNode{ID: 7, Name: sinkNodeName(0, 0), Volumes: []float64{0.5, 0.5}}
@@ -447,8 +440,8 @@ func readyCondition(met bool, message string) EndpointCondition {
 	return condition(ReadyCondition, met, reason, message, factsTime)
 }
 
-// A card's sink reports the layout the declaration holds, where it
-// came from, and whether PipeWire runs it.
+// A card's sink reports the layout that the drop-in gives it, the
+// source of that layout, and whether PipeWire applies it.
 func TestSinkStatusReportsTheLayout(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -495,16 +488,16 @@ func TestSinkStatusReportsTheLayout(t *testing.T) {
 	}
 }
 
-// A speaker and a source have no layout, so they report no layout
-// fields and no LayoutApplied condition.
+// An endpoint with no layout state reports no layout fields and no
+// LayoutApplied condition.
 func TestAnEndpointWithNoLayoutReportsNone(t *testing.T) {
 	status := endpointFacts{Name: "speaker", Direction: directionSink}.status(EndpointStatus{}, factsTime)
 	if status.Layout != nil || status.LayoutSource != "" {
-		t.Errorf("layout = %v from %q", status.Layout, status.LayoutSource)
+		t.Errorf("layout = %v from %q, want none", status.Layout, status.LayoutSource)
 	}
 	for _, reported := range status.Conditions {
 		if reported.Type == LayoutAppliedCondition {
-			t.Errorf("reported %+v", reported)
+			t.Errorf("the status reports %+v, want no LayoutApplied condition", reported)
 		}
 	}
 }

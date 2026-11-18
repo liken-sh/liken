@@ -1,38 +1,31 @@
 package main
 
-// Choosing the representation a request gets.
+// A route with a file extension serves one format. A route without one
+// serves the format with the highest q-value in Accept (RFC 9110
+// section 12.5.1). Between formats with equal q, the one first in the
+// route's Serves wins, and a request with no Accept gets the first.
 //
-// An extension names one fixed representation. With no extension,
-// Accept chooses by RFC 9110 section 12.5.1 with q-values, and the
-// server's own preference order breaks a tie, which is the order
-// audioRepresentations is written in. A request with no Accept gets
-// the first of that order.
-//
-// An extension route still reads Accept. An Accept that excludes the
-// route's one representation is a 406 rather than a 200 of something
-// the client refused, which is also why Vary: Accept goes on an
-// extension route's answer.
+// A route with an extension still checks Accept, and returns 406 when
+// Accept excludes its format, instead of a 200 that the client said it
+// would not take. That is also why an extension route's response has
+// Vary: Accept.
 
 import (
 	"strconv"
 	"strings"
 )
 
-// mediaRange is one entry of an Accept header: a type, a subtype, and
-// the quality the client gave it. Every other parameter is read and
-// dropped: this API's three representations differ by type and
-// subtype alone, and the codecs parameter on audio/ogg names the one
-// codec the Ogg route ever carries.
+// mediaRange drops every parameter but q, because the formats differ
+// by type and subtype alone, and the only codec in audio/ogg here is
+// Opus.
 type mediaRange struct {
 	Type    string
 	Subtype string
 	Quality float64
 }
 
-// parseAccept reads an Accept header into its ranges, in the order the
-// client wrote them. A range this parser cannot read is dropped rather
-// than failing the header, because a client that sends one malformed
-// range still stated preferences in the rest.
+// parseAccept skips a malformed range instead of rejecting the header,
+// so the other ranges still apply.
 func parseAccept(header string) []mediaRange {
 	var ranges []mediaRange
 	for _, entry := range strings.Split(header, ",") {
@@ -67,11 +60,10 @@ func parseAccept(header string) []mediaRange {
 	return ranges
 }
 
-// quality is the weight one Accept header gives one representation.
-// The most specific range wins, which is section 12.5.1's rule: an
-// exact type and subtype beats a subtype wildcard, which beats the
-// full wildcard. That is what makes "audio/wav;q=0, */*" exclude WAV
-// and admit the other two.
+// quality returns false when no range matches form. The most specific
+// matching range wins (RFC 9110 section 12.5.1): audio/wav beats
+// audio/*, which beats */*. So "audio/wav;q=0, */*" excludes WAV and
+// admits the other formats.
 func quality(ranges []mediaRange, form representation) (float64, bool) {
 	best, precision, matched := 0.0, -1, false
 	for _, accepted := range ranges {
@@ -92,8 +84,8 @@ func quality(ranges []mediaRange, form representation) (float64, bool) {
 	return best, matched
 }
 
-// matchesType says whether a subtype wildcard covers this form, by the
-// type half of any spelling the form accepts.
+// matchesType reports whether kind, from a range such as audio/*, is
+// the type of any spelling in form.Accepted.
 func matchesType(kind string, form representation) bool {
 	for _, spelling := range form.Accepted {
 		if before, _, _ := strings.Cut(spelling, "/"); before == kind {
@@ -103,9 +95,8 @@ func matchesType(kind string, form representation) bool {
 	return false
 }
 
-// matchesExactly says whether a range names this form. Every spelling
-// the form accepts names it, so audio/vnd.wave and audio/x-flac reach
-// the same representation as the name this API sends.
+// matchesExactly matches any spelling in form.Accepted, so
+// audio/vnd.wave selects WAV and audio/x-flac selects FLAC.
 func matchesExactly(accepted mediaRange, form representation) bool {
 	name := accepted.Type + "/" + accepted.Subtype
 	for _, spelling := range form.Accepted {
@@ -116,8 +107,8 @@ func matchesExactly(accepted mediaRange, form representation) bool {
 	return false
 }
 
-// negotiate chooses the representation a route serves this request, or
-// reports that the route serves none the client will take.
+// negotiate returns false when Accept excludes every representation of
+// the route.
 func negotiate(route apiRoute, accept string) (representation, bool) {
 	if strings.TrimSpace(accept) == "" {
 		if len(route.Serves) == 0 {
@@ -132,8 +123,8 @@ func negotiate(route apiRoute, accept string) (representation, bool) {
 		if !matched || weight <= 0 {
 			continue
 		}
-		// The server's order breaks a tie, so a later form has to beat
-		// the weight of an earlier one, not equal it.
+		// Serves is in the server's order of preference, so a later form
+		// wins only with a higher q.
 		if found && weight <= best {
 			continue
 		}

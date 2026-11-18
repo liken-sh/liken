@@ -11,8 +11,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// accessServer stands in for the API server's SubjectAccessReview
-// endpoint.
+// accessServer is a fake API server that records the SubjectAccessReview
+// it receives and replies with a fixed status.
 type accessServer struct {
 	sent   accessReview
 	answer accessReviewStatus
@@ -44,8 +44,8 @@ func (f *accessServer) authorizer() *authorizer {
 	return newAuthorizer(apiclient.New(f.server.URL, f.server.Client(), ""))
 }
 
-// listener is the caller a TokenReview reported, with every field a
-// SubjectAccessReview copies.
+// listener is a caller with every field that a SubjectAccessReview
+// copies from the caller.
 var listener = caller{
 	Username: "system:serviceaccount:liken-system:listener",
 	UID:      "1f0e3dad-9990-4f65-8b2c-77b3f2a27c81",
@@ -64,7 +64,7 @@ func TestATapAuthorizesOnTheSubresourceWithTheName(t *testing.T) {
 	route, name, _ := matchRoute("/v1/audio/sinks/kitchen/audio.wav")
 	allowed, _, err := fake.authorizer().authorize(listener, route, name)
 	if err != nil || !allowed {
-		t.Fatalf("the review answered %v (%v)", allowed, err)
+		t.Fatalf("the review returned allowed %v and error %v, want allowed and no error", allowed, err)
 	}
 
 	attributes := fake.sent.Spec.ResourceAttributes
@@ -75,7 +75,7 @@ func TestATapAuthorizesOnTheSubresourceWithTheName(t *testing.T) {
 		t.Errorf("the verb is %q, want get", attributes.Verb)
 	}
 	if attributes.Group != "audio.liken.sh" {
-		t.Errorf("the group is %q", attributes.Group)
+		t.Errorf("the group is %q, want audio.liken.sh", attributes.Group)
 	}
 	if attributes.Resource != "sinks" || attributes.Subresource != "audio" {
 		t.Errorf("the check is on %s/%s, want sinks/audio",
@@ -84,9 +84,8 @@ func TestATapAuthorizesOnTheSubresourceWithTheName(t *testing.T) {
 	if attributes.Name != "kitchen" {
 		t.Errorf("the name is %q, want kitchen", attributes.Name)
 	}
-	// Both kinds are cluster-scoped, so the namespace is empty.
 	if attributes.Namespace != "" {
-		t.Errorf("the namespace is %q, and both kinds are cluster-scoped", attributes.Namespace)
+		t.Errorf("the namespace is %q, want empty because both kinds are cluster-scoped", attributes.Namespace)
 	}
 }
 
@@ -94,21 +93,21 @@ func TestTheReviewCarriesEveryFieldTheTokenReviewReported(t *testing.T) {
 	fake := newAccessServer(t, accessReviewStatus{Allowed: true})
 	route, name, _ := matchRoute("/v1/audio/sources/desk/audio.opus")
 	if _, _, err := fake.authorizer().authorize(listener, route, name); err != nil {
-		t.Fatal(err)
+		t.Fatalf("authorizing the tap of a Source: %v", err)
 	}
 	if fake.sent.Spec.User != listener.Username {
-		t.Errorf("the user is %q", fake.sent.Spec.User)
+		t.Errorf("the user is %q, want %q", fake.sent.Spec.User, listener.Username)
 	}
 	if fake.sent.Spec.UID != listener.UID {
-		t.Errorf("the uid is %q", fake.sent.Spec.UID)
+		t.Errorf("the uid is %q, want %q", fake.sent.Spec.UID, listener.UID)
 	}
 	if !slices.Equal(fake.sent.Spec.Groups, listener.Groups) {
-		t.Errorf("the groups are %v", fake.sent.Spec.Groups)
+		t.Errorf("the groups are %v, want %v", fake.sent.Spec.Groups, listener.Groups)
 	}
 	if len(fake.sent.Spec.Extra) != 1 ||
 		!slices.Equal(fake.sent.Spec.Extra["authentication.kubernetes.io/credential-id"],
 			listener.Extra["authentication.kubernetes.io/credential-id"]) {
-		t.Errorf("the extra is %v", fake.sent.Spec.Extra)
+		t.Errorf("the extra is %v, want %v", fake.sent.Spec.Extra, listener.Extra)
 	}
 	if fake.sent.Spec.ResourceAttributes.Resource != "sources" {
 		t.Errorf("the resource is %q, want sources", fake.sent.Spec.ResourceAttributes.Resource)
@@ -119,7 +118,7 @@ func TestAnInfoRouteAuthorizesOnTheOrdinaryResource(t *testing.T) {
 	fake := newAccessServer(t, accessReviewStatus{Allowed: true})
 	route, name, _ := matchRoute("/v1/audio/sinks/kitchen")
 	if _, _, err := fake.authorizer().authorize(listener, route, name); err != nil {
-		t.Fatal(err)
+		t.Fatalf("authorizing the info route of a Sink: %v", err)
 	}
 	attributes := fake.sent.Spec.ResourceAttributes
 	if attributes.Resource != "sinks" || attributes.Subresource != "" {
@@ -134,7 +133,7 @@ func TestTheTwoDocumentsNeedNoAuthorization(t *testing.T) {
 		route, name, _ := matchRoute(path)
 		allowed, _, err := fake.authorizer().authorize(listener, route, name)
 		if err != nil || !allowed {
-			t.Errorf("%s was refused: %v (%v)", path, allowed, err)
+			t.Errorf("%s returned allowed %v and error %v, want allowed with no review", path, allowed, err)
 		}
 	}
 	if fake.sent.Kind != "" {
@@ -150,27 +149,27 @@ func TestARefusalCarriesTheAuthorizersOwnWords(t *testing.T) {
 	route, name, _ := matchRoute("/v1/audio/sinks/kitchen/audio.wav")
 	allowed, reason, err := fake.authorizer().authorize(listener, route, name)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("authorizing the tap: %v", err)
 	}
 	if allowed {
 		t.Fatal("a denial was read as a grant")
 	}
 	if !strings.Contains(reason, "audio-capture-viewer") {
-		t.Errorf("the reason is %q, and it must carry the authorizer's own words", reason)
+		t.Errorf("the reason is %q, want the authorizer's own text, which names audio-capture-viewer", reason)
 	}
 }
 
 func TestAReviewThatIsNeitherAllowedNorDeniedIsARefusal(t *testing.T) {
-	// The API server answers allowed false with denied false when no
-	// authorizer had an opinion, which is a refusal.
+	// The API server returns allowed false and denied false when no
+	// authorizer matched the request. That is a refusal.
 	fake := newAccessServer(t, accessReviewStatus{})
 	route, name, _ := matchRoute("/v1/audio/sinks/kitchen/audio.wav")
 	allowed, reason, err := fake.authorizer().authorize(listener, route, name)
 	if err != nil || allowed {
-		t.Fatalf("the review answered %v (%v)", allowed, err)
+		t.Fatalf("the review returned allowed %v and error %v, want a refusal with no error", allowed, err)
 	}
 	if reason == "" {
-		t.Error("a refusal with no reason said nothing")
+		t.Error("a refusal with no reason from the authorizer returned an empty reason, want the default text")
 	}
 }
 
@@ -184,7 +183,7 @@ func TestAnEvaluationErrorIsAFailureAndNotARefusal(t *testing.T) {
 		t.Fatal("an evaluation error was read as a plain refusal")
 	}
 	if !strings.Contains(err.Error(), "\"reader\" not found") {
-		t.Errorf("the failure is %q, and it must carry the API server's own words", err)
+		t.Errorf("the error is %q, want the API server's own text, which contains \"reader\" not found", err)
 	}
 }
 
@@ -198,14 +197,14 @@ func TestTheScopeNamesTheGrantACallerWouldNeed(t *testing.T) {
 	for path, want := range cases {
 		route, _, _ := matchRoute(path)
 		if got := scopeOf(route); got != want {
-			t.Errorf("%s needs %q, want %q", path, got, want)
+			t.Errorf("scopeOf(%s) = %q, want %q", path, got, want)
 		}
 	}
 }
 
 func TestTheChallengeIsRFC6750(t *testing.T) {
 	if got := challenge(); got != `Bearer realm="audio-api"` {
-		t.Errorf("a request with no token is challenged with %q", got)
+		t.Errorf("a request with no token is challenged with %q, want %q", got, `Bearer realm="audio-api"`)
 	}
 	got := invalidTokenChallenge(`[invalid bearer token, token is expired]`)
 	want := `Bearer realm="audio-api", error="invalid_token", ` +

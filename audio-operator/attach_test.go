@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// SwitchControl and levelControl build the two
-// control shapes the attach rule sorts, because the rule reads the
-// interface, the name, and the index and nothing else.
+// switchControl and levelControl build a boolean and an integer mixer
+// control. The attach rule reads only a control's interface, name, and
+// index, so the tests vary nothing else.
 func switchControl(name string, index uint32) control {
 	return control{Name: name, Index: index, Interface: ctlElemIfaceMixer,
 		Capability: controlCapability{Type: capabilityBoolean, Channels: 1}}
@@ -18,8 +18,6 @@ func levelControl(name string, index uint32) control {
 		Capability: controlCapability{Type: capabilityInteger, Channels: 2}}
 }
 
-// The attach rule, on the three cards the lab holds: an Intel
-// HDMI codec, a Realtek analog codec, and a USB DAC.
 func TestAttachControls(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -34,9 +32,8 @@ func TestAttachControls(t *testing.T) {
 				switchControl("IEC958 Playback Switch", 1),
 				switchControl("IEC958 Playback Switch", 2),
 				switchControl("IEC958 Playback Switch", 3),
-				// The card declares one of these on the PCM interface
-				// for each HDMI device, and its name carries the
-				// Playback word. It reaches no endpoint.
+				// This name contains "Playback", but the control is
+				// on the PCM interface, so no endpoint gets it.
 				{Name: "Playback Channel Map", Interface: ctlElemIfacePCM, Device: 3,
 					Capability: controlCapability{Type: capabilityInteger, Channels: 8}},
 				{Name: "Playback Channel Map", Interface: ctlElemIfacePCM, Device: 7,
@@ -115,16 +112,13 @@ func TestAttachControls(t *testing.T) {
 			for endpoint, want := range c.want {
 				got := controlNames(attached[endpoint])
 				if !slices.Equal(got, want) {
-					t.Errorf("%s holds %v, want %v", endpoint, got, want)
+					t.Errorf("%s has %v, want %v", endpoint, got, want)
 				}
 			}
 		})
 	}
 }
 
-// A control that belongs to the card and to no one endpoint
-// carries neither the Capture word nor an IEC958 name, and the card's
-// analog and USB sinks list it.
 func TestAttachControlsGivesTheCardsOwnControlsToItsSinks(t *testing.T) {
 	controls := []control{
 		{Name: "Auto-Mute Mode", Interface: ctlElemIfaceMixer,
@@ -143,18 +137,15 @@ func TestAttachControlsGivesTheCardsOwnControlsToItsSinks(t *testing.T) {
 
 	want := []string{"Auto-Mute Mode", "Loopback Mixing", "Independent HP"}
 	if got := controlNames(attached["analog"]); !slices.Equal(got, want) {
-		t.Errorf("the analog sink holds %v, want %v", got, want)
+		t.Errorf("the analog sink has %v, want %v", got, want)
 	}
 	for _, endpoint := range []string{"hdmi-0", "analog-in"} {
 		if got := controlNames(attached[endpoint]); len(got) != 0 {
-			t.Errorf("%s holds %v, want nothing", endpoint, got)
+			t.Errorf("%s has %v, want nothing", endpoint, got)
 		}
 	}
 }
 
-// The ordinal an HDMI slot takes, on the card the lab holds:
-// the slots are the PCM devices the codec filled in order, and the
-// analog jack and the microphone beside them are no slots at all.
 func TestEndpointControlsOfNumbersTheHDMISlots(t *testing.T) {
 	listed := endpointControlsOf([]alsaEndpoint{
 		{Card: 0, PCM: 9, HDMI: true, DeviceName: "hdmi-3"},
@@ -181,9 +172,6 @@ func TestEndpointControlsOfNumbersTheHDMISlots(t *testing.T) {
 	}
 }
 
-// What the card's jacks say about one endpoint. A jack is
-// named for the connector behind it, so the direction picks which
-// jacks answer, and a card that senses none for the endpoint says so.
 func TestJackState(t *testing.T) {
 	jacks := map[string]bool{
 		"Headphone Jack":     false,
@@ -199,8 +187,8 @@ func TestJackState(t *testing.T) {
 		sensed    bool
 	}{
 		{
-			// The speaker jack answers for the analog sink, and one
-			// plug in either jack is a plug this endpoint plays into.
+			// The speaker jack is plugged and the headphone jack is
+			// not.
 			name: "a sink with a plug in one of its jacks", direction: directionSink,
 			jacks: jacks, plugged: true, sensed: true,
 		},
@@ -224,8 +212,6 @@ func TestJackState(t *testing.T) {
 	}
 }
 
-// CapabilitiesOf is what status.capabilities is built from, and
-// the kernel's own control name is the key.
 func TestCapabilitiesOfKeysByControlName(t *testing.T) {
 	capabilities := capabilitiesOf([]control{
 		levelControl("Master Playback Volume", 0),

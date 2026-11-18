@@ -42,7 +42,7 @@ func TestAnAcceptThatExcludesEveryFormIsRefused(t *testing.T) {
 	route, _, _ := matchRoute("/v1/audio/sinks/kitchen/audio")
 	for _, accept := range []string{"audio/mpeg", "image/png", "*/*;q=0", "audio/*;q=0", "audio/wav;q=0, audio/flac;q=0, audio/ogg;q=0"} {
 		if _, ok := negotiate(route, accept); ok {
-			t.Errorf("Accept: %q was served", accept)
+			t.Errorf("Accept: %q was served, want a refusal", accept)
 		}
 	}
 }
@@ -52,12 +52,12 @@ func TestAnExtensionRouteServesItsOwnFormOrNothing(t *testing.T) {
 	for _, accept := range []string{"", "*/*", "audio/*", "audio/wav", "audio/vnd.wave", "audio/x-wav", "audio/wave"} {
 		form, ok := negotiate(route, accept)
 		if !ok || form.Extension != "wav" {
-			t.Errorf("audio.wav with Accept: %q served %v (%v)", accept, form.Extension, ok)
+			t.Errorf("audio.wav with Accept: %q served %q (found %v), want wav", accept, form.Extension, ok)
 		}
 	}
 	for _, accept := range []string{"audio/flac", "audio/ogg", "audio/mpeg", "audio/wav;q=0"} {
 		if _, ok := negotiate(route, accept); ok {
-			t.Errorf("audio.wav served Accept: %q", accept)
+			t.Errorf("audio.wav served Accept: %q, want a refusal", accept)
 		}
 	}
 }
@@ -82,7 +82,7 @@ func TestADocumentRouteNegotiatesItsOwnType(t *testing.T) {
 		}
 	}
 	if _, ok := negotiate(route, "text/html"); ok {
-		t.Error("the discovery document served text/html")
+		t.Error("the discovery document served text/html, want a refusal")
 	}
 
 	openapi, _, _ := matchRoute("/v1/audio/openapi.json")
@@ -93,29 +93,29 @@ func TestADocumentRouteNegotiatesItsOwnType(t *testing.T) {
 	}
 	form, _ := negotiate(openapi, "*/*")
 	if form.ContentType != "application/openapi+json" {
-		t.Errorf("the OpenAPI document sends %q", form.ContentType)
+		t.Errorf("the OpenAPI document sends %q, want application/openapi+json", form.ContentType)
 	}
 }
 
 func TestTheContentTypeCarriesTheCodecsParameterAndTheLinkTypeDoesNot(t *testing.T) {
 	opus, found := representationFor("opus")
 	if !found {
-		t.Fatal("no opus representation")
+		t.Fatal(`representationFor("opus") found nothing, want the Opus representation`)
 	}
 	if opus.ContentType != "audio/ogg; codecs=opus" {
-		t.Errorf("Content-Type is %q", opus.ContentType)
+		t.Errorf("Content-Type is %q, want %q", opus.ContentType, "audio/ogg; codecs=opus")
 	}
 	if opus.MediaType != "audio/ogg" {
-		t.Errorf("the Link type is %q, and RFC 8288 section 3.4.1 takes no parameters", opus.MediaType)
+		t.Errorf("the Link type is %q, want audio/ogg, because RFC 8288 section 3.4.1 takes no parameters", opus.MediaType)
 	}
 }
 
 func TestAMalformedAcceptIsReadAsFarAsItGoes(t *testing.T) {
 	route, _, _ := matchRoute("/v1/audio/sinks/kitchen/audio")
-	// A range with no subtype and a q that is not a number are both
-	// things a client sends; neither one refuses the whole header.
+	// A range with no subtype and a q-value that is not a number are
+	// each skipped, and the rest of the header still applies.
 	form, ok := negotiate(route, "audio, audio/flac;q=bogus")
 	if !ok || form.Extension != "flac" {
-		t.Errorf("a malformed Accept served %v (%v)", form.Extension, ok)
+		t.Errorf("a malformed Accept served %q (found %v), want flac", form.Extension, ok)
 	}
 }

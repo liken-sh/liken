@@ -1,24 +1,22 @@
 package main
 
-// The resting layer: the settings a spec declares, and the write each
-// one lands in.
+// The writes that make an endpoint match the level, mute, ALSA
+// controls, and Bluetooth codec that its Sink or Source spec declares.
 //
-// The operator writes nothing at all for a field the spec leaves out.
-// So an empty spec costs the hardware nothing, and a value a person
-// set by hand on an undeclared field stays where they put it. The one
-// exception is the unity default: a sink node PipeWire has just built
-// is set to unity when its spec declares no level, because this pod
-// stores no volumes and unity is the one level the operator can
-// defend with no declaration to read.
+// The operator writes no field that the spec leaves out, so an empty
+// spec never touches the hardware, and a value that a person set by
+// hand stays. The exception is a sink node that PipeWire has just
+// built, when the spec declares no level or mute: the operator sets it
+// to unity (100%). It stores no earlier volume to restore, so unity is
+// the only level it can justify.
 //
-// A declared control and a declared codec are written wherever the
-// endpoint diverges from them. A declared level and mute are not. The
-// operator writes them when the declaration changes and when the
-// node appears, such as a speaker that reconnects, and follows the
-// device at every other time. The level has other writers: the media
-// operator's volume asks (asks.go) and a speaker's own buttons. An
-// operator that wrote the declaration back on each divergence would
-// undo each of them on its next pass.
+// Controls and the codec are written on every pass where the endpoint
+// differs from the spec. The declared level and mute are written only
+// when the declaration changed or the node is new, as when a speaker
+// reconnects. Other writers change the level on purpose, such as a volume
+// request in status.session.volumeAsk (asks.go) and the buttons on a
+// speaker, and writing the declared level on every pass would undo their
+// change.
 
 import (
 	"context"
@@ -31,17 +29,14 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// levelWrite is one write of a level: the volume as a percent of
-// unity, the mute, or both, which go in one write because PipeWire
-// applies one Props pod at once. A field the spec leaves out is nil
-// and stays out of the pod, so a declared mute on a node whose level
-// is unknown never writes a gain of zero beside it.
+// levelWrite is a volume in percent of unity, a mute, or both. Both go
+// to PipeWire in one Props pod, which PipeWire applies as a unit. A nil
+// field is left out of the pod, so the node keeps its current value.
 type levelWrite struct {
 	Volume *int
 	Mute   *bool
 }
 
-// same reports whether two level writes state the same thing.
 func (l levelWrite) same(other levelWrite) bool {
 	return optionalEqual(l.Volume, other.Volume) && optionalEqual(l.Mute, other.Mute)
 }
@@ -53,7 +48,6 @@ func optionalEqual[T comparable](a, b *T) bool {
 	return *a == *b
 }
 
-// String names the write for a log line.
 func (l levelWrite) String() string {
 	var parts []string
 	if l.Volume != nil {
@@ -65,99 +59,99 @@ func (l levelWrite) String() string {
 	return strings.Join(parts, ", ")
 }
 
-// controlWrite is one write of one of the card's own controls.
 type controlWrite struct {
 	Element control
 	Value   string
 }
 
-// endpointWrites is everything one pass must write to make one
-// endpoint rest where its spec says. A pass that finds nothing
-// diverged writes nothing.
+// endpointWrites is empty when the endpoint already matches its spec.
 type endpointWrites struct {
 	Level    *levelWrite
 	Controls []controlWrite
 	Codec    string
 }
 
-// nodeMemory is what the controller knows about an endpoint's node:
-// whether PipeWire built it since the operator last judged it, and the
-// declaration the node was last judged against, if any. A declaration
-// that differs from that judgment is a change of the spec.
-type nodeMemory struct {
-	New  bool
-	Held *levelWrite
+// nodeHistory is what earlier passes recorded about an endpoint's node.
+// New is true when PipeWire built the node after the last pass read it.
+// Reconciled is the declared level and mute that the node was last
+// compared against, or nil when no level or mute was declared then.
+type nodeHistory struct {
+	New        bool
+	Reconciled *levelWrite
 }
 
-// nodeRecord is one endpoint's node as the controller last saw it.
+// nodeRecord is what endpointControl keeps for one endpoint's node
+// between passes.
 //
-// written is the level this operator last wrote, from the spec or from
-// a volume ask, which status.observed reports for an idle node. held is
-// the declaration the node was last judged against: the declaration
-// this operator wrote, or the one it adopted because the node already
-// held it or because the first pass found the node. A declaration is
-// written again only when it differs from held, so a level that moved
-// at the device or by an ask stays where it moved.
+// written is the last level the operator wrote to the node, from the
+// spec or from a volume request. status.observed reports it when the node
+// prints no level or is suspended, because the level that a suspended
+// node prints can be stale.
 //
-// cookie and id name the node: PipeWire gives out the same small ids
-// again after it restarts, so an id alone can name a node of an older
-// PipeWire.
+// reconciled is the declared level and mute that the node was last
+// compared against, whether or not that pass wrote them. The operator
+// writes the declared level again only when the spec differs from
+// reconciled.
+//
+// cookie and id identify the node. PipeWire reuses small ids after it
+// restarts, so an id alone can match a node of an earlier PipeWire
+// process. cookie is a random number that the PipeWire daemon picks
+// when it starts.
 type nodeRecord struct {
-	cookie  uint32
-	id      int
-	written *levelWrite
-	held    *levelWrite
+	cookie     uint32
+	id         int
+	written    *levelWrite
+	reconciled *levelWrite
 }
 
-// names reports whether the record names the node the facts hold.
-func (r nodeRecord) names(facts endpointFacts) bool {
+func (r nodeRecord) matches(facts endpointFacts) bool {
 	return r.cookie == facts.PipeWire && r.id == facts.Node.ID
 }
 
-// actuate writes what the declaration and the endpoint disagree on.
-// A spec it refuses posts one SpecRefused Warning on the resource for
-// each run of passes that refuses the same values, because a person
-// wrote the spec and the endpoint does not take it.
+// actuate writes what the endpoint needs to match its spec, and updates
+// the record of its node. It skips each declared value that the
+// endpoint cannot accept, such as an unknown control name, a value out of
+// range, or a codec the speaker does not offer. When the refused values
+// differ from the ones of the last pass, it posts a SpecRefused Warning
+// on the Sink or Source.
 func (e *endpointControl) actuate(ctx context.Context, object events.ObjectReference, spec declaration,
 	applied *EndpointApplied, reading endpoint) error {
 	name := reading.facts.Name
-	writes, refusals := plannedWrites(spec, reading.facts, e.remember(reading.facts, applied))
-	if said := e.report(name, refusals); said != "" {
-		e.recorder.Warning(object, reasonSpecRefused, said)
+	writes, refusals := plannedWrites(spec, reading.facts, e.recordNode(reading.facts, applied))
+	if message := e.report(name, refusals); message != "" {
+		e.recorder.Warning(object, reasonSpecRefused, message)
 	}
 	err := e.apply(ctx, reading, writes)
 	record, seen := e.nodes[name]
 	switch {
 	case !seen:
-		// The endpoint has no node, so there is nothing to record.
+		// The endpoint has no node.
 	case writes.Level != nil && err != nil:
-		// The node is recorded as seen before the write, and a
-		// level that did not land has to be tried again, so the
-		// failure forgets it and the next pass reads it as a new
-		// node.
+		// Without a record, the next pass treats the node as new and
+		// writes the level again.
 		delete(e.nodes, name)
 	case writes.Level != nil:
 		record.written = writes.Level
 		if spec.Volume != nil || spec.Mute != nil {
-			record.held = writes.Level
+			record.reconciled = writes.Level
 		}
 		e.nodes[name] = record
 	case spec.Volume != nil || spec.Mute != nil:
-		// The pass judged the declaration and planned no level write:
-		// the node holds it, or the declaration is unchanged. Later
-		// passes judge against it.
-		record.held = &levelWrite{Volume: spec.Volume, Mute: spec.Mute}
+		// The node already has the declared level, or the declaration is
+		// unchanged. Later passes compare the spec against it.
+		record.reconciled = &levelWrite{Volume: spec.Volume, Mute: spec.Mute}
 		e.nodes[name] = record
 	default:
-		// The spec declares no level, so a declaration a person writes
-		// later is a change, even when it states the level held before.
-		record.held = nil
+		// The spec declares no level or mute. With reconciled cleared, a
+		// declaration added later counts as a change, even when it
+		// matches the level the node had before.
+		record.reconciled = nil
 		e.nodes[name] = record
 	}
-	// A node that runs reports its own level, which is newer than any
-	// write, so the record of the written level is cleared. Without
-	// this, a node that later suspends would report an older write
-	// over the level it last ran at.
+	// The level that a running node prints is newer than any earlier
+	// write, so written is cleared. Otherwise status.observed would
+	// report the old write after the node suspends, in place of the
+	// level the node last ran at.
 	if _, _, known := reading.facts.level(); known && !reading.facts.suspended() && writes.Level == nil {
 		if record, seen := e.nodes[name]; seen {
 			record.written = nil
@@ -167,89 +161,82 @@ func (e *endpointControl) actuate(ctx context.Context, object events.ObjectRefer
 	return err
 }
 
-// remember reports whether PipeWire built this endpoint's node since
-// the operator last judged it, with the declaration the node that
-// stands was last judged against, and records the node it sees now.
+// recordNode stores the endpoint's current node and returns its
+// nodeHistory for plannedWrites.
 //
-// The memory is a cache of status.applied. When the memory holds no
-// record, as in the first pass after a start, the status decides: a
-// node whose cookie and id match status.applied kept running through
-// the restart. Its level can be a volume ask or a press of a
-// speaker's button that the declaration does not know, so it is
-// judged against the declaration it was judged against before, and
-// not written again unless the declaration changed. Any other node
-// was built since, as on a machine that booted, where PipeWire starts
-// with the operator and builds every node again unmuted at its
-// configured level. That node takes the declaration, or unity.
-func (e *endpointControl) remember(facts endpointFacts, applied *EndpointApplied) nodeMemory {
+// The records are in memory, so the first pass after an operator restart
+// finds none and reads them from status.applied. A node whose cookie and
+// id match status.applied kept running through the restart, and its level
+// can have changed through a volume request or a button on a speaker. So
+// that node is written again only when the spec changed since
+// status.applied. Any other node is new, as on a machine that just
+// booted, where PipeWire builds every node unmuted at its configured
+// level. The operator writes the declared level, or unity, to a new
+// node.
+func (e *endpointControl) recordNode(facts endpointFacts, applied *EndpointApplied) nodeHistory {
 	if !facts.HasNode {
 		delete(e.nodes, facts.Name)
-		return nodeMemory{}
+		return nodeHistory{}
 	}
 	last, seen := e.nodes[facts.Name]
-	if seen && last.names(facts) {
-		return nodeMemory{Held: last.held}
+	if seen && last.matches(facts) {
+		return nodeHistory{Reconciled: last.reconciled}
 	}
 	if !seen && applied != nil {
-		stood := nodeRecord{cookie: applied.PipeWireCookie, id: applied.Node}
-		if stood.names(facts) {
+		previous := nodeRecord{cookie: applied.PipeWireCookie, id: applied.Node}
+		if previous.matches(facts) {
 			if applied.Volume != nil || applied.Mute != nil {
-				stood.held = &levelWrite{Volume: applied.Volume, Mute: applied.Mute}
+				previous.reconciled = &levelWrite{Volume: applied.Volume, Mute: applied.Mute}
 			}
-			e.nodes[facts.Name] = stood
-			return nodeMemory{Held: stood.held}
+			e.nodes[facts.Name] = previous
+			return nodeHistory{Reconciled: previous.reconciled}
 		}
 	}
 	e.nodes[facts.Name] = nodeRecord{cookie: facts.PipeWire, id: facts.Node.ID}
-	return nodeMemory{New: true}
+	return nodeHistory{New: true}
 }
 
-// applied is what status.applied publishes for the endpoint after the
-// pass judged it: the node and the declaration it holds, or nothing
-// when the endpoint has no node.
+// applied returns the value of status.applied for the endpoint, or nil
+// when the endpoint has no node. recordNode reads it back after an
+// operator restart.
 func (e *endpointControl) applied(facts endpointFacts) *EndpointApplied {
 	record, seen := e.nodes[facts.Name]
 	if !facts.HasNode || !seen {
 		return nil
 	}
 	applied := &EndpointApplied{PipeWireCookie: record.cookie, Node: record.id}
-	if record.held != nil {
-		applied.Volume, applied.Mute = record.held.Volume, record.held.Mute
+	if record.reconciled != nil {
+		applied.Volume, applied.Mute = record.reconciled.Volume, record.reconciled.Mute
 	}
 	return applied
 }
 
-// plannedWrites is the resting layer's whole decision: what the
-// declaration and the endpoint disagree on, and what the declaration
-// states that the endpoint cannot take.
-//
-// Four rules. A declared level is written when the node is new and
-// when the declaration changed, unless the endpoint already holds it.
-// A declared control or codec is written where the endpoint diverges
-// from it. A field the spec leaves out is written nowhere, apart from
-// the unity default a new sink node takes. A value the hardware
-// refuses is reported and never written, so a typo in a control name
-// costs one log line and no register.
-func plannedWrites(spec declaration, facts endpointFacts, node nodeMemory) (endpointWrites, []string) {
+// plannedWrites returns the writes that make the endpoint match the
+// spec, and a message for each declared value that the endpoint cannot
+// accept. A declared level is written when the node is new or the
+// declaration changed, unless the node already has that level. A
+// refused value is never written, so a mistyped control name makes no
+// write to the card.
+func plannedWrites(spec declaration, facts endpointFacts, node nodeHistory) (endpointWrites, []string) {
 	var writes endpointWrites
 	var refusals []string
 
 	volume, mute, known := facts.level()
 	switch {
 	case !facts.HasNode:
-		// An endpoint with no node has nothing to write a level to.
-		// The no-sink taint and the Ready condition are where that
-		// shows, and the controls below still write, because they
-		// are the card's and not the node's.
+		// The no-sink taint and the Ready condition report the missing
+		// node. The controls below are still written, because they belong
+		// to the card and not to the node.
 	case spec.Volume != nil || spec.Mute != nil:
 		want := levelWrite{Volume: spec.Volume, Mute: spec.Mute}
-		// The declaration is compared with the one the node was last
-		// judged against, and not with the level the node reports, so a
-		// level that moved at the device or by an ask stays where it
-		// moved. A node with no judgment yet takes the declaration.
-		changed := node.New || node.Held == nil || !node.Held.same(want)
-		holds := known && !facts.suspended() && (want.Volume == nil || *want.Volume == volume) && (want.Mute == nil || *want.Mute == mute)
-		if changed && !holds {
+		// The declaration is compared with the last one, not with the
+		// node's level, so a level that changed at the device or through
+		// a volume request stays.
+		changed := node.New || node.Reconciled == nil || !node.Reconciled.same(want)
+		// A suspended node can print the level it last ran at, which does
+		// not show that the declared level is set.
+		alreadySet := known && !facts.suspended() && (want.Volume == nil || *want.Volume == volume) && (want.Mute == nil || *want.Mute == mute)
+		if changed && !alreadySet {
 			writes.Level = &want
 		}
 	case facts.Direction == directionSink && node.New && known && volume != unityPercent:
@@ -261,12 +248,12 @@ func plannedWrites(spec declaration, facts endpointFacts, node nodeMemory) (endp
 		value := spec.Controls[name]
 		element, declared := findControl(facts.Controls, name)
 		if !declared {
-			refusals = append(refusals, fmt.Sprintf("the spec states the control %q, "+
-				"and this endpoint lists none by that name", name))
+			refusals = append(refusals, fmt.Sprintf("spec.controls names the control %q, "+
+				"and this endpoint lists no control by that name", name))
 			continue
 		}
 		if err := declarable(element.Capability, value); err != nil {
-			refusals = append(refusals, fmt.Sprintf("the spec states %q for %q: %v", value, name, err))
+			refusals = append(refusals, fmt.Sprintf("spec.controls sets %q to %q: %v", name, value, err))
 			continue
 		}
 		if current, read := facts.Values[name]; read && current == value {
@@ -283,11 +270,12 @@ func plannedWrites(spec declaration, facts endpointFacts, node nodeMemory) (endp
 	return writes, refusals
 }
 
-// plannedCodec returns the codec to apply, or no change while a claim
-// allocates the speaker. Switching codecs replaces the speaker's node
-// and interrupts playback. A claim's codec parameter takes precedence
-// for the duration of the claim. The operator applies the codec from
-// the Sink spec after the claim ends.
+// plannedCodec returns the codec to switch the speaker to, or a refusal
+// message when the speaker does not offer the declared codec. It
+// returns neither while a claim has the speaker, because a switch
+// replaces the speaker's node and interrupts playback, and a codec
+// parameter on the claim takes precedence. The spec's codec is written
+// on a pass after the claim ends.
 func plannedCodec(spec declaration, facts endpointFacts) (string, string) {
 	if spec.Codec == nil || facts.Speaker == nil || !facts.Speaker.HasSink {
 		return "", ""
@@ -297,14 +285,12 @@ func plannedCodec(spec declaration, facts endpointFacts) (string, string) {
 		return "", ""
 	}
 	if _, offered := findCodec(facts.Speaker.Sink.Codecs, codec); !offered {
-		return "", fmt.Sprintf("the spec states the codec %q, and the speaker offers %s",
+		return "", fmt.Sprintf("spec.codec is %q, and the speaker offers %s",
 			codec, codecList(facts.Speaker.Sink.Codecs))
 	}
 	return codec, ""
 }
 
-// findControl picks one of an endpoint's controls by the kernel's own
-// name for it.
 func findControl(controls []control, name string) (control, bool) {
 	for _, element := range controls {
 		if element.Name == name {
@@ -314,17 +300,15 @@ func findControl(controls []control, name string) (control, bool) {
 	return control{}, false
 }
 
-// declarable reports whether a control takes the declared value, by
-// encoding it the way the write would. One encoder answers for both,
-// so a value this accepts is a value the card takes.
+// declarable uses the encoder of the real write, so the check and the
+// write cannot disagree about which values a control accepts.
 func declarable(capability controlCapability, value string) error {
 	var scratch ctlElemValue
 	return encodeControlValue(capability, value, scratch.Value[:])
 }
 
-// apply makes the writes one pass planned. Each one is reported on
-// its own line, because a write to hardware is the one thing this
-// operator does that a person cannot see in the resource.
+// apply logs each write, because a write to the hardware does not show
+// in any resource. A failed write does not stop the others.
 func (e *endpointControl) apply(ctx context.Context, reading endpoint, writes endpointWrites) error {
 	var failures []error
 	facts := reading.facts
@@ -333,12 +317,11 @@ func (e *endpointControl) apply(ctx context.Context, reading endpoint, writes en
 			failures = append(failures, err)
 			e.readings.controlFailed(operationVolume)
 		} else {
-			fmt.Printf("%s: %s\n", facts.Name, level)
+			fmt.Printf("%s: set %s\n", facts.Name, level)
 		}
 	}
-	// A control write goes through the same descriptor the value was
-	// read through, so an endpoint whose card did not open has no
-	// control to write and lists none for a spec to state.
+	// A card that did not open lists no controls, so no control write is
+	// planned when reading.card is nil.
 	for _, write := range writes.Controls {
 		if reading.card == nil {
 			break
@@ -348,20 +331,19 @@ func (e *endpointControl) apply(ctx context.Context, reading endpoint, writes en
 			e.readings.controlFailed(operationControl)
 			continue
 		}
-		fmt.Printf("%s: %s is %s\n", facts.Name, write.Element.Name, write.Value)
+		fmt.Printf("%s: set the control %q to %s\n", facts.Name, write.Element.Name, write.Value)
 	}
 	if writes.Codec != "" {
 		if _, err := e.switchCodec(ctx, facts.Speaker.Address, writes.Codec, facts.Speaker.Sink); err != nil {
 			failures = append(failures, err)
 			e.readings.controlFailed(operationCodec)
 		} else {
-			fmt.Printf("%s: codec %s\n", facts.Name, writes.Codec)
+			fmt.Printf("%s: switched the codec to %s\n", facts.Name, writes.Codec)
 		}
 	}
 	return errors.Join(failures...)
 }
 
-// applyLevel writes one level where the endpoint's level lives.
 func (e *endpointControl) applyLevel(ctx context.Context, facts endpointFacts, level levelWrite) error {
 	if device, route, absolute := facts.absoluteRoute(); absolute {
 		return e.setRoute(ctx, device, route, level)

@@ -16,9 +16,10 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-// objectStore stands in for the API server's Secrets and ConfigMaps.
-// It answers 409 on a create of something it already holds, which is
-// the race the API has to lose cleanly.
+// objectStore fakes the API server's Secrets and ConfigMaps. It
+// returns 409 to a create of an object that it already stores, which
+// is how the API server refuses the pod that loses the race to create
+// one.
 type objectStore struct {
 	mu         sync.Mutex
 	secrets    map[string]secret
@@ -109,11 +110,11 @@ func (s *objectStore) secretData(t *testing.T, name string) map[string][]byte {
 	held, found := s.secrets[name]
 	s.mu.Unlock()
 	if !found {
-		t.Fatalf("the store holds no Secret %s", name)
+		t.Fatalf("the store has no Secret %s", name)
 	}
 	decoded, err := decodeSecretData(held.Data)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the data of the Secret: %v", err)
 	}
 	return decoded
 }
@@ -128,44 +129,42 @@ func TestTheFirstStartMintsACAAndBothLeaves(t *testing.T) {
 	held := store.secretData(t, apiTLSSecret)
 	for _, key := range []string{tlsCertFile, tlsKeyFile, tlsCABundle, caKeyFile} {
 		if len(held[key]) == 0 {
-			t.Errorf("the Secret %s holds no %s", apiTLSSecret, key)
+			t.Errorf("the Secret %s has no %s", apiTLSSecret, key)
 		}
 	}
 	store.mu.Lock()
 	kind := store.secrets[apiTLSSecret].Type
 	store.mu.Unlock()
 	if kind != "kubernetes.io/tls" {
-		t.Errorf("the Secret is typed %q", kind)
+		t.Errorf("the Secret's type is %q, want kubernetes.io/tls", kind)
 	}
 
-	// The container's leaf is signed by the same CA, with the one name
-	// the API dials it by.
+	// The capture container's leaf is signed by the same CA and lists
+	// only the name that the API dials.
 	leaf := store.secretData(t, captureTLSSecret)
 	certificate, err := parseCertificate(leaf[tlsCertFile])
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the capture leaf: %v", err)
 	}
 	if !slices.Equal(certificate.DNSNames, []string{captureAudience}) {
 		t.Errorf("the capture leaf names %v, want [%s]", certificate.DNSNames, captureAudience)
 	}
 	authority, err := parseCertificate(held[tlsCABundle])
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the CA certificate: %v", err)
 	}
 	if err := certificate.CheckSignatureFrom(authority); err != nil {
-		t.Errorf("the capture leaf is not signed by the domain's CA: %v", err)
+		t.Errorf("the capture leaf is not signed by the CA in audio-api-tls: %v", err)
 	}
 
-	// The trust anchor is a ConfigMap, so a client reads it with an
-	// ordinary get and never touches the Secret.
 	store.mu.Lock()
 	anchor := store.configMaps[apiCAConfigMap].Data[tlsCABundle]
 	store.mu.Unlock()
 	if anchor != string(held[tlsCABundle]) {
-		t.Error("the ConfigMap does not hold the CA certificate")
+		t.Error("the ConfigMap does not contain the CA certificate")
 	}
 	if strings.Contains(anchor, "PRIVATE KEY") {
-		t.Error("the ConfigMap holds a private key")
+		t.Error("the ConfigMap contains a private key")
 	}
 }
 
@@ -173,11 +172,11 @@ func TestThePublicLeafNamesEverySpellingOfTheService(t *testing.T) {
 	store := newObjectStore(t)
 	certs := store.certificates()
 	if _, err := certs.ensure(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the certificates: %v", err)
 	}
 	certificate, err := parseCertificate(store.secretData(t, apiTLSSecret)[tlsCertFile])
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the public leaf: %v", err)
 	}
 	want := []string{
 		"audio-api",
@@ -196,17 +195,17 @@ func TestTheLifetimesAreTenYearsAndOne(t *testing.T) {
 	at := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
 	certs.now = func() time.Time { return at }
 	if _, err := certs.ensure(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the certificates: %v", err)
 	}
 	held := store.secretData(t, apiTLSSecret)
 
 	authority, _ := parseCertificate(held[tlsCABundle])
 	if years := authority.NotAfter.Sub(at).Hours() / 24 / 365; years < 9.9 || years > 10.1 {
-		t.Errorf("the CA lives %.1f years, want 10", years)
+		t.Errorf("the CA is valid for %.1f years, want 10", years)
 	}
 	leaf, _ := parseCertificate(held[tlsCertFile])
 	if years := leaf.NotAfter.Sub(at).Hours() / 24 / 365; years < 0.99 || years > 1.01 {
-		t.Errorf("the leaf lives %.2f years, want 1", years)
+		t.Errorf("the leaf is valid for %.2f years, want 1", years)
 	}
 }
 
@@ -216,32 +215,33 @@ func TestALeafIsMintedAgainUnderAThirdOfItsLife(t *testing.T) {
 	first := store.certificates()
 	first.now = func() time.Time { return at }
 	if _, err := first.ensure(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the certificates: %v", err)
 	}
 	minted, _ := parseCertificate(store.secretData(t, apiTLSSecret)[tlsCertFile])
 
-	// Eight months in, more than a third of a year remains.
+	// Eight months in, more than a third of the leaf's life remains.
 	kept := store.certificates()
 	kept.now = func() time.Time { return at.Add(8 * 30 * 24 * time.Hour) }
 	if _, err := kept.ensure(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the certificates eight months later: %v", err)
 	}
 	same, _ := parseCertificate(store.secretData(t, apiTLSSecret)[tlsCertFile])
 	if minted.SerialNumber.Cmp(same.SerialNumber) != 0 {
 		t.Error("a leaf with two thirds of its life left was minted again")
 	}
 
-	// Eleven months in, under a third remains.
+	// Eleven months in, less than a third of the leaf's life remains.
 	renewed := store.certificates()
 	renewed.now = func() time.Time { return at.Add(11 * 30 * 24 * time.Hour) }
 	if _, err := renewed.ensure(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the certificates eleven months later: %v", err)
 	}
 	next, _ := parseCertificate(store.secretData(t, apiTLSSecret)[tlsCertFile])
 	if minted.SerialNumber.Cmp(next.SerialNumber) == 0 {
 		t.Error("a leaf under a third of its life was not minted again")
 	}
-	// The CA is the same one, so nothing a client already trusts moves.
+	// The new leaf is signed by the same CA, so clients that trust that
+	// CA need no new trust anchor.
 	authority, _ := parseCertificate(store.secretData(t, apiTLSSecret)[tlsCABundle])
 	if err := next.CheckSignatureFrom(authority); err != nil {
 		t.Errorf("the new leaf is signed by another CA: %v", err)
@@ -252,13 +252,13 @@ func TestACreateThatLosesTheRaceReadsTheWinner(t *testing.T) {
 	store := newObjectStore(t)
 	winner := store.certificates()
 	if _, err := winner.ensure(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the certificates in the winning pod: %v", err)
 	}
 	winnersCA := store.secretData(t, apiTLSSecret)[tlsCABundle]
 
-	// The second pod sees no Secret at the moment it looks, mints its
-	// own, and loses the create. It has to take the winner's CA, or the
-	// two pods would serve leaves no one anchor covers.
+	// The second pod finds no Secret when it reads, mints its own CA,
+	// and loses the create. If it kept its own CA, no single CA
+	// certificate would verify the leaves of both pods.
 	loser := store.certificates()
 	if _, err := loser.ensure(); err != nil {
 		t.Fatalf("the losing pod: %v", err)
@@ -273,15 +273,15 @@ func TestACreateThatLosesTheRaceReadsTheWinner(t *testing.T) {
 
 func TestASecretAnotherIssuerOwnsIsServedAndNotSigned(t *testing.T) {
 	store := newObjectStore(t)
-	// A cert-manager owner replaces audio-api-tls with a Certificate of
-	// the same name, which holds no CA key.
+	// cert-manager can replace audio-api-tls with the Secret of a
+	// Certificate of the same name. That Secret has no CA key.
 	issued, err := mintAuthority(time.Now())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the other issuer's CA: %v", err)
 	}
 	leaf, err := issued.mintLeaf(apiService, serviceNames(apiService, "liken-system"), time.Now())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the other issuer's leaf: %v", err)
 	}
 	store.mu.Lock()
 	store.secrets[apiTLSSecret] = secret{
@@ -307,7 +307,7 @@ func TestASecretAnotherIssuerOwnsIsServedAndNotSigned(t *testing.T) {
 	_, minted := store.secrets[captureTLSSecret]
 	store.mu.Unlock()
 	if minted {
-		t.Error("the API signed a capture leaf with a CA key it does not hold")
+		t.Error("the API signed a capture leaf with a CA key that the Secret does not contain")
 	}
 }
 
@@ -317,9 +317,10 @@ func TestTheNearestExpiryIsWhatTheGaugeReports(t *testing.T) {
 	at := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
 	certs.now = func() time.Time { return at }
 	if _, err := certs.ensure(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the certificates: %v", err)
 	}
-	// The leaf runs out first, so the leaf's expiry is the gauge.
+	// The leaf expires in a year and the CA in ten, so the gauge reports
+	// the leaf's expiry.
 	nearest := certs.nearestExpiry()
 	if years := nearest.Sub(at).Hours() / 24 / 365; years > 1.01 {
 		t.Errorf("the nearest expiry is %.2f years out, want the leaf's one year", years)
@@ -330,15 +331,15 @@ func TestATrustAnchorTheContainerAcceptsIsWhatTheAPIPublishes(t *testing.T) {
 	store := newObjectStore(t)
 	certs := store.certificates()
 	if _, err := certs.ensure(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the certificates: %v", err)
 	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(certs.anchor()) {
-		t.Fatal("the anchor holds no certificates")
+		t.Fatal("the anchor contains no certificates")
 	}
 	leaf, err := parseCertificate(store.secretData(t, captureTLSSecret)[tlsCertFile])
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the capture leaf: %v", err)
 	}
 	if _, err := leaf.Verify(x509.VerifyOptions{
 		Roots:     roots,
@@ -377,19 +378,20 @@ func TestPEMThatIsNotACertificateIsARefusal(t *testing.T) {
 	}
 }
 
-// A Secret an owner deleted has to come back when the watch reports
-// the delete, not on the hourly lifetime check: a capture container
-// with no leaf serves a certificate no client trusts, so every tap on
-// its node is a 503 until it returns.
+// The watch on the audio-capture-server Secret calls keepCaptureLeaf
+// when the Secret is deleted, so the Secret is written again at once
+// and not at the next hourly certificate check. Until then the capture
+// container serves a certificate that no client trusts, and every tap
+// on its node fails with a 503.
 func TestADeletedCaptureSecretIsMintedAgainByTheLeafCheck(t *testing.T) {
 	store := newObjectStore(t)
 	certs := store.certificates()
 	if _, err := certs.ensure(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the certificates: %v", err)
 	}
 	first, err := parseCertificate(store.secretData(t, captureTLSSecret)[tlsCertFile])
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the capture leaf: %v", err)
 	}
 
 	store.mu.Lock()
@@ -406,26 +408,27 @@ func TestADeletedCaptureSecretIsMintedAgainByTheLeafCheck(t *testing.T) {
 	if first.SerialNumber.Cmp(next.SerialNumber) == 0 {
 		t.Error("the Secret carries the deleted leaf")
 	}
-	// The same CA signs it, so nothing a client already trusts moves.
+	// The new leaf is signed by the same CA, so clients that trust that
+	// CA need no new trust anchor.
 	authority, _ := parseCertificate(store.secretData(t, apiTLSSecret)[tlsCABundle])
 	if err := next.CheckSignatureFrom(authority); err != nil {
 		t.Errorf("the new leaf is signed by another CA: %v", err)
 	}
 }
 
-func TestTheMinuteCheckWritesNothingWhenTheSecretIsInOrder(t *testing.T) {
+func TestKeepCaptureLeafWritesNothingWhenTheSecretIsInOrder(t *testing.T) {
 	store := newObjectStore(t)
 	certs := store.certificates()
 	if _, err := certs.ensure(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the certificates: %v", err)
 	}
 	held, err := parseCertificate(store.secretData(t, captureTLSSecret)[tlsCertFile])
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the capture leaf: %v", err)
 	}
 	for range 5 {
 		if err := certs.keepCaptureLeaf(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("checking the capture leaf: %v", err)
 		}
 	}
 	same, _ := parseCertificate(store.secretData(t, captureTLSSecret)[tlsCertFile])
@@ -438,17 +441,18 @@ func TestALeafAnotherCASignedIsMintedAgain(t *testing.T) {
 	store := newObjectStore(t)
 	certs := store.certificates()
 	if _, err := certs.ensure(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the certificates: %v", err)
 	}
-	// A Secret left over from a CA that is gone: a container serving it
-	// would present a leaf the API refuses.
+	// The Secret holds a leaf from a CA other than the API's. A
+	// container that served it would present a certificate that the API
+	// refuses.
 	stranger, err := mintAuthority(time.Now())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the other CA: %v", err)
 	}
 	leaf, err := stranger.mintLeaf(captureAudience, []string{captureAudience}, time.Now())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting a leaf from the other CA: %v", err)
 	}
 	store.mu.Lock()
 	store.secrets[captureTLSSecret] = secret{
@@ -462,11 +466,11 @@ func TestALeafAnotherCASignedIsMintedAgain(t *testing.T) {
 	store.mu.Unlock()
 
 	if err := certs.keepCaptureLeaf(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the capture leaf: %v", err)
 	}
 	next, err := parseCertificate(store.secretData(t, captureTLSSecret)[tlsCertFile])
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the capture leaf: %v", err)
 	}
 	authority, _ := parseCertificate(certs.anchor())
 	if err := next.CheckSignatureFrom(authority); err != nil {

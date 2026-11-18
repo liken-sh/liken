@@ -1,32 +1,30 @@
 package main
 
-// Running one tap: the processes, the confirmation that the link
-// landed where the request asked, and the copy from the pipeline to
-// the response.
+// A tap starts pw-record and an optional encoder, confirms that PipeWire
+// linked the recording stream to the requested node, and copies the
+// audio to the HTTP response.
 //
-// The order is fixed by what each step can still refuse. The
-// container resolves the node first, because pw-record never refuses
-// a bad target. It starts the pipeline, then reads the graph again to
-// confirm the link, and only then writes the status line, because a
-// 500 wrong-target cannot be sent after a 200 has gone out. A
-// confirmation that fails ends the tap with nothing written.
+// pw-record does not fail on a bad target, so the handler resolves the
+// target node before any process starts. After the pipeline starts,
+// confirm reads the graph until the link appears, and only then does
+// stream write the 200, because a 500 cannot be sent after a 200. When
+// confirm fails, the body stays empty.
 //
-// The discard is a clock and not a byte count. Sample zero of the
-// body is the accept instant plus begin on this container's own
-// clock, and the bound on the body's length is the span's own
-// duration in bytes. Both are applied to the raw samples, ahead of
-// any encoder, so an encoder only ever sees the span the client asked
-// for.
+// The span's begin and end apply to the raw samples, ahead of any
+// encoder, so the encoder reads only the requested span. discardPump
+// drops samples until this container's clock reaches the accept time
+// plus begin, so it compares times and does not count bytes. The body
+// is limited to the span's duration in bytes.
 //
-// The discard runs from the moment pw-record starts, so the pipe is
-// drained while the link is confirmed rather than held unread.
-// Without that, pw-record would block on a full pipe within about
-// 340 ms at 48 kHz stereo, and the whole confirmation time would be
-// added to the shift between the accept instant and sample zero.
+// discardPump reads from the moment pw-record starts, so the pipe drains
+// while confirm runs. Otherwise pw-record would block on a full pipe
+// after about 340 ms at 48 kHz stereo, and the time that confirm takes
+// would add to the delay between the accept time and sample zero.
 //
-// An encoder that dies ends the response with no terminating chunk,
-// which is HTTP/1.1's signal for an incomplete message (RFC 9112
-// section 8), and the log line carries the encoder's stderr.
+// When the pipeline ends before the span does, or an encoder fails, the
+// response ends without its terminating chunk, which is how HTTP/1.1
+// signals an incomplete message (RFC 9112 section 8). The log line
+// includes the last line of the encoder's stderr.
 
 import (
 	"bytes"
@@ -46,88 +44,87 @@ import (
 	"time"
 )
 
-// linkDeadline is how long the container waits for PipeWire to build
-// the link before it calls the target wrong.
+// linkDeadline is how long confirm waits for PipeWire to build the link
+// before it reports a wrong target.
 //
-// Each look is one pw-dump process, so the interval between them
-// trades the time to the first body byte against the number of
-// processes a slow link costs. It starts at linkFirstPeriod and
-// doubles to linkPeriod, because PipeWire usually has the link within
-// a few tens of milliseconds and a poll every quarter second was
-// adding up to that much to every tap.
+// Each read of the graph runs a pw-dump process. The wait between reads
+// starts at linkFirstPeriod and doubles up to linkPeriod, so a quick
+// link adds little delay and a slow link does not start a pw-dump every
+// 20 ms. PipeWire usually builds the link within a few tens of
+// milliseconds, so a fixed wait of linkPeriod would add up to that much
+// delay to every tap.
 const (
 	linkDeadline    = 3 * time.Second
 	linkFirstPeriod = 20 * time.Millisecond
 	linkPeriod      = 250 * time.Millisecond
 )
 
-// discardBlock is how much the discard reads at a time. 2048 bytes is
-// about 10.7 ms at 48 kHz stereo, which is the most the clock can
-// overshoot the instant it is aiming at.
+// discardBlock is the size of each read in discardPump's loop. The loop
+// checks the clock between reads, so it can drop up to one block past
+// until: 2048 bytes is about 10.7 ms of 16-bit stereo at 48 kHz.
 const discardBlock = 2048
 
-// ErrGraphUnread marks a graph this container could not read at all,
-// which is PipeWire being down rather than a tap that landed
-// somewhere else. It is a 503 that clears on its own, and the daemon's
-// own words go in the detail.
-var ErrGraphUnread = errors.New("PipeWire did not answer")
+// ErrGraphUnread wraps a failure of pw-dump, such as when PipeWire is
+// down. The tap's link is then unknown and PipeWire can come back, so
+// the handler and stream return a 503 with Retry-After, not the 500 of
+// a wrong target. The error text includes pw-dump's stderr.
+var ErrGraphUnread = errors.New("pw-dump cannot read the PipeWire graph")
 
-// tapPlan is everything one tap needs, settled before any process
-// starts.
+// tapPlan is the target, format, and span of one tap, resolved from the
+// request before any process starts.
 type tapPlan struct {
 	Route     apiRoute
 	Node      string
 	Direction pwDirection
 	Form      representation
 	Format    captureFormat
-	Knobs     captureKnobs
+	Query     captureQuery
 	RequestID string
 
-	// Stream is the node.name pw-record's own node takes in the
-	// graph, which is how the confirmation finds this tap.
+	// Stream is the node.name that pw-record's own node gets in the
+	// graph. confirm looks for the link from this node.
 	Stream string
 
-	// Until is when sample zero of the body belongs: the accept
-	// instant plus begin. Release is closed when the link is
-	// confirmed, and the pump discards until both have passed.
+	// Until is the time of sample zero of the body: the accept time plus
+	// begin. stream closes Release after confirm succeeds, and the pump
+	// drops samples until Until has passed and Release is closed.
 	Until   time.Time
 	Now     func() time.Time
 	Release <-chan struct{}
 }
 
-// spoken is what one process printed on stderr. os/exec copies into it
-// from a goroutine of its own while the tap runs, and this container
-// reads it whenever a failure has to carry the process's own words, so
-// the two go through the lock.
-type spoken struct {
+// stderrBuffer collects what one process prints on stderr. os/exec
+// writes to it from its own goroutine while the tap runs, and a failure
+// path can read it at the same time, so both go through the lock.
+type stderrBuffer struct {
 	mu     sync.Mutex
 	buffer bytes.Buffer
 }
 
-func (s *spoken) Write(block []byte) (int, error) {
+func (s *stderrBuffer) Write(block []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.buffer.Write(block)
 }
 
-func (s *spoken) String() string {
+func (s *stderrBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.buffer.String()
 }
 
-// runningTap is the pipeline: the samples to read, and the words each
-// process printed.
+// runningTap is a started pipeline. Body is the audio to send to the
+// client. stop ends the processes and returns how they exited, and with
+// drain it first waits up to encoderDrain for the encoder to exit.
 type runningTap struct {
 	Body io.ReadCloser
 
 	stop     func(drain bool) tapExit
 	pump     *discardPump
-	recorded *spoken
-	encoded  *spoken
+	recorded *stderrBuffer
+	encoded  *stderrBuffer
 }
 
-// discarded is how many bytes this tap dropped before the body began.
 func (t *runningTap) discarded() int64 {
 	if t.pump == nil {
 		return 0
@@ -135,71 +132,66 @@ func (t *runningTap) discarded() int64 {
 	return t.pump.discarded()
 }
 
-// delivered says this tap sent the whole span it was asked for.
+// delivered reports whether the tap copied the whole of a span that has
+// an end. A span with no end is never delivered, because it ends when the
+// client leaves.
 func (t *runningTap) delivered() bool {
 	return t.pump != nil && t.pump.delivered()
 }
 
-// tapExit is how one tap's processes ended: the exit status of each,
-// and the last thing each said.
+// tapExit records how the processes of one tap ended: the exit status of
+// each, and the last stderr line of the encoder, or of pw-record when the
+// encoder printed none.
 //
-// An exit status of -1 is a process this container signalled, which is
-// what ends every tap that finished its span or lost its client. Only
-// a status of one or more is a process that failed on its own.
+// An exit status of -1 means a signal killed the process. The context
+// kills the processes at the end of every tap, so -1 is normal. Only a
+// status above zero is a process that failed on its own.
 type tapExit struct {
 	Recorder int
 	Encoder  int
-	Words    string
+	LastLine string
 }
 
-// failed says whether a process ended on its own with something to
-// report. Both encoders print a banner and a progress bar to stderr
-// and exit zero on every successful tap, so stderr alone says nothing
-// about whether a tap worked.
+// failed reports whether either process exited by itself with a status
+// above zero. Stderr cannot be used for this, because flac and opusenc
+// print a banner and a progress bar and exit 0 on every successful tap.
 func (e tapExit) failed() bool {
 	return e.Recorder > 0 || e.Encoder > 0
 }
 
-// encoderFailed says the encoder ended on its own with something to
-// report. The encoder can consume every sample of a span and still
-// fail to write its last frame, so this is the one process status a
-// delivered body still depends on. The recorder is deliberately not
-// consulted: a recorder that died before the end already shows as a
-// span that was not delivered, and one that died after the end cannot
-// take back bytes the client holds.
+// encoderFailed reports whether the encoder exited by itself with a
+// status above zero. An encoder can consume every sample of a span and
+// still fail to write its last frame, so a fully copied body can still be
+// invalid. The recorder's status is not checked here. A recorder that
+// died before the end already leaves the span undelivered, and one that
+// died after the end cannot take back bytes that the client has.
 func (e tapExit) encoderFailed() bool {
 	return e.Encoder > 0
 }
 
-// String is the log line's ended field: the two exit statuses, and the
-// last line either process wrote.
 func (e tapExit) String() string {
 	ended := fmt.Sprintf("pw-record:%s", exitWords(e.Recorder))
 	if e.Encoder != exitNotRun {
 		ended += fmt.Sprintf(" encoder:%s", exitWords(e.Encoder))
 	}
-	if e.Words != "" {
-		ended += " " + e.Words
+	if e.LastLine != "" {
+		ended += " " + e.LastLine
 	}
 	return ended
 }
 
-// The two statuses that are not a process's own.
-//
-// exitNotRun marks a process this tap never started, which is the
-// encoder of a WAV tap. exitUnknown marks a wait that answered
-// something other than an exit: os/exec reports exec.ErrWaitDelay when
-// a process exits well and its pipes are still open a moment later,
-// and that says nothing about how the process ended.
+// exitNotRun is the encoder status of a WAV tap, which starts no
+// encoder. exitUnknown is the status of a Wait error that is not an
+// ExitError, such as exec.ErrWaitDelay.
 const (
 	exitNotRun  = -2
 	exitUnknown = -3
 )
 
-// encoderDrain is how long the pipeline waits for an encoder that is
-// already finishing. The span closed its stdin, so it is writing its
-// last bytes and exiting; a second is many times what either encoder
-// needs, and a wait that runs out cancels rather than hanging a tap.
+// encoderDrain is how long stop waits for an encoder to exit by itself
+// after its stdin closed at the end of the span. The encoder only has its
+// last bytes to write, so a second is far more than it needs. When the
+// wait runs out, stop cancels the context so a tap cannot hang.
 const encoderDrain = time.Second
 
 func exitWords(status int) string {
@@ -215,38 +207,37 @@ func exitWords(status int) string {
 	}
 }
 
-// lastLine is the last thing a process said. An encoder's banner and
-// its progress bar are everything before it, and a progress bar
-// returns the carriage rather than the line, so both endings split it.
+// lastLine returns the last non-blank line of a process's stderr, cut to
+// lastLineMax. It splits on a carriage return as well as a newline,
+// because opusenc redraws its progress bar with a carriage return and
+// flac prints a multi-line banner before the line that matters.
 func lastLine(output string) string {
-	kept := ""
+	last := ""
 	for _, line := range strings.FieldsFunc(output, func(r rune) bool {
 		return r == '\n' || r == '\r'
 	}) {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			kept = trimmed
+			last = trimmed
 		}
 	}
-	if len(kept) > lastLineMax {
-		return kept[:lastLineMax] + "..."
+	if len(last) > lastLineMax {
+		return last[:lastLineMax] + "..."
 	}
-	return kept
+	return last
 }
 
-// lastLineMax bounds the one line the log carries, because a process
-// may write a line of any length and a log line is read by a person.
+// lastLineMax limits the length of the stderr line in the log line,
+// because a process can print a line of any length.
 const lastLineMax = 200
 
-// startTap runs pw-record, and an encoder when the form needs one.
-//
-// until is when the body's sample zero belongs, which is the accept
-// instant plus begin, and release is closed once the link is confirmed.
-// The pump below discards until both have passed, so the confirmation
-// never lets the pipe fill and never shifts the samples.
+// startTap starts pw-record, and an encoder when the form needs one. A
+// discardPump reads pw-record's output, drops samples until plan.Until
+// has passed and plan.Release is closed, and passes the rest to the
+// encoder, or to Body for a WAV tap.
 func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	record := commandOf(ctx, recordCommand(plan.Node, plan.Stream, plan.Direction, plan.Format))
-	recorded := &spoken{}
+	recorded := &stderrBuffer{}
 	record.Stderr = recorded
 	raw, err := record.StdoutPipe()
 	if err != nil {
@@ -260,12 +251,10 @@ func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 
 	tap := &runningTap{
 		recorded: recorded,
-		encoded:  &spoken{},
+		encoded:  &stderrBuffer{},
 	}
 
-	// The span is taken off the raw samples, before any encoder, so
-	// the encoder produces the span and nothing around it.
-	span := plan.Knobs.Span
+	span := plan.Query.Span
 	pump := &discardPump{
 		from:    raw,
 		until:   plan.Until,
@@ -276,7 +265,7 @@ func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 	tap.pump = pump
 	samples := pump.start()
 
-	encoderArgs := encoderCommand(plan.Form, plan.Format, plan.Knobs.Bitrate)
+	encoderArgs := encoderCommand(plan.Form, plan.Format, plan.Query.Bitrate)
 	if encoderArgs == nil {
 		tap.Body = readCloser{Reader: samples, close: raw.Close}
 		tap.stop = func(bool) tapExit {
@@ -284,7 +273,7 @@ func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 			return tapExit{
 				Recorder: exitStatus(waitForRecorder(record, raw)),
 				Encoder:  exitNotRun,
-				Words:    lastLine(recorded.String()),
+				LastLine: lastLine(recorded.String()),
 			}
 		}
 		return tap, nil
@@ -308,21 +297,21 @@ func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 	}
 	tap.Body = readCloser{Reader: encoded, close: encoded.Close}
 	tap.stop = func(drain bool) tapExit {
-		// The wait starts here, after the response has stopped
-		// reading, and not when the encoder starts. Wait closes the
-		// encoder's stdout pipe when the process exits, and an encoder
-		// that finishes a short span before the first read would then
-		// take its whole output with it: the client would get a 200
-		// with an empty body.
+		// Call encoder.Wait here, after the response has stopped reading,
+		// and not right after Start. Wait closes the encoder's stdout
+		// pipe once the process exits, which discards output that the
+		// response has not read yet. A short span can finish encoding
+		// before the first read, so an early Wait would send a 200 with
+		// an empty body.
 		waited := make(chan error, 1)
 		go func() { waited <- encoder.Wait() }()
 		ended := tapExit{}
-		// A span that ran out closed the encoder's stdin, so the
-		// encoder is already writing its last bytes and exiting on its
-		// own. Waiting for that is what makes the status its own:
-		// cancelling first leaves os/exec watching pipes it is about
-		// to close, and the wait then answers ErrWaitDelay rather than
-		// the zero the encoder exited with.
+		// When the span ran out, the pump closed the encoder's stdin,
+		// so the encoder is already writing its last bytes and
+		// exiting. Waiting for that exit gives the encoder's own
+		// status. Cancelling first would leave os/exec waiting on
+		// pipes that are about to close, and Wait would return
+		// ErrWaitDelay instead of the 0 the encoder exited with.
 		if drain {
 			select {
 			case err := <-waited:
@@ -337,22 +326,20 @@ func startTap(ctx context.Context, plan tapPlan) (*runningTap, error) {
 		}
 		cancel()
 		ended.Recorder = exitStatus(waitForRecorder(record, raw))
-		ended.Words = lastLine(tap.encoded.String())
-		if ended.Words == "" {
-			ended.Words = lastLine(recorded.String())
+		ended.LastLine = lastLine(tap.encoded.String())
+		if ended.LastLine == "" {
+			ended.LastLine = lastLine(recorded.String())
 		}
 		return ended
 	}
 	return tap, nil
 }
 
-// exitStatus reads what a process ended with. A process this container
-// signalled reports -1, which is how a tap whose client hung up ends.
-//
-// An error that is not an ExitError carries no status at all: os/exec
-// answers exec.ErrWaitDelay when a process exits well and its pipes
-// are still open a moment later, and reading that as a failure made
-// every finished Opus span look like a capture that was cut short.
+// exitStatus returns the exit code of a process, which is -1 when a
+// signal killed it. An error that is not an ExitError returns
+// exitUnknown. os/exec returns exec.ErrWaitDelay when a process exits
+// normally but its pipes stay open past WaitDelay, and counting that as
+// a failure would mark every finished Opus span as cut short.
 func exitStatus(err error) int {
 	if err == nil {
 		return 0
@@ -364,36 +351,32 @@ func exitStatus(err error) int {
 	return exitUnknown
 }
 
-// waitForRecorder reaps pw-record after the context has killed it.
-//
-// The pipe this container reads its samples from is closed first,
-// because os/exec waits out WaitDelay for a pipe that is still open
-// when the process ends, and that second was landing on the end of
-// every tap: the client had its last block and sat waiting for the
-// response to close.
+// waitForRecorder waits for pw-record after the context has killed it.
+// It closes the sample pipe first, because os/exec waits for WaitDelay
+// when a pipe is still open after the process exits. Without the close,
+// every tap would end one second after its last block.
 func waitForRecorder(record *exec.Cmd, samples io.ReadCloser) error {
 	_ = samples.Close()
 	return record.Wait()
 }
 
-// commandOf builds one process under the context, with the same wait
-// delay every exec in this program takes: the kill bounds the process,
-// and the delay bounds the read after the kill.
+// commandOf sets WaitDelay, so after the context kills the process, Wait
+// waits at most a second for its output pipes to close.
 func commandOf(ctx context.Context, args []string) *exec.Cmd {
 	command := exec.CommandContext(ctx, args[0], args[1:]...)
 	command.WaitDelay = time.Second
 	return command
 }
 
-// discardPump reads pw-record's samples from the moment the process
-// starts. It drops what it reads until the clock reaches until and the
-// confirmation has closed release, then delivers the rest through a
-// pipe, bounded at limit bytes when the span names an end.
+// discardPump reads pw-record's output from the moment the process
+// starts. It drops samples until the clock reaches until and release is
+// closed, then passes the rest on through a pipe, up to limit bytes when
+// limit is above zero.
 //
-// The pipe is what lets the pump run ahead of the response. The
-// reader of the body is the response, which does not exist yet while
-// the link is being confirmed, so a plain reader would leave the
-// samples unread and pw-record would block on a full pipe.
+// The pipe lets the pump run ahead of the response. The response is the
+// reader of the body, and it does not exist while the link is being
+// confirmed. With a plain reader, nothing would read pw-record's output
+// in that time and pw-record would block on a full pipe.
 type discardPump struct {
 	from    io.ReadCloser
 	until   time.Time
@@ -401,14 +384,12 @@ type discardPump struct {
 	release <-chan struct{}
 	limit   int64
 
-	// dropped is written by the pump's own goroutine and read by the
-	// log line when the tap ends, so it is counted atomically.
+	// dropped counts the bytes discarded. The pump's goroutine writes it
+	// and logTap reads it when the tap ends, so it is atomic.
 	dropped atomic.Int64
 
-	// whole says the span ran out, which is the one way a bounded tap
-	// ends with nothing left to send. It is written by the pump's own
-	// goroutine for the reason dropped is.
-	whole atomic.Bool
+	// reachedLimit is atomic for the same reason as dropped.
+	reachedLimit atomic.Bool
 }
 
 func (p *discardPump) start() io.Reader {
@@ -429,15 +410,15 @@ func (p *discardPump) start() io.Reader {
 		}
 		copied, err := io.Copy(writer, samples)
 		if p.limit > 0 && copied >= p.limit {
-			p.whole.Store(true)
+			p.reachedLimit.Store(true)
 		}
 		_ = writer.CloseWithError(err)
 	}()
 	return reader
 }
 
-// ready says whether the body may begin: the confirmation has finished
-// and the clock has reached the instant sample zero belongs at.
+// ready reports whether the body may begin: release is closed and the
+// clock has reached until.
 func (p *discardPump) ready() bool {
 	select {
 	case <-p.release:
@@ -447,14 +428,12 @@ func (p *discardPump) ready() bool {
 	return !p.now().Before(p.until)
 }
 
-// discarded is how many bytes the pump dropped, which the log line
-// carries so a reader can tell a long begin from a slow link.
+// discarded returns the number of bytes dropped. The log line reports it
+// so a reader can tell a long begin from a slow link.
 func (p *discardPump) discarded() int64 { return p.dropped.Load() }
 
-// delivered says the span ran out with every sample of it sent.
-func (p *discardPump) delivered() bool { return p.whole.Load() }
+func (p *discardPump) delivered() bool { return p.reachedLimit.Load() }
 
-// readCloser pairs a reader with the close that ends the pipeline.
 type readCloser struct {
 	io.Reader
 	close func() error
@@ -462,14 +441,12 @@ type readCloser struct {
 
 func (r readCloser) Close() error { return r.close() }
 
-// stream runs one tap and copies it to the response. The headers go
-// out only after the link is confirmed, so a wrong target is a 500
-// and never a 200 that ends early.
+// stream runs one tap and copies it to the response. It writes no header
+// until confirm succeeds, so a wrong target is a 500 and not a 200 that
+// ends early.
 func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapPlan, at time.Time) {
-	// The pump starts discarding as soon as pw-record does, and holds
-	// the body back until this channel closes.
 	release := make(chan struct{})
-	plan.Until = at.Add(plan.Knobs.Span.Begin)
+	plan.Until = at.Add(plan.Query.Span.Begin)
 	plan.Now = s.now
 	plan.Release = release
 
@@ -485,10 +462,10 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 	ended := tapExit{}
 	finish := func(drain bool) tapExit {
 		if !stopped {
-			// The processes are stopped before their pipes are
-			// closed. Closing first sends SIGPIPE to a recorder still
-			// blocked on a write, so the container's own teardown
-			// arrives as the process's failure.
+			// Stop the processes before closing their pipes. Closing
+			// first would send SIGPIPE to a process that is blocked on a
+			// write, and this container's own teardown would look like a
+			// failure of that process.
 			ended = tap.stop(drain)
 			_ = tap.Body.Close()
 			stopped = true
@@ -498,9 +475,6 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 	defer finish(false)
 
 	if err := s.confirm(r.Context(), plan.Stream, plan.Format.NodeID); err != nil {
-		// A graph this container could not read says nothing about
-		// where the tap landed. PipeWire that is down clears on its
-		// own, so it is a 503 and the tap is not called wrong.
 		if errors.Is(err, ErrGraphUnread) {
 			s.readings.failed(failureConnect)
 			w.Header().Set("Retry-After", retryAfterSeconds)
@@ -528,13 +502,10 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 	ran := s.now().Sub(started)
 	s.readings.finished(plan.Route.Aspect, plan.Form.Extension, sent, ran)
 
-	// The processes are stopped before the line is written, because
-	// their exit statuses are what it reports. A tap that finished its
-	// span and a tap whose client hung up both end with a signal, and
-	// neither is a failure; only a process that ended on its own with
-	// a status of one or more is.
-	// The span running out is the one end that leaves an encoder
-	// finishing of its own accord, and the only one worth waiting for.
+	// Stop the processes before logging, because the log line includes
+	// their exit statuses. Drain only when the span ran out, because the
+	// pump has then closed the encoder's stdin and the encoder exits by
+	// itself.
 	exit := finish(tap.delivered())
 	if exit.failed() {
 		s.readings.failed(failureEncoder)
@@ -554,28 +525,28 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request, plan tapP
 	s.logTap(plan, at, sent, tap.discarded(), "on-target", words)
 
 	if cut {
-		// The response is already a 200 with bytes on the wire, so
-		// there is no status left to tell a client with. Ending the
-		// handler this way closes the body without its terminating
-		// chunk, which is RFC 9112 section 8's signal for an
-		// incomplete message, and over HTTP/2 it resets the stream.
-		// ErrAbortHandler is the one panic net/http expects, so it
-		// prints no stack trace for it.
+		// The 200 and part of the body are already sent, so the only way
+		// to tell the client that the body is incomplete is to abort the
+		// response. Panicking with http.ErrAbortHandler closes an
+		// HTTP/1.1 chunked body without its terminating chunk (RFC 9112
+		// section 8) and resets an HTTP/2 stream. net/http recovers this
+		// panic without logging a stack trace.
 		panic(http.ErrAbortHandler)
 	}
 }
 
-// logTap writes the one line this container keeps for a tap, whatever
-// became of it. link says what the confirmation read, and ended is the
-// exit status: the encoder's own words when one failed, the reason a
-// stream stopped, or ok.
+// logTap prints the log line that this container writes for each tap,
+// whatever its result. link is not-started, unread, wrong-target, or
+// on-target. ended is the error text when the tap failed before the
+// body, and otherwise tapExit.String, followed by cut= and the copy
+// error when the copy failed, and by truncated when the body was cut.
 func (s *captureServer) logTap(plan tapPlan, at time.Time, sent, discarded int64,
 	link, ended string) {
 	line := fmt.Sprintf("%s: tap %s target=%s node=%d stream=%s format=%s rate=%d "+
 		"channels=%d span=%s bytes=%d discarded=%d link=%s at=%s seconds=%.3f ended=%s",
 		DriverName, plan.RequestID, plan.Node, plan.Format.NodeID, plan.Stream,
 		plan.Form.Extension, plan.Format.Rate, plan.Format.Channels,
-		spanWords(plan.Knobs.Span), sent, discarded, link,
+		spanWords(plan.Query.Span), sent, discarded, link,
 		at.UTC().Format(time.RFC3339), s.now().Sub(at).Seconds(), ended)
 	if s.log == nil {
 		fmt.Println(line)
@@ -584,11 +555,11 @@ func (s *captureServer) logTap(plan tapPlan, at time.Time, sent, discarded int64
 	s.log(line)
 }
 
-// confirm reads the graph until the link this tap's stream made
-// appears. A link to another node ends the tap at once, and no link by
-// the deadline ends it too: pw-record with an unknown target links to
-// the default sink's monitor, and either way the sound on the wire
-// would not be the sound that was asked for.
+// confirm reads the graph until the link from this tap's stream to the
+// target node appears. It returns an error as soon as the link goes to
+// another node, and when no link appears within linkDeadline, because
+// pw-record with a target that does not exist links to the default
+// sink's monitor and would record the wrong audio.
 func (s *captureServer) confirm(ctx context.Context, stream string, targetNodeID int) error {
 	deadline := time.After(linkDeadline)
 	period := linkFirstPeriod
@@ -597,8 +568,6 @@ func (s *captureServer) confirm(ctx context.Context, stream string, targetNodeID
 		if err != nil {
 			return err
 		}
-		// One parse answers all three states, so a poll reads the
-		// graph once rather than walking it twice.
 		state, err := confirmLink(document, stream, targetNodeID)
 		if err != nil {
 			return err
@@ -623,52 +592,48 @@ func (s *captureServer) confirm(ctx context.Context, stream string, targetNodeID
 	}
 }
 
-// errClientGone marks a copy that ended because whoever was reading the
-// response stopped reading. That is a client hanging up, which is a
-// normal end of a tap, and it is told apart from the pipeline ending
-// on its own, which is not.
+// errClientGone marks a write error in copyFlushing: the client stopped
+// reading the response, which is a normal end of a tap.
 var errClientGone = errors.New("the client stopped reading")
 
-// endedByClient says a copy stopped because whoever was reading the
-// response left. The write error names the departure directly. When
-// the read side fails first, the departure is named by the request's
-// own context instead: the process killed for that context reports its
-// death as a read error on this goroutine, and the two errors race.
+// endedByClient reports whether the client left. Usually the write
+// fails with errClientGone. But the processes run under the request's
+// context, so when the client leaves they are killed, and the read from
+// their pipe can fail before the next write does. Then only requestDone
+// shows that the client left.
 func endedByClient(copyErr error, requestDone bool) bool {
 	return requestDone || errors.Is(copyErr, errClientGone)
 }
 
-// bodyCut says a response body ended without the client getting what
-// it asked for. A body is complete when the span ran out or the client
-// stopped reading. Anything else is the pipeline ending under the tap,
-// which the client has to be told about. The encoder is the one
-// process whose failure cuts a body it already delivered.
+// bodyCut reports whether the client must be told that the body is
+// incomplete. A body is complete when the span ran out or the client
+// left. Otherwise the pipeline ended before the span did. An encoder
+// failure cuts the body even when the whole span was delivered, because
+// the encoder may not have written its last frame.
 func bodyCut(delivered, left, encoderFailed bool) bool {
 	return (!delivered && !left) || encoderFailed
 }
 
-// copyFlushing sends a 200 with its type, then copies the pipeline to
-// the response, flushing each block, so a client hears the tap as it
-// arrives rather than when a buffer fills. onFirst runs once, when the
-// first block has been written, which is the moment a request has
-// produced bytes.
+// copyFlushing writes a 200 with the content type, then copies from to w
+// and flushes after each block, so the client receives the audio as it
+// arrives and not when a buffer fills. It calls onFirst once, after the
+// first block is written.
 //
-// The type is set here, beside the write of the body, and nosniff
-// tells a browser to keep that type: the bytes are audio and never a
-// page to render. The headers go out at once, not with the first block
-// of audio. A tap with a begin sends nothing for as long as the discard
-// runs, and a client that had not yet seen the status, the type, or the
-// save name would have nothing to show for it.
+// The headers are sent and flushed before any audio. A tap with a begin
+// sends no audio while discardPump drops the samples before begin, and
+// until then the client would have no status or headers to show.
+// X-Content-Type-Options: nosniff stops a browser from guessing another
+// type for the audio bytes.
 //
-// An error from the writing side is wrapped in errClientGone; an error
-// from the reading side is returned as it came.
+// A write error is wrapped in errClientGone. A read error is returned
+// unchanged.
 func copyFlushing(w http.ResponseWriter, contentType string, from io.Reader,
 	onFirst func()) (int64, error) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	if err := flush(w); err != nil {
-		fmt.Fprintf(os.Stderr, "the tap's headers could not be flushed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "flushing the tap's headers: %v\n", err)
 	}
 	block := make([]byte, 32*1024)
 	var sent int64
@@ -695,39 +660,36 @@ func copyFlushing(w http.ResponseWriter, contentType string, from io.Reader,
 	}
 }
 
-// flush pushes what has been written to the client at once.
-//
-// It goes through a ResponseController rather than a type assertion on
-// http.Flusher, because an assertion answers no for any writer that
-// wraps another and a flush that quietly does not happen is invisible:
-// the headers and the first block would then sit in a buffer until
-// something else filled it. The controller unwraps the chain and says
-// so when nothing in it can flush.
+// flush uses http.ResponseController and not a type assertion to
+// http.Flusher, because the assertion fails on a ResponseWriter that
+// wraps another one, and the headers and the first block would then stay
+// in a buffer. The controller unwraps the writers and returns an error
+// when none of them can flush.
 func flush(w http.ResponseWriter) error {
 	return http.NewResponseController(w).Flush()
 }
 
-// dumpGraph is the container's own read of PipeWire, which is the same
-// pw-dump the reconcile loop runs, under the same bound.
+// dumpGraph reads the graph for the capture handler and for confirm,
+// with the pwDumpTimeout that readGraph also uses.
 func dumpGraph(ctx context.Context) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, pwDumpTimeout)
 	defer cancel()
 
 	command := exec.CommandContext(ctx, "pw-dump")
 	command.WaitDelay = time.Second
-	complaints := &spoken{}
-	command.Stderr = complaints
+	stderr := &stderrBuffer{}
+	command.Stderr = stderr
 	raw, err := command.Output()
 	if err != nil {
 		return nil, fmt.Errorf("%w: running pw-dump: %w: %s",
-			ErrGraphUnread, err, unexpectedStderr(complaints.String()))
+			ErrGraphUnread, err, unexpectedStderr(stderr.String()))
 	}
 	return raw, nil
 }
 
-// requestID names one request. The problem document's instance carries
-// it and so does the log line, so a reader joins the answer a client
-// saw to the record this container kept.
+// requestID returns a random 16-digit hexadecimal ID for one request. It
+// goes in the instance of the problem document and in the log line, so a
+// response can be matched to its log line.
 func requestID() string {
 	buffer := make([]byte, 8)
 	if _, err := rand.Read(buffer); err != nil {
@@ -736,7 +698,6 @@ func requestID() string {
 	return hex.EncodeToString(buffer)
 }
 
-// spanWords is the span as the log line names it.
 func spanWords(span timeSpan) string {
 	if span.Ended {
 		return fmt.Sprintf("%s,%s", span.Begin, span.End)
@@ -747,8 +708,8 @@ func spanWords(span timeSpan) string {
 	return "open"
 }
 
-// endedWords names how a stream ended, when it ended for a reason
-// other than the client closing.
+// endedWords formats the error that ended a stream, for a reason other
+// than the client closing.
 func endedWords(err error) string {
 	if err == nil {
 		return ""

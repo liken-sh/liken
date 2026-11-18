@@ -1,8 +1,8 @@
 package main
 
-// These tests run the two certificate object watches through the real
-// reflector: the Secret the capture containers mount, and the
-// ConfigMap that holds the cluster's client authority.
+// These tests run followCertificateObjects through client-go's
+// reflector: the watch of the Secret that the capture containers mount,
+// and the watch of the ConfigMap that holds the cluster's client CA.
 
 import (
 	"net/http"
@@ -15,8 +15,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-// namedObject is a named object of a kind at a version, with nothing
-// else the watch reads.
+// namedObject returns an object with only the fields that the watch
+// reads.
 func namedObject(kind, name, version string) map[string]any {
 	return map[string]any{
 		"apiVersion": "v1",
@@ -25,17 +25,16 @@ func namedObject(kind, name, version string) map[string]any {
 	}
 }
 
-// objectEvent is one watch event for a named object.
 func objectEvent(t *testing.T, event, kind, name, version string) string {
 	t.Helper()
 	return encode(t, map[string]any{"type": event, "object": namedObject(kind, name, version)})
 }
 
-// The API follows the capture Secret with a watch, and a delete of the
-// Secret is minted again when the event arrives. The hourly lifetime
-// check never runs in this test, so only the event can bring the
-// Secret back. Both watches select their one object by name, so RBAC
-// restricts them to it.
+// When the watch reports that the capture Secret was deleted, the API
+// creates it again. The hourly certificateCheck does not run in this
+// test, so only the watch event can create the new Secret. Each watch
+// selects its object with a fieldSelector on the name, so RBAC can
+// limit the API to that object.
 func TestADeletedCaptureSecretIsMintedAgainWhenTheWatchReportsIt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := newObjectStore(t)
@@ -43,8 +42,8 @@ func TestADeletedCaptureSecretIsMintedAgainWhenTheWatchReportsIt(t *testing.T) {
 			[]string{encode(t, []any{namedObject("Secret", captureTLSSecret, "1")})},
 			[]string{pause, objectEvent(t, "DELETED", "Secret", captureTLSSecret, "2"), holdOpen})
 		configMaps := newWatchServer(configMapsPath(clientCANamespace), "v1", "ConfigMap", []string{`[]`})
-		// checks counts each read of the capture Secret, which is the
-		// first step of every leaf check.
+		// checks counts the GETs of the capture Secret. Each run of
+		// keepCaptureLeaf starts with one.
 		var checks atomic.Int64
 		objects := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodGet && r.URL.Path == secretsPath("liken-system")+"/"+captureTLSSecret {
@@ -55,15 +54,15 @@ func TestADeletedCaptureSecretIsMintedAgainWhenTheWatchReportsIt(t *testing.T) {
 		api := apiservertest.Start(t, serveCollections(t, objects, secrets, configMaps))
 		server := newAPIServer(apiclient.New(apiservertest.Host, api.Client(), ""), "liken-system")
 		if _, err := server.certs.ensure(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("preparing the certificates: %v", err)
 		}
 		first := store.secretData(t, captureTLSSecret)[tlsCertFile]
 		checks.Store(0)
 
 		server.followCertificateObjects(t.Context(), dynamicClient(t, api), func(error) {})
 		synctest.Wait()
-		// The Secret's add runs a check before the delete, so it cannot
-		// mint the leaf again.
+		// The add event for the Secret runs keepCaptureLeaf once. The
+		// Secret is still present then, so it creates nothing.
 		if got := checks.Load(); got != 1 {
 			t.Errorf("the first read ran %d leaf checks, want 1", got)
 		}
@@ -76,7 +75,7 @@ func TestADeletedCaptureSecretIsMintedAgainWhenTheWatchReportsIt(t *testing.T) {
 
 		again := store.secretData(t, captureTLSSecret)[tlsCertFile]
 		if string(again) == string(first) {
-			t.Error("the Secret carries the deleted leaf")
+			t.Error("the Secret carries the deleted leaf, want a leaf minted again")
 		}
 		for _, c := range []struct {
 			server *watchServer
@@ -94,9 +93,8 @@ func TestADeletedCaptureSecretIsMintedAgainWhenTheWatchReportsIt(t *testing.T) {
 	})
 }
 
-// A capture Secret that does not exist when the watch starts arrives
-// as no event, so the end of the first read runs the check that mints
-// it.
+// A capture Secret that does not exist when the watch starts produces
+// no event, so keepCaptureLeaf creates it when the first list returns.
 func TestAnAbsentCaptureSecretIsMintedWhenTheFirstReadIsDone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := newObjectStore(t)
@@ -105,7 +103,7 @@ func TestAnAbsentCaptureSecretIsMintedWhenTheFirstReadIsDone(t *testing.T) {
 		api := apiservertest.Start(t, serveCollections(t, http.HandlerFunc(store.serve), secrets, configMaps))
 		server := newAPIServer(apiclient.New(apiservertest.Host, api.Client(), ""), "liken-system")
 		if _, err := server.certs.ensure(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("preparing the certificates: %v", err)
 		}
 		store.mu.Lock()
 		delete(store.secrets, captureTLSSecret)
@@ -115,24 +113,21 @@ func TestAnAbsentCaptureSecretIsMintedWhenTheFirstReadIsDone(t *testing.T) {
 		synctest.Wait()
 
 		if !store.holdsSecret(captureTLSSecret) {
-			t.Error("the capture Secret was not minted after the first read")
+			t.Error("the capture Secret is absent after the first read, want it minted")
 		}
 	})
 }
 
-// authorityConfigMap is the ConfigMap that holds the cluster's client
-// authority, at a version.
 func authorityConfigMap(caPEM []byte, version string) map[string]any {
-	held := namedObject("ConfigMap", clientCAConfigMap, version)
-	held["metadata"].(map[string]any)["namespace"] = clientCANamespace
-	held["data"] = map[string]any{clientCAKey: string(caPEM)}
-	return held
+	object := namedObject("ConfigMap", clientCAConfigMap, version)
+	object["metadata"].(map[string]any)["namespace"] = clientCANamespace
+	object["data"] = map[string]any{clientCAKey: string(caPEM)}
+	return object
 }
 
-// Through the reflector: a change to the ConfigMap that holds the
-// cluster's client authority loads the authority again, so a rotation
-// takes effect with no restart. The copy the watch delivers is the one
-// the pool takes, and the API sends no read of its own.
+// A change to the client CA ConfigMap reloads the CA pool, so a
+// rotation takes effect without a restart. The pool is built from the
+// object that the watch delivers, and the API makes no GET of its own.
 func TestARotatedClientAuthorityIsLoadedWhenTheWatchReportsIt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		first, second := newClientAuthority(t), newClientAuthority(t)
@@ -162,23 +157,23 @@ func TestARotatedClientAuthorityIsLoadedWhenTheWatchReportsIt(t *testing.T) {
 			t.Error("the rotated authority's leaf does not verify against the pool")
 		}
 		if got := reads.Load(); got != 0 {
-			t.Errorf("the API read the ConfigMap %d times", got)
+			t.Errorf("the API read the ConfigMap %d times, want 0", got)
 		}
 	})
 }
 
-// An authority ConfigMap that does not exist leaves the pool as it was,
-// and says so.
+// When the client CA ConfigMap does not exist, adopt returns an error
+// and keeps the CA pool it had.
 func TestAnAbsentClientAuthorityKeepsThePool(t *testing.T) {
-	held := newClientAuthority(t)
+	authority := newClientAuthority(t)
 	anchors := &clientAnchors{}
-	if err := anchors.adopt(&configMap{Data: map[string]string{clientCAKey: string(held.certPEM)}}); err != nil {
-		t.Fatal(err)
+	if err := anchors.adopt(&configMap{Data: map[string]string{clientCAKey: string(authority.certPEM)}}); err != nil {
+		t.Fatalf("adopting the first authority: %v", err)
 	}
 	if err := anchors.adopt(nil); err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Errorf("adopt(nil) = %v, want an error that says the ConfigMap does not exist", err)
 	}
-	if !verifiesAgainst(t, anchors, held) {
-		t.Error("the pool lost the authority it held")
+	if !verifiesAgainst(t, anchors, authority) {
+		t.Error("the pool lost the authority it had, want it kept")
 	}
 }

@@ -7,8 +7,6 @@ import (
 	"unsafe"
 )
 
-// The request number that reads a control's TLV payload, and
-// the size of the header it carries.
 func TestTLVIoctlNumber(t *testing.T) {
 	if got, want := ctlIoctlTLVRead, uintptr(0xc008551a); got != want {
 		t.Errorf("SNDRV_CTL_IOCTL_TLV_READ = %#x, want %#x", got, want)
@@ -18,13 +16,14 @@ func TestTLVIoctlNumber(t *testing.T) {
 	}
 }
 
-// tlvFixture reads a TLV payload the card would answer TLV_READ with.
-// The files hold 32-bit words in the machine's own order.
+// tlvFixture reads a TLV payload that a card returned for TLV_READ,
+// from testdata/mixer. The files hold 32-bit words in the byte order of
+// the machine.
 func tlvFixture(t *testing.T, name string) []uint32 {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/mixer/" + name)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the TLV fixture: %v", err)
 	}
 	payload := make([]uint32, len(raw)/4)
 	for i := range payload {
@@ -33,12 +32,8 @@ func tlvFixture(t *testing.T, name string) []uint32 {
 	return payload
 }
 
-// tlvWord writes one signed level the way a TLV payload carries it,
-// as the bits of a 32-bit word.
 func tlvWord(value int32) uint32 { return uint32(value) }
 
-// The four dB TLV shapes a card writes, and the outer bounds
-// rule for a range of ranges.
 func TestDecibelRangeFromTLV(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -99,8 +94,6 @@ func TestDecibelRangeFromTLV(t *testing.T) {
 	}
 }
 
-// The decimal string form, which keeps the hundredths the TLV
-// states and drops the zeros it does not.
 func TestFormatDecibels(t *testing.T) {
 	cases := []struct {
 		hundredths int32

@@ -1,39 +1,31 @@
 package main
 
-// The RIFF WAVE header a tap sends ahead of the raw samples pw-record
-// produces.
+// A WAV tap needs no encoder: it writes the header from wavHeader and
+// then the output of pw-record --raw, which is already the PCM of a WAV
+// data chunk.
 //
-// The Go code writes it rather than an encoder because the samples
-// pw-record prints with --raw are already the PCM the data chunk
-// carries, so the whole of WAV is these 44 bytes.
-//
-// The two sizes are 0xFFFFFFFF. A live tap has no length, and a pipe
-// has no seek, so neither size can be filled in later. ffmpeg's WAV
-// muxer writes the same -1 placeholders and never returns to fix them
-// on a pipe (libavformat/wavenc.c and riffenc.c), so every player
-// that reads an ffmpeg-piped WAV reads this one.
+// The RIFF size and the data size are both 0xFFFFFFFF, because a live
+// tap has no length and a header already sent cannot be rewritten.
+// ffmpeg's WAV muxer writes the same -1 placeholders when its output is
+// a pipe (libavformat/wavenc.c and riffenc.c), so players already
+// accept them.
 
 import "encoding/binary"
 
-// wavSampleBits is the sample width. Every tap is s16le, and 16 bits
-// is the width every player reads.
+// wavSampleBits matches sampleBytes, because every tap is s16le.
 const wavSampleBits = 16
 
-// wavFormatPCM is the one format tag in the WAVE_FORMAT_ list that
-// names plain integer PCM.
+// wavFormatPCM is the WAVE_FORMAT_PCM tag of integer PCM.
 const wavFormatPCM = 1
 
-// wavHeaderBytes is the header's own length: the RIFF chunk's twelve
-// bytes, the fmt chunk's twenty-four, and the data chunk's eight.
+// wavHeaderBytes is 12 bytes of RIFF header, 24 of fmt chunk, and 8 of
+// data chunk header.
 const wavHeaderBytes = 44
 
-// wavUnknownSize is what the two size fields carry. It is the
-// streaming convention players accept, not a length.
 const wavUnknownSize = 0xFFFFFFFF
 
-// wavHeader builds the header for one endpoint's rate and channel
-// count. The fmt chunk's own size is the sixteen bytes of the plain
-// PCM shape, with no extension.
+// wavHeader writes the fmt chunk in its 16-byte PCM form, with no
+// extension, for every channel count.
 func wavHeader(rate, channels int) []byte {
 	header := make([]byte, wavHeaderBytes)
 	blockAlign := channels * sampleBytes

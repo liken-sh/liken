@@ -1,19 +1,19 @@
 package main
 
-// The two routes that name an endpoint: the info document and the
-// tap.
+// The routes for one Sink or Source: the info document and the tap.
 //
-// Three reads happen in order. The object comes from the API server:
-// none is a 404, and no status.node is a 409 away, with a detail that
-// says to power the device on, because a 409 is used only where the
-// caller can act. The node's pod comes from the informer's memory: no
-// Ready capture container is an instant 503. The sound comes from
-// that pod.
+// serveEndpoint reads the Sink or Source from the API server, then the
+// capture pod of its node from the pod informer's cache, then the format
+// or the audio from the container in that pod. A missing object is a
+// 404. An empty status.node is a 409 whose detail says to power the
+// device on, because the API returns a 409 only when the caller can fix
+// the cause. A node with no Ready capture container is a 503, which the
+// cache settles without a request to the API server.
 //
-// The API adds Vary, Content-Location, Link, and Content-Disposition
-// to the container's answer. The status and the body are the
-// container's own. On a 200 the API also writes the type and the
-// cache directives, because they follow from the form it chose.
+// The API passes on the container's status and body. It sets Vary and
+// Link on every response. On a 200 it also sets the content type, the
+// cache headers, Content-Disposition, and Content-Location, because they
+// depend on the representation that the API negotiated with the caller.
 
 import (
 	"context"
@@ -27,8 +27,6 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// capturedEndpoint is one Sink or Source as this API reads it: the
-// kind, the object's own identity, and the status the tap needs.
 type capturedEndpoint struct {
 	Kind   string
 	Name   string
@@ -36,8 +34,8 @@ type capturedEndpoint struct {
 	Status EndpointStatus
 }
 
-// readEndpoint reads one object. The two kinds share a status shape, so
-// one function reads either.
+// readEndpoint reads the Sink or Source that route.Resource names into
+// one type, because the routes use only fields that both kinds have.
 func (s *apiServer) readEndpoint(route apiRoute, name string) (capturedEndpoint, error) {
 	if route.Resource == "sources" {
 		source, err := getSource(s.client, name)
@@ -63,161 +61,157 @@ func (s *apiServer) readEndpoint(route apiRoute, name string) (capturedEndpoint,
 	}, nil
 }
 
-// serveEndpoint answers the info route and the tap routes.
 func (s *apiServer) serveEndpoint(w http.ResponseWriter, r *http.Request, route apiRoute,
-	name string, form representation, knobs captureKnobs, who caller,
-	id string, at time.Time, outcome *answered) answered {
-	held, err := s.readEndpoint(route, name)
+	name string, form representation, query captureQuery, who caller,
+	id string, at time.Time, outcome *requestOutcome) requestOutcome {
+	endpoint, err := s.readEndpoint(route, name)
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return s.refuseAs(w, r, route, name, who, http.StatusNotFound, problemNoNode, id,
-			fmt.Sprintf("this cluster holds no %s named %s", singular(route.Resource), name))
+			fmt.Sprintf("this cluster has no %s named %s", singular(route.Resource), name))
 	}
 	if err != nil {
 		w.Header().Set("Retry-After", retryAfterSeconds)
 		return s.refuseAs(w, r, route, name, who, http.StatusServiceUnavailable,
 			problemBlank, id, err.Error())
 	}
-	// status.node is the machine the endpoint is on and status.nodeName
-	// is the PipeWire node a stream targets. An endpoint with no
-	// machine is away, whatever PipeWire last held for it.
-	if held.Status.Node == "" {
+	// status.node is the machine, and status.nodeName is the PipeWire
+	// node that a stream targets. With no machine the endpoint is away,
+	// even when status.nodeName is still set.
+	if endpoint.Status.Node == "" {
 		return s.refuseAs(w, r, route, name, who, http.StatusConflict, problemAway, id,
-			fmt.Sprintf("%s %s is away; power the device on, or connect it, and the operator "+
-				"publishes its node again", held.Kind, held.Name))
+			fmt.Sprintf("%s %s is away: power the device on, or connect it, and the operator "+
+				"publishes its node again", endpoint.Kind, endpoint.Name))
 	}
 
-	pod, running := s.pods.on(held.Status.Node)
+	pod, running := s.pods.on(endpoint.Status.Node)
 	if !running || !pod.Ready {
 		w.Header().Set("Retry-After", retryAfterSeconds)
 		return s.refuseAs(w, r, route, name, who, http.StatusServiceUnavailable, problemBlank, id,
-			fmt.Sprintf("no Ready capture container is running on the node %s", held.Status.Node))
+			fmt.Sprintf("no Ready capture container is running on the node %s", endpoint.Status.Node))
 	}
 
 	if route.Kind == routeInfo {
-		return s.serveInfo(w, r, route, held, form, pod, who, id)
+		return s.serveInfo(w, r, route, endpoint, form, pod, who, id)
 	}
-	return s.serveTap(w, r, route, held, form, knobs, pod, who, id, at, outcome)
+	return s.serveTap(w, r, route, endpoint, form, query, pod, who, id, at, outcome)
 }
 
-// refuseAs writes a problem and names the caller, so the one log line
-// still says who asked.
+// refuseAs is refuse with the caller added to the result, so the log
+// line of a refused request names the caller.
 func (s *apiServer) refuseAs(w http.ResponseWriter, r *http.Request, route apiRoute,
-	name string, who caller, status int, kind, id, detail string) answered {
+	name string, who caller, status int, kind, id, detail string) requestOutcome {
 	result := s.refuse(w, r, route, name, status, kind, id, detail)
 	result.Who = who
 	return result
 }
 
-// serveInfo answers one endpoint's own document: the object the API
-// server holds, joined to the format the container read from the graph.
+// serveInfo writes the endpoint's info document: the Sink or Source
+// from the API server, with the sample rate and channel count that the
+// container reads from the PipeWire graph.
 func (s *apiServer) serveInfo(w http.ResponseWriter, r *http.Request, route apiRoute,
-	held capturedEndpoint, form representation, pod capturePod, who caller, id string) answered {
-	// A HEAD answers with the GET's headers and makes no call to the
-	// capture container, and the graph read is only in the body.
+	endpoint capturedEndpoint, form representation, pod capturePod, who caller, id string) requestOutcome {
+	// A HEAD makes no call to the container, because only the body
+	// depends on the PipeWire graph.
 	if r.Method == http.MethodHead {
-		writeDocumentHeaders(w, route, held.Name, form, s.buildVersion())
+		writeDocumentHeaders(w, route, endpoint.Name, form, s.buildVersion())
 		w.WriteHeader(http.StatusOK)
-		return answered{Status: http.StatusOK, Who: who}
+		return requestOutcome{Status: http.StatusOK, Who: who}
 	}
-	format, err := s.readCaptureFormat(r, route, held, pod)
+	format, err := s.readCaptureFormat(r, route, endpoint, pod)
 	if err != nil {
-		return s.relayFailure(w, r, route, held.Name, who, id, err)
+		return s.relayFailure(w, r, route, endpoint.Name, who, id, err)
 	}
-	writeDocumentHeaders(w, route, held.Name, form, s.buildVersion())
+	writeDocumentHeaders(w, route, endpoint.Name, form, s.buildVersion())
 	if matchesETag(r.Header.Get("If-None-Match"), documentETag(s.buildVersion())) {
 		w.WriteHeader(http.StatusNotModified)
-		return answered{Status: http.StatusNotModified, Who: who}
+		return requestOutcome{Status: http.StatusNotModified, Who: who}
 	}
 	writeJSON(w, r.Method, http.StatusOK,
-		newEndpointDocument(held.Kind, held.Name, held.Status, format))
-	return answered{Status: http.StatusOK, Who: who}
+		newEndpointDocument(endpoint.Kind, endpoint.Name, endpoint.Status, format))
+	return requestOutcome{Status: http.StatusOK, Who: who}
 }
 
-// readCaptureFormat asks the node's container what a tap would run at.
-// The graph is on the node, so this is the one read that is not the
-// API's own.
+// readCaptureFormat reads from the container the sample rate and
+// channel count that a tap of this endpoint would use. Only the
+// container can read them, from the PipeWire graph on its node.
 func (s *apiServer) readCaptureFormat(r *http.Request, route apiRoute,
-	held capturedEndpoint, pod capturePod) (captureFormat, error) {
-	answer, err := s.relay.forward(r.Context(), pod,
-		apiPrefix+"/"+route.Resource+"/"+held.Status.NodeName, "", 0)
+	endpoint capturedEndpoint, pod capturePod) (captureFormat, error) {
+	response, err := s.relay.forward(r.Context(), pod,
+		apiPrefix+"/"+route.Resource+"/"+endpoint.Status.NodeName, "", 0)
 	if err != nil {
 		return captureFormat{}, err
 	}
-	defer drain(answer.Body)
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(answer.Body, maxDrain))
-		if document, held := readProblem(body); held {
+	defer drain(response.Body)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, maxDrain))
+		if document, isProblem := readProblem(body); isProblem {
 			return captureFormat{}, errors.New(document.Detail)
 		}
-		return captureFormat{}, fmt.Errorf("the capture container answered %s", answer.Status)
+		return captureFormat{}, fmt.Errorf("the capture container returned %s", response.Status)
 	}
 	var document captureFormatDocument
-	if err := readJSON(answer.Body, &document); err != nil {
+	if err := readJSON(response.Body, &document); err != nil {
 		return captureFormat{}, err
 	}
 	return captureFormat{Rate: document.Rate, Channels: document.Channels}, nil
 }
 
-// serveTap forwards one capture and relays what comes back.
 func (s *apiServer) serveTap(w http.ResponseWriter, r *http.Request, route apiRoute,
-	held capturedEndpoint, form representation, knobs captureKnobs, pod capturePod,
-	who caller, id string, at time.Time, outcome *answered) answered {
-	// A HEAD answers with the GET's headers, takes no sample, and makes
-	// no call to the capture container (RFC 9110 section 9.3.2).
+	endpoint capturedEndpoint, form representation, query captureQuery, pod capturePod,
+	who caller, id string, at time.Time, outcome *requestOutcome) requestOutcome {
+	// A HEAD returns the GET's headers, with no sample and no call to
+	// the container (RFC 9110 section 9.3.2).
 	if r.Method == http.MethodHead {
-		writeTapHeaders(w, route, held.Name, form, at)
+		writeTapHeaders(w, route, endpoint.Name, form, at)
 		w.Header().Set("Content-Type", form.ContentType)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(http.StatusOK)
-		return answered{Status: http.StatusOK, Who: who, Ended: "ok"}
+		return requestOutcome{Status: http.StatusOK, Who: who, Ended: "ok"}
 	}
 
-	// The container's route mirrors this one with the extension always
-	// present, and what it resolves is a PipeWire node, so the path
-	// carries status.nodeName rather than the machine in status.node.
-	private := apiPrefix + "/" + route.Resource + "/" + held.Status.NodeName +
+	// The container's path always has the extension, and it names the
+	// PipeWire node in status.nodeName, not the machine in status.node.
+	private := apiPrefix + "/" + route.Resource + "/" + endpoint.Status.NodeName +
 		"/" + route.Aspect + "." + form.Extension
-	// The stream runs under a context of its own, so the idle bound
-	// below can end it: a read on a connection that went silent blocks
-	// inside the transport, and only the request's own cancel returns
-	// from it.
+	// The idleReader calls stop to end a silent body.
 	streaming, stop := context.WithCancel(r.Context())
 	defer stop()
-	answer, err := s.relay.forward(streaming, pod, private, r.URL.RawQuery, knobs.Span.Begin)
+	response, err := s.relay.forward(streaming, pod, private, r.URL.RawQuery, query.Span.Begin)
 	if err != nil {
-		return s.relayFailure(w, r, route, held.Name, who, id, err)
+		return s.relayFailure(w, r, route, endpoint.Name, who, id, err)
 	}
-	defer drain(answer.Body)
+	defer drain(response.Body)
 
-	if answer.StatusCode != http.StatusOK {
-		return s.relayProblem(w, r, route, held.Name, answer, who, id)
+	if response.StatusCode != http.StatusOK {
+		return s.relayProblem(w, r, route, endpoint.Name, response, who, id)
 	}
 
-	// writeTapHeaders owns the type and the cache directives on a 200,
-	// so nothing of the container's is relayed onto it.
-	writeTapHeaders(w, route, held.Name, form, at)
+	// On a 200, writeTapHeaders and copyFlushing set the content type
+	// and the cache headers, so none of the container's headers are
+	// copied.
+	writeTapHeaders(w, route, endpoint.Name, form, at)
 
 	s.readings.streaming(route.Aspect, 1)
 	defer s.readings.streaming(route.Aspect, -1)
 
 	started := s.now()
-	body := newIdleReader(answer.Body, idleTimeout, started.Add(knobs.Span.Begin))
+	body := newIdleReader(response.Body, idleTimeout, started.Add(query.Span.Begin))
 	body.watch(stop)
 	defer body.stopWatching()
-	// The Event is posted on the first block, not at the end: an
-	// open-ended tap runs for hours, and `kubectl describe` has to
-	// answer who is listening while they still are.
+	// The callback posts the captured Event with the first block, not
+	// when the tap ends. An open-ended tap can run for hours, and
+	// kubectl describe has to show the listener while it runs.
 	sent, copyErr := copyFlushing(w, form.ContentType, body, func() {
-		s.recordCapture(held.Kind, held.Name, held.UID, route.Aspect, form.Extension, who.Username)
+		s.recordCapture(endpoint.Kind, endpoint.Name, endpoint.UID, route.Aspect, form.Extension, who.Username)
 	})
 	streamed := s.now().Sub(started)
 
-	// The container ends its handler without a terminating chunk when
-	// the capture was cut short, and that reaches this side as a read
-	// that ended with anything but EOF. The caller is told the same
-	// way, so a truncation crosses both legs as a truncation.
+	// When a capture is cut short, the container aborts its response
+	// without the final chunk, so the read fails with an error other
+	// than EOF. The API then aborts its own response, so the caller sees
+	// the truncated body as an error and not as a complete one.
 	cut := copyErr != nil && !errors.Is(copyErr, errClientGone)
-	result := answered{
+	result := requestOutcome{
 		Status: http.StatusOK, Sent: sent, Streamed: streamed, Who: who, Ended: "ok",
 	}
 	if copyErr != nil {
@@ -231,16 +225,17 @@ func (s *apiServer) serveTap(w http.ResponseWriter, r *http.Request, route apiRo
 	return result
 }
 
-// relayFailure maps a private leg that did not answer at all.
+// relayFailure writes the problem for an error of forward, which
+// returned no response.
 //
-// A container that sent no headers within the bound is a 504. A
-// container this API never reached, or never trusted, is a 503 with
-// Retry-After: a refused dial, a certificate its own CA did not sign,
-// a token it could not read, or a CA it has not minted yet, each of
-// which clears on its own. Everything after a connection that stood
-// is the answer on it going wrong, and that is a 502.
+// A container that sent no headers in time is a 504, and a response
+// that could not be read on an established connection is a 502. Any
+// other error is a 503 with Retry-After: a refused connection, a
+// certificate that the API's CA did not sign, a CA that the API has not
+// minted yet, an unreadable token file, or a CA whose PEM holds no
+// certificate.
 func (s *apiServer) relayFailure(w http.ResponseWriter, r *http.Request,
-	route apiRoute, name string, who caller, id string, err error) answered {
+	route apiRoute, name string, who caller, id string, err error) requestOutcome {
 	switch {
 	case errors.Is(err, ErrCaptureTimeout):
 		return s.refuseAs(w, r, route, name, who, http.StatusGatewayTimeout,
@@ -255,43 +250,40 @@ func (s *apiServer) relayFailure(w http.ResponseWriter, r *http.Request,
 	}
 }
 
-// relayProblem relays the container's own problem document unchanged.
-// An answer that is not a problem document is a 502, because the API
-// cannot say what went wrong on the node.
+// relayProblem returns the container's problem document to the caller.
+// A response that is not a problem document is a 502, because the API
+// cannot tell what failed on the node.
 func (s *apiServer) relayProblem(w http.ResponseWriter, r *http.Request, route apiRoute,
-	name string, answer *http.Response, who caller, id string) answered {
-	body, _ := io.ReadAll(io.LimitReader(answer.Body, maxDrain))
-	document, held := readProblem(body)
-	if !held {
+	name string, response *http.Response, who caller, id string) requestOutcome {
+	body, _ := io.ReadAll(io.LimitReader(response.Body, maxDrain))
+	document, isProblem := readProblem(body)
+	if !isProblem {
 		return s.refuseAs(w, r, route, name, who, http.StatusBadGateway, problemUpstreamFailed, id,
-			fmt.Sprintf("the capture container answered %s with %d bytes that are not a problem document",
-				answer.Status, len(body)))
+			fmt.Sprintf("the capture container returned %s with %d bytes that are not a problem document",
+				response.Status, len(body)))
 	}
-	relayHeaders(answer.Header, w.Header())
-	writeAnswerHeaders(w, route, name)
-	// The instance is the public path and this request's own id, so the
-	// caller's document names the route the caller called.
+	relayHeaders(response.Header, w.Header())
+	writeVaryAndLink(w, route, name)
+	// The instance is the caller's path and this request's id, not the
+	// container's private path.
 	document.Instance = instanceOf(r.URL.Path, id)
 	writeProblem(w, r.Method, document)
-	return answered{Status: document.Status, Who: who}
+	return requestOutcome{Status: document.Status, Who: who}
 }
 
-// readJSON decodes one small document the private leg answered with.
-// The bound is the one every other read of a body in this program
-// takes: a document this API asked for, and nothing more.
 func readJSON(body io.Reader, into any) error {
 	return json.NewDecoder(io.LimitReader(body, maxDrain)).Decode(into)
 }
 
-// maxDrain bounds each read of an answer from the private leg. The
-// largest answer the API asks a capture container for is one small
-// document, so a body past this size is not one the API asked for.
+// maxDrain limits each read of a container response that the API
+// buffers or discards. The API requests only small documents this way,
+// so a larger body is unexpected.
 const maxDrain = 4 << 20
 
-// drain reads what the caller left in an answer's body, then closes
-// it. Go returns a connection to its pool only when the body reaches
-// EOF, so a body closed early costs a new TCP connection and TLS
-// handshake on the next request to the same container.
+// drain discards the rest of a response body, up to maxDrain, and
+// closes it. Go returns a connection to its pool only when the body
+// reaches EOF, so without the drain the next request to the same
+// container opens a new connection and makes a new TLS handshake.
 func drain(body io.ReadCloser) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrain))
 	_ = body.Close()

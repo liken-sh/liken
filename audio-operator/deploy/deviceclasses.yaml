@@ -1,31 +1,33 @@
-# The class this operator's own pod claims through. It ships with
-# the base because the claim template in operator.yaml names it
-# literally: it is wiring, not policy, and the operator cannot
-# start without it. The classes your workloads claim through, one
-# for the speakers and one for the microphones, are the cluster
-# owner's vocabulary to create, and the manual gives the YAML: each
-# one selects on the presence of the sink or the source attribute.
+# The DeviceClass that the operator's own pod claims its devices
+# through. It ships with the operator because the claim template in
+# operator.yaml names it, and the operator cannot start without it. You
+# create the classes that your workloads claim through, one for
+# speakers and one for microphones, and the manual gives the YAML for
+# them. Each of those classes selects the devices that have the sink
+# attribute or the source attribute.
 ---
-# Any device that supports a sound server. Today that is the sound
-# card liken publishes and the media bus the Bluetooth operator
-# publishes for each adapter. The operator's own pod claims every such
-# device on its node, and the claim does two jobs. It places the
-# pod, because only a machine with such a device publishes one, so
-# no node selector has to name the machine with the speakers. And it
-# arbitrates, because each device allocates once, so the claim
-# holder is the only sound server on it. ALSA gives each PCM
-# subdevice to one opener and refuses a second open with EBUSY, and
-# two claims sharing a card have no contract over which claim gets
-# which output, so that refusal would arrive at play time on
-# whichever pod opened second.
+# This class selects every device that a sound server can use: the
+# sound card that liken publishes, and the media bus that
+# bluetooth-operator publishes for each Bluetooth adapter. The
+# operator's pod claims every such device on its node with
+# allocationMode: All. The claim places the pod, because only a machine
+# that has such a device publishes one, so no node selector has to name
+# the machine that has the speakers. The claim also gives the pod sole
+# use of the devices, because a device is allocated to one claim at a
+# time, so the pod that holds the claim is the only sound server on
+# them. That matters because ALSA gives each PCM subdevice to one
+# process and refuses a second open with EBUSY. If two claims shared a
+# card, nothing would decide which claim gets which output, and the pod
+# that opened an output second would get the refusal when it started to
+# play.
 #
-# The selector names no driver. supportsSound is a qualified
-# attribute in a domain no single driver owns: liken stamps it on
-# the sound card, and the Bluetooth operator stamps it on the media
-# bus, so the pod's allocationMode: All claim takes the card and
-# the bus together, and a future driver joins by stamping the one
-# field. The has() guard is what keeps an unguarded read from
-# aborting the allocation on a device that does not carry the
+# The selector names no driver. supportsSound is an attribute in the
+# sound.liken.sh domain, which no single driver owns: liken sets it on
+# the sound card, and bluetooth-operator sets it on the media bus. So
+# the pod's claim gets the card and the bus together, and another
+# driver can join by setting the same attribute. The has() check comes
+# first because reading a missing attribute is a CEL error, and that
+# error would stop the allocation on a device that does not have the
 # attribute.
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass

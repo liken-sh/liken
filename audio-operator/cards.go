@@ -1,16 +1,12 @@
 package main
 
-// Where a card's identity comes from.
-//
-// Three sources hold the parts of it. The control device answers
-// with the card's own id, driver, and name. sysfs says where the
-// card is: the PCI function or the USB port it is on, and for a USB
-// card the vendor, product, and serial of the device above the
-// interface. And the control device answers with the driver's own
-// name for each PCM device, the same name /proc/asound prints, which
-// the container runtime masks. liken runs no udev, so the operator reads the same
-// attributes that 60-persistent-alsa.rules reads to build
-// /dev/snd/by-id and by-path, and names.go builds the same names.
+// liken runs no udev, so the operator reads the card attributes that
+// udev's 60-persistent-alsa.rules reads to build /dev/snd/by-id and
+// /dev/snd/by-path, and names.go builds the same names from them. The
+// card's control device, /dev/snd/controlC<N>, returns the card's id,
+// driver, and name, and the driver's id for each PCM device, through
+// ioctls. sysfs gives the card's PCI function or USB port, and for a
+// USB card the vendor, product, and serial of the USB device.
 
 import (
 	"bytes"
@@ -21,37 +17,33 @@ import (
 	"unsafe"
 )
 
-// sysDir and procDir are the two pseudo-filesystems this file reads.
-// They are variables so the tests can point them at fixtures that
-// mirror a real machine's trees.
+// Tests point these at fixture trees.
 var (
 	sysDir  = "/sys"
 	procDir = "/proc"
 )
 
-// ctlCardInfoSize is the size of struct snd_ctl_card_info in bytes.
-// The ioctl number encodes it, so it is part of the protocol.
+// ctlCardInfoSize is sizeof(struct snd_ctl_card_info). The ioctl
+// request number encodes it, so a wrong size makes the kernel reject
+// the request.
 const ctlCardInfoSize = 376
 
-// ctlIoctlCardInfo reads the card's own identity. It is _IOR and not
-// _IOWR: the caller passes an empty structure and the kernel fills
-// every field.
+// ctlIoctlCardInfo is SNDRV_CTL_IOCTL_CARD_INFO. It is _IOR, not
+// _IOWR, because the kernel fills the whole structure and reads
+// nothing from it.
 var ctlIoctlCardInfo = ior(0x01, ctlCardInfoSize)
 
-// ior builds an ioctl request number that only reads: the read
-// direction bit, the argument size, the 'U' group, and the command
-// number.
+// ior builds a request number the way the kernel's _IOR macro does.
+// 'U' is the ioctl type of ALSA's control devices.
 func ior(number, size uintptr) uintptr {
 	return 2<<30 | size<<16 | 'U'<<8 | number
 }
 
-// ctlCardInfo mirrors struct snd_ctl_card_info field for field. The
-// two fields this operator does not read are here because the layout
-// is the protocol: dropping one would move every field after it.
+// ctlCardInfo mirrors struct snd_ctl_card_info. The fields the
+// operator does not read stay, because the kernel writes the whole
+// structure and dropping a field would shift every field after it.
 type ctlCardInfo struct {
-	Card int32
-	// Pad is the kernel's own name for the word after the number,
-	// which it reserves and never fills.
+	Card       int32
 	Pad        int32
 	ID         [16]byte
 	Driver     [16]byte
@@ -62,10 +54,9 @@ type ctlCardInfo struct {
 	Components [128]byte
 }
 
-// cardIdentity is what one card says about itself. ID, Driver, and
-// Name come from the control device, and Bus, Location, Vendor,
-// Product, and Serial come from sysfs. A device name is built from
-// the sysfs half, and the resource status reports both.
+// ID, Driver, and Name come from the control device, and the other
+// fields come from sysfs. names.go builds the device name from the
+// sysfs fields.
 type cardIdentity struct {
 	ID       string
 	Driver   string
@@ -77,17 +68,15 @@ type cardIdentity struct {
 	Serial   string
 }
 
-// The two buses this operator names a card on. A card on any other
-// bus has no name form, and the reason reaches the operator's log.
+// names.go refuses a card on any other bus.
 const (
 	pciBus = "pci"
 	usbBus = "usb"
 )
 
-// readCardIdentity reads everything one card says about itself. A
-// field it cannot read is empty, and no error is raised here: the
-// name builder is what refuses an endpoint whose identity is too
-// thin to name, and it says which part was missing.
+// readCardIdentity leaves a field empty when it cannot read it, and
+// returns no error, because names.go refuses an endpoint that lacks a
+// field its name needs, and that error names the field.
 func readCardIdentity(card int) cardIdentity {
 	identity := cardIdentity{}
 	if info, err := readCardInfo(card); err == nil {
@@ -95,11 +84,10 @@ func readCardIdentity(card int) cardIdentity {
 		identity.Driver = cText(info.Driver[:])
 		identity.Name = cText(info.Name[:])
 	}
-	readCardPlace(card, &identity)
+	readCardLocation(card, &identity)
 	return identity
 }
 
-// readCardInfo asks the card's control device who it is.
 func readCardInfo(card int) (ctlCardInfo, error) {
 	var info ctlCardInfo
 	control, err := os.Open(fmt.Sprintf("%s/controlC%d", sndDir, card))
@@ -108,17 +96,17 @@ func readCardInfo(card int) (ctlCardInfo, error) {
 	}
 	defer control.Close()
 	if err := ioctl(control, ctlIoctlCardInfo, unsafe.Pointer(&info)); err != nil {
-		return info, fmt.Errorf("reading the card information: %w", err)
+		return info, fmt.Errorf("reading the card information from controlC%d: %w", card, err)
 	}
 	return info, nil
 }
 
-// readCardPlace reads where the card is. /sys/class/sound/card<N>/device
-// is a link that resolves to the PCI function or the USB interface
-// the card binds to, through one or more links on the way, so it is
-// resolved and not joined. A USB card's identity lives one level up
-// from the interface, on the device.
-func readCardPlace(card int, identity *cardIdentity) {
+// readCardLocation fills in the bus, the location, and the USB
+// attributes. /sys/class/sound/card<N>/device is a chain of symbolic
+// links that ends at the PCI function or the USB interface the card is
+// bound to, so the path is resolved with EvalSymlinks and not joined by
+// hand.
+func readCardLocation(card int, identity *cardIdentity) {
 	device, err := filepath.EvalSymlinks(fmt.Sprintf("%s/class/sound/card%d/device", sysDir, card))
 	if err != nil {
 		return
@@ -139,8 +127,6 @@ func readCardPlace(card int, identity *cardIdentity) {
 	}
 }
 
-// subsystemOf names the bus a sysfs device is on. Every device has a
-// subsystem link, and its last element is the bus name.
 func subsystemOf(device string) string {
 	target, err := os.Readlink(filepath.Join(device, "subsystem"))
 	if err != nil {
@@ -149,11 +135,10 @@ func subsystemOf(device string) string {
 	return filepath.Base(target)
 }
 
-// usbDeviceOf climbs from a USB interface to the device that holds
-// it. A sound card binds to an interface, 1-6:1.0, and the identity
-// attributes live one level up on the device, 1-6. idVendor is what
-// marks a device apart from an interface, because only a device
-// carries one.
+// usbDeviceOf returns the USB device that contains a USB interface. A
+// sound card binds to an interface such as 1-6:1.0, but vendor,
+// product, and serial are attributes of the device above it, 1-6. Only
+// a device directory has an idVendor file.
 func usbDeviceOf(device string) string {
 	for dir := device; strings.HasPrefix(dir, sysDir); dir = filepath.Dir(dir) {
 		if _, err := os.Stat(filepath.Join(dir, "idVendor")); err == nil {
@@ -163,8 +148,6 @@ func usbDeviceOf(device string) string {
 	return ""
 }
 
-// sysfsAttribute reads one attribute file, and gives an empty string
-// for one the device does not publish.
 func sysfsAttribute(dir, name string) string {
 	raw, err := os.ReadFile(filepath.Join(dir, name))
 	if err != nil {
@@ -173,25 +156,23 @@ func sysfsAttribute(dir, name string) string {
 	return strings.TrimSpace(string(raw))
 }
 
-// pcmInfoSize is the size of struct snd_pcm_info in bytes, and
-// ctlIoctlPCMInfo is the request that fills one through the control
-// device: the caller states the device, the subdevice, and the
-// stream, and the kernel answers with the driver's own id and name
-// for that PCM. It is the same answer /proc/asound/card<N>/pcm<D>p/info
-// prints, from a device node this pod is given where the proc file is
-// not: the container runtime masks /proc/asound with an empty tmpfs.
+// pcmInfoSize is sizeof(struct snd_pcm_info). For
+// SNDRV_CTL_IOCTL_PCM_INFO, the caller sets the device, subdevice, and
+// stream, and the kernel fills in the driver's id and name for that
+// PCM, the same text as /proc/asound/card<N>/pcm<D>p/info. The pod
+// cannot read that file, because the container runtime masks
+// /proc/asound with an empty tmpfs, but it has the control device node.
 const pcmInfoSize = 288
 
 var ctlIoctlPCMInfo = iowr(0x31, pcmInfoSize)
 
-// The two stream directions struct snd_pcm_info names.
 const (
 	pcmStreamPlayback = 0
 	pcmStreamCapture  = 1
 )
 
-// sndPCMInfo mirrors struct snd_pcm_info field for field. The fields
-// after the name are here because the layout is the protocol.
+// sndPCMInfo mirrors struct snd_pcm_info. The fields after Name are
+// never read, and stay because the kernel writes the whole structure.
 type sndPCMInfo struct {
 	Device          uint32
 	Subdevice       uint32
@@ -208,7 +189,6 @@ type sndPCMInfo struct {
 	Reserved        [64]byte
 }
 
-// readPCMInfo asks the card's control device about one PCM device.
 func readPCMInfo(card, pcm int, capture bool) (sndPCMInfo, error) {
 	info := sndPCMInfo{Device: uint32(pcm), Stream: pcmStreamPlayback}
 	if capture {
@@ -220,27 +200,25 @@ func readPCMInfo(card, pcm int, capture bool) (sndPCMInfo, error) {
 	}
 	defer control.Close()
 	if err := ioctl(control, ctlIoctlPCMInfo, unsafe.Pointer(&info)); err != nil {
-		return info, fmt.Errorf("reading the PCM information: %w", err)
+		return info, fmt.Errorf("reading the information of PCM device %d from controlC%d: %w", pcm, card, err)
 	}
 	return info, nil
 }
 
-// pcmIDKey is the field of a PCM's info file that holds the driver's
-// name for it.
 const pcmIDKey = "id:"
 
-// readPCMID reads the driver's own name for one PCM device, such as
-// HDMI 0 or USB Audio. The id is the durable half of a device name
-// and the number is not: the HDA codec fills its PCM slots from a
-// fixed table per type (get_empty_pcm_device in
-// sound/hda/common/codec.c), so the numbers are stable on one card,
-// but a second card or a kernel change can move them, and the id
-// names the same converter either way.
+// readPCMID returns the driver's id for a PCM device, such as "HDMI 0"
+// or "USB Audio", or "" when it cannot be read. Device names use this
+// id and not the PCM number, because the id names the same converter
+// when the number changes. The HDA driver assigns PCM numbers from a
+// fixed table for each type of PCM (get_empty_pcm_device in
+// sound/hda/common/codec.c), so the numbers are stable on one card, but
+// a different card or a kernel update can move them.
 //
-// The control device answers first, because the pod is given the
-// device nodes and not /proc/asound. The proc file is the fallback
-// for a control device that refuses the request, and it is what the
-// fixtures in testdata answer through.
+// The ioctl comes first, because the pod has the device nodes and not
+// /proc/asound. The /proc file is read when the ioctl fails or returns
+// an empty id, and the test fixtures supply the id only through that
+// file.
 func readPCMID(card, pcm int, capture bool) string {
 	if info, err := readPCMInfo(card, pcm, capture); err == nil {
 		if id := cText(info.ID[:]); id != "" {
@@ -264,8 +242,8 @@ func readPCMID(card, pcm int, capture bool) string {
 	return ""
 }
 
-// cText reads a string out of a fixed-length field the kernel fills.
-// A value that fills the field has no terminator.
+// cText converts a NUL-terminated field that the kernel fills into a
+// string. A value that fills the whole field has no NUL.
 func cText(field []byte) string {
 	if end := bytes.IndexByte(field, 0); end >= 0 {
 		return string(field[:end])

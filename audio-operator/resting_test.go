@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the resting layer's whole decision: for each
-// declared field and each value the endpoint reads now, which write
-// the pass makes, or none at all.
-
 import (
 	"context"
 	"errors"
@@ -11,8 +7,6 @@ import (
 	"testing"
 )
 
-// alsaSink is an endpoint of the card with one node in the graph, at
-// the level and the mute the caller states.
 func alsaSink(volume int, mute bool) endpointFacts {
 	return endpointFacts{
 		Name:      testAnalogName,
@@ -28,31 +22,29 @@ func alsaSink(volume int, mute bool) endpointFacts {
 	}
 }
 
-// suspendedSink is an endpoint whose node stands and runs no stream,
-// which is a node that reports no levels at all.
-func suspendedSink() endpointFacts {
+// sinkWithNoLevel is an ALSA sink whose node prints no volumes, as a
+// node can while it runs no stream, so its level is unknown.
+func sinkWithNoLevel() endpointFacts {
 	facts := alsaSink(0, false)
 	facts.Node.Volumes = nil
 	return facts
 }
 
-// staleSink is an endpoint whose node is suspended and still prints
-// the unity level it last ran at.
+// staleSink is an ALSA sink whose node is suspended and prints the
+// unity level it had when it last ran.
 func staleSink() endpointFacts {
 	facts := alsaSink(100, false)
 	facts.Node.Suspended = true
 	return facts
 }
 
-// withControls gives an endpoint the card's controls and the value
-// each one reads now.
 func withControls(facts endpointFacts, controls []control, values map[string]string) endpointFacts {
 	facts.Controls, facts.Values = controls, values
 	return facts
 }
 
-// speakerSink is a speaker whose transport reports a volume of its
-// own, so its level lives on the device's Route.
+// speakerSink is a Bluetooth speaker that reports absolute volume, so
+// its level is read from and written to the device's Route.
 func speakerSink(volume int, codec string) endpointFacts {
 	level := float64(volume) / 100
 	facts := endpointFacts{
@@ -75,8 +67,6 @@ func speakerSink(volume int, codec string) endpointFacts {
 }
 
 func TestPlannedWrites(t *testing.T) {
-	// The range is the card's own, and it is what a declared value is
-	// judged against.
 	master := control{Name: "Master Playback Volume", Interface: ctlElemIfaceMixer,
 		Capability: controlCapability{Type: capabilityInteger,
 			Min: pointerTo(int64(0)), Max: pointerTo(int64(87)), Channels: 2}}
@@ -87,18 +77,18 @@ func TestPlannedWrites(t *testing.T) {
 	cardValues := map[string]string{"Master Playback Volume": "64", "Auto-Mute Mode": "Enabled"}
 
 	cases := []struct {
-		name     string
-		spec     declaration
-		facts    endpointFacts
-		newNode  bool
-		held     *levelWrite
-		level    *levelWrite
-		controls []controlWrite
-		codec    string
-		refusals int
+		name       string
+		spec       declaration
+		facts      endpointFacts
+		newNode    bool
+		reconciled *levelWrite
+		level      *levelWrite
+		controls   []controlWrite
+		codec      string
+		refusals   int
 	}{
 		{
-			name:  "an empty spec on a node that stands writes nothing",
+			name:  "an empty spec on an existing node writes nothing",
 			facts: alsaSink(50, false),
 		},
 		{
@@ -113,8 +103,7 @@ func TestPlannedWrites(t *testing.T) {
 			newNode: true,
 		},
 		{
-			// The unity default is the sink's. A microphone that no
-			// declaration names is left where the card left it.
+			// Only a sink gets the unity default.
 			name: "a source whose node is new is left alone",
 			facts: func() endpointFacts {
 				facts := alsaSink(40, false)
@@ -124,43 +113,42 @@ func TestPlannedWrites(t *testing.T) {
 			newNode: true,
 		},
 		{
-			name:  "a new declaration the endpoint does not hold",
+			name:  "a new declaration the endpoint does not match",
 			spec:  declaration{Volume: pointerTo(50)},
 			facts: alsaSink(100, false),
 			level: &levelWrite{Volume: pointerTo(50)},
 		},
 		{
-			name:  "a changed declaration the endpoint does not hold",
-			spec:  declaration{Volume: pointerTo(50)},
-			facts: alsaSink(100, false),
-			held:  &levelWrite{Volume: pointerTo(70)},
-			level: &levelWrite{Volume: pointerTo(50)},
+			name:       "a changed declaration the endpoint does not match",
+			spec:       declaration{Volume: pointerTo(50)},
+			facts:      alsaSink(100, false),
+			reconciled: &levelWrite{Volume: pointerTo(70)},
+			level:      &levelWrite{Volume: pointerTo(50)},
 		},
 		{
-			// A level that moved at the device or by a volume ask is
-			// followed, and the declaration is not written back.
-			name:  "an endpoint that drifted from the declaration it was judged against",
-			spec:  declaration{Volume: pointerTo(50)},
-			facts: alsaSink(30, false),
-			held:  &levelWrite{Volume: pointerTo(50)},
+			// The level changed at the device or through a volume request
+			// after the last comparison, so the operator leaves it.
+			name:       "an endpoint that drifted from the declaration it was judged against",
+			spec:       declaration{Volume: pointerTo(50)},
+			facts:      alsaSink(30, false),
+			reconciled: &levelWrite{Volume: pointerTo(50)},
 		},
 		{
-			name:    "a declaration on a node that is new",
-			spec:    declaration{Volume: pointerTo(50)},
-			facts:   alsaSink(30, false),
-			newNode: true,
-			held:    &levelWrite{Volume: pointerTo(50)},
-			level:   &levelWrite{Volume: pointerTo(50)},
+			name:       "a declaration on a node that is new",
+			spec:       declaration{Volume: pointerTo(50)},
+			facts:      alsaSink(30, false),
+			newNode:    true,
+			reconciled: &levelWrite{Volume: pointerTo(50)},
+			level:      &levelWrite{Volume: pointerTo(50)},
 		},
 		{
-			name:  "a declared level the endpoint already holds",
+			name:  "a declared level the endpoint already has",
 			spec:  declaration{Volume: pointerTo(50)},
 			facts: alsaSink(50, false),
 		},
 		{
-			// The write carries the mute alone, so the level the
-			// endpoint holds is not written beside it.
-			name:  "a declared mute leaves the level the endpoint holds",
+			// The write has only the mute, so the level is not written.
+			name:  "a declared mute leaves the level the endpoint has",
 			spec:  declaration{Mute: pointerTo(true)},
 			facts: alsaSink(50, false),
 			level: &levelWrite{Mute: pointerTo(true)},
@@ -171,13 +159,13 @@ func TestPlannedWrites(t *testing.T) {
 			facts: endpointFacts{Name: testAnalogName, Direction: directionSink},
 		},
 		{
-			name:     "a declared control the card does not hold at that value",
+			name:     "a declared control the card has at another value",
 			spec:     declaration{Controls: map[string]string{"Master Playback Volume": "40"}},
 			facts:    withControls(alsaSink(50, false), cardControls, cardValues),
 			controls: []controlWrite{{Element: master, Value: "40"}},
 		},
 		{
-			name:  "a declared control the card already holds",
+			name:  "a declared control the card already has",
 			spec:  declaration{Controls: map[string]string{"Master Playback Volume": "64"}},
 			facts: withControls(alsaSink(50, false), cardControls, cardValues),
 		},
@@ -211,8 +199,8 @@ func TestPlannedWrites(t *testing.T) {
 			facts: speakerSink(50, "sbc"),
 		},
 		{
-			// A switch destroys the node and interrupts what plays, so
-			// the declaration waits for the claim to end.
+			// Switching codecs replaces the node and interrupts playback,
+			// so the declared codec waits until the claim ends.
 			name: "a declared codec while a claim holds the speaker",
 			spec: declaration{Codec: pointerTo("aptx")},
 			facts: func() endpointFacts {
@@ -234,59 +222,58 @@ func TestPlannedWrites(t *testing.T) {
 			level: &levelWrite{Volume: pointerTo(25)},
 		},
 		{
-			name:  "a declaration on a suspended node with no judged level",
+			name:  "a declaration on a node with no level",
 			spec:  declaration{Mute: pointerTo(true)},
-			facts: suspendedSink(),
+			facts: sinkWithNoLevel(),
 			level: &levelWrite{Mute: pointerTo(true)},
 		},
 		{
-			name:  "the same declaration on a suspended node that holds it",
-			spec:  declaration{Mute: pointerTo(true)},
-			facts: suspendedSink(),
-			held:  &levelWrite{Mute: pointerTo(true)},
+			name:       "the same declaration again on a node with no level",
+			spec:       declaration{Mute: pointerTo(true)},
+			facts:      sinkWithNoLevel(),
+			reconciled: &levelWrite{Mute: pointerTo(true)},
 		},
 		{
-			name:  "a changed declaration on a suspended node",
-			spec:  declaration{Volume: pointerTo(40), Mute: pointerTo(true)},
-			facts: suspendedSink(),
-			held:  &levelWrite{Mute: pointerTo(true)},
-			level: &levelWrite{Volume: pointerTo(40), Mute: pointerTo(true)},
+			name:       "a changed declaration on a node with no level",
+			spec:       declaration{Volume: pointerTo(40), Mute: pointerTo(true)},
+			facts:      sinkWithNoLevel(),
+			reconciled: &levelWrite{Mute: pointerTo(true)},
+			level:      &levelWrite{Volume: pointerTo(40), Mute: pointerTo(true)},
 		},
 		{
-			// PipeWire announces no write to a suspended node, so a
-			// node that stood through a restart is judged by the
-			// declaration status.applied holds, not by its level.
-			name:  "an unchanged declaration on a suspended node that stood",
-			spec:  declaration{Volume: pointerTo(40)},
-			facts: suspendedSink(),
-			held:  &levelWrite{Volume: pointerTo(40)},
+			// The node prints no level, so after an operator restart the
+			// spec is compared with the declaration in status.applied.
+			name:       "an unchanged declaration on a node with no level after an operator restart",
+			spec:       declaration{Volume: pointerTo(40)},
+			facts:      sinkWithNoLevel(),
+			reconciled: &levelWrite{Volume: pointerTo(40)},
 		},
 		{
-			// The level can be an ask or a press at the device that the
-			// declaration does not know, so it stays.
-			name:  "an unchanged declaration on a running node that moved away from it",
-			spec:  declaration{Volume: pointerTo(40)},
-			facts: alsaSink(50, false),
-			held:  &levelWrite{Volume: pointerTo(40)},
+			// The level can have come from a volume request or a button
+			// on the device, so the operator leaves it.
+			name:       "an unchanged declaration on a running node that moved away from it",
+			spec:       declaration{Volume: pointerTo(40)},
+			facts:      alsaSink(50, false),
+			reconciled: &levelWrite{Volume: pointerTo(40)},
 		},
 		{
-			// A suspended node can print the level it last ran at, so
-			// a level it prints is not proof that it holds the
-			// declaration.
-			name:  "a changed declaration on a suspended node that prints it",
-			spec:  declaration{Volume: pointerTo(100)},
-			facts: staleSink(),
-			held:  &levelWrite{Volume: pointerTo(70)},
-			level: &levelWrite{Volume: pointerTo(100)},
+			// A suspended node prints the volume it had when it last ran,
+			// so a printed 100% does not show that the declared 100% is
+			// set.
+			name:       "a changed declaration on a suspended node that prints it",
+			spec:       declaration{Volume: pointerTo(100)},
+			facts:      staleSink(),
+			reconciled: &levelWrite{Volume: pointerTo(70)},
+			level:      &levelWrite{Volume: pointerTo(100)},
 		},
 		{
-			name:  "no declaration on a suspended node",
-			facts: suspendedSink(),
+			name:  "no declaration on a node with no level",
+			facts: sinkWithNoLevel(),
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			writes, refusals := plannedWrites(c.spec, c.facts, nodeMemory{New: c.newNode, Held: c.held})
+			writes, refusals := plannedWrites(c.spec, c.facts, nodeHistory{New: c.newNode, Reconciled: c.reconciled})
 			if !sameLevel(writes.Level, c.level) {
 				t.Errorf("level = %+v, want %+v", writes.Level, c.level)
 			}
@@ -317,24 +304,23 @@ func sameControlWrite(got, want controlWrite) bool {
 		got.Value == want.Value
 }
 
-// writeRecord holds what one pass wrote, so a test reads which of the
-// two level writes the endpoint took.
+// writeRecord records the calls to the fake setLevel, setRoute, and
+// switchCodec of recordingControl.
 type writeRecord struct {
 	node   *pwNode
 	route  *pwRoute
 	device int
 	level  levelWrite
 	codec  string
-	// levels is every level written, in order.
 	levels []levelWrite
 }
 
 func recordingControl(record *writeRecord) *endpointControl {
 	return &endpointControl{
-		nodes:    map[string]nodeRecord{},
-		refusals: map[string]string{},
-		asks:     map[string]string{},
-		latest:   map[string]endpointFacts{},
+		nodes:          map[string]nodeRecord{},
+		loggedFailures: map[string]string{},
+		asks:           map[string]string{},
+		latest:         map[string]endpointFacts{},
 		setLevel: func(_ context.Context, node pwNode, level levelWrite) error {
 			record.node, record.level = &node, level
 			record.levels = append(record.levels, level)
@@ -352,10 +338,10 @@ func recordingControl(record *writeRecord) *endpointControl {
 	}
 }
 
-// A speaker whose transport reports a volume of its own takes the
-// write on the device's Route, which is what reaches the speaker as
-// AVRCP absolute volume. Every other endpoint takes the node's gain.
-func TestLevelWritesLandWhereTheLevelLives(t *testing.T) {
+// A level for a speaker that reports absolute volume is written to the
+// device's Route, which reaches the speaker as AVRCP absolute volume.
+// Every other endpoint gets the level on its node.
+func TestALevelWriteGoesToTheRouteOnlyForASpeakerWithAbsoluteVolume(t *testing.T) {
 	cases := []struct {
 		name  string
 		facts endpointFacts
@@ -379,10 +365,10 @@ func TestLevelWritesLandWhereTheLevelLives(t *testing.T) {
 			err := control.apply(context.Background(), endpoint{facts: c.facts},
 				endpointWrites{Level: &levelWrite{Volume: pointerTo(25)}})
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("applying the level write: %v", err)
 			}
 			if (record.route != nil) != c.route {
-				t.Errorf("route write = %+v, node write = %+v", record.route, record.node)
+				t.Errorf("route write = %+v, node write = %+v, want a route write: %t", record.route, record.node, c.route)
 			}
 			if record.level.Volume == nil || *record.level.Volume != 25 {
 				t.Errorf("level = %s, want volume 25", record.level)
@@ -391,24 +377,23 @@ func TestLevelWritesLandWhereTheLevelLives(t *testing.T) {
 	}
 }
 
-// A pass that plans no write reaches no hardware at all.
 func TestAnEmptySpecWritesNothing(t *testing.T) {
 	record := &writeRecord{}
 	control := recordingControl(record)
-	writes, refusals := plannedWrites(declaration{}, alsaSink(50, false), nodeMemory{})
+	writes, refusals := plannedWrites(declaration{}, alsaSink(50, false), nodeHistory{})
 	if err := control.apply(context.Background(), endpoint{facts: alsaSink(50, false)}, writes); err != nil {
-		t.Fatal(err)
+		t.Fatalf("applying the planned writes: %v", err)
 	}
 	if record.node != nil || record.route != nil || record.codec != "" {
-		t.Errorf("an empty spec wrote %+v", record)
+		t.Errorf("an empty spec wrote %+v, want no write", record)
 	}
 	if len(refusals) != 0 {
-		t.Errorf("refusals = %v", refusals)
+		t.Errorf("refusals = %v, want none", refusals)
 	}
 }
 
-// A failed write fails the endpoint's own reconcile and nothing else.
-// The next event or the backstop tick tries again.
+// apply returns the error of a failed level write. actuate then deletes
+// the node's record, so the next pass writes the level again.
 func TestAFailedLevelWriteIsReported(t *testing.T) {
 	control := recordingControl(&writeRecord{})
 	control.setLevel = func(context.Context, pwNode, levelWrite) error {
@@ -418,6 +403,6 @@ func TestAFailedLevelWriteIsReported(t *testing.T) {
 	err := control.apply(context.Background(), endpoint{facts: alsaSink(100, false)},
 		endpointWrites{Level: &levelWrite{Volume: pointerTo(25)}})
 	if err == nil {
-		t.Fatal("a failed write reported nothing")
+		t.Fatal("apply with a failed level write returned nil, want the error")
 	}
 }

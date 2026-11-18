@@ -16,8 +16,8 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
-// stubLister records the parse it is asked with and returns a fixed set
-// of names, so a test drives completeArgs without a cluster.
+// stubLister returns a fixed set of names and records the parse that it
+// received, so a test drives completeArgs without a cluster.
 func stubLister(names ...string) (endpointLister, *completionParse) {
 	var seen completionParse
 	return func(parse completionParse) []string {
@@ -218,8 +218,7 @@ func TestCompletionScriptRejectsAnOtherShell(t *testing.T) {
 	}
 }
 
-// endpoint builds an unstructured Sink or Source object for the dynamic
-// fake. Both kinds are cluster-scoped, so it sets no namespace.
+// Sink and Source are cluster-scoped, so endpoint sets no namespace.
 func endpoint(gvk schema.GroupVersionKind, name string) *unstructured.Unstructured {
 	object := &unstructured.Unstructured{}
 	object.SetGroupVersionKind(gvk)

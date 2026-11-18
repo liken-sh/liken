@@ -1,16 +1,10 @@
 package main
 
-// The order every request goes through.
-//
-// The route is matched first, so the metric and the log line carry a
-// template rather than a path. The method is checked before anything
-// reads, because a 405 costs nothing. The caller is authenticated and
-// then authorized, and only then is the object read, so a 403 never
-// reveals that a name exists.
-//
-// Each request writes one log line: the route template, the request
-// id, the caller's username, the resource, the status, the bytes, the
-// header time, and the stream time. It never carries the token.
+// The handler matches the route first, so the metric and the log line
+// record the route template and not the path. It authenticates and
+// authorizes the caller before it reads any object, so a 403 does not
+// reveal whether a name exists. Each request writes one log line, which
+// never contains the token.
 
 import (
 	"errors"
@@ -20,30 +14,28 @@ import (
 	"time"
 )
 
-// ServeHTTP answers one request.
+// ServeHTTP implements http.Handler for the API.
 func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	at := s.now()
 	id := requestID()
 	route, name, found := matchRoute(r.URL.Path)
 	if !found {
-		// A path outside the table names no resource, so the answer
-		// carries the two service links and nothing else.
-		writeAnswerHeaders(w, apiRoute{}, "")
+		writeVaryAndLink(w, apiRoute{}, "")
 		writeProblem(w, r.Method, newProblem(problemBlank, http.StatusNotFound,
 			fmt.Sprintf("this API serves no route at %s", r.URL.Path),
 			instanceOf(r.URL.Path, id)))
-		s.readings.answered("", r.Method, http.StatusNotFound, s.now().Sub(at))
+		s.readings.observeRequest("", r.Method, http.StatusNotFound, s.now().Sub(at))
 		return
 	}
 
-	// The line is written from a defer, because a tap the capture
-	// container cut short ends this handler with a panic and the
-	// record of the request has to survive it. serveTap fills the
-	// outcome in before it aborts.
-	outcome := &answered{}
+	// The log line is written in a defer because serveTap ends a
+	// capture stream that the capture container cut short with
+	// panic(http.ErrAbortHandler), and that request must still be
+	// logged. serveTap fills in outcome before it panics.
+	outcome := &requestOutcome{}
 	defer func() {
 		headers := s.now().Sub(at) - outcome.Streamed
-		s.readings.answered(route.Template, r.Method, outcome.Status, headers)
+		s.readings.observeRequest(route.Template, r.Method, outcome.Status, headers)
 		s.record(fmt.Sprintf(
 			"%s: %s route=%s id=%s user=%s resource=%s status=%d bytes=%d "+
 				"headers=%.3f stream=%.3f ended=%s",
@@ -51,40 +43,40 @@ func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			resourceOf(route, name), outcome.Status, outcome.Sent,
 			headers.Seconds(), outcome.Streamed.Seconds(), outcome.Ended))
 	}()
-	*outcome = s.answer(w, r, route, name, id, at, outcome)
+	*outcome = s.handle(w, r, route, name, id, at, outcome)
 }
 
-// answered is what one request produced, which is what the log line
-// and the two metrics report.
-type answered struct {
+// requestOutcome is what one request returned, for the log line and the
+// metrics.
+type requestOutcome struct {
 	Status   int
 	Sent     int64
 	Streamed time.Duration
 	Who      caller
 
-	// Ended is how the body finished, which is ok on every answer that
-	// is not a stream the capture container cut short.
+	// Ended is "ok" when the body was written in full, and otherwise
+	// the error that ended a capture stream.
 	Ended string
 }
 
-func refused(status int) answered { return answered{Status: status, Ended: "ok"} }
+func outcomeOf(status int) requestOutcome { return requestOutcome{Status: status, Ended: "ok"} }
 
-// answer does the work and reports what was sent, so ServeHTTP writes
-// one log line and one metric for every path through this file. The
-// negotiation and the query come after the authorization, so a 406
-// and a 400 reveal no more than a 403 does.
-func (s *apiServer) answer(w http.ResponseWriter, r *http.Request, route apiRoute,
-	name, id string, at time.Time, outcome *answered) answered {
-	if !answersMethod(r.Method) {
+// handle serves the request and returns its outcome, so ServeHTTP logs
+// and counts each request once on every path. Content negotiation and
+// query parsing come after authorization, so a 406 or a 400 reveals no
+// more than a 403 does.
+func (s *apiServer) handle(w http.ResponseWriter, r *http.Request, route apiRoute,
+	name, id string, at time.Time, outcome *requestOutcome) requestOutcome {
+	if !allowsMethod(r.Method) {
 		w.Header().Set("Allow", allowHeader())
 		return s.refuse(w, r, route, name, http.StatusMethodNotAllowed, problemBlank, id,
-			fmt.Sprintf("%s is not one of the methods this route allows", r.Method))
+			fmt.Sprintf("%s is not one of the methods that this route allows: %s", r.Method, allowHeader()))
 	}
 	if r.Method == http.MethodOptions {
-		writeAnswerHeaders(w, route, name)
+		writeVaryAndLink(w, route, name)
 		w.Header().Set("Allow", allowHeader())
 		w.WriteHeader(http.StatusNoContent)
-		return refused(http.StatusNoContent)
+		return outcomeOf(http.StatusNoContent)
 	}
 
 	who, status, challenged, detail := s.authenticate(r)
@@ -115,15 +107,13 @@ func (s *apiServer) answer(w http.ResponseWriter, r *http.Request, route apiRout
 			fmt.Sprintf("this route serves none of %q", r.Header.Get("Accept")),
 			instanceOf(r.URL.Path, id))
 		document.Acceptable = route.acceptable(name)
-		writeAnswerHeaders(w, route, name)
+		writeVaryAndLink(w, route, name)
 		writeProblem(w, r.Method, document)
-		return answered{Status: http.StatusNotAcceptable, Who: who, Ended: "ok"}
+		return requestOutcome{Status: http.StatusNotAcceptable, Who: who, Ended: "ok"}
 	}
 
-	knobs, err := parseKnobs(route, r.URL.RawQuery)
+	query, err := parseCaptureQuery(route, r.URL.RawQuery)
 	if err != nil {
-		// Authentication ran first, so the line names who asked even
-		// when the query is what refused them.
 		return s.refuseAs(w, r, route, name, who, http.StatusBadRequest,
 			problemBlank, id, err.Error())
 	}
@@ -131,16 +121,17 @@ func (s *apiServer) answer(w http.ResponseWriter, r *http.Request, route apiRout
 	if route.Kind == routeDiscovery || route.Kind == routeOpenAPI {
 		return s.serveDocument(w, r, route, name, form, who)
 	}
-	return s.serveEndpoint(w, r, route, name, form, knobs, who, id, at, outcome)
+	return s.serveEndpoint(w, r, route, name, form, query, who, id, at, outcome)
 }
 
-// authenticate names the caller the two ways this API takes one, in
-// the order the API server reads them: a verified client certificate
-// first, then the Bearer token.
+// authenticate identifies the caller by a verified client certificate,
+// and otherwise by a Bearer token, in the order that the Kubernetes API
+// server uses.
 //
-// It answers the caller, or the status and the challenge a refusal
-// carries. A review the API server did not answer is a 503, not a
-// 401: the token was never judged.
+// On a refusal it returns the status code, the WWW-Authenticate
+// challenge, and the detail text. When the TokenReview does not
+// complete, the status is 503 and not 401, because the API server did
+// not review the token.
 func (s *apiServer) authenticate(r *http.Request) (caller, int, string, string) {
 	if who, found := certificateCaller(r.TLS); found {
 		return who, 0, "", ""
@@ -148,7 +139,7 @@ func (s *apiServer) authenticate(r *http.Request) (caller, int, string, string) 
 	token, found := bearerToken(r.Header.Get("Authorization"))
 	if !found {
 		return caller{}, http.StatusUnauthorized, challenge(),
-			"this API takes a ServiceAccount token with the audience " + apiAudience
+			"this API accepts a ServiceAccount token with the audience " + apiAudience
 	}
 	who, err := s.review.review(token)
 	if errors.Is(err, ErrTokenDenied) {
@@ -160,36 +151,35 @@ func (s *apiServer) authenticate(r *http.Request) (caller, int, string, string) 
 	return who, 0, "", ""
 }
 
-// refuse writes one problem document and reports what the log line
-// says about it.
 func (s *apiServer) refuse(w http.ResponseWriter, r *http.Request, route apiRoute,
-	name string, status int, kind, id, detail string) answered {
-	writeAnswerHeaders(w, route, name)
+	name string, status int, kind, id, detail string) requestOutcome {
+	writeVaryAndLink(w, route, name)
 	writeProblem(w, r.Method, newProblem(kind, status, detail, instanceOf(r.URL.Path, id)))
-	return refused(status)
+	return outcomeOf(status)
 }
 
-// serveDocument answers the discovery and OpenAPI routes, which carry
-// an ETag and answer If-None-Match with a 304.
+// serveDocument serves the discovery and OpenAPI documents. Each has an
+// ETag, and a request whose If-None-Match matches it gets a 304.
 func (s *apiServer) serveDocument(w http.ResponseWriter, r *http.Request,
-	route apiRoute, name string, form representation, who caller) answered {
+	route apiRoute, name string, form representation, who caller) requestOutcome {
 	writeDocumentHeaders(w, route, name, form, s.buildVersion())
 	if matchesETag(r.Header.Get("If-None-Match"), documentETag(s.buildVersion())) {
-		// A 304 carries the ETag and Vary and no body (RFC 9110
+		// A 304 has the ETag and Vary headers and no body (RFC 9110
 		// section 15.4.5).
 		w.WriteHeader(http.StatusNotModified)
-		return answered{Status: http.StatusNotModified, Who: who, Ended: "ok"}
+		return requestOutcome{Status: http.StatusNotModified, Who: who, Ended: "ok"}
 	}
 	if route.Kind == routeDiscovery {
 		writeJSON(w, r.Method, http.StatusOK, newDiscovery())
-		return answered{Status: http.StatusOK, Who: who, Ended: "ok"}
+		return requestOutcome{Status: http.StatusOK, Who: who, Ended: "ok"}
 	}
 	writeJSON(w, r.Method, http.StatusOK, newOpenAPI(s.origin(r)))
-	return answered{Status: http.StatusOK, Who: who, Ended: "ok"}
+	return requestOutcome{Status: http.StatusOK, Who: who, Ended: "ok"}
 }
 
-// origin is what the served OpenAPI document names in servers: the
-// configured public base, else the request's own origin.
+// origin returns the base URL for the servers field of the OpenAPI
+// document: PUBLIC_BASE when it is set, and otherwise the scheme and
+// host of the request.
 func (s *apiServer) origin(r *http.Request) string {
 	if s.publicBase != "" {
 		return s.publicBase
@@ -203,8 +193,9 @@ func (s *apiServer) origin(r *http.Request) string {
 
 func (s *apiServer) buildVersion() string { return version }
 
-// matchesETag reads an If-None-Match field. A star matches anything
-// the resource has (RFC 9110 section 13.1.2).
+// matchesETag reports whether the If-None-Match header lists tag or *.
+// It ignores a W/ prefix, because If-None-Match uses weak comparison
+// (RFC 9110 section 13.1.2).
 func matchesETag(header, tag string) bool {
 	for _, candidate := range strings.Split(header, ",") {
 		candidate = strings.TrimSpace(candidate)
@@ -216,8 +207,7 @@ func matchesETag(header, tag string) bool {
 	return false
 }
 
-// resourceOf is what the log line names as the resource: the kind and
-// the name, or nothing on a document route.
+// resourceOf returns "-" for a document route, which has no resource.
 func resourceOf(route apiRoute, name string) string {
 	if route.Resource == "" {
 		return "-"
@@ -225,7 +215,6 @@ func resourceOf(route apiRoute, name string) string {
 	return route.Resource + "/" + name
 }
 
-// record writes the one line this API keeps for a request.
 func (s *apiServer) record(line string) {
 	if s.log == nil {
 		fmt.Println(line)
@@ -234,8 +223,8 @@ func (s *apiServer) record(line string) {
 	s.log(line)
 }
 
-// callerName is the username the log line carries. A request that
-// never got past the challenge has none.
+// callerName returns "-" for a request that was refused before it was
+// authenticated.
 func callerName(who caller) string {
 	if who.Username == "" {
 		return "-"

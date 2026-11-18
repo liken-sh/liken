@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestTheServiceLinksAreOnEveryRouteTheTableHolds(t *testing.T) {
+func TestEveryRouteLinksTheServiceDescriptionAndDocument(t *testing.T) {
 	for _, path := range []string{
 		"/v1/audio",
 		"/v1/audio/openapi.json",
@@ -26,18 +26,17 @@ func TestTheServiceLinksAreOnEveryRouteTheTableHolds(t *testing.T) {
 	}
 }
 
-func TestARouteThatNamesAnObjectDescribesItAbsolutely(t *testing.T) {
+func TestARouteThatNamesAnObjectLinksItsAbsoluteURI(t *testing.T) {
 	route, name, _ := matchRoute("/v1/audio/sinks/kitchen/audio.flac")
 	header := linkHeader(route, name, representation{})
 	want := `<https://kubernetes.default.svc/apis/audio.liken.sh/v1alpha1/sinks/kitchen>; rel="describedby"`
 	if !strings.Contains(header, want) {
-		t.Errorf("the header is %s, and it must carry %s", header, want)
+		t.Errorf("the header is %s, want it to contain %s", header, want)
 	}
 
-	// The two documents name no object, so neither describes one.
 	document, _, _ := matchRoute("/v1/audio")
 	if strings.Contains(linkHeader(document, "", representation{}), "describedby") {
-		t.Error("the discovery document describes an object it does not name")
+		t.Error("the discovery document has a describedby link, want none because it names no object")
 	}
 }
 
@@ -50,18 +49,19 @@ func TestOnlyTheNegotiatedRouteNamesItsAlternates(t *testing.T) {
 		`</v1/audio/sinks/kitchen/audio.opus>; rel="alternate"; type="audio/ogg"`,
 	} {
 		if !strings.Contains(header, want) {
-			t.Errorf("the header is %s, and it must carry %s", header, want)
+			t.Errorf("the header is %s, want it to contain %s", header, want)
 		}
 	}
-	// RFC 8288 section 3.4.1: the type parameter takes no media type
-	// parameters, so the Opus alternate never says codecs=opus.
+	// RFC 8288 section 3.4.1 defines the value of type as
+	// type-name "/" subtype-name, with no media type parameters, so the
+	// Opus alternate has no codecs=opus.
 	if strings.Contains(header, "codecs") {
-		t.Errorf("a Link type carries a media type parameter: %s", header)
+		t.Errorf("a Link type carries a media type parameter: %s, want none", header)
 	}
 
 	fixed, name, _ := matchRoute("/v1/audio/sinks/kitchen/audio.wav")
 	if strings.Contains(linkHeader(fixed, name, representation{}), "alternate") {
-		t.Error("an extension route named an alternate")
+		t.Error("an extension route named an alternate, want none")
 	}
 }
 
@@ -74,7 +74,7 @@ func TestAnInfoDocumentRelatesToItsCaptureRoutes(t *testing.T) {
 		`</v1/audio/sinks/kitchen/audio.opus>; rel="related"; type="audio/ogg"`,
 	} {
 		if !strings.Contains(header, want) {
-			t.Errorf("the header is %s, and it must carry %s", header, want)
+			t.Errorf("the header is %s, want it to contain %s", header, want)
 		}
 	}
 }
@@ -121,7 +121,7 @@ func TestTheSaveNameReplacesEveryColon(t *testing.T) {
 		t.Errorf("the disposition is %q, want %q", got, want)
 	}
 	if strings.Contains(got, ":") {
-		t.Errorf("the save name holds a colon: %q", got)
+		t.Errorf("the save name contains a colon: %q, want none", got)
 	}
 }
 
@@ -134,14 +134,14 @@ func TestADocumentCarriesNoCaptureOnlyHeader(t *testing.T) {
 		t.Errorf("a document says Cache-Control: %q, want no-cache", got)
 	}
 	if got := recorder.Header().Get("Vary"); got != "Accept" {
-		t.Errorf("a document says Vary: %q", got)
+		t.Errorf("a document says Vary: %q, want Accept", got)
 	}
 	if got := recorder.Header().Get("ETag"); got != `"v1"` {
-		t.Errorf("a document's ETag is %q", got)
+		t.Errorf("a document's ETag is %q, want %q", got, `"v1"`)
 	}
 	for _, absent := range []string{"Content-Disposition", "Accept-Ranges", "Content-Location"} {
 		if got := recorder.Header().Get(absent); got != "" {
-			t.Errorf("a document carries %s: %q", absent, got)
+			t.Errorf("a document carries %s: %q, want no such header", absent, got)
 		}
 	}
 }
@@ -160,17 +160,16 @@ func TestATapCarriesTheCaptureHeaders(t *testing.T) {
 		t.Errorf("a tap says Accept-Ranges: %q, want none", got)
 	}
 	if got := recorder.Header().Get("Vary"); got != "Accept" {
-		t.Errorf("a tap says Vary: %q", got)
+		t.Errorf("a tap says Vary: %q, want Accept", got)
 	}
-	// Content-Location names the fixed form the negotiation chose.
 	if got := recorder.Header().Get("Content-Location"); got != "/v1/audio/sinks/kitchen/audio.flac" {
-		t.Errorf("a negotiated tap says Content-Location: %q", got)
+		t.Errorf("a negotiated tap says Content-Location: %q, want /v1/audio/sinks/kitchen/audio.flac", got)
 	}
 	if got := recorder.Header().Get("Content-Disposition"); !strings.HasSuffix(got, `.flac"`) {
-		t.Errorf("the save name is %q", got)
+		t.Errorf("the save name is %q, want a name that ends in .flac", got)
 	}
 	if got := recorder.Header().Get("ETag"); got != "" {
-		t.Errorf("a tap carries an ETag: %q", got)
+		t.Errorf("a tap carries an ETag: %q, want none", got)
 	}
 }
 
@@ -181,12 +180,11 @@ func TestAnExtensionTapNamesNoContentLocation(t *testing.T) {
 	writeTapHeaders(recorder, route, name, form, time.Now())
 
 	if got := recorder.Header().Get("Content-Location"); got != "" {
-		t.Errorf("an extension route says Content-Location: %q", got)
+		t.Errorf("an extension route says Content-Location: %q, want none", got)
 	}
-	// RFC 9110 section 12.5.5's second purpose: Vary tells the
-	// recipient the answer was subject to negotiation, and an Accept
-	// can still turn this 200 into a 406.
+	// An extension route has Vary: Accept too, because Accept can still
+	// turn its 200 into a 406 (RFC 9110 section 12.5.5).
 	if got := recorder.Header().Get("Vary"); got != "Accept" {
-		t.Errorf("an extension route says Vary: %q", got)
+		t.Errorf("an extension route says Vary: %q, want Accept", got)
 	}
 }

@@ -17,9 +17,10 @@ import (
 	"time"
 )
 
-// captureHarness is one capture container under test: the fake
-// pw-dump, pw-record, and encoders on the path, a fake API server for
-// the TokenReview, and the samples the tap delivers.
+// captureHarness serves a captureServer with fake pw-dump, pw-record,
+// and encoder programs on the PATH, and a fake API server for the
+// TokenReview. The fake pw-record writes the raw samples in the file
+// samples, and the fakes write their arguments to args and encoder.
 type captureHarness struct {
 	server  *captureServer
 	serving *httptest.Server
@@ -31,29 +32,28 @@ type captureHarness struct {
 	lines []string
 }
 
-// logged is the per-tap lines this container wrote.
 func (h *captureHarness) logged() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return append([]string(nil), h.lines...)
 }
 
-// newCaptureHarness points the container at the fixtures in
-// testdata/capture and gives it a graph to read.
+// newCaptureHarness puts the fake programs in testdata/capture on the
+// PATH, and the fake pw-dump returns the fixture named by graph.
 func newCaptureHarness(t *testing.T, graph string, samples []byte) *captureHarness {
 	t.Helper()
 	work := t.TempDir()
 	sampleFile := filepath.Join(work, "samples.raw")
 	if err := os.WriteFile(sampleFile, samples, 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the samples file: %v", err)
 	}
 	bin, err := filepath.Abs("testdata/capture/bin")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("finding the fake binaries: %v", err)
 	}
 	graphFile, err := filepath.Abs("testdata/capture/" + graph)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("finding the graph fixture: %v", err)
 	}
 	harness := &captureHarness{
 		samples: sampleFile,
@@ -84,73 +84,72 @@ func newCaptureHarness(t *testing.T, graph string, samples []byte) *captureHarne
 	return harness
 }
 
-// endsWithTheSamples makes the fake pw-record stop when the samples
-// file runs out, rather than looping, which is what a pw-record that
-// died under a tap looks like to the container.
+// endsWithTheSamples makes the fake pw-record exit when the samples
+// run out instead of looping, as a pw-record that dies during a tap.
 func (h *captureHarness) endsWithTheSamples(t *testing.T) {
 	t.Helper()
 	t.Setenv("CAPTURE_FAKE_ONCE", "yes")
 }
 
-// linksTo says which node the fixture's link lands on, which is how
-// one graph serves a tap on any endpoint in it.
+// linksTo sets the node id that the fake graph links the tap's stream
+// to, so one fixture serves a tap on any endpoint in it.
 func (h *captureHarness) linksTo(t *testing.T, nodeID string) {
 	t.Helper()
 	t.Setenv("CAPTURE_FAKE_TARGET", nodeID)
 }
 
-// call makes one request with the API's own credential.
+// call sends one request with the audio API's credential.
 func (h *captureHarness) call(t *testing.T, method, target string) *http.Response {
 	t.Helper()
 	request, err := http.NewRequest(method, h.serving.URL+target, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the request: %v", err)
 	}
 	request.Header.Set("Authorization", "Bearer a.b.c")
-	answer, err := h.serving.Client().Do(request)
+	response, err := h.serving.Client().Do(request)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sending the request: %v", err)
 	}
-	t.Cleanup(func() { _ = answer.Body.Close() })
-	return answer
+	t.Cleanup(func() { _ = response.Body.Close() })
+	return response
 }
 
-// silence is one second of s16le at 48000 Hz and two channels, which
-// is what a tap on a suspended sink delivers.
+// silence returns zeroed s16le samples for the duration, which is what
+// a tap on a suspended sink delivers.
 func silence(seconds float64, rate, channels int) []byte {
 	return make([]byte, int(seconds*float64(rate*channels*sampleBytes)))
 }
 
 func TestATapRunsPwRecordWithTheLineThePlanStates(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.5")
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("the tap answered %s: %s", answer.Status, body)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("the tap returned %s, want 200 OK: %s", response.Status, body)
 	}
-	body, err := io.ReadAll(answer.Body)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		t.Fatalf("reading the body: %v", err)
 	}
-	// The 44-byte header, then half a second of samples: 48,000 Hz,
-	// two channels, two bytes a sample.
+	// The WAV header, then 0.5 s of samples at 48000 Hz, 2 channels,
+	// and 2 bytes a sample.
 	if len(body) != wavHeaderBytes+96000 {
 		t.Errorf("the body is %d bytes, want %d", len(body), wavHeaderBytes+96000)
 	}
 	if string(body[:4]) != "RIFF" {
-		t.Errorf("the body starts %q", body[:4])
+		t.Errorf("the body starts %q, want RIFF", body[:4])
 	}
 
 	args, err := os.ReadFile(harness.args)
 	if err != nil {
 		t.Fatalf("reading what pw-record was given: %v", err)
 	}
-	// The stream's own name is the request's, so the line is compared
-	// around it.
+	// The stream name contains the request ID, which varies, so the
+	// test compares the text before it and after it.
 	given := string(args)
 	if !strings.HasPrefix(given, "-P\n{ node.name = \"audio-capture-") {
-		t.Errorf("pw-record was given\n%q", given)
+		t.Errorf("pw-record was given\n%q\nwant a line that starts with the stream's node.name", given)
 	}
 	tail := "\", stream.capture.sink = true }\n--target\n" +
 		"liken-1-usb-0573-1573-a34004801402-usb-audio\n--raw\n--format\ns16\n" +
@@ -163,13 +162,13 @@ func TestATapRunsPwRecordWithTheLineThePlanStates(t *testing.T) {
 func TestATapOnASourceOmitsTheSinkProperty(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.5, 48000, 1))
 	harness.linksTo(t, "47")
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sources/liken-1-usb-0573-1573-a34004801402-usb-audio-capture/audio.wav?t=0,0.25")
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("the tap answered %s: %s", answer.Status, body)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("the tap returned %s, want 200 OK: %s", response.Status, body)
 	}
-	_, _ = io.Copy(io.Discard, answer.Body)
+	_, _ = io.Copy(io.Discard, response.Body)
 	args, _ := os.ReadFile(harness.args)
 	if strings.Contains(string(args), "stream.capture.sink") {
 		t.Errorf("a source tap carried the sink property: %q", args)
@@ -180,12 +179,13 @@ func TestATapOnASourceOmitsTheSinkProperty(t *testing.T) {
 }
 
 func TestASpanDiscardsAndThenDelivers(t *testing.T) {
-	// 48000 Hz, two channels, s16le: 192,000 bytes a second. t=0.25,0.5
-	// discards 48,000 bytes and delivers 48,000.
+	// At 48000 Hz, 2 channels, and s16le, one second is 192,000 bytes.
+	// The span t=0.25,0.5 discards the first 48,000 bytes and delivers
+	// the next 48,000.
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0.25,0.5")
-	body, _ := io.ReadAll(answer.Body)
+	body, _ := io.ReadAll(response.Body)
 	if len(body) != wavHeaderBytes+48000 {
 		t.Errorf("the body is %d bytes, want %d", len(body), wavHeaderBytes+48000)
 	}
@@ -193,18 +193,18 @@ func TestASpanDiscardsAndThenDelivers(t *testing.T) {
 
 func TestAnEncoderGetsTheEndpointsFormatAndTheMD5WarningIsNotAFailure(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.flac?t=0,0.125")
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("the tap answered %s: %s", answer.Status, body)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("the tap returned %s, want 200 OK: %s", response.Status, body)
 	}
-	if got := answer.Header.Get("Content-Type"); got != "audio/flac" {
-		t.Errorf("the type is %q", got)
+	if got := response.Header.Get("Content-Type"); got != "audio/flac" {
+		t.Errorf("the Content-Type is %q, want audio/flac", got)
 	}
-	body, _ := io.ReadAll(answer.Body)
+	body, _ := io.ReadAll(response.Body)
 	if !strings.HasPrefix(string(body), "fLaC") {
-		t.Errorf("the body is %d bytes and starts %q", len(body), body[:min(len(body), 4)])
+		t.Errorf("the body is %d bytes and starts %q, want fLaC", len(body), body[:min(len(body), 4)])
 	}
 	args, err := os.ReadFile(harness.encoder)
 	if err != nil {
@@ -217,18 +217,18 @@ func TestAnEncoderGetsTheEndpointsFormatAndTheMD5WarningIsNotAFailure(t *testing
 	}
 }
 
-func TestOpusCarriesTheBitrateKnobThroughToTheEncoder(t *testing.T) {
+func TestOpusPassesTheBitrateParameterToTheEncoder(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.opus?t=0,0.125&bitrate=128")
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("the tap answered %s: %s", answer.Status, body)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("the tap returned %s, want 200 OK: %s", response.Status, body)
 	}
-	if got := answer.Header.Get("Content-Type"); got != "audio/ogg; codecs=opus" {
-		t.Errorf("the type is %q", got)
+	if got := response.Header.Get("Content-Type"); got != "audio/ogg; codecs=opus" {
+		t.Errorf("the Content-Type is %q, want audio/ogg; codecs=opus", got)
 	}
-	_, _ = io.Copy(io.Discard, answer.Body)
+	_, _ = io.Copy(io.Discard, response.Body)
 	args, _ := os.ReadFile(harness.encoder)
 	if !strings.Contains(string(args), "--bitrate\n128\n") {
 		t.Errorf("the bitrate did not reach opusenc: %q", args)
@@ -237,77 +237,77 @@ func TestOpusCarriesTheBitrateKnobThroughToTheEncoder(t *testing.T) {
 
 func TestATapCarriesTheCaptureOnlyHeadersAndNothingTheAPIAdds(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.125")
-	_, _ = io.Copy(io.Discard, answer.Body)
-	if got := answer.Header.Get("Cache-Control"); got != "no-store" {
-		t.Errorf("the container says Cache-Control: %q", got)
+	_, _ = io.Copy(io.Discard, response.Body)
+	if got := response.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("the container says Cache-Control: %q, want no-store", got)
 	}
-	if got := answer.Header.Get("Accept-Ranges"); got != "none" {
-		t.Errorf("the container says Accept-Ranges: %q", got)
+	if got := response.Header.Get("Accept-Ranges"); got != "none" {
+		t.Errorf("the container says Accept-Ranges: %q, want none", got)
 	}
-	if got := answer.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+	if got := response.Header.Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("the container says X-Content-Type-Options: %q, want nosniff", got)
 	}
-	// The API adds these four; the container sends none of them.
+	// The API adds these headers, so the container must not send them.
 	for _, added := range []string{"Vary", "Link", "Content-Location", "Content-Disposition"} {
-		if got := answer.Header.Get(added); got != "" {
-			t.Errorf("the container sent %s: %q", added, got)
+		if got := response.Header.Get(added); got != "" {
+			t.Errorf("the container sent %s: %q, want no %s header", added, got, added)
 		}
 	}
 }
 
 func TestAHeadTakesNoSampleAndStartsNoProcess(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
-	answer := harness.call(t, http.MethodHead,
+	response := harness.call(t, http.MethodHead,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
-	if answer.StatusCode != http.StatusOK {
-		t.Fatalf("the HEAD answered %s", answer.Status)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the HEAD returned %s, want 200 OK", response.Status)
 	}
-	if got := answer.Header.Get("Content-Type"); got != "audio/wav" {
-		t.Errorf("the HEAD says Content-Type: %q", got)
+	if got := response.Header.Get("Content-Type"); got != "audio/wav" {
+		t.Errorf("the HEAD says Content-Type: %q, want audio/wav", got)
 	}
-	if got := answer.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+	if got := response.Header.Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("the HEAD says X-Content-Type-Options: %q, want nosniff", got)
 	}
-	body, _ := io.ReadAll(answer.Body)
+	body, _ := io.ReadAll(response.Body)
 	if len(body) != 0 {
-		t.Errorf("the HEAD carried %d bytes", len(body))
+		t.Errorf("the HEAD body is %d bytes, want 0", len(body))
 	}
 	if _, err := os.Stat(harness.args); err == nil {
 		t.Error("the HEAD started pw-record")
 	}
 }
 
-func TestANameTheGraphDoesNotHoldIsANotFound(t *testing.T) {
+func TestANameMissingFromTheGraphIsANotFound(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav")
-	if answer.StatusCode != http.StatusNotFound {
-		t.Fatalf("an unknown name answered %s", answer.Status)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav")
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("an unknown name returned %s, want 404 Not Found", response.Status)
 	}
-	document := readProblemBody(t, answer)
+	document := readProblemBody(t, response)
 	if document.Type != problemNoNode {
-		t.Errorf("the problem type is %q", document.Type)
+		t.Errorf("the problem type is %q, want %q", document.Type, problemNoNode)
 	}
 	if !strings.Contains(document.Detail, "kitchen") {
-		t.Errorf("the detail is %q, and it must carry what was asked for", document.Detail)
+		t.Errorf("the detail is %q, want it to name kitchen", document.Detail)
 	}
 	if !strings.HasPrefix(document.Instance, "/v1/audio/sinks/kitchen/audio.wav#") {
-		t.Errorf("the instance is %q", document.Instance)
+		t.Errorf("the instance is %q, want the path followed by #", document.Instance)
 	}
 }
 
 func TestAStreamThatLandsOnAnotherNodeIsAWrongTarget(t *testing.T) {
-	// The graph fixture links the stream to the HDMI sink, not to the
-	// DAC the request named.
+	// In this graph fixture the stream links to the HDMI sink, not to
+	// the DAC that the request named.
 	harness := newCaptureHarness(t, "graph-wrong-target.json", silence(1, 44100, 2))
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
-	if answer.StatusCode != http.StatusInternalServerError {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("a wrong target answered %s: %s", answer.Status, body)
+	if response.StatusCode != http.StatusInternalServerError {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("a wrong target returned %s, want 500 Internal Server Error: %s", response.Status, body)
 	}
-	document := readProblemBody(t, answer)
+	document := readProblemBody(t, response)
 	if document.Type != problemWrongTarget {
 		t.Errorf("the problem type is %q, want %q", document.Type, problemWrongTarget)
 	}
@@ -322,51 +322,51 @@ func TestAQueryTheGrammarRefusesIsABadRequest(t *testing.T) {
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?bitrate=128",
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?width=480",
 	} {
-		answer := harness.call(t, http.MethodGet, target)
-		if answer.StatusCode != http.StatusBadRequest {
-			t.Errorf("%s answered %s", target, answer.Status)
+		response := harness.call(t, http.MethodGet, target)
+		if response.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s returned %s, want 400 Bad Request", target, response.Status)
 		}
-		_, _ = io.Copy(io.Discard, answer.Body)
+		_, _ = io.Copy(io.Discard, response.Body)
 	}
 }
 
 func TestTheFifthTapIsRefusedWithARetryAfter(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
-	// Four slots are already held, so the next request is the fifth.
+	// Fill the tap limit, so the next request is over it.
 	for range cap(harness.server.taps) {
 		harness.server.taps <- struct{}{}
 	}
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
-	if answer.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("the fifth tap answered %s", answer.Status)
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("the fifth tap returned %s, want 503 Service Unavailable", response.Status)
 	}
-	if got := answer.Header.Get("Retry-After"); got != "5" {
+	if got := response.Header.Get("Retry-After"); got != "5" {
 		t.Errorf("the refusal says Retry-After: %q, want 5", got)
 	}
-	document := readProblemBody(t, answer)
+	document := readProblemBody(t, response)
 	if document.Type != problemCaptureBusy {
 		t.Errorf("the problem type is %q, want %q", document.Type, problemCaptureBusy)
 	}
 }
 
-func TestTheThreeUntokenedRoutesNeedNoToken(t *testing.T) {
+func TestHealthReadinessAndMetricsNeedNoToken(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", nil)
 	for path, want := range map[string]int{
 		"/healthz": http.StatusOK,
 		"/metrics": http.StatusOK,
-		// No leaf has been minted into the directory, so the container
-		// is not ready and says so.
+		// The TLS directory has no certificate yet, so the container is
+		// not ready.
 		"/readyz": http.StatusServiceUnavailable,
 	} {
-		answer, err := harness.serving.Client().Get(harness.serving.URL + path)
+		response, err := harness.serving.Client().Get(harness.serving.URL + path)
 		if err != nil {
-			t.Fatalf("%s: %v", path, err)
+			t.Fatalf("requesting %s: %v", path, err)
 		}
-		if answer.StatusCode != want {
-			t.Errorf("%s answered %s, want %d", path, answer.Status, want)
+		if response.StatusCode != want {
+			t.Errorf("%s returned %s, want %d", path, response.Status, want)
 		}
-		_ = answer.Body.Close()
+		_ = response.Body.Close()
 	}
 }
 
@@ -385,118 +385,118 @@ func TestOnlyTheAPIsServiceAccountReachesATap(t *testing.T) {
 	request, _ := http.NewRequest(http.MethodGet,
 		serving.URL+"/v1/audio/sinks/kitchen/audio.wav", nil)
 	request.Header.Set("Authorization", "Bearer a.b.c")
-	answer, err := serving.Client().Do(request)
+	response, err := serving.Client().Do(request)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sending the request: %v", err)
 	}
-	defer func() { _ = answer.Body.Close() }()
-	if answer.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("another ServiceAccount answered %s", answer.Status)
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("another ServiceAccount returned %s, want 401 Unauthorized", response.Status)
 	}
-	if got := answer.Header.Get("WWW-Authenticate"); !strings.Contains(got, `error="invalid_token"`) {
-		t.Errorf("the challenge is %q", got)
+	if got := response.Header.Get("WWW-Authenticate"); !strings.Contains(got, `error="invalid_token"`) {
+		t.Errorf("the challenge is %q, want error=\"invalid_token\"", got)
 	}
 }
 
 func TestARequestWithNoTokenIsChallengedWithTheRealmAlone(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", nil)
-	answer, err := harness.serving.Client().Get(
+	response, err := harness.serving.Client().Get(
 		harness.serving.URL + "/v1/audio/sinks/kitchen/audio.wav")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sending the request: %v", err)
 	}
-	defer func() { _ = answer.Body.Close() }()
-	if answer.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("a request with no token answered %s", answer.Status)
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("a request with no token returned %s, want 401 Unauthorized", response.Status)
 	}
-	if got := answer.Header.Get("WWW-Authenticate"); got != `Bearer realm="audio-capture"` {
-		t.Errorf("the challenge is %q", got)
+	if got := response.Header.Get("WWW-Authenticate"); got != `Bearer realm="audio-capture"` {
+		t.Errorf("the challenge is %q, want %q", got, `Bearer realm="audio-capture"`)
 	}
 }
 
 func TestTheContainerServesNoNegotiatedRoute(t *testing.T) {
-	// The container's route mirrors the public one with the extension
-	// always present, so the API never forwards an extensionless path.
+	// The API always forwards a path with a format extension, so the
+	// container has no route for a path without one.
 	harness := newCaptureHarness(t, "graph.json", nil)
 	for _, target := range []string{
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio",
 		"/v1/audio",
 		"/v1/audio/openapi.json",
 	} {
-		answer := harness.call(t, http.MethodGet, target)
-		if answer.StatusCode != http.StatusNotFound {
-			t.Errorf("%s answered %s", target, answer.Status)
+		response := harness.call(t, http.MethodGet, target)
+		if response.StatusCode != http.StatusNotFound {
+			t.Errorf("%s returned %s, want 404 Not Found", target, response.Status)
 		}
-		_, _ = io.Copy(io.Discard, answer.Body)
+		_, _ = io.Copy(io.Discard, response.Body)
 	}
 }
 
-func TestTheContainerAnswersTheInfoRouteWithTheGraphsOwnFormat(t *testing.T) {
+func TestTheInfoRouteReturnsTheFormatFromTheGraph(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", nil)
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/pci-0000-00-1f-3-hdmi-0")
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("the info route answered %s: %s", answer.Status, body)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/pci-0000-00-1f-3-hdmi-0")
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("the info route returned %s, want 200 OK: %s", response.Status, body)
 	}
 	var format captureFormatDocument
-	if err := json.NewDecoder(answer.Body).Decode(&format); err != nil {
-		t.Fatalf("reading the answer: %v", err)
+	if err := json.NewDecoder(response.Body).Decode(&format); err != nil {
+		t.Fatalf("decoding the info document: %v", err)
 	}
 	if format.Node != "pci-0000-00-1f-3-hdmi-0" || format.Rate != 48000 || format.Channels != 6 {
-		t.Errorf("the info route answered %+v", format)
+		t.Errorf("the info route returned %+v, want node pci-0000-00-1f-3-hdmi-0 at 48000 Hz with 6 channels", format)
 	}
 	if _, err := os.Stat(harness.args); err == nil {
 		t.Error("the info route started pw-record")
 	}
 }
 
-func TestOptionsAnswersTheThreeMethodsAndAnythingElseIsRefused(t *testing.T) {
+func TestOptionsListsTheAllowedMethodsAndPostIsRefused(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", nil)
-	answer := harness.call(t, http.MethodOptions,
+	response := harness.call(t, http.MethodOptions,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
-	if answer.StatusCode != http.StatusNoContent {
-		t.Errorf("OPTIONS answered %s", answer.Status)
+	if response.StatusCode != http.StatusNoContent {
+		t.Errorf("OPTIONS returned %s, want 204 No Content", response.Status)
 	}
-	if got := answer.Header.Get("Allow"); got != "GET, HEAD, OPTIONS" {
-		t.Errorf("OPTIONS says Allow: %q", got)
+	if got := response.Header.Get("Allow"); got != "GET, HEAD, OPTIONS" {
+		t.Errorf("OPTIONS says Allow: %q, want GET, HEAD, OPTIONS", got)
 	}
-	_ = answer.Body.Close()
+	_ = response.Body.Close()
 
-	answer = harness.call(t, http.MethodPost,
+	response = harness.call(t, http.MethodPost,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
-	if answer.StatusCode != http.StatusMethodNotAllowed {
-		t.Errorf("POST answered %s", answer.Status)
+	if response.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("POST returned %s, want 405 Method Not Allowed", response.Status)
 	}
-	if got := answer.Header.Get("Allow"); got != "GET, HEAD, OPTIONS" {
-		t.Errorf("a 405 says Allow: %q", got)
+	if got := response.Header.Get("Allow"); got != "GET, HEAD, OPTIONS" {
+		t.Errorf("a 405 says Allow: %q, want GET, HEAD, OPTIONS", got)
 	}
-	_, _ = io.Copy(io.Discard, answer.Body)
+	_, _ = io.Copy(io.Discard, response.Body)
 }
 
 func TestASuspendedSinkTapsAsSilence(t *testing.T) {
-	// The HDMI sink in the fixture reports no Format, so the tap takes
-	// six channels from EnumFormat and the rate from the settings
-	// metadata, and answers 200 rather than reporting a failure the
-	// service does not have.
+	// The HDMI sink in the fixture has no Format, so the container
+	// reads the six channels from EnumFormat and the rate from the
+	// PipeWire settings metadata. A suspended sink is not a failure, so
+	// the tap returns 200 with silence.
 	harness := newCaptureHarness(t, "graph.json", silence(0.125, 48000, 6))
 	harness.linksTo(t, "48")
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/pci-0000-00-1f-3-hdmi-0/audio.wav?t=0,0.0625")
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("a suspended sink answered %s: %s", answer.Status, body)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("a suspended sink returned %s, want 200 OK: %s", response.Status, body)
 	}
-	_, _ = io.Copy(io.Discard, answer.Body)
+	_, _ = io.Copy(io.Discard, response.Body)
 	args, _ := os.ReadFile(harness.args)
 	if !strings.Contains(string(args), "--channels\n6\n") {
-		t.Errorf("a suspended 5.1 sink was tapped as %q", args)
+		t.Errorf("a suspended 5.1 sink was tapped as %q, want --channels 6", args)
 	}
 }
 
-func TestTheGraphIsReadBeforeTheTapAndAgainToConfirm(t *testing.T) {
-	// The resolution is one read and the confirmation is at least one
-	// more, so a fixture that never links reaches the deadline and a
-	// wrong-target answer.
+func TestConfirmReadsTheGraphUntilTheLinkDeadline(t *testing.T) {
+	// confirm reads the graph again until the stream links to the
+	// target or linkDeadline passes. A graph with no link runs to the
+	// deadline.
 	synctest.Test(t, func(t *testing.T) {
 		server := &captureServer{
 			version:  "dev",
@@ -518,19 +518,19 @@ func TestTheGraphIsReadBeforeTheTapAndAgainToConfirm(t *testing.T) {
 			t.Errorf("the confirmation gave up after %s, want %s", waited, linkDeadline)
 		}
 		if reads < 2 {
-			t.Errorf("the confirmation read the graph %d times", reads)
+			t.Errorf("the confirmation read the graph %d times, want at least 2", reads)
 		}
 	})
 }
 
-func readProblemBody(t *testing.T, answer *http.Response) problem {
+func readProblemBody(t *testing.T, response *http.Response) problem {
 	t.Helper()
-	if got := answer.Header.Get("Content-Type"); got != problemType {
+	if got := response.Header.Get("Content-Type"); got != problemType {
 		t.Errorf("the problem is served as %q, want %q", got, problemType)
 	}
-	body, err := io.ReadAll(answer.Body)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the problem body: %v", err)
 	}
 	var document problem
 	if err := json.Unmarshal(body, &document); err != nil {
@@ -544,9 +544,7 @@ func TestTheTapLimitComesFromTheEnvironment(t *testing.T) {
 	if got := captureTapLimit(); got != 8 {
 		t.Errorf("the limit is %d, want 8", got)
 	}
-	// A value the container cannot read, and a value that would serve
-	// nothing, both fall back to the default rather than parking the
-	// node with no taps at all.
+	// A value that is not a positive integer gives the default.
 	for _, value := range []string{"", "many", "0", "-1"} {
 		t.Setenv(captureTapsVariable, value)
 		if got := captureTapLimit(); got != defaultCaptureTaps {
@@ -570,14 +568,13 @@ func TestTheSpanTheLogLineNames(t *testing.T) {
 	}
 }
 
-// A PipeWire that answers nothing says nothing about where the tap
-// landed. The drill killed the daemon mid-tap and got a 500
-// wrong-target with "can't connect: Host is down" in it; a daemon that
-// is down clears on its own, so it is a 503.
-func TestAPipeWireThatDoesNotAnswerIsUnavailableAndNotAWrongTarget(t *testing.T) {
+// When pw-dump fails after the tap starts, the container cannot confirm
+// where the stream linked. It returns a 503 that the caller can retry,
+// and not a 500 wrong-target, because PipeWire restarts on its own.
+func TestAPipeWireThatStopsRespondingIsUnavailableAndNotAWrongTarget(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
-	// The graph resolves once, then the daemon goes away, which is what
-	// the confirmation meets.
+	// The first graph read succeeds and the later reads fail, as when
+	// the daemon dies after the container found the node.
 	reads := 0
 	resolve := harness.server.graph
 	harness.server.graph = func(ctx context.Context) ([]byte, error) {
@@ -588,22 +585,22 @@ func TestAPipeWireThatDoesNotAnswerIsUnavailableAndNotAWrongTarget(t *testing.T)
 		return nil, fmt.Errorf("%w: running pw-dump: exit status 255: can't connect: Host is down",
 			ErrGraphUnread)
 	}
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
-	if answer.StatusCode != http.StatusServiceUnavailable {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("a dead PipeWire answered %s: %s", answer.Status, body)
+	if response.StatusCode != http.StatusServiceUnavailable {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("a dead PipeWire returned %s, want 503 Service Unavailable: %s", response.Status, body)
 	}
-	if got := answer.Header.Get("Retry-After"); got != "5" {
-		t.Errorf("the refusal says Retry-After: %q", got)
+	if got := response.Header.Get("Retry-After"); got != "5" {
+		t.Errorf("the refusal says Retry-After: %q, want 5", got)
 	}
-	document := readProblemBody(t, answer)
+	document := readProblemBody(t, response)
 	if document.Type == problemWrongTarget {
 		t.Error("a dead PipeWire was called a wrong target")
 	}
-	// The daemon's own words reach the caller.
+	// The detail includes the text of the failed graph read.
 	if !strings.Contains(document.Detail, "can't connect: Host is down") {
-		t.Errorf("the detail is %q", document.Detail)
+		t.Errorf("the detail is %q, want the daemon's own text, can't connect: Host is down", document.Detail)
 	}
 }
 
@@ -619,13 +616,14 @@ func TestAGraphThatWillNotReadIsNotAWrongTarget(t *testing.T) {
 	}
 	err := server.confirm(context.Background(), "audio-capture-4242", 46)
 	if !errors.Is(err, ErrGraphUnread) {
-		t.Errorf("a graph that will not read answered %v", err)
+		t.Errorf("a graph that will not read returned %v, want ErrGraphUnread", err)
 	}
 }
 
-// The plan asks for one line per tap in the container. The drill found
-// none at all, because every tap ended at the confirmation and only
-// the paths past it wrote one.
+// Every tap writes one log line, including a tap that fails the link
+// confirmation, as
+// audio-operator/plans/completed/09-capture-audio-over-http.md
+// requires.
 func TestEveryTapWritesOneLineWhateverBecameOfIt(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -640,9 +638,9 @@ func TestEveryTapWritesOneLineWhateverBecameOfIt(t *testing.T) {
 	}
 	for _, row := range cases {
 		harness := newCaptureHarness(t, row.graph, silence(0.5, 48000, 2))
-		answer := harness.call(t, http.MethodGet,
+		response := harness.call(t, http.MethodGet,
 			"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/"+row.target)
-		_, _ = io.Copy(io.Discard, answer.Body)
+		_, _ = io.Copy(io.Discard, response.Body)
 
 		lines := harness.logged()
 		if len(lines) != 1 {
@@ -664,65 +662,66 @@ func TestEveryTapWritesOneLineWhateverBecameOfIt(t *testing.T) {
 			"ended=",
 		} {
 			if !strings.Contains(line, want) {
-				t.Errorf("%s wrote %q, which carries no %s", row.name, line, want)
+				t.Errorf("%s wrote %q, want a line that contains %s", row.name, line, want)
 			}
 		}
-		// The line names the request, so it joins the API's own.
+		// The line has the request ID, so a person can match it with the
+		// API's log line for the same request.
 		if !strings.Contains(line, "tap ") {
-			t.Errorf("%s names no request: %q", row.name, line)
+			t.Errorf("%s wrote %q, want a line that names the request after tap", row.name, line)
 		}
 	}
 }
 
 func TestATapRefusedByTheLimitWritesNoTapLine(t *testing.T) {
-	// Nothing was tapped, so there is nothing to say about a tap. The
-	// refusal is on the metric and in the API's line.
+	// No tap started, so there is no tap line. The metrics and the
+	// API's log line record the refusal.
 	harness := newCaptureHarness(t, "graph.json", silence(0.25, 48000, 2))
 	for range cap(harness.server.taps) {
 		harness.server.taps <- struct{}{}
 	}
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav")
-	_, _ = io.Copy(io.Discard, answer.Body)
+	_, _ = io.Copy(io.Discard, response.Body)
 	if lines := harness.logged(); len(lines) != 0 {
-		t.Errorf("a refused tap wrote %v", lines)
+		t.Errorf("a refused tap wrote %v, want no line", lines)
 	}
 }
 
-// A capture the pipeline ended under has no status left to report: the
-// 200 and its first bytes are already on the wire. The container ends
-// the body without its terminating chunk instead, which is RFC 9112
-// section 8's signal for an incomplete message, and a reader sees the
-// read fail rather than a clean end.
+// When pw-record or the encoder dies after the container sent the 200
+// and the first bytes, the status cannot change. The container ends the
+// body without the terminating chunk, which RFC 9112 section 8 defines
+// as an incomplete message, so the client's read fails and the body is
+// not mistaken for a complete recording.
 func TestAPipelineThatDiedMidTapEndsTheBodyIncomplete(t *testing.T) {
-	// The samples run out before the span does: pw-record ended on its
-	// own, which is what PipeWire dying under a tap looks like here.
+	// The samples end before the span, so the fake pw-record exits
+	// early.
 	harness := newCaptureHarness(t, "graph.json", silence(0.05, 48000, 2))
 	harness.endsWithTheSamples(t)
 
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,5")
-	if answer.StatusCode != http.StatusOK {
-		t.Fatalf("the tap answered %s", answer.Status)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the tap returned %s, want 200 OK", response.Status)
 	}
-	_, err := io.ReadAll(answer.Body)
+	_, err := io.ReadAll(response.Body)
 	if err == nil {
 		t.Fatal("a capture that was cut short ended as though it were complete")
 	}
 
 	lines := harness.logged()
 	if len(lines) != 1 || !strings.Contains(lines[0], "truncated") {
-		t.Errorf("the container logged %v", lines)
+		t.Errorf("the container logged %v, want one line that contains truncated", lines)
 	}
 }
 
 func TestAFinishedSpanEndsCleanly(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
-	answer := harness.call(t, http.MethodGet,
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.125")
-	body, err := io.ReadAll(answer.Body)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		t.Fatalf("a finished span ended with %v", err)
+		t.Fatalf("reading a finished span returned %v, want a clean end", err)
 	}
 	// 0.125 s at 48000 Hz, two channels, two bytes a sample.
 	if len(body) != wavHeaderBytes+24000 {
@@ -730,27 +729,28 @@ func TestAFinishedSpanEndsCleanly(t *testing.T) {
 	}
 	lines := harness.logged()
 	if len(lines) != 1 || strings.Contains(lines[0], "truncated") {
-		t.Errorf("a finished span logged %v", lines)
+		t.Errorf("a finished span logged %v, want one line without truncated", lines)
 	}
 }
 
 func TestAClientThatHungUpEndsCleanly(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
-	// An open span, read for one block and then abandoned.
+	// The request has no end time. The client reads one block and then
+	// closes the body.
 	request, err := http.NewRequest(http.MethodGet,
 		harness.serving.URL+"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav", nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the request: %v", err)
 	}
 	request.Header.Set("Authorization", "Bearer a.b.c")
-	answer, err := harness.serving.Client().Do(request)
+	response, err := harness.serving.Client().Do(request)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sending the request: %v", err)
 	}
-	if _, err := io.ReadFull(answer.Body, make([]byte, 64)); err != nil {
+	if _, err := io.ReadFull(response.Body, make([]byte, 64)); err != nil {
 		t.Fatalf("reading the first block: %v", err)
 	}
-	_ = answer.Body.Close()
+	_ = response.Body.Close()
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) && len(harness.logged()) == 0 {
@@ -758,70 +758,68 @@ func TestAClientThatHungUpEndsCleanly(t *testing.T) {
 	}
 	lines := harness.logged()
 	if len(lines) != 1 {
-		t.Fatalf("the container logged %v", lines)
+		t.Fatalf("the container logged %v, want one line", lines)
 	}
 	if strings.Contains(lines[0], "truncated") {
 		t.Errorf("a client that hung up was read as a truncation: %q", lines[0])
 	}
 }
 
-// The container sends its headers when it accepts the request, not
-// when the first sample of the span arrives. A tap with a begin
-// discards for as long as begin asks, and the API relays what it has;
-// if the headers waited for audio, every tap with a begin would keep
-// its caller in the dark for that long.
+// The container sends the response headers before the first sample of
+// the span. A tap with a begin offset discards audio until that offset,
+// so headers that waited for audio would leave the caller with no
+// response for the length of the offset.
 func TestTheContainerSendsItsHeadersBeforeTheDiscardIsOver(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(1, 48000, 2))
-	// The encoder writes nothing until samples reach it, the way a
-	// real one does, so the only thing that can carry the headers out
-	// ahead of the discard is the flush that follows them.
+	// The fake encoder writes nothing until it receives samples, like a
+	// real one, so only a flush of the headers sends them before the
+	// clock reaches begin.
 	t.Setenv("CAPTURE_FAKE_ENCODER_QUIET", "yes")
 
 	request, err := http.NewRequest(http.MethodGet, harness.serving.URL+
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.flac?t=0.4,0.5", nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the request: %v", err)
 	}
 	request.Header.Set("Authorization", "Bearer a.b.c")
 	started := time.Now()
-	answer, err := harness.serving.Client().Do(request)
+	response, err := harness.serving.Client().Do(request)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sending the request: %v", err)
 	}
-	defer func() { _ = answer.Body.Close() }()
+	defer func() { _ = response.Body.Close() }()
 	waited := time.Since(started)
 
-	if answer.StatusCode != http.StatusOK {
-		t.Fatalf("the tap answered %s", answer.Status)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the tap returned %s, want 200 OK", response.Status)
 	}
 	if waited > 200*time.Millisecond {
-		t.Errorf("the headers took %s, and the discard is 400 ms", waited)
+		t.Errorf("the headers took %s, want under 200 ms, before the clock reaches the begin at 400 ms", waited)
 	}
-	if got := answer.Header.Get("Content-Type"); got != "audio/flac" {
-		t.Errorf("the type is %q", got)
+	if got := response.Header.Get("Content-Type"); got != "audio/flac" {
+		t.Errorf("the Content-Type is %q, want audio/flac", got)
 	}
-	_, _ = io.Copy(io.Discard, answer.Body)
+	_, _ = io.Copy(io.Discard, response.Body)
 	if total := time.Since(started); total < 400*time.Millisecond {
-		t.Errorf("the whole tap took %s, so the discard never ran", total)
+		t.Errorf("the whole tap took %s, want at least the 400 ms before begin", total)
 	}
 }
 
-// A finished span must end with its terminating chunk. The drill on
-// liken-1 read a whole Opus body and then an HTTP/2 INTERNAL_ERROR,
-// because the span's end looked like a capture that was cut short.
-//
-// Two things made it look that way, and this test holds both. The
-// encoder is drained rather than killed, so the status is its own
-// zero; and os/exec's answer when a process exits well with its pipes
-// still open is not read as a failure.
+// A span that finishes normally ends with the terminating chunk. If the
+// container treated a normal finish as a cut-short capture, an HTTP/2
+// client would read the whole Opus body and then fail with
+// INTERNAL_ERROR. The container drains the encoder instead of killing
+// it, so the encoder exits with status 0. It also does not count as a
+// failure the exec.ErrWaitDelay that os/exec returns when a process
+// exits normally while its pipes are still open.
 func TestAFinishedOpusSpanEndsCleanlyOverHTTP2(t *testing.T) {
 	harness := newCaptureHarness(t, "graph.json", silence(2, 48000, 2))
-	// The encoder takes a moment to write its last page once its stdin
-	// closes, the way the real one does.
+	// Like a real encoder, the fake writes its last page a moment after
+	// its stdin closes.
 	t.Setenv("CAPTURE_FAKE_ENCODER_LINGER", "0.1")
 
-	// The container's own listener, over HTTP/2, which is where the
-	// drill saw the stream reset.
+	// Serve over HTTP/2, because that is where the client sees the
+	// stream reset.
 	serving := httptest.NewUnstartedServer(harness.server.handler())
 	serving.EnableHTTP2 = true
 	serving.StartTLS()
@@ -830,40 +828,40 @@ func TestAFinishedOpusSpanEndsCleanlyOverHTTP2(t *testing.T) {
 	request, err := http.NewRequest(http.MethodGet, serving.URL+
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.opus?t=0,0.25", nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the request: %v", err)
 	}
 	request.Header.Set("Authorization", "Bearer a.b.c")
-	answer, err := serving.Client().Do(request)
+	response, err := serving.Client().Do(request)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sending the request: %v", err)
 	}
-	defer func() { _ = answer.Body.Close() }()
-	if answer.Proto != "HTTP/2.0" {
-		t.Fatalf("the test spoke %s, and the reset was seen over HTTP/2", answer.Proto)
+	defer func() { _ = response.Body.Close() }()
+	if response.Proto != "HTTP/2.0" {
+		t.Fatalf("the test spoke %s, want HTTP/2.0, because only an HTTP/2 client reports a cut body as INTERNAL_ERROR", response.Proto)
 	}
-	if answer.StatusCode != http.StatusOK {
-		t.Fatalf("the tap answered %s", answer.Status)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the tap returned %s, want 200 OK", response.Status)
 	}
 
-	body, err := io.ReadAll(answer.Body)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		t.Fatalf("a finished span ended with %v", err)
+		t.Fatalf("reading a finished span returned %v, want a clean end", err)
 	}
-	// 0.25 s at 48000 Hz, two channels, two bytes a sample, behind the
-	// encoder's own four-byte marker.
+	// 0.25 s at 48000 Hz, 2 channels, and 2 bytes a sample, after the
+	// 4-byte marker that the fake encoder writes first.
 	if len(body) != 4+48000 {
 		t.Errorf("the body is %d bytes, want %d", len(body), 4+48000)
 	}
 
 	lines := harness.logged()
 	if len(lines) != 1 {
-		t.Fatalf("the container logged %v", lines)
+		t.Fatalf("the container logged %v, want one line", lines)
 	}
 	if strings.Contains(lines[0], "truncated") {
 		t.Errorf("a finished span was read as cut short: %q", lines[0])
 	}
-	// The encoder was drained, so the status is the one it exited
-	// with, not the one a process this container killed reports.
+	// The encoder's exit status 0 shows that the container waited for
+	// it and did not kill it.
 	if !strings.Contains(lines[0], "encoder:0") {
 		t.Errorf("the encoder was not waited for: %q", lines[0])
 	}
@@ -879,17 +877,17 @@ func TestAFinishedWAVSpanEndsCleanlyOverHTTP2(t *testing.T) {
 	request, err := http.NewRequest(http.MethodGet, serving.URL+
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav?t=0,0.25", nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the request: %v", err)
 	}
 	request.Header.Set("Authorization", "Bearer a.b.c")
-	answer, err := serving.Client().Do(request)
+	response, err := serving.Client().Do(request)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sending the request: %v", err)
 	}
-	defer func() { _ = answer.Body.Close() }()
-	body, err := io.ReadAll(answer.Body)
+	defer func() { _ = response.Body.Close() }()
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		t.Fatalf("a finished span ended with %v", err)
+		t.Fatalf("reading a finished span returned %v, want a clean end", err)
 	}
 	if len(body) != wavHeaderBytes+48000 {
 		t.Errorf("the body is %d bytes, want %d", len(body), wavHeaderBytes+48000)

@@ -1,10 +1,9 @@
 package main
 
-// The blocks in testdata are laid out the way sound/pci/hda/hda_eld.c
-// lays them out, and they hold the field values of two monitors: an
-// LG UltraWide on HDMI, and a Dell U2415 on DisplayPort. A machine
-// with no monitor connected reports no block at all, so these are
-// assembled rather than captured.
+// The blocks in testdata follow the layout that sound/pci/hda/hda_eld.c
+// reads. They carry the field values of an LG UltraWide on HDMI and a
+// Dell U2415 on DisplayPort. They are assembled by hand because a
+// machine with no monitor connected reports no block to capture.
 
 import (
 	"os"
@@ -15,7 +14,7 @@ func fixture(t *testing.T, name string) []byte {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/" + name)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the fixture: %v", err)
 	}
 	return raw
 }
@@ -23,19 +22,19 @@ func fixture(t *testing.T, name string) []byte {
 func TestParseHDMIBlock(t *testing.T) {
 	block, err := parseELD(fixture(t, "eld-hdmi-lg-ultrawide.bin"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the ELD block: %v", err)
 	}
 	if block.ConnectionType != "hdmi" {
-		t.Errorf("connection type = %q", block.ConnectionType)
+		t.Errorf("connection type = %q, want hdmi", block.ConnectionType)
 	}
 	if block.Manufacturer != "GSM" {
 		t.Errorf("manufacturer = %q, want GSM", block.Manufacturer)
 	}
 	if block.Product != 0x5b09 {
-		t.Errorf("product = %#04x", block.Product)
+		t.Errorf("product = %#04x, want 0x5b09", block.Product)
 	}
 	if block.MonitorName != "LG ULTRAWIDE" {
-		t.Errorf("monitor name = %q", block.MonitorName)
+		t.Errorf("monitor name = %q, want %q", block.MonitorName, "LG ULTRAWIDE")
 	}
 	if block.LPCMChannels != 2 {
 		t.Errorf("LPCM channels = %d, want 2", block.LPCMChannels)
@@ -47,32 +46,32 @@ func TestParseHDMIBlock(t *testing.T) {
 		t.Errorf("LPCM bit depths = %q, want \"16 20 24\"", got)
 	}
 	if block.Speakers != "FL/FR" {
-		t.Errorf("speakers = %q", block.Speakers)
+		t.Errorf("speakers = %q, want FL/FR", block.Speakers)
 	}
 	if block.PortID != 0x800 {
-		t.Errorf("port id = %#x", block.PortID)
+		t.Errorf("port id = %#x, want 0x800", block.PortID)
 	}
 	if got := block.monitorID(); got != "gsm-5b09-lg-ultrawide" {
-		t.Errorf("monitor id = %q", got)
+		t.Errorf("monitor id = %q, want gsm-5b09-lg-ultrawide", got)
 	}
 }
 
 func TestParseDisplayPortBlock(t *testing.T) {
 	block, err := parseELD(fixture(t, "eld-displayport-dell-u2415.bin"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the ELD block: %v", err)
 	}
 	if block.ConnectionType != "displayport" {
-		t.Errorf("connection type = %q", block.ConnectionType)
+		t.Errorf("connection type = %q, want displayport", block.ConnectionType)
 	}
 	if block.Manufacturer != "DEL" {
 		t.Errorf("manufacturer = %q, want DEL", block.Manufacturer)
 	}
 	if block.Product != 0x4071 {
-		t.Errorf("product = %#04x", block.Product)
+		t.Errorf("product = %#04x, want 0x4071", block.Product)
 	}
 	if block.MonitorName != "DELL U2415" {
-		t.Errorf("monitor name = %q", block.MonitorName)
+		t.Errorf("monitor name = %q, want %q", block.MonitorName, "DELL U2415")
 	}
 	if block.LPCMChannels != 8 {
 		t.Errorf("LPCM channels = %d, want 8", block.LPCMChannels)
@@ -84,10 +83,10 @@ func TestParseDisplayPortBlock(t *testing.T) {
 		t.Errorf("LPCM bit depths = %q, want \"16 20 24\"", got)
 	}
 	if block.Speakers != "FL/FR FC" {
-		t.Errorf("speakers = %q", block.Speakers)
+		t.Errorf("speakers = %q, want %q", block.Speakers, "FL/FR FC")
 	}
 	if got := block.monitorID(); got != "del-4071-dell-u2415" {
-		t.Errorf("monitor id = %q", got)
+		t.Errorf("monitor id = %q, want del-4071-dell-u2415", got)
 	}
 }
 
@@ -107,14 +106,14 @@ func TestParseRejectsBlocksItCannotRead(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := parseELD(c.raw); err == nil {
-				t.Fatal("the parser accepted a block it cannot read")
+				t.Fatal("parseELD returned no error, want a refusal of the block")
 			}
 		})
 	}
 }
 
-// withByte copies a block with one byte replaced, so that a test can
-// break one field and leave the rest of a real block alone.
+// withByte returns a copy of a block with one byte replaced, to break
+// one field of an otherwise valid block.
 func withByte(raw []byte, index int, value byte) []byte {
 	broken := make([]byte, len(raw))
 	copy(broken, raw)
@@ -123,16 +122,13 @@ func withByte(raw []byte, index int, value byte) []byte {
 }
 
 func TestParseKeepsWhatItReadBeforeATruncatedDescriptor(t *testing.T) {
-	// A descriptor that runs past the end is an error. The fields
-	// ahead of it are still the monitor's, and the caller handles the
-	// pair.
 	truncated := fixture(t, "eld-hdmi-lg-ultrawide.bin")[:34]
 	block, err := parseELD(truncated)
 	if err == nil {
-		t.Fatal("the parser accepted a descriptor that runs past the end")
+		t.Fatal("parseELD returned no error for a descriptor that runs past the end, want one")
 	}
 	if block.MonitorName != "LG ULTRAWIDE" {
-		t.Errorf("monitor name = %q", block.MonitorName)
+		t.Errorf("monitor name = %q, want %q", block.MonitorName, "LG ULTRAWIDE")
 	}
 }
 
@@ -142,7 +138,7 @@ func TestParseTakesTheHighestRateAndTheUnionOfTheDepths(t *testing.T) {
 
 	block, err := parseELD(twoDescriptors)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the ELD block: %v", err)
 	}
 	if block.LPCMMaxRateHz != 96000 {
 		t.Errorf("LPCM maximum rate = %d, want 96000", block.LPCMMaxRateHz)
@@ -157,7 +153,7 @@ func TestParseReportsNoRateOrDepthWithoutAnLPCMDescriptor(t *testing.T) {
 
 	block, err := parseELD(withByte(full, 32, 0x11))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the ELD block: %v", err)
 	}
 	if block.LPCMChannels != 0 {
 		t.Errorf("LPCM channels = %d, want 0", block.LPCMChannels)

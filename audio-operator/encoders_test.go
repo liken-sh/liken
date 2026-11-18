@@ -22,10 +22,10 @@ func TestASinkTapCarriesPipeWiresOwnCaptureProperty(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("the tap is %v, want %v", got, want)
 	}
-	// There is no --monitor flag on pw-record; the property is what
-	// links the stream to the sink's monitor ports.
+	// pw-record has no --monitor flag, so the property links the stream
+	// to the sink's monitor ports.
 	if slices.Contains(got, "--monitor") {
-		t.Error("the tap names a flag pw-record does not have")
+		t.Error("the tap passes --monitor, want no flag that pw-record does not have")
 	}
 }
 
@@ -47,42 +47,40 @@ func TestASourceTapOmitsTheSinkProperty(t *testing.T) {
 	}
 	for _, entry := range got {
 		if strings.Contains(entry, "stream.capture.sink") {
-			t.Error("a source tap carries the sink property, which would link it to a monitor")
+			t.Errorf("a source tap passes %q, want no stream.capture.sink, which would link it to a monitor", entry)
 		}
 	}
 }
 
-// The confirmation finds this tap's own stream by the name given here,
-// so every tap has to carry one and no two taps may share it.
+// confirmLink finds a tap's stream by the node.name that the command
+// gives it, so every tap needs a name and no two taps may share one.
 func TestEveryTapNamesItsOwnStream(t *testing.T) {
 	for _, direction := range []pwDirection{directionSink, directionSource} {
 		command := recordCommand("kitchen", streamName("0f1b2c3d"), direction,
 			captureFormat{Rate: 48000, Channels: 2})
 		properties := command[2]
 		if !strings.Contains(properties, `node.name = "audio-capture-0f1b2c3d"`) {
-			t.Errorf("a %s tap names its stream %q", direction, properties)
+			t.Errorf("a %s tap passes %q, want node.name = \"audio-capture-0f1b2c3d\"", direction, properties)
 		}
-		// One -P carries both properties as a SPA JSON object, which is
-		// the form pw-cat documents. Two flags would depend on pw-cat
-		// merging them.
-		if count := slices.Contains(command[3:], "-P"); count {
-			t.Errorf("a %s tap passes -P more than once: %v", direction, command)
+		// One -P passes both properties as one SPA JSON object, the form
+		// that the pw-cat manual documents. Two -P flags would depend on
+		// pw-cat merging them.
+		if repeated := slices.Contains(command[3:], "-P"); repeated {
+			t.Errorf("a %s tap passes -P more than once: %v, want one -P", direction, command)
 		}
 	}
 	if streamName("a") == streamName("b") {
-		t.Error("two requests share one stream name")
+		t.Errorf("streamName returned %q for two requests, want two names", streamName("a"))
 	}
-	// The name carries no endpoint name, so a person reading pw-dump
-	// learns which request a stream belongs to and nothing else.
 	if strings.Contains(streamName("0f1b2c3d"), "kitchen") {
-		t.Error("the stream name carries what was captured")
+		t.Errorf("streamName = %q, want no endpoint name in it", streamName("0f1b2c3d"))
 	}
 }
 
 func TestWAVRunsNoEncoder(t *testing.T) {
 	wav, _ := representationFor("wav")
 	if command := encoderCommand(wav, captureFormat{Rate: 48000, Channels: 2}, 0); command != nil {
-		t.Errorf("WAV ran %v", command)
+		t.Errorf("encoderCommand for WAV = %v, want no encoder", command)
 	}
 }
 
@@ -105,7 +103,7 @@ func TestFLACTakesTheEndpointsOwnFormat(t *testing.T) {
 	}
 }
 
-func TestOpusTakesTheBitrateOnlyWhenTheKnobGivesOne(t *testing.T) {
+func TestTheEncoderSetsABitrateOnlyWhenTheQueryGivesOne(t *testing.T) {
 	opus, _ := representationFor("opus")
 	format := captureFormat{Rate: 48000, Channels: 2}
 
@@ -165,17 +163,17 @@ func TestADeploymentCanNameAnotherLibrary(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("the named library did not reach the encoder")
+		t.Errorf("encoderEnvironment = %v, want LD_PRELOAD=/usr/lib/coreutils/libstdbuf.so", encoderEnvironment())
 	}
 }
 
 func TestFlacsMD5WarningIsNotAFailure(t *testing.T) {
 	output := "\n" + flacMD5Warning + "\n"
 	if got := unexpectedStderr(output); got != "" {
-		t.Errorf("the MD5 warning was read as a failure: %q", got)
+		t.Errorf("unexpectedStderr = %q for the MD5 warning, want the empty string", got)
 	}
 	if !expectedStderr("  " + flacMD5Warning) {
-		t.Error("the MD5 warning was not recognised")
+		t.Error("expectedStderr = false for the MD5 warning, want true")
 	}
 }
 
@@ -183,6 +181,6 @@ func TestARealFailureKeepsTheProcessesOwnWords(t *testing.T) {
 	output := flacMD5Warning + "\nERROR: unsupported number of channels 9\n"
 	got := unexpectedStderr(output)
 	if got != "ERROR: unsupported number of channels 9" {
-		t.Errorf("the failure is %q, and it must carry the encoder's own words", got)
+		t.Errorf("unexpectedStderr = %q, want the encoder's own line %q", got, "ERROR: unsupported number of channels 9")
 	}
 }

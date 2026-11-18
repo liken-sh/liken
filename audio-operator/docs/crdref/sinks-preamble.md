@@ -1,12 +1,14 @@
 A `Sink` is one playback endpoint as a Kubernetes resource: an
-analog jack, an HDMI or DisplayPort output, the playback side of a
-USB card, or a Bluetooth speaker. The operator creates one for every
-endpoint it publishes, cluster-scoped like a `Node`, named by the
-same device name the `ResourceSlice` carries. You never create or
-delete one. The operator writes `status`: where the endpoint is, the
-controls the card declares, and the values it last read. The media
-operator writes `status.session`, the volume asks of a remote's keys.
-You write `spec`, which states the settings you want for the endpoint.
+analog jack, an HDMI or DisplayPort output, the playback side of a USB
+card, or a Bluetooth speaker. The operator creates a `Sink` for each
+endpoint it publishes. A `Sink` is cluster-scoped, like a `Node`, and
+has the same name as the device in the `ResourceSlice`. You never
+create one, and you delete one only after its card has gone. The
+operator writes `status`, which has the endpoint's location, the
+controls that the card declares, and the values that the operator last
+read. media-operator writes `status.session`, which has the last
+volume request from a remote's volume key. You write `spec`, the
+settings you want for the endpoint.
 
 ```yaml
 apiVersion: audio.liken.sh/v1alpha1
@@ -60,14 +62,12 @@ status:
       status: "True"
 ```
 
-The claim and the `Sink` answer two different needs. A pod that
-plays sound still holds the output through a claim, as the
-[claim guide](/docs/guides/claim/) shows, and it still has its own
-stream volume. The `Sink` is for everything about the output that
-is not the sound itself: its default level, its mute, and the
-card's own controls. Because it is an ordinary Kubernetes resource,
-anything with the right RBAC can change it. A pod that only wants
-to mute the kitchen needs no claim, and a rule that lowers every
-speaker at night is one patch per `Sink`.
-[Set endpoint volume and controls](/docs/guides/rest/) walks through
-it.
+A pod that plays sound still gets the output through a claim, as the
+[claim guide](/docs/guides/claim/) shows, and it keeps its own stream
+volume. The `Sink` covers everything else about the output: its
+default level, its mute, and the card's own controls. Because a `Sink`
+is an ordinary Kubernetes resource, anything with the right RBAC can
+change it. A pod that only needs to mute one speaker needs no claim,
+and a rule that lowers every speaker at night is one patch for each
+`Sink`. [Set endpoint volume and controls](/docs/guides/rest/) walks
+through it.

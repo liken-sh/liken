@@ -9,21 +9,21 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// PipeWire follows every sound card of the node by itself, so the pod
-// must keep running when one USB card is unplugged. machine-operator
-// taints such a device liken.sh/unplugged with the effect NoExecute,
-// and the pod's claim tolerates it, so the eviction does not restart
-// the sound of every other card on the node.
+// machine-operator taints the device of an unplugged USB card with
+// liken.sh/unplugged and the NoExecute effect. The operator's pod claims
+// every sound card of the node, so without a toleration the taint evicts
+// the pod and stops the sound of every other card. The pod can stay,
+// because PipeWire follows the sound cards of the node by itself.
 func TestTheSoundCardClaimToleratesAnUnpluggedCard(t *testing.T) {
 	raw, err := os.ReadFile("deploy/operator.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the operator manifest: %v", err)
 	}
 	var template resourcev1.ResourceClaimTemplate
 	for _, document := range strings.Split(string(raw), "\n---\n") {
 		if strings.Contains(document, "kind: ResourceClaimTemplate") {
 			if err := yaml.UnmarshalStrict([]byte(document), &template); err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the ResourceClaimTemplate: %v", err)
 			}
 		}
 	}

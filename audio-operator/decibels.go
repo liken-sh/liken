@@ -1,42 +1,41 @@
 package main
 
-// The dB range a control declares.
+// Reads the dB range of an integer control.
 //
-// An integer control is a number in a range, and the number alone
-// says nothing about loudness: a USB DAC's 0 to 127 and a Realtek's
-// 0 to 87 are both a scale from silence to full. A card that measures
-// the level behind each step declares it through TLV, a typed block
-// the control interface reads on request, and this file turns that
-// block into the two decimal strings status.capabilities carries at
-// the range's ends.
+// The number range of an integer control does not give its loudness: a
+// USB DAC's 0 to 127 and a Realtek's 0 to 87 both run from silence to
+// full. A driver that has the level of each step declares it in a TLV
+// block, which the control interface returns on request. This file
+// converts that block to the minDecibels and maxDecibels strings of
+// status.capabilities.
 
 import (
 	"fmt"
 	"unsafe"
 )
 
-// The request that reads a control's TLV block. Its argument is the
-// numid, the length of the buffer in bytes, and the buffer after
-// them, all as 32-bit words.
+// SNDRV_CTL_IOCTL_TLV_READ. Its argument is struct snd_ctl_tlv: the
+// numid, the length of the buffer in bytes, and the buffer, all as
+// 32-bit words.
 var ctlIoctlTLVRead = iowr(0x1a, ctlTLVHeaderSize)
 
-// The fixed part of struct snd_ctl_tlv, the numid and the length,
-// with the payload words following it inline.
+// The fixed part of struct snd_ctl_tlv, which is the numid and the
+// length. The payload follows it inline.
 const ctlTLVHeaderSize = 8
 
-// How many words this operator gives the card to answer TLV_READ
-// with. A dB range of ranges is the longest block a card writes, and
-// a Realtek's, with a handful of sub-ranges, is under twenty words.
+// The size, in 32-bit words, of the buffer that receives the TLV_READ
+// reply. The longest dB block is a range of ranges, which holds one
+// block for each sub-range.
 const tlvPayloadWords = 256
 
-// The value a dB block writes where a step is silence rather than a
-// level, SNDRV_CTL_TLVD_DB_GAIN_MUTE. A range whose low end is mute
+// SNDRV_CTL_TLVD_DB_GAIN_MUTE, the value that a dB block uses for a
+// step that is silence and not a level. A range whose low end is mute
 // has no level to report there, so the API leaves minDecibels out.
 const gainMute = -9999999
 
-// The TLV types this operator reads a dB range out of, from
-// include/uapi/sound/tlv.h. The channel-map types share the same
-// block format and carry no level, so they fall through to no range.
+// The TLV types that carry a dB range, from include/uapi/sound/tlv.h.
+// The channel-map types use the same block format but carry no level,
+// so they give no range.
 const (
 	tlvTypeContainer    = 0
 	tlvTypeDBScale      = 1
@@ -46,20 +45,20 @@ const (
 	tlvTypeDBMinMaxMute = 5
 )
 
-// The mask that holds a dB scale's step. The bit above it says that
-// the minimum also mutes, which changes nothing about the range's
-// ends.
+// The mask that selects the step in the second word of a dB scale. The
+// bit above it means that the minimum also mutes, which does not change
+// the ends of the range.
 const dbScaleStepMask = 0xffff
 
-// decibels reads the dB range an element declares, and gives none for
-// an element that declares no range.
+// decibels returns the dB range of an element, or nil when the element
+// declares none.
 func (m *mixer) decibels(info ctlElemInfo) *decibelRange {
 	if info.Access&ctlAccessTLVRead == 0 || info.Type != ctlElemTypeInteger {
 		return nil
 	}
-	// The buffer is a slice of words because the kernel writes the
-	// numid and the length as 32-bit words and the payload after
-	// them, and a slice of words is aligned for all three.
+	// The buffer is a slice of 32-bit words because the kernel
+	// reads the numid and the length as words and writes the payload
+	// after them. A slice of words has the alignment for all three.
 	buffer := make([]uint32, 2+tlvPayloadWords)
 	buffer[0] = info.ID.NumID
 	buffer[1] = tlvPayloadWords * 4
@@ -74,18 +73,18 @@ func (m *mixer) decibels(info ctlElemInfo) *decibelRange {
 	return &levels
 }
 
-// decibelRange is the level at an integer control's two ends, in
-// hundredths of a decibel, which is the unit every dB block writes.
+// decibelRange is the level at the two ends of an integer control, in
+// hundredths of a decibel, the unit of every dB block.
 type decibelRange struct{ Low, High int32 }
 
-// decibelRangeFrom reads a dB range out of a TLV block.
+// decibelRangeFrom reads a dB range from a TLV block, which is a type,
+// a length in bytes, and the data.
 //
-// A block is a type, a length in bytes, and the data. The four dB
-// types state their ends in three ways: a scale gives the low end
-// and a step per control value, a min-max pair gives both ends, and
-// a linear range gives both ends of a linear curve. A range of
-// ranges and a container both hold further blocks, and the answer
-// for those is the outer bounds of everything inside.
+// A scale gives the low end and a step for each control value, so the
+// high end is the low end plus the step times (max - min). A min-max
+// block and a linear block give both ends. A range of ranges and a
+// container hold further blocks, and their range is the outer bounds of
+// the blocks inside.
 func decibelRangeFrom(payload []uint32, min, max int64) (decibelRange, bool) {
 	if len(payload) < 2 {
 		return decibelRange{}, false
@@ -117,14 +116,14 @@ func decibelRangeFrom(payload []uint32, min, max int64) (decibelRange, bool) {
 	return decibelRange{}, false
 }
 
-// outerBounds walks the blocks inside a range of ranges or a
-// container and reports the widest range they cover between them.
+// outerBounds walks the blocks inside a range of ranges or a container
+// and returns the widest range that they cover together.
 //
-// A range of ranges puts the two control values a sub-range covers
-// ahead of the sub-range's own block, and a container puts the
-// blocks one after another with nothing between. A sub-range whose
-// low end is mute is passed over on that side, because silence is
-// not a level and would otherwise be the lowest number in the walk.
+// In a range of ranges (ranged is true), the two control values that a
+// sub-range covers come before the sub-range's own block. In a
+// container the blocks follow one another with nothing between them. A
+// sub-range whose low end is mute does not set the low bound, because
+// mute is not a level and would otherwise be the lowest number.
 func outerBounds(data []uint32, ranged bool) (decibelRange, bool) {
 	bounds := decibelRange{Low: gainMute, High: gainMute}
 	found := false
@@ -152,10 +151,10 @@ func outerBounds(data []uint32, ranged bool) (decibelRange, bool) {
 	return bounds, found
 }
 
-// formatDecibels writes hundredths of a decibel as the decimal string
-// the API carries. It is a string and not a number so the CRD holds
-// the value exact, where a float would round -65.25 on its way
-// through the API server.
+// formatDecibels writes hundredths of a decibel as a decimal string.
+// The API field is a string so that it stores the exact value, because
+// most hundredths, such as -0.05, have no exact binary floating-point
+// form.
 func formatDecibels(hundredths int32) string {
 	sign := ""
 	if hundredths < 0 {

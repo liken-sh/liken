@@ -1,20 +1,21 @@
 package main
 
-// Choosing the A2DP codec a speaker plays.
+// Choosing the A2DP codec that a Bluetooth speaker plays.
 //
-// A speaker and this image agree on a set of codecs, and the
-// transport plays exactly one. WirePlumber picks at connect time,
-// but which loss a person prefers when the air gets busy is a
-// preference, not a graph fact: aptX holds its bitrate and gaps, SBC
-// shrinks its bitpool and keeps the stream whole at a lower
-// quality. So the offered set publishes as an attribute, and a
-// claim states a choice. This file holds both halves.
+// A speaker and this image's bluez5 plugin support several codecs in
+// common. WirePlumber picks one when the speaker connects, but
+// the right codec depends on what the listener prefers when the radio
+// is busy: aptX keeps its bitrate and the sound drops out, and SBC
+// lowers its bitpool and keeps playing at a lower quality. So the
+// operator publishes the codecs that a speaker offers in the codecs
+// attribute of its ResourceSlice device, a claim selects one in its
+// opaque parameters, and a Sink's spec.codec sets one while no claim
+// holds the speaker.
 //
-// A switch costs about a second of silence while the transport
-// renegotiates. The sink node is destroyed and built again under
-// the same name with a new id, and WirePlumber re-links a playing
-// stream to the new node on its own, so a consumer already playing
-// keeps playing.
+// A switch silences the speaker while the transport renegotiates.
+// PipeWire destroys the sink node and creates a new one with the same
+// name and a new id. WirePlumber links a playing stream to the new
+// node, so a consumer that is already playing keeps playing.
 
 import (
 	"context"
@@ -24,59 +25,42 @@ import (
 	"time"
 )
 
-// codecProperty is the property the bluez5 device answers with the
-// codec choice, in PropInfo and in Props.
-//
-// The name is the bluez5 plugin's own; its PropInfo entry labels
-// the property "Air codec".
+// codecProperty is the bluez5 device property that lists the offered
+// codecs in PropInfo and sets the codec in Props. PropInfo labels it
+// "Air codec".
 const codecProperty = "bluetoothAudioCodec"
 
-// codecParameter is the one key this driver reads out of a claim's
-// opaque parameters.
 const codecParameter = "codec"
 
-// codecSwitchTimeout bounds the wait for the transport to come back
-// with the requested codec.
-//
-// In that window bluetoothd tears the transport down, the
-// endpoint renegotiates, and the new node appears in the graph.
-// The lab speaker takes one to four seconds. A timeout fails the
-// prepare, and the kubelet's retry starts a fresh wait.
+// codecSwitchTimeout is how long a switch waits for the rebuilt sink
+// node to report the new codec, while bluetoothd closes the transport,
+// the speaker renegotiates, and PipeWire creates the node. A prepare
+// that times out fails, and the kubelet retries it.
+// plans/completed/05-choosing-the-codec.md has the times measured on a
+// speaker.
 const codecSwitchTimeout = 10 * time.Second
 
-// bluezCodec is one codec the device offers: the integer id a write
-// names it by, and the name this operator publishes it as.
-//
-// The id and the name are both kept because they speak to
-// different parties: a write names the codec by integer id, and
-// pw-cli refuses the string label, while the attribute and the
-// claim speak the published name.
+// bluezCodec is one codec that a speaker offers. pw-cli accepts only
+// the integer ID, and the codecs attribute and a claim's codec
+// parameter use the name.
 type bluezCodec struct {
 	ID   int
 	Name string
 }
 
-// pwPropInfo describes one property an object accepts: its name, the
-// values it takes, and a display label for each one.
-//
-// type and labels stay raw because their shape depends on the
-// property: a choice prints an object of alternatives, a plain
-// property prints a bare value, and only the codec reader knows
-// which one it is looking at.
+// pwPropInfo is one PropInfo entry of a PipeWire object, as pw-dump
+// prints it. Type and Labels stay raw JSON because their shape depends
+// on the property: a choice prints an object of alternatives, and other
+// properties print a bare value. codecChoices decodes them for the
+// codec property.
 type pwPropInfo struct {
 	ID     string          `json:"id"`
 	Type   json.RawMessage `json:"type"`
 	Labels json.RawMessage `json:"labels"`
 }
 
-// codecOptions reads the codecs a bluez5 device offers out of its
-// PropInfo list, in the order the device enumerated them.
-//
-// The alternatives are the codecs the speaker and this image both
-// support, and the first is the one playing now, because PropInfo
-// names the current value both as the default and as alt1. An
-// unlabeled id has no name to publish and a repeated id adds
-// nothing, so both are dropped.
+// codecOptions returns the codecs in the bluetoothAudioCodec entry of a
+// device's PropInfo, or nil when the device has none.
 func codecOptions(params []pwPropInfo) []bluezCodec {
 	for _, info := range params {
 		if info.ID != codecProperty {
@@ -87,11 +71,14 @@ func codecOptions(params []pwPropInfo) []bluezCodec {
 	return nil
 }
 
-// codecChoices reads one PropInfo entry.
-//
-// The alternatives are read by name, alt1 upward, because pw-dump
-// prints them as one JSON object, and an object's printed order
-// proves nothing.
+// codecChoices returns the alternatives of the codec property's
+// PropInfo entry, which are the codecs that both the speaker and this
+// image support. The codec that plays comes first, because PropInfo
+// lists the current value as both default and alt1. pw-dump prints the
+// alternatives as a JSON object, whose key order has no meaning, so
+// codecChoices reads alt1, alt2, and so on until a key is missing. It
+// leaves out an ID with no label, which has no name to publish, and an
+// ID that repeats.
 func codecChoices(info pwPropInfo) []bluezCodec {
 	var alternatives map[string]json.RawMessage
 	if err := json.Unmarshal(info.Type, &alternatives); err != nil {
@@ -118,12 +105,10 @@ func codecChoices(info pwPropInfo) []bluezCodec {
 	}
 }
 
-// codecLabels reads the display label of each codec id.
-//
-// The labels array alternates id, label, the JSON print of a SPA
-// choice's label table. A malformed pair is skipped rather than
-// fatal, because one bad label should cost one codec, not the
-// list.
+// codecLabels maps each codec ID to its label. pw-dump prints the
+// labels of a SPA choice as one flat array: ID, label, ID, label. A pair
+// that does not decode is skipped, so one bad label drops one codec and
+// not the whole list. When an ID repeats, the first label is kept.
 func codecLabels(raw json.RawMessage) map[int]string {
 	var items []json.RawMessage
 	if err := json.Unmarshal(raw, &items); err != nil {
@@ -147,26 +132,21 @@ func codecLabels(raw json.RawMessage) map[int]string {
 	return labels
 }
 
-// codecName turns a PropInfo label into the name this operator
-// publishes.
-//
-// The transform is a lowercase and a dash-to-underscore, not a
-// table, because that lands on the spelling api.bluez5.codec
-// prints: aptX becomes aptx, SBC-XQ becomes sbc_xq. The list and
-// the negotiated codec speak one language, and no table here can
-// drift from PipeWire's.
+// codecName converts a PropInfo label to the spelling of the sink
+// node's api.bluez5.codec property, which the codec attribute
+// publishes: aptX becomes aptx, and SBC-XQ becomes sbc_xq. So the codecs
+// attribute and the codec attribute use the same names, with no table
+// of names to keep in step with PipeWire.
 func codecName(label string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(label)), "-", "_")
 }
 
-// codecList is the value of the codecs attribute: the names, space
-// separated, in the device's own order.
-//
-// A list is one string because a device attribute holds no array,
-// the convention lpcmBitDepths set, and a selector asks with
-// .contains(). A name that would pass the attribute limit is
-// dropped whole, because half a name would match the wrong
-// codec.
+// codecList returns the value of the codecs attribute. A DRA device
+// attribute cannot be a list, so codecList joins the names with
+// spaces, as lpcmBitDepths does, and a CEL selector tests the value
+// with .contains(). It leaves out the first name that would make the
+// value longer than maxAttributeLength and every name after it, because
+// a cut name could match a different codec in .contains().
 func codecList(codecs []bluezCodec) string {
 	list := ""
 	for _, codec := range codecs {
@@ -182,10 +162,8 @@ func codecList(codecs []bluezCodec) string {
 	return list
 }
 
-// codecNames lists the codecs the speaker offers by name, in the
-// device's own order with the one playing first. It is the list
-// status.bluetooth.codecs carries, read from the graph value alone,
-// so the reconciler answers it with no prepare in flight.
+// codecNames returns the names of the codecs that the speaker offers,
+// in PropInfo's order, so the playing codec comes first.
 func (s bluezSink) codecNames() []string {
 	names := make([]string, 0, len(s.Codecs))
 	for _, codec := range s.Codecs {
@@ -194,7 +172,6 @@ func (s bluezSink) codecNames() []string {
 	return names
 }
 
-// findCodec resolves a published name back to the id a write names.
 func findCodec(codecs []bluezCodec, name string) (bluezCodec, bool) {
 	for _, codec := range codecs {
 		if codec.Name == name {
@@ -204,30 +181,27 @@ func findCodec(codecs []bluezCodec, name string) (bluezCodec, bool) {
 	return bluezCodec{}, false
 }
 
-// codecProps is the pod that sets the codec.
-//
-// The value is the integer id. pw-cli parses the pod against the
-// property's enum type, and a string label fails that parse with
-// an error that names no property.
+// codecProps returns the SPA pod that sets the codec. pw-cli parses the
+// pod against the property's enum type, so the value must be the
+// integer ID. A label fails that parse with an error that names no
+// property.
 func codecProps(id int) string {
 	return fmt.Sprintf("{ %s: %d }", codecProperty, id)
 }
 
-// setDeviceCodec writes the codec on one bluez5 device.
 func setDeviceCodec(ctx context.Context, device, codec int) error {
 	return setParam(ctx, device, "Props", codecProps(codec))
 }
 
-// codecSwitch is one codec change: a write on the device, and a wait
-// for the rebuilt node to report the codec. The prepare path and the
-// resting declaration both switch a codec, and they share this one
-// implementation. The write, the read, and the change signal are
-// fields so that a test drives them with no PipeWire behind it.
+// codecSwitch writes a codec on a bluez5 device and waits for the
+// rebuilt sink node to report it. A prepare uses it for a claim's codec,
+// and the reconciler uses it for Sink.spec.codec. Its operations are
+// fields so that a test can run a switch with no PipeWire.
 //
-// changes is the graph feed's signal: a channel that closes when the
-// next graph arrives. The wait reads the graph again only when the
-// channel closes, so a switch costs one read for each batch of
-// changes that pw-dump -m prints, and no read on a timer.
+// changes returns a channel that closes when the graph feed receives
+// the next graph from pw-dump -m, or when the monitor ends. await reads
+// the graph again only when that channel closes, so it reads once for
+// each batch of changes and never on a timer.
 type codecSwitch struct {
 	write   func(ctx context.Context, device, codec int) error
 	read    func(context.Context) (pwGraph, error)
@@ -235,11 +209,10 @@ type codecSwitch struct {
 	timeout time.Duration
 }
 
-// speakerCodecSwitch is the switch the reconciler makes for
-// Sink.spec.codec. It makes it only while no claim holds the
-// speaker, because a switch replaces the node and interrupts
-// whatever plays, and a claim's own codec parameter wins while the
-// claim lasts.
+// speakerCodecSwitch returns the switch that applies Sink.spec.codec.
+// The reconciler applies spec.codec only while no claim holds the
+// speaker, because a switch replaces the node under the claim's stream,
+// and a claim's codec parameter takes precedence while the claim exists.
 func speakerCodecSwitch(feed *graphFeed) codecSwitch {
 	return codecSwitch{
 		write:   setDeviceCodec,
@@ -249,67 +222,54 @@ func speakerCodecSwitch(feed *graphFeed) codecSwitch {
 	}
 }
 
-// AllocatedConfig is one entry of the configuration the scheduler
-// resolved for an allocation.
-//
-// An opaque block is DRA's channel for a driver's own parameters:
-// the scheduler validates none of it and copies it into the
-// allocation unread. An entry with no requests applies to every
-// request in the claim, and the source says whether the claim's
-// author wrote the entry or the DeviceClass carried it in.
+// AllocatedConfig is one entry of status.allocation.devices.config, in
+// which the scheduler combines the config of the claim and of its
+// DeviceClass. The scheduler copies an opaque entry unchanged and does
+// not validate it, so codecParameters validates it. An entry with no
+// requests applies to every request of the claim. Source is
+// configFromClaim or configFromClass.
 type AllocatedConfig struct {
 	Source   string              `json:"source"`
 	Requests []string            `json:"requests"`
 	Opaque   *OpaqueDeviceConfig `json:"opaque"`
 }
 
-// The two places a resolved config entry comes from: the claim its
-// author wrote, and the DeviceClass the claim allocates through.
-//
-// The claim's own choice wins over the class's, because a class
-// is the cluster's default and a claim is the workload's say. The
-// precedence reads the source field rather than the list's order,
-// because the order is the allocator's habit and no API promises
-// it.
+// The values of AllocatedConfig.Source. A codec from the claim takes
+// precedence over one from the DeviceClass, because the class sets the
+// cluster's default and the claim is the workload's own choice. The
+// precedence reads Source and not the order of the list, because the
+// allocator sets that order and no API guarantees it.
 const (
 	configFromClaim = "FromClaim"
 	configFromClass = "FromClass"
 )
 
-// OpaqueDeviceConfig is one driver's own parameters inside a claim.
-//
-// The driver name decides whose parameters these are. A claim
-// that pairs two drivers, a screen with its speakers, holds one
-// block per driver, and each driver reads only its own.
+// OpaqueDeviceConfig holds the parameters for one driver. A claim that
+// pairs a screen with its speakers has entries for each driver, and
+// each driver reads only the entries with its own Driver name.
 type OpaqueDeviceConfig struct {
 	Driver     string          `json:"driver"`
 	Parameters json.RawMessage `json:"parameters"`
 }
 
-// codecChoice is one codec a config entry stated, and whether the
-// claim stated it or the class did.
 type codecChoice struct {
 	Codec     string
 	FromClaim bool
 }
 
-// codecSelection is the codec each request asks for. The requests map
-// holds what a block that names its requests stated, and every holds
-// what a block with no requests stated, which applies to every
-// request in the claim.
+// codecSelection holds the codecs that a claim's config entries select,
+// by request name, and the codec of an entry that names no requests.
 type codecSelection struct {
-	requests map[string]codecChoice
-	every    codecChoice
+	requests    map[string]codecChoice
+	allRequests codecChoice
 }
 
-// state records one entry's codec, and refuses to let a class's
-// entry overwrite the claim's own.
-//
-// A later entry of the same source overwrites an earlier one, the
-// plain reading of a list. An entry from the class never
-// overwrites one from the claim, whatever the order.
-func (s *codecSelection) state(request string, choice codecChoice) {
-	current := s.every
+// record stores the codec of one entry for one request, or for all
+// requests when request is empty. A later entry replaces an earlier
+// entry from the same source, but an entry from the DeviceClass never
+// replaces one from the claim, whatever the order.
+func (s *codecSelection) record(request string, choice codecChoice) {
+	current := s.allRequests
 	if request != "" {
 		current = s.requests[request]
 	}
@@ -317,7 +277,7 @@ func (s *codecSelection) state(request string, choice codecChoice) {
 		return
 	}
 	if request == "" {
-		s.every = choice
+		s.allRequests = choice
 		return
 	}
 	if s.requests == nil {
@@ -326,31 +286,27 @@ func (s *codecSelection) state(request string, choice codecChoice) {
 	s.requests[request] = choice
 }
 
-// forRequest answers what one allocation result must play.
-//
-// Two rules, applied in this order: the claim's own choice beats
-// the class's, and within one source a block that names the
-// request beats a block that names none. So a claim's
-// every-request block still beats a class block that names this
-// request.
+// forRequest returns the codec for the request of one allocation
+// result, or "" when no entry selects one. An entry from the claim
+// takes precedence over one from the DeviceClass, even when the
+// DeviceClass entry names the request and the claim's entry does not.
+// Between entries from the same source, an entry that names the request
+// takes precedence over one for all requests.
 func (s codecSelection) forRequest(request string) string {
 	named := s.requests[request]
 	if named.Codec == "" {
-		return s.every.Codec
+		return s.allRequests.Codec
 	}
-	if s.every.Codec != "" && s.every.FromClaim && !named.FromClaim {
-		return s.every.Codec
+	if s.allRequests.Codec != "" && s.allRequests.FromClaim && !named.FromClaim {
+		return s.allRequests.Codec
 	}
 	return named.Codec
 }
 
-// claimCodecs reads this driver's own config blocks out of the
-// configuration the scheduler resolved for an allocation.
-//
-// A block of another driver is not this driver's to judge, so it
-// is skipped. A parameter this driver does not read fails
-// whichever source wrote it: a typo in cluster policy plays the
-// wrong codec as surely as a typo in a claim.
+// claimCodecs reads the codec from each of this driver's opaque config
+// entries in an allocation. An entry for another driver is skipped,
+// because that driver validates it. Parameters that codecParameters
+// refuses fail the read, from the DeviceClass as well as from the claim.
 func claimCodecs(config []AllocatedConfig) (codecSelection, error) {
 	selection := codecSelection{}
 	for _, entry := range config {
@@ -366,21 +322,20 @@ func claimCodecs(config []AllocatedConfig) (codecSelection, error) {
 		}
 		choice := codecChoice{Codec: codec, FromClaim: entry.Source == configFromClaim}
 		if len(entry.Requests) == 0 {
-			selection.state("", choice)
+			selection.record("", choice)
 			continue
 		}
 		for _, request := range entry.Requests {
-			selection.state(request, choice)
+			selection.record(request, choice)
 		}
 	}
 	return selection, nil
 }
 
-// codecParameters reads one opaque block's parameters.
-//
-// An unknown key fails instead of being ignored, because a
-// silently dropped typo would play the wrong codec with nothing
-// said anywhere.
+// codecParameters returns the codec from the parameters of one opaque
+// entry, or "" when there are none. A key other than codec is an
+// error, because a typo that the driver ignored would play the wrong
+// codec with no message.
 func codecParameters(raw json.RawMessage) (string, error) {
 	if len(raw) == 0 {
 		return "", nil
@@ -402,19 +357,13 @@ func codecParameters(raw json.RawMessage) (string, error) {
 	return codec, nil
 }
 
-// selectCodec makes one speaker play the codec the claim states, and
-// answers with the sink the consumer must be given.
-//
-// Write the codec, then wait for the node that reports it: the
-// write is what destroys the old node, so nothing read after it
-// means anything until the new node stands. The delivery's unity
-// write follows in prepareClaim, on whichever node this returns.
+// selectCodec switches the speaker to the claim's codec and returns the
+// rebuilt sink. The caller must use the returned sink, because the
+// switch destroys the node of the sink passed in.
 func (p *draPlugin) selectCodec(ctx context.Context, address, codec string, sink bluezSink) (bluezSink, error) {
 	return p.codecSwitch().choose(ctx, address, codec, sink)
 }
 
-// codecSwitch is the switch a prepare makes, built from the plugin's
-// own seams, which are the production values outside a test.
 func (p *draPlugin) codecSwitch() codecSwitch {
 	return codecSwitch{
 		write:   p.setCodec,
@@ -424,13 +373,14 @@ func (p *draPlugin) codecSwitch() codecSwitch {
 	}
 }
 
-// choose makes the speaker play one codec and answers with the node
-// that came back. A codec the speaker does not offer fails before any
-// write, and the message names the offered list.
+// choose switches the speaker to codec and returns the rebuilt sink, or
+// the current sink when it already plays codec. A codec that the
+// speaker does not offer fails before any write, with the offered list
+// in the error.
 func (c codecSwitch) choose(ctx context.Context, address, codec string, sink bluezSink) (bluezSink, error) {
 	chosen, offered := findCodec(sink.Codecs, codec)
 	if !offered {
-		return bluezSink{}, fmt.Errorf("speaker %s does not offer the codec %q; it offers %s",
+		return bluezSink{}, fmt.Errorf("speaker %s does not offer the codec %q, and offers %s",
 			speakerName(address), codec, codecList(sink.Codecs))
 	}
 	if sink.Codec == codec {
@@ -443,26 +393,20 @@ func (c codecSwitch) choose(ctx context.Context, address, codec string, sink blu
 	return c.await(ctx, address, codec)
 }
 
-// awaitCodec reads the graph until the speaker's node reports the
-// requested codec.
-//
-// The wait keys on the speaker's address and never an object id,
-// because the switch destroys the node that held the id, and the
-// address is the one name that survives the rebuild. A timeout
-// fails the prepare rather than falling back to what plays,
-// because what plays is the wrong codec by definition.
+// awaitCodec waits for the codec switch that a prepare started.
 func (p *draPlugin) awaitCodec(ctx context.Context, address, codec string) (bluezSink, error) {
 	return p.codecSwitch().await(ctx, address, codec)
 }
 
-// await reads the graph until the speaker's node reports the codec,
-// or until the timeout passes. It reads once at the start and once
-// each time the graph feed delivers a new graph.
+// await waits until the speaker's sink reports codec, or the timeout
+// passes. It finds the sink by the speaker's Bluetooth address and not
+// by node id, because the switch destroys the node and its id. A
+// timeout returns an error and not the sink that plays, because that
+// sink plays another codec. A failed read waits for the next change.
 //
-// The wait takes the change signal before the read. A graph that
-// arrives between the read and the select closes the channel the wait
-// already holds, so the wait reads again and does not sleep through
-// the change.
+// await calls changes before each read, so a graph that arrives between
+// the read and the select closes a channel that await already has, and
+// await reads again instead of missing the change.
 func (c codecSwitch) await(ctx context.Context, address, codec string) (bluezSink, error) {
 	deadline := time.NewTimer(c.timeout)
 	defer deadline.Stop()

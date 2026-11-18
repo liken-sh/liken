@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// scrapeHandler reads a registry through the same handler the listener
-// serves, with no network socket behind it.
+// scrapeHandler returns the body of a /metrics response without a
+// network socket.
 func scrapeHandler(t *testing.T, handler http.Handler) string {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
@@ -18,12 +18,12 @@ func scrapeHandler(t *testing.T, handler http.Handler) string {
 	handler.ServeHTTP(recorder, request)
 	body, err := io.ReadAll(recorder.Result().Body)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the scrape: %v", err)
 	}
 	return string(body)
 }
 
-func TestTheCaptureRegistryCarriesTheFiveSeriesThePlanNames(t *testing.T) {
+func TestTheCaptureRegistryExposesItsSeries(t *testing.T) {
 	readings := newCaptureMetrics("2026.09.16-001")
 	readings.readiness(true)
 	readings.started(audioAspect)
@@ -76,9 +76,9 @@ func TestEveryCaptureFailureHasItsOwnName(t *testing.T) {
 	}
 }
 
-func TestTheAPIRegistryCarriesTheFourSeriesThePlanNames(t *testing.T) {
+func TestTheAPIRegistryExposesItsSeries(t *testing.T) {
 	readings := newAPIMetrics("2026.09.16-001")
-	readings.answered("/v1/audio/sinks/{name}/audio.wav", http.MethodGet, http.StatusOK, 40*time.Millisecond)
+	readings.observeRequest("/v1/audio/sinks/{name}/audio.wav", http.MethodGet, http.StatusOK, 40*time.Millisecond)
 	readings.streaming(audioAspect, 1)
 	readings.certificateExpiry(time.Unix(1789000000, 0))
 
@@ -98,7 +98,7 @@ func TestTheAPIRegistryCarriesTheFourSeriesThePlanNames(t *testing.T) {
 
 func TestTheRouteLabelIsNeverAConcretePath(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("liken-1-usb-0573-1573-a34004801402-usb-audio", "node-1", drillPipeWireNode)
+	harness.addSink("liken-1-usb-0573-1573-a34004801402-usb-audio", "node-1", drillPipeWireNode)
 	answer := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/liken-1-usb-0573-1573-a34004801402-usb-audio/audio.wav", nil)
 	_, _ = io.Copy(io.Discard, answer.Body)
@@ -120,19 +120,19 @@ func TestTheAPIsProbesAnswerOnTheMetricsPort(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if recorder.Code != http.StatusOK {
-		t.Errorf("/healthz answered %d", recorder.Code)
+		t.Errorf("/healthz returned %d, want 200", recorder.Code)
 	}
 
 	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if recorder.Code != http.StatusServiceUnavailable {
-		t.Errorf("/readyz answered %d before a certificate", recorder.Code)
+		t.Errorf("/readyz returned %d before a certificate, want 503", recorder.Code)
 	}
 
 	ready = true
 	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if recorder.Code != http.StatusOK {
-		t.Errorf("/readyz answered %d with a certificate", recorder.Code)
+		t.Errorf("/readyz returned %d with a certificate, want 200", recorder.Code)
 	}
 }

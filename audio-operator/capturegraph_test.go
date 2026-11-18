@@ -6,16 +6,17 @@ import (
 	"testing"
 )
 
-// drillStream is the node.name the container gives one tap's own
-// stream. The fixtures carry it where a real dump carries the name
-// pw-record was started with.
+// drillStream is the node.name that the capture container gives a
+// tap's stream. The fixtures contain it where a real dump has the name
+// that pw-record was started with.
 const drillStream = "audio-capture-725682cad0fd5870"
 
-// readGraphFixture reads one graph. The fixture carries PWTARGETID
-// where the link's output node goes, so the fake pw-dump in
-// testdata/capture/bin can point one graph at any endpoint in it; a
-// reader here takes the DAC, which is node 46. PWSTREAMNAME is where
-// the tap's own stream is named.
+// readGraphFixture reads a graph from testdata/capture. A fixture has
+// PWTARGETID in place of the link's output node ID and PWSTREAMNAME in
+// place of the tap's stream name. The fake pw-dump in
+// testdata/capture/bin replaces them for each request, so one graph
+// serves a tap on any endpoint in it. This function replaces them with
+// the DAC, node 46, and drillStream.
 func readGraphFixture(t *testing.T, name string) []byte {
 	t.Helper()
 	document, err := os.ReadFile("testdata/capture/" + name)
@@ -42,9 +43,8 @@ func TestARunningNodeReportsTheFormatItNegotiated(t *testing.T) {
 }
 
 func TestASuspendedNodeTakesItsChannelsFromTheHardware(t *testing.T) {
-	// A suspended 5.1 sink is never guessed as stereo: the channel
-	// count comes from EnumFormat and the rate from the graph's own
-	// settings metadata.
+	// A suspended 5.1 sink must not be recorded as stereo, so the channel
+	// count comes from EnumFormat and the rate from the settings metadata.
 	format, err := resolveNode(readGraphFixture(t, "graph.json"),
 		"pci-0000-00-1f-3-hdmi-0", directionSink)
 	if err != nil {
@@ -65,29 +65,29 @@ func TestASuspendedSourceResolvesToItsOwnNode(t *testing.T) {
 		t.Fatalf("resolving the microphone: %v", err)
 	}
 	if format.NodeID != 47 || format.Channels != 1 {
-		t.Errorf("the microphone resolved to node %d with %d channels",
+		t.Errorf("the microphone resolved to node %d with %d channels, want node 47 with 1 channel",
 			format.NodeID, format.Channels)
 	}
 }
 
 func TestANodeOfTheOtherDirectionIsNotTheOneAsked(t *testing.T) {
-	// The DAC's playback node and its capture node carry different
-	// names here, but a request for a Source by the Sink's name must
-	// find nothing rather than the Sink.
+	// The DAC's playback node and capture node have different names
+	// here, but a request for a Source with the Sink's name must find
+	// nothing, and must not return the Sink.
 	_, err := resolveNode(readGraphFixture(t, "graph.json"),
 		"liken-1-usb-0573-1573-a34004801402-usb-audio", directionSource)
 	if err == nil {
-		t.Fatal("a sink answered a source request")
+		t.Fatal("resolveNode returned the sink for a source request, want an error")
 	}
 	if !strings.Contains(err.Error(), "liken-1-usb-0573-1573-a34004801402-usb-audio") {
-		t.Errorf("the refusal does not name what was asked for: %v", err)
+		t.Errorf("the error is %v, want it to name the requested node", err)
 	}
 }
 
 func TestANameTheGraphDoesNotHoldIsARefusal(t *testing.T) {
 	_, err := resolveNode(readGraphFixture(t, "graph.json"), "kitchen", directionSink)
 	if err == nil {
-		t.Fatal("a name the graph does not hold resolved")
+		t.Fatal("a name that the graph does not contain resolved, want an error")
 	}
 }
 
@@ -112,14 +112,14 @@ func TestAStreamLinkedToTheTargetIsConfirmed(t *testing.T) {
 		t.Fatalf("reading the graph: %v", err)
 	}
 	if state != linkOnTarget {
-		t.Errorf("the link to the DAC read as %v", state)
+		t.Errorf("the link to the DAC read as %v, want linkOnTarget", state)
 	}
 }
 
 func TestAStreamLinkedElsewhereIsTheWrongTarget(t *testing.T) {
-	// pw-record never refuses a bad target: with the property set and
-	// an unknown name it links to the default sink's monitor. This is
-	// the read that catches it.
+	// pw-record links a stream whose stream.capture.sink is an unknown
+	// name to the default sink's monitor, and confirmLink must report
+	// that link as linkElsewhere.
 	document := readGraphFixture(t, "graph-wrong-target.json")
 	state, err := confirmLink(document, drillStream, 46)
 	if err != nil {
@@ -137,13 +137,13 @@ func TestAGraphWithNoStreamOfOursConfirmsNothing(t *testing.T) {
 		t.Fatalf("reading the graph: %v", err)
 	}
 	if state != linkNone {
-		t.Errorf("a stream this container did not start read as %v", state)
+		t.Errorf("a stream this container did not start read as %v, want linkNone", state)
 	}
 }
 
 func TestAStreamWithNoLinkYetIsNeitherRightNorWrong(t *testing.T) {
-	// PipeWire takes a moment to build the link, so "no link at all"
-	// has to be its own state: a tap that answered wrong-target on the
+	// PipeWire takes a moment to build the link, so "no link yet" must
+	// be its own state. A tap that treated it as the wrong target on the
 	// first poll would refuse every slow node.
 	document := readGraphFixture(t, "graph-no-settings.json")
 	state, err := confirmLink(document, drillStream, 48)
@@ -151,7 +151,7 @@ func TestAStreamWithNoLinkYetIsNeitherRightNorWrong(t *testing.T) {
 		t.Fatalf("reading the graph: %v", err)
 	}
 	if state != linkNone {
-		t.Errorf("a graph with no link read as %v", state)
+		t.Errorf("a graph with no link read as %v, want linkNone", state)
 	}
 }
 
@@ -164,11 +164,11 @@ func TestOutputThatIsNotAGraphIsAnError(t *testing.T) {
 	}
 }
 
-// The graph the drill on liken-1 read while a tap ran: the DAC's sink
-// at node 33, pw-record's own stream at 123, and the two links that
-// carry its monitor ports. The stream carries application.name and no
-// application.process.id, because the kernel cannot translate a peer's
-// pid across PID namespaces on this socket.
+// graph-drill.json is a pw-dump taken on liken-1 while a tap ran. It has
+// the DAC's sink at node 33, pw-record's stream at node 123, and the
+// links from the sink's monitor ports to the stream. The stream has
+// application.name and no application.process.id, because the kernel
+// cannot translate a peer's pid across PID namespaces on this socket.
 func TestTheConfirmationReadsTheDrillsOwnDump(t *testing.T) {
 	document := readGraphFixture(t, "graph-drill.json")
 
@@ -180,19 +180,18 @@ func TestTheConfirmationReadsTheDrillsOwnDump(t *testing.T) {
 		t.Errorf("the tap on the DAC read as %v, want linkOnTarget", state)
 	}
 
-	// The property the first build matched on is not in this dump at
-	// all, which is why every tap ended wrong-target.
+	// The dump has no application.process.id, so a match on that
+	// property would find no stream, and every tap would wait for a link
+	// until its deadline.
 	if strings.Contains(string(document), "application.process.id") {
-		t.Error("the drill's dump carries application.process.id, and it does not")
+		t.Error("the fixture contains application.process.id, want the drill's dump, which does not")
 	}
 
-	// A tap whose stream is not in the graph yet has made no link.
 	if state, _ := confirmLink(document, "audio-capture-another", 33); state != linkNone {
-		t.Errorf("another request's stream read as %v", state)
+		t.Errorf("another request's stream read as %v, want linkNone", state)
 	}
-	// The same stream against another sink is the wrong target.
 	if state, _ := confirmLink(document, drillStream, 39); state != linkElsewhere {
-		t.Errorf("a link to the DAC read as %v against the microphone", state)
+		t.Errorf("a link to the DAC read as %v against the microphone, want linkElsewhere", state)
 	}
 }
 
@@ -204,18 +203,18 @@ func TestTheDrillsGraphResolvesBothOfTheDACsNodes(t *testing.T) {
 		t.Fatalf("resolving the DAC: %v", err)
 	}
 	if sink.NodeID != 33 || sink.Rate != 48000 || sink.Channels != 2 {
-		t.Errorf("the DAC resolved to %+v", sink)
+		t.Errorf("the DAC resolved to %+v, want node 33 at 48000 Hz with 2 channels", sink)
 	}
 	source, err := resolveNode(document, "liken.audio.card1-pcm0c", directionSource)
 	if err != nil {
 		t.Fatalf("resolving the microphone: %v", err)
 	}
 	if source.NodeID != 39 {
-		t.Errorf("the microphone resolved to node %d", source.NodeID)
+		t.Errorf("the microphone resolved to node %d, want 39", source.NodeID)
 	}
-	// The drill asked the sink's name as a source and got a 404, never
-	// another endpoint's sound.
+	// A request for the sink's name as a source must fail, so that it
+	// gets a 404 and not another endpoint's sound.
 	if _, err := resolveNode(document, "liken.audio.card1-pcm0", directionSource); err == nil {
-		t.Error("the DAC's sink answered a source request")
+		t.Error("resolveNode returned the DAC's sink for a source request, want an error")
 	}
 }

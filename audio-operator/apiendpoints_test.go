@@ -1,9 +1,8 @@
 package main
 
-// These tests drive the two routes that name an endpoint: the info
-// document and the tap. The harness is the one in api_test.go, so what
-// they exercise is the whole path from the public request to the
-// capture container and back.
+// These tests send requests to the info and tap routes through the
+// harness in api_test.go, so each one covers the path from the public
+// request to the capture container and back.
 
 import (
 	"encoding/json"
@@ -18,101 +17,99 @@ import (
 
 func TestANameTheClusterDoesNotHoldIsANotFound(t *testing.T) {
 	harness := newAPIHarness(t)
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusNotFound {
-		t.Fatalf("an unknown Sink answered %s", answer.Status)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("the request for an unknown Sink returned %s, want 404 Not Found", response.Status)
 	}
-	document := readProblemBody(t, answer)
+	document := readProblemBody(t, response)
 	if document.Type != problemNoNode {
-		t.Errorf("the problem type is %q", document.Type)
+		t.Errorf("the problem type is %q, want %q", document.Type, problemNoNode)
 	}
 }
 
 func TestAnEndpointWithNoNodeIsAway(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "", "")
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusConflict {
-		t.Fatalf("an endpoint with no node answered %s", answer.Status)
+	harness.addSink("kitchen", "", "")
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("the request for an endpoint with no node returned %s, want 409 Conflict", response.Status)
 	}
-	document := readProblemBody(t, answer)
+	document := readProblemBody(t, response)
 	if document.Type != problemAway {
 		t.Errorf("the problem type is %q, want %q", document.Type, problemAway)
 	}
-	// A 409 is used only where the caller can act, and the detail says
-	// what clears it.
 	if !strings.Contains(document.Detail, "power the device on") {
-		t.Errorf("the detail is %q", document.Detail)
+		t.Errorf("the detail is %q, want a detail that contains \"power the device on\"", document.Detail)
 	}
 }
 
 func TestANodeWithNoReadyContainerIsUnavailable(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-9", drillPipeWireNode)
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("a node with no container answered %s", answer.Status)
+	harness.addSink("kitchen", "node-9", drillPipeWireNode)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("the request to a node with no Ready container returned %s, want 503 Service Unavailable", response.Status)
 	}
-	if got := answer.Header.Get("Retry-After"); got != "5" {
-		t.Errorf("the refusal says Retry-After: %q", got)
+	if got := response.Header.Get("Retry-After"); got != "5" {
+		t.Errorf("the refusal says Retry-After: %q, want 5", got)
 	}
 }
 
 func TestATapForwardsTheNodeNameAndTheQuery(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	answer := harness.call(t, http.MethodGet,
+	harness.addSink("kitchen", "node-1", drillPipeWireNode)
+	response := harness.call(t, http.MethodGet,
 		"/v1/audio/sinks/kitchen/audio.opus?t=5,7&bitrate=128", nil)
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("the tap answered %s: %s", answer.Status, body)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("the tap returned %s, want 200 OK: %s", response.Status, body)
 	}
-	_, _ = io.Copy(io.Discard, answer.Body)
+	_, _ = io.Copy(io.Discard, response.Body)
 
 	called := harness.container.called()
 	if len(called) != 1 {
-		t.Fatalf("the container was called %d times", len(called))
+		t.Fatalf("the container was called %d times, want 1", len(called))
 	}
-	// The API forwards the PipeWire node in status.nodeName, not the
-	// Sink's own name and not the machine in status.node, because what
-	// the container resolves is a node in the graph.
+	// The path has status.nodeName, not the Sink's name or the machine
+	// in status.node, because the container looks up a PipeWire node.
 	if called[0].Path != "/v1/audio/sinks/"+drillPipeWireNode+"/audio.opus" {
-		t.Errorf("the private path is %q", called[0].Path)
+		t.Errorf("the private path is %q, want /v1/audio/sinks/%s/audio.opus", called[0].Path, drillPipeWireNode)
 	}
 	if called[0].RawQuery != "t=5,7&bitrate=128" {
-		t.Errorf("the private query is %q", called[0].RawQuery)
+		t.Errorf("the private query is %q, want t=5,7&bitrate=128", called[0].RawQuery)
 	}
 	if harness.container.token != "Bearer private.leg.token" {
-		t.Errorf("the private leg carried %q", harness.container.token)
+		t.Errorf("the private leg carried the token %q, want Bearer private.leg.token", harness.container.token)
 	}
 }
 
-func TestATapAddsTheFourHeadersTheAPIOwns(t *testing.T) {
+func TestATapCarriesTheHeadersTheAPISets(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio", nil)
-	_, _ = io.Copy(io.Discard, answer.Body)
+	harness.addSink("kitchen", "node-1", drillPipeWireNode)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio", nil)
+	_, _ = io.Copy(io.Discard, response.Body)
 
-	if got := answer.Header.Get("Vary"); got != "Accept" {
-		t.Errorf("the tap says Vary: %q", got)
+	if got := response.Header.Get("Vary"); got != "Accept" {
+		t.Errorf("the tap says Vary: %q, want Accept", got)
 	}
-	if got := answer.Header.Get("Content-Location"); got != "/v1/audio/sinks/kitchen/audio.wav" {
-		t.Errorf("the tap says Content-Location: %q", got)
+	if got := response.Header.Get("Content-Location"); got != "/v1/audio/sinks/kitchen/audio.wav" {
+		t.Errorf("the tap says Content-Location: %q, want /v1/audio/sinks/kitchen/audio.wav", got)
 	}
-	if got := answer.Header.Get("Content-Disposition"); !strings.Contains(got, `filename="kitchen-`) {
-		t.Errorf("the tap says Content-Disposition: %q", got)
+	if got := response.Header.Get("Content-Disposition"); !strings.Contains(got, `filename="kitchen-`) {
+		t.Errorf("the tap says Content-Disposition: %q, want a filename that starts with kitchen-", got)
 	}
-	if got := answer.Header.Get("Link"); !strings.Contains(got, `rel="service-desc"`) {
-		t.Errorf("the tap says Link: %q", got)
+	if got := response.Header.Get("Link"); !strings.Contains(got, `rel="service-desc"`) {
+		t.Errorf("the tap says Link: %q, want a link with rel=\"service-desc\"", got)
 	}
-	// The container's own headers are relayed unchanged.
-	if got := answer.Header.Get("Cache-Control"); got != "no-store" {
-		t.Errorf("the tap says Cache-Control: %q", got)
+	// On a 200 the API sets these itself and copies none of the
+	// container's headers.
+	if got := response.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("the tap says Cache-Control: %q, want no-store", got)
 	}
-	if got := answer.Header.Get("Accept-Ranges"); got != "none" {
-		t.Errorf("the tap says Accept-Ranges: %q", got)
+	if got := response.Header.Get("Accept-Ranges"); got != "none" {
+		t.Errorf("the tap says Accept-Ranges: %q, want none", got)
 	}
-	if got := answer.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+	if got := response.Header.Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("the tap says X-Content-Type-Options: %q, want nosniff", got)
 	}
 }
@@ -120,23 +117,23 @@ func TestATapAddsTheFourHeadersTheAPIOwns(t *testing.T) {
 func TestATapThatProducedBytesWritesACapturedEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		harness := newAPIHarness(t)
-		harness.holds("kitchen", "node-1", drillPipeWireNode)
-		answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.flac", nil)
-		_, _ = io.Copy(io.Discard, answer.Body)
+		harness.addSink("kitchen", "node-1", drillPipeWireNode)
+		response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.flac", nil)
+		_, _ = io.Copy(io.Discard, response.Body)
 
 		written := harness.cluster.recorded()
 		if len(written) != 1 {
-			t.Fatalf("%d events were written", len(written))
+			t.Fatalf("the tap wrote %d Events, want 1", len(written))
 		}
 		if written[0].Reason != reasonCaptured || written[0].Type != "Normal" {
-			t.Errorf("the event is %s/%s", written[0].Reason, written[0].Type)
+			t.Errorf("the Event is %s/%s, want %s/Normal", written[0].Reason, written[0].Type, reasonCaptured)
 		}
 		if written[0].InvolvedObject.Kind != SinkKind || written[0].InvolvedObject.Name != "kitchen" {
-			t.Errorf("the event is about %+v", written[0].InvolvedObject)
+			t.Errorf("the Event is about %+v, want the Sink kitchen", written[0].InvolvedObject)
 		}
 		if !strings.Contains(written[0].Message, "listener") ||
 			!strings.Contains(written[0].Message, "audio") {
-			t.Errorf("the message is %q, and it must name the subject and the aspect",
+			t.Errorf("the message is %q, want one that names the subject listener and the aspect audio",
 				written[0].Message)
 		}
 	})
@@ -145,59 +142,59 @@ func TestATapThatProducedBytesWritesACapturedEvent(t *testing.T) {
 func TestAHeadTakesNoSampleAndMakesNoPrivateCall(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		harness := newAPIHarness(t)
-		harness.holds("kitchen", "node-1", drillPipeWireNode)
-		answer := harness.call(t, http.MethodHead, "/v1/audio/sinks/kitchen/audio.wav", nil)
-		if answer.StatusCode != http.StatusOK {
-			t.Fatalf("the HEAD answered %s", answer.Status)
+		harness.addSink("kitchen", "node-1", drillPipeWireNode)
+		response := harness.call(t, http.MethodHead, "/v1/audio/sinks/kitchen/audio.wav", nil)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("the HEAD returned %s, want 200 OK", response.Status)
 		}
-		if got := answer.Header.Get("Content-Type"); got != "audio/wav" {
-			t.Errorf("the HEAD says Content-Type: %q", got)
+		if got := response.Header.Get("Content-Type"); got != "audio/wav" {
+			t.Errorf("the HEAD says Content-Type: %q, want audio/wav", got)
 		}
-		if got := answer.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		if got := response.Header.Get("X-Content-Type-Options"); got != "nosniff" {
 			t.Errorf("the HEAD says X-Content-Type-Options: %q, want nosniff", got)
 		}
-		if got := answer.Header.Get("Content-Disposition"); got == "" {
+		if got := response.Header.Get("Content-Disposition"); got == "" {
 			t.Error("the HEAD carries no Content-Disposition")
 		}
-		body, _ := io.ReadAll(answer.Body)
+		body, _ := io.ReadAll(response.Body)
 		if len(body) != 0 {
-			t.Errorf("the HEAD carried %d bytes", len(body))
+			t.Errorf("the HEAD carried %d bytes, want none", len(body))
 		}
 		if called := harness.container.called(); len(called) != 0 {
-			t.Errorf("the HEAD called the container %d times", len(called))
+			t.Errorf("the HEAD called the container %d times, want 0", len(called))
 		}
 		if written := harness.cluster.recorded(); len(written) != 0 {
-			t.Errorf("the HEAD wrote %d events", len(written))
+			t.Errorf("the HEAD wrote %d Events, want none", len(written))
 		}
 	})
 }
 
 func TestAHeadOnAnErrorCarriesNoBody(t *testing.T) {
 	harness := newAPIHarness(t)
-	answer := harness.call(t, http.MethodHead, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusNotFound {
-		t.Fatalf("the HEAD answered %s", answer.Status)
+	response := harness.call(t, http.MethodHead, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("the HEAD returned %s, want 404 Not Found", response.Status)
 	}
-	body, _ := io.ReadAll(answer.Body)
+	body, _ := io.ReadAll(response.Body)
 	if len(body) != 0 {
-		t.Errorf("a HEAD on an error carried %d bytes", len(body))
+		t.Errorf("a HEAD on an error carried %d bytes, want none", len(body))
 	}
 }
 
 func TestAnAcceptTheRouteCannotServeIsA406WithItsSiblings(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio",
+	harness.addSink("kitchen", "node-1", drillPipeWireNode)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio",
 		http.Header{"Accept": {"audio/mpeg"}})
-	if answer.StatusCode != http.StatusNotAcceptable {
-		t.Fatalf("Accept: audio/mpeg answered %s", answer.Status)
+	if response.StatusCode != http.StatusNotAcceptable {
+		t.Fatalf("a request with Accept: audio/mpeg returned %s, want 406 Not Acceptable", response.Status)
 	}
-	if got := answer.Header.Get("Vary"); got != "Accept" {
-		t.Errorf("the 406 says Vary: %q", got)
+	if got := response.Header.Get("Vary"); got != "Accept" {
+		t.Errorf("the 406 says Vary: %q, want Accept", got)
 	}
-	document := readProblemBody(t, answer)
+	document := readProblemBody(t, response)
 	if document.Type != problemNotAcceptable {
-		t.Errorf("the problem type is %q", document.Type)
+		t.Errorf("the problem type is %q, want %q", document.Type, problemNotAcceptable)
 	}
 	want := []acceptableType{
 		{Type: "audio/wav", Href: "/v1/audio/sinks/kitchen/audio.wav"},
@@ -205,7 +202,7 @@ func TestAnAcceptTheRouteCannotServeIsA406WithItsSiblings(t *testing.T) {
 		{Type: "audio/ogg", Href: "/v1/audio/sinks/kitchen/audio.opus"},
 	}
 	if len(document.Acceptable) != 3 {
-		t.Fatalf("acceptable is %v", document.Acceptable)
+		t.Fatalf("acceptable is %v, want 3 entries", document.Acceptable)
 	}
 	for index, entry := range want {
 		if document.Acceptable[index] != entry {
@@ -227,16 +224,16 @@ func TestTheNegotiationChoosesTheForwardedExtension(t *testing.T) {
 	}
 	for accept, want := range cases {
 		harness := newAPIHarness(t)
-		harness.holds("kitchen", "node-1", drillPipeWireNode)
+		harness.addSink("kitchen", "node-1", drillPipeWireNode)
 		headers := http.Header{}
 		if accept != "" {
 			headers.Set("Accept", accept)
 		}
-		answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio", headers)
-		_, _ = io.Copy(io.Discard, answer.Body)
+		response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio", headers)
+		_, _ = io.Copy(io.Discard, response.Body)
 		called := harness.container.called()
 		if len(called) != 1 {
-			t.Fatalf("Accept: %q called the container %d times", accept, len(called))
+			t.Fatalf("Accept: %q called the container %d times, want 1", accept, len(called))
 		}
 		if !strings.HasSuffix(called[0].Path, want) {
 			t.Errorf("Accept: %q forwarded %q, want a path ending %s", accept, called[0].Path, want)
@@ -246,45 +243,45 @@ func TestTheNegotiationChoosesTheForwardedExtension(t *testing.T) {
 
 func TestTheContainersProblemIsRelayedWithThisRequestsInstance(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	harness.container.answers(problem{
+	harness.addSink("kitchen", "node-1", drillPipeWireNode)
+	harness.container.returnsProblem(problem{
 		Type:     problemWrongTarget,
 		Title:    "Wrong target",
 		Status:   http.StatusInternalServerError,
 		Detail:   "pw-record linked to a node other than the 46 this request named",
 		Instance: "/v1/audio/sinks/" + drillPipeWireNode + "/audio.wav#deadbeef",
 	})
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusInternalServerError {
-		t.Fatalf("a wrong target answered %s", answer.Status)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("a wrong target returned %s, want 500 Internal Server Error", response.Status)
 	}
-	document := readProblemBody(t, answer)
+	document := readProblemBody(t, response)
 	if document.Type != problemWrongTarget {
-		t.Errorf("the problem type is %q", document.Type)
+		t.Errorf("the problem type is %q, want %q", document.Type, problemWrongTarget)
 	}
 	if !strings.Contains(document.Detail, "pw-record linked to a node other than") {
-		t.Errorf("the detail is %q, and it must carry the container's own words", document.Detail)
+		t.Errorf("the detail is %q, want the container's own words", document.Detail)
 	}
 	// The instance names the route the caller called, not the private
 	// one.
 	if !strings.HasPrefix(document.Instance, "/v1/audio/sinks/kitchen/audio.wav#") {
-		t.Errorf("the instance is %q", document.Instance)
+		t.Errorf("the instance is %q, want the public path /v1/audio/sinks/kitchen/audio.wav#<id>", document.Instance)
 	}
 }
 
-func TestAnAnswerThatIsNotAProblemDocumentIsABadGateway(t *testing.T) {
+func TestAResponseThatIsNotAProblemDocumentIsABadGateway(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
+	harness.addSink("kitchen", "node-1", drillPipeWireNode)
 	harness.container.mu.Lock()
 	harness.container.status = http.StatusInternalServerError
 	harness.container.body = []byte("<html>a proxy wrote this</html>")
 	harness.container.mu.Unlock()
 
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusBadGateway {
-		t.Fatalf("an answer that is not a problem document answered %s", answer.Status)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("a response that is not a problem document returned %s, want 502 Bad Gateway", response.Status)
 	}
-	document := readProblemBody(t, answer)
+	document := readProblemBody(t, response)
 	if document.Type != problemUpstreamFailed {
 		t.Errorf("the problem type is %q, want %q", document.Type, problemUpstreamFailed)
 	}
@@ -292,67 +289,66 @@ func TestAnAnswerThatIsNotAProblemDocumentIsABadGateway(t *testing.T) {
 
 func TestTheInfoDocumentJoinsTheObjectAndTheGraph(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen", nil)
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("the info route answered %s: %s", answer.Status, body)
+	harness.addSink("kitchen", "node-1", drillPipeWireNode)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen", nil)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("the info route returned %s, want 200 OK: %s", response.Status, body)
 	}
 	var document endpointDocument
-	if err := json.NewDecoder(answer.Body).Decode(&document); err != nil {
-		t.Fatal(err)
+	if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
+		t.Fatalf("decoding the info document: %v", err)
 	}
-	// The document carries both names the status carries, under the
-	// CRD's own spellings: node is the machine and nodeName is the
-	// PipeWire node a tap targets.
+	// node is the machine, and nodeName is the PipeWire node that a tap
+	// targets, spelled as in the CRD's status.
 	if document.Node != "node-1" || document.NodeName != drillPipeWireNode {
-		t.Errorf("the info document names %q and %q", document.Node, document.NodeName)
+		t.Errorf("the info document names %q and %q, want node-1 and %s", document.Node, document.NodeName, drillPipeWireNode)
 	}
 	if document.Rate != 48000 || document.Channels != 2 {
-		t.Errorf("the info document is %+v", document)
+		t.Errorf("the info document is %+v, want a rate of 48000 and 2 channels", document)
 	}
 	if document.ConnectionType != "usb" {
-		t.Errorf("the connection type is %q", document.ConnectionType)
+		t.Errorf("the connection type is %q, want usb", document.ConnectionType)
 	}
 	if len(document.MediaTypes) != 3 {
-		t.Errorf("the info document publishes %v", document.MediaTypes)
+		t.Errorf("the info document publishes the media types %v, want 3", document.MediaTypes)
 	}
-	// An info document links to the routes that tap it, and carries no
-	// capture-only header.
-	if got := answer.Header.Get("Link"); !strings.Contains(got, `rel="related"`) {
-		t.Errorf("the info document says Link: %q", got)
+	// The info document links to the tap routes and has none of the
+	// headers that only a capture has.
+	if got := response.Header.Get("Link"); !strings.Contains(got, `rel="related"`) {
+		t.Errorf("the info document says Link: %q, want a link with rel=\"related\"", got)
 	}
 	for _, absent := range []string{"Content-Disposition", "Accept-Ranges", "Content-Location"} {
-		if got := answer.Header.Get(absent); got != "" {
-			t.Errorf("the info document carries %s: %q", absent, got)
+		if got := response.Header.Get(absent); got != "" {
+			t.Errorf("the info document carries %s: %q, want no such header", absent, got)
 		}
 	}
 }
 
 func TestOptionsAndTheOtherMethods(t *testing.T) {
 	harness := newAPIHarness(t)
-	answer := harness.call(t, http.MethodOptions, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusNoContent {
-		t.Errorf("OPTIONS answered %s", answer.Status)
+	response := harness.call(t, http.MethodOptions, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusNoContent {
+		t.Errorf("OPTIONS returned %s, want 204 No Content", response.Status)
 	}
-	if got := answer.Header.Get("Allow"); got != "GET, HEAD, OPTIONS" {
-		t.Errorf("OPTIONS says Allow: %q", got)
+	if got := response.Header.Get("Allow"); got != "GET, HEAD, OPTIONS" {
+		t.Errorf("OPTIONS says Allow: %q, want GET, HEAD, OPTIONS", got)
 	}
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
-		answer := harness.call(t, method, "/v1/audio/sinks/kitchen/audio.wav", nil)
-		if answer.StatusCode != http.StatusMethodNotAllowed {
-			t.Errorf("%s answered %s", method, answer.Status)
+		response := harness.call(t, method, "/v1/audio/sinks/kitchen/audio.wav", nil)
+		if response.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("%s returned %s, want 405 Method Not Allowed", method, response.Status)
 		}
-		if got := answer.Header.Get("Allow"); got != "GET, HEAD, OPTIONS" {
-			t.Errorf("%s got Allow: %q", method, got)
+		if got := response.Header.Get("Allow"); got != "GET, HEAD, OPTIONS" {
+			t.Errorf("%s got Allow: %q, want GET, HEAD, OPTIONS", method, got)
 		}
-		_, _ = io.Copy(io.Discard, answer.Body)
+		_, _ = io.Copy(io.Discard, response.Body)
 	}
 }
 
-func TestEveryRouteInTheTableAnswersThroughTheRouter(t *testing.T) {
+func TestEveryRouteInTheTableRespondsThroughTheRouter(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
+	harness.addSink("kitchen", "node-1", drillPipeWireNode)
 	harness.cluster.mu.Lock()
 	harness.cluster.sources["desk"] = Source{
 		Metadata: EndpointMeta{Name: "desk"},
@@ -366,202 +362,199 @@ func TestEveryRouteInTheTableAnswersThroughTheRouter(t *testing.T) {
 			name = "desk"
 		}
 		target := route.path(name)
-		answer := harness.call(t, http.MethodGet, target, nil)
-		if answer.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(answer.Body)
-			t.Errorf("%s answered %s: %s", target, answer.Status, body)
+		response := harness.call(t, http.MethodGet, target, nil)
+		if response.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(response.Body)
+			t.Errorf("%s returned %s, want 200 OK: %s", target, response.Status, body)
 			continue
 		}
-		if got := answer.Header.Get("Vary"); got != "Accept" {
-			t.Errorf("%s says Vary: %q", target, got)
+		if got := response.Header.Get("Vary"); got != "Accept" {
+			t.Errorf("%s says Vary: %q, want Accept", target, got)
 		}
-		if got := answer.Header.Get("Link"); !strings.Contains(got, `rel="service-desc"`) {
-			t.Errorf("%s says Link: %q", target, got)
+		if got := response.Header.Get("Link"); !strings.Contains(got, `rel="service-desc"`) {
+			t.Errorf("%s says Link: %q, want a link with rel=\"service-desc\"", target, got)
 		}
-		_, _ = io.Copy(io.Discard, answer.Body)
+		_, _ = io.Copy(io.Discard, response.Body)
 	}
 }
 
 func TestAPathOutsideTheTableIsANotFound(t *testing.T) {
 	harness := newAPIHarness(t)
 	for _, target := range []string{"/", "/v1", "/v1/audio/sinks/kitchen/levels"} {
-		answer := harness.call(t, http.MethodGet, target, nil)
-		if answer.StatusCode != http.StatusNotFound {
-			t.Errorf("%s answered %s", target, answer.Status)
+		response := harness.call(t, http.MethodGet, target, nil)
+		if response.StatusCode != http.StatusNotFound {
+			t.Errorf("%s returned %s, want 404 Not Found", target, response.Status)
 		}
-		_, _ = io.Copy(io.Discard, answer.Body)
+		_, _ = io.Copy(io.Discard, response.Body)
 	}
 }
 
 func TestAHeadOnTheInfoRouteMakesNoPrivateCall(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	answer := harness.call(t, http.MethodHead, "/v1/audio/sinks/kitchen", nil)
-	if answer.StatusCode != http.StatusOK {
-		t.Fatalf("the HEAD answered %s", answer.Status)
+	harness.addSink("kitchen", "node-1", drillPipeWireNode)
+	response := harness.call(t, http.MethodHead, "/v1/audio/sinks/kitchen", nil)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the HEAD returned %s, want 200 OK", response.Status)
 	}
-	if got := answer.Header.Get("Content-Type"); got != documentType {
-		t.Errorf("the HEAD says Content-Type: %q", got)
+	if got := response.Header.Get("Content-Type"); got != documentType {
+		t.Errorf("the HEAD says Content-Type: %q, want %s", got, documentType)
 	}
-	if answer.Header.Get("ETag") == "" {
+	if response.Header.Get("ETag") == "" {
 		t.Error("the HEAD carries no ETag")
 	}
-	body, _ := io.ReadAll(answer.Body)
+	body, _ := io.ReadAll(response.Body)
 	if len(body) != 0 {
-		t.Errorf("the HEAD carried %d bytes", len(body))
+		t.Errorf("the HEAD carried %d bytes, want none", len(body))
 	}
 	if called := harness.container.called(); len(called) != 0 {
-		t.Errorf("the HEAD called the container %d times", len(called))
+		t.Errorf("the HEAD called the container %d times, want 0", len(called))
 	}
 }
 
-// hijacked hands the container's connection to one function, which
-// answers something other than HTTP.
-func hijacked(t *testing.T, answer func(net.Conn)) func(http.ResponseWriter) {
+// hijacked returns a container handler that takes over the connection
+// and passes it to write, so a test can send bytes that are not HTTP.
+func hijacked(t *testing.T, write func(net.Conn)) func(http.ResponseWriter) {
 	return func(w http.ResponseWriter) {
 		connection, _, err := http.NewResponseController(w).Hijack()
 		if err != nil {
-			t.Error(err)
+			t.Errorf("hijacking the container's connection: %v", err)
 			return
 		}
-		answer(connection)
+		write(connection)
 		_ = connection.Close()
 	}
 }
 
-func TestAContainerThatAnsweredNoHTTPIsABadGateway(t *testing.T) {
+func TestAContainerThatSentNoHTTPIsABadGateway(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
-	// A container that writes one line no transport can read as HTTP
-	// and closes. Go reports that as a malformed response, a peek
-	// failure, or an unexpected EOF depending on which side of the read
-	// the close lands, so the assertion is on the status and the
-	// problem type and never on the words.
+	harness.addSink("kitchen", "node-1", drillPipeWireNode)
+	// The container writes a line that is not HTTP and closes the
+	// connection. Go's error text for that varies with when the close
+	// arrives, so the test checks the status and the problem type, not
+	// the text.
 	harness.container.streams(hijacked(t, func(connection net.Conn) {
 		_, _ = connection.Write([]byte("this is not HTTP at all\n"))
 	}))
 
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusBadGateway {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("an answer that is not HTTP answered %s: %s", answer.Status, body)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusBadGateway {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("a response that is not HTTP returned %s, want 502 Bad Gateway: %s", response.Status, body)
 	}
-	document := readProblemBody(t, answer)
+	document := readProblemBody(t, response)
 	if document.Type != problemUpstreamFailed {
-		t.Errorf("the problem type is %q", document.Type)
+		t.Errorf("the problem type is %q, want %q", document.Type, problemUpstreamFailed)
 	}
 }
 
-// A connection that stood and then answered nothing at all is the same
-// failure as one that answered garbage: the container is there and its
-// answer did not read.
-func TestAContainerThatClosedBeforeAnsweringIsABadGateway(t *testing.T) {
+// A container that accepts the connection and closes it without a
+// response is a 502, like one that sends garbage, because the
+// connection was made and no response could be read.
+func TestAContainerThatClosedBeforeRespondingIsABadGateway(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.addSink("kitchen", drillMachine, drillPipeWireNode)
 	harness.server.pods.put(samplePod(drillMachine))
 	harness.container.streams(hijacked(t, func(net.Conn) {}))
 
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusBadGateway {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("a container that closed at once answered %s: %s", answer.Status, body)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusBadGateway {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("the request to a container that closed at once returned %s, want 502 Bad Gateway: %s", response.Status, body)
 	}
-	if document := readProblemBody(t, answer); document.Type != problemUpstreamFailed {
-		t.Errorf("the problem type is %q", document.Type)
+	if document := readProblemBody(t, response); document.Type != problemUpstreamFailed {
+		t.Errorf("the problem type is %q, want %q", document.Type, problemUpstreamFailed)
 	}
 }
 
 func TestAContainerThatRefusedTheConnectionIsUnavailable(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "node-1", drillPipeWireNode)
+	harness.addSink("kitchen", "node-1", drillPipeWireNode)
 	// A container that is down refuses the connection with
-	// ECONNREFUSED, which the rulings put at 503 with Retry-After.
+	// ECONNREFUSED, which the API reports as a 503 with Retry-After.
 	harness.container.server.SetDown(true)
 
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("a refused connection answered %s", answer.Status)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("a refused connection returned %s, want 503 Service Unavailable", response.Status)
 	}
-	if got := answer.Header.Get("Retry-After"); got != "5" {
-		t.Errorf("the refusal says Retry-After: %q", got)
+	if got := response.Header.Get("Retry-After"); got != "5" {
+		t.Errorf("the refusal says Retry-After: %q, want 5", got)
 	}
-	_, _ = io.Copy(io.Discard, answer.Body)
+	_, _ = io.Copy(io.Discard, response.Body)
 }
 
-// status.node is the machine and status.nodeName is the PipeWire node.
-// A build that reads one where it needs the other looks the pod up by
-// a name no node has and asks the container for a machine, and every
-// route answers 503. The two names here look nothing alike, so the
-// swap cannot pass.
+// status.node is the machine, and status.nodeName is the PipeWire node.
+// If the API used one where it needs the other, it would look up the
+// pod by a name that no node has and send a machine name to the
+// container, and every route would return 503. The two names in this
+// test are unlike, so a swap fails it.
 func TestTheMachineAndThePipeWireNodeAreNotInterchangeable(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.addSink("kitchen", drillMachine, drillPipeWireNode)
 	harness.server.pods.put(samplePod(drillMachine))
 
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("the tap answered %s: %s", answer.Status, body)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("the tap returned %s, want 200 OK: %s", response.Status, body)
 	}
-	_, _ = io.Copy(io.Discard, answer.Body)
+	_, _ = io.Copy(io.Discard, response.Body)
 
 	called := harness.container.called()
 	if len(called) != 1 {
-		t.Fatalf("the container was called %d times", len(called))
+		t.Fatalf("the container was called %d times, want 1", len(called))
 	}
-	// The pod came from the machine, and the path carries the graph's
+	// The pod lookup used the machine, and the path uses the PipeWire
 	// node.
 	if called[0].Path != "/v1/audio/sinks/"+drillPipeWireNode+"/audio.wav" {
 		t.Errorf("the private path is %q, want the PipeWire node", called[0].Path)
 	}
 	if strings.Contains(called[0].Path, drillMachine) {
-		t.Error("the API asked the capture container for a machine")
+		t.Error("the API requested a machine from the capture container")
 	}
 }
 
 func TestAnEndpointWithAPipeWireNodeAndNoMachineIsAway(t *testing.T) {
-	// PipeWire held a node for it once and the machine is gone, which
-	// is the state a USB card that was unplugged leaves behind.
+	// status.nodeName is still set but the machine is gone, which is
+	// what an unplugged USB card leaves.
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", "", drillPipeWireNode)
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusConflict {
-		t.Fatalf("an endpoint with no machine answered %s", answer.Status)
+	harness.addSink("kitchen", "", drillPipeWireNode)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusConflict {
+		t.Fatalf("the request for an endpoint with no machine returned %s, want 409 Conflict", response.Status)
 	}
-	if document := readProblemBody(t, answer); document.Type != problemAway {
-		t.Errorf("the problem type is %q", document.Type)
+	if document := readProblemBody(t, response); document.Type != problemAway {
+		t.Errorf("the problem type is %q, want %q", document.Type, problemAway)
 	}
 }
 
 func TestTheInfoRouteTakesTheSameTwoNames(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.addSink("kitchen", drillMachine, drillPipeWireNode)
 	harness.server.pods.put(samplePod(drillMachine))
 
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen", nil)
-	if answer.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(answer.Body)
-		t.Fatalf("the info route answered %s: %s", answer.Status, body)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen", nil)
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("the info route returned %s, want 200 OK: %s", response.Status, body)
 	}
-	_, _ = io.Copy(io.Discard, answer.Body)
+	_, _ = io.Copy(io.Discard, response.Body)
 	called := harness.container.called()
 	if len(called) != 1 || called[0].Path != "/v1/audio/sinks/"+drillPipeWireNode {
-		t.Errorf("the info route asked for %v", called)
+		t.Errorf("the info route called the container with %v, want one call to /v1/audio/sinks/%s", called, drillPipeWireNode)
 	}
 }
 
-// A tap runs until the client hangs up or the span ends. The header
-// bound covers the wait for the container's status line and nothing
-// after it, so a stream that outlives the bound many times over is
-// what the route promises.
+// The header timeout covers only the wait for the container's headers,
+// so a tap can run for many times that timeout.
 func TestATapOutlivesTheHeaderBound(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		harness := newAPIHarness(t)
-		harness.holds("kitchen", drillMachine, drillPipeWireNode)
+		harness.addSink("kitchen", drillMachine, drillPipeWireNode)
 		harness.server.pods.put(samplePod(drillMachine))
 
-		// The container answers its headers at once and then delivers a
-		// block every second for three times the bound.
+		// The container sends its headers at once, then one block per
+		// second for three times headerTimeout.
 		blocks := 3 * int(headerTimeout/time.Second)
 		harness.container.streams(func(w http.ResponseWriter) {
 			w.Header().Set("Content-Type", "audio/wav")
@@ -575,17 +568,17 @@ func TestATapOutlivesTheHeaderBound(t *testing.T) {
 		})
 
 		started := time.Now()
-		answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-		if answer.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(answer.Body)
-			t.Fatalf("the tap answered %s: %s", answer.Status, body)
+		response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+		if response.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(response.Body)
+			t.Fatalf("the tap returned %s, want 200 OK: %s", response.Status, body)
 		}
-		body, err := io.ReadAll(answer.Body)
+		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			t.Fatalf("the body ended early: %v", err)
 		}
 		if len(body) != blocks*len("samples!") {
-			t.Errorf("the tap delivered %d bytes of %d, and it was cut short",
+			t.Errorf("the tap delivered %d bytes, want %d",
 				len(body), blocks*len("samples!"))
 		}
 		if ran := time.Since(started); ran != time.Duration(blocks)*time.Second {
@@ -597,43 +590,43 @@ func TestATapOutlivesTheHeaderBound(t *testing.T) {
 func TestHeadersThatArriveLateAreAGatewayTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		harness := newAPIHarness(t)
-		harness.holds("kitchen", drillMachine, drillPipeWireNode)
+		harness.addSink("kitchen", drillMachine, drillPipeWireNode)
 		harness.server.pods.put(samplePod(drillMachine))
 
-		// The container takes longer than the bound to answer at all.
 		harness.container.streams(func(w http.ResponseWriter) {
 			time.Sleep(headerTimeout + time.Second)
 			w.WriteHeader(http.StatusOK)
 		})
 
 		started := time.Now()
-		answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+		response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
 		if waited := time.Since(started); waited != headerTimeout {
 			t.Errorf("the API gave up after %s, want %s", waited, headerTimeout)
 		}
-		if answer.StatusCode != http.StatusGatewayTimeout {
-			body, _ := io.ReadAll(answer.Body)
-			t.Fatalf("late headers answered %s: %s", answer.Status, body)
+		if response.StatusCode != http.StatusGatewayTimeout {
+			body, _ := io.ReadAll(response.Body)
+			t.Fatalf("late headers returned %s, want 504 Gateway Timeout: %s", response.Status, body)
 		}
-		document := readProblemBody(t, answer)
+		document := readProblemBody(t, response)
 		if document.Type != problemUpstreamFailed {
-			t.Errorf("the problem type is %q", document.Type)
+			t.Errorf("the problem type is %q, want %q", document.Type, problemUpstreamFailed)
 		}
 		if !strings.Contains(document.Detail, "sent no headers in time") {
-			t.Errorf("the detail is %q", document.Detail)
+			t.Errorf("the detail is %q, want a detail that contains \"sent no headers in time\"", document.Detail)
 		}
-		_, _ = io.Copy(io.Discard, answer.Body)
-		// The container finishes its late answer before the bubble ends.
+		_, _ = io.Copy(io.Discard, response.Body)
+		// The container's handler must finish before the synctest bubble
+		// ends.
 		time.Sleep(time.Second)
 	})
 }
 
-// The span's begin is added to the bound, so a tap that discards a
-// minute is not cut off before its first byte.
+// The header timeout includes the span's begin offset, so a tap that
+// discards audio first is not cut off before the container responds.
 func TestTheBoundAllowsForTheSpansOwnBegin(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		harness := newAPIHarness(t)
-		harness.holds("kitchen", drillMachine, drillPipeWireNode)
+		harness.addSink("kitchen", drillMachine, drillPipeWireNode)
 		harness.server.pods.put(samplePod(drillMachine))
 
 		harness.container.streams(func(w http.ResponseWriter) {
@@ -643,30 +636,29 @@ func TestTheBoundAllowsForTheSpansOwnBegin(t *testing.T) {
 			_, _ = w.Write([]byte("samples!"))
 		})
 
-		// Without the begin the bound would cut this off 100 ms before
-		// the headers; t=0.2,0.3 adds 200 ms to it.
-		answer := harness.call(t, http.MethodGet,
+		// The container sends its headers 100 ms after headerTimeout, so
+		// without the begin offset the API would give up first. The span
+		// t=0.2,0.3 adds 200 ms to the timeout.
+		response := harness.call(t, http.MethodGet,
 			"/v1/audio/sinks/kitchen/audio.wav?t=0.2,0.3", nil)
-		if answer.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(answer.Body)
-			t.Fatalf("a tap with a begin answered %s: %s", answer.Status, body)
+		if response.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(response.Body)
+			t.Fatalf("a tap with a begin returned %s, want 200 OK: %s", response.Status, body)
 		}
-		_, _ = io.Copy(io.Discard, answer.Body)
+		_, _ = io.Copy(io.Discard, response.Body)
 	})
 }
 
-// The capture container ends a cut-short body without its terminating
-// chunk, which reaches this side as a read that ended with anything
-// but EOF. The API tells its own caller the same way, so a truncation
-// crosses both legs as a truncation rather than turning into a clean
-// end at the door.
+// When the container ends its body without the final chunk, the API
+// aborts its own response, so the caller sees an error and not a clean
+// end of the body.
 func TestAContainerThatCutTheBodyShortCutsThePublicOneToo(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.addSink("kitchen", drillMachine, drillPipeWireNode)
 	harness.server.pods.put(samplePod(drillMachine))
 
-	// The container writes a 200 and some bytes, then ends its handler
-	// the way a tap whose pipeline died does.
+	// The container sends a 200 and some bytes, then aborts the handler,
+	// as it does when the capture pipeline dies.
 	harness.container.streams(func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "audio/wav")
 		w.WriteHeader(http.StatusOK)
@@ -675,28 +667,27 @@ func TestAContainerThatCutTheBodyShortCutsThePublicOneToo(t *testing.T) {
 		panic(http.ErrAbortHandler)
 	})
 
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	if answer.StatusCode != http.StatusOK {
-		t.Fatalf("the tap answered %s", answer.Status)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the tap returned %s, want 200 OK", response.Status)
 	}
-	if _, err := io.ReadAll(answer.Body); err == nil {
+	if _, err := io.ReadAll(response.Body); err == nil {
 		t.Fatal("a body the container cut short arrived as though it were complete")
 	}
 
-	// The record of the request survives the abort, and it says what
-	// happened.
+	// The API writes the log line after the abort too, with the failure.
 	line := harness.lines.last()
 	if !strings.Contains(line, "the capture container ended the body part way") {
-		t.Errorf("the API logged %q", line)
+		t.Errorf("the API logged %q, want a line that contains \"the capture container ended the body part way\"", line)
 	}
 	if !strings.Contains(line, "status=200") {
-		t.Errorf("the line does not name the status it sent: %q", line)
+		t.Errorf("the API logged %q, want a line that contains status=200", line)
 	}
 }
 
 func TestABodyTheContainerFinishedArrivesComplete(t *testing.T) {
 	harness := newAPIHarness(t)
-	harness.holds("kitchen", drillMachine, drillPipeWireNode)
+	harness.addSink("kitchen", drillMachine, drillPipeWireNode)
 	harness.server.pods.put(samplePod(drillMachine))
 
 	harness.container.streams(func(w http.ResponseWriter) {
@@ -705,39 +696,39 @@ func TestABodyTheContainerFinishedArrivesComplete(t *testing.T) {
 		_, _ = w.Write([]byte("RIFFsamples"))
 	})
 
-	answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
-	body, err := io.ReadAll(answer.Body)
+	response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.wav", nil)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		t.Fatalf("a finished body ended with %v", err)
+		t.Fatalf("reading a finished body: %v", err)
 	}
 	if string(body) != "RIFFsamples" {
-		t.Errorf("the body is %q", body)
+		t.Errorf("the body is %q, want RIFFsamples", body)
 	}
 	if line := harness.lines.last(); !strings.Contains(line, "ended=ok") {
-		t.Errorf("the API logged %q", line)
+		t.Errorf("the API logged %q, want a line that contains ended=ok", line)
 	}
 }
 
 func TestThePublicLegLogsEveryRequestWhateverBecameOfIt(t *testing.T) {
-	// The line is written from a defer, so the two endings and the
-	// answers that never stream all reach the log.
+	// The log line is written from a defer, so every request is
+	// logged, whether it ends normally, aborts, or never streams.
 	harness := newAPIHarness(t)
-	answer := harness.call(t, http.MethodGet, "/v1/audio", nil)
-	_, _ = io.Copy(io.Discard, answer.Body)
+	response := harness.call(t, http.MethodGet, "/v1/audio", nil)
+	_, _ = io.Copy(io.Discard, response.Body)
 	if line := harness.lines.last(); !strings.Contains(line, "ended=ok") ||
 		!strings.Contains(line, "route=/v1/audio") {
-		t.Errorf("the discovery document logged %q", line)
+		t.Errorf("the discovery document logged %q, want a line with ended=ok and route=/v1/audio", line)
 	}
 }
 
-// The headers reach the caller when the container's do, not when the
-// first block of audio does. A tap with a begin sends no audio for as
-// long as the discard runs, so a caller waiting on the headers would
-// otherwise have nothing to show for a minute.
+// The caller receives the headers as soon as the container sends them,
+// not with the first block of audio. A tap with a begin offset sends no
+// audio before begin, so otherwise the caller would wait that
+// long without a status or headers.
 func TestTheRelayedHeadersReachTheCallerBeforeTheFirstBodyByte(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		harness := newAPIHarness(t)
-		harness.holds("kitchen", drillMachine, drillPipeWireNode)
+		harness.addSink("kitchen", drillMachine, drillPipeWireNode)
 		harness.server.pods.put(samplePod(drillMachine))
 
 		const silent = time.Minute
@@ -751,34 +742,32 @@ func TestTheRelayedHeadersReachTheCallerBeforeTheFirstBodyByte(t *testing.T) {
 			_ = http.NewResponseController(w).Flush()
 		})
 
-		// Do returns when the headers arrive, so this is the wait a client
-		// sees before it knows what it is getting.
+		// call returns when the headers arrive, so this measures the wait
+		// before the client knows the status and the type.
 		started := time.Now()
-		answer := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.flac?t=60,61", nil)
+		response := harness.call(t, http.MethodGet, "/v1/audio/sinks/kitchen/audio.flac?t=60,61", nil)
 		if waited := time.Since(started); waited != 0 {
-			t.Errorf("the headers took %s, and the container sent them at once", waited)
+			t.Errorf("the headers took %s, want 0 because the container sent them at once", waited)
 		}
-		if answer.StatusCode != http.StatusOK {
-			t.Fatalf("the tap answered %s", answer.Status)
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("the tap returned %s, want 200 OK", response.Status)
 		}
-		// Everything the caller needs to act on is already there.
-		if got := answer.Header.Get("Content-Type"); got != "audio/flac" {
-			t.Errorf("the type is %q", got)
+		if got := response.Header.Get("Content-Type"); got != "audio/flac" {
+			t.Errorf("the type is %q, want audio/flac", got)
 		}
-		if answer.Header.Get("Content-Disposition") == "" {
+		if response.Header.Get("Content-Disposition") == "" {
 			t.Error("the save name is not in the headers")
 		}
-		if got := answer.Header.Get("Cache-Control"); got != "no-store" {
-			t.Errorf("the cache directive is %q", got)
+		if got := response.Header.Get("Cache-Control"); got != "no-store" {
+			t.Errorf("the cache directive is %q, want no-store", got)
 		}
 
-		// And the body still arrives, after the container's silence.
-		body, err := io.ReadAll(answer.Body)
+		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			t.Fatalf("reading the body: %v", err)
 		}
 		if string(body) != "fLaC" {
-			t.Errorf("the body is %q", body)
+			t.Errorf("the body is %q, want fLaC", body)
 		}
 		if total := time.Since(started); total != silent {
 			t.Errorf("the whole tap took %s, want the container's silence of %s", total, silent)

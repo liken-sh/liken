@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestTheRouteTableHoldsEveryPublishedRoute(t *testing.T) {
+func TestTheRouteTableContainsEveryPublishedRoute(t *testing.T) {
 	published := []string{
 		"/v1/audio",
 		"/v1/audio/openapi.json",
@@ -20,14 +20,14 @@ func TestTheRouteTableHoldsEveryPublishedRoute(t *testing.T) {
 		"/v1/audio/sources/{name}/audio.flac",
 		"/v1/audio/sources/{name}/audio.opus",
 	}
-	var held []string
+	var templates []string
 	for _, route := range apiRoutes {
-		held = append(held, route.Template)
+		templates = append(templates, route.Template)
 	}
 	slices.Sort(published)
-	slices.Sort(held)
-	if !slices.Equal(published, held) {
-		t.Errorf("the table holds %v, the manual publishes %v", held, published)
+	slices.Sort(templates)
+	if !slices.Equal(published, templates) {
+		t.Errorf("the table contains %v, want the routes the manual publishes, %v", templates, published)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestEveryRouteMatchesItsOwnPath(t *testing.T) {
 	for _, row := range cases {
 		route, name, found := matchRoute(row.path)
 		if !found {
-			t.Errorf("%s matched no route", row.path)
+			t.Errorf("%s matched no route, want %s", row.path, row.template)
 			continue
 		}
 		if route.Template != row.template {
@@ -80,7 +80,7 @@ func TestPathsOutsideTheTableMatchNothing(t *testing.T) {
 	}
 	for _, path := range outside {
 		if _, _, found := matchRoute(path); found {
-			t.Errorf("%s matched a route", path)
+			t.Errorf("%s matched a route, want none", path)
 		}
 	}
 }
@@ -98,7 +98,7 @@ func TestTapRoutesServeTheRightRepresentations(t *testing.T) {
 	for _, row := range cases {
 		route, _, found := matchRoute(row.path)
 		if !found {
-			t.Fatalf("%s matched no route", row.path)
+			t.Fatalf("%s matched no route, want a tap route", row.path)
 		}
 		var served []string
 		for _, form := range route.Serves {
@@ -110,7 +110,7 @@ func TestTapRoutesServeTheRightRepresentations(t *testing.T) {
 	}
 }
 
-func TestOnlyOpusTakesTheBitrateKnob(t *testing.T) {
+func TestTheBitrateIsAcceptedWhereOpusCanBeServed(t *testing.T) {
 	cases := map[string]bool{
 		"/v1/audio/sinks/kitchen/audio":      true,
 		"/v1/audio/sinks/kitchen/audio.opus": true,
@@ -120,13 +120,13 @@ func TestOnlyOpusTakesTheBitrateKnob(t *testing.T) {
 		"/v1/audio/sinks/kitchen":            false,
 		"/v1/audio":                          false,
 	}
-	for path, takes := range cases {
+	for path, accepted := range cases {
 		route, _, found := matchRoute(path)
 		if !found {
-			t.Fatalf("%s matched no route", path)
+			t.Fatalf("%s matched no route, want one", path)
 		}
-		if route.takes("bitrate") != takes {
-			t.Errorf("%s takes bitrate = %v, want %v", path, route.takes("bitrate"), takes)
+		if route.accepts("bitrate") != accepted {
+			t.Errorf("%s accepts bitrate = %v, want %v", path, route.accepts("bitrate"), accepted)
 		}
 	}
 }
@@ -140,10 +140,10 @@ func TestOnlyTapRoutesTakeASpan(t *testing.T) {
 		"/v1/audio/sinks/kitchen/audio.wav": true,
 		"/v1/audio/sources/desk/audio.flac": true,
 	}
-	for path, takes := range cases {
+	for path, accepted := range cases {
 		route, _, _ := matchRoute(path)
-		if route.takes("t") != takes {
-			t.Errorf("%s takes t = %v, want %v", path, route.takes("t"), takes)
+		if route.accepts("t") != accepted {
+			t.Errorf("%s accepts t = %v, want %v", path, route.accepts("t"), accepted)
 		}
 	}
 }
@@ -160,7 +160,7 @@ func TestTheSiblingsOfAnExtensionRouteAreTheOtherFormats(t *testing.T) {
 	}
 }
 
-func TestTheAspectTemplateCarriesBothKnobs(t *testing.T) {
+func TestTheAspectTemplateNamesEveryQueryParameter(t *testing.T) {
 	want := "/v1/audio/sinks/{name}/audio{.ext}{?t,bitrate}"
 	if got := aspectTemplate("sinks", "audio"); got != want {
 		t.Errorf("the template is %q, want %q", got, want)

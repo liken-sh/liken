@@ -8,9 +8,8 @@ import (
 	"unsafe"
 )
 
-// The ioctl number carries the argument size, and the value
-// union's offset is where every reader of an element's information
-// starts.
+// Every read of an element's info or value decodes the value union, so
+// the union must start at the offset that the kernel uses.
 func TestMixerStructureLayout(t *testing.T) {
 	cases := []struct {
 		name string
@@ -27,15 +26,14 @@ func TestMixerStructureLayout(t *testing.T) {
 	}
 }
 
-// The request number that writes an element's value.
 func TestMixerIoctlNumber(t *testing.T) {
 	if got, want := ctlIoctlElemWrite, uintptr(0xc4c85513); got != want {
 		t.Errorf("SNDRV_CTL_IOCTL_ELEM_WRITE = %#x, want %#x", got, want)
 	}
 }
 
-// integerInfo builds the element information the kernel returns for an
-// integer control, which holds its range in the value union.
+// integerInfo builds the info that the kernel returns for an integer
+// control, which stores its range in the value union.
 func integerInfo(count uint32, min, max, step int64) ctlElemInfo {
 	info := ctlElemInfo{Type: ctlElemTypeInteger, Count: count}
 	binary.NativeEndian.PutUint64(info.Value[0:8], uint64(min))
@@ -44,16 +42,14 @@ func integerInfo(count uint32, min, max, step int64) ctlElemInfo {
 	return info
 }
 
-// enumeratedInfo builds the element information for an enumerated
-// control, which holds its item count in the same union.
+// enumeratedInfo builds the info of an enumerated control, which
+// stores its item count in the value union.
 func enumeratedInfo(count, items uint32) ctlElemInfo {
 	info := ctlElemInfo{Type: ctlElemTypeEnumerated, Count: count}
 	binary.NativeEndian.PutUint32(info.Value[0:4], items)
 	return info
 }
 
-// What each element type becomes in status.capabilities, and
-// which types have no spelling and are left out.
 func TestCapabilityFromElementInfo(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -106,31 +102,28 @@ func TestCapabilityFromElementInfo(t *testing.T) {
 				Channels: 1,
 			},
 		},
-		{name: "a block of bytes has no spelling", info: ctlElemInfo{Type: ctlElemTypeBytes, Count: 128}, skipped: true},
-		{name: "IEC958 channel status has no spelling", info: ctlElemInfo{Type: 5, Count: 4}, skipped: true},
-		{name: "a 64-bit integer has no spelling", info: ctlElemInfo{Type: 6, Count: 1}, skipped: true},
+		{name: "a block of bytes is not a capability", info: ctlElemInfo{Type: ctlElemTypeBytes, Count: 128}, skipped: true},
+		{name: "IEC958 channel status is not a capability", info: ctlElemInfo{Type: 5, Count: 4}, skipped: true},
+		{name: "a 64-bit integer is not a capability", info: ctlElemInfo{Type: 6, Count: 1}, skipped: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got, ok := capabilityFrom(c.info, c.items, c.levels)
 			if ok == c.skipped {
-				t.Fatalf("the element was taken = %v, want %v", ok, !c.skipped)
+				t.Fatalf("capabilityFrom returned ok = %v, want %v", ok, !c.skipped)
 			}
 			if c.skipped {
 				return
 			}
 			if !sameCapability(got, c.want) {
-				t.Errorf("capability = %+v, want %+v", got, c.want)
+				t.Errorf("capabilityFrom = %+v, want %+v", got, c.want)
 			}
 		})
 	}
 }
 
-// pointerTo takes the address of a value, which is how the capability
-// tells a min of zero from no min at all.
 func pointerTo[T any](value T) *T { return &value }
 
-// sameCapability compares two capabilities through the pointers.
 func sameCapability(a, b controlCapability) bool {
 	same := func(x, y *int64) bool {
 		return (x == nil) == (y == nil) && (x == nil || *x == *y)
@@ -140,8 +133,6 @@ func sameCapability(a, b controlCapability) bool {
 		slices.Equal(a.Values, b.Values) && a.Channels == b.Channels
 }
 
-// elementValue builds the union an element's value carries, with one
-// number in every channel.
 func elementValue(width, channels int, number int64) []byte {
 	raw := make([]byte, 1024)
 	for channel := range channels {
@@ -155,9 +146,7 @@ func elementValue(width, channels int, number int64) []byte {
 	return raw
 }
 
-// The spelling status.observed.controls reports, one string per
-// control, and the first channel for a control that carries several.
-func TestControlValueSpelling(t *testing.T) {
+func TestControlValueFrom(t *testing.T) {
 	volume := controlCapability{Type: capabilityInteger, Min: pointerTo(int64(0)), Max: pointerTo(int64(87)), Channels: 2}
 	switching := controlCapability{Type: capabilityBoolean, Channels: 2}
 	source := controlCapability{Type: capabilityEnumerated, Values: []string{"Mic", "Line", "Internal Mic"}, Channels: 1}
@@ -180,22 +169,20 @@ func TestControlValueSpelling(t *testing.T) {
 			got, err := controlValueFrom(c.capability, c.raw)
 			if c.fails {
 				if err == nil {
-					t.Fatalf("value = %q, want an error", got)
+					t.Fatalf("controlValueFrom = %q, want an error", got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("controlValueFrom returned the error %v, want %q", err, c.want)
 			}
 			if got != c.want {
-				t.Errorf("value = %q, want %q", got, c.want)
+				t.Errorf("controlValueFrom = %q, want %q", got, c.want)
 			}
 		})
 	}
 }
 
-// A write parses the same spelling back, refuses what the
-// control does not accept, and sets every channel alike.
 func TestEncodeControlValue(t *testing.T) {
 	volume := controlCapability{Type: capabilityInteger, Min: pointerTo(int64(0)), Max: pointerTo(int64(87)), Channels: 2}
 	switching := controlCapability{Type: capabilityBoolean, Channels: 2}
@@ -214,7 +201,7 @@ func TestEncodeControlValue(t *testing.T) {
 		{name: "a level that is not a number", capability: volume, value: "loud", fails: true},
 		{name: "a switch on", capability: switching, value: "on", want: elementValue(8, 2, 1)},
 		{name: "a switch off", capability: switching, value: "off", want: elementValue(8, 2, 0)},
-		{name: "a switch takes on or off alone", capability: switching, value: "true", fails: true},
+		{name: "a switch accepts only on or off", capability: switching, value: "true", fails: true},
 		{name: "an item by name", capability: source, value: "Line", want: elementValue(4, 1, 1)},
 		{name: "an item the control does not declare", capability: source, value: "Headset", fails: true},
 	}
@@ -224,22 +211,21 @@ func TestEncodeControlValue(t *testing.T) {
 			err := encodeControlValue(c.capability, c.value, raw)
 			if c.fails {
 				if err == nil {
-					t.Fatal("the write was accepted, and the control does not accept it")
+					t.Fatalf("encodeControlValue(%q) accepted the value, want a refusal", c.value)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("encodeControlValue(%q) returned %v, want no error", c.value, err)
 			}
 			if !slices.Equal(raw, c.want) {
-				t.Errorf("the written union does not match the expected one")
+				t.Errorf("encodeControlValue(%q) wrote a union that starts %v, want %v",
+					c.value, raw[:16], c.want[:16])
 			}
 		})
 	}
 }
 
-// A jack is read-only and feeds the Connected condition, so it
-// is told from a capability by its interface and its name.
 func TestJackControls(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -260,26 +246,26 @@ func TestJackControls(t *testing.T) {
 	}
 }
 
-// A name the card does not declare, and a value the control
-// does not accept, are both refused before anything reaches the card.
+// This mixer has no open device, so these calls pass only when the
+// mixer refuses them before it makes an ioctl.
 func TestTheCardRefusesWhatItDoesNotDeclare(t *testing.T) {
 	card := &mixer{card: 0, byName: map[string]control{}}
 
 	if value, err := card.readControl("No Such Control"); err == nil {
-		t.Errorf("an undeclared control read as %q", value)
+		t.Errorf("an undeclared control read as %q, want an error", value)
 	}
 	if err := card.writeControl("No Such Control", controlOn); err == nil {
-		t.Error("an undeclared control accepted a write")
+		t.Error("an undeclared control accepted a write, want a refusal")
 	}
 	volume := control{Name: "Master Playback Volume",
 		Capability: controlCapability{Type: capabilityInteger, Min: pointerTo(int64(0)), Max: pointerTo(int64(87)), Channels: 1}}
 	if err := card.writeElement(volume, "loud"); err == nil {
-		t.Error("a control that takes a number accepted a word")
+		t.Error("a control that takes a number accepted a word, want a refusal")
 	}
 }
 
-// The live check. It runs only where a card answers, and it
-// reads every control the card declares without writing one.
+// TestMixerReadsTheLocalCard runs only on a machine where card 0 opens.
+// It reads every writable control of the card and writes none.
 func TestMixerReadsTheLocalCard(t *testing.T) {
 	sndDir = "/dev/snd"
 	t.Cleanup(func() { sndDir = "/dev/snd" })
@@ -303,13 +289,13 @@ func TestMixerReadsTheLocalCard(t *testing.T) {
 			continue
 		}
 		if value == "" {
-			t.Errorf("%q reads as an empty string", c.Name)
+			t.Errorf("%q reads as an empty string, want its value", c.Name)
 		}
 	}
 	if _, err := card.jackStates(); err != nil {
 		t.Errorf("reading the jacks: %v", err)
 	}
 	if _, err := card.readControl("No Such Control"); err == nil {
-		t.Error("a control the card does not declare read without an error")
+		t.Error("a control the card does not declare read without an error, want an error")
 	}
 }

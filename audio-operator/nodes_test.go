@@ -9,10 +9,8 @@ import (
 	"testing"
 )
 
-// declaredObjects reads the context.objects array back out of a
-// generated drop-in. The generator writes the strict JSON subset of
-// SPA-JSON on purpose, so a test can parse what PipeWire will parse
-// instead of matching text.
+// declaredObjects parses the context.objects array of a generated
+// drop-in, so a test checks objects and not text.
 func declaredObjects(t *testing.T, document string) []staticNode {
 	t.Helper()
 	start := strings.Index(document, configPrefix)
@@ -27,9 +25,9 @@ func declaredObjects(t *testing.T, document string) []staticNode {
 	return objects
 }
 
-// Every playback PCM device on the card gets one sink node, and each
-// one holds the ALSA device it opens and the two properties that map
-// it back to the output the operator publishes.
+// Each playback PCM device gets a sink node with the ALSA path it
+// opens, and with the card and PCM properties that parseGraph maps back
+// to an endpoint.
 func TestNodeConfigDeclaresOneSinkForEachPlaybackPCM(t *testing.T) {
 	outputs := []alsaEndpoint{
 		{Card: 0, PCM: 3, HDMI: true},
@@ -40,8 +38,8 @@ func TestNodeConfigDeclaresOneSinkForEachPlaybackPCM(t *testing.T) {
 		t.Fatalf("declared %d objects, want two", len(objects))
 	}
 
-	// The card's outputs are declared in ALSA address order, whatever
-	// order the enumeration returned them in.
+	// Objects come out sorted by card and PCM number, whatever order the
+	// enumeration returned the endpoints in.
 	cases := []struct {
 		card, pcm int
 		path      string
@@ -54,9 +52,6 @@ func TestNodeConfigDeclaresOneSinkForEachPlaybackPCM(t *testing.T) {
 		if object.Factory != "adapter" {
 			t.Errorf("object %d factory = %q, want adapter", i, object.Factory)
 		}
-		// One output that cannot be created must not stop PipeWire from
-		// starting, because every other output on the card would lose
-		// its sink with it.
 		if !slices.Contains(object.Flags, nofail) {
 			t.Errorf("object %d flags = %v, want %s among them", i, object.Flags, nofail)
 		}
@@ -77,10 +72,8 @@ func TestNodeConfigDeclaresOneSinkForEachPlaybackPCM(t *testing.T) {
 	}
 }
 
-// A capture PCM device is declared beside the playback ones, as a
-// source. The card's PCM device 0 runs in both directions, which is
-// what a USB card does, so the two nodes share an ALSA address and
-// must not share a name.
+// PCM device 0 of this card plays and records, as a USB card's does, so
+// its sink and its source have one ALSA address and need two names.
 func TestNodeConfigDeclaresASourceForEachCapturePCM(t *testing.T) {
 	objects := declaredObjects(t, nodeConfig([]alsaEndpoint{
 		{Card: 1, PCM: 0, Capture: true},
@@ -90,11 +83,10 @@ func TestNodeConfigDeclaresASourceForEachCapturePCM(t *testing.T) {
 		t.Fatalf("declared %d objects, want two", len(objects))
 	}
 
-	// Playback comes first for one PCM device, so the same card always
-	// makes the same document.
+	// Playback sorts before capture.
 	sink, source := objects[0], objects[1]
 	if got := sink.Args["factory.name"]; got != "api.alsa.pcm.sink" {
-		t.Errorf("the playback object's factory = %q", got)
+		t.Errorf("the playback object's factory = %q, want api.alsa.pcm.sink", got)
 	}
 	args := map[string]string{
 		"factory.name":      "api.alsa.pcm.source",
@@ -110,21 +102,16 @@ func TestNodeConfigDeclaresASourceForEachCapturePCM(t *testing.T) {
 			t.Errorf("the capture object's %s = %q, want %q", key, got, want)
 		}
 	}
-	// One PCM device that cannot be opened for capture must not stop
-	// PipeWire from starting, the same way a playback one must not.
 	if !slices.Contains(source.Flags, nofail) {
 		t.Errorf("the capture object's flags = %v, want %s among them", source.Flags, nofail)
 	}
 	if sink.Args["node.name"] == source.Args["node.name"] {
-		t.Errorf("both directions of one PCM device declare the node name %q", sink.Args["node.name"])
+		t.Errorf("both directions of one PCM device declare the node name %q, want a name for each direction", sink.Args["node.name"])
 	}
 }
 
-// An HDMI output with no monitor on it is declared like any other. The
-// PCM device is what the card has, and the set of nodes must not
-// change when somebody moves a cable, because PipeWire reads these
-// declarations once. The layout is the one part a monitor decides,
-// and it reaches the generator only through the layouts it is given.
+// A monitor changes only a sink's layout, and the layout reaches
+// nodeConfig only through its layouts argument.
 func TestNodeConfigDeclaresAnHDMIOutputWithNoMonitor(t *testing.T) {
 	connected := nodeConfig([]alsaEndpoint{{Card: 0, PCM: 3, HDMI: true, Monitor: true}}, nil)
 	unplugged := nodeConfig([]alsaEndpoint{{Card: 0, PCM: 3, HDMI: true}}, nil)
@@ -133,10 +120,6 @@ func TestNodeConfigDeclaresAnHDMIOutputWithNoMonitor(t *testing.T) {
 	}
 }
 
-// The reconcile pass compares a freshly generated document against the
-// one PipeWire started with, and restarts the pod when the two differ.
-// A generator whose output moved with the enumeration order would
-// restart the pod forever.
 func TestNodeConfigDoesNotMoveWithTheEnumerationOrder(t *testing.T) {
 	one := nodeConfig([]alsaEndpoint{{Card: 0, PCM: 0}, {Card: 0, PCM: 3}, {Card: 1, PCM: 0}}, nil)
 	other := nodeConfig([]alsaEndpoint{{Card: 1, PCM: 0}, {Card: 0, PCM: 3}, {Card: 0, PCM: 0}}, nil)
@@ -145,16 +128,16 @@ func TestNodeConfigDoesNotMoveWithTheEnumerationOrder(t *testing.T) {
 	}
 }
 
-// A card with no playback PCM device declares no node, and the file is
-// still a document PipeWire can read.
+// A card with no PCM device declares no node, and the file still
+// parses.
 func TestNodeConfigDeclaresNothingForACardWithNoOutputs(t *testing.T) {
 	if objects := declaredObjects(t, nodeConfig(nil, nil)); len(objects) != 0 {
-		t.Errorf("declared %+v for a card with no outputs", objects)
+		t.Errorf("declared %+v for a card with no outputs, want no object", objects)
 	}
 }
 
-// Two outputs must never claim one node name. A name that collided
-// would give one PCM device no sink and the other one two.
+// Two endpoints must never get the same node name. With a shared name,
+// one PCM device would have no node and the other would have two.
 func TestNodeConfigNamesEveryOutputOnce(t *testing.T) {
 	outputs := []alsaEndpoint{{Card: 0, PCM: 0}, {Card: 0, PCM: 3}, {Card: 1, PCM: 0}, {Card: 1, PCM: 3}}
 	seen := map[string]bool{}
@@ -166,7 +149,7 @@ func TestNodeConfigNamesEveryOutputOnce(t *testing.T) {
 		seen[name] = true
 	}
 	if len(seen) != len(outputs) {
-		t.Errorf("%d outputs declared %d names", len(outputs), len(seen))
+		t.Errorf("%d outputs declared %d names, want one name for each output", len(outputs), len(seen))
 	}
 }
 
@@ -176,11 +159,11 @@ func TestWriteNodeConfigLandsWherePipeWireReadsIt(t *testing.T) {
 
 	document, err := writeNodeConfig([]alsaEndpoint{{Card: 0, PCM: 3, HDMI: true}}, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the declaration: %v", err)
 	}
 	written, err := os.ReadFile(filepath.Join(pipewireConfigDir, dropInName))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the declaration back: %v", err)
 	}
 	if string(written) != document {
 		t.Errorf("the file holds something other than the document it returned:\n%s", written)
@@ -190,10 +173,8 @@ func TestWriteNodeConfigLandsWherePipeWireReadsIt(t *testing.T) {
 	}
 }
 
-// Each kind of layout reaches the node through its own properties,
-// and the ALSA path is the same whatever the layout. The position
-// list is in the "[ FL FR ]" form, the one PipeWire parsed when a
-// 7.1 declaration was tested by hand on a receiver.
+// Each kind of layout reaches the node through its own properties, and
+// api.alsa.path is the same for every kind.
 func TestNodeConfigDeclaresEachKindOfLayout(t *testing.T) {
 	absent := "<absent>"
 	cases := []struct {
@@ -242,14 +223,14 @@ func TestNodeConfigDeclaresEachKindOfLayout(t *testing.T) {
 	}
 }
 
-// A source shares its PCM device number with a USB card's sink, and a
-// layout keyed by the sink's address must not reach the source.
+// A source can have the card and PCM numbers of a sink, as on a USB
+// card, and a layout keyed by the sink's address must not apply to it.
 func TestNodeConfigGivesASourceNoLayout(t *testing.T) {
 	sink := alsaEndpoint{Card: 1, PCM: 0}
 	source := alsaEndpoint{Card: 1, PCM: 0, Capture: true}
 	objects := declaredObjects(t, nodeConfig([]alsaEndpoint{sink, source},
 		map[nodeAddress]channelLayout{sink.graphAddress(): {Source: layoutFromChannelMap}}))
 	if _, ok := objects[1].Args["api.alsa.use-chmap"]; ok {
-		t.Errorf("the source was declared with the sink's layout: %v", objects[1].Args)
+		t.Errorf("the source was declared with the sink's layout: %v, want no api.alsa.use-chmap", objects[1].Args)
 	}
 }

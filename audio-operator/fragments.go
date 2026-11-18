@@ -1,27 +1,24 @@
 package main
 
 // The query of a capture request: the W3C Media Fragments temporal
-// dimension t= and this API's own bitrate= knob.
+// dimension t= and this API's own bitrate= parameter.
 //
-// The query form has standing in the specification. Media Fragments
-// section 3.1 says a URI query produces a new resource requiring
-// server processing, and section 7.4 says a query approach may change
-// the media type, with a fragment retrieved as a JPEG through Accept
-// as its example. That is why identity is in the path, the format is
-// in the extension or in Accept, and the span is here.
+// Media Fragments section 3.1 says a URI query produces a new resource
+// that needs server processing, and section 7.4 says a query can change
+// the media type. So the path identifies the sink or source, the
+// extension or the Accept header selects the format, and the query
+// selects the span.
 //
-// The parse order is section 5.1.1's: split the query on the
-// ampersand and the equals sign first, and percent-decode each part
-// second. That order is what makes t=10%2C20, t=%6ept:10, and
-// t=npt%3a10 parse, and it is why this file does not use net/url's
-// own query parser, which also decodes a plus sign as a space.
+// The parser follows the order of section 5.1.1: split the query on &
+// and =, then percent-decode each part. That is how t=10%2C20,
+// t=%6ept:10, and t=npt%3a10 parse. It does not use net/url's query
+// parser, because that also decodes a plus sign as a space.
 //
-// This API departs from the specification in one place. Sections
-// 6.2, 6.2.1, and 6.3.1 tell a user agent to ignore an invalid,
-// unknown, or non-existent dimension. This API answers 400 instead,
-// because a query produces a new resource and a client that asked for
-// a span must not silently get something else. A repeated dimension
-// is 400, and t=a,b with a at or past b is 400.
+// Sections 6.2, 6.2.1, and 6.3.1 tell a user agent to ignore an
+// invalid, unknown, or non-existent dimension. This API refuses them
+// with a 400 instead, because a query produces a new resource, and a
+// client that asked for a span must not get something else. A repeated
+// dimension is a 400, and so is t=a,b when a is at or past b.
 
 import (
 	"fmt"
@@ -31,40 +28,40 @@ import (
 	"time"
 )
 
-// captureBeginMax bounds the discard. The three capture APIs share
-// this number. A larger begin is a 400 rather than a request the API
-// holds open for longer than any client would wait.
+// captureBeginMax limits the begin offset, because the API discards the
+// audio before begin, so the client waits that long for its first byte.
+// The display capture API uses the same limit.
 const captureBeginMax = 60 * time.Second
 
-// bitrateMin and bitrateMax are the range opusenc takes, in kbit/s
-// per channel. When the knob is absent opusenc chooses for itself,
-// and its own default is 64 kbit/s per mono stream and 96 kbit/s per
-// coupled pair for input at 44.1 kHz or higher.
+// bitrateMin and bitrateMax are the range that opusenc accepts, in
+// kbit/s per channel. Without the bitrate parameter, opusenc uses its
+// own default: 64 kbit/s per mono stream and 96 kbit/s per coupled
+// pair for input at 44.1 kHz or higher.
 const (
 	bitrateMin = 6
 	bitrateMax = 256
 )
 
-// timeSpan is the half-open interval [Begin, End) the tap delivers.
+// timeSpan is the half-open interval [Begin, End) of the tap. Ended is
+// false when the request names no end.
 //
-// Media Fragments fixes NPT's zero at the start of the source media
-// (section 6.1.1). A live tap has no start, so this API defines the
-// source media's zero as the instant the capture container accepts
-// the request. The clock: format that would say this directly is in
-// the advanced document, not in 1.0.
+// Media Fragments puts NPT's zero at the start of the source media
+// (section 6.1.1). A live tap has no start, so this API puts zero at
+// the moment the capture container accepts the request. The clock:
+// format would state that directly, but it is in the advanced Media
+// Fragments document and not in 1.0.
 type timeSpan struct {
 	Begin time.Duration
 	End   time.Duration
 	Ended bool
 }
 
-// sampleBytes is the size of one sample of one channel. Every tap is
-// s16le, so it is two bytes, and 16 bits is the width every player
-// reads.
+// sampleBytes is the size of one sample of one channel, because every
+// tap is s16le.
 const sampleBytes = 2
 
-// bodyBytes is how many raw bytes the body carries. An absent end
-// means until the client closes, which is no bound at all.
+// bodyBytes returns 0 when the span has no end, because the body then
+// runs until the client closes the connection.
 func (s timeSpan) bodyBytes(rate, channels int) int64 {
 	if !s.Ended {
 		return 0
@@ -79,57 +76,53 @@ func rawBytes(length time.Duration, rate, channels int) int64 {
 	return int64(length.Seconds() * float64(rate*channels*sampleBytes))
 }
 
-// captureKnobs is the whole of what a request's query says.
-type captureKnobs struct {
+type captureQuery struct {
 	Span    timeSpan
 	Bitrate int
 }
 
-// parseKnobs reads the query a route takes, and refuses every other
-// name in it.
-func parseKnobs(route apiRoute, rawQuery string) (captureKnobs, error) {
-	var knobs captureKnobs
+// parseCaptureQuery refuses a parameter that the route does not accept, a
+// repeated parameter, and an invalid value.
+func parseCaptureQuery(route apiRoute, rawQuery string) (captureQuery, error) {
+	var query captureQuery
 	seen := map[string]bool{}
 	for _, pair := range splitQuery(rawQuery) {
-		if !route.takes(pair.Name) {
-			return captureKnobs{}, fmt.Errorf("the route %s takes no %s", route.Template, pair.Name)
+		if !route.accepts(pair.Name) {
+			return captureQuery{}, fmt.Errorf("the route %s accepts no %s", route.Template, pair.Name)
 		}
 		if seen[pair.Name] {
-			return captureKnobs{}, fmt.Errorf("%s is given more than once", pair.Name)
+			return captureQuery{}, fmt.Errorf("%s is given more than once", pair.Name)
 		}
 		seen[pair.Name] = true
 		switch pair.Name {
 		case "t":
 			span, err := parseSpan(pair.Value)
 			if err != nil {
-				return captureKnobs{}, err
+				return captureQuery{}, err
 			}
-			knobs.Span = span
+			query.Span = span
 		case "bitrate":
 			rate, err := strconv.Atoi(pair.Value)
 			if err != nil {
-				return captureKnobs{}, fmt.Errorf("bitrate=%s is not a whole number of kbit/s", pair.Value)
+				return captureQuery{}, fmt.Errorf("bitrate=%s is not a whole number of kbit/s", pair.Value)
 			}
 			if rate < bitrateMin || rate > bitrateMax {
-				return captureKnobs{}, fmt.Errorf("bitrate=%d is outside %d to %d kbit/s",
+				return captureQuery{}, fmt.Errorf("bitrate=%d is outside %d to %d kbit/s",
 					rate, bitrateMin, bitrateMax)
 			}
-			knobs.Bitrate = rate
+			query.Bitrate = rate
 		}
 	}
-	return knobs, nil
+	return query, nil
 }
 
-// queryPair is one name and value of the query, decoded.
 type queryPair struct {
 	Name  string
 	Value string
 }
 
-// splitQuery is section 5.1.1's order: split on the ampersand and the
-// equals sign, then percent-decode each part. A part that does not
-// decode is kept as it arrived, which leaves the refusal to the
-// grammar below rather than hiding it as a missing name.
+// splitQuery keeps a part that does not percent-decode as received, so
+// the caller refuses it as invalid and does not treat it as absent.
 func splitQuery(rawQuery string) []queryPair {
 	var pairs []queryPair
 	for _, part := range strings.Split(rawQuery, "&") {
@@ -150,18 +143,16 @@ func decode(text string) string {
 	return decoded
 }
 
-// parseSpan reads the temporal dimension. The grammar is section
-// 4.2.1's npttimedef: begin and end, begin alone, or a comma and end
-// alone, each an npt-sec, an npt-mmss, or an npt-hhmmss.
+// parseSpan parses the value of t= with the npttimedef grammar of
+// section 4.2.1: begin and end, begin alone, or a comma and end alone.
 func parseSpan(value string) (timeSpan, error) {
-	// Section 4.2.1 makes the npt: prefix optional, and section 6.1.1
-	// is the case where it arrives percent-encoded.
+	// The npt: prefix is optional (section 4.2.1).
 	if after, found := strings.CutPrefix(value, "npt:"); found {
 		value = after
 	} else if index := strings.IndexByte(value, ':'); index >= 0 {
-		// A prefix this API does not serve. smpte: and clock: are in
-		// the specification; neither has a meaning for a live tap
-		// whose zero is the accept instant.
+		// smpte: and clock: are valid Media Fragments formats that this
+		// API refuses, because a live tap's zero is the moment the
+		// request is accepted.
 		if prefix := value[:index]; prefix == "smpte" || prefix == "clock" ||
 			strings.HasPrefix(prefix, "smpte-") {
 			return timeSpan{}, fmt.Errorf("t=%s names a time format this API does not serve", value)
@@ -201,21 +192,17 @@ func parseSpan(value string) (timeSpan, error) {
 	return span, nil
 }
 
-// parseNPT reads one npttime, which section 4.2.1 writes as
-// npt-sec, npt-mmss, or npt-hhmmss:
+// parseNPT parses one time, which section 4.2.1 defines as npt-sec,
+// npt-mmss, or npt-hhmmss:
 //
 //	npt-sec    = 1*DIGIT [ "." *DIGIT ]
 //	npt-mmss   = 2DIGIT ":" 2DIGIT [ "." *DIGIT ]
 //	npt-hhmmss = 1*DIGIT ":" 2DIGIT ":" 2DIGIT [ "." *DIGIT ]
 //
-// The grammar is checked before the number is read. strconv.ParseFloat
-// takes nan, inf, infinity, an exponent, and a leading sign, and the
-// grammar above produces none of them. A NaN begin passes every
-// comparison a number would fail, so a t=nan,inf that reached the tap
-// would run unbounded instead of answering 400.
-//
-// The hours field is 1*DIGIT where the minutes and the seconds are
-// always two digits, so an end of any number of hours parses.
+// The grammar is checked before strconv.ParseFloat, which also accepts
+// nan, inf, infinity, an exponent, and a leading sign. Every comparison
+// with NaN is false, so a NaN begin would pass the range checks, and
+// t=nan,inf would run the tap without bound.
 func parseNPT(text string) (time.Duration, error) {
 	refuse := func() (time.Duration, error) {
 		return 0, fmt.Errorf("%q is not a time in NPT", text)
@@ -261,9 +248,9 @@ func asDuration(seconds float64) time.Duration {
 	return time.Duration(seconds * float64(time.Second))
 }
 
-// parseWhole reads one whole field. width is how many digits the field
-// must have, or zero for any number of them, and most is the largest
-// value it may take, or a negative number for no bound.
+// parseWhole parses one integer field. width is the required number of
+// digits, or 0 for any number. most is the largest allowed value, or
+// negative for no limit.
 func parseWhole(text string, width, most int) (int, bool) {
 	if !digits(text) || (width > 0 && len(text) != width) {
 		return 0, false
@@ -275,29 +262,27 @@ func parseWhole(text string, width, most int) (int, bool) {
 	return value, true
 }
 
-// parseSeconds reads the last field, which is the only one that may
-// carry a fraction. Two digits and a value under sixty are required
-// wherever minutes precede it.
-func parseSeconds(text string, inMinutes bool) (float64, bool) {
+// parseSeconds parses the last field, which is the only one that can
+// have a fraction. After a minutes field, it must be two digits and
+// less than 60.
+func parseSeconds(text string, afterMinutes bool) (float64, bool) {
 	whole, fraction, dotted := strings.Cut(text, ".")
 	if !digits(whole) || (dotted && !digits(fraction)) {
 		return 0, false
 	}
-	if inMinutes && len(whole) != 2 {
+	if afterMinutes && len(whole) != 2 {
 		return 0, false
 	}
 	value, err := strconv.ParseFloat(text, 64)
 	if err != nil {
 		return 0, false
 	}
-	if inMinutes && value >= 60 {
+	if afterMinutes && value >= 60 {
 		return 0, false
 	}
 	return value, true
 }
 
-// digits says whether text is one or more decimal digits and nothing
-// else: no sign, no exponent, and no name of a number that is not one.
 func digits(text string) bool {
 	if text == "" {
 		return false
@@ -310,14 +295,10 @@ func digits(text string) bool {
 	return true
 }
 
-// expandAspectTemplate is RFC 6570 expansion of the template the
-// discovery document publishes. The round-trip test calls what it
-// builds, so the published template and the router never drift.
-//
-// Form-style query expansion (section 3.2.8) percent-encodes the
-// comma in t=5,7, and Media Fragments section 5.1.1's parse order is
-// what accepts the result.
-func expandAspectTemplate(template, name, extension string, knobs map[string]string) string {
+// expandAspectTemplate expands the RFC 6570 template that the discovery
+// document publishes. A test sends the result to the router, so it
+// fails when the published template and the router disagree.
+func expandAspectTemplate(template, name, extension string, values map[string]string) string {
 	path, rest, _ := strings.Cut(template, "{.ext}")
 	expanded := strings.ReplaceAll(path, "{name}", name)
 	if extension != "" {
@@ -325,12 +306,12 @@ func expandAspectTemplate(template, name, extension string, knobs map[string]str
 	}
 	names := strings.Split(strings.Trim(rest, "{?}"), ",")
 	var query []string
-	for _, knob := range names {
-		value, given := knobs[knob]
+	for _, parameter := range names {
+		value, given := values[parameter]
 		if !given {
 			continue
 		}
-		query = append(query, knob+"="+url.QueryEscape(value))
+		query = append(query, parameter+"="+url.QueryEscape(value))
 	}
 	if len(query) == 0 {
 		return expanded

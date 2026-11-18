@@ -1,20 +1,15 @@
 package main
 
-// Reporting what each pass did to the slice.
+// Log lines for what each reconcile pass did to the ResourceSlice.
 //
-// A pass that finds nothing changed writes nothing. That is correct
-// for the API server, but it leaves no sign in the log.
-// The slice's resourceVersion and its pool generation do not change
-// while an operator republishes the same content, and they do not
-// change after the operator dies and leaves its last slice behind. A
-// person who reads the API sees the same two numbers in both cases.
-// Only the operator can tell the two apart, so it prints which one it
-// is.
+// A pass that finds the devices unchanged does not write the slice, so
+// its resourceVersion and pool generation stay the same, as they do
+// after the operator dies. The operator logs a line for those passes at
+// least once per sliceLivenessInterval, so the log shows that it is
+// still running.
 //
-// The reporter holds what that needs: the time of the last line it
-// printed, and how many passes have changed nothing since then. One
-// goroutine runs the reconcile loop in this operator, and it is the
-// only caller, so the counters need no lock.
+// Only the reconcile loop's goroutine calls sliceReport, so it needs no
+// lock.
 
 import (
 	"fmt"
@@ -26,27 +21,18 @@ import (
 	"time"
 )
 
-// sliceLivenessInterval is the longest a running operator stays quiet
-// about its slice. It is a clock on the log and reads nothing: the
-// line prints on the first pass after the interval, so a person who
-// reads the log and finds the newest slice line older than this plus
-// one backstop tick knows the loop is not running, whatever the API
-// server still shows.
+// sliceLivenessInterval is the longest a running operator goes without
+// a slice line. The unchanged line prints on the first pass after the
+// interval, so when the newest slice line is older than this plus one
+// backstopInterval, the loop has stopped.
 //
-// The bound is time, not a count of passes. The loop's rate sets how
-// fast passes accumulate: the backstop tick alone gives one pass a
-// minute, and a flapping cable gives many passes a second. So a line
-// on every tenth pass says nothing fixed about how old the newest
-// line may be. Ten minutes against a 60 second backstop is one
-// line for every ten quiet passes, and it keeps that limit whatever
-// the hardware does.
+// The limit is a time and not a number of passes, because hardware
+// events add passes to the backstop tick at no fixed rate.
 const sliceLivenessInterval = 10 * time.Minute
 
-// sliceLog is where this operator reports its slice writes. Routine
-// facts go to stdout, the same as the startup lines and the hardware
-// events, and the failures around them still go to stderr.
 var sliceLog = &sliceReport{out: os.Stdout, now: time.Now}
 
+// unchanged counts the passes since lastLine that wrote nothing.
 type sliceReport struct {
 	out io.Writer
 	now func() time.Time
@@ -55,25 +41,21 @@ type sliceReport struct {
 	unchanged int
 }
 
-// created reports the first write, which puts the slice in the API for
-// the first time or replaces one that a node deletion took away.
 func (r *sliceReport) created(generation int64, devices []SliceDevice) {
 	r.line("slice: created generation %d, %s%s",
 		generation, sliceSummary(devices), tail(taintedPhrases(devices)))
 }
 
-// wrote reports a replacement and names what moved. The device count
-// alone does not name it: a device that gains or loses a taint keeps
-// the count where it was. That taint change is the event that parks a
-// consumer or evicts one, so the line names it.
+// wrote names each device that changed, because a device that gains or
+// loses a taint leaves the device count the same, and a new taint keeps
+// a claim Pending or evicts its pod.
 func (r *sliceReport) wrote(generation int64, published, current []SliceDevice) {
 	r.line("slice: wrote generation %d, %s%s",
 		generation, sliceSummary(current), tail(sliceChanges(published, current)))
 }
 
-// unchangedSlice reports a pass that wrote nothing, at most once per
-// sliceLivenessInterval. The pass count on the line proves the loop
-// ran the whole time instead of once.
+// unchangedSlice logs at most once per sliceLivenessInterval. The pass
+// count in the line shows that the loop ran throughout the interval.
 func (r *sliceReport) unchangedSlice(generation int64, devices []SliceDevice) {
 	r.unchanged++
 	if r.now().Sub(r.lastLine) < sliceLivenessInterval {
@@ -83,19 +65,16 @@ func (r *sliceReport) unchangedSlice(generation int64, devices []SliceDevice) {
 		generation, sliceSummary(devices), r.unchanged, plural(r.unchanged, "pass", "passes"))
 }
 
-// line prints one line and starts the quiet interval again. A write is
-// its own proof that the operator is alive, so it resets the interval
-// the same way a liveness line does, and no unchanged line follows
-// straight after a write.
+// line restarts the interval for every kind of line, because a created
+// or wrote line also shows that the operator is running.
 func (r *sliceReport) line(format string, args ...any) {
 	fmt.Fprintf(r.out, format+"\n", args...)
 	r.lastLine = r.now()
 	r.unchanged = 0
 }
 
-// sliceSummary counts what the slice now offers. The tainted count is
-// the second half because a slice of three devices with all three
-// tainted offers nothing, and the count is the shortest way to say so.
+// sliceSummary includes the tainted count, because a slice whose
+// devices are all tainted offers nothing.
 func sliceSummary(devices []SliceDevice) string {
 	tainted := 0
 	for _, device := range devices {
@@ -107,12 +86,9 @@ func sliceSummary(devices []SliceDevice) string {
 		len(devices), plural(len(devices), "device", "devices"), tainted)
 }
 
-// sliceChanges names every device that moved between the published
-// slice and the one this pass writes, one phrase for each.
-//
-// It reads both lists into maps rather than walking them in step,
-// because the published list comes back from the API server and this
-// operator is not the only thing that can write it.
+// sliceChanges matches devices by name and does not walk the two lists
+// in step, because the published list comes from the API server, where
+// another writer can have changed its order or contents.
 func sliceChanges(published, current []SliceDevice) []string {
 	before := devicesByName(published)
 	after := devicesByName(current)
@@ -138,15 +114,14 @@ func sliceChanges(published, current []SliceDevice) []string {
 		case !has:
 			phrases = append(phrases, name+" left")
 		default:
-			phrases = append(phrases, moved(was, is)...)
+			phrases = append(phrases, deviceChanges(was, is)...)
 		}
 	}
 	return phrases
 }
 
-// appeared describes a device the slice did not hold before, with the
-// taints it arrives with, because a device that appears already unable
-// to serve is a different fact from one that appears ready.
+// appeared names the taints of a new device, because a device that
+// arrives tainted cannot serve claims yet.
 func appeared(device SliceDevice) string {
 	keys := taintKeys(device.Taints)
 	if len(keys) == 0 {
@@ -155,15 +130,14 @@ func appeared(device SliceDevice) string {
 	return device.Name + " appeared with " + strings.Join(keys, ", ")
 }
 
-// moved describes what changed about a device the slice held
-// before. A device can gain one taint and lose another in one pass, so
-// this gives back up to two phrases.
+// deviceChanges describes a device that was already in the slice. A
+// device can gain one taint and lose another in the same pass, so it
+// returns a phrase for each.
 //
-// An attribute change with no taint change gets one flat phrase and no
-// detail. The attributes say what the hardware is, so a reader who
-// needs them reads the slice. Naming every one of them here would
-// hide the taint changes, which are what park a consumer or evict one.
-func moved(was, is SliceDevice) []string {
+// An attribute change gets a phrase only when no taint changed, and it
+// does not name the attributes. The taint changes matter more, and the
+// slice has the attribute values.
+func deviceChanges(was, is SliceDevice) []string {
 	gained := keysNotIn(taintKeys(is.Taints), taintKeys(was.Taints))
 	lost := keysNotIn(taintKeys(was.Taints), taintKeys(is.Taints))
 
@@ -180,9 +154,8 @@ func moved(was, is SliceDevice) []string {
 	return phrases
 }
 
-// taintedPhrases lists the devices that have taints, which is what a
-// newly created slice has to say. Every device in it is new, so naming
-// them all would only repeat the count on the front of the line.
+// taintedPhrases lists only the tainted devices of a new slice, because
+// every device in it is new.
 func taintedPhrases(devices []SliceDevice) []string {
 	var phrases []string
 	for _, device := range devices {
@@ -193,10 +166,9 @@ func taintedPhrases(devices []SliceDevice) []string {
 	return phrases
 }
 
-// taintKeys gives the sorted keys of one device's taints. The key is
-// the whole comparison: this operator publishes one effect per key, so
-// a key that arrives or leaves is the whole change. Sorting keeps the
-// line the same whatever order the API server stored them in.
+// taintKeys compares keys only, because this operator publishes one
+// effect for each key. The sort keeps the line the same in whatever
+// order the API server returns the taints.
 func taintKeys(taints []DeviceTaint) []string {
 	keys := make([]string, 0, len(taints))
 	for _, taint := range taints {
@@ -206,8 +178,6 @@ func taintKeys(taints []DeviceTaint) []string {
 	return keys
 }
 
-// keysNotIn gives the keys of the first list that the second does not
-// hold.
 func keysNotIn(keys, other []string) []string {
 	var out []string
 	for _, key := range keys {
@@ -226,10 +196,8 @@ func devicesByName(devices []SliceDevice) map[string]SliceDevice {
 	return out
 }
 
-// tail joins the phrases onto the end of a line, and gives an empty
-// string when there are none. The separators nest: a colon opens the
-// list, a semicolon divides the devices, and a comma divides one
-// device's taint keys.
+// tail separates the phrases with semicolons, because commas already
+// separate the taint keys inside a phrase.
 func tail(phrases []string) string {
 	if len(phrases) == 0 {
 		return ""
@@ -237,8 +205,6 @@ func tail(phrases []string) string {
 	return ": " + strings.Join(phrases, "; ")
 }
 
-// plural picks the word that goes with a count, so a line reads
-// "1 device" and never "1 devices".
 func plural(n int, one, many string) string {
 	if n == 1 {
 		return one

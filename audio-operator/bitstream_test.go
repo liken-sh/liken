@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// withEncodedTypes answers a parsed block that also lists each coding
-// type, as parseELD reads a descriptor of that type.
+// withEncodedTypes returns block with codingTypes added to the coding
+// types that parseELD found in its descriptors.
 func withEncodedTypes(block eld, codingTypes ...byte) eld {
 	for _, codingType := range codingTypes {
 		block.EncodedTypes |= 1 << codingType
@@ -14,10 +14,11 @@ func withEncodedTypes(block eld, codingTypes ...byte) eld {
 	return block
 }
 
-// receiverBlock assembles the block of a receiver: 8-channel LPCM, a
-// 7.1 speaker allocation, and one descriptor for each coding type. The
-// second and third bytes of a descriptor for an encoded format hold
-// its rates and its bitrate, which this operator does not read.
+// receiverBlock assembles the raw ELD of a receiver with 8-channel LPCM,
+// a 7.1 speaker allocation, and one short audio descriptor for each
+// coding type. The second and third bytes of a descriptor hold the
+// sample rates and the bitrate. The operator reads neither, so the
+// bytes are arbitrary.
 func receiverBlock(t *testing.T, codingTypes ...byte) []byte {
 	t.Helper()
 	raw := make([]byte, eldFixedBytes+3)
@@ -49,7 +50,7 @@ func TestParseNamesTheEncodedFormatsAMonitorAccepts(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			block, err := parseELD(receiverBlock(t, c.codingTypes...))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the receiver's ELD: %v", err)
 			}
 			if got := block.encodedFormats(); !slices.Equal(got, c.want) {
 				t.Errorf("encoded formats = %v, want %v", got, c.want)
@@ -64,10 +65,10 @@ func TestParseNamesTheEncodedFormatsAMonitorAccepts(t *testing.T) {
 func TestEncodedTypesReadsBackTheNamesItWrote(t *testing.T) {
 	block, err := parseELD(receiverBlock(t, 2, 7, 10, 11, 12))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the receiver's ELD: %v", err)
 	}
 	if got := encodedTypes(block.encodedFormats()); got != block.EncodedTypes {
-		t.Errorf("types = %#x, want %#x", got, block.EncodedTypes)
+		t.Errorf("encodedTypes of the parsed names = %#x, want %#x", got, block.EncodedTypes)
 	}
 	if got := encodedTypes([]string{"AC3", "Vorbis"}); got != 1<<2 {
 		t.Errorf("types of a list with an unknown name = %#x, want AC3 alone", got)
@@ -86,7 +87,7 @@ func TestSelectEncodedTakesTheFormatsOfAnHDACardsMonitor(t *testing.T) {
 		declared channelLayout
 		want     []string
 	}{
-		{"a receiver that answers",
+		{"a connected receiver",
 			alsaEndpoint{PCM: 3, HDMI: true, Monitor: true, ELD: receiver, Identity: hda}, channelLayout{}, formats},
 		{"a receiver that turned off keeps the declared formats",
 			alsaEndpoint{PCM: 3, HDMI: true, Identity: hda}, declared, formats},
@@ -111,9 +112,9 @@ func TestSelectEncodedTakesTheFormatsOfAnHDACardsMonitor(t *testing.T) {
 	}
 }
 
-// The index of the hdmi device is the output's place in alsa-lib's
-// table for the driver, and not its place among the PCM devices the
-// card has.
+// The index of an hdmi device is its position in the alsa-lib table for
+// the driver (hdaHDMIDevices), not its position among the PCM devices
+// of the card.
 func TestHDMIDeviceIndexFollowsALSALibsTable(t *testing.T) {
 	cases := []struct {
 		pcm     int
@@ -177,8 +178,8 @@ func TestNodeConfigDeclaresASinkThatPassesBitstreamsThrough(t *testing.T) {
 	}
 }
 
-// A spec.layout states the positions and nothing about the formats, so
-// the formats of the receiver's ELD travel with it.
+// A spec.layout sets only the speaker positions, so the encoded formats
+// still come from the receiver's ELD.
 func TestSelectLayoutKeepsTheEncodedFormatsUnderEverySource(t *testing.T) {
 	receiver := withEncodedTypes(eldWith(t, 8, fiveOne|rearCenterPair), 2, 10)
 	formats := []string{"AC3", "EAC3"}
@@ -215,8 +216,9 @@ func TestSelectLayoutKeepsTheEncodedFormatsUnderEverySource(t *testing.T) {
 	}
 }
 
-// A receiver in standby can answer with the same speakers and no
-// encoded formats, so the formats alone must make a layout difference.
+// A receiver in standby can report the same speakers and no encoded
+// formats in its ELD, so a change in the formats alone must count as a
+// layout change.
 func TestPlanLayoutsFindsAChangeOfTheEncodedFormatsAlone(t *testing.T) {
 	plain := eldWith(t, 8, fiveOne|rearCenterPair)
 	decoding := withEncodedTypes(plain, 10, 12)

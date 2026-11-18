@@ -1,24 +1,18 @@
 package main
 
-// Publishing the card's outputs as this operator's own ResourceSlice.
+// This file writes the node's audio devices to the API server as one
+// ResourceSlice under this operator's driver name. liken publishes the
+// node's sound card in its own slice under the driver liken.sh. The two
+// cannot collide, because a device is identified by
+// <driver>/<pool>/<device>, and each slice name ends with its driver
+// name: <node>-liken.sh and <node>-audio.liken.sh.
 //
-// A device operator publishes under its own driver name, in its own
-// slices, beside whatever liken publishes on the same node. The two
-// cannot collide: a device's identity is the triple
-// <driver>/<pool>/<device>, and the slice name ends with the driver
-// name, so this node's two slices are <node>-liken.sh and
-// <node>-audio.liken.sh.
+// The structs below have only the fields of the upstream ResourceSlice
+// API that this operator writes.
 //
-// Like liken's own client, these structs hold only the part of the
-// upstream API that this program writes. The full ResourceSlice can
-// describe partitionable devices, shared counters, and per-device
-// node selection, and none of that changes what an output needs: a
-// name, its attributes, taints when it cannot play, and the claims
-// capacity when its resource lets several claims share it.
-//
-// One slice holds the whole inventory, so the pool protocol reduces
-// to a version counter: bump the generation on every change, and one
-// slice is always a consistent snapshot.
+// Every device is in one slice, so a change is one write that
+// increments pool.generation, and a reader never sees a pool that is
+// half written.
 
 import (
 	"encoding/json"
@@ -29,26 +23,20 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// DriverName identifies this operator as a DRA driver. A driver name
-// is a DNS name so that drivers cannot collide, and a device
-// operator's name is <domain>.liken.sh. The name states the contract
-// the operator implements rather than the repository that builds it.
+// DriverName is this operator's DRA driver name. A driver name is a DNS
+// name, and the name of a device operator is <domain>.liken.sh.
 const DriverName = "audio.liken.sh"
 
-// ResourceSlicesPath names the URL of the DRA inventory. Slices
-// are cluster-scoped, like Nodes, because hardware inventory belongs
-// to the machine and not to any tenant.
+// ResourceSlicesPath is the API path of the ResourceSlice collection.
+// ResourceSlices are cluster-scoped, so the path has no namespace.
 const ResourceSlicesPath = "/apis/resource.k8s.io/v1/resourceslices"
 
-// maxSliceDevices is the API's limit on devices in one slice. The
-// limit is 128 for a slice with no taints and 64 for a slice that
-// taints any device, and this operator taints every output that
-// cannot play, so 64 is the number that applies. One card's PCM
-// devices and one adapter's paired speakers together stay far under
-// that in practice.
+// maxSliceDevices is the API limit on devices in one slice when any
+// device has a taint. A slice with no taints can hold 128, but this
+// operator taints every device that cannot play.
 const maxSliceDevices = 64
 
-// maxAttributeLength is the API's limit on the length of a string
+// maxAttributeLength is the API limit on the length of a string
 // attribute.
 const maxAttributeLength = 64
 
@@ -65,10 +53,9 @@ type ResourceSliceMeta struct {
 	OwnerReferences []OwnerReference `json:"ownerReferences,omitempty"`
 }
 
-// OwnerReference ties one object's lifetime to another's. The UID
-// matters: a reference names one instance of the owner, so a Node
-// that is deleted and registered again under the same name does not
-// inherit the old node's slices.
+// OwnerReference names the owner by UID as well as by name, so a Node
+// that is deleted and registered again under the same name does not own
+// the old Node's slice.
 type OwnerReference struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`
@@ -89,11 +76,10 @@ type ResourcePool struct {
 	ResourceSliceCount int64  `json:"resourceSliceCount"`
 }
 
-// SliceDevice is one claimable output. The name must be a DNS label,
-// unique within the pool. An attribute name left unqualified belongs
-// to the publishing driver's domain, so a selector reads these as
-// device.attributes["audio.liken.sh"].connectionType. The pairing
-// attribute is the one exception: its own name includes the domain.
+// SliceDevice is one claimable endpoint. Name must be a DNS label that
+// is unique within the pool. A selector reads an attribute name with no
+// domain under the driver's domain, as
+// device.attributes["audio.liken.sh"].connectionType.
 //
 // AllowMultipleAllocations and Capacity are set together, and only on
 // an endpoint whose resource declares a share count (shares.go).
@@ -105,16 +91,14 @@ type SliceDevice struct {
 	Taints                   []DeviceTaint              `json:"taints,omitempty"`
 }
 
-// DeviceCapacity is one amount a device holds, as a quantity string.
-// The device carries no request policy, so a claim that asks for none
-// of the amount is charged all of it.
+// DeviceCapacity is a quantity string. The operator sets no request
+// policy, so a claim that does not request the capacity consumes all of
+// it.
 type DeviceCapacity struct {
 	Value string `json:"value"`
 }
 
-// DeviceAttribute holds exactly one of four typed values. The API
-// keeps the types apart so that a selector compares a number as a
-// number, instead of against the string "2".
+// DeviceAttribute has exactly one of its fields set.
 type DeviceAttribute struct {
 	Bool    *bool   `json:"bool,omitempty"`
 	Int     *int64  `json:"int,omitempty"`
@@ -122,12 +106,11 @@ type DeviceAttribute struct {
 	Version *string `json:"version,omitempty"`
 }
 
-// DeviceTaint keeps a claim off a device, and evicts the pods of the
-// claims that already hold it when the effect is NoExecute.
+// DeviceTaint keeps new claims off a device. With the NoExecute effect
+// it also evicts the pods whose claims already hold the device.
 //
-// TimeAdded is a field the API server fills in on write. This
-// operator never sets it, and reads it back only so that the change
-// detection can ignore it (see sameDevices).
+// The API server sets TimeAdded on create or update when it is empty.
+// This operator never sets it, and sameDevices ignores it.
 type DeviceTaint struct {
 	Key       string `json:"key"`
 	Value     string `json:"value,omitempty"`
@@ -135,32 +118,25 @@ type DeviceTaint struct {
 	TimeAdded string `json:"timeAdded,omitempty"`
 }
 
-// AttrString builds a string-typed attribute value without repeating
-// pointer syntax at every call site.
 func AttrString(s string) DeviceAttribute { return DeviceAttribute{String: &s} }
 
-// AttrInt builds a number attribute value.
 func AttrInt(i int64) DeviceAttribute { return DeviceAttribute{Int: &i} }
 
-// AttrBool builds a boolean attribute value.
 func AttrBool(b bool) DeviceAttribute { return DeviceAttribute{Bool: &b} }
 
-// sameDevices reports whether the published devices already say what
-// this pass would say.
-//
-// The comparison ignores TimeAdded, which the API server fills in on
-// every taint it stores. A plain comparison would compare the stored
-// timestamp against an empty one, call every pass a change, and write
-// the slice on every pass. Each ResourceSlice write wakes every
-// DRA-pending pod in the cluster, so a needless write is a
-// cluster-wide cost.
+// sameDevices reports whether the published devices equal the devices
+// that this pass computed, so the pass can skip the write. It ignores
+// TimeAdded, because the API server sets it on every stored taint, and
+// a plain comparison would make every pass write the slice. Each
+// ResourceSlice write wakes every DRA-pending pod in the cluster.
 func sameDevices(published, current []SliceDevice) bool {
 	return reflect.DeepEqual(withoutTimeAdded(published), withoutTimeAdded(current))
 }
 
-// withoutTimeAdded copies the devices with every taint's timestamp
-// cleared. The copy is deep enough to leave the caller's own taints
-// untouched.
+// withoutTimeAdded returns a copy of devices with TimeAdded cleared and
+// with each empty taint list, attribute map, and capacity map set to
+// nil, because reflect.DeepEqual finds an empty value different from
+// nil. It copies the taints, so the caller's devices are not changed.
 func withoutTimeAdded(devices []SliceDevice) []SliceDevice {
 	out := make([]SliceDevice, len(devices))
 	for i, device := range devices {
@@ -183,33 +159,25 @@ func withoutTimeAdded(devices []SliceDevice) []SliceDevice {
 	return out
 }
 
-// ErrNoDevices refuses a write that would publish nothing.
-//
-// An empty inventory is never a real state of a machine this operator
-// runs on. The operator holds an exclusive claim on a card,
-// and a card has playback PCM devices, so an empty list means the
-// enumeration failed. Publishing it would retract every device that a
-// prepared claim still names, which is the one thing a device
-// operator must never do.
+// ErrNoDevices is returned for an empty device list. The operator's pod
+// claims a sound card, and a sound card has playback PCM devices, so an
+// empty list means that reading them failed. Publishing it would remove
+// devices that prepared claims still name.
 var ErrNoDevices = errors.New("refusing to publish an empty inventory")
 
-// EnsureResourceSlice makes this operator's published slice match the
-// card's outputs. It creates the slice on the first pass, replaces
-// the slice when anything changed, and writes nothing when nothing
-// moved.
+// EnsureResourceSlice creates the slice when none exists, replaces it
+// when the devices changed, and writes nothing otherwise.
 //
-// The slice is never deleted. The operator's shutdown does not
-// retract it, because the prepared claims outlive the pod: a
-// consumer that is already running keeps its socket mount, and the
-// next pod's prepare call reads an allocation that still names these
-// devices. The Node owns the slice, so a Node that leaves the cluster
-// takes the slice with it, and that is the only retraction this
-// operator relies on. A person who uninstalls the operator for good
-// deletes the slice by name.
+// The operator never deletes the slice, not even on shutdown, because
+// prepared claims outlive the operator's pod. A running consumer keeps
+// its socket mount, and the next operator pod's prepare call reads an
+// allocation that still names these devices. The Node owns the slice,
+// so the garbage collector deletes the slice with the Node. To
+// uninstall the operator, delete the slice by name.
 //
-// The write includes the resourceVersion from the read, so a
-// conflicting writer gets apiclient.ErrConflict instead of losing its change.
-// The next pass reads again and writes again.
+// The replace sends the resourceVersion from the read, so a concurrent
+// write makes this one fail with apiclient.ErrConflict instead of
+// overwriting it. The next pass reads and writes again.
 func EnsureResourceSlice(c *apiclient.Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
 	if len(devices) == 0 {
 		return ErrNoDevices
@@ -252,8 +220,7 @@ func EnsureResourceSlice(c *apiclient.Client, nodeName string, owner OwnerRefere
 		return nil
 	}
 
-	// The published devices are read before the assignment overwrites
-	// them, because they are one half of what the line says changed.
+	// sliceLog.wrote reports the difference from the old devices.
 	published := current.Spec.Devices
 	generation := current.Spec.Pool.Generation + 1
 
@@ -280,8 +247,6 @@ func sliceName(nodeName string) string {
 	return nodeName + "-" + DriverName
 }
 
-// nodeObject holds the one thing this operator reads from its Node:
-// the UID that the slice's owner reference needs.
 type nodeObject struct {
 	Metadata struct {
 		Name string `json:"name"`
@@ -289,8 +254,6 @@ type nodeObject struct {
 	} `json:"metadata"`
 }
 
-// NodeOwner reads this operator's node and builds the owner reference
-// for its slice.
 func NodeOwner(c *apiclient.Client, nodeName string) (OwnerReference, error) {
 	node, err := apiclient.Get[nodeObject](c, "/api/v1/nodes/"+nodeName)
 	if err != nil {

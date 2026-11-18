@@ -15,9 +15,9 @@ import (
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 )
 
-// The entry the lab's speaker answers, captured verbatim from
-// pw-dump on liken-1. aptX is the current codec, and the
-// alternatives enumerate the set the speaker and this image share.
+// labCodecEntry is the PropInfo entry that pw-dump printed for a
+// speaker on liken-1. aptX plays, and the alternatives are the codecs
+// that the speaker and this image both support.
 const labCodecEntry = `{
   "id": "bluetoothAudioCodec",
   "description": "Air codec",
@@ -25,12 +25,12 @@ const labCodecEntry = `{
   "labels": [ 6, "aptX", 1, "SBC", 2, "SBC-XQ", 9, "aptX-LL" ]
 }`
 
-// propInfo reads one PropInfo entry the way parseGraph reads it.
+// propInfo decodes one PropInfo entry.
 func propInfo(t *testing.T, entry string) pwPropInfo {
 	t.Helper()
 	var info pwPropInfo
 	if err := json.Unmarshal([]byte(entry), &info); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the PropInfo entry: %v", err)
 	}
 	return info
 }
@@ -42,7 +42,7 @@ func TestCodecOptionsReadsThePropInfoEntry(t *testing.T) {
 		want  []bluezCodec
 	}{
 		{
-			name:  "the entry the lab speaker answers",
+			name:  "the entry the lab speaker reports",
 			entry: labCodecEntry,
 			want: []bluezCodec{
 				{ID: 6, Name: "aptx"},
@@ -97,8 +97,8 @@ func TestCodecOptionsReadsThePropInfoEntry(t *testing.T) {
 	}
 }
 
-// The published vocabulary is the one api.bluez5.codec prints, so a
-// reader finds the negotiated codec in the list.
+// codecName spells a codec the way api.bluez5.codec does, so the codec
+// attribute names one of the codecs in the codecs attribute.
 func TestCodecNameFollowsTheNodesSpelling(t *testing.T) {
 	cases := []struct {
 		label string
@@ -120,14 +120,14 @@ func TestCodecNameFollowsTheNodesSpelling(t *testing.T) {
 	}
 }
 
-// twoCodecs is the set the fixtures publish: the negotiated codec
-// first, in the order PropInfo enumerated them.
+// twoCodecs returns the codecs that the fixtures' speaker offers, with
+// the playing codec first, as PropInfo lists them.
 func twoCodecs() []bluezCodec {
 	return []bluezCodec{{ID: 1, Name: "sbc"}, {ID: 6, Name: "aptx"}}
 }
 
-// manyCodecs is a set whose joined names pass the API's limit on the
-// length of a string attribute.
+// manyCodecs returns codecs whose joined names are longer than
+// maxAttributeLength.
 func manyCodecs() []bluezCodec {
 	codecs := make([]bluezCodec, 0, 8)
 	for i := range 8 {
@@ -144,11 +144,10 @@ func TestCodecListJoinsWholeNames(t *testing.T) {
 	}{
 		{name: "no codec at all"},
 		{name: "one codec", codecs: []bluezCodec{{ID: 1, Name: "sbc"}}, want: "sbc"},
-		{name: "the set the lab answers", codecs: twoCodecs(), want: "sbc aptx"},
+		{name: "the set the lab speaker offers", codecs: twoCodecs(), want: "sbc aptx"},
 		{
-			// A truncated list would name a codec that does not exist,
-			// and a selector that reads it with .contains() would match
-			// it.
+			// A name cut at the limit would be a codec that does not
+			// exist, and a selector with .contains() could match it.
 			name:   "more names than the attribute holds",
 			codecs: manyCodecs(),
 			want:   "codec_number_0 codec_number_1 codec_number_2 codec_number_3",
@@ -161,25 +160,24 @@ func TestCodecListJoinsWholeNames(t *testing.T) {
 				t.Errorf("codecs = %q, want %q", got, c.want)
 			}
 			if len(got) > maxAttributeLength {
-				t.Errorf("the value is %d characters, past the %d limit", len(got), maxAttributeLength)
+				t.Errorf("the value is %d characters, want at most %d", len(got), maxAttributeLength)
 			}
 		})
 	}
 }
 
-// The pod is the SPA object literal pw-cli parses. The id is the
-// integer PropInfo gave: a string label fails the parse.
 func TestCodecPropsWritesTheIntegerID(t *testing.T) {
-	if got := codecProps(6); got != "{ bluetoothAudioCodec: 6 }" {
-		t.Errorf("props = %q", got)
+	want := "{ bluetoothAudioCodec: 6 }"
+	if got := codecProps(6); got != want {
+		t.Errorf("codecProps(6) = %q, want %q", got, want)
 	}
 }
 
-// claimWith builds what the API server holds for a claim on one
-// device, with the given entries in the configuration the scheduler
-// resolved for the allocation. A claim's own spec.devices.config is
-// not what the driver reads: the scheduler copies each block here,
-// beside the DeviceClass's own, and marks where it came from.
+// claimWith returns an allocated claim for one device, whose
+// status.allocation.devices.config has the given entries. The driver
+// reads the config there and not in spec.devices.config, because the
+// scheduler copies the entries of the claim and of the DeviceClass
+// there and records the source of each.
 func claimWith(device, config string) string {
 	return fmt.Sprintf(`{
 	  "metadata": {"name": "kitchen", "namespace": "media", "uid": "claim-1"},
@@ -192,119 +190,113 @@ func claimWith(device, config string) string {
 	}`, device, config)
 }
 
-// configEntry is one resolved config block of this driver's own,
-// from the given source, for the given requests.
+// configEntry returns one of this driver's entries of the allocation's
+// config.
 func configEntry(source, requests, parameters string) string {
 	return fmt.Sprintf(`{"source": %q, "requests": [%s], "opaque": {"driver": %q, "parameters": %s}}`,
 		source, requests, DriverName, parameters)
 }
 
-// opaqueCodec is what the claim's author wrote, applying to every
-// request in the claim.
-func opaqueCodec(parameters string) string {
+// claimEntry returns an entry from the claim for all of its requests.
+func claimEntry(parameters string) string {
 	return configEntry(configFromClaim, "", parameters)
 }
 
-// classCodec is the same block written in the DeviceClass, which is
-// cluster policy rather than one workload's choice.
-func classCodec(parameters string) string {
+// classEntry returns an entry from the DeviceClass for all requests.
+func classEntry(parameters string) string {
 	return configEntry(configFromClass, "", parameters)
 }
 
-// claimConfig reads the resolved config array out of one claim
-// document.
+// claimConfig decodes the claim and returns its allocation's config.
 func claimConfig(t *testing.T, document string) []AllocatedConfig {
 	t.Helper()
 	claim := &ResourceClaim{}
 	if err := json.Unmarshal([]byte(document), claim); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the claim document: %v", err)
 	}
 	if claim.Status.Allocation == nil {
-		t.Fatal("the claim document holds no allocation")
+		t.Fatal("the claim document has no allocation")
 	}
 	return claim.Status.Allocation.Devices.Config
 }
 
-func TestClaimCodecsReadsTheOpaqueBlock(t *testing.T) {
+func TestClaimCodecsReadsTheOpaqueEntries(t *testing.T) {
 	cases := []struct {
 		name    string
 		config  string
 		request string
 		want    string
 	}{
-		{name: "a claim with no config block", request: "speaker"},
+		{name: "a claim with no config entry", request: "speaker"},
 		{
 			name:    "a codec for every request",
-			config:  opaqueCodec(`{"codec": "sbc"}`),
+			config:  claimEntry(`{"codec": "sbc"}`),
 			request: "speaker",
 			want:    "sbc",
 		},
 		{
-			name: "another driver's block",
+			name: "another driver's entry",
 			config: `{"source": "FromClaim", "opaque": {"driver": "display.liken.sh",
 			          "parameters": {"mode": "1080p"}}}`,
 			request: "speaker",
 			want:    "",
 		},
 		{
-			name:    "a block that names the requests it applies to",
+			name:    "an entry that names the request",
 			config:  configEntry(configFromClaim, `"speaker"`, `{"codec": "aptx"}`),
 			request: "speaker",
 			want:    "aptx",
 		},
 		{
-			name:    "a block that names another request",
+			name:    "an entry that names another request",
 			config:  configEntry(configFromClaim, `"screen"`, `{"codec": "aptx"}`),
 			request: "speaker",
 			want:    "",
 		},
 		{
-			name: "a request's own block over the claim's",
-			config: opaqueCodec(`{"codec": "sbc"}`) + "," +
+			name: "an entry for the request over one for all requests",
+			config: claimEntry(`{"codec": "sbc"}`) + "," +
 				configEntry(configFromClaim, `"speaker"`, `{"codec": "aptx"}`),
 			request: "speaker",
 			want:    "aptx",
 		},
 		{
-			// The class is cluster policy, and it answers for a claim
-			// that states nothing of its own.
 			name:    "the class's codec, with none in the claim",
-			config:  classCodec(`{"codec": "sbc"}`),
+			config:  classEntry(`{"codec": "sbc"}`),
 			request: "speaker",
 			want:    "sbc",
 		},
 		{
 			name:    "the claim's codec over the class's",
-			config:  classCodec(`{"codec": "sbc"}`) + "," + opaqueCodec(`{"codec": "aptx"}`),
+			config:  classEntry(`{"codec": "sbc"}`) + "," + claimEntry(`{"codec": "aptx"}`),
 			request: "speaker",
 			want:    "aptx",
 		},
 		{
-			// The allocator lists the class's config first, and the
-			// precedence reads the source rather than the order, so the
-			// answer does not move when the order does.
+			// The allocator lists the class's entries first, but
+			// forRequest reads the source and not the order.
 			name:    "the claim's codec, listed before the class's",
-			config:  opaqueCodec(`{"codec": "aptx"}`) + "," + classCodec(`{"codec": "sbc"}`),
+			config:  claimEntry(`{"codec": "aptx"}`) + "," + classEntry(`{"codec": "sbc"}`),
 			request: "speaker",
 			want:    "aptx",
 		},
 		{
-			name: "the claim's every-request block over the class's named one",
+			name: "the claim's entry for all requests over the class's entry for the request",
 			config: configEntry(configFromClass, `"speaker"`, `{"codec": "sbc"}`) + "," +
-				opaqueCodec(`{"codec": "aptx"}`),
+				claimEntry(`{"codec": "aptx"}`),
 			request: "speaker",
 			want:    "aptx",
 		},
 		{
-			name: "the class's named block, with the claim naming no request",
+			name: "the class's entry for the request over its entry for all requests",
 			config: configEntry(configFromClass, `"speaker"`, `{"codec": "sbc"}`) + "," +
-				classCodec(`{"codec": "aptx"}`),
+				classEntry(`{"codec": "aptx"}`),
 			request: "speaker",
 			want:    "sbc",
 		},
 		{
-			name:    "a block with empty parameters",
-			config:  opaqueCodec(`{}`),
+			name:    "an entry with empty parameters",
+			config:  claimEntry(`{}`),
 			request: "speaker",
 		},
 	}
@@ -312,7 +304,7 @@ func TestClaimCodecsReadsTheOpaqueBlock(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			selection, err := claimCodecs(claimConfig(t, claimWith(testSpeakerName, c.config)))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the claim's codecs: %v", err)
 			}
 			if got := selection.forRequest(c.request); got != c.want {
 				t.Errorf("codec = %q, want %q", got, c.want)
@@ -321,45 +313,42 @@ func TestClaimCodecsReadsTheOpaqueBlock(t *testing.T) {
 	}
 }
 
-// A typo in the parameters is a codec nobody asked for, played with
-// nothing said anywhere, so the parse refuses what it does not know.
-// The source does not soften it: a typo in cluster policy is as
-// wrong as one in a claim.
+// The DeviceClass's parameters are refused like the claim's.
 func TestClaimCodecsRefusesParametersItCannotRead(t *testing.T) {
 	cases := []struct {
-		name   string
-		config string
-		says   string
+		name        string
+		config      string
+		wantInError string
 	}{
 		{
-			name:   "a key this driver does not read",
-			config: opaqueCodec(`{"codecs": "sbc"}`),
-			says:   `"codecs"`,
+			name:        "a key this driver does not read",
+			config:      claimEntry(`{"codecs": "sbc"}`),
+			wantInError: `"codecs"`,
 		},
 		{
-			name:   "a key the class does not read either",
-			config: classCodec(`{"codecs": "sbc"}`),
-			says:   `"codecs"`,
+			name:        "the same key in the DeviceClass",
+			config:      classEntry(`{"codecs": "sbc"}`),
+			wantInError: `"codecs"`,
 		},
 		{
-			name:   "a codec that is not a string",
-			config: opaqueCodec(`{"codec": 6}`),
-			says:   "not a string",
+			name:        "a codec that is not a string",
+			config:      claimEntry(`{"codec": 6}`),
+			wantInError: "not a string",
 		},
 		{
-			name:   "parameters that are not an object",
-			config: opaqueCodec(`["sbc"]`),
-			says:   "parameters",
+			name:        "parameters that are not an object",
+			config:      claimEntry(`["sbc"]`),
+			wantInError: "parameters",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := claimCodecs(claimConfig(t, claimWith(testSpeakerName, c.config)))
 			if err == nil {
-				t.Fatal("the parse accepted parameters it cannot read")
+				t.Fatal("claimCodecs returned no error, want a refusal of the parameters")
 			}
-			if !strings.Contains(err.Error(), c.says) {
-				t.Errorf("error = %q, want it to say %q", err, c.says)
+			if !strings.Contains(err.Error(), c.wantInError) {
+				t.Errorf("error = %q, want it to contain %q", err, c.wantInError)
 			}
 		})
 	}
@@ -377,11 +366,11 @@ type volumeWrite struct {
 	Volumes []float64
 }
 
-// fakePipeWire stands in for the graph read and the two writes a
-// codec switch makes. A codec write changes what a later read
-// reports, after settleReads reads, which is the renegotiation seen
-// from here: the sink node is destroyed and built again with a new
-// id under the same name.
+// fakePipeWire is a fake of the graph read and of the codec and volume
+// writes. After a codec write and settleReads more reads, a read reports
+// the new codec on a node with newNodeID and the same name, as PipeWire
+// rebuilds the sink node. When stuck is true, no read reports the new
+// codec.
 type fakePipeWire struct {
 	mu           sync.Mutex
 	sink         bluezSink
@@ -397,8 +386,8 @@ type fakePipeWire struct {
 	volumeWrites []volumeWrite
 }
 
-// currentSink is the sink a connected speaker holds before any
-// switch: SBC on node 63, at a level a person turned down.
+// currentSink returns the sink of a connected speaker before any
+// switch: SBC on node 63, below unity volume.
 func currentSink() bluezSink {
 	return bluezSink{
 		Node:    testSpeakerNode,
@@ -425,8 +414,8 @@ func (f *fakePipeWire) read(context.Context) (pwGraph, error) {
 	return graph, nil
 }
 
-// settle applies a written codec once the renegotiation has taken
-// as many reads as this fake was told it takes.
+// settle applies the written codec once settleReads reads have passed
+// since the write.
 func (f *fakePipeWire) settle() {
 	if !f.switching {
 		return
@@ -440,10 +429,9 @@ func (f *fakePipeWire) settle() {
 	f.sink.NodeID = f.newNodeID
 }
 
-// changes stands in for the graph feed's signal. While a switch
-// renegotiates, the graph moves, so the signal fires at once and the
-// wait reads again. A graph that does not move never fires it, and
-// the wait runs to its timeout.
+// changes returns a closed channel while a switch is in progress, so
+// await reads again at once. Otherwise it returns nil, which never
+// fires, so a stuck switch waits until its timeout.
 func (f *fakePipeWire) changes() <-chan struct{} {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -481,8 +469,8 @@ func codecNameByID(codecs []bluezCodec, id int) string {
 	return ""
 }
 
-// codecPlugin builds a DRA plugin over an API server that holds one
-// claim, and over the fake PipeWire.
+// codecPlugin builds a DRA plugin whose API server has the claim and
+// whose PipeWire is the fake.
 func codecPlugin(t *testing.T, claim string, pipewire *fakePipeWire) *draPlugin {
 	t.Helper()
 	plugin := testPlugin(t, claim, pwGraph{})
@@ -493,7 +481,7 @@ func codecPlugin(t *testing.T, claim string, pipewire *fakePipeWire) *draPlugin 
 	return plugin
 }
 
-// nodeInSpec is the node name the claim's CDI file gives the
+// nodeInSpec returns the node name that the claim's CDI spec gives the
 // consumer.
 func nodeInSpec(t *testing.T, dir string) string {
 	t.Helper()
@@ -506,38 +494,38 @@ func nodeInSpec(t *testing.T, dir string) string {
 	return ""
 }
 
-// The whole switch: the driver writes the codec by its integer id,
-// waits for the rebuilt node to report it, sets the new node to
-// unity, and only then delivers the node name.
-func TestPrepareSwitchesTheCodecTheClaimStates(t *testing.T) {
+// The driver writes the codec by its integer ID, waits for the rebuilt
+// node to report it, writes unity volume on the new node, and then
+// returns the node name.
+func TestPrepareSwitchesToTheCodecTheClaimSelects(t *testing.T) {
 	dir := specDirectory(t)
 	pipewire := &fakePipeWire{sink: currentSink(), newNodeID: 99, settleReads: 2}
-	plugin := codecPlugin(t, claimWith(testSpeakerName, opaqueCodec(`{"codec": "aptx"}`)), pipewire)
+	plugin := codecPlugin(t, claimWith(testSpeakerName, claimEntry(`{"codec": "aptx"}`)), pipewire)
 
 	entry := prepare(t, plugin, "claim-1")
 	if entry.Error != "" {
-		t.Fatalf("prepare failed: %s", entry.Error)
+		t.Fatalf("preparing the claim: %s", entry.Error)
 	}
 
 	writes := []codecWrite{{Device: 62, Codec: 6}}
 	if !reflect.DeepEqual(pipewire.codecWrites, writes) {
 		t.Errorf("codec writes = %+v, want %+v", pipewire.codecWrites, writes)
 	}
-	// The unity write lands on the rebuilt node, not on the one the
+	// The unity write is on the rebuilt node, not on the node that the
 	// switch destroyed.
 	unity := []volumeWrite{{Node: 99, Volumes: []float64{1, 1}}}
 	if !reflect.DeepEqual(pipewire.volumeWrites, unity) {
 		t.Errorf("volume writes = %+v, want %+v", pipewire.volumeWrites, unity)
 	}
 	if got := nodeInSpec(t, dir); got != testSpeakerNode {
-		t.Errorf("delivered node = %q, want %q", got, testSpeakerNode)
+		t.Errorf("the prepared node is %q, want %q", got, testSpeakerNode)
 	}
 }
 
-// Every prepare of a speaker delivers its sink at unity, whether the
-// claim states a codec, states the one already playing, or states
-// none at all. Any level a prepare finds is a leftover from an
-// earlier tenant, never the arriving consumer's choice.
+// A prepare of a speaker that no other claim holds sets its sink to
+// unity, whether the claim selects a codec, the codec already playing,
+// or no codec. A level that the prepare finds was set for an earlier
+// claim, not for this one.
 func TestPrepareDeliversASpeakerAtUnity(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -545,16 +533,16 @@ func TestPrepareDeliversASpeakerAtUnity(t *testing.T) {
 		codecs int
 	}{
 		{
-			name:   "a claim that states no codec",
+			name:   "a claim that selects no codec",
 			config: "",
 		},
 		{
-			name:   "a claim that states the codec already playing",
-			config: opaqueCodec(`{"codec": "sbc"}`),
+			name:   "a claim that selects the codec already playing",
+			config: claimEntry(`{"codec": "sbc"}`),
 		},
 		{
-			name:   "a claim that states the other codec",
-			config: opaqueCodec(`{"codec": "aptx"}`),
+			name:   "a claim that selects the other codec",
+			config: claimEntry(`{"codec": "aptx"}`),
 			codecs: 1,
 		},
 	}
@@ -566,7 +554,7 @@ func TestPrepareDeliversASpeakerAtUnity(t *testing.T) {
 
 			entry := prepare(t, plugin, "claim-1")
 			if entry.Error != "" {
-				t.Fatalf("prepare failed: %s", entry.Error)
+				t.Fatalf("preparing the claim: %s", entry.Error)
 			}
 			if len(pipewire.codecWrites) != c.codecs {
 				t.Errorf("codec writes = %+v, want %d", pipewire.codecWrites, c.codecs)
@@ -578,15 +566,15 @@ func TestPrepareDeliversASpeakerAtUnity(t *testing.T) {
 				t.Errorf("levels = %v, want unity on both channels", levels)
 			}
 			if got := nodeInSpec(t, dir); got != testSpeakerNode {
-				t.Errorf("delivered node = %q, want %q", got, testSpeakerNode)
+				t.Errorf("the prepared node is %q, want %q", got, testSpeakerNode)
 			}
 		})
 	}
 }
 
-// The channel count comes from the node, and a node that reported
-// none takes the stereo assumption. Object 0 is not a node, so a
-// graph read that gave no id is written to at all.
+// The unity write has one value for each channel of the node, and two
+// for a node that reported no channels. Object 0 is not a node, so a
+// sink with no node id gets no write.
 func TestPrepareWritesUnityOnEveryChannelTheNodeHas(t *testing.T) {
 	sixChannels := currentSink()
 	sixChannels.Volumes = []float64{0.3, 0.3, 0.3, 0.3, 0.3, 0.3}
@@ -627,7 +615,7 @@ func TestPrepareWritesUnityOnEveryChannelTheNodeHas(t *testing.T) {
 
 			entry := prepare(t, plugin, "claim-1")
 			if entry.Error != "" {
-				t.Fatalf("prepare failed: %s", entry.Error)
+				t.Fatalf("preparing the claim: %s", entry.Error)
 			}
 			if !reflect.DeepEqual(pipewire.volumeWrites, c.want) {
 				t.Errorf("volume writes = %+v, want %+v", pipewire.volumeWrites, c.want)
@@ -636,8 +624,8 @@ func TestPrepareWritesUnityOnEveryChannelTheNodeHas(t *testing.T) {
 	}
 }
 
-// The card's own outputs take no volume write. Their level lives on
-// a route, which this plan does not touch.
+// The level of a sound card's output is set on its route, which a
+// prepare does not change.
 func TestPrepareWritesNoVolumeOnTheCardsOutputs(t *testing.T) {
 	specDirectory(t)
 	pipewire := &fakePipeWire{outputs: map[pcmAddress]string{
@@ -647,16 +635,15 @@ func TestPrepareWritesNoVolumeOnTheCardsOutputs(t *testing.T) {
 
 	entry := prepare(t, plugin, "claim-1")
 	if entry.Error != "" {
-		t.Fatalf("prepare failed: %s", entry.Error)
+		t.Fatalf("preparing the claim: %s", entry.Error)
 	}
 	if len(pipewire.volumeWrites) != 0 {
-		t.Errorf("the driver wrote %+v on an ALSA output", pipewire.volumeWrites)
+		t.Errorf("volume writes = %+v on an ALSA output, want none", pipewire.volumeWrites)
 	}
 }
 
-// A unity write that fails fails the prepare. The pod waits, the
-// kubelet retries, and the retry converges; a delivery that went
-// ahead would play at a level nobody chose.
+// The kubelet retries a failed prepare. A prepare that succeeded after a
+// failed unity write would play at the level set for an earlier claim.
 func TestPrepareFailsWhenTheUnityWriteFails(t *testing.T) {
 	dir := specDirectory(t)
 	pipewire := &fakePipeWire{sink: currentSink()}
@@ -667,52 +654,52 @@ func TestPrepareFailsWhenTheUnityWriteFails(t *testing.T) {
 
 	entry := prepare(t, plugin, "claim-1")
 	if entry.Error == "" {
-		t.Fatalf("prepare delivered a sink it could not set: %+v", entry.Devices)
+		t.Fatalf("prepare returned %+v, want a refusal because the unity write returned an error", entry.Devices)
 	}
 	if !strings.Contains(entry.Error, "unity") {
-		t.Errorf("error = %q, want it to say what it could not set", entry.Error)
+		t.Errorf("error = %q, want it to name the unity write", entry.Error)
 	}
 	if left := specFiles(t, dir); len(left) != 0 {
-		t.Errorf("a refused claim left %v behind", left)
+		t.Errorf("a refused claim left the spec files %v, want none", left)
 	}
 }
 
 func TestPrepareRefusesACodecItCannotDeliver(t *testing.T) {
 	cases := []struct {
-		name   string
-		device string
-		config string
-		stuck  bool
-		says   string
-		waits  time.Duration
+		name        string
+		device      string
+		config      string
+		stuck       bool
+		wantInError string
+		waits       time.Duration
 	}{
 		{
-			name:   "a codec the speaker does not offer",
-			device: testSpeakerName,
-			config: opaqueCodec(`{"codec": "ldac"}`),
-			says:   "sbc aptx",
+			name:        "a codec the speaker does not offer",
+			device:      testSpeakerName,
+			config:      claimEntry(`{"codec": "ldac"}`),
+			wantInError: "sbc aptx",
 		},
 		{
-			name:   "a codec on the card's own output",
-			device: testSinkName,
-			config: opaqueCodec(`{"codec": "sbc"}`),
-			says:   "not a Bluetooth speaker",
+			name:        "a codec on the card's own output",
+			device:      testSinkName,
+			config:      claimEntry(`{"codec": "sbc"}`),
+			wantInError: "not a Bluetooth speaker",
 		},
 		{
-			name:   "a parameter this driver does not read",
-			device: testSpeakerName,
-			config: opaqueCodec(`{"bitpool": "53"}`),
-			says:   `"bitpool"`,
+			name:        "a parameter this driver does not read",
+			device:      testSpeakerName,
+			config:      claimEntry(`{"bitpool": "53"}`),
+			wantInError: `"bitpool"`,
 		},
 		{
-			// PipeWire took the write and the transport never came
-			// back with the codec, so no node ever reports it.
-			name:   "a switch the graph never reports",
-			device: testSpeakerName,
-			config: opaqueCodec(`{"codec": "aptx"}`),
-			stuck:  true,
-			says:   "did not report",
-			waits:  codecSwitchTimeout,
+			// PipeWire accepts the write, and no node reports the
+			// codec before the timeout.
+			name:        "a switch the graph never reports",
+			device:      testSpeakerName,
+			config:      claimEntry(`{"codec": "aptx"}`),
+			stuck:       true,
+			wantInError: "did not report",
+			waits:       codecSwitchTimeout,
 		},
 	}
 	for _, c := range cases {
@@ -725,54 +712,50 @@ func TestPrepareRefusesACodecItCannotDeliver(t *testing.T) {
 				started := time.Now()
 				entry := prepare(t, plugin, "claim-1")
 				if waited := time.Since(started); waited != c.waits {
-					t.Errorf("prepare answered after %s, want %s", waited, c.waits)
+					t.Errorf("prepare returned after %s, want %s", waited, c.waits)
 				}
 				if entry.Error == "" {
-					t.Fatalf("prepare accepted a codec it cannot deliver: %+v", entry.Devices)
+					t.Fatalf("prepare returned %+v, want a refusal", entry.Devices)
 				}
-				if !strings.Contains(entry.Error, c.says) {
-					t.Errorf("error = %q, want it to say %q", entry.Error, c.says)
+				if !strings.Contains(entry.Error, c.wantInError) {
+					t.Errorf("error = %q, want it to contain %q", entry.Error, c.wantInError)
 				}
-				// A refusal delivers no node name, so no consumer plays
-				// through a codec nobody chose.
+				// A refused prepare leaves no CDI spec, so no consumer
+				// plays a codec that the claim did not select.
 				if left := specFiles(t, dir); len(left) != 0 {
-					t.Errorf("a refused claim left %v behind", left)
+					t.Errorf("a refused claim left the spec files %v, want none", left)
 				}
 			})
 		})
 	}
 }
 
-// A claim with no config block behaves as it did before a codec
-// could be stated: WirePlumber's pick stands, and the driver writes
-// nothing.
-func TestPrepareLeavesTheCodecAloneWithNoConfigBlock(t *testing.T) {
+// A claim with no config entry keeps the codec that WirePlumber chose.
+func TestPrepareLeavesTheCodecAloneWithNoConfigEntry(t *testing.T) {
 	dir := specDirectory(t)
 	pipewire := &fakePipeWire{sink: currentSink(), newNodeID: 99}
 	plugin := codecPlugin(t, claimWith(testSpeakerName, ""), pipewire)
 
 	entry := prepare(t, plugin, "claim-1")
 	if entry.Error != "" {
-		t.Fatalf("prepare failed: %s", entry.Error)
+		t.Fatalf("preparing the claim: %s", entry.Error)
 	}
 	if len(pipewire.codecWrites) != 0 {
-		t.Errorf("the driver wrote %+v for a claim that stated no codec", pipewire.codecWrites)
+		t.Errorf("codec writes = %+v for a claim that selects no codec, want none", pipewire.codecWrites)
 	}
 	if got := nodeInSpec(t, dir); got != testSpeakerNode {
-		t.Errorf("delivered node = %q, want %q", got, testSpeakerNode)
+		t.Errorf("the prepared node is %q, want %q", got, testSpeakerNode)
 	}
 }
 
-// The unprepare path never renegotiates. A speaker allocates to one
-// claim at a time, so no other consumer holds the old codec, and a
-// switch on teardown would sound for nobody.
-func TestUnprepareLeavesTheCodecWhereTheClaimPutIt(t *testing.T) {
+// A switch after the claim ends would rebuild the sink for no consumer.
+func TestUnprepareWritesNoCodec(t *testing.T) {
 	specDirectory(t)
 	pipewire := &fakePipeWire{sink: currentSink(), newNodeID: 99}
-	plugin := codecPlugin(t, claimWith(testSpeakerName, opaqueCodec(`{"codec": "aptx"}`)), pipewire)
+	plugin := codecPlugin(t, claimWith(testSpeakerName, claimEntry(`{"codec": "aptx"}`)), pipewire)
 
 	if entry := prepare(t, plugin, "claim-1"); entry.Error != "" {
-		t.Fatalf("prepare failed: %s", entry.Error)
+		t.Fatalf("preparing the claim: %s", entry.Error)
 	}
 	writes := len(pipewire.codecWrites)
 
@@ -780,20 +763,19 @@ func TestUnprepareLeavesTheCodecWhereTheClaimPutIt(t *testing.T) {
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "kitchen", Uid: "claim-1"}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("unpreparing the claim: %v", err)
 	}
 	if message := resp.Claims["claim-1"].Error; message != "" {
-		t.Fatalf("unprepare failed: %s", message)
+		t.Fatalf("unpreparing the claim: %s", message)
 	}
 	if len(pipewire.codecWrites) != writes {
-		t.Errorf("unprepare wrote %+v", pipewire.codecWrites[writes:])
+		t.Errorf("unprepare wrote the codecs %+v, want none", pipewire.codecWrites[writes:])
 	}
 }
 
-// The resting switch and the prepare's switch are
-// the same code with the same bounds, and that the reconciler passes
-// the graph read it already has.
-func TestSpeakerCodecSwitchTakesTheProductionBounds(t *testing.T) {
+// The reconciler's switch for Sink.spec.codec uses codecSwitchTimeout,
+// as a prepare does, and reads the graph through the graph feed.
+func TestSpeakerCodecSwitchUsesTheSwitchTimeout(t *testing.T) {
 	sink := currentSink()
 	sink.Codec = "aptx"
 	read := staticGraph(speakerGraph(map[string]bluezSink{testSpeakerAddress: sink}))
@@ -803,25 +785,23 @@ func TestSpeakerCodecSwitchTakesTheProductionBounds(t *testing.T) {
 		t.Errorf("timeout = %s, want %s", change.timeout, codecSwitchTimeout)
 	}
 
-	// The graph already reports the codec, so the wait answers with
-	// the speaker and writes nothing.
+	// The graph already reports the codec, so await returns the sink at
+	// once.
 	got, err := change.await(context.Background(), testSpeakerAddress, "aptx")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("waiting for the codec: %v", err)
 	}
 	if got.Node != testSpeakerNode {
-		t.Errorf("sink = %+v", got)
+		t.Errorf("sink = %+v, want the node %q", got, testSpeakerNode)
 	}
 }
 
-// The codec list a status reports is read off the
-// graph value, in the device's own order.
-func TestCodecNamesReadOffTheGraphValue(t *testing.T) {
+func TestCodecNamesKeepsTheOrderOfTheCodecs(t *testing.T) {
 	sink := bluezSink{Codecs: []bluezCodec{{ID: 1, Name: "sbc"}, {ID: 6, Name: "aptx"}}}
 	if got := sink.codecNames(); !reflect.DeepEqual(got, []string{"sbc", "aptx"}) {
-		t.Errorf("names = %v", got)
+		t.Errorf("codecNames() = %v, want [sbc aptx]", got)
 	}
 	if got := (bluezSink{}).codecNames(); len(got) != 0 {
-		t.Errorf("a speaker that offers nothing lists %v", got)
+		t.Errorf("codecNames() of a speaker that offers no codec = %v, want none", got)
 	}
 }

@@ -1,18 +1,15 @@
 package main
 
-// The API's own certificates and the objects that hold them: the Secret
-// audio-api-tls, which carries the CA and the public leaf, the
-// ConfigMap audio-api-ca, which carries the trust anchor alone, and
-// the Secret audio-capture-server, which carries the capture
-// container's leaf. apitls.go mints what this file stores.
+// audio-api stores its TLS material in these objects, and apitls.go
+// mints it:
 //
-// The anchor is a ConfigMap and not the Secret because a client needs
-// an ordinary get on a public certificate, and a grant on the Secret
-// would hand it the keys as well.
-//
-// A create that loses the race reads the winner, so two API pods
-// during a rollout settle on one CA rather than each serving leaves
-// the other's anchor does not cover.
+//   - The Secret audio-api-tls contains the CA certificate and key, and
+//     the leaf certificate and key that the API serves.
+//   - The ConfigMap audio-api-ca contains the CA certificate only. A
+//     client that trusts the API needs get on this ConfigMap, because
+//     get on the Secret would also give it the CA's private key.
+//   - The Secret audio-capture-server contains the leaf certificate and
+//     key of the capture containers.
 
 import (
 	"crypto/tls"
@@ -28,7 +25,7 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// secret is the part of a Kubernetes Secret this API reads and writes.
+// secret is the part of a Secret that the API reads and writes.
 type secret struct {
 	APIVersion string            `json:"apiVersion"`
 	Kind       string            `json:"kind"`
@@ -37,9 +34,9 @@ type secret struct {
 	Data       map[string]string `json:"data,omitempty"`
 }
 
-// configMap is the same for a ConfigMap. The CA certificate is text,
-// so it goes in data rather than binaryData and a person reads it with
-// kubectl get -o jsonpath.
+// configMap is the part of a ConfigMap that the API reads and writes.
+// The PEM certificate goes in data and not binaryData, so a person can
+// read it with kubectl get -o jsonpath.
 type configMap struct {
 	APIVersion string            `json:"apiVersion"`
 	Kind       string            `json:"kind"`
@@ -55,66 +52,68 @@ func configMapsPath(namespace string) string {
 	return "/api/v1/namespaces/" + namespace + "/configmaps"
 }
 
-// certificates holds the API's own TLS material and keeps it current.
+// certificates creates the objects above when they are missing, and
+// renews a certificate when it is expiring.
 type certificates struct {
 	client    *apiclient.Client
 	namespace string
 	service   string
 
-	// now is a field so a test mints a certificate that has already
-	// half expired without waiting six months.
+	// now lets a test set the time instead of waiting for a
+	// certificate to age.
 	now func() time.Time
 
-	// keepCertificates writes these two on its own goroutine every
-	// hour, and every forwarded request reads the anchor, so the lock
-	// is what keeps a re-mint from tearing a read.
+	// mu guards authority and public, because keepCertificates
+	// replaces them in its own goroutine while each forwarded request
+	// reads the CA. A reader must not get a new leaf with the old CA.
 	mu        sync.RWMutex
 	authority authority
 	public    keyPair
 
-	// pass lets one pass run at a time. The hourly pass and the watch
-	// on the capture Secret run on two goroutines, and both read the
-	// Secret and write it back. Two passes at once would each mint a
-	// leaf, and adopt writes the held pair with no lock.
-	pass sync.Mutex
+	// writes serializes ensure and keepCaptureLeaf. keepCertificates
+	// and the watch on the capture Secret call them from separate
+	// goroutines, and each reads a Secret and writes it back, so two
+	// calls at once could both mint a leaf for the same Secret.
+	writes sync.Mutex
 }
 
 func newCertificates(client *apiclient.Client, namespace, service string) *certificates {
 	return &certificates{client: client, namespace: namespace, service: service, now: time.Now}
 }
 
-// ensure reads the Secret, mints what is absent, and writes back what
-// changed. It returns the public leaf the API serves.
+// ensure brings the objects above up to date and returns the leaf that
+// the API serves.
 func (c *certificates) ensure() (tls.Certificate, error) {
-	c.pass.Lock()
-	defer c.pass.Unlock()
-	held, err := c.readSecret(apiTLSSecret)
+	c.writes.Lock()
+	defer c.writes.Unlock()
+	stored, err := c.readSecret(apiTLSSecret)
 	switch {
 	case errors.Is(err, apiclient.ErrNotFound):
-		if err := c.mintEverything(); err != nil {
+		if err := c.mintAuthorityAndLeaf(); err != nil {
 			return tls.Certificate{}, err
 		}
 	case err != nil:
 		return tls.Certificate{}, err
 	default:
-		if err := c.adopt(held); err != nil {
+		if err := c.adopt(stored); err != nil {
 			return tls.Certificate{}, err
 		}
 	}
-	if err := c.publishAnchor(); err != nil {
+	if err := c.publishCAConfigMap(); err != nil {
 		return tls.Certificate{}, err
 	}
 	if err := c.publishCaptureLeaf(); err != nil {
 		return tls.Certificate{}, err
 	}
-	_, public := c.held()
+	_, public := c.keys()
 	return tls.X509KeyPair(public.Certificate, public.Key)
 }
 
-// mintEverything makes the CA and the public leaf, and writes them. A
-// create that loses the race reads the winner, which is the other API
-// pod's CA, so both serve leaves one trust anchor covers.
-func (c *certificates) mintEverything() error {
+// mintAuthorityAndLeaf creates a CA and a leaf and writes them to the
+// audio-api-tls Secret. When another API pod creates the Secret first,
+// this pod adopts that pod's CA and leaf, so every pod serves a leaf
+// that one CA signed.
+func (c *certificates) mintAuthorityAndLeaf() error {
 	minted, err := mintAuthority(c.now())
 	if err != nil {
 		return err
@@ -123,7 +122,7 @@ func (c *certificates) mintEverything() error {
 	if err != nil {
 		return err
 	}
-	written, lost, err := c.createSecret(apiTLSSecret, map[string][]byte{
+	existing, existed, err := c.createSecret(apiTLSSecret, map[string][]byte{
 		tlsCertFile: leaf.Certificate,
 		tlsKeyFile:  leaf.Key,
 		tlsCABundle: minted.Pair.Certificate,
@@ -132,51 +131,52 @@ func (c *certificates) mintEverything() error {
 	if err != nil {
 		return err
 	}
-	if lost {
-		return c.adopt(written)
+	if existed {
+		return c.adopt(existing)
 	}
-	c.hold(minted, leaf)
+	c.setKeys(minted, leaf)
 	return nil
 }
 
-// hold replaces the two certificates this API serves and signs with.
-func (c *certificates) hold(minted authority, leaf keyPair) {
+func (c *certificates) setKeys(minted authority, leaf keyPair) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.authority, c.public = minted, leaf
 }
 
-// held answers the two, so a caller reads a matched pair rather than
-// one from before a re-mint and one from after.
-func (c *certificates) held() (authority, keyPair) {
+// keys returns the CA and the leaf under one lock, so the two match.
+func (c *certificates) keys() (authority, keyPair) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.authority, c.public
 }
 
-// caKeyFile is the extra key in the Secret that the kubernetes.io/tls
-// names do not cover. The CA's own key is in the same Secret because
-// the API signs the capture leaf from it, and a second Secret would be
-// a second grant for one thing. When a cert-manager owner replaces
-// the Secret with a Certificate of the same name there is no ca.key,
-// so the API serves the leaf it finds and mints no capture leaf, and
-// the owner issues that one too.
+// caKeyFile is the Secret key of the CA's private key, which the
+// kubernetes.io/tls Secret type does not define. The CA key is in the
+// same Secret as the leaf because the API signs the capture leaf with
+// it, and a second Secret would need a second RBAC grant.
+//
+// When cert-manager writes the Secret from a Certificate of the same
+// name, the Secret has no ca.key. The API then serves the leaf it finds
+// and mints no capture leaf, so the owner of the Certificate must issue
+// the capture leaf too.
 const caKeyFile = "ca.key"
 
-// adopt takes the material an existing Secret holds, and mints a leaf
-// again when under a third of its life remains.
-func (c *certificates) adopt(held map[string][]byte) error {
-	c.public = keyPair{Certificate: held[tlsCertFile], Key: held[tlsKeyFile]}
+// adopt loads the CA and the leaf from the data of an existing
+// audio-api-tls Secret. When the leaf is expiring, adopt mints a new one
+// and updates the Secret.
+func (c *certificates) adopt(data map[string][]byte) error {
+	c.public = keyPair{Certificate: data[tlsCertFile], Key: data[tlsKeyFile]}
 	if len(c.public.Certificate) == 0 || len(c.public.Key) == 0 {
-		return fmt.Errorf("the Secret %s holds no %s and %s", apiTLSSecret, tlsCertFile, tlsKeyFile)
+		return fmt.Errorf("the Secret %s has no %s and %s", apiTLSSecret, tlsCertFile, tlsKeyFile)
 	}
-	if len(held[caKeyFile]) == 0 {
-		// A Secret another issuer owns. The API serves what it finds
-		// and signs nothing.
-		c.authority = authority{Pair: keyPair{Certificate: held[tlsCABundle]}}
+	if len(data[caKeyFile]) == 0 {
+		// Another issuer, such as cert-manager, writes this Secret.
+		// The API serves its leaf and signs nothing.
+		c.authority = authority{Pair: keyPair{Certificate: data[tlsCABundle]}}
 		return nil
 	}
-	found, err := readAuthority(keyPair{Certificate: held[tlsCABundle], Key: held[caKeyFile]})
+	found, err := readAuthority(keyPair{Certificate: data[tlsCABundle], Key: data[caKeyFile]})
 	if err != nil {
 		return err
 	}
@@ -196,14 +196,15 @@ func (c *certificates) adopt(held map[string][]byte) error {
 	}); err != nil {
 		return err
 	}
-	c.hold(found, leaf)
+	c.setKeys(found, leaf)
 	return nil
 }
 
-// publishAnchor writes the CA certificate alone into the ConfigMap, so
-// a client reads the trust anchor with an ordinary get.
-func (c *certificates) publishAnchor() error {
-	signer, _ := c.held()
+// publishCAConfigMap writes the CA certificate to the audio-api-ca
+// ConfigMap. It does nothing when the ConfigMap already contains the
+// certificate.
+func (c *certificates) publishCAConfigMap() error {
+	signer, _ := c.keys()
 	anchor := string(signer.Pair.Certificate)
 	if anchor == "" {
 		return nil
@@ -222,28 +223,27 @@ func (c *certificates) publishAnchor() error {
 	return c.updateConfigMap(apiCAConfigMap, map[string]string{tlsCABundle: anchor})
 }
 
-// keepCaptureLeaf runs on every change the watch on the Secret
-// reports. It reads the Secret the capture containers mount, and mints
-// the leaf again when it is gone, when it is expiring, or when another
-// CA signed it. It writes nothing when the Secret is in order, so the
-// cost of a pass is one get.
+// keepCaptureLeaf runs on each change that the watch on the
+// audio-capture-server Secret delivers. When the Secret's leaf is
+// valid, a call makes one GET and no write.
 func (c *certificates) keepCaptureLeaf() error {
-	c.pass.Lock()
-	defer c.pass.Unlock()
+	c.writes.Lock()
+	defer c.writes.Unlock()
 	return c.publishCaptureLeaf()
 }
 
-// publishCaptureLeaf mints the container's leaf when none is held or
-// the one held is expiring, and writes it into the Secret the
-// DaemonSet mounts.
+// publishCaptureLeaf writes a new leaf to the audio-capture-server
+// Secret, which the capture DaemonSet mounts, when the Secret has no
+// leaf, the leaf is expiring, or another CA signed it. It does nothing
+// when the API has no CA key to sign with.
 func (c *certificates) publishCaptureLeaf() error {
-	signer, _ := c.held()
+	signer, _ := c.keys()
 	if signer.key == nil {
 		return nil
 	}
-	held, err := c.readSecret(captureTLSSecret)
+	stored, err := c.readSecret(captureTLSSecret)
 	if err == nil {
-		current := keyPair{Certificate: held[tlsCertFile], Key: held[tlsKeyFile]}
+		current := keyPair{Certificate: stored[tlsCertFile], Key: stored[tlsKeyFile]}
 		if len(current.Certificate) > 0 && !expiring(current, c.now()) &&
 			signedBy(current, signer) {
 			return nil
@@ -262,17 +262,17 @@ func (c *certificates) publishCaptureLeaf() error {
 		tlsCABundle: signer.Pair.Certificate,
 	}
 	if errors.Is(err, apiclient.ErrNotFound) {
-		// A create that loses the race leaves the winner's leaf in
-		// place, which this API's own CA signed too.
+		// When another API pod creates the Secret first, its leaf
+		// stays, because the same CA signed it.
 		_, _, createErr := c.createSecret(captureTLSSecret, data)
 		return createErr
 	}
 	return c.updateSecret(captureTLSSecret, data)
 }
 
-// signedBy says whether a leaf was signed by the CA the API holds now.
-// A leaf from a CA that is gone is one the container's clients would
-// refuse, so it is minted again.
+// signedBy reports whether ca signed leaf. The API refuses a capture
+// container whose leaf another CA signed, so a false result makes the
+// caller mint a new leaf.
 func signedBy(leaf keyPair, ca authority) bool {
 	certificate, err := parseCertificate(leaf.Certificate)
 	if err != nil || ca.certificate == nil {
@@ -281,19 +281,19 @@ func signedBy(leaf keyPair, ca authority) bool {
 	return certificate.CheckSignatureFrom(ca.certificate) == nil
 }
 
-// anchor is the CA certificate the API trusts when it dials a capture
-// container.
+// anchor returns the CA certificate that the API trusts when it
+// connects to a capture container.
 func (c *certificates) anchor() []byte {
-	held, _ := c.held()
-	return held.Pair.Certificate
+	signer, _ := c.keys()
+	return signer.Pair.Certificate
 }
 
-// nearestExpiry is what audio_api_certificate_expiry_seconds carries:
-// the first of the certificates this API owns to run out.
+// nearestExpiry returns the earlier expiry of the CA and the leaf, for
+// the gauge audio_api_certificate_expiry_seconds.
 func (c *certificates) nearestExpiry() time.Time {
-	held, public := c.held()
+	signer, public := c.keys()
 	nearest := time.Time{}
-	for _, pair := range []keyPair{public, held.Pair} {
+	for _, pair := range []keyPair{public, signer.Pair} {
 		at, err := expiryOf(pair)
 		if err != nil {
 			continue
@@ -306,11 +306,11 @@ func (c *certificates) nearestExpiry() time.Time {
 }
 
 func (c *certificates) readSecret(name string) (map[string][]byte, error) {
-	held, err := apiclient.Get[secret](c.client, secretsPath(c.namespace)+"/"+name)
+	object, err := apiclient.Get[secret](c.client, secretsPath(c.namespace)+"/"+name)
 	if err != nil {
 		return nil, err
 	}
-	return decodeSecretData(held.Data)
+	return decodeSecretData(object.Data)
 }
 
 func decodeSecretData(data map[string]string) (map[string][]byte, error) {
@@ -318,7 +318,7 @@ func decodeSecretData(data map[string]string) (map[string][]byte, error) {
 	for key, value := range data {
 		body, err := base64.StdEncoding.DecodeString(value)
 		if err != nil {
-			return nil, fmt.Errorf("reading the Secret's %s: %w", key, err)
+			return nil, fmt.Errorf("decoding the Secret's %s: %w", key, err)
 		}
 		decoded[key] = body
 	}
@@ -333,8 +333,8 @@ func encodeSecretData(data map[string][]byte) map[string]string {
 	return encoded
 }
 
-// createSecret makes one Secret. A create that loses the race answers
-// with the winner's data and lost set, so the caller adopts it.
+// createSecret creates a Secret. When the Secret already exists, it
+// returns that Secret's data and true, so the caller can adopt it.
 func (c *certificates) createSecret(name string, data map[string][]byte) (map[string][]byte, bool, error) {
 	body, err := json.Marshal(&secret{
 		APIVersion: "v1",
@@ -348,8 +348,8 @@ func (c *certificates) createSecret(name string, data map[string][]byte) (map[st
 	}
 	err = c.client.RequestJSON(http.MethodPost, secretsPath(c.namespace), body, nil)
 	if errors.Is(err, apiclient.ErrConflict) {
-		winner, readErr := c.readSecret(name)
-		return winner, true, readErr
+		existing, readErr := c.readSecret(name)
+		return existing, true, readErr
 	}
 	return nil, false, err
 }
@@ -369,11 +369,11 @@ func (c *certificates) updateSecret(name string, data map[string][]byte) error {
 }
 
 func (c *certificates) readConfigMap(name string) (map[string]string, error) {
-	held, err := apiclient.Get[configMap](c.client, configMapsPath(c.namespace)+"/"+name)
+	object, err := apiclient.Get[configMap](c.client, configMapsPath(c.namespace)+"/"+name)
 	if err != nil {
 		return nil, err
 	}
-	return held.Data, nil
+	return object.Data, nil
 }
 
 func (c *certificates) createConfigMap(name string, data map[string]string) (map[string]string, bool, error) {
@@ -388,8 +388,8 @@ func (c *certificates) createConfigMap(name string, data map[string]string) (map
 	}
 	err = c.client.RequestJSON(http.MethodPost, configMapsPath(c.namespace), body, nil)
 	if errors.Is(err, apiclient.ErrConflict) {
-		winner, readErr := c.readConfigMap(name)
-		return winner, true, readErr
+		existing, readErr := c.readConfigMap(name)
+		return existing, true, readErr
 	}
 	return nil, false, err
 }

@@ -1,15 +1,13 @@
 package main
 
-// The capture container's own registry.
+// Only the capture container exports these series, and the API
+// container exports its own request metrics, so a tap is not counted
+// twice.
 //
-// The counters here are emitted by the container only, so nothing
-// double-counts: the API keeps its own request series, and the bytes
-// and the stream time are the container's.
-//
-// /metrics, /healthz, and /readyz need no token, because the scrape
-// and the kubelet hold none. They share the one TLS listener the taps
-// use, with a leaf Prometheus has no anchor for, which is why the
-// PodMonitor endpoint skips verification.
+// /metrics, /healthz, and /readyz need no token, because Prometheus and
+// the kubelet send none. They share the TLS listener of the taps, whose
+// certificate is signed by a CA that Prometheus does not trust, so the
+// PodMonitor skips certificate verification for this port.
 
 import (
 	"net/http"
@@ -23,10 +21,9 @@ import (
 // captureComponent is this process's name on liken_build_info.
 const captureComponent = "audio-capture"
 
-// The fixed vocabulary audio_capture_failures_total takes. Every
-// failure a tap can have is counted under one of these six names, so
-// the dashboard's panel by reason is complete and no label arrives
-// that nobody chose.
+// Every call to failed passes one of these reasons, so the reason label
+// of audio_capture_failures_total has a fixed set of values and the
+// dashboard's panel by reason covers every failure.
 const (
 	failureConnect     = "connect"
 	failureTarget      = "target"
@@ -36,7 +33,8 @@ const (
 	failureCertificate = "certificate"
 )
 
-// captureMetrics holds the registry the capture listener serves.
+// Each method of captureMetrics does nothing on a nil receiver.
+// captureRegistryHandler needs a non-nil one.
 type captureMetrics struct {
 	registry *prometheus.Registry
 
@@ -52,7 +50,7 @@ func newCaptureMetrics(version string) *captureMetrics {
 		registry: prometheus.NewRegistry(),
 		ready: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "audio_capture_ready",
-			Help: "One while the container holds a server certificate and can answer a tap.",
+			Help: "One while the container has a server certificate and can serve a tap.",
 		}),
 		bytes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "audio_capture_bytes_total",
@@ -68,7 +66,7 @@ func newCaptureMetrics(version string) *captureMetrics {
 		}, []string{"aspect"}),
 		failures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "audio_capture_failures_total",
-			Help: "Taps that failed, by the failure's own kind.",
+			Help: "Taps that failed, by the kind of failure.",
 		}, []string{"reason"}),
 	}
 
@@ -87,17 +85,16 @@ func newCaptureMetrics(version string) *captureMetrics {
 	return m
 }
 
-// readiness reports whether the container holds the leaf the API
-// signed. Until that file exists no tap can complete its handshake,
-// and this gauge is zero.
-func (m *captureMetrics) readiness(held bool) {
+// readiness sets audio_capture_ready to 1 when the container has the
+// server certificate that audio-api signed, because without it no tap
+// can complete a TLS handshake.
+func (m *captureMetrics) readiness(hasCertificate bool) {
 	if m == nil {
 		return
 	}
-	m.ready.Set(gauge(held))
+	m.ready.Set(gauge(hasCertificate))
 }
 
-// started counts one tap onto the active gauge.
 func (m *captureMetrics) started(aspect string) {
 	if m == nil {
 		return
@@ -105,8 +102,6 @@ func (m *captureMetrics) started(aspect string) {
 	m.active.WithLabelValues(aspect).Inc()
 }
 
-// finished records one tap that ended: how long it ran and how many
-// bytes it delivered.
 func (m *captureMetrics) finished(aspect, format string, sent int64, ran time.Duration) {
 	if m == nil {
 		return
@@ -116,8 +111,6 @@ func (m *captureMetrics) finished(aspect, format string, sent int64, ran time.Du
 	m.seconds.WithLabelValues(aspect, format).Add(ran.Seconds())
 }
 
-// failed counts one tap that did not deliver, under the reason's own
-// name.
 func (m *captureMetrics) failed(reason string) {
 	if m == nil {
 		return
@@ -125,7 +118,6 @@ func (m *captureMetrics) failed(reason string) {
 	m.failures.WithLabelValues(reason).Inc()
 }
 
-// captureRegistryHandler serves this container's registry at /metrics.
 func captureRegistryHandler(m *captureMetrics) http.Handler {
 	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
 }

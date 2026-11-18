@@ -18,25 +18,25 @@ func TestThePrivateLegDialsThePodsOwnAddress(t *testing.T) {
 	relay := &forwarder{port: capturePort}
 	got := relay.origin(capturePod{IP: "10.42.0.7"})
 	if got != "https://10.42.0.7:9201" {
-		t.Errorf("the private leg dials %q", got)
+		t.Errorf("the private leg dials %q, want https://10.42.0.7:9201", got)
 	}
 }
 
-func TestAForwarderWithNoAnchorHoldsNothing(t *testing.T) {
+func TestAForwarderWithNoAnchorBuildsNoClient(t *testing.T) {
 	relay := newForwarder(func() []byte { return nil })
 	if _, err := relay.transport(); !errors.Is(err, ErrNoCertificate) {
-		t.Errorf("a forwarder with no CA answered %v", err)
+		t.Errorf("transport() with no CA returned %v, want ErrNoCertificate", err)
 	}
 }
 
 func TestACAThatIsNotPEMIsARefusal(t *testing.T) {
 	relay := newForwarder(func() []byte { return []byte("not pem") })
 	if _, err := relay.transport(); err == nil {
-		t.Error("a CA that is not PEM was taken")
+		t.Error("transport() with a CA that is not PEM returned no error, want one")
 	}
 }
 
-func TestOnlyTheFourHeadersAreRelayed(t *testing.T) {
+func TestRelayHeadersCopiesOnlyTheRelayedList(t *testing.T) {
 	from := http.Header{}
 	from.Set("Content-Type", "audio/flac")
 	from.Set("Cache-Control", "no-store")
@@ -57,10 +57,9 @@ func TestOnlyTheFourHeadersAreRelayed(t *testing.T) {
 			t.Errorf("%s was relayed as %q, want %q", name, got, want)
 		}
 	}
-	// The API builds these itself, so the container's copy never wins.
 	for _, name := range []string{"Server", "Link"} {
 		if got := to.Get(name); got != "" {
-			t.Errorf("%s was relayed: %q", name, got)
+			t.Errorf("%s was relayed as %q, want no such header", name, got)
 		}
 	}
 }
@@ -71,18 +70,16 @@ func TestAStreamThatGoesQuietForTooLongEnds(t *testing.T) {
 	reader := newIdleReader(quiet, 30*time.Second, at)
 	reader.now = func() time.Time { return at }
 
-	// Nothing has arrived, and the timeout has not passed.
 	if _, err := reader.Read(make([]byte, 8)); err != nil {
 		t.Fatalf("a quiet stream inside the timeout ended: %v", err)
 	}
-	// The timeout passes with nothing delivered.
 	reader.now = func() time.Time { return at.Add(31 * time.Second) }
 	_, err := reader.Read(make([]byte, 8))
 	if err == nil {
-		t.Fatal("a stream that went quiet did not end")
+		t.Fatal("a stream that went quiet returned no error, want the idle end")
 	}
 	if !strings.Contains(err.Error(), "30s") {
-		t.Errorf("the end is reported as %q", err)
+		t.Errorf("the end is reported as %q, want a message that names 30s", err)
 	}
 }
 
@@ -96,35 +93,32 @@ func TestAStreamThatDeliversResetsTheIdleCount(t *testing.T) {
 	if _, err := reader.Read(make([]byte, 7)); err != nil {
 		t.Fatalf("a stream that delivered ended: %v", err)
 	}
-	// The clock moved past the first count, and the delivery reset it.
+	// 21 seconds have passed since the byte at 29 seconds, which is under
+	// the timeout. Counted from the start, 50 seconds would be over it.
 	now = at.Add(50 * time.Second)
 	if _, err := reader.Read(make([]byte, 7)); !errors.Is(err, io.EOF) {
-		t.Errorf("the reader answered %v, want the reader's own end", err)
+		t.Errorf("the reader returned %v, want io.EOF from the underlying reader", err)
 	}
 }
 
-func TestTheIdleCountStartsAfterTheDiscard(t *testing.T) {
-	// A tap with t=45,50 discards forty-five seconds. The count starts
-	// at the end of the discard, so the thirty-second bound never fires
-	// while the container is discarding.
+func TestTheIdleCountStartsAtBegin(t *testing.T) {
+	// A tap with t=45,50 drops 45 seconds of audio before the body
+	// starts, so the silence counts from begin.
 	at := time.Unix(1789000000, 0)
 	reader := newIdleReader(&quietReader{}, 30*time.Second, at.Add(45*time.Second))
 	reader.now = func() time.Time { return at.Add(40 * time.Second) }
 	if _, err := reader.Read(make([]byte, 8)); err != nil {
-		t.Fatalf("the bound fired during the discard: %v", err)
+		t.Fatalf("the bound fired before begin: %v", err)
 	}
 }
 
-// quietReader delivers nothing and never ends, which is a container
-// that has stopped sending.
+// quietReader returns no bytes and no error, like a container that has
+// stopped sending.
 type quietReader struct{}
 
 func (quietReader) Read([]byte) (int, error) { return 0, nil }
 
 func TestASilentConnectionIsCutOffFromOutsideTheRead(t *testing.T) {
-	// A read on a connection that went silent blocks inside the
-	// transport, so the bound has to end the request rather than wait
-	// for a read to come back.
 	synctest.Test(t, func(t *testing.T) {
 		blocked := make(chan struct{})
 		started := time.Now()
@@ -133,7 +127,7 @@ func TestASilentConnectionIsCutOffFromOutsideTheRead(t *testing.T) {
 		defer reader.stopWatching()
 
 		if _, err := reader.Read(make([]byte, 8)); err == nil {
-			t.Fatal("a silent connection was not cut off")
+			t.Fatal("a silent connection returned no error, want the idle end")
 		}
 		if waited := time.Since(started); waited != idleTimeout {
 			t.Errorf("the bound ended the request after %s, want %s", waited, idleTimeout)
@@ -141,8 +135,8 @@ func TestASilentConnectionIsCutOffFromOutsideTheRead(t *testing.T) {
 	})
 }
 
-// blockingReader is a connection that went silent: it returns nothing
-// until the request that owns it is cut off.
+// blockingReader blocks until its channel is closed, like a silent
+// connection until its request is canceled.
 type blockingReader struct{ until chan struct{} }
 
 func (b blockingReader) Read([]byte) (int, error) {
@@ -150,12 +144,6 @@ func (b blockingReader) Read([]byte) (int, error) {
 	return 0, io.EOF
 }
 
-// The private leg is classified by how far the request got, not by
-// what the transport put in the error. Go reports a server that writes
-// garbage and closes as a malformed response, a peek failure, or an
-// unexpected EOF depending on which side of the read the close lands,
-// so a classifier that read the words answered differently for one
-// failure.
 func TestOnlyAConnectionThatWasNeverMadeIsUnreachable(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -169,8 +157,8 @@ func TestOnlyAConnectionThatWasNeverMadeIsUnreachable(t *testing.T) {
 		{"a dial failure the transport wrapped",
 			fmt.Errorf("Get %q: %w", "https://10.42.0.7:9201/",
 				&net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}), false},
-		// Everything below happened after the connection stood.
-		{"a read on a connection that stood",
+		// These failed after the connection was established.
+		{"a read on a connection that was established",
 			&net.OpError{Op: "read", Err: errors.New("connection reset by peer")}, true},
 		{"a malformed response",
 			errors.New(`net/http: HTTP/1.x transport connection broken: malformed HTTP response "x"`), true},
@@ -185,10 +173,6 @@ func TestOnlyAConnectionThatWasNeverMadeIsUnreachable(t *testing.T) {
 	}
 }
 
-// A container whose Secret has yet to arrive serves a certificate it
-// signed itself. That is the plan's "has no certificate yet", it
-// clears when the API mints the leaf, and it is a 503 rather than a
-// 502 about a broken upstream.
 func TestACertificateThisAPIDoesNotTrustIsNotABrokenUpstream(t *testing.T) {
 	untrusted := &tls.CertificateVerificationError{
 		Err: errors.New("x509: certificate signed by unknown authority"),
@@ -202,7 +186,7 @@ func TestACertificateThisAPIDoesNotTrustIsNotABrokenUpstream(t *testing.T) {
 	if trusted(tls.RecordHeaderError{Msg: "first record does not look like a TLS handshake"}) {
 		t.Error("a listener that speaks no TLS read as trusted")
 	}
-	// An answer that did not read is not a certificate problem.
+	// A response that could not be read is not a certificate problem.
 	if !trusted(errors.New("readLoopPeekFailLocked: %!w(<nil>)")) {
 		t.Error("a peek failure read as a certificate problem")
 	}

@@ -1,23 +1,21 @@
 package main
 
-// An inotify watch on a Secret volume for the kubelet's update.
+// The kubelet does not rewrite the files of a Secret or ConfigMap
+// volume. It writes the new files to a new directory, points a symlink
+// ..data_tmp at it, and renames ..data_tmp onto ..data. Every visible
+// file is a symlink through ..data, so a single rename replaces all of
+// them, and a watch on the volume's directory receives it as
+// IN_MOVED_TO with the name ..data.
 //
-// The kubelet does not write a Secret volume's files in place. It
-// writes the new files into a new directory beside the old one, points
-// a symlink named ..data_tmp at it, and renames that symlink onto
-// ..data. Every visible file is a symlink through ..data, so the
-// rename changes all of them at once. The kernel reports the rename to
-// a watch on the volume's directory as IN_MOVED_TO for the name ..data.
+// When the volume was empty, the kubelet renames ..data into place
+// before it creates the visible symlinks, so a read right after the
+// rename can find no tls.crt yet. The watch also fires on IN_CREATE
+// for each visible name, and the read after the last symlink finds
+// every file.
 //
-// The first update of a volume that was empty is different. The
-// kubelet renames ..data into place and then creates the visible
-// symlinks, so a read on the rename can find no tls.crt yet. The watch
-// also wakes on IN_CREATE for each visible name, and the read after
-// the last symlink finds every file.
-//
-// A watch on tls.crt itself would miss the update: the kubelet never
-// writes to that symlink, and the file it names is in a directory the
-// kubelet deletes after the swap.
+// A watch on tls.crt itself would miss updates, because the kubelet
+// never writes through that symlink and deletes the file it pointed to
+// after the rename.
 
 import (
 	"bytes"
@@ -29,24 +27,21 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// volumeData is the name the kubelet renames into place on every
-// update of a Secret volume.
 const volumeData = "..data"
 
-// volumeSwaps wakes its reader once for each swap of ..data, and for
-// each creation of a visible name it follows.
+// volumeSwaps sends on swapped when a file named ..data or one of
+// names is created in the directory or renamed into it.
 //
-// The watch is on the directory's inode, so a directory that is
-// removed ends it: the kernel sends IN_IGNORED. The watch then wakes
-// its reader and starts again on the next arm, on whatever directory
-// holds the path by then. A volume mount cannot be removed while it is
-// mounted, so this is the path of a mount that went away under a live
-// pod.
+// inotify watches the directory's inode, not its path. When the
+// directory is removed or its filesystem is unmounted, the kernel
+// sends IN_IGNORED and drops the watch. volumeSwaps then signals, so
+// the reader reads the volume again and its next arm watches the
+// directory that is at the path by then.
 type volumeSwaps struct {
 	directory string
 	names     []string
-	// swapped holds one wake at most. A reader needs to know that the
-	// volume changed, not how many times.
+	// swapped holds one pending signal, because the reader needs only
+	// to learn that the volume changed, not how many times.
 	swapped chan struct{}
 
 	mu      sync.Mutex
@@ -54,8 +49,7 @@ type volumeSwaps struct {
 	closed  bool
 }
 
-// newVolumeSwaps watches directory for the swap of ..data and for the
-// creation of each of the visible names.
+// newVolumeSwaps watches nothing until the first arm.
 func newVolumeSwaps(directory string, names ...string) *volumeSwaps {
 	return &volumeSwaps{
 		directory: directory,
@@ -64,9 +58,10 @@ func newVolumeSwaps(directory string, names ...string) *volumeSwaps {
 	}
 }
 
-// arm starts the watch when it is down, and forgets every swap so far.
-// A caller arms before it reads the volume: the read sees whatever
-// swapped before it, so that swap owes no second read.
+// arm starts the inotify watch if it is not running, and discards a
+// pending signal. A caller arms before it reads the volume, so the read
+// includes every swap before the arm, and a swap after the arm sends a
+// new signal.
 func (v *volumeSwaps) arm() error {
 	select {
 	case <-v.swapped:
@@ -85,15 +80,16 @@ func (v *volumeSwaps) arm() error {
 		_ = unix.Close(fd)
 		return os.NewSyscallError("inotify_add_watch "+v.directory, err)
 	}
-	// A non-blocking descriptor joins Go's poller, so the read parks
-	// the goroutine instead of a thread, and a close ends the read.
+	// os.NewFile registers a non-blocking descriptor with Go's network
+	// poller, so a blocked Read parks only its goroutine, and Close makes
+	// it return.
 	v.inotify = os.NewFile(uintptr(fd), "inotify")
 	go v.read(v.inotify)
 	return nil
 }
 
-// read reads events until the watch closes or its directory goes, and
-// wakes on each event that names ..data or a visible name.
+// read signals for each event on one of v.names, until the file closes
+// or the kernel sends IN_IGNORED.
 func (v *volumeSwaps) read(file *os.File) {
 	buffer := make([]byte, 64*(unix.SizeofInotifyEvent+unix.NAME_MAX+1))
 	for {
@@ -102,8 +98,7 @@ func (v *volumeSwaps) read(file *os.File) {
 			return
 		}
 		for offset := 0; offset+unix.SizeofInotifyEvent <= n; {
-			// The mask and the name's length are fields of the event
-			// header, in the machine's own byte order.
+			// The kernel writes inotify_event in the machine's byte order.
 			mask := binary.NativeEndian.Uint32(buffer[offset+4 : offset+8])
 			length := int(binary.NativeEndian.Uint32(buffer[offset+12 : offset+16]))
 			start := offset + unix.SizeofInotifyEvent
@@ -120,8 +115,8 @@ func (v *volumeSwaps) read(file *os.File) {
 	}
 }
 
-// lost ends a watch whose directory went. The reader wakes so it reads
-// the volume at once, and its next arm starts a new watch.
+// lost closes a watch that received IN_IGNORED and signals, so the
+// reader reads the volume and calls arm to start a new watch.
 func (v *volumeSwaps) lost(file *os.File) {
 	v.mu.Lock()
 	if v.inotify == file {
@@ -139,8 +134,7 @@ func (v *volumeSwaps) wake() {
 	}
 }
 
-// close ends the watch for good. The close of the descriptor ends the
-// read goroutine.
+// close stops the watch for good, and a later arm does nothing.
 func (v *volumeSwaps) close() {
 	v.mu.Lock()
 	defer v.mu.Unlock()

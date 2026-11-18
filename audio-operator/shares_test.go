@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the slice side of a shared endpoint: the share
-// count a cluster owner declares on a Sink or a Source, and the
-// capacity the published device carries for it.
-
 import (
 	"context"
 	"errors"
@@ -13,9 +9,9 @@ import (
 
 func intPointer(i int) *int { return &i }
 
-// A device publishes allowMultipleAllocations and its claims capacity
-// only when its resource declares a share count. Every other device
-// publishes neither, so it allocates once, as it always has.
+// A device with no share count publishes neither
+// allowMultipleAllocations nor a capacity, so the scheduler allocates
+// it to one claim at a time.
 func TestShareDevicesPublishesTheDeclaredCount(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -52,9 +48,8 @@ func TestShareDevicesPublishesTheDeclaredCount(t *testing.T) {
 	}
 }
 
-// A count of one is no share. The schema refuses it, and the slice
-// publishes the device as exclusive if a count below two reaches it
-// anyway.
+// The schema refuses a count below 2, and shareDevices publishes the
+// device as exclusive when one reaches it anyway.
 func TestShareDevicesIgnoresACountBelowTwo(t *testing.T) {
 	got := shareDevices([]SliceDevice{{Name: testAnalogName}}, map[string]int{testAnalogName: 1})
 	if !reflect.DeepEqual(got, []SliceDevice{{Name: testAnalogName}}) {
@@ -64,9 +59,8 @@ func TestShareDevicesIgnoresACountBelowTwo(t *testing.T) {
 
 func boolPointer(b bool) *bool { return &b }
 
-// The share counts come from the machine's Sinks and Sources, by the
-// endpoint's device name. A resource that declares none is not in
-// the answer.
+// A Sink or Source that sets no spec.sharedClaims has no entry in the
+// result.
 func TestSharedClaimsReadsTheDeclaredCounts(t *testing.T) {
 	api := newEndpointAPI()
 	api.sinks[testAnalogName] = &Sink{
@@ -87,7 +81,7 @@ func TestSharedClaimsReadsTheDeclaredCounts(t *testing.T) {
 
 	shares, err := control.sharedClaims()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the share counts: %v", err)
 	}
 	want := map[string]int{testAnalogName: 4, testSourceName: 2}
 	if !reflect.DeepEqual(shares, want) {
@@ -95,10 +89,9 @@ func TestSharedClaimsReadsTheDeclaredCounts(t *testing.T) {
 	}
 }
 
-// The pass publishes the declared share in the slice it writes, and a
-// later pass that cannot read the resources keeps the share it read
-// last. A share that vanished on one failed read would publish the
-// device as exclusive for a pass.
+// A pass that cannot read the share counts publishes the counts of the
+// last read, so one failed read does not publish a shared device as
+// exclusive.
 func TestReconcilePublishesTheDeclaredShare(t *testing.T) {
 	slices := &slicePublishFixture{}
 	operator := testReconciler(t, slices, staticGraph(outputGraph(map[pcmAddress]string{
@@ -108,25 +101,26 @@ func TestReconcilePublishesTheDeclaredShare(t *testing.T) {
 	operator.readShares = func() (map[string]int, error) { return read, nil }
 
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
 	assertShared(t, lastPublished(t, slices), testAnalogName, "3")
 
 	operator.readShares = func() (map[string]int, error) { return nil, errors.New("the API server refused the list") }
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass after a failed read of the share counts: %v", err)
 	}
 	assertShared(t, lastPublished(t, slices), testAnalogName, "3")
 }
 
-// lastPublished is the slice the fixture received last.
+// lastPublished returns the devices of the last slice that the fixture
+// received.
 func lastPublished(t *testing.T, f *slicePublishFixture) []SliceDevice {
 	t.Helper()
 	if f.updated != nil {
 		return f.updated.Spec.Devices
 	}
 	if f.created == nil {
-		t.Fatal("the pass published nothing")
+		t.Fatal("the fixture received no slice, want one")
 	}
 	return f.created.Spec.Devices
 }
@@ -147,5 +141,5 @@ func assertShared(t *testing.T, devices []SliceDevice, name, claims string) {
 		}
 		return
 	}
-	t.Errorf("the slice holds no device %s: %+v", name, devices)
+	t.Errorf("the slice has no device %s: %+v, want it shared", name, devices)
 }

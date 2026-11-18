@@ -1,22 +1,11 @@
 package main
 
-// Asking the API server who is calling.
-//
-// A TokenReview is the Kubernetes mechanism for "who is calling me".
-// It uses the API server's own keys, and it needs no secret to mount
-// and no rotation of its own, which is why there is no minted shared
-// secret here. Both processes use it. The API reviews the caller's
-// token with the audience audio-api; the capture container reviews
-// the API's own projected token with the audience audio-capture.
-//
-// The review carries the audience in its spec and the answer carries
-// status.audiences. This code reads the answer rather than trusting
-// the ask, so a token minted for another audience never reaches a
-// route here.
-//
-// The cache key is the SHA-256 of the raw token. A positive verdict
-// is kept for the lesser of the token's own expiry and sixty seconds,
-// a denial is never cached, and the key is never logged.
+// Both HTTP servers of this component authenticate a bearer token with
+// a TokenReview. audio-api reviews a caller's token for the audience
+// audio-api. The capture container reviews the projected token that
+// audio-api sends with each request it forwards, for the audience
+// audio-capture. The API server checks the token with its own keys, so
+// neither server has a shared Secret or a key of its own to rotate.
 
 import (
 	"crypto/sha256"
@@ -33,39 +22,48 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The two audiences. An audience is what keeps every pod's ordinary
-// API-server token out of these two doors: a token minted for the API
-// server alone reviews as not for either one.
+// A pod's default ServiceAccount token has only the API server's
+// audience, so it fails review for both of these. A client must mount a
+// projected token requested for one of them.
 const (
 	apiAudience     = "audio-api"
 	captureAudience = "audio-capture"
 )
 
-// captureCaller is the one identity the capture container accepts on
-// its private leg.
+// captureCaller is the only username that the capture container
+// accepts. It is the ServiceAccount of audio-api, which forwards
+// requests to the capture container.
 const captureCaller = "system:serviceaccount:liken-system:audio-api"
 
-// tokenReviewPath is where a TokenReview is created.
 const tokenReviewPath = "/apis/authentication.k8s.io/v1/tokenreviews"
 
-// tokenCacheMax bounds how long a positive verdict is kept.
+// tokenCacheMax is the longest time that a reviewer accepts a token
+// from its cache without a new TokenReview. The cache entry expires
+// sooner when the token's exp claim comes sooner. When the API server
+// starts to refuse a token before its exp claim, the reviewer can still
+// accept it from the cache for up to tokenCacheMax.
 const tokenCacheMax = 60 * time.Second
 
-// sweepAbove is how many verdicts the cache holds before a new one
-// clears the expired ones out. Every verdict is kept at most a minute,
-// so the sweep is what bounds the map rather than what keeps it small.
-const sweepAbove = 64
+// When the cache has cacheSweepSize entries or more, store deletes the
+// expired ones before it adds an entry. cached deletes an expired entry
+// only when a client presents its token again, and a client that gets a
+// new token for each request never does. Without the sweep, the map
+// grows for as long as the process runs.
+const cacheSweepSize = 64
 
-// ErrTokenDenied marks a token the API server refused, which is a 401
-// with the review's own words. Every other failure of a review is the
-// API server not answering, which is a 503.
+// ErrTokenDenied is the error that review wraps when the API server
+// refuses the token: the TokenReview returned authenticated false, or
+// its status.audiences lacks the reviewer's audience. audio-api responds
+// to this error with a 401, and to any other error of review, such as a
+// failed request to the API server, with a 503, because the API server
+// did not judge the token. The capture container responds to every
+// error of review with a 401.
 var ErrTokenDenied = errors.New("the token review refused the token")
 
-// caller is who is calling. A TokenReview answers with all four
-// fields, and a verified client certificate answers with the user and
-// the groups alone, so every route and every record reads one type
-// and never checks which credential arrived. A SubjectAccessReview
-// copies all four.
+// caller is the authenticated identity of a request. A TokenReview
+// fills every field, and a verified client certificate fills only
+// Username and Groups. The routes and the SubjectAccessReview read
+// caller, so they do not depend on which credential the client used.
 type caller struct {
 	Username string
 	UID      string
@@ -73,7 +71,6 @@ type caller struct {
 	Extra    map[string][]string
 }
 
-// tokenReview is the object sent and the object returned.
 type tokenReview struct {
 	APIVersion string            `json:"apiVersion"`
 	Kind       string            `json:"kind"`
@@ -100,22 +97,22 @@ type tokenUserInfo struct {
 	Extra    map[string][]string `json:"extra"`
 }
 
-// reviewer reviews tokens for one audience and keeps the positive
-// verdicts.
+// reviewer sends TokenReviews for one audience and caches the identity
+// of each token that passes. It never caches a refusal.
 type reviewer struct {
 	client   *apiclient.Client
 	audience string
 
-	// now is a field so a test reads a fixed clock off the cache
-	// instead of waiting for a real minute to pass.
+	// A test replaces now to move the cache past an expiry without
+	// waiting for it.
 	now func() time.Time
 
-	mu    sync.Mutex
-	kept  map[string]keptVerdict
-	calls int
+	mu      sync.Mutex
+	entries map[string]cacheEntry
+	calls   int
 }
 
-type keptVerdict struct {
+type cacheEntry struct {
 	who   caller
 	until time.Time
 }
@@ -125,13 +122,15 @@ func newReviewer(client *apiclient.Client, audience string) *reviewer {
 		client:   client,
 		audience: audience,
 		now:      time.Now,
-		kept:     map[string]keptVerdict{},
+		entries:  map[string]cacheEntry{},
 	}
 }
 
-// review answers who holds the token, or why the API server refused
-// it. A refusal carries the review's own words, which is what the
-// 401's error_description publishes.
+// review returns the identity of the token's owner, from the cache when
+// it has the token. When the API server refuses the token, the error
+// wraps ErrTokenDenied, and its text has the TokenReview's status.error
+// or the audience that the token lacks. Both servers send that text to
+// the client as the error_description of their 401.
 func (r *reviewer) review(token string) (caller, error) {
 	key := tokenKey(token)
 	if who, found := r.cached(key); found {
@@ -148,34 +147,37 @@ func (r *reviewer) review(token string) (caller, error) {
 		return caller{}, err
 	}
 	r.counted()
-	var answer tokenReview
-	if err := r.client.RequestJSON("POST", tokenReviewPath, body, &answer); err != nil {
+	var response tokenReview
+	if err := r.client.RequestJSON("POST", tokenReviewPath, body, &response); err != nil {
 		return caller{}, fmt.Errorf("reviewing the token: %w", err)
 	}
-	if !answer.Status.Authenticated {
-		return caller{}, fmt.Errorf("%w: %s", ErrTokenDenied, refusalWords(answer.Status.Error))
+	if !response.Status.Authenticated {
+		return caller{}, fmt.Errorf("%w: %s", ErrTokenDenied, tokenRefusalReason(response.Status.Error))
 	}
-	// The ask is not the answer. A token minted for another audience
-	// comes back authenticated with its own audiences, so the answer
-	// is what decides.
-	if !slices.Contains(answer.Status.Audiences, r.audience) {
+	// status.authenticated alone does not prove the audience. An
+	// authenticator that does not support audiences ignores
+	// spec.audiences and can return authenticated with an empty
+	// status.audiences, which means that the token is for the API server
+	// itself. The TokenReview API documentation tells a client that sets
+	// spec.audiences to check that status.audiences has one of them.
+	if !slices.Contains(response.Status.Audiences, r.audience) {
 		return caller{}, fmt.Errorf("%w: the token is not for the audience %s", ErrTokenDenied, r.audience)
 	}
 
 	who := caller{
-		Username: answer.Status.User.Username,
-		UID:      answer.Status.User.UID,
-		Groups:   answer.Status.User.Groups,
-		Extra:    answer.Status.User.Extra,
+		Username: response.Status.User.Username,
+		UID:      response.Status.User.UID,
+		Groups:   response.Status.User.Groups,
+		Extra:    response.Status.User.Extra,
 	}
-	r.keep(key, who, token)
+	r.store(key, who, token)
 	return who, nil
 }
 
-// refusalWords is the review's own text, or a stand-in when the API
-// server sent none. A 401 has to say something, and "authenticated is
-// false with no error" is what it says then.
-func refusalWords(text string) string {
+// tokenRefusalReason returns status.error, or a fixed reason when the API
+// server left it empty, so the error_description of a 401 is never
+// empty.
+func tokenRefusalReason(text string) string {
 	if strings.TrimSpace(text) == "" {
 		return "the API server reported the token as not authenticated and gave no reason"
 	}
@@ -185,42 +187,36 @@ func refusalWords(text string) string {
 func (r *reviewer) cached(key string) (caller, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	verdict, found := r.kept[key]
+	entry, found := r.entries[key]
 	if !found {
 		return caller{}, false
 	}
-	if !r.now().Before(verdict.until) {
-		delete(r.kept, key)
+	if !r.now().Before(entry.until) {
+		delete(r.entries, key)
 		return caller{}, false
 	}
-	return verdict.who, true
+	return entry.who, true
 }
 
-// keep holds a positive verdict for the lesser of the token's own
-// expiry and tokenCacheMax, so a token the API server would refuse a
-// moment from now is never accepted from memory.
-//
-// The sweep is here because an expired verdict otherwise leaves the
-// map only when the same token is looked up again. A caller that
-// presents a fresh token every time never looks any of them up twice,
-// so without the sweep the map would grow for as long as the process
-// runs.
-func (r *reviewer) keep(key string, who caller, token string) {
+// store caches the identity for tokenCacheMax, or until the token's exp
+// claim when that comes sooner, so the cache never accepts a token after
+// its exp claim.
+func (r *reviewer) store(key string, who caller, token string) {
 	until := r.now().Add(tokenCacheMax)
 	if expiry, found := tokenExpiry(token); found && expiry.Before(until) {
 		until = expiry
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(r.kept) >= sweepAbove {
+	if len(r.entries) >= cacheSweepSize {
 		now := r.now()
-		for held, verdict := range r.kept {
-			if !now.Before(verdict.until) {
-				delete(r.kept, held)
+		for cachedKey, entry := range r.entries {
+			if !now.Before(entry.until) {
+				delete(r.entries, cachedKey)
 			}
 		}
 	}
-	r.kept[key] = keptVerdict{who: who, until: until}
+	r.entries[key] = cacheEntry{who: who, until: until}
 }
 
 func (r *reviewer) counted() {
@@ -229,24 +225,23 @@ func (r *reviewer) counted() {
 	r.mu.Unlock()
 }
 
-// reviews is how many times this reviewer has asked the API server,
-// which is what a test reads to prove the cache holds.
 func (r *reviewer) reviews() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.calls
 }
 
-// tokenKey is the cache key: the SHA-256 of the raw token. The token
-// itself never enters the map, and the key never enters a log line.
+// tokenKey returns the hex SHA-256 of the token. The cache uses it as
+// the key, so the map holds no credential that a client could present.
 func tokenKey(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
 
-// tokenExpiry reads the exp claim of a ServiceAccount token. The
-// signature is not checked here, because the TokenReview above already
-// checked it; this read only shortens how long the verdict is kept.
+// tokenExpiry reads the exp claim from the payload of a ServiceAccount
+// JWT without checking the signature. That is enough, because review
+// calls it only after the API server accepted the token, and the value
+// can only shorten how long the cache keeps the identity.
 func tokenExpiry(token string) (time.Time, bool) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -265,10 +260,13 @@ func tokenExpiry(token string) (time.Time, bool) {
 	return time.Unix(claims.Expiry, 0), true
 }
 
-// bearerToken reads the credential out of an Authorization header. An
-// absent header and a header of another scheme both answer with no
-// token, which is the 401 that carries the realm alone (RFC 6750
-// section 2.1).
+// bearerToken returns the credential of an Authorization header whose
+// scheme is Bearer, in any letter case, because HTTP compares
+// authentication schemes without case. It returns false for a missing
+// header, another scheme, or an empty credential. Both servers respond
+// to false with a 401 whose challenge has only the realm, because RFC
+// 6750 section 3.1 gives no error code to a request that has no
+// authentication.
 func bearerToken(header string) (string, bool) {
 	scheme, credential, found := strings.Cut(header, " ")
 	if !found || !strings.EqualFold(scheme, "Bearer") {

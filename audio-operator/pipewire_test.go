@@ -9,44 +9,38 @@ import (
 	"time"
 )
 
-// The document in testdata is the shape pw-dump prints: an array of
-// objects, each with its interface type and its properties. pw-dump
-// leaves a property whose value reads as a number unquoted, even
-// though every value in PipeWire's property list is a string, so the
-// fixture holds both forms.
+// pw-dump prints a property that looks like a number without quotes,
+// so the fixture has card and device values in both forms.
 func TestParseGraph(t *testing.T) {
 	graph, err := parseGraph(fixture(t, "pw-dump.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing pw-dump.json: %v", err)
 	}
 	sinks := sinkNames(graph)
 	if len(sinks) != 2 {
 		t.Fatalf("sinks = %v, want two", sinks)
 	}
 	if len(graph.Speakers) != 0 {
-		t.Errorf("a graph with no radio in it holds %v", graph.Speakers)
+		t.Errorf("a graph with no radio has the speakers %v, want none", graph.Speakers)
 	}
 
-	// The HDMI sink names its card and device as numbers, and two
-	// sinks name that PCM device. The first name in alphabetical order
-	// is the one that publishes, so a profile change that leaves the
-	// pair for a moment does not write the slice twice.
+	// The HDMI sink gives its card and device as numbers. Two sinks
+	// claim that PCM device, and the name that sorts first wins.
 	hdmi := sinks[pcmAddress{Card: 0, PCM: 3}]
-	if hdmi != "alsa_output.pci-0000_00_1f.3.hdmi-stereo" {
-		t.Errorf("the HDMI sink = %q", hdmi)
+	if want := "alsa_output.pci-0000_00_1f.3.hdmi-stereo"; hdmi != want {
+		t.Errorf("the HDMI sink = %q, want %q", hdmi, want)
 	}
 
-	// The analog sink names its card and device as strings, under the
-	// keys the ALSA plugin writes.
+	// The analog sink gives its card and device as strings, under the
+	// keys that the ALSA plugin writes.
 	analog := sinks[pcmAddress{Card: 0, PCM: 0}]
-	if analog != "alsa_output.pci-0000_00_1f.3.analog-stereo" {
-		t.Errorf("the analog sink = %q", analog)
+	if want := "alsa_output.pci-0000_00_1f.3.analog-stereo"; analog != want {
+		t.Errorf("the analog sink = %q, want %q", analog, want)
 	}
 }
 
-// The cookie is the random number a PipeWire daemon picks when it
-// starts, and pw-dump prints it in the Core object's info block. A
-// document with no Core object reads as cookie zero.
+// pw-dump prints the cookie in the info block of the Core object. A
+// document with no Core object has cookie zero.
 func TestParseGraphReadsThePipeWireCookie(t *testing.T) {
 	cases := []struct {
 		fixture string
@@ -59,7 +53,7 @@ func TestParseGraphReadsThePipeWireCookie(t *testing.T) {
 		t.Run(c.fixture, func(t *testing.T) {
 			graph, err := parseGraph(fixture(t, c.fixture))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing %s: %v", c.fixture, err)
 			}
 			if graph.Cookie != c.cookie {
 				t.Errorf("cookie = %d, want %d", graph.Cookie, c.cookie)
@@ -68,15 +62,13 @@ func TestParseGraphReadsThePipeWireCookie(t *testing.T) {
 	}
 }
 
-// The nodes this operator declares have no alsa.card and no
-// alsa.device, because those two come from the udev device that
-// WirePlumber's monitor builds and this graph has no monitor in it.
-// The operator's own two properties map a declared node back to its
-// PCM device.
+// A declared node has no alsa.card or alsa.device, so the operator's
+// own liken.audio.card and liken.audio.pcm properties map it to its PCM
+// device.
 func TestParseGraphMapsTheNodesTheOperatorDeclares(t *testing.T) {
 	graph, err := parseGraph(fixture(t, "pw-dump-declared.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing pw-dump-declared.json: %v", err)
 	}
 	sinks := sinkNames(graph)
 	if len(sinks) != 2 {
@@ -90,44 +82,42 @@ func TestParseGraphMapsTheNodesTheOperatorDeclares(t *testing.T) {
 	}
 }
 
-// A capture PCM declares its own node under the
-// same two properties as the playback one, so the direction is what
-// separates them, and that a source never enters the playback index
-// the delivery reads.
+// The capture node of a PCM device has the same card and PCM
+// properties as its playback node, so only the direction separates
+// them, and sinkNames must not return the capture node.
 func TestParseGraphMapsACaptureNode(t *testing.T) {
 	graph, err := parseGraph(fixture(t, "pw-dump-declared.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing pw-dump-declared.json: %v", err)
 	}
 	analog := pcmAddress{Card: 0, PCM: 0}
 	source := graph.Nodes[nodeAddress{pcmAddress: analog, Direction: directionSource}]
 	if source.Name != "liken.audio.card0-pcm0c" {
-		t.Errorf("the capture node = %q", source.Name)
+		t.Errorf("the capture node = %q, want liken.audio.card0-pcm0c", source.Name)
 	}
 	if source.ID != 50 {
 		t.Errorf("the capture node's id = %d, want 50", source.ID)
 	}
 	sink := graph.Nodes[nodeAddress{pcmAddress: analog, Direction: directionSink}]
 	if sink.Name != sinkNodeName(0, 0) {
-		t.Errorf("the playback node on the same PCM device = %q", sink.Name)
+		t.Errorf("the playback node on the same PCM device = %q, want %q", sink.Name, sinkNodeName(0, 0))
 	}
 	if got, has := sinkNames(graph)[analog]; got == source.Name || !has {
-		t.Errorf("the playback index holds %q for the analog PCM", got)
+		t.Errorf("the playback index has %q, present %t, for the analog PCM, want the playback node and not the capture node %q", got, has, source.Name)
 	}
 }
 
-// The three facts the endpoint's status reads off a
-// node, and the two shapes a declared node prints them in: a running
-// node carries its levels and its negotiated format, and a suspended
-// one carries an empty list for each.
+// A running declared node prints its levels, mute, and negotiated
+// format. A suspended one prints an empty list for the levels and the
+// format.
 func TestParseGraphReadsTheFactsAStatusReports(t *testing.T) {
 	graph, err := parseGraph(fixture(t, "pw-dump-declared.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing pw-dump-declared.json: %v", err)
 	}
 	running := graph.Nodes[nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 3}, Direction: directionSink}]
 	if !running.Mute {
-		t.Error("the muted node reports itself unmuted")
+		t.Error("the muted node reads as unmuted, want muted")
 	}
 	if want := []float64{0.5, 0.5}; !reflect.DeepEqual(running.Volumes, want) {
 		t.Errorf("levels = %v, want %v", running.Volumes, want)
@@ -139,19 +129,18 @@ func TestParseGraphReadsTheFactsAStatusReports(t *testing.T) {
 
 	suspended := graph.Nodes[nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink}]
 	if len(suspended.Volumes) != 0 {
-		t.Errorf("a suspended node reports the levels %v", suspended.Volumes)
+		t.Errorf("a suspended node reports the levels %v, want none", suspended.Volumes)
 	}
 	if !reflect.DeepEqual(suspended.Format, pwFormat{}) {
-		t.Errorf("a suspended node reports the format %+v", suspended.Format)
+		t.Errorf("a suspended node reports the format %+v, want none", suspended.Format)
 	}
 	if suspended.Mute {
-		t.Error("a suspended node's mute was read from the ALSA Props block")
+		t.Error("a suspended node reads as muted, want unmuted, because the ALSA Props block carries no mute")
 	}
 }
 
-// A node's info carries its state, and a suspended node can still
-// print the channelVolumes it last ran at. The state is what says the
-// level is not current.
+// A suspended node can still print the channelVolumes it last ran at,
+// so the node's state, not the list, shows that the level is stale.
 func TestParseGraphReadsWhetherANodeIsSuspended(t *testing.T) {
 	node := func(id int, pcm, state string) string {
 		return `{"id": ` + strconv.Itoa(id) + `, "type": "PipeWire:Interface:Node", "info": {"state": "` + state + `",
@@ -161,34 +150,34 @@ func TestParseGraphReadsWhetherANodeIsSuspended(t *testing.T) {
 	}
 	graph, err := parseGraph([]byte("[" + node(40, "3", "suspended") + "," + node(41, "7", "running") + "]"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the two-node document: %v", err)
 	}
 	suspended := graph.Nodes[nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 3}, Direction: directionSink}]
 	if !suspended.Suspended || len(suspended.Volumes) != 2 {
-		t.Errorf("the suspended node reads as %+v", suspended)
+		t.Errorf("the suspended node reads as %+v, want Suspended with two levels", suspended)
 	}
 	if running := graph.Nodes[nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 7}, Direction: directionSink}]; running.Suspended {
-		t.Errorf("the running node reads as suspended: %+v", running)
+		t.Errorf("the running node reads as %+v, want it not suspended", running)
 	}
 }
 
 func TestParseGraphReportsBrokenOutput(t *testing.T) {
 	if _, err := parseGraph([]byte("this is not JSON")); err == nil {
-		t.Fatal("a document that is not JSON did not report an error")
+		t.Fatal("parseGraph of a document that is not JSON returned no error, want one")
 	}
 }
 
-// The peer this file's Bluetooth fixtures name, in the three
-// forms the operator uses: the key it maps on, the device name it
-// publishes, and the node name WirePlumber builds.
+// The peer of the Bluetooth fixtures as the key of pwGraph.Speakers, as
+// the device name that the operator publishes, and as the node name
+// that WirePlumber builds.
 const (
 	testSpeakerAddress = "a0:ab:51:33:b7:12"
 	testSpeakerName    = "a0-ab-51-33-b7-12"
 	testSpeakerNode    = "bluez_output.A0_AB_51_33_B7_12.1"
 )
 
-// outputGraph is a graph with the card's sinks in it and no
-// Bluetooth speaker, which is what a machine with no radio holds.
+// outputGraph is a graph with the card's sinks and no Bluetooth
+// speaker.
 func outputGraph(sinks map[pcmAddress]string) pwGraph {
 	nodes := map[nodeAddress]pwNode{}
 	for address, name := range sinks {
@@ -197,8 +186,7 @@ func outputGraph(sinks map[pcmAddress]string) pwGraph {
 	return pwGraph{Nodes: nodes, Speakers: map[string]bluezSink{}}
 }
 
-// sinkNames reads back the playback node of each PCM device, which is
-// what the tests below assert a parse produced.
+// sinkNames returns the name of the playback node of each PCM device.
 func sinkNames(graph pwGraph) map[pcmAddress]string {
 	names := map[pcmAddress]string{}
 	for address, node := range graph.Nodes {
@@ -209,32 +197,30 @@ func sinkNames(graph pwGraph) map[pcmAddress]string {
 	return names
 }
 
-// speakerGraph is the other half: a graph with Bluetooth sinks in
-// it and no card.
 func speakerGraph(speakers map[string]bluezSink) pwGraph {
 	return pwGraph{Nodes: map[nodeAddress]pwNode{}, Speakers: speakers}
 }
 
-// staticGraph reads back one fixed graph, so a test drives a pass
-// with no PipeWire behind it.
+// staticGraph returns a graph read that always returns graph, so a
+// test can run a pass without PipeWire.
 func staticGraph(graph pwGraph) func(context.Context) (pwGraph, error) {
 	return func(context.Context) (pwGraph, error) { return graph, nil }
 }
 
-// The fixture is assembled from the property names the bluez5 SPA
-// plugin sets in pipewire 1.4.2 and the node name WirePlumber 0.5.8
-// builds from them. It was not captured from a machine with a
-// speaker on it; the drill supplies that capture.
+// The fixture is written by hand from the property names that the
+// bluez5 SPA plugin of pipewire 1.4.2 sets and the node name that
+// WirePlumber 0.5.8 builds from them. It is not a capture from a
+// machine with a speaker.
 func TestParseGraphReadsABluetoothSink(t *testing.T) {
 	graph, err := parseGraph(fixture(t, "pw-dump-bluez.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing pw-dump-bluez.json: %v", err)
 	}
 	if len(graph.Speakers) != 1 {
 		t.Fatalf("speakers = %v, want one", graph.Speakers)
 	}
-	// The address is the key, in the lowercase colon form, whatever
-	// case BlueZ printed it in.
+	// The key is the address in lowercase colon form, whatever case
+	// BlueZ printed it in.
 	sink := graph.Speakers[testSpeakerAddress]
 	if sink.Node != testSpeakerNode {
 		t.Errorf("node = %q, want %q", sink.Node, testSpeakerNode)
@@ -242,17 +228,16 @@ func TestParseGraphReadsABluetoothSink(t *testing.T) {
 	if sink.Codec != "sbc" {
 		t.Errorf("codec = %q, want sbc", sink.Codec)
 	}
-	// The node's own object id and its channel volumes, which a codec
-	// switch needs: the switch destroys this node and builds another
-	// one, born at PipeWire's own level rather than this one.
+	// A level write on the node names it by NodeID and reads the channel
+	// count from Volumes.
 	if sink.NodeID != 63 {
 		t.Errorf("node id = %d, want 63", sink.NodeID)
 	}
 	if want := []float64{0.064, 0.064}; !reflect.DeepEqual(sink.Volumes, want) {
 		t.Errorf("volumes = %v, want %v", sink.Volumes, want)
 	}
-	// The codec set comes from the bluez5 Device object, not from the
-	// node, and the write that switches the codec names that object.
+	// The codecs come from the bluez5 Device object, not from the node,
+	// because the write that switches the codec names the device.
 	if sink.Device != 62 {
 		t.Errorf("device id = %d, want 62", sink.Device)
 	}
@@ -265,34 +250,32 @@ func TestParseGraphReadsABluetoothSink(t *testing.T) {
 	if !reflect.DeepEqual(sink.Codecs, codecs) {
 		t.Errorf("codecs = %+v, want %+v", sink.Codecs, codecs)
 	}
-	// The speaker's level lives on the device's
-	// Route, that the Output route is the speaker's and the Input one
-	// is the headset microphone this pod does not open, and that
-	// volumeStep is the graph saying the transport reports a volume.
+	// The speaker's own level is on the device's Output route. The
+	// Input route is the headset microphone, which this pod does not
+	// open. A volumeStep shows that the transport has a volume of its
+	// own.
 	route := sink.Route
 	if route == nil {
-		t.Fatal("the device published no output route")
+		t.Fatal("the device's output route is nil, want the Output route")
 	}
 	if route.Index != 1 || route.Device != 0 {
 		t.Errorf("route = index %d device %d, want index 1 device 0", route.Index, route.Device)
 	}
 	if !route.Mute {
-		t.Error("the muted route reports itself unmuted")
+		t.Error("the muted route reads as unmuted, want muted")
 	}
 	if want := []float64{0.25, 0.25}; !reflect.DeepEqual(route.Volumes, want) {
 		t.Errorf("route levels = %v, want %v", route.Volumes, want)
 	}
 	if !route.AbsoluteVolume {
-		t.Error("a route with a volumeStep reports no absolute volume")
+		t.Error("a route with a volumeStep reports no absolute volume, want AbsoluteVolume")
 	}
-	// The speaker's own node carries the format the transport
-	// negotiated.
 	if want := (pwFormat{Rate: 44100, Channels: 2, Positions: []string{"FL", "FR"}}); !reflect.DeepEqual(sink.Format, want) {
 		t.Errorf("format = %+v, want %+v", sink.Format, want)
 	}
 
-	// The card's own sink is in the same document, and a Bluetooth
-	// node has no ALSA address for it to be mistaken for.
+	// The card's sink is in the same document, and the Bluetooth node
+	// has no ALSA address that could be mistaken for it.
 	sinks := sinkNames(graph)
 	if got := sinks[pcmAddress{Card: 0, PCM: 0}]; got != sinkNodeName(0, 0) {
 		t.Errorf("the analog sink = %q, want %q", got, sinkNodeName(0, 0))
@@ -302,7 +285,7 @@ func TestParseGraphReadsABluetoothSink(t *testing.T) {
 	}
 }
 
-// The declared outputs and a graph that holds a sink for each one.
+// testSinks has a sink node for each output of testOutputs.
 func testOutputs() []alsaEndpoint {
 	return []alsaEndpoint{
 		{Card: 0, PCM: 0, DeviceName: "liken-1-pci-0000-00-1f-3-alc236-analog"},
@@ -318,7 +301,7 @@ func testSinks() map[pcmAddress]string {
 }
 
 // PipeWire creates the declared nodes while it loads its
-// configuration, so the usual case is one graph read and no wait.
+// configuration, so the first graph read normally finds them all.
 func TestWaitForNodesReturnsAsSoonAsEveryOutputHasASink(t *testing.T) {
 	reads := 0
 	read := func(context.Context) (pwGraph, error) {
@@ -333,13 +316,13 @@ func TestWaitForNodesReturnsAsSoonAsEveryOutputHasASink(t *testing.T) {
 		t.Errorf("read the graph %d times, want one", reads)
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Errorf("waited %s for nodes that were already there", elapsed)
+		t.Errorf("waited %s for nodes that were already there, want no wait", elapsed)
 	}
 }
 
 // An output whose node PipeWire could not create publishes with the
-// no-sink taint. Waiting past the timeout would leave the card's
-// working outputs unpublished over the one that is broken.
+// no-sink taint, so waitForNodes stops at the timeout. A longer wait
+// would keep the card's working outputs unpublished.
 func TestWaitForNodesGivesUpAtTheTimeout(t *testing.T) {
 	read := func(context.Context) (pwGraph, error) {
 		return outputGraph(map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)}), nil
@@ -349,11 +332,12 @@ func TestWaitForNodesGivesUpAtTheTimeout(t *testing.T) {
 	waitForNodes(context.Background(), read, testOutputs(), 50*time.Millisecond)
 
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("waited %s past a %s timeout", elapsed, 50*time.Millisecond)
+		t.Errorf("waited %s with a %s timeout, want under 5s", elapsed, 50*time.Millisecond)
 	}
 }
 
-// A graph that never reads is the same bounded wait, and not a hang.
+// A graph read that keeps failing ends at the timeout too, and does
+// not hang.
 func TestWaitForNodesGivesUpWhenTheGraphNeverReads(t *testing.T) {
 	read := func(context.Context) (pwGraph, error) {
 		return pwGraph{}, errors.New("running pw-dump: no such file or directory")
@@ -363,7 +347,7 @@ func TestWaitForNodesGivesUpWhenTheGraphNeverReads(t *testing.T) {
 	waitForNodes(context.Background(), read, testOutputs(), 50*time.Millisecond)
 
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("waited %s past a %s timeout", elapsed, 50*time.Millisecond)
+		t.Errorf("waited %s with a %s timeout, want under 5s", elapsed, 50*time.Millisecond)
 	}
 }
 
@@ -378,7 +362,7 @@ func TestWaitForNodesStopsWithItsContext(t *testing.T) {
 	waitForNodes(ctx, read, testOutputs(), time.Hour)
 
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("a cancelled context waited %s", elapsed)
+		t.Errorf("a cancelled context waited %s, want under 5s", elapsed)
 	}
 }
 
@@ -415,8 +399,9 @@ func TestMissingNodesNamesTheOutputsWithNoSink(t *testing.T) {
 	}
 }
 
-// A link names the two nodes it joins, and the graph holds both ids,
-// so a stream into a sink and a tap of its monitor both mark the sink.
+// A link has the ids of the two nodes it joins, and the graph records
+// both, so a stream into a sink and a tap of its monitor both mark the
+// sink.
 func TestParseGraphReadsWhichNodesALinkTouches(t *testing.T) {
 	graph, err := parseGraph([]byte(`[
 		{"id": 60, "type": "PipeWire:Interface:Link",
@@ -424,7 +409,7 @@ func TestParseGraphReadsWhichNodesALinkTouches(t *testing.T) {
 		{"id": 61, "type": "PipeWire:Interface:Link", "info": null}
 	]`))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the two-link document: %v", err)
 	}
 	if len(graph.Linked) != 2 || !graph.Linked[51] || !graph.Linked[59] {
 		t.Errorf("linked = %v, want 51 and 59", graph.Linked)

@@ -1,46 +1,26 @@
 package main
 
-// The identity of a published device.
+// A device name is built from the hardware's identity, in forms like
+// the ones udev uses for /dev/snd/by-id and /dev/snd/by-path. Every
+// form starts with the machine's name, because Sinks and Sources are
+// cluster-scoped, and two machines that built the same name would
+// write the same object. After the machine name come:
 //
-// A device name is built from the hardware's own identity, in the
-// same three forms udev encodes into /dev/snd/by-id and by-path, and
-// every form starts with the machine's name. The Sinks and the
-// Sources are cluster-scoped, so a name that two machines derive is
-// one object that both machines write. An onboard card is named by
-// the machine and its PCI address, because a PCI address repeats on
-// every machine of the same model. A USB card with a serial is named
-// by the machine and its vendor, product, and serial. A serial is not
-// unique across machines: dongles of one model can all report the
-// same serial. The serial is still in the name, because it tells
-// apart two identical dongles on one machine. A USB card with no
-// serial is named by the machine and its port. Each form ends in the
-// driver's own name for the PCM device, hdmi-0 or usb-audio, and not
-// its device number: the id is stable per codec, and the number is
-// this boot's.
+//   - Onboard card: "pci", the PCI address, and the PCM id. The PCI
+//     address repeats on every machine of the same model.
+//   - USB card with a serial: "usb", vendor, product, serial, and the
+//     PCM id. The serial tells apart two dongles of one model on one
+//     machine. It is not unique across machines, because dongles of one
+//     model can all report the same serial.
+//   - USB card with no serial: "usb", the port path, and the PCM id.
 //
-// A name is a DNS label, so it holds 63 characters. A USB serial is
-// often 20 characters or more, so the serial form passes 63 on a
-// machine with a longer name. When it would, the name holds the first
-// eight hex digits of the serial's SHA-256 in place of the serial,
-// and keeps the machine, the vendor, the product, and the PCM id. The
-// hash is stable, so the name is too, and two serials give two
-// hashes, so two identical dongles on one machine still get two
-// names. The test is on each name alone, and the capture suffix adds
-// eight characters, so a dongle whose playback name is 56 to 63
-// characters keeps the serial on its Sink and holds the hash on its
-// Source. Any other name past 63 characters is refused rather than
-// shortened. The ALSA address, card0-pcm3, survives only as the
-// PipeWire node name.
+// The PCM id is the driver's name for the PCM device, such as "HDMI 0"
+// or "USB Audio". The name does not use the PCM device number, because
+// the kernel can assign a different number at each boot.
 //
-// The pairing identity is a different thing. monitor.liken.sh/id
-// names the monitor a claim asks for, in a domain that neither this
-// driver nor the display operator owns, so that one ResourceClaim can
-// hold a request against each driver and a matchAttribute constraint
-// across the two. The scheduler compares a fully qualified attribute
-// name across devices without regard to which driver published them.
-// An attribute written without a domain belongs to the publishing
-// driver's domain, so a bare monitorName from two drivers is two
-// different names that never match.
+// When the name of a USB card with a serial is longer than
+// maxDeviceName, it uses a hash of the serial in place of the serial
+// (serialHash). A name that is still longer is refused.
 
 import (
 	"crypto/sha256"
@@ -52,58 +32,66 @@ import (
 	"sync"
 )
 
-// PairingAttribute is the fully qualified attribute that pairs a
-// screen with its speakers. The display operator publishes the same
-// name, and the two values must be identical byte for byte, so the
-// derivation below is the contract between the two repositories.
+// PairingAttribute pairs a screen with its speakers. display-operator
+// publishes the same attribute, so one ResourceClaim can request a device
+// from each driver with a matchAttribute constraint across the two. The
+// scheduler qualifies an attribute written without a domain with the
+// domain of the driver that publishes it, so a bare name from each driver
+// would be two attributes that never match. The domain monitor.liken.sh
+// belongs to neither driver. The scheduler compares the two values byte
+// for byte, so monitorID here and in display-operator/names.go must
+// return the same string for the same monitor.
 const PairingAttribute = "monitor.liken.sh/id"
 
-// maxDeviceName is the length of a DNS label, which is what a DRA
-// device name must be. A name past it is refused rather than cut,
-// because a cut name is a name nobody can predict from the hardware.
-// The one exception is the hashed serial, which a person can compute
-// from the serial the card reports.
+// maxDeviceName is the length limit of a DNS label, which a DRA device
+// name must be. endpointName refuses a longer name instead of cutting
+// it, because a person cannot predict a cut name from the hardware.
 const maxDeviceName = 63
 
-// serialHash is what a USB name holds in place of a serial that would
-// take it past maxDeviceName: the first eight hex digits of the
-// SHA-256 of the serial as sysfs reports it. Eight digits keep a
-// collision between two dongles of one model on one machine out of
-// reach. They leave the serial form room for a machine name of 22
-// characters, with the PCM id usb-audio and the capture suffix.
+// serialHash returns the first eight hex digits of the SHA-256 of a USB
+// serial, as sysfs reports it. endpointName uses it in place of the
+// serial when the name with the serial is longer than maxDeviceName. A
+// person can compute the hash from the serial, so the name stays
+// predictable from the hardware. Eight digits make a collision between
+// two dongles on one machine unlikely, and leave room for a machine name
+// of 22 characters in a capture name whose PCM id is USB Audio.
+//
+// endpointName checks the length of each name alone. A playback name of
+// 56 to 63 characters keeps the serial, and the capture name of the same
+// dongle, which is 8 characters longer, uses the hash.
 func serialHash(serial string) string {
 	sum := sha256.Sum256([]byte(serial))
 	return hex.EncodeToString(sum[:])[:8]
 }
 
-// captureSuffix separates a capture endpoint's name from the
-// playback endpoint beside it. A USB card serves both directions
-// through one PCM device with one id, so the two endpoints derive the
-// same name, and two devices of one pool cannot share a name.
-// Playback carries no word, because a sink is what a claim asks for
-// most and its name reads cleaner without one.
+// captureSuffix keeps a capture endpoint's name apart from the playback
+// endpoint of the same PCM device. A USB card serves both directions
+// through one PCM device with one id, so both endpoints would derive
+// the same name, and two devices in one pool cannot have the same name.
+// Playback has no suffix, because claims request sinks more often.
 const captureSuffix = "-capture"
 
-// alsaAddress spells one PCM device's ALSA address, which is the
-// card number and the device number the kernel assigned this boot.
-// It is not a device name. It names the PipeWire node the operator
-// declares, because the node is declared before the identity is read
-// and lives only as long as the graph.
+// alsaAddress returns the card and PCM device numbers that the kernel
+// assigned in this boot, such as card0-pcm3. The PipeWire node name is
+// built from it and not from the device name, because nodeConfig
+// declares a node for every PCM device, including one that endpointName
+// refuses, and a layout change rewrites the drop-in from the card
+// and PCM numbers alone. A number that changes at a reboot does no harm,
+// because the declare init container writes the drop-in again at
+// each pod start.
 func alsaAddress(card, pcm int) string {
 	return fmt.Sprintf("card%d-pcm%d", card, pcm)
 }
 
-// endpointName builds the DRA device name for one ALSA endpoint,
-// from the machine and the hardware's own identity, in the three
-// forms the file header describes. The machine in every form makes
-// one trade: a card that moves to another machine, or a card with no
-// serial that moves to another port, becomes a new object, which is
-// the trade udev made. An error names what was missing, and the
-// caller refuses to publish the endpoint.
+// endpointName builds the DRA device name of one ALSA endpoint. A card
+// that moves to another machine, or a USB card with no serial that moves
+// to another port, gets a new name, as with udev's names. An error
+// names the missing part of the identity, a bus that the operator
+// cannot name a card by, or a name over maxDeviceName.
 func endpointName(machine string, card cardIdentity, pcmID string, capture bool) (string, error) {
 	pcm := slug(pcmID)
 	if pcm == "" {
-		return "", fmt.Errorf("the driver states no id for the PCM device")
+		return "", fmt.Errorf("the driver reports no id for the PCM device")
 	}
 	if card.Bus != pciBus && card.Bus != usbBus {
 		return "", fmt.Errorf("the card is on no bus this operator can name it by")
@@ -123,7 +111,7 @@ func endpointName(machine string, card cardIdentity, pcmID string, capture bool)
 	case card.Bus == usbBus && card.Serial != "":
 		vendor, product, serial := slug(card.Vendor), slug(card.Product), slug(card.Serial)
 		if vendor == "" || product == "" {
-			return "", fmt.Errorf("the USB card states no vendor or product identifier")
+			return "", fmt.Errorf("the USB card reports no vendor or product identifier")
 		}
 		name = strings.Join([]string{node, usbBus, vendor, product, serial, pcm}, "-") + suffix
 		if len(name) > maxDeviceName {
@@ -132,21 +120,21 @@ func endpointName(machine string, card cardIdentity, pcmID string, capture bool)
 	default:
 		location := slug(card.Location)
 		if location == "" {
-			return "", fmt.Errorf("sysfs states no %s address for the card", card.Bus)
+			return "", fmt.Errorf("sysfs reports no %s address for the card", card.Bus)
 		}
 		name = strings.Join([]string{node, card.Bus, location, pcm}, "-") + suffix
 	}
 
 	if len(name) > maxDeviceName {
-		return "", fmt.Errorf("the name %s is %d characters, and a device name holds %d",
+		return "", fmt.Errorf("the name %s is %d characters, and a device name has at most %d",
 			name, len(name), maxDeviceName)
 	}
 	return name, nil
 }
 
-// slug turns one part of an identity into a piece of a DNS label:
-// lowercase letters, digits, and one dash for each run of anything
-// else, with no dash on either end.
+// slug turns one part of an identity into part of a DNS label:
+// lowercase letters and digits, with one dash for each run of other
+// characters and no dash at either end.
 func slug(value string) string {
 	var slugged strings.Builder
 	separated := false
@@ -166,12 +154,10 @@ func slug(value string) string {
 	return slugged.String()
 }
 
-// nameEndpoints stamps each endpoint with the name it publishes
-// under, and holds back the ones this operator cannot name. An
-// endpoint with no name reaches no slice and no claim, because a
-// name built from anything but the hardware's identity would follow
-// the wrong hardware the first time a card registers in a different
-// order.
+// nameEndpoints sets DeviceName on each endpoint it can name, and
+// returns a reason for each one it cannot. There is no fallback name,
+// because a name built from the card number would point at different
+// hardware when the cards register in a different order.
 func nameEndpoints(machine string, outputs []alsaEndpoint) (named []alsaEndpoint, refused []string) {
 	for _, output := range outputs {
 		name, err := endpointName(machine, output.Identity, output.PCMID, output.Capture)
@@ -185,22 +171,19 @@ func nameEndpoints(machine string, outputs []alsaEndpoint) (named []alsaEndpoint
 	return named, refused
 }
 
-// endpointInventory is what the last reconcile pass published, keyed
-// by device name.
-//
-// A prepare call carries the allocated device's name and nothing
-// else, and the name no longer holds the card and PCM numbers, so
-// the plugin resolves a name against the inventory the reconcile
-// pass read from the hardware. The reconcile loop writes it and the
-// kubelet's gRPC handlers read it, which is why it holds a lock.
+// endpointInventory maps each device name to the endpoint that the
+// last reconcile pass published under it. A prepare call carries only
+// the device name, which does not contain the card and PCM numbers, so
+// the plugin looks the name up here. The reconcile loop writes the map
+// and the kubelet's gRPC handlers read it.
 type endpointInventory struct {
 	mutex     sync.RWMutex
 	endpoints map[string]alsaEndpoint
 }
 
-// publish replaces the whole inventory with what one pass read. A
-// nil inventory takes the write and drops it, so a caller that has
-// none needs no branch.
+// publish replaces the inventory with the endpoints of one reconcile
+// pass. On a nil inventory it does nothing, so a caller needs no nil
+// check.
 func (i *endpointInventory) publish(outputs []alsaEndpoint) {
 	if i == nil {
 		return
@@ -214,8 +197,7 @@ func (i *endpointInventory) publish(outputs []alsaEndpoint) {
 	i.endpoints = endpoints
 }
 
-// sinkNames answers the device name of each playback endpoint the
-// inventory holds, in order. A nil inventory holds none.
+// sinkNames returns the device names of the playback endpoints, sorted.
 func (i *endpointInventory) sinkNames() []string {
 	if i == nil {
 		return nil
@@ -231,9 +213,9 @@ func (i *endpointInventory) sinkNames() []string {
 	return names
 }
 
-// lookup resolves one device name to the endpoint it names. A name
-// this operator did not publish resolves to nothing, and the prepare
-// call fails with that name in its message.
+// lookup returns the endpoint published under a device name. The name
+// of a Bluetooth speaker returns false, because the inventory holds only
+// ALSA endpoints.
 func (i *endpointInventory) lookup(name string) (alsaEndpoint, bool) {
 	if i == nil {
 		return alsaEndpoint{}, false
@@ -244,16 +226,18 @@ func (i *endpointInventory) lookup(name string) (alsaEndpoint, bool) {
 	return output, published
 }
 
-// speakerName builds a speaker's device name from its peer MAC, the
-// one identity BlueZ carries that survives a reboot, in the same
-// dashed lowercase form the Bluetooth operator names a controller
-// with.
+// speakerName builds a Bluetooth speaker's device name from its MAC
+// address, because the address is the identity that BlueZ reports that
+// stays the same across a reboot. bluetooth-operator names a
+// Peripheral in the same dashed lowercase form.
 func speakerName(address string) string {
 	return strings.ReplaceAll(normalizeMAC(address), ":", "-")
 }
 
-// speakerFromDeviceName inverts speakerName. A prepare call carries
-// the allocated device's name and nothing else.
+// speakerFromDeviceName returns the MAC address in a name that
+// speakerName built, so a prepare call finds the speaker from the
+// device name alone. It returns false for any other name, such as the
+// name of an ALSA endpoint.
 func speakerFromDeviceName(name string) (string, bool) {
 	address := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(name)), "-", ":")
 	if !validMAC(address) {
@@ -262,24 +246,23 @@ func speakerFromDeviceName(name string) (string, bool) {
 	return address, true
 }
 
-// normalizeMAC is the one form this operator keys a speaker on:
-// lowercase with colons. BlueZ prints AA:BB:CC:DD:EE:FF over D-Bus
-// and pw-dump prints the same string on the node, so one lowering
-// makes the two sources agree.
+// normalizeMAC returns the key of a speaker: the address in lowercase,
+// with colons. BlueZ over D-Bus and api.bluez5.address in pw-dump both
+// report the uppercase form, AA:BB:CC:DD:EE:FF. The key is lowercase
+// because a device name must be lowercase, and speakerFromDeviceName
+// returns the key from the device name.
 func normalizeMAC(address string) string {
 	return strings.ToLower(strings.TrimSpace(address))
 }
 
-// publishedMAC is the uppercase colon form. The label on a speaker
-// shows it and bluetoothctl prints it, so it is the form a person
-// already has the address written down in.
+// publishedMAC returns the uppercase colon form of a MAC address, as
+// bluetoothctl and the label on a speaker print it.
 func publishedMAC(address string) string {
 	return strings.ToUpper(normalizeMAC(address))
 }
 
-// validMAC accepts six colon-separated pairs of hexadecimal digits
-// and nothing else, so an ALSA output's name never decodes as a
-// speaker.
+// validMAC reports whether address is six colon-separated pairs of hex
+// digits, in either case.
 func validMAC(address string) bool {
 	octets := strings.Split(normalizeMAC(address), ":")
 	if len(octets) != 6 {
@@ -298,34 +281,26 @@ func validMAC(address string) bool {
 	return true
 }
 
-// monitorID builds the pairing value from the facts that an ELD block
-// and an EDID block both hold: the manufacturer, the product code,
-// and the monitor name.
-//
-// The manufacturer and the product code are the whole of the value,
-// and the name is appended only when there is one:
+// monitorID builds the value of PairingAttribute from the facts that
+// both an ELD block and an EDID block contain: the manufacturer, the
+// product code, and the monitor name, when there is one:
 //
 //	GSM 0x5b09 "LG ULTRAWIDE"    -> gsm-5b09-lg-ultrawide
 //	BOE 0x095f ""                -> boe-095f
 //
-// The name is optional because the two operators must agree on every
-// monitor, and one of them can read a name the other cannot. A panel
-// that publishes no name descriptor gives the display operator an
-// empty string, so a rule that dropped the whole value for a missing
-// name would make one operator publish a pairing attribute and the
-// other publish none. A claim with a matchAttribute constraint across
-// the two would then park forever, with nothing in the cluster saying
-// why.
+// This operator reads the ELD and display-operator reads the EDID, and
+// for a panel with no name descriptor, the name can be empty in one of
+// the two. So an empty name leaves the value without a name. If it made
+// the value empty, only one operator would publish the attribute, and a
+// claim that matches on it would stay Pending with no reason reported.
 //
-// The name is trimmed before the spaces inside it become dashes. EDID
-// pads a descriptor with spaces to fill it, so an untrimmed name
-// gives a value with a dash on the end, and a monitor whose padding
-// the graphics driver already stripped would not match it.
+// EDID pads a name descriptor with spaces, and a graphics driver can
+// strip the padding, so the name is trimmed before its spaces become
+// dashes.
 //
-// An empty return means the manufacturer did not decode, and the
-// caller publishes no pairing attribute at all. A constraint on a
-// missing attribute allocates nothing, which is the correct answer
-// for a screen this operator cannot identify.
+// An empty manufacturer returns an empty value, and the caller
+// publishes no attribute, so a claim that matches on it allocates
+// nothing for a monitor that this operator cannot identify.
 func monitorID(manufacturer string, product uint16, name string) string {
 	manufacturer = strings.ToLower(strings.TrimSpace(manufacturer))
 	if manufacturer == "" {
@@ -338,29 +313,27 @@ func monitorID(manufacturer string, product uint16, name string) string {
 	return id
 }
 
-// hexProduct formats a monitor's product code the way the pairing
-// identity and the product attribute spell it: four lowercase
-// hexadecimal digits.
+// hexProduct returns a product code as four lowercase hex digits, the
+// form in monitorID and in the product attribute.
 func hexProduct(product uint16) string {
 	return fmt.Sprintf("%04x", product)
 }
 
-// dashed lowercases a monitor name and replaces each run of spaces
-// with one dash.
+// dashed returns the same string as slug in display-operator/names.go,
+// because the pairing attribute must match byte for byte. This
+// package's slug also replaces punctuation with a dash, so a monitor
+// name with punctuation would give a different value.
 func dashed(name string) string {
 	fields := strings.Fields(strings.ToLower(name))
 	return strings.Join(fields, "-")
 }
 
-// pnpID decodes the three-letter manufacturer identifier that EDID
-// packs into two bytes, five bits for each letter, most significant
-// letter first. The value here is the EDID's own big-endian form:
-// 0x1e6d is GSM, which is LG.
-//
-// The kernel prints manufacture_id from an ELD block in the other
-// byte order, because it reads the two bytes as a little-endian
-// integer. The caller passes the bytes in EDID order, so this
-// function and the display operator's own decoding agree.
+// pnpID decodes the three-letter manufacturer id that EDID packs into
+// two bytes, five bits per letter, first letter in the high bits. It
+// reads the bytes in EDID order, big-endian: 0x1e6d is GSM, which is
+// LG. The kernel prints an ELD's manufacture_id with the two bytes
+// swapped, so the ELD parser reads the raw bytes in EDID order before
+// it calls pnpID, and both operators decode a manufacturer the same way.
 func pnpID(id uint16) string {
 	letters := [3]byte{
 		byte((id>>10)&0x1f) + 'A' - 1,

@@ -1,34 +1,31 @@
 package main
 
-// The hold on an HDMI or DisplayPort slot whose monitor stops answering
-// for a moment.
-//
 // An A/V receiver in standby drops hot plug detect on the machine's
-// HDMI port for a fraction of a second, several times a minute. The
-// graphics driver clears the slot's ELD on each drop and writes the
-// same block again when the receiver answers, and the card reports
-// both changes on its control device. Without the hold, a pass that
-// reads the card during a drop publishes the slot with the no-monitor
-// taint, sets the Sink's Connected condition to NoMonitor, and can
-// change the channel layout that the ELD gives, which restarts
-// PipeWire. The next pass undoes all of it.
+// HDMI port for a fraction of a second, several times a minute. On each
+// drop the graphics driver empties the ELD control element of the PCM
+// device, and it writes the same ELD back when hot plug detect returns.
+// The card sends a control event for each of the two changes. A
+// reconcile pass that reads the card during the drop would publish the
+// device with the no-monitor taint, set the Sink's Connected condition
+// to NoMonitor, and could change the channel layout, which restarts
+// PipeWire. The next pass would undo all of it.
 //
-// So the pass reads the card through a hold. A slot whose ELD goes
-// empty answers its last reading with a monitor, until it has stayed
-// empty for monitorSettle. A slot that answers again inside that time
-// ends the hold, and nothing the pass writes sees the drop. A slot that
-// is still empty at the end of the hold reads empty, and a timer at
-// that deadline wakes a pass, so a monitor that really left is reported
-// then, and not on the next unrelated event. A change of the slot's ELD
-// between two empty reads says the monitor answered and dropped again
-// with no pass to read it, so the hold starts again from the later
-// read.
+// monitorHold hides these drops from the pass. When an HDMI or
+// DisplayPort playback device reads with an empty ELD, apply returns
+// the device's last reading with a monitor until the ELD has been empty
+// for monitorSettle. If the ELD comes back sooner, the pass publishes
+// nothing about the drop. A timer wakes a pass when monitorSettle ends,
+// so a monitor that left is published then, and not at the next
+// unrelated event. An ELD change event between two empty reads means
+// that the monitor came back and dropped again between passes, so
+// apply starts the monitorSettle wait again from the later read.
 //
-// An operator that starts while a slot is in a drop has read no monitor
-// on it. The slice the previous operator published names each slot it
-// published with a monitor, with every fact of the ELD it read, so the
-// hold starts from those readings (seed), and the first empty read of
-// such a slot starts a hold like any other drop.
+// A new operator process has no earlier reading of a device that is in
+// a drop when the process starts. So the process reads the
+// ResourceSlice that the previous process published, and for each
+// device published with a monitor, it rebuilds the ELD from the
+// device's attributes. On the first read, apply uses that ELD as the
+// device's last reading with a monitor.
 
 import (
 	"context"
@@ -44,92 +41,88 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// monitorSettle is how long a slot's ELD must stay empty before the
-// operator reports that its monitor left. It is the settle time of
-// display-operator's own hold on the connector, for the reasons
-// display-operator's plan 32 records, so the screen and its speakers
-// report a monitor that left at the same time.
+// monitorSettle is how long an ELD must stay empty before the operator
+// publishes that the monitor left. It equals display-operator's
+// hotplugSettle, so a monitor's screen and its speakers are reported gone
+// at the same time.
+// display-operator/plans/completed/32-a-short-hotplug-drop-changes-nothing.md
+// gives the reasons for the value.
 const monitorSettle = 5 * time.Second
 
-// monitorCeiling bounds how long ELD changes keep starting a hold again,
-// so a slot whose ELD keeps changing is reported within monitorCeiling
-// plus monitorSettle. It is display-operator's hotplugCeiling, so the
-// screen and its speakers report a monitor that left by the same bound.
+// monitorCeiling limits how long after the first empty read an ELD
+// change event can start the monitorSettle wait again. So a device
+// whose ELD keeps changing reads empty no later than monitorCeiling
+// plus monitorSettle after its first empty read. It equals
+// display-operator's hotplugCeiling, for the same reason as
+// monitorSettle.
 const monitorCeiling = 3 * monitorSettle
 
-// monitorHold follows each HDMI slot across the passes. The reconcile
-// pass reads through it, and the loop's wakes report each ELD change
-// to it from their own goroutine, so every call takes the lock.
+// apply runs on the reconcile goroutine, and countELDChange runs on the
+// goroutine that receives the cards' control events, so both take mu.
 type monitorHold struct {
 	mu  sync.Mutex
 	now func() time.Time
-	// expired wakes a pass at the end of a hold. A nil expired arms no
-	// timer.
-	expired func()
-	// lit is each slot's last reading while a monitor answered.
-	lit map[pcmAddress]alsaEndpoint
-	// dark is when each held slot was first read empty, and the timer
-	// that ends its hold.
-	dark map[pcmAddress]heldSlot
-	// changes counts the ELD changes the card reported on each slot.
-	changes map[pcmAddress]uint64
-	// seeds is the ELD the previous operator published for each slot,
-	// by device name, until this process reads the slot.
-	seeds map[string]eld
+	// expired wakes a reconcile pass when monitorSettle ends for a
+	// device that still reads empty. When expired is nil, apply starts
+	// no timer.
+	expired         func()
+	lastWithMonitor map[pcmAddress]alsaEndpoint
+	emptyELDs       map[pcmAddress]emptyELD
+	eldChanges      map[pcmAddress]uint64
+	// publishedELDs is keyed by device name, because the ResourceSlice
+	// names its devices and has no PCM address.
+	publishedELDs map[string]eld
 }
 
-type heldSlot struct {
-	// first is the first empty read of this outage, and since the read
-	// the hold runs from. An ELD change moves since and never first.
-	first time.Time
-	since time.Time
-	// seen is the slot's change count at the last empty read.
-	seen  uint64
-	timer *time.Timer
+// emptyELD records a device whose ELD reads empty while apply returns
+// its last reading with a monitor.
+type emptyELD struct {
+	firstRead time.Time
+	// settleStart is when the monitorSettle wait started. It is
+	// firstRead, or the later read where an ELD change started the wait
+	// again.
+	settleStart time.Time
+	// changesAtSettleStart is the device's count in eldChanges at
+	// settleStart. A different count at a later empty read means that
+	// the ELD changed in between.
+	changesAtSettleStart uint64
+	timer                *time.Timer
 }
 
 func newMonitorHold(expired func()) *monitorHold {
 	return &monitorHold{
-		now:     time.Now,
-		expired: expired,
-		lit:     map[pcmAddress]alsaEndpoint{},
-		dark:    map[pcmAddress]heldSlot{},
-		changes: map[pcmAddress]uint64{},
-		seeds:   map[string]eld{},
+		now:             time.Now,
+		expired:         expired,
+		lastWithMonitor: map[pcmAddress]alsaEndpoint{},
+		emptyELDs:       map[pcmAddress]emptyELD{},
+		eldChanges:      map[pcmAddress]uint64{},
+		publishedELDs:   map[string]eld{},
 	}
 }
 
-// seed gives the hold the ELD the previous operator published for each
-// slot, by device name. A slot this process reads takes its own reading
-// in place of the seed.
-func (h *monitorHold) seed(seeds map[string]eld) {
+func (h *monitorHold) setPublishedELDs(elds map[string]eld) {
 	if h == nil {
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for name, block := range seeds {
-		h.seeds[name] = block
+	for name, block := range elds {
+		h.publishedELDs[name] = block
 	}
 }
 
-// heard records one control event. A change of a slot's ELD element
-// counts for that slot, and every other event counts for nothing. A
-// nil hold takes the call and records nothing.
-func (h *monitorHold) heard(event controlEvent) {
+func (h *monitorHold) countELDChange(event controlEvent) {
 	if h == nil || event.Name != eldElementName {
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.changes[pcmAddress{Card: event.Card, PCM: int(event.Device)}]++
+	h.eldChanges[pcmAddress{Card: event.Card, PCM: int(event.Device)}]++
 }
 
-// apply answers the card's endpoints with each held slot's lit reading
-// in place of its empty one, and records this read for the next. Only
-// an HDMI or DisplayPort playback slot is held, because only those
-// carry an ELD. A slot this process never read with a monitor answers
-// empty at once.
+// For an HDMI or DisplayPort playback endpoint that reads with no ELD,
+// apply returns its last reading with a monitor, until the ELD has been
+// empty for monitorSettle.
 func (h *monitorHold) apply(endpoints []alsaEndpoint) []alsaEndpoint {
 	if h == nil {
 		return endpoints
@@ -137,89 +130,87 @@ func (h *monitorHold) apply(endpoints []alsaEndpoint) []alsaEndpoint {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := h.now()
-	held := make([]alsaEndpoint, len(endpoints))
+	readings := make([]alsaEndpoint, len(endpoints))
 	for i, endpoint := range endpoints {
-		held[i] = endpoint
+		readings[i] = endpoint
 		if !endpoint.HDMI || endpoint.Capture {
 			continue
 		}
-		slot := pcmAddress{Card: endpoint.Card, PCM: endpoint.PCM}
-		if block, seeded := h.seeds[endpoint.Name()]; seeded {
-			delete(h.seeds, endpoint.Name())
-			if _, read := h.lit[slot]; !read && !endpoint.Monitor {
-				lit := endpoint
-				lit.Monitor, lit.ELD = true, block
-				h.lit[slot] = lit
+		pcm := pcmAddress{Card: endpoint.Card, PCM: endpoint.PCM}
+		if block, published := h.publishedELDs[endpoint.Name()]; published {
+			delete(h.publishedELDs, endpoint.Name())
+			if _, read := h.lastWithMonitor[pcm]; !read && !endpoint.Monitor {
+				rebuilt := endpoint
+				rebuilt.Monitor, rebuilt.ELD = true, block
+				h.lastWithMonitor[pcm] = rebuilt
 			}
 		}
 		if endpoint.Monitor {
-			h.lit[slot] = endpoint
-			h.release(slot)
+			h.lastWithMonitor[pcm] = endpoint
+			h.release(pcm)
 			continue
 		}
-		last, seen := h.lit[slot]
-		if !seen {
+		last, hadMonitor := h.lastWithMonitor[pcm]
+		if !hadMonitor {
 			continue
 		}
-		dark, holding := h.dark[slot]
-		restart := holding && dark.seen != h.changes[slot] && now.Sub(dark.first) < monitorCeiling
-		if !holding || restart {
-			first := now
-			if holding {
-				first = dark.first
+		empty, waiting := h.emptyELDs[pcm]
+		restart := waiting && empty.changesAtSettleStart != h.eldChanges[pcm] && now.Sub(empty.firstRead) < monitorCeiling
+		if !waiting || restart {
+			firstRead := now
+			if waiting {
+				firstRead = empty.firstRead
 			}
-			h.release(slot)
-			dark = heldSlot{first: first, since: now, seen: h.changes[slot]}
+			h.release(pcm)
+			empty = emptyELD{firstRead: firstRead, settleStart: now, changesAtSettleStart: h.eldChanges[pcm]}
 			if h.expired != nil {
-				dark.timer = time.AfterFunc(monitorSettle, h.expired)
+				empty.timer = time.AfterFunc(monitorSettle, h.expired)
 			}
-			h.dark[slot] = dark
+			h.emptyELDs[pcm] = empty
 		}
-		if now.Sub(dark.since) >= monitorSettle {
-			delete(h.lit, slot)
-			h.release(slot)
+		if now.Sub(empty.settleStart) >= monitorSettle {
+			delete(h.lastWithMonitor, pcm)
+			h.release(pcm)
 			continue
 		}
-		held[i] = last
+		readings[i] = last
 	}
-	// A seed describes the card as the previous operator left it, so it
-	// serves this first read alone. A slot this read did not hold, such
-	// as one on a card that arrives later, is read as it is.
-	clear(h.seeds)
-	return held
+	// publishedELDs describe the card when the previous process stopped,
+	// so they are valid for the first read only. A device that appears
+	// later, such as one on a card added after the start, gets none.
+	clear(h.publishedELDs)
+	return readings
 }
 
-// release ends one slot's hold and stops its timer, because a slot
-// whose monitor answered again owes no pass at the deadline. The caller
-// holds the lock.
-func (h *monitorHold) release(slot pcmAddress) {
-	if dark, holding := h.dark[slot]; holding {
-		if dark.timer != nil {
-			dark.timer.Stop()
+// release ends the device's wait and stops its timer, so that no pass
+// is woken for a monitor that came back. The caller holds mu.
+func (h *monitorHold) release(pcm pcmAddress) {
+	if empty, waiting := h.emptyELDs[pcm]; waiting {
+		if empty.timer != nil {
+			empty.timer.Stop()
 		}
-		delete(h.dark, slot)
+		delete(h.emptyELDs, pcm)
 	}
 }
 
-// awaitMonitors reads the card, and while waitFor answers that a slot
-// it expects a monitor on reads empty, waits for an ELD change and reads
-// again, until the wait has lasted for deadline. The init container
-// declares each sink's channel layout from this read before PipeWire
-// starts, and a slot read in a drop would declare stereo and cost a
-// PipeWire restart when the monitor answers. changes carries the
-// card's control events, and the subscription opens before the first
-// read, so a change during the read is not lost.
-func awaitMonitors(read func() ([]alsaEndpoint, error), waitFor func([]alsaEndpoint) bool,
-	changes <-chan controlEvent, deadline time.Duration) ([]alsaEndpoint, error) {
+// awaitMonitors reads the card, and reads it again on each ELD change
+// event while missing returns true, for at most timeout. The init
+// container writes each sink's channel layout before PipeWire starts.
+// A device read during a drop gets a stereo layout, and the layout
+// change when the monitor comes back restarts PipeWire. The caller
+// must open changes before its own first read of the card, so that an
+// event during that read is not lost.
+func awaitMonitors(read func() ([]alsaEndpoint, error), missing func([]alsaEndpoint) bool,
+	changes <-chan controlEvent, timeout time.Duration) ([]alsaEndpoint, error) {
 	outputs, err := read()
 	if err != nil {
 		return nil, err
 	}
-	timeout := time.NewTimer(deadline)
-	defer timeout.Stop()
-	for waitFor(outputs) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for missing(outputs) {
 		select {
-		case <-timeout.C:
+		case <-timer.C:
 			return outputs, nil
 		case event, ok := <-changes:
 			if !ok {
@@ -236,12 +227,12 @@ func awaitMonitors(read func() ([]alsaEndpoint, error), waitFor func([]alsaEndpo
 	return outputs, nil
 }
 
-// expectedEmpty answers, for a read of the card, whether a playback
-// slot reads no monitor while its Sink reports one. The Sink's
-// status.monitor is what the previous operator read on the slot, so
-// only a slot that had a monitor is waited for, and a GPU's HDMI slots
-// that never had one are not.
-func expectedEmpty(sinks map[string]Sink) func([]alsaEndpoint) bool {
+// missingSinkMonitor returns a function that reports whether an HDMI
+// playback endpoint reads no monitor while its Sink's status.monitor is
+// set. The previous operator process wrote status.monitor from its own
+// read, so the init container waits for a device that had a monitor,
+// and not for the HDMI outputs of a GPU that never had one.
+func missingSinkMonitor(sinks map[string]Sink) func([]alsaEndpoint) bool {
 	return func(outputs []alsaEndpoint) bool {
 		for _, output := range outputs {
 			if !output.HDMI || output.Capture || output.Monitor {
@@ -255,28 +246,25 @@ func expectedEmpty(sinks map[string]Sink) func([]alsaEndpoint) bool {
 	}
 }
 
-// monitorSeeds answers the ELD of each device the slice published with
-// a monitor, by device name: a device that carries the ELD's facts and
-// no no-monitor taint.
-func monitorSeeds(slice *ResourceSlice) map[string]eld {
-	seeds := map[string]eld{}
+func sliceMonitorELDs(slice *ResourceSlice) map[string]eld {
+	elds := map[string]eld{}
 	if slice == nil {
-		return seeds
+		return elds
 	}
 	for _, device := range slice.Spec.Devices {
 		if slices.ContainsFunc(device.Taints, func(taint DeviceTaint) bool { return taint.Key == noMonitorTaint }) {
 			continue
 		}
 		if block, ok := publishedELD(device); ok {
-			seeds[device.Name] = block
+			elds[device.Name] = block
 		}
 	}
-	return seeds
+	return elds
 }
 
-// publishedELD rebuilds the ELD a device was published from, out of the
-// attributes addMonitorAttributes wrote. A device with no eldVersion
-// was published with no monitor.
+// publishedELD rebuilds an ELD from the attributes that
+// addMonitorAttributes wrote. A device with no eldVersion attribute was
+// published with no monitor, so publishedELD returns false for it.
 func publishedELD(device SliceDevice) (eld, bool) {
 	attributes := device.Attributes
 	version, ok := attributes["eldVersion"]
@@ -324,10 +312,7 @@ func publishedELD(device SliceDevice) (eld, bool) {
 	return block, true
 }
 
-// readPublishedSeeds reads the slice the previous operator published,
-// and answers the seeds of its devices. A slice that does not read
-// seeds nothing, which is the behavior of an operator with no seed.
-func readPublishedSeeds(client *apiclient.Client, nodeName string) map[string]eld {
+func readPublishedELDs(client *apiclient.Client, nodeName string) map[string]eld {
 	slice, err := apiclient.Get[ResourceSlice](client, ResourceSlicesPath+"/"+sliceName(nodeName))
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil
@@ -336,13 +321,14 @@ func readPublishedSeeds(client *apiclient.Client, nodeName string) map[string]el
 		fmt.Fprintf(os.Stderr, "reading the slice this node last published: %v\n", err)
 		return nil
 	}
-	return monitorSeeds(slice)
+	return sliceMonitorELDs(slice)
 }
 
-// declaredMonitors reads the Sinks of the card's outputs for the init
-// container, and answers which empty slots it waits for. A Sink that
-// does not read waits for nothing.
-func declaredMonitors(outputs []alsaEndpoint) func([]alsaEndpoint) bool {
+// readMissingSinkMonitor reads the Sinks of outputs from the API server
+// and returns missingSinkMonitor for them. When NODE_NAME is unset or
+// the Sinks cannot be read, the returned function always returns false,
+// so the init container does not wait.
+func readMissingSinkMonitor(outputs []alsaEndpoint) func([]alsaEndpoint) bool {
 	nothing := func([]alsaEndpoint) bool { return false }
 	machine := os.Getenv("NODE_NAME")
 	if machine == "" {
@@ -357,18 +343,19 @@ func declaredMonitors(outputs []alsaEndpoint) func([]alsaEndpoint) bool {
 		return getSink(client, name)
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v; declaring the layouts without waiting for a monitor\n", err)
+		fmt.Fprintf(os.Stderr, "declaring the layouts without waiting for a monitor: %v\n", err)
 		return nothing
 	}
 	return func(outputs []alsaEndpoint) bool {
 		named, _ := nameEndpoints(machine, outputs)
-		return expectedEmpty(sinks)(named)
+		return missingSinkMonitor(sinks)(named)
 	}
 }
 
-// cardChanges subscribes to the control events of every delivered card
-// and merges them onto one channel until ctx ends. A card whose events
-// do not open adds nothing, and its slots are read once.
+// cardChanges subscribes to the control events of every card whose
+// control device the claim gives the pod, and merges the events onto one
+// channel until ctx ends. A card whose subscription fails sends no
+// events, so an ELD change on it does not start a new read of the card.
 func cardChanges(ctx context.Context) <-chan controlEvent {
 	merged := make(chan controlEvent, 16)
 	for _, card := range controlCards() {
@@ -390,13 +377,14 @@ func cardChanges(ctx context.Context) <-chan controlEvent {
 	return merged
 }
 
-// declaredReading reads the card for the init container: it opens the
-// cards' events, reads the card, asks expect which empty slots to wait
-// for, and waits for them. The events stay open until the wait returns,
-// so a wait that starts after a slow read of the Sinks still hears an
-// ELD change at its end.
-func declaredReading(read func() ([]alsaEndpoint, error),
-	expect func([]alsaEndpoint) func([]alsaEndpoint) bool,
+// readOutputsForDeclaration reads the card for the init container, and
+// waits up to monitorSettle for each output that reads no monitor while
+// its Sink reports one. The control events stay open from before the
+// first read until awaitMonitors returns, because readMissing reads the
+// Sinks from the API server, which can be slow, and an ELD change
+// during that read must still end the wait.
+func readOutputsForDeclaration(read func() ([]alsaEndpoint, error),
+	readMissing func([]alsaEndpoint) func([]alsaEndpoint) bool,
 	subscribe func(context.Context) <-chan controlEvent) ([]alsaEndpoint, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -405,5 +393,5 @@ func declaredReading(read func() ([]alsaEndpoint, error),
 	if err != nil {
 		return nil, err
 	}
-	return awaitMonitors(read, expect(outputs), changes, monitorSettle)
+	return awaitMonitors(read, readMissing(outputs), changes, monitorSettle)
 }

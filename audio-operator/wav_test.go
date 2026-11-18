@@ -24,9 +24,8 @@ func TestTheWAVHeaderIsTheFortyFourBytesAPlayerReads(t *testing.T) {
 		t.Errorf("the third chunk is %q, want data", got)
 	}
 
-	// Both sizes are the streaming placeholder. ffmpeg's WAV muxer
-	// writes the same -1 and never returns to fix it on a pipe, so
-	// every player that reads an ffmpeg-piped WAV reads this one.
+	// A live tap has no length, so both sizes are the streaming
+	// placeholder.
 	if got := binary.LittleEndian.Uint32(header[4:8]); got != 0xFFFFFFFF {
 		t.Errorf("the RIFF size is %#x, want 0xFFFFFFFF", got)
 	}
@@ -46,7 +45,7 @@ func TestTheWAVHeaderIsTheFortyFourBytesAPlayerReads(t *testing.T) {
 	if got := binary.LittleEndian.Uint32(header[24:28]); got != 48000 {
 		t.Errorf("the sample rate is %d, want 48000", got)
 	}
-	// 48000 frames a second, two channels, two bytes a sample.
+	// 48000 frames per second times 2 channels times 2 bytes per sample.
 	if got := binary.LittleEndian.Uint32(header[28:32]); got != 192000 {
 		t.Errorf("the byte rate is %d, want 192000", got)
 	}
@@ -72,10 +71,10 @@ func TestTheWAVHeaderFollowsTheEndpointsOwnFormat(t *testing.T) {
 	for _, row := range cases {
 		header := wavHeader(row.rate, row.channels)
 		if got := binary.LittleEndian.Uint32(header[24:28]); got != uint32(row.rate) {
-			t.Errorf("%d Hz: the header says %d", row.rate, got)
+			t.Errorf("%d Hz: the header names the rate %d, want %d", row.rate, got, row.rate)
 		}
 		if got := binary.LittleEndian.Uint16(header[22:24]); got != uint16(row.channels) {
-			t.Errorf("%d channels: the header says %d", row.channels, got)
+			t.Errorf("%d channels: the header names %d channels, want %d", row.channels, got, row.channels)
 		}
 		if got := binary.LittleEndian.Uint32(header[28:32]); got != row.byteRate {
 			t.Errorf("%d Hz %d channels: the byte rate is %d, want %d",
@@ -90,6 +89,6 @@ func TestTheWAVHeaderFollowsTheEndpointsOwnFormat(t *testing.T) {
 
 func TestTheWAVHeaderIsTheSameBytesEveryTime(t *testing.T) {
 	if !bytes.Equal(wavHeader(48000, 2), wavHeader(48000, 2)) {
-		t.Error("two headers for one format differ")
+		t.Error("two headers for one format differ, want the same bytes")
 	}
 }

@@ -1,31 +1,33 @@
 package main
 
-// The pass reads this machine's Sinks and Sources from the two watches'
-// stores, not from the API server. Each store holds every resource
-// whose status.node is this machine, the same selection the pass lists,
-// so a settled pass sends the API server no read at all. The shared
-// informer package holds the rules of that read: a resource a store
-// does not hold, and a store's copy older than this operator's own last
-// write, are read from the API server, and a list comes from a store
-// only after the store holds the whole first read.
+// The pass reads this machine's Sinks and Sources from the stores of
+// the Sink and Source watches, so a pass that changes nothing sends no
+// GET. Each watch selects status.node=<this machine>, the selector the
+// pass lists with. kubernetes/informer decides when a store is used. A
+// list or a single resource comes from a store only after the watch's
+// first list has finished. After that, a resource is still read from
+// the API server when the store has no copy of it, or when the
+// copy's resourceVersion differs from the one the operator last wrote
+// or read.
 //
-// A resource the store does not hold is one no machine has written
-// status.node on yet, one whose status.node names another machine,
-// such as a Bluetooth speaker that moved here, or any resource while
-// the watch has not finished its first read.
+// A store has no copy of a resource that has no status.node yet, or
+// whose status.node names another machine, such as a Bluetooth speaker
+// that moved to this machine.
 //
-// A copy older than this operator's own write matters here because the
-// pass writes status only where it differs from the copy it read. A
-// pass that read such a copy would skip a write the resource needs: a
-// claim released after the write that recorded it matches the older
-// copy, and the API server would keep the claim. The memo of each kind
-// records the version of the newest copy this operator wrote or read.
+// The version check matters because the pass writes a status only when
+// it differs from the copy it read. Suppose the operator writes a claim
+// into a Sink's status while the store still has the copy from before.
+// When the claim is released, the status the pass composes equals that
+// old copy, so the pass skips the write and the API server keeps the
+// released claim. The memo of each kind records the version of the
+// operator's last write or read, so the pass reads from the API server
+// when the store's copy is at another version.
 
 import "github.com/liken-sh/liken/kubernetes/informer"
 
-// The three getters are the metadata the shared cache reads from each
-// of this operator's kinds. Both kinds are cluster-scoped, so an
-// endpoint has no namespace.
+// kubernetes/informer reads an object's metadata through these
+// methods. Sinks and Sources are cluster-scoped, so the namespace is
+// empty.
 func (m *EndpointMeta) GetName() string            { return m.Name }
 func (m *EndpointMeta) GetNamespace() string       { return "" }
 func (m *EndpointMeta) GetResourceVersion() string { return m.ResourceVersion }
@@ -33,9 +35,8 @@ func (m *EndpointMeta) GetResourceVersion() string { return m.ResourceVersion }
 func (s *Sink) GetObjectMeta() informer.Meta   { return &s.Metadata }
 func (s *Source) GetObjectMeta() informer.Meta { return &s.Metadata }
 
-// objectCache is the stores the pass reads, and the memos of the copies
-// it wrote or read. The zero value holds nothing, and every read goes to
-// the API server.
+// The zero objectCache has no stores, so every read goes to the API
+// server.
 type objectCache struct {
 	sinks, sources informer.Held
 }

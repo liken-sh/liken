@@ -1,9 +1,5 @@
 package main
 
-// The prepare path of a shared endpoint: two claims on one speaker,
-// the unity write that only the first one makes, and the codec that a
-// shared claim cannot state.
-
 import (
 	"context"
 	"fmt"
@@ -15,9 +11,9 @@ import (
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 )
 
-// sharedClaim is a claim whose request asks for one of the speaker's
-// claims, as the scheduler allocated it. A request that names the
-// capacity is what makes a claim a share.
+// sharedClaim returns an allocated ResourceClaim that requests one unit
+// of the speaker's claims capacity. That capacity request makes the
+// claim a share of the speaker.
 func sharedClaim(name, uid, config string) string {
 	return fmt.Sprintf(`{
 	  "metadata": {"name": %q, "namespace": "media", "uid": %q},
@@ -34,15 +30,15 @@ func sharedClaim(name, uid, config string) string {
 	}`, name, uid, testSpeakerName, len(name), config)
 }
 
-// claimsPlugin builds a DRA plugin over an API server that holds
-// several claims by name, and over the fake PipeWire.
+// claimsPlugin returns a DRA plugin whose fake API server serves these
+// claims by name.
 func claimsPlugin(t *testing.T, pipewire *fakePipeWire, claims map[string]string) *draPlugin {
 	t.Helper()
 	plugin := codecPlugin(t, "", pipewire)
 	plugin.client = testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
-		document, held := claims[name]
-		if !held {
+		document, found := claims[name]
+		if !found {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -58,15 +54,15 @@ func prepareNamed(t *testing.T, plugin *draPlugin, name, uid string) *drav1.Node
 		Claims: []*drav1.Claim{{Namespace: "media", Name: name, Uid: uid}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim %s: %v", name, err)
 	}
 	return resp.Claims[uid]
 }
 
-// The second claim on a shared speaker plays into the sink the first
-// one holds. The first prepare delivers the speaker at unity, and the
-// second one leaves the level alone, because a unity write then would
-// change the level under the stream that already plays.
+// The second claim on a shared speaker plays through the sink that
+// the first claim already uses. Only the first prepare sets the volume
+// to unity, because a write by the second would change the level of
+// the stream that is already playing.
 func TestASecondShareLeavesTheLevelAlone(t *testing.T) {
 	specDirectory(t)
 	pipewire := &fakePipeWire{sink: currentSink()}
@@ -77,7 +73,7 @@ func TestASecondShareLeavesTheLevelAlone(t *testing.T) {
 
 	for _, claim := range []struct{ name, uid string }{{"kitchen", "claim-1"}, {"doorbell", "claim-2"}} {
 		if entry := prepareNamed(t, plugin, claim.name, claim.uid); entry.Error != "" {
-			t.Fatalf("prepare of %s failed: %s", claim.name, entry.Error)
+			t.Fatalf("preparing the claim %s: %s", claim.name, entry.Error)
 		}
 	}
 	if len(pipewire.volumeWrites) != 1 {
@@ -89,9 +85,8 @@ func TestASecondShareLeavesTheLevelAlone(t *testing.T) {
 	}
 }
 
-// The kubelet repeats a prepare it has no record of. A repeat of the
-// one claim that holds the speaker is still the first share, so it
-// writes unity again.
+// The kubelet can prepare a claim again. heldByAnother ignores the
+// claim's own UID, so the repeat writes unity again.
 func TestARepeatedPrepareOfTheOnlyShareWritesUnity(t *testing.T) {
 	specDirectory(t)
 	pipewire := &fakePipeWire{sink: currentSink()}
@@ -99,7 +94,7 @@ func TestARepeatedPrepareOfTheOnlyShareWritesUnity(t *testing.T) {
 
 	for range 2 {
 		if entry := prepareNamed(t, plugin, "kitchen", "claim-1"); entry.Error != "" {
-			t.Fatalf("prepare failed: %s", entry.Error)
+			t.Fatalf("preparing the claim: %s", entry.Error)
 		}
 	}
 	if len(pipewire.volumeWrites) != 2 {
@@ -107,16 +102,16 @@ func TestARepeatedPrepareOfTheOnlyShareWritesUnity(t *testing.T) {
 	}
 }
 
-// A codec switch rebuilds the speaker's sink, which cuts off every
-// other claim that plays through it. So a shared claim that states a
-// codec is refused, and writes no codec and no file.
+// A codec switch rebuilds the speaker's sink, which interrupts every
+// other claim that plays through it. So prepare refuses a shared claim
+// that selects a codec, and writes no codec and no spec file.
 func TestPrepareRefusesACodecOnASharedClaim(t *testing.T) {
 	cases := []struct {
 		name   string
 		config string
 	}{
-		{name: "the claim's own block", config: opaqueCodec(`{"codec": "aptx"}`)},
-		{name: "the DeviceClass's block", config: classCodec(`{"codec": "aptx"}`)},
+		{name: "the claim's own block", config: claimEntry(`{"codec": "aptx"}`)},
+		{name: "the DeviceClass's block", config: classEntry(`{"codec": "aptx"}`)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -125,23 +120,23 @@ func TestPrepareRefusesACodecOnASharedClaim(t *testing.T) {
 			plugin := claimsPlugin(t, pipewire, map[string]string{"kitchen": sharedClaim("kitchen", "claim-1", c.config)})
 
 			entry := prepareNamed(t, plugin, "kitchen", "claim-1")
-			want := "the claim shares " + testSpeakerName + " and states the codec aptx"
+			want := "the claim shares " + testSpeakerName + " and selects the codec aptx"
 			if !strings.Contains(entry.Error, want) {
-				t.Errorf("error = %q, want it to say %q", entry.Error, want)
+				t.Errorf("error = %q, want it to contain %q", entry.Error, want)
 			}
 			if len(pipewire.codecWrites) != 0 {
 				t.Errorf("codec writes = %+v, want none", pipewire.codecWrites)
 			}
 			if left := specFiles(t, dir); len(left) != 0 {
-				t.Errorf("a refused claim left %v behind", left)
+				t.Errorf("a refused claim left the spec files %v, want none", left)
 			}
 		})
 	}
 }
 
-// A request with a list of alternatives names the one that was
-// allocated as request/subrequest, and the subrequest is the one
-// whose capacity decides whether the claim shares.
+// When a request is a firstAvailable list, the allocation result names
+// the chosen alternative as request/subrequest. The capacity of that
+// subrequest decides whether the claim is a share.
 func TestASubrequestThatAsksForAShareIsAShare(t *testing.T) {
 	specDirectory(t)
 	pipewire := &fakePipeWire{sink: currentSink()}
@@ -157,7 +152,7 @@ func TestASubrequestThatAsksForAShareIsAShare(t *testing.T) {
 	    "results": [{"request": "sound/speaker", "driver": "audio.liken.sh", "pool": "liken-1", "device": %q}],
 	    "config": [%s]
 	  }}}
-	}`, testSpeakerName, opaqueCodec(`{"codec": "aptx"}`))})
+	}`, testSpeakerName, claimEntry(`{"codec": "aptx"}`))})
 
 	entry := prepareNamed(t, plugin, "kitchen", "claim-1")
 	if !strings.Contains(entry.Error, "the claim shares") {
@@ -165,8 +160,8 @@ func TestASubrequestThatAsksForAShareIsAShare(t *testing.T) {
 	}
 }
 
-// Each share is released on its own. The claim that stays still
-// holds the speaker.
+// Unpreparing one share releases only that claim. The other claim
+// still holds the speaker.
 func TestUnprepareReleasesOneShare(t *testing.T) {
 	specDirectory(t)
 	pipewire := &fakePipeWire{sink: currentSink()}
@@ -180,7 +175,7 @@ func TestUnprepareReleasesOneShare(t *testing.T) {
 	if _, err := plugin.NodeUnprepareResources(context.Background(), &drav1.NodeUnprepareResourcesRequest{
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "kitchen", Uid: "claim-1"}},
 	}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("unpreparing the claim kitchen: %v", err)
 	}
 	want := []EndpointClaim{{Namespace: "media", Name: "doorbell"}}
 	if got := plugin.claims.holders(testSpeakerName); !reflect.DeepEqual(got, want) {

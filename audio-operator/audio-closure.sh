@@ -1,13 +1,12 @@
 #!/bin/sh
-# Collects PipeWire, WirePlumber, and every file the two daemons open
-# at runtime into one directory tree, so the image ships that tree and
-# nothing else. Run it in a builder that has the Debian packages
+# Copies PipeWire, WirePlumber, the tools that the pod runs, and every
+# file that they open at runtime into one directory tree, which is all
+# the image ships. Run it in a builder that has the Debian packages
 # installed, with the output directory as the argument.
 #
-# The functions come from vulkan/closure.sh, the closure library of
-# every image on a Debian builder. The Dockerfile copies it from the
-# build context named builder, and it sets $lib, the multiarch
-# directory that holds every library below.
+# collect, notices, and $lib, the multiarch library directory, come
+# from vulkan/closure.sh, which the Dockerfile copies in from the build
+# context named builder.
 set -eu
 
 # shellcheck source=../vulkan/closure.sh
@@ -15,88 +14,74 @@ set -eu
 
 out=$1
 
-# coreutils ships libstdbuf.so in a private directory of its own,
-# and the directory differs between releases, so the path is read
-# from dpkg rather than written down here.
+# coreutils installs libstdbuf.so in a private directory that differs
+# between releases, so the path comes from dpkg.
 stdbuf=$(dpkg -L coreutils | grep '/libstdbuf\.so$')
 
-# ldd reports the DT_NEEDED graph and nothing about a file a program
-# opens by name at runtime. Every module below is such a file. Each
-# one is named because the running daemons mapped it, and the module
-# directories hold many more that this operator never loads. The
-# dependency walk of those modules is where the image size would come
-# back.
+# collect copies each seed and the libraries that ldd reports for it.
+# ldd cannot report a file that a program opens by name at runtime, and
+# every module below is such a file, so each is listed. The module
+# directories hold many more modules that this operator never loads,
+# and copying them with their libraries would make the image larger.
 #
-# pipewire loads the eleven modules its packaged pipewire.conf names,
-# minus the four that have the ifexists flag (rt, portal, x11-bell,
+# pipewire loads the modules named in its packaged pipewire.conf,
+# except the ones marked ifexists (rt, portal, x11-bell,
 # jackdbus-detect), which it skips when the file is absent.
 #
-# wireplumber's main-embedded profile loads these nine, and the
-# operator's own configuration turns off the monitors whose modules
-# are not here.
+# wireplumber loads the modules that its main-embedded profile needs.
+# The operator's configuration disables the monitors whose modules are
+# not here. The bluez monitor is a Lua script under /usr/share/wireplumber,
+# and the PipeWire modules it uses (adapter, client-device, client-node)
+# are already listed, so enabling it needs no other module.
 #
-# The bluez monitor is a Lua script under /usr/share/wireplumber,
-# not a module, and the pipewire modules it uses are the adapter,
-# client-device, and client-node already named below, so enabling
-# it adds no wireplumber module to this list.
+# The SPA plugins are the media layer. audioconvert and audiomixer
+# serve every adapter node, support provides the loop and logger, and
+# dbus serves client libraries that ask for a bus. libspa-support.so
+# also provides the support.null-audio-sink factory, which the smoke
+# test (smoke/audio-operator.sh) uses to create a sink, because the CI
+# runner has no sound card and the test's capture stream needs a sink
+# to link to.
 #
-# The SPA plugins are the media layer: audioconvert and audiomixer
-# for every adapter node, support for the loop and the logger, dbus
-# for the client libraries that ask for a bus. libspa-support.so also
-# carries the support.null-audio-sink factory, which the release gate
-# builds a sink from: the runner has no sound card, so without one the
-# gate's capture stream has nothing to link to and never settles into
-# the graph.
+# libspa-alsa.so opens no card on a machine without one, so the daemons
+# do not map it in CI. It is listed because this image is for machines
+# with sound cards, and the smoke test checks for it by name.
 #
-# libspa-alsa.so opens no card on a machine that has none, so no
-# runtime check reports it loading. It is named here because a machine
-# with speakers is the machine this image is for, and the release gate
-# asserts it by name for the same reason.
+# The operator runs pw-dump to read the graph, and the smoke test runs
+# wpctl against WirePlumber.
 #
-# pw-dump is how the operator reads the graph, and wpctl is the
-# wireplumber container's probe. kubectl exec runs both by name,
-# which is the only way to run anything in an image with no shell.
+# A person runs pw-top and pw-metadata with kubectl exec. pw-top -b -n 1
+# prints one reading of every node with its xrun count, which counts
+# dropouts. Without it, the only reading is a debug environment
+# variable that takes two pod restarts to set. pw-metadata reads and
+# writes the settings in the graph's metadata object, for example
+# clock.force-quantum. The operator also runs pw-cli set-param: a
+# prepare request that sets a codec writes it to the bluez5 device, and
+# every prepare of a speaker sets the delivered sink's level to unity.
+# pw-top needs libncursesw and libtinfo, pw-cli needs libreadline, and
+# pw-metadata needs no other libraries.
 #
-# Three more binaries. Two are for a person with kubectl exec, and
-# no daemon runs them: pw-top -b -n 1 prints one reading of every
-# node with its xrun count, which is the dropout measurement;
-# without it, the only reading is a debug environment variable that
-# costs two pod rolls to place. pw-metadata reads and writes the
-# settings the graph keeps in its metadata object, for example
-# clock.force-quantum. The third, pw-cli, the operator itself runs:
-# a prepare that states a codec writes it on the bluez5 device with
-# set-param, and every prepare of a speaker sets the delivered
-# sink's level to unity the same way. The three cost 1,022,763
-# bytes on a 24,599,703-byte closure: pw-top brings libncursesw and
-# libtinfo, pw-cli brings libreadline over the same libtinfo, and
-# pw-metadata brings nothing new.
+# The capture container runs pw-record to tap a sink's monitor ports or
+# a source's output ports, and pipes its raw samples into flac or
+# opusenc. pw-record is the pw-cat binary under another name, so both
+# the link and its target are listed. The Go process does not encode
+# because no pure-Go Opus encoder exists. The container preloads
+# libstdbuf.so into flac and opusenc with _STDBUF_O=0, because both
+# write to stdout through stdio, and without it a silent sink would
+# deliver nothing until the tap ends.
 #
-# pw-record is how the capture container taps a sink's monitor ports
-# or a source's output ports. It is the pw-cat binary under another
-# name, so the link and its target are both named here. flac and opusenc are the two encoders the container
-# pipes pw-record's raw samples into; the Go process does not encode
-# in their place because no pure-Go Opus encoder exists. libstdbuf.so
-# is what the container preloads into flac and opusenc with
-# _STDBUF_O=0, because both write stdout through stdio and a silent
-# sink would otherwise deliver nothing until the tap ends. Its path
-# comes from dpkg for the reason the multiarch directory above does.
+# pw-cat links libsndfile, which brings libvorbisenc, libvorbis,
+# libmpg123, and libmp3lame. The capture container runs pw-record with
+# --raw, so it never opens those codec libraries, but they are copied
+# with the dependency. libopus is already here for
+# libspa-codec-bluez5-opus.so, so opusenc adds only the encoder.
 #
-# The largest part of what these five seeds add is libsndfile, which
-# pw-cat links and which brings in libvorbisenc, libvorbis, libmpg123,
-# and libmp3lame: four codec libraries that --raw never opens. To
-# measure what the seeds cost, run this script with and without them
-# and compare `du -sb` of the two output directories. libopus is already here, brought
-# in by libspa-codec-bluez5-opus.so below, so opusenc adds the
-# encoder alone.
-#
-# The bluez5 plugin loads by name when the declare container
-# enables WirePlumber's Bluetooth monitor. The codec plugins beside
-# it are dlopened one at a time as bluez5/libspa-codec-bluez5-
-# <name>.so, so the closure takes each one that libspa-0.2-bluetooth
-# ships, by the pattern below. The plugin refuses to start when a
-# codec it requires is missing, such as the HFP CVSD codec, and then
-# WirePlumber registers no endpoint with bluetoothd. A pattern keeps
-# a codec that a new PipeWire adds from going missing.
+# libspa-bluez5.so is loaded by name when the declare container
+# enables WirePlumber's Bluetooth monitor. It loads each codec plugin
+# beside it as bluez5/libspa-codec-bluez5-<name>.so, so the pattern
+# below takes every codec plugin that libspa-0.2-bluetooth installs,
+# including one that a newer PipeWire adds. The bluez5 plugin refuses
+# to start when a codec it requires is missing, such as the HFP CVSD
+# codec, and WirePlumber then registers no endpoint with bluetoothd.
 seeds="
 /usr/bin/pipewire
 /usr/bin/wireplumber
@@ -139,21 +124,20 @@ $lib/wireplumber-0.5/libwireplumber-module-si-standard-link.so
 $lib/wireplumber-0.5/libwireplumber-module-standard-event-source.so
 "
 
-# The data trees, every one read by name at startup, so nothing in
-# the library graph points at them: pipewire reads its own
-# pipewire.conf and client.conf from /usr/share/pipewire, wireplumber
-# reads wireplumber.conf and every Lua script under
-# /usr/share/wireplumber, and the ALSA plugin reads the card and PCM
+# pipewire, wireplumber, and the ALSA plugin read these trees by name
+# at startup, so no library graph points at them: pipewire.conf and
+# client.conf under /usr/share/pipewire, wireplumber.conf and every
+# Lua script under /usr/share/wireplumber, and the card and PCM
 # definitions under /usr/share/alsa.
 #
-# The three gconv index files are what glibc maps on the first
-# iconv_open. The charset modules beside them stay behind, because
-# the conversions this pod runs are between UTF-8 and glibc's
-# internal form, and both are built into libc.
+# glibc maps the gconv index files on the first iconv_open. The
+# charset modules beside them are left out, because this pod converts
+# only between UTF-8 and glibc's internal form, which libc has built
+# in.
 #
-# /usr/share/spa-0.2 holds bluez5/bluez-hardware.conf, the quirks
-# database the bluez5 plugin opens by that path at startup. It maps
-# known adapters and speakers to the features each one may use.
+# The bluez5 plugin opens /usr/share/spa-0.2/bluez5/bluez-hardware.conf
+# at startup. It maps known adapters and speakers to the features each
+# may use.
 data="
 /usr/share/pipewire
 /usr/share/wireplumber

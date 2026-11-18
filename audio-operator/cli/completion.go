@@ -1,9 +1,9 @@
 package main
 
-// How the CLI completes a command line for the shell, same
-// contract as media-operator's completion.go: a kubectl_complete-liken-
-// audio shim runs this binary's hidden __complete verb, which answers in
-// cobra's completion protocol>
+// Shell completion for kubectl liken audio. kubectl runs the shim
+// kubectl_complete-liken-audio, which calls this binary's hidden
+// __complete verb. The verb prints one candidate per line and then
+// ":<directive>", which is cobra's completion protocol.
 
 import (
 	"context"
@@ -17,29 +17,24 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-// The ShellCompDirective bits this CLI emits; same numbering as
-// media-operator's completion.go>
+// The cobra ShellCompDirective values that this CLI prints.
 const (
 	compDirectiveError      = 1
 	compDirectiveNoFileComp = 4
 	compDirectiveDefault    = 0
 )
 
-// The verb the capture command answers to
 const captureVerb = "capture"
 
 var completionVerbs = []string{captureVerb}
 
-// One flag the CLI accepts, and whether it reads a value from the
-// next word>
 type completionFlag struct {
 	name       string
 	takesValue bool
 }
 
-// Every flag run() binds, in the completion table's own form;
-// audio binds no --namespace/-n, because Sink and Source are cluster-
-// scoped>
+// completionFlags must match the flags that run binds in main.go. There
+// is no --namespace or -n because Sink and Source are cluster-scoped.
 var completionFlags = []completionFlag{
 	{name: "--version"},
 	{name: "--format", takesValue: true},
@@ -49,10 +44,10 @@ var completionFlags = []completionFlag{
 	{name: "--context", takesValue: true},
 }
 
-// What the words before the cursor amount to: positionals, the
-// cluster-selecting flag values, the flag pending a value, and whether
-// --source appeared, which switches the positional from Sink to Source
-// names>
+// pendingValueFlag is set when the last word before the cursor is a
+// flag that takes a value, so the word under the cursor is that value.
+// source is set by --source, which makes the argument after capture a
+// Source name instead of a Sink name.
 type completionParse struct {
 	positionals      []string
 	context          string
@@ -61,14 +56,15 @@ type completionParse struct {
 	source           bool
 }
 
-// A source of Sink or Source names for the resolved context; the
-// real one queries the cluster, a test hands back a fixed list>
+// An endpointLister returns the Sink or Source names to offer.
+// clusterEndpointLister reads them from the cluster, and a test returns
+// a fixed list.
 type endpointLister func(parse completionParse) []string
 
-// runComplete answers a __complete request and writes the
-// protocol to stdout; stays silent on failure>
+// When the names cannot be listed, runComplete writes no candidates and
+// returns no error.
 func runComplete(ctx context.Context, args []string, stdout io.Writer) error {
-	candidates, directive := completeArgs(args, realEndpointLister(ctx))
+	candidates, directive := completeArgs(args, clusterEndpointLister(ctx))
 	for _, candidate := range candidates {
 		fmt.Fprintln(stdout, candidate)
 	}
@@ -76,9 +72,9 @@ func runComplete(ctx context.Context, args []string, stdout io.Writer) error {
 	return nil
 }
 
-// completeArgs reads the request words and returns the candidates;
-// the whole of the completion logic, so a test drives it with words and
-// a stub lister>
+// completeArgs returns the candidates and the directive for the last
+// word of args. A test calls it with a stub lister in place of the
+// cluster.
 func completeArgs(args []string, lister endpointLister) ([]string, int) {
 	if len(args) == 0 {
 		return completionVerbs, compDirectiveNoFileComp
@@ -86,20 +82,16 @@ func completeArgs(args []string, lister endpointLister) ([]string, int) {
 	toComplete := args[len(args)-1]
 	parse := parseCompletionArgs(args[:len(args)-1])
 
-	// The word under the cursor is the value of a flag that reads
-	// one>
 	if parse.pendingValueFlag != "" {
 		return completeFlagValue(parse.pendingValueFlag, toComplete)
 	}
 
-	// The word under the cursor starts a flag
 	if strings.HasPrefix(toComplete, "-") {
 		return filterByPrefix(flagNames(), toComplete), compDirectiveNoFileComp
 	}
 
-	// The word is a positional: with none given yet it names a
-	// verb; after capture it names the Sink or Source the operator
-	// serves, Sink unless --source appeared>
+	// The first positional word is the verb. The word after capture is a
+	// Sink name, or a Source name with --source.
 	switch len(parse.positionals) {
 	case 0:
 		return filterByPrefix(completionVerbs, toComplete), compDirectiveNoFileComp
@@ -111,9 +103,6 @@ func completeArgs(args []string, lister endpointLister) ([]string, int) {
 	return nil, compDirectiveNoFileComp
 }
 
-// parseCompletionArgs walks the words before the cursor into
-// their positionals, the cluster-selecting flag values, the --source
-// mark, and a flag left waiting for its value>
 func parseCompletionArgs(prior []string) completionParse {
 	var parse completionParse
 	for i := 0; i < len(prior); i++ {
@@ -125,8 +114,6 @@ func parseCompletionArgs(prior []string) completionParse {
 				continue
 			}
 			if !flag.takesValue {
-				// --source takes no value; its presence, not a
-				// value, switches the positional's target>
 				if name == "--source" {
 					parse.source = true
 				}
@@ -149,7 +136,6 @@ func parseCompletionArgs(prior []string) completionParse {
 	return parse
 }
 
-// record stores a flag value against the field it selects.
 func (parse *completionParse) record(name, value string) {
 	switch name {
 	case "--context":
@@ -159,8 +145,6 @@ func (parse *completionParse) record(name, value string) {
 	}
 }
 
-// splitFlag splits a "--name=value" word into its name and value, and
-// reports a bare "--name" as a name with no value.
 func splitFlag(token string) (name, value string, hasEquals bool) {
 	if equals := strings.IndexByte(token, '='); equals >= 0 {
 		return token[:equals], token[equals+1:], true
@@ -168,7 +152,6 @@ func splitFlag(token string) (name, value string, hasEquals bool) {
 	return token, "", false
 }
 
-// lookupCompletionFlag finds a flag by its exact name.
 func lookupCompletionFlag(name string) (completionFlag, bool) {
 	for _, flag := range completionFlags {
 		if flag.name == name {
@@ -178,7 +161,6 @@ func lookupCompletionFlag(name string) (completionFlag, bool) {
 	return completionFlag{}, false
 }
 
-// flagNames lists every flag name completion can offer.
 func flagNames() []string {
 	names := make([]string, 0, len(completionFlags))
 	for _, flag := range completionFlags {
@@ -187,10 +169,8 @@ func flagNames() []string {
 	return names
 }
 
-// completeFlagValue offers the values a flag accepts: --format
-// has a fixed set, --kubeconfig names a file so the shell completes a
-// path, --source takes no value and never reaches here, the rest have
-// open values>
+// --kubeconfig takes a file path, so completeFlagValue returns
+// compDirectiveDefault for it, which lets the shell complete file names.
 func completeFlagValue(flag, toComplete string) ([]string, int) {
 	switch flag {
 	case "--format":
@@ -202,7 +182,7 @@ func completeFlagValue(flag, toComplete string) ([]string, int) {
 	}
 }
 
-// formatNames lists the capture formats in a stable order.
+// formatNames sorts the names because map iteration order is random.
 func formatNames() []string {
 	names := make([]string, 0, len(captureFormats))
 	for name := range captureFormats {
@@ -212,7 +192,6 @@ func formatNames() []string {
 	return names
 }
 
-// filterByPrefix keeps the candidates the cursor's word begins.
 func filterByPrefix(items []string, prefix string) []string {
 	var kept []string
 	for _, item := range items {
@@ -223,33 +202,31 @@ func filterByPrefix(items []string, prefix string) []string {
 	return kept
 }
 
-// A dynamic client built from a parse; the real factory reads the
-// standard kube flags, a test hands back a fake client. There is no
-// namespace to resolve, because Sink and Source are cluster-scoped>
+// A clientFactory builds a dynamic client for the parsed words.
+// kubeClientFactory reads the kube flags, and a test returns a fake
+// client.
 type clientFactory func(parse completionParse) (dynamic.Interface, error)
 
-// realEndpointLister queries the cluster for Sink or Source names
-// over the standard kube flags; every failure yields no names>
-func realEndpointLister(ctx context.Context) endpointLister {
+func clusterEndpointLister(ctx context.Context) endpointLister {
 	return newEndpointLister(ctx, kubeClientFactory)
 }
 
-// newEndpointLister lists Sink or Source names through a client
-// the factory builds, picking the GVR from parse.source; it bounds the
-// query so a completion gives up quickly>
+// The returned lister returns no names on any error. The list times
+// out after 5 seconds, so an unreachable cluster does not hang the shell
+// prompt.
 func newEndpointLister(ctx context.Context, factory clientFactory) endpointLister {
 	return func(parse completionParse) []string {
 		client, err := factory(parse)
 		if err != nil {
 			return nil
 		}
-		reach, cancel := context.WithTimeout(ctx, 5*time.Second)
+		listCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		gvr := sinkGVR
 		if parse.source {
 			gvr = sourceGVR
 		}
-		names, err := listEndpoints(reach, client, gvr)
+		names, err := listEndpoints(listCtx, client, gvr)
 		if err != nil {
 			return nil
 		}
@@ -257,9 +234,8 @@ func newEndpointLister(ctx context.Context, factory clientFactory) endpointListe
 	}
 }
 
-// kubeClientFactory builds a dynamic client from the standard
-// kube flags, honoring the context and kubeconfig the completion words
-// carry; no namespace to resolve>
+// kubeClientFactory reads --context and --kubeconfig from the parsed
+// words, because run handles __complete before it parses any flags.
 func kubeClientFactory(parse completionParse) (dynamic.Interface, error) {
 	flags := genericclioptions.NewConfigFlags(true)
 	if parse.context != "" {
@@ -279,9 +255,9 @@ func kubeClientFactory(parse completionParse) (dynamic.Interface, error) {
 	return client, nil
 }
 
-// completionScript prints the bash script that completes a
-// direct invocation of the binary; kubectl instead runs the
-// kubectl_complete-liken-audio shim, which runs the same verb>
+// completionScript prints the bash script that completes a direct call
+// of kubectl-liken-audio. Completion through kubectl does not use it,
+// because kubectl runs the kubectl_complete-liken-audio shim.
 func completionScript(shell string, stdout io.Writer) error {
 	if shell != "bash" {
 		return fmt.Errorf("completion supports bash, not %q", shell)
@@ -290,9 +266,8 @@ func completionScript(shell string, stdout io.Writer) error {
 	return nil
 }
 
-// The bash completion for a direct kubectl-liken-audio call; a
-// sibling CLI copies this text and changes only the binary name and the
-// two function names>
+// Each sibling CLI has a copy of this script with its own binary name
+// and function name.
 const bashCompletionScript = `# bash completion for kubectl-liken-audio
 __kubectl_liken_audio_complete()
 {
@@ -310,15 +285,15 @@ __kubectl_liken_audio_complete()
     directive="${directive#:}"
     [[ "$directive" =~ ^[0-9]+$ ]] || directive=0
 
-    # Every other line is a candidate; a tab and a description may follow
+    # Every other line is a candidate. A tab and a description can follow
     # the value, so keep only the value.
     while IFS= read -r comp; do
         [[ -z "$comp" || "$comp" == :* ]] && continue
         COMPREPLY+=("${comp%%$'\t'*}")
     done <<< "${out%$'\n'*}"
 
-    # Bit 2 keeps the cursor against the completion; bit 4 stops the file
-    # fallback the "complete -o default" registration would otherwise add.
+    # Bit 2 keeps the cursor against the completion. Bit 4 stops the file
+    # completion that the "complete -o default" registration adds otherwise.
     (( (directive & 2) != 0 )) && compopt -o nospace 2>/dev/null
     (( (directive & 4) != 0 )) && compopt +o default 2>/dev/null
 }

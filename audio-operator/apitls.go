@@ -1,40 +1,40 @@
 package main
 
-// Minting the domain's one certificate authority and the two leaves
-// it signs.
+// The capture API mints its own certificate authority (CA). The
+// kubernetes.io/tls Secret audio-api-tls holds the CA certificate and
+// key, and the leaf that audio-api serves. The ConfigMap audio-api-ca
+// holds a copy of the CA certificate, so a client can read the trust
+// anchor without access to the Secret. The same CA signs the capture
+// container's leaf, which has the SAN audio-capture and is stored in
+// the Secret audio-capture-server. The DaemonSet mounts that Secret as
+// an optional volume.
 //
-// The CA and the public leaf are in the Secret audio-api-tls, in the
-// kubernetes.io/tls shape. The CA certificate alone goes in the
-// ConfigMap audio-api-ca, so a client reads the trust anchor with an
-// ordinary get and never touches the Secret. The capture container's
-// leaf, signed by the same CA with the SAN audio-capture, goes in the
-// Secret audio-capture-server, which the DaemonSet mounts as an
-// optional volume.
-//
-// The CA is valid for ten years and a leaf for one, and the API mints a
-// leaf again when under a third of its life remains.
+// The API mints a leaf again before it expires (leafRenewalShare), and
 // audio_api_certificate_expiry_seconds reports the nearest expiry.
 //
-// Every key the API mints is ECDSA on the P-256 curve, stored as
-// PKCS#8 under the PEM type "PRIVATE KEY". P-256 is the TLS default
-// for a new certificate, and a P-256 key takes well under a
-// millisecond to generate, where an RSA-2048 key takes tens of
-// milliseconds. The API still reads an RSA key, in PKCS#1 or PKCS#8,
-// because a Secret that an earlier release minted holds one. An RSA CA
-// stays in place until its own rotation, and signs the ECDSA leaves
-// that the API mints until then. The API serves an RSA leaf until
-// under a third of its life remains, and mints an ECDSA leaf to
-// replace it. A Secret that cert-manager issues can hold a key of any
-// type that crypto/tls reads, and the API serves it as it is.
+// Every key the API mints is ECDSA on the P-256 curve, stored as PKCS#8
+// under the PEM type "PRIVATE KEY", because P-256 is the default for a
+// new TLS certificate and generates much faster than an RSA-2048 key.
+// The API still reads RSA keys, in PKCS#1 or PKCS#8, because a Secret
+// from an earlier release can hold one. An RSA CA stays in use until it
+// is rotated, and it signs ECDSA leaves. The API serves an RSA leaf
+// until the leaf is due for renewal, and then mints an ECDSA leaf in
+// its place. A Secret that cert-manager issues can hold any key
+// type that crypto/tls reads, and the API serves it unchanged.
 //
-// A create that loses the race reads the winner, so two API pods
-// during a rollout settle on one CA. The Deployment is strategy
-// Recreate for the same reason.
+// Two API pods that run at once must use one CA, or no single CA
+// certificate verifies the leaves of both. The Deployment's Recreate
+// strategy keeps a rollout from running two pods at once. When two pods
+// still create the Secret at once, the create that loses reads the
+// winner's Secret.
 //
-// Rotation of the CA is two steps: publish the new CA appended to
-// ca.crt in the ConfigMap, wait for every client to read it, then
-// switch the leaves. A cert-manager owner replaces audio-api-tls with
-// a Certificate of the same name.
+// To rotate the CA by hand, append the new CA to ca.crt in the
+// ConfigMap, wait until every client has read it, and then write the
+// new CA's certificate and key into ca.crt and ca.key of the Secret
+// audio-api-tls. The API then mints a capture leaf from the new CA, and
+// mints its own leaf from it when the old leaf is due for renewal. If
+// you use cert-manager, replace audio-api-tls with a Certificate of the
+// same name.
 
 import (
 	"crypto"
@@ -51,38 +51,36 @@ import (
 	"time"
 )
 
-// The three objects this API owns. The Role in deploy/api.yaml names
-// them by these exact names, so a rename here is a rename there.
+// The objects that the API owns. The Role in deploy/api.yaml names
+// each of them, so a rename here needs the same rename there.
 const (
 	apiTLSSecret     = "audio-api-tls"
 	apiCAConfigMap   = "audio-api-ca"
 	captureTLSSecret = "audio-capture-server"
 )
 
-// The lifetimes, and the share of a leaf's life below which the API
-// mints it again: a leaf with under a third of its year left is
-// replaced.
+// The lifetimes of the certificates. The API mints a leaf again when
+// less than 1/leafRenewalShare of its life remains.
 const (
 	caLifetime       = 10 * 365 * 24 * time.Hour
 	leafLifetime     = 365 * 24 * time.Hour
 	leafRenewalShare = 3
 )
 
-// keyPair is one certificate and its key, in the PEM the Kubernetes
-// tls shape carries.
+// keyPair is one certificate and its key, PEM-encoded as a
+// kubernetes.io/tls Secret stores them.
 type keyPair struct {
 	Certificate []byte
 	Key         []byte
 }
 
-// authority is the CA this domain signs with.
+// authority is the CA that signs the capture API's leaves.
 type authority struct {
 	Pair        keyPair
 	certificate *x509.Certificate
 	key         crypto.Signer
 }
 
-// mintAuthority makes the domain's CA.
 func mintAuthority(now time.Time) (authority, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -120,7 +118,6 @@ func mintAuthority(now time.Time) (authority, error) {
 	}, nil
 }
 
-// readAuthority reads a CA back out of the PEM a Secret holds.
 func readAuthority(pair keyPair) (authority, error) {
 	certificate, err := parseCertificate(pair.Certificate)
 	if err != nil {
@@ -133,11 +130,11 @@ func readAuthority(pair keyPair) (authority, error) {
 	return authority{Pair: pair, certificate: certificate, key: key}, nil
 }
 
-// mintLeaf signs one server certificate for the names given. The key
-// usage is digital signature alone, because an ECDSA key signs the
-// handshake and never encrypts a key. The CA's own key decides the
-// signature algorithm: ECDSA with SHA-256 from an ECDSA CA, and RSA
-// with SHA-256 from an RSA CA of an earlier release.
+// mintLeaf signs a server certificate that lists names as DNS SANs.
+// The key usage is digital signature only, because an ECDSA key signs
+// the TLS handshake and does not encrypt a key exchange. The CA's key
+// type sets the signature algorithm: ECDSA with SHA-256 from an ECDSA
+// CA, and RSA with SHA-256 from an RSA CA.
 func (a authority) mintLeaf(commonName string, names []string, now time.Time) (keyPair, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -167,15 +164,13 @@ func (a authority) mintLeaf(commonName string, names []string, now time.Time) (k
 	return keyPair{Certificate: encodeCertificate(body), Key: keyPEM}, nil
 }
 
-// selfSigned makes a certificate of this process's own, signed by a
-// CA it mints and discards.
-//
-// The capture listener serves it while the Secret the API mints is
-// absent, so /healthz answers and the liveness probe passes rather
-// than restarting the container every three minutes. No client in
-// this cluster trusts it: the API anchors on the domain's CA, so a
-// tap against this certificate fails verification and is a 503, and
-// audio_capture_ready stays 0.
+// selfSigned returns a certificate for name, signed by a CA that it
+// mints and discards. The capture listener serves it until the
+// audio-capture-server Secret exists, so /healthz responds over HTTPS
+// and the kubelet does not restart the container for a failed liveness
+// probe. No client trusts this certificate, because the API verifies
+// against its own CA, so a tap fails with a 503 and
+// audio_capture_ready stays 0 until the Secret arrives.
 func selfSigned(name string, now time.Time) (tls.Certificate, error) {
 	authority, err := mintAuthority(now)
 	if err != nil {
@@ -188,8 +183,8 @@ func selfSigned(name string, now time.Time) (tls.Certificate, error) {
 	return tls.X509KeyPair(pair.Certificate, pair.Key)
 }
 
-// expiring says whether a leaf has less than a third of its life left,
-// which is when the API mints it again.
+// expiring reports whether a leaf is due for renewal. A certificate
+// that does not parse counts as expiring.
 func expiring(pair keyPair, now time.Time) bool {
 	certificate, err := parseCertificate(pair.Certificate)
 	if err != nil {
@@ -199,8 +194,6 @@ func expiring(pair keyPair, now time.Time) bool {
 	return certificate.NotAfter.Sub(now) < life/leafRenewalShare
 }
 
-// expiryOf reports when a certificate runs out, which is what the
-// gauge carries.
 func expiryOf(pair keyPair) (time.Time, error) {
 	certificate, err := parseCertificate(pair.Certificate)
 	if err != nil {
@@ -209,8 +202,8 @@ func expiryOf(pair keyPair) (time.Time, error) {
 	return certificate.NotAfter, nil
 }
 
-// serviceNames are the DNS names the public leaf carries: the four
-// spellings a client in this cluster reaches the Service by.
+// serviceNames returns the names that a client in the cluster can use
+// to reach the Service, which the public leaf lists as DNS SANs.
 func serviceNames(service, namespace string) []string {
 	return []string{
 		service,
@@ -248,9 +241,9 @@ func parseCertificate(body []byte) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-// parseKey reads a CA key in each form a Secret can hold: PKCS#8 from
-// this release, PKCS#1 "RSA PRIVATE KEY" from an earlier one, and SEC1
-// "EC PRIVATE KEY" from a CA that a person made with openssl.
+// parseKey reads a CA key in any form that a Secret can hold: PKCS#8,
+// which this code writes, PKCS#1 "RSA PRIVATE KEY" from an earlier
+// release, and SEC1 "EC PRIVATE KEY" from a CA made with openssl.
 func parseKey(body []byte) (crypto.Signer, error) {
 	block, _ := pem.Decode(body)
 	if block == nil {

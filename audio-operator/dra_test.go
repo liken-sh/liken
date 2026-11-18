@@ -1,9 +1,5 @@
 package main
 
-// The prepare path, end to end: the kubelet's call, the claim the
-// driver reads back, the CDI file it leaves for the runtime, and the
-// unprepare that removes it.
-
 import (
 	"context"
 	"net/http"
@@ -17,11 +13,8 @@ import (
 	drav1 "k8s.io/kubelet/pkg/apis/dra/v1"
 )
 
-// allocatedClaim is what the API server holds for a claim that the
-// scheduler allocated. The second result belongs to another driver,
-// which is what a claim that pairs a screen with its speakers looks
-// like. This driver must leave that result to the other driver's own
-// plugin.
+// allocatedClaim pairs speakers with a screen. The screen's result
+// belongs to another driver, so this driver must leave it alone.
 const allocatedClaim = `{
   "metadata": {"name": "kitchen", "namespace": "media", "uid": "claim-1"},
   "status": {"allocation": {"devices": {"results": [
@@ -30,9 +23,8 @@ const allocatedClaim = `{
   ]}}}
 }`
 
-// A claim on one Bluetooth speaker. The device name is the peer
-// MAC, and the driver is the same one that publishes the card's
-// outputs, so the delivery is the same delivery.
+// speakerClaim is allocated a Bluetooth speaker, whose device name is
+// its MAC address with dashes.
 const speakerClaim = `{
   "metadata": {"name": "kitchen", "namespace": "media", "uid": "claim-1"},
   "status": {"allocation": {"devices": {"results": [
@@ -40,13 +32,13 @@ const speakerClaim = `{
   ]}}}
 }`
 
-// testPlugin builds a DRA plugin over an API server that holds one
-// claim, and over a fixed graph.
+// testPlugin returns a plugin whose API server serves one claim and
+// whose PipeWire graph is fixed.
 func testPlugin(t *testing.T, claim string, graph pwGraph) *draPlugin {
 	t.Helper()
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			t.Errorf("the plugin sent %s %s, want only GET requests", r.Method, r.URL.Path)
 		}
 		_, _ = w.Write([]byte(claim))
 	}))
@@ -54,16 +46,12 @@ func testPlugin(t *testing.T, claim string, graph pwGraph) *draPlugin {
 		client:    client,
 		endpoints: testInventory(),
 		graph:     staticGraph(graph),
-		// A static graph never moves, so its change signal never
-		// fires.
-		changes: func() <-chan struct{} { return nil },
-		// A claim that states no codec must reach no codec write. The
-		// stand-in fails the test rather than panic, so a prepare that
-		// writes one names itself. The volume write is a stand-in that
-		// takes what it is given, because every prepare of a speaker
-		// makes one; codecs_test.go is where its levels are asserted.
+		changes:   func() <-chan struct{} { return nil },
+		// A claim that selects no codec must not switch one. Every
+		// prepare of a speaker writes volumes, and codecs_test.go
+		// checks the levels.
 		setCodec: func(context.Context, int, int) error {
-			t.Error("the driver wrote a codec for a claim that stated none")
+			t.Error("the driver wrote a codec for a claim that selects none, want no codec write")
 			return nil
 		},
 		setVolumes: func(context.Context, int, []float64) error { return nil },
@@ -76,10 +64,10 @@ func prepare(t *testing.T, plugin *draPlugin, uid string) *drav1.NodePrepareReso
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "kitchen", Uid: uid}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("preparing the claim: %v", err)
 	}
-	entry, answered := resp.Claims[uid]
-	if !answered {
+	entry, found := resp.Claims[uid]
+	if !found {
 		t.Fatal("the response has no entry for the claim, which the kubelet reads as a failure to retry")
 	}
 	return entry
@@ -93,7 +81,7 @@ func TestPrepareDeliversTheSocketAndTheSinkName(t *testing.T) {
 
 	entry := prepare(t, plugin, "claim-1")
 	if entry.Error != "" {
-		t.Fatalf("prepare failed: %s", entry.Error)
+		t.Fatalf("preparing the claim: %s", entry.Error)
 	}
 	// One device, because the other result belongs to another driver.
 	if len(entry.Devices) != 1 {
@@ -101,21 +89,20 @@ func TestPrepareDeliversTheSocketAndTheSinkName(t *testing.T) {
 	}
 	device := entry.Devices[0]
 	if device.DeviceName != testSinkName || device.PoolName != "liken-1" {
-		t.Errorf("device = %+v", device)
+		t.Errorf("device = %+v, want %s in the pool liken-1", device, testSinkName)
 	}
 	if !slices.Equal(device.RequestNames, []string{"speakers"}) {
-		t.Errorf("requests = %v", device.RequestNames)
+		t.Errorf("requests = %v, want [speakers]", device.RequestNames)
 	}
 	want := []string{"audio.liken.sh/output=claim-1-" + testSinkName}
 	if !slices.Equal(device.CdiDeviceIds, want) {
 		t.Errorf("CDI ids = %v, want %v", device.CdiDeviceIds, want)
 	}
 
-	// The runtime reads the file, so the delivery is what the file
-	// says and not what the response says.
+	// The container runtime applies the CDI file, not the response.
 	spec := readSpec(t, filepath.Join(dir, "audio.liken.sh-claim-1.json"))
 	if spec.Kind != cdiKind {
-		t.Errorf("kind = %q", spec.Kind)
+		t.Errorf("kind = %q, want %q", spec.Kind, cdiKind)
 	}
 	edits := spec.Devices[0].ContainerEdits
 	env := []string{
@@ -126,31 +113,29 @@ func TestPrepareDeliversTheSocketAndTheSinkName(t *testing.T) {
 		t.Errorf("env = %v, want %v", edits.Env, env)
 	}
 	if len(edits.Mounts) != 1 || edits.Mounts[0].HostPath != runtimeDir {
-		t.Errorf("mounts = %+v", edits.Mounts)
+		t.Errorf("mounts = %+v, want one mount of %s", edits.Mounts, runtimeDir)
 	}
 
-	// Unprepare takes the file back, and repeats of it succeed,
-	// because the kubelet repeats the call whenever it has no record
-	// that it succeeded.
+	// The kubelet can repeat an unprepare until it records a success,
+	// so a second unprepare must succeed too.
 	for range 2 {
 		resp, err := plugin.NodeUnprepareResources(context.Background(), &drav1.NodeUnprepareResourcesRequest{
 			Claims: []*drav1.Claim{{Namespace: "media", Name: "kitchen", Uid: "claim-1"}},
 		})
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("unpreparing the claim: %v", err)
 		}
 		if message := resp.Claims["claim-1"].Error; message != "" {
-			t.Fatalf("unprepare failed: %s", message)
+			t.Fatalf("unpreparing the claim: %s", message)
 		}
 	}
 	if left := specFiles(t, dir); len(left) != 0 {
-		t.Fatalf("unprepare left %v behind", left)
+		t.Fatalf("unprepare left the spec files %v, want none", left)
 	}
 }
 
-// A Bluetooth speaker receives what an HDMI output receives.
-// The node name is the one WirePlumber's bluez monitor built, and
-// nothing else in the delivery changes.
+// A Bluetooth speaker gets the same CDI edits as an HDMI output,
+// with the node name that WirePlumber's bluez monitor created.
 func TestPrepareDeliversASpeakersNodeName(t *testing.T) {
 	dir := specDirectory(t)
 	plugin := testPlugin(t, speakerClaim, speakerGraph(map[string]bluezSink{
@@ -159,7 +144,7 @@ func TestPrepareDeliversASpeakersNodeName(t *testing.T) {
 
 	entry := prepare(t, plugin, "claim-1")
 	if entry.Error != "" {
-		t.Fatalf("prepare failed: %s", entry.Error)
+		t.Fatalf("preparing the claim: %s", entry.Error)
 	}
 	if len(entry.Devices) != 1 {
 		t.Fatalf("devices = %+v, want one", entry.Devices)
@@ -177,14 +162,13 @@ func TestPrepareDeliversASpeakersNodeName(t *testing.T) {
 		t.Errorf("env = %v, want %v", got, env)
 	}
 	if mounts := spec.Devices[0].ContainerEdits.Mounts; len(mounts) != 1 || mounts[0].HostPath != runtimeDir {
-		t.Errorf("mounts = %+v", mounts)
+		t.Errorf("mounts = %+v, want one mount of %s", mounts, runtimeDir)
 	}
 }
 
-// A claim on one capture endpoint. The device name carries the
-// capture word, and the delivery is the delivery a sink receives with
-// the source node's name in PIPEWIRE_NODE, which target.object
-// honors for a capture stream.
+// sourceClaim is allocated a capture endpoint. PipeWire reads
+// PIPEWIRE_NODE as target.object for a capture stream as well as for
+// playback.
 var sourceClaim = `{
   "metadata": {"name": "kitchen", "namespace": "media", "uid": "claim-1"},
   "status": {"allocation": {"devices": {"results": [
@@ -193,8 +177,8 @@ var sourceClaim = `{
   ]}}}
 }`
 
-// sourceGraph is a graph that holds one capture node, on the PCM
-// device the lab card's analog jack records through.
+// sourceGraph returns a graph with one capture node, on the PCM
+// device that the lab card's analog jack records through.
 func sourceGraph(node string) pwGraph {
 	address := pcmAddress{Card: 0, PCM: 0}
 	return pwGraph{
@@ -211,7 +195,7 @@ func TestPrepareDeliversASourceNodeName(t *testing.T) {
 
 	entry := prepare(t, plugin, "claim-1")
 	if entry.Error != "" {
-		t.Fatalf("prepare failed: %s", entry.Error)
+		t.Fatalf("preparing the claim: %s", entry.Error)
 	}
 	if len(entry.Devices) != 1 {
 		t.Fatalf("devices = %+v, want one", entry.Devices)
@@ -229,13 +213,13 @@ func TestPrepareDeliversASourceNodeName(t *testing.T) {
 		t.Errorf("env = %v, want %v", got, env)
 	}
 	if mounts := spec.Devices[0].ContainerEdits.Mounts; len(mounts) != 1 || mounts[0].HostPath != runtimeDir {
-		t.Errorf("mounts = %+v", mounts)
+		t.Errorf("mounts = %+v, want one mount of %s", mounts, runtimeDir)
 	}
 }
 
-// The playback node of the same PCM device is not the source. A
-// prepare that read the playback index would deliver the speakers to
-// a pod that asked for the microphone.
+// The graph has the playback node of the same PCM device but no
+// capture node. A prepare that used the playback node would give the
+// speakers to a pod that requested the microphone.
 func TestPrepareRefusesASourceWhoseNodeIsGone(t *testing.T) {
 	specDirectory(t)
 	plugin := testPlugin(t, sourceClaim,
@@ -243,7 +227,7 @@ func TestPrepareRefusesASourceWhoseNodeIsGone(t *testing.T) {
 
 	entry := prepare(t, plugin, "claim-1")
 	if entry.Error == "" {
-		t.Fatalf("prepare delivered a source with no node: %+v", entry.Devices)
+		t.Fatalf("prepare returned %+v for a source with no node, want a refusal", entry.Devices)
 	}
 	if want := "source " + testSourceName + " has no PipeWire node right now"; entry.Error != want {
 		t.Errorf("error = %q, want %q", entry.Error, want)
@@ -252,46 +236,40 @@ func TestPrepareRefusesASourceWhoseNodeIsGone(t *testing.T) {
 
 func TestPrepareRefusesWhatItCannotDeliver(t *testing.T) {
 	cases := []struct {
-		name  string
-		claim string
-		uid   string
-		graph pwGraph
-		says  string
+		name      string
+		claim     string
+		uid       string
+		graph     pwGraph
+		wantError string
 	}{
 		{
-			// The pod waits in ContainerCreating, and the device's
-			// taints are what the scheduler and the eviction controller
-			// act on.
-			name:  "the sink has no node",
-			claim: allocatedClaim,
-			uid:   "claim-1",
-			says:  "sink " + testSinkName + " has no PipeWire node right now",
+			name:      "the sink has no node",
+			claim:     allocatedClaim,
+			uid:       "claim-1",
+			wantError: "sink " + testSinkName + " has no PipeWire node right now",
 		},
 		{
-			name:  "the claim has no allocation yet",
-			claim: `{"metadata": {"name": "kitchen", "namespace": "media", "uid": "claim-1"}}`,
-			uid:   "claim-1",
-			graph: outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}),
-			says:  "the claim has no allocation yet",
+			name:      "the claim has no allocation yet",
+			claim:     `{"metadata": {"name": "kitchen", "namespace": "media", "uid": "claim-1"}}`,
+			uid:       "claim-1",
+			graph:     outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}),
+			wantError: "the claim has no allocation yet",
 		},
 		{
-			// The named claim was deleted and recreated after the
-			// kubelet asked, so whatever it holds is not the grant this
-			// pod was scheduled against.
-			name:  "the claim was recreated",
-			claim: allocatedClaim,
-			uid:   "claim-2",
-			graph: outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}),
-			says:  "the claim's UID changed",
+			name:      "the claim was recreated",
+			claim:     allocatedClaim,
+			uid:       "claim-2",
+			graph:     outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}),
+			wantError: "the claim's UID changed",
 		},
 		{
-			// The speaker is paired and switched off, so the slice
-			// carries its two taints and no pod should reach this call.
-			name:  "the speaker has no sink",
-			claim: speakerClaim,
-			uid:   "claim-1",
-			graph: outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}),
-			says:  "speaker " + testSpeakerName + " has no PipeWire sink right now",
+			// The speaker is paired but switched off. Its device's taints
+			// keep pods off it, but the prepare must still refuse.
+			name:      "the speaker has no sink",
+			claim:     speakerClaim,
+			uid:       "claim-1",
+			graph:     outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}),
+			wantError: "speaker " + testSpeakerName + " has no PipeWire sink right now",
 		},
 		{
 			name: "the allocation names something this driver did not publish",
@@ -301,9 +279,9 @@ func TestPrepareRefusesWhatItCannotDeliver(t *testing.T) {
 			    {"request": "speakers", "driver": "audio.liken.sh", "pool": "liken-1", "device": "card0-hdmi-a-1"}
 			  ]}}}
 			}`,
-			uid:   "claim-1",
-			graph: outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}),
-			says:  "does not name a device of this driver",
+			uid:       "claim-1",
+			graph:     outputGraph(map[pcmAddress]string{{Card: 0, PCM: 3}: "alsa_output.test"}),
+			wantError: "does not name a device of this driver",
 		},
 	}
 	for _, c := range cases {
@@ -313,26 +291,23 @@ func TestPrepareRefusesWhatItCannotDeliver(t *testing.T) {
 
 			entry := prepare(t, plugin, c.uid)
 			if entry.Error == "" {
-				t.Fatalf("prepare accepted a claim it cannot deliver: %+v", entry.Devices)
+				t.Fatalf("prepare returned %+v, want a refusal", entry.Devices)
 			}
-			if !strings.Contains(entry.Error, c.says) {
-				t.Errorf("error = %q, want it to say %q", entry.Error, c.says)
+			if !strings.Contains(entry.Error, c.wantError) {
+				t.Errorf("error = %q, want it to contain %q", entry.Error, c.wantError)
 			}
-			// A refusal writes no file, so no later pod receives a
-			// delivery from a claim that was never prepared.
 			if left := specFiles(t, dir); len(left) != 0 {
-				t.Errorf("a refused claim left %v behind", left)
+				t.Errorf("a refused claim left the spec files %v, want none", left)
 			}
 		})
 	}
 }
 
-// specFiles lists what the CDI directory holds.
 func specFiles(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the CDI directory: %v", err)
 	}
 	names := []string{}
 	for _, entry := range entries {
@@ -341,10 +316,10 @@ func specFiles(t *testing.T, dir string) []string {
 	return names
 }
 
-// The claims that hold an endpoint are what status.claims reports, so
-// the plugin records it at prepare and drops it at unprepare. The
-// record is the only place a claim's namespace and name arrive: the
-// file the prepare leaves behind carries the claim's UID alone.
+// status.claims lists the claims that hold an endpoint, so the plugin
+// records a claim at prepare and drops it at unprepare. The CDI file
+// contains only the claim's UID, so this record is the only place the
+// plugin keeps the claim's namespace and name.
 func TestPreparedClaimsRecordWhoHoldsEachDevice(t *testing.T) {
 	specDirectory(t)
 	plugin := testPlugin(t, allocatedClaim, outputGraph(map[pcmAddress]string{
@@ -353,23 +328,21 @@ func TestPreparedClaimsRecordWhoHoldsEachDevice(t *testing.T) {
 	plugin.claims = &preparedClaims{}
 
 	if entry := prepare(t, plugin, "claim-1"); entry.Error != "" {
-		t.Fatalf("prepare failed: %s", entry.Error)
+		t.Fatalf("preparing the claim: %s", entry.Error)
 	}
 	if got, want := plugin.claims.holders(testSinkName), []EndpointClaim{{Namespace: "media", Name: "kitchen"}}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("holders = %+v, want %+v", got, want)
 	}
-	// The other driver's device in the same claim is that driver's to
-	// record.
 	if held := plugin.claims.holders("card0-hdmi-a-1"); len(held) != 0 {
-		t.Error("this driver recorded another driver's device")
+		t.Error("this driver recorded another driver's device, want no holders for it")
 	}
 
 	if _, err := plugin.NodeUnprepareResources(context.Background(), &drav1.NodeUnprepareResourcesRequest{
 		Claims: []*drav1.Claim{{Namespace: "media", Name: "kitchen", Uid: "claim-1"}},
 	}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("unpreparing the claim: %v", err)
 	}
 	if held := plugin.claims.holders(testSinkName); len(held) != 0 {
-		t.Errorf("the device is still held by %+v after unprepare", held)
+		t.Errorf("after unprepare, the device is held by %+v, want no holders", held)
 	}
 }

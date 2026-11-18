@@ -1,9 +1,8 @@
 package main
 
-// Kubectl-liken-audio is the audio operator's CLI plugin. kubectl
+// kubectl-liken-audio is the CLI plugin of audio-operator. kubectl
 // finds it on PATH and runs "kubectl liken audio capture room" as this
-// binary with "capture room". It owns the audio verbs and takes the
-// cluster's identity from the standard kube flags.
+// binary with the arguments "capture room".
 
 import (
 	"context"
@@ -16,52 +15,54 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
-// The release this binary was built from; the build
-// stamps it with -ldflags "-X main.version=...", the same way the
-// operator image is stamped, and every other build reports dev.
+// A release build sets version with -ldflags "-X main.version=...".
+// Other builds report "dev".
 var version = "dev"
 
-// The usage block and the one-line flag descriptions.
 const (
-	usageText = `kubectl liken audio: capture the sound of a Sink or Source
+	usageText = `kubectl liken audio: stream the sound of a Sink or a Source
 
 Verbs:
-  capture <sink>     stream the Sink's sound to stdout as WAV, FLAC, or Opus
+  capture <name>     stream the sound of a Sink, or of a Source with --source, to stdout as WAV, FLAC, or Opus
   completion bash    print the bash completion script
 
 Example:
   kubectl liken audio capture living-room > living-room.wav`
-	formatUsage     = "wav, flac, or opus"
-	sourceUsage     = "tap a source, not a sink"
-	forceUsage      = "run despite a version mismatch"
-	versionUsage    = "print the version"
+	formatUsage     = "audio format of the stream: wav, flac, or opus"
+	sourceUsage     = "treat the name as a Source, not a Sink"
+	forceUsage      = "do not warn when the CLI version differs from the operator version"
+	versionUsage    = "print the version of this CLI"
 	kubeconfigUsage = "path to the kubeconfig file"
 	contextUsage    = "the kubeconfig context to use"
 )
 
+// programName starts each message that this binary prints, spelled as
+// a person types the command.
+const programName = "kubectl liken audio"
+
+// verbList must match the verbs of the switch in run.
+const verbList = "capture and completion"
+
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "%s: %v\n", programName, err)
 		os.Exit(1)
 	}
 }
 
-// run parses the flags and dispatches the verb; it is
-// the whole of the binary's behavior, so a test drives it with its own
-// arguments and writers.
+// main only calls run, so a test calls run with its own arguments and
+// writers.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	// The __complete verb answers the shell's completion request;
-	// it runs before the flag parse, because a request carries a partial
-	// flag and a trailing empty word that the parser would reject>
+	// __complete runs before flag parsing because a completion request
+	// can end in a partial flag or an empty word, which pflag rejects.
 	if len(args) > 0 && args[0] == "__complete" {
 		return runComplete(ctx, args[1:], stdout)
 	}
 
 	flags := pflag.NewFlagSet("kubectl-liken-audio", pflag.ContinueOnError)
 	flags.SetOutput(stderr)
-	// The help prints the verbs and an example first, then the flags,
-	// so a reader learns what the command does before how to call it.
-	// pflag's own usage prints the flags alone, so it is silenced here.
+	// pflag's own usage prints only the flags, so it is silenced, and
+	// printHelp prints the verbs and an example before the flags.
 	flags.Usage = func() {}
 	printHelp := func() {
 		fmt.Fprintln(stderr, usageText)
@@ -73,16 +74,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	source := flags.Bool("source", false, sourceUsage)
 	force := flags.Bool("force", false, forceUsage)
 
-	// The standard kube flags come from cli-runtime,
-	// and this getter turns them into a REST config; only context and
-	// kubeconfig are bound, so the help stays short.
+	// cli-runtime's ConfigFlags turns the kube flags into a REST config.
+	// Only --context and --kubeconfig are bound, to keep the help short.
 	config := genericclioptions.NewConfigFlags(true)
 	flags.StringVar(config.KubeConfig, "kubeconfig", *config.KubeConfig, kubeconfigUsage)
 	flags.StringVar(config.Context, "context", *config.Context, contextUsage)
 
 	if err := flags.Parse(args); err != nil {
-		// --help is not a failure. printHelp writes the usage, so the
-		// branch returns no error.
 		if errors.Is(err, pflag.ErrHelp) {
 			printHelp()
 			return nil
@@ -112,12 +110,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "completion":
 		return completionScript(argAt(positional, 1), stdout)
 	default:
-		return fmt.Errorf("unknown verb %q", positional[0])
+		return fmt.Errorf("unknown verb %q: the verbs are %s", positional[0], verbList)
 	}
 }
 
-// argAt returns the positional argument at index, or an
-// empty string when the caller gave none.
 func argAt(positional []string, index int) string {
 	if index < len(positional) {
 		return positional[index]

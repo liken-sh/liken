@@ -1,28 +1,21 @@
-// audio-operator publishes each physical audio output as its own DRA
-// device, so that a pod claims one monitor's speakers or the analog
-// jack and receives the PipeWire socket and the name of the sink its
-// streams must reach.
+// audio-operator publishes each physical audio output of a machine as
+// a DRA device under the driver name audio.liken.sh. A pod that claims
+// one receives the PipeWire socket and the name of the sink that its
+// streams play to.
 //
-// It is an instance of liken's device operator pattern. The operator
-// claims the machine's audio controller through an ordinary liken.sh
-// claim, reads the PipeWire that runs beside it in the same pod, and
-// publishes what PipeWire holds under its own driver name,
-// audio.liken.sh. The operator uses no private interface into liken.
-// The raw claim, the slices it writes, and the CDI files it leaves
-// for the runtime are the public contracts that any DRA driver on any
-// Kubernetes cluster gets.
+// The operator's own pod claims the machine's audio controller through
+// a liken.sh claim, runs PipeWire beside the operator, and publishes
+// PipeWire's sinks and sources in a ResourceSlice. Only a machine with
+// an audio controller publishes one, so the claim places the pod with
+// no node selector. liken publishes a controller as an exclusive
+// device, so no other sound server can run on that card. The operator
+// uses only the interfaces that any DRA driver uses: the claim, the
+// slice, and CDI files.
 //
-// The claim does two jobs that a person would otherwise write down.
-// It places the pod, because only a machine that has an audio
-// controller publishes one, so no node selector names the machine
-// with the speakers. And it arbitrates, because liken publishes a
-// controller as an exclusive device, so the claim holder is the only
-// sound server on that card.
-//
-// Which PCM device plays into which monitor is the fact this operator
-// exists to publish. It comes from the ELD block that the graphics
-// driver writes into the audio driver, so only a running driver makes
-// it true. It changes whenever somebody moves a cable.
+// The operator publishes which PCM device plays into which monitor.
+// That mapping comes from the ELD that the graphics driver writes into
+// the HDMI audio driver, so it is valid only while the driver runs, and
+// it changes when somebody moves a cable.
 package main
 
 import (
@@ -38,79 +31,63 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// version is the release this binary was built from. The Dockerfile
-// sets it with -ldflags "-X main.version=...", and every other build
-// reports dev. liken_build_info carries it under this operator's
-// component name, so one panel lists every release in the cluster.
+// version is set through -ldflags in the Dockerfile, and is dev in any
+// other build. liken_build_info exports it.
 var version = "dev"
 
 const (
-	// settleWindow is how long the loop waits for quiet after the last
-	// event before it writes. A monitor that a person plugs in
-	// produces a burst of control events, and PipeWire needs a moment
-	// after them to build the sink, so one write must cover the whole
-	// burst.
-	//
-	// Every ResourceSlice write wakes every DRA-pending pod in the
-	// cluster, because the scheduler event that a slice change raises
-	// includes no queueing hint. Hardware that flaps must not turn into
-	// a cluster-wide scheduling storm.
+	// settleWindow is the quiet time after the last event before the
+	// loop writes. Plugging in a monitor produces a burst of control
+	// events, and PipeWire builds the sink some time after them, so one
+	// write must cover the whole burst. Each ResourceSlice write also
+	// wakes every pod that waits on a DRA claim, because kube-scheduler
+	// has no queueing hint for a slice change, so flapping hardware
+	// would requeue those pods again and again.
 	settleWindow = 1500 * time.Millisecond
 
-	// settleLimit bounds the wait. A cable that somebody wiggles
-	// restarts the quiet window forever, and the state it settles on
-	// may never arrive, so the loop publishes what it reads at this
-	// interval regardless.
+	// settleLimit is the longest the loop waits after the first event of
+	// a burst. Without it, a loose cable would restart the quiet window
+	// forever and the loop would never write.
 	settleLimit = 10 * time.Second
 
-	// backstopInterval is how often the loop reconciles with no event
-	// to prompt it. It is a backstop for the changes that no event
-	// source reports: a change on a card whose control device would
-	// not open as an event source, and a slice or status write that
-	// failed on the last pass, which no event repeats. A jack with a
-	// control element, an ELD, and a control all report on the card's
-	// control device, and a reader of it that stops wakes the loop. The
-	// graph feed delivers every change in PipeWire's graph, a renamed
-	// node included. So none of them needs the tick.
+	// backstopInterval is how often the loop runs a pass when nothing
+	// wakes it. The tick covers a card whose control events could not
+	// be subscribed, and a write of the slice or a status that failed,
+	// because no event repeats either. Jack, ELD, and control changes
+	// arrive as control events, and the graph feed delivers every change
+	// in PipeWire's graph, so neither needs the tick.
 	backstopInterval = 60 * time.Second
 
-	// maxSinkFailures is how many graph reads may fail in a row before
-	// the operator exits.
-	//
-	// One failure skips the write, because a slice that tainted every
-	// output would evict every consumer for a pw-dump that timed out
-	// once. A run of them is a different state. The published slice
-	// still says every output has a sink and no taint, while every
-	// prepare call fails because the driver cannot read a sink name,
-	// and nothing in the cluster bounds that. Three in a row make it a
-	// restart, which is the one repair that reaches a PipeWire that
-	// has stopped answering.
-	maxSinkFailures = 3
+	// maxFailedGraphReads is the number of PipeWire graph reads in a row
+	// that can fail before the operator taints every output and exits.
+	// A single failure only skips the pass, because tainting every
+	// output would evict every consumer over one pw-dump that timed out.
+	// During a longer run of failures the slice still reports every
+	// output as ready while every prepare call fails, because the driver
+	// cannot read a sink name. Only a restart of the pod repairs a
+	// PipeWire that has stopped responding.
+	maxFailedGraphReads = 3
 
-	// writeRetryDelay is how long the loop waits before it repeats a
-	// failed slice write. One retry covers the conflict that a
-	// concurrent writer causes and the moment an API server takes to
-	// come back. A failure that outlives it waits for the next event
-	// or the backstop tick.
+	// writeRetryDelay is the wait before the single retry of a failed
+	// slice write. The retry covers a conflict with another writer and a
+	// short API server outage. When the retry fails too, the next event
+	// or the backstop tick writes the slice.
 	writeRetryDelay = 2 * time.Second
 )
 
-// main selects the mode from the command line.
+// main selects the program from its first argument. The operator's pod
+// and the audio-api Deployment run this one image, so every container
+// runs the same version:
 //
-// The pod runs this one image five times. The declare init container
-// passes the declare argument and writes PipeWire's node
-// declarations, the PipeWire and WirePlumber containers name their
-// own binary, the operator container runs with no argument, and the
-// capture container passes capture and serves the taps.
-//
-// The WirePlumber and PipeWire containers run the image once more
-// for each of their probes: the same binary is already there, so the
-// endpoints check, the graph check, and the declaration check need no
-// second image and no shell.
-//
-// The audio-api Deployment runs the same image with the api argument,
-// so the cluster runs one binary at one version for the whole
-// operator.
+//   - declare is the init container that writes the PipeWire drop-in
+//     that declares the card's nodes.
+//   - pipewire and wireplumber start the sound daemons. The remaining
+//     arguments of wireplumber go to WirePlumber.
+//   - endpoints-registered and graph-answers are exec probes of those
+//     containers. They run this binary, so the image needs no shell.
+//   - capture serves the taps that record a Sink or a Source.
+//   - api is the audio-api Deployment.
+//   - With no argument, it is the operator.
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -120,7 +97,7 @@ func main() {
 		case endpointsMode:
 			endpointsRegistered()
 			return
-		case graphMode:
+		case graphProbeMode:
 			graphProbe()
 			return
 		case pipewireMode:
@@ -144,21 +121,15 @@ func operate() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// The DaemonSet gives the pod its node's name through the downward
-	// API. A ResourceSlice names the node whose hardware it describes,
-	// and a pod cannot read that from anywhere else without asking the
-	// API server which node it is on.
+	// The DaemonSet sets NODE_NAME from spec.nodeName through the
+	// downward API, because a ResourceSlice must name its node.
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
-		fatal("NODE_NAME is unset; the DaemonSet must supply it from spec.nodeName")
+		fatal("NODE_NAME is unset, and the DaemonSet must set it from spec.nodeName")
 	}
 	fmt.Printf("%s: operating the audio controller on %s\n", DriverName, nodeName)
 
-	// The metrics listener takes its address the same way the rest of
-	// this program takes its settings: an environment variable the
-	// DaemonSet sets. An empty value serves no metrics, which is what a
-	// pod under test runs with, and a failure here never blocks the
-	// reconcile loop this operator exists for.
+	// An empty METRICS_ADDRESS serves no metrics.
 	readings := newMetrics(version)
 	metricsListener, err := readings.listen(os.Getenv("METRICS_ADDRESS"))
 	if err != nil {
@@ -169,99 +140,84 @@ func operate() {
 		go serveMetrics(ctx, metricsListener, readings)
 	}
 
-	// Failures during setup end the process deliberately. This code
-	// has no retry logic of its own, because the kubelet already
-	// provides it: a pod that exits nonzero restarts with backoff, and
-	// the failure shows in kubectl instead of hiding in a log.
+	// A setup failure exits the process instead of retrying, so the
+	// kubelet restarts the container with backoff, and kubectl shows the
+	// restarts.
 	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
-		fatal("in-cluster config: %v", err)
+		fatal("reading the in-cluster config: %v", err)
 	}
 	owner, err := NodeOwner(client, nodeName)
 	if err != nil {
-		fatal("reading node %s: %v", nodeName, err)
+		fatal("reading the Node %s: %v", nodeName, err)
 	}
 
-	// The declaration PipeWire built its graph from: the one the init
-	// container wrote, or the one this operator wrote for a layout
-	// change before it last restarted. See nodes.go and layoutdrift.go.
-	//
-	// A missing file is an init container that did not run, so the
-	// process ends.
+	// declared is the text of the drop-in that the running PipeWire
+	// loaded: the file that the init container wrote, or the file that
+	// the operator rewrote for a layout change before PipeWire's last
+	// restart. A missing file means that the init container did not run.
 	declared, err := readNodeConfig()
 	if err != nil {
 		fatal("reading the declaration PipeWire loaded: %v", err)
 	}
 
-	// When the claim delivered a Bluetooth media bus, the operator
-	// reads bluetoothd's paired set over it. A pod whose claim
-	// delivered none never opens a bus and publishes the card's
-	// outputs alone.
-	//
-	// A bus that never answers ends the process, like every other
-	// setup failure here: the kubelet's restart with backoff is this
-	// operator's only retry, and the failure shows in kubectl instead
-	// of hiding in a log. Plan 60 accepts the coupling this creates,
-	// because the pod could not prepare its claim without the
-	// Bluetooth operator either.
-	//
-	// After start, a bus that closes is connected again (mediaBus), so
-	// a restart of the Bluetooth operator's pod does not restart this
-	// one.
+	// When the claim includes a Bluetooth media bus, the operator also
+	// publishes the speakers that bluetoothd has paired. A bus that does
+	// not respond at startup exits the process, because the pod could
+	// not have prepared its claim without bluetooth-operator either
+	// (plans/completed/60-bluetooth-audio.md). After startup, followBus
+	// connects again when the bus closes, so a restart of
+	// bluetooth-operator's pod does not restart this one.
 	var speakers func() (map[string]speaker, error)
 	var bluez <-chan struct{}
 	if bluetoothEnabled() {
 		if _, err := waitForBus(ctx, busReadyTimeout); err != nil {
-			fatal("connecting to the delivered Bluetooth media bus: %v", err)
+			fatal("connecting to the Bluetooth media bus: %v", err)
 		}
 		bus := &mediaBus{}
 		speakers = bus.speakers
 		bluez = followBus(ctx, bus)
-		fmt.Printf("%s: the claim delivered a Bluetooth media bus at %s\n",
+		fmt.Printf("%s: the claim includes a Bluetooth media bus at %s\n",
 			DriverName, os.Getenv(busAddressVariable))
 	}
 
-	// The one wake every watcher that carries no event of its own
-	// pokes: the graph feed, the watch on the two collections, and a
-	// card's event reader that stopped.
-	pokes := make(chan struct{}, 1)
+	// wake queues a pass. The channel holds one request, so requests
+	// that arrive before the loop reads it merge into one.
+	wakeRequests := make(chan struct{}, 1)
 	wake := func() {
 		select {
-		case pokes <- struct{}{}:
+		case wakeRequests <- struct{}{}:
 		default:
 		}
 	}
 
-	// The graph feed is one pw-dump -m for the life of the pod. Every
-	// pass reads the graph it last delivered, and a pass that runs
-	// before the first batch, or while the feed is starting again,
-	// reads PipeWire itself.
+	// The graph feed runs one pw-dump -m for the life of the pod, and a
+	// pass reads the last graph that it delivered. Before the first
+	// graph, and while pw-dump restarts, a pass reads PipeWire directly.
 	feed := newGraphFeed()
 
-	// The record of which claim holds which endpoint. The DRA plugin
-	// writes it and the endpoints' own resources report it, so the two
-	// hold one object between them, the way they hold the inventory.
+	// claims records which claim holds which endpoint. The DRA plugin
+	// writes it, and the status of the Sinks and Sources reports it.
 	claims := &preparedClaims{}
 
-	// The watch on the two collections starts before the first pass,
-	// so that a change it carries wakes the loop from the moment it
-	// runs. Its stores are what the pass reads this machine's Sinks and
-	// Sources from.
+	// The watches on the Sinks and Sources start before the first pass,
+	// so a change that arrives during that pass still wakes the loop.
 	watcher, err := informer.InCluster()
 	if err != nil {
-		fatal("in-cluster config for the watches: %v", err)
+		fatal("reading the in-cluster config for the watches: %v", err)
 	}
-	// A new volume ask on a Sink arrives on its own channel, which the
-	// loop reads outside the settle window. One buffered wake covers a
-	// burst: the loop reads each Sink's newest ask.
-	asks := make(chan struct{}, 1)
-	asked := func() {
+	// A new status.session.volumeAsk on a Sink signals volumeAsks
+	// instead of waking a pass, so the loop applies it without the
+	// settle delay. One buffered signal covers a burst, because the loop
+	// reads the newest request of each Sink.
+	volumeAsks := make(chan struct{}, 1)
+	askArrived := func() {
 		select {
-		case asks <- struct{}{}:
+		case volumeAsks <- struct{}{}:
 		default:
 		}
 	}
-	resources := watchEndpoints(ctx, watcher, nodeName, wake, asked, readings)
+	resources := watchEndpoints(ctx, watcher, nodeName, wake, askArrived, readings)
 
 	operator := &reconciler{
 		client:   client,
@@ -270,30 +226,29 @@ func operate() {
 		graph:    feed.read,
 		speakers: speakers,
 		declared: declared,
-		// The operator reads the same fact as the PipeWire container's
-		// first process, to report a layout that waits for the restart.
+		// The PipeWire container's first process makes the same check
+		// before it starts PipeWire. The operator uses it to report a
+		// layout change that waits for a PipeWire restart.
 		declarationStale: runningStale,
 		readings:         readings,
-		// The reconcile pass fills the inventory and the DRA plugin
-		// reads it, so the two hold one object between them.
-		endpoints: &endpointInventory{},
-		cards:     watchCards(ctx, wake),
-		control:   newEndpointControl(client, resources, nodeName, claims, feed, readings),
-		asks:      asks,
-		poke:      wake,
-		// The end of a hotplug hold wakes a pass, so a monitor that
-		// stayed away is reported at the hold's deadline.
+		// The reconcile pass writes the inventory and the DRA plugin
+		// reads it.
+		endpoints:   &endpointInventory{},
+		cards:       watchCards(ctx, wake),
+		control:     newEndpointControl(client, resources, nodeName, claims, feed, readings),
+		volumeAsks:  volumeAsks,
+		requestPass: wake,
+		// The hold wakes a pass when its wait for an empty ELD ends, so
+		// a monitor that stayed disconnected is published then.
 		monitors: newMonitorHold(wake),
 	}
-	// A slot in a drop when the operator starts is held from the
-	// monitor the previous operator published on it.
-	operator.monitors.seed(readPublishedSeeds(client, nodeName))
-	// The one recorder of the operator container. It posts the Events
-	// about this machine's Sinks and Sources, with the pod's name as
-	// reportingInstance.
+	// A monitor whose hot plug detect is down when the operator starts
+	// has no earlier reading in this process, so the hold uses the ELDs
+	// that the previous operator published in the slice.
+	operator.monitors.setPublishedELDs(readPublishedELDs(client, nodeName))
 	operator.control.recorder = events.New(ctx, client, operatorComponent, events.Options{})
-	// The share counts are a field of the same Sinks and Sources the
-	// controller reads, so the slice reads them from its stores.
+	// The slice reads the share counts from spec.sharedClaims in the
+	// same stores that the control reads.
 	operator.readShares = operator.control.sharedClaims
 
 	if err := operator.awaitPipeWire(ctx, pipewireReadyTimeout); err != nil {
@@ -305,44 +260,42 @@ func operate() {
 		fatal("reading the card's outputs: %v", err)
 	}
 	// PipeWire creates the declared nodes while it loads its
-	// configuration, so they are there as soon as it answers. The wait
-	// costs one graph read in that case, and it covers the case where
-	// they are not. Without it the first pass would taint every output,
-	// and a NoExecute taint ends the pods that the previous operator's
-	// prepared claims left running.
+	// configuration, so they usually exist when it first responds, and
+	// waitForNodes costs one graph read. Without the wait, a first pass
+	// that ran before the nodes existed would taint every output, and a
+	// NoExecute taint evicts the pods on claims that the previous
+	// operator prepared.
 	//
-	// The wait watches the playback endpoints alone. A capture node
-	// that PipeWire could not create costs a recorder nothing until
-	// it claims the source, and no running pod holds one at startup.
+	// The wait covers only the playback endpoints. A capture node that
+	// PipeWire could not create affects a recorder only when it claims
+	// the source, and no running pod holds one at startup.
 	named, _ := nameEndpoints(nodeName, outputs)
-	// The inventory is filled before the plugin serves, so that a
-	// prepare call the kubelet makes ahead of the first reconcile pass
-	// resolves its device rather than reporting a name this driver
-	// does publish as one it does not.
+	// The inventory is filled before the plugin serves, so a prepare
+	// call that the kubelet sends before the first pass finds its device.
 	operator.endpoints.publish(named)
 	waitForNodes(ctx, operator.graph, sinkEndpoints(named), nodeReadyTimeout)
 
-	// The graph feed starts before the plugin serves, so that a codec
-	// switch in the first prepare call wakes on the feed's graphs.
-	// It starts before the first pass for the same reason: a change
-	// the feed carries wakes the loop from the moment it runs.
+	// The feed starts before the plugin serves, so a codec switch in
+	// the first prepare call can wait on the feed's graphs. It also
+	// starts before the first pass, so a graph change during that pass
+	// wakes the loop.
 	go feed.follow(ctx, wake)
 
 	// The plugin registers with the kubelet only after PipeWire
-	// answers, so the driver appears when it can answer a prepare
-	// call.
+	// responds, so the kubelet sends no prepare call before the driver
+	// can serve it.
 	go func() {
 		if err := serveDRAPlugin(ctx, client, operator.endpoints, claims, feed); err != nil {
-			fatal("the DRA plugin is not serving: %v", err)
+			fatal("serving the DRA plugin: %v", err)
 		}
 	}()
 
-	settled := settle(ctx, wakes(ctx, bluez, operator.cards.Events(), pokes, operator.monitors.heard),
+	settled := settle(ctx, wakes(ctx, bluez, operator.cards.Events(), wakeRequests, operator.monitors.countELDChange),
 		settleWindow, settleLimit)
 
-	// The first pass runs before any event, because the operator
-	// starts with monitors already connected, and a restart must
-	// republish what the previous pod published.
+	// The first pass runs without waiting for an event, because the
+	// monitors are already connected and a restarted operator must
+	// publish the slice again.
 	if err := operator.pass(ctx); err != nil {
 		fatal("%v", err)
 	}
@@ -351,24 +304,18 @@ func operate() {
 	}
 }
 
-// wakes turns every event source and the backstop tick into one
-// channel. None of them holds state that the loop uses, so the merge
-// loses nothing: all of them say to look again.
+// wakes merges the event sources and the backstop tick into one
+// channel. A wake carries no state, because the pass that follows reads
+// everything again.
 //
-// cards carries every change a card reports on its control device: a
-// control a person moved, on a knob or from another process, a jack
-// that a plug changed, and an ELD that a monitor rewrote. pokes is where the graph feed and the watch
-// on the two collections arrive, because neither one carries an
-// event the pass reads: the pass reads everything again.
-//
-// bluez is nil on a pod whose claim delivered no media bus. A
-// receive on a nil channel blocks forever, so the merge needs no
-// branch for that pod. It closes only when ctx ends, because
-// followBus connects again when the bus closes.
-//
-// A closed bluez or cards channel ends the merge.
+// cards carries each change on a card's control device: a control set
+// on the card or by another process, a jack change, and an ELD that a
+// monitor rewrote. bluez is nil when the claim includes no media bus,
+// and a receive from a nil channel blocks forever. A closed bluez or
+// cards channel ends the merge. bluez closes only when ctx ends,
+// because followBus connects again when the bus closes.
 func wakes(ctx context.Context, bluez <-chan struct{}, cards <-chan controlEvent,
-	pokes <-chan struct{}, heard func(controlEvent)) <-chan struct{} {
+	wakeRequests <-chan struct{}, countELDChange func(controlEvent)) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	wake := func() {
 		select {
@@ -394,13 +341,14 @@ func wakes(ctx context.Context, bluez <-chan struct{}, cards <-chan controlEvent
 					return
 				}
 				fmt.Printf("control: %s\n", event)
-				// The hold counts each ELD change before the pass it
-				// wakes reads the card (monitorhold.go).
-				if heard != nil {
-					heard(event)
+				// The hold counts the event before the wake, so the
+				// pass that the wake starts finds the ELD change
+				// counted.
+				if countELDChange != nil {
+					countELDChange(event)
 				}
 				wake()
-			case <-pokes:
+			case <-wakeRequests:
 				wake()
 			case <-tick.C:
 				wake()
@@ -410,13 +358,11 @@ func wakes(ctx context.Context, bluez <-chan struct{}, cards <-chan controlEvent
 	return out
 }
 
-// settle collapses a burst of events into one wake. It emits after
-// the input has been quiet for window, or after limit has passed
-// since the first event of the burst, whichever comes first.
-//
-// The limit keeps the loop publishing under a flapping cable. Without
-// it, hardware that changes faster than the quiet window would restart
-// the wait on every event and the loop would never write.
+// settle turns a burst of values on in into one value on out. It sends
+// when in has been quiet for window, or when limit has passed since the
+// first value of the burst, whichever comes first. Without limit,
+// hardware that changes faster than window would keep the loop from
+// ever writing.
 func settle(ctx context.Context, in <-chan struct{}, window, limit time.Duration) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	go func() {

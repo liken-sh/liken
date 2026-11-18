@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// The reconcile pass reads the running declaration back, so every
-// node and every layout the generator writes must read back as it
-// was given.
-func TestTheDeclarationReadsBackAsItWasWritten(t *testing.T) {
+// The reconcile pass parses the drop-in that nodeConfig wrote, so
+// each node and layout must parse back to the value that was written.
+func TestTheDropInReadsBackAsItWasWritten(t *testing.T) {
 	hdmi := alsaEndpoint{Card: 0, PCM: 3}
 	analog := alsaEndpoint{Card: 0, PCM: 0}
 	usb := alsaEndpoint{Card: 1, PCM: 0}
@@ -21,7 +20,7 @@ func TestTheDeclarationReadsBackAsItWasWritten(t *testing.T) {
 	}
 	nodes, err := parseDeclaration(nodeConfig([]alsaEndpoint{hdmi, analog, usb, microphone}, layouts))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the declaration: %v", err)
 	}
 	want := []declaredNode{
 		{Address: analog.graphAddress(), Layout: layouts[analog.graphAddress()]},
@@ -30,16 +29,14 @@ func TestTheDeclarationReadsBackAsItWasWritten(t *testing.T) {
 		{Address: microphone.graphAddress()},
 	}
 	if !reflect.DeepEqual(nodes, want) {
-		t.Errorf("read back\n%+v\nwant\n%+v", nodes, want)
+		t.Errorf("parseDeclaration returned\n%+v\nwant\n%+v", nodes, want)
 	}
 }
 
-// A sink declared with no layout reads back as None, which is what a
-// declaration written before layouts existed holds for every sink.
 func TestASinkWithNoLayoutReadsBackAsNone(t *testing.T) {
 	nodes, err := parseDeclaration(nodeConfig([]alsaEndpoint{{Card: 0, PCM: 0}}, nil))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the declaration: %v", err)
 	}
 	if got := nodes[0].Layout; !got.equal(channelLayout{Source: layoutNone}) || got.Source != layoutNone {
 		t.Errorf("layout = %+v, want None", got)
@@ -58,24 +55,24 @@ func TestParseDeclarationRefusesWhatItCannotRead(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := parseDeclaration(c.document); err == nil {
-				t.Errorf("parsed %q", c.document)
+				t.Errorf("parseDeclaration(%q) returned no error, want a refusal", c.document)
 			}
 		})
 	}
 }
 
-// The rewrite for a layout change writes the same nodes again, so a
-// declaration rebuilt from what it holds generates the same document.
-func TestADeclarationRebuildsFromItsOwnNodes(t *testing.T) {
+// A layout change rewrites the drop-in from the parsed nodes, so the
+// rewrite must reproduce the original drop-in.
+func TestADropInRebuildsFromItsOwnNodes(t *testing.T) {
 	outputs := []alsaEndpoint{{Card: 0, PCM: 0}, {Card: 0, PCM: 3}, {Card: 1, PCM: 0}, {Card: 1, PCM: 0, Capture: true}}
 	layouts := map[nodeAddress]channelLayout{outputs[1].graphAddress(): {Source: layoutFromELD, Positions: stereoLayout}}
 	document := nodeConfig(outputs, layouts)
 	nodes, err := parseDeclaration(document)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the declaration: %v", err)
 	}
 	if again := nodeConfig(declaredEndpoints(nodes), declaredLayouts(nodes)); again != document {
-		t.Errorf("the rebuilt declaration differs:\n%s\n%s", document, again)
+		t.Errorf("the rebuilt declaration is\n%s\nwant\n%s", again, document)
 	}
 }
 
@@ -85,7 +82,7 @@ func TestSamePCMDevicesIgnoresLayoutsAndOrder(t *testing.T) {
 	nodes, err := parseDeclaration(nodeConfig([]alsaEndpoint{analog, hdmi},
 		map[nodeAddress]channelLayout{hdmi.graphAddress(): {Source: layoutFromELD, Positions: stereoLayout}}))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the declaration: %v", err)
 	}
 	cases := []struct {
 		name    string
@@ -100,7 +97,7 @@ func TestSamePCMDevicesIgnoresLayoutsAndOrder(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := samePCMDevices(nodes, c.outputs); got != c.want {
-				t.Errorf("same = %v, want %v", got, c.want)
+				t.Errorf("samePCMDevices = %v, want %v", got, c.want)
 			}
 		})
 	}

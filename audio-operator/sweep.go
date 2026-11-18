@@ -1,21 +1,19 @@
 package main
 
-// The sweep: what a pass says about a Sink or a Source whose endpoint
-// this machine no longer publishes, such as a USB card that was
-// unplugged.
-//
-// The resource is never deleted, because it holds the declaration a
-// person wrote. A USB card that is unplugged for an hour must come
-// back to the level it rested at, and a speaker that moved to another
-// machine keeps its Sink. The conditions are what report the absence,
-// and the hardware triple's gauges report it too, because a sweep is a
-// confirmed absence, not an invalid observation.
+// When this machine stops publishing an endpoint, for example because
+// a USB card was unplugged, the sweep marks its Sink or Source absent.
+// It never deletes the resource, because the spec holds what a person
+// declared, such as the volume level. So a USB card that is unplugged
+// for an hour comes back at the declared level, and a speaker that
+// moves to another machine keeps its Sink. The sweep sets the Connected
+// and Ready conditions to False and the connected, ready, and claimed
+// gauges to 0. A failed observation leaves the gauges alone, because
+// it does not show that the endpoint is gone.
 //
 // Only the machine that status.node names sweeps a resource, and the
-// sweep keeps status.node. A card's Sink under a name that no machine
-// publishes any more, such as a Sink whose name carries no machine, is
-// therefore reported absent once, by the last machine that wrote it,
-// and no other machine writes it again.
+// sweep leaves status.node unchanged. So when no machine publishes an
+// endpoint, the last machine that wrote its resource marks it absent,
+// and no other machine writes it.
 
 import (
 	"errors"
@@ -26,16 +24,17 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// sweep reports the endpoints this machine held a resource for and no
-// longer publishes.
+// present is the set of endpoint names that this machine publishes.
+// sweep continues past an error and returns every error, joined.
 func (e *endpointControl) sweep(present map[string]bool) error {
 	if !e.sweepDue(present) {
 		return nil
 	}
 	var failures []error
-	// Only the machine that status.node names writes the absence. The
-	// retry after a conflict reads the resource again, and a Bluetooth
-	// speaker's Sink can name another machine by then.
+	// After a conflict, settleSinkStatus calls absent again with the
+	// current copy of the resource. By then status.node can name another
+	// machine, for example when a Bluetooth speaker connected elsewhere,
+	// and then absent returns false so that nothing is written.
 	now := e.now()
 	absent := func(published EndpointStatus) (EndpointStatus, bool) {
 		return absentStatus(published, now), published.Node == e.machine
@@ -69,10 +68,9 @@ func (e *endpointControl) sweep(present map[string]bool) error {
 	return errors.Join(failures...)
 }
 
-// sweepDue answers whether this pass lists the resources. It does
-// when the endpoints this machine publishes are not the endpoints of
-// the last listing, so a card that arrives or leaves is answered on
-// the pass that finds it, and otherwise once per backstop interval.
+// sweepDue returns true when the set of endpoints differs from the set
+// at the last sweep, so a card that leaves is marked absent on the
+// same pass, and otherwise once per backstopInterval.
 func (e *endpointControl) sweepDue(present map[string]bool) bool {
 	names := slices.Sorted(maps.Keys(present))
 	if !slices.Equal(names, e.swept) {
@@ -86,17 +84,16 @@ func (e *endpointControl) sweepDue(present map[string]bool) bool {
 	return true
 }
 
-// absentStatus is what a resource reports once its machine no longer
-// publishes the endpoint. The identity it read stays, because it says
-// which piece of hardware this resource is for.
+// absentStatus keeps status.node, card, pcm, and the other fields that
+// identify the hardware that the resource is for.
 func absentStatus(published EndpointStatus, now time.Time) EndpointStatus {
 	status := published
 	status.NodeName = ""
 	status.Format = nil
 	status.Claims = nil
 	status.Conditions = setCondition(status.Conditions, condition(ConnectedCondition, false,
-		"EndpointAbsent", "this machine no longer publishes the endpoint", now))
+		"EndpointAbsent", "This machine no longer publishes the endpoint", now))
 	status.Conditions = setCondition(status.Conditions, condition(ReadyCondition, false,
-		"NoNode", "PipeWire holds no node for this endpoint", now))
+		"NoNode", "PipeWire has no node for this endpoint", now))
 	return status
 }

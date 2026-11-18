@@ -6,30 +6,32 @@ description: "Play a video on one monitor with its sound on that monitor's own s
 
 # Pair sound with its screen
 
-This guide plays a video on one monitor with its sound on that same
-monitor's speakers: one claim, one pod, one screen. You need this
-operator and the [display operator](https://liken.sh/display/)
-[installed](/docs/guides/install/) on your
+At the end of this guide, one pod plays a video on a monitor's
+screen and its sound on that monitor's speakers, through one claim.
+You need this operator [installed](/docs/guides/install/) and
+[`display-operator`](https://liken.sh/display/) installed on your
 [`liken`](https://liken.sh/docs/) cluster, and a monitor with
 speakers on HDMI or DisplayPort.
 
 ## How the pairing works
 
-The two operators are separate
+`display-operator` and this operator are separate
 [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-drivers, and each publishes its own reading of the same monitor. The
-display operator reads the EDID (Extended Display Identification
-Data) through the graphics card, and this operator reads the ELD
-(EDID-Like Data), the block the graphics driver writes into the
-audio driver. Both derive one attribute the same way, byte for byte:
-`monitor.liken.sh/id`, the pairing identity.
+drivers, and each reads the same monitor on its own.
+`display-operator` reads the monitor's EDID (Extended Display
+Identification Data) through the graphics card. This operator reads
+the ELD (EDID-Like Data), which the graphics driver copies into the
+audio driver. Both operators compute the attribute
+`monitor.liken.sh/id` from their data in the same way, so both
+publish the same value for the same monitor. This value is the
+pairing identity.
 
 A single
 [`ResourceClaim`](https://kubernetes.io/docs/reference/kubernetes-api/resource/resource-claim-v1/)
-holds one request against each driver, and a `matchAttribute`
-constraint requires one value of `monitor.liken.sh/id` across the
-two. The scheduler then allocates a screen and speakers that belong
-to one monitor, whichever connector it is on.
+contains one request for each driver, and a `matchAttribute`
+constraint requires the same `monitor.liken.sh/id` in both. The
+scheduler then allocates a screen and speakers of one monitor, on
+whichever connector that monitor uses.
 
 ## 1. Write the claim
 
@@ -61,14 +63,16 @@ to one monitor, whichever connector it is on.
           - requests: [screen, speakers]
             matchAttribute: monitor.liken.sh/id
 
-`matchAttribute` takes the attribute's full name. Only a CEL
-selector splits the name on its domain, as
+`matchAttribute` takes the full name of the attribute, with its
+domain. A CEL selector is different: it writes the domain and the
+attribute name separately, as
 [Play sound to an output](/docs/guides/claim/) shows.
 
-As written, the claim takes any monitor that offers both a screen
-and speakers. To name one monitor, add a CEL selector to the
-`screen` request, on the display operator's `model` or `serial`
-attributes. The constraint brings the matching speakers with it.
+This claim accepts any monitor that has both a screen and speakers.
+To choose one monitor, add a CEL selector to the `screen` request that
+tests the `model` or `serial` attribute that `display-operator`
+publishes. The constraint then allocates the speakers of a monitor
+with the same pairing identity.
 
 ## 2. Reference the claim from a `Deployment`
 
@@ -97,50 +101,49 @@ attributes. The constraint brings the matching speakers with it.
               image: <your mpv image>
               args:
                 - --fullscreen
-                - --wayland-app-id=$(DISPLAY_APP_ID)
                 - --ao=pipewire
                 - https://media.example.com/movie.mkv
               resources:
                 claims:
                   - name: monitor
 
-`resources.claims` names the claim once, so the container receives
-both allocations: the display operator's delivery for the screen,
-and this operator's for the speakers. Two of `mpv`'s flags route the
-two halves. `--wayland-app-id=$(DISPLAY_APP_ID)` puts the window on
-the allocated screen, and `--ao=pipewire` plays through PipeWire,
-which reads the delivered `PIPEWIRE_REMOTE` and `PIPEWIRE_NODE`
+One `resources.claims` entry names the claim, and the container
+receives both allocations: the screen from `display-operator` and the
+speakers from this operator. `mpv` needs no flag to find the screen,
+because the compositor places each window on the screen of the
+Wayland socket that the window arrived on. `--ao=pipewire` plays
+through PipeWire, which reads `PIPEWIRE_REMOTE` and `PIPEWIRE_NODE`
 itself.
 
 ## 3. What the container receives
 
-Each driver applies its own edits, and they do not collide:
+Each driver adds its own mount and variables, and they do not
+conflict:
 
 | From | What | Value |
 |---|---|---|
 | display | mount | `/var/run/display.liken.sh` |
 | display | `XDG_RUNTIME_DIR` | `/var/run/display.liken.sh` |
-| display | `WAYLAND_DISPLAY` | `wayland-0` |
-| display | `DISPLAY_APP_ID` | the allocated output's app-id |
+| display | `WAYLAND_DISPLAY` | `wayland-<the claim's UID>`, a socket the compositor opened for this claim |
+| display | `DISPLAY_APP_ID` | the allocated output's name; nothing reads it |
 | audio | mount | `/var/run/audio.liken.sh`, read-only |
 | audio | `PIPEWIRE_REMOTE` | `/var/run/audio.liken.sh/pipewire-0` |
 | audio | `PIPEWIRE_NODE` | the allocated output's node name |
 
-The display operator points `XDG_RUNTIME_DIR` at its own directory,
-and that does not misroute the audio. A `PIPEWIRE_REMOTE` that
-starts with a slash is an absolute socket path, and PipeWire does
-not read the runtime directory.
+`display-operator` sets `XDG_RUNTIME_DIR` to its own directory. That
+does not affect the sound, because `PIPEWIRE_REMOTE` starts with a
+slash, so PipeWire treats it as an absolute socket path and does not
+look in the runtime directory.
 
-## The grain of the pairing
+## Two identical monitors
 
-The pairing identity names a monitor's model. It does not identify
-one unit of that model. The ELD has no serial number, so two
-monitors of one model publish one value, and the constraint is
-satisfied by either pairing.
-[Devices](/docs/reference/devices/#the-pairing-identity) gives the
-derivation. On a machine with two identical monitors, the screen and
-the speakers the scheduler picks can come from different units, and
-no selector can prevent that. A `serial` selector on the `screen`
-request pins the screen to one unit. This operator publishes no
-serial, so the constraint has nothing to hold the speakers to. The
-ELD offers nothing finer.
+The pairing identity identifies a monitor's model, not one unit of
+that model. The ELD has no serial number, so two monitors of the same
+model have the same `monitor.liken.sh/id`.
+[Devices](/docs/reference/devices/#the-pairing-identity) describes
+how the value is computed. On a machine with two identical monitors,
+the scheduler can allocate the screen of one monitor and the speakers
+of the other, and no selector prevents it. A `serial` selector on the
+`screen` request selects one monitor's screen, but this operator
+publishes no serial, so no selector can select that monitor's
+speakers.

@@ -1,41 +1,38 @@
 package main
 
-// Reading the graph for a tap: which node carries the endpoint the
-// request named, what rate and channel count the tap runs at, and
-// whether the stream that started linked to the node the request
-// asked for.
+// A tap reads a pw-dump document to find the node that a request names
+// and the rate and channel count to record at, and then to check that
+// the stream it started is linked to that node.
 //
-// The container resolves the node before it taps because pw-record
-// never refuses a bad target. With stream.capture.sink set and an
-// unknown name it links to the default sink's monitor, and without
-// the property a sink name links to a microphone. So an unresolved
-// name is a 404 here rather than another endpoint's sound on the
-// wire.
+// The capture container resolves the node before it starts a tap,
+// because pw-record never refuses a bad target. With
+// stream.capture.sink set to an unknown name it links to the default
+// sink's monitor, and without the property a sink name links to a
+// microphone. So a name that does not resolve returns 404, and the
+// caller never gets another endpoint's sound.
 //
-// The rate and channel count come from the graph. The node's Format
-// is what it negotiated while it runs. A suspended node prints an
-// empty Format, so the channel count then comes from the node's
-// EnumFormat, which is what the hardware offers, and the rate comes
-// from the graph's own settings metadata. A suspended 5.1 sink is
-// never guessed as stereo.
+// A running node's Format is the format that it negotiated. A suspended
+// node prints an empty Format, so its channel count comes from its
+// EnumFormat, which lists what the hardware offers, and its rate comes
+// from the graph's settings metadata. So a suspended 5.1 sink is not
+// recorded as stereo.
 
 import (
 	"encoding/json"
 	"fmt"
 )
 
-// settingsMetadata is the metadata object that holds the graph's own
-// settings, and clockRateKey is the key in it that names the rate
-// the graph runs at, which every node resamples to.
+// settingsMetadata names the metadata object that holds the graph's
+// settings, and clockRateKey is its entry for the graph's rate.
 const (
 	settingsMetadata = "settings"
 	clockRateKey     = "clock.rate"
 )
 
-// captureObject is the part of one pw-dump object a tap reads. It is
-// separate from pwObject because the questions differ: the reconcile
-// loop asks which PCM device a node serves, and a tap asks which node
-// carries one name, what it runs at, and what it is linked to.
+// captureObject is the part of a pw-dump object that a tap reads. It is
+// separate from pwObject because the reconcile loop reads which PCM
+// device a node serves, and a tap reads a node's name, format, and
+// links.
 type captureObject struct {
 	ID       int                        `json:"id"`
 	Type     string                     `json:"type"`
@@ -61,8 +58,8 @@ type captureMetadata struct {
 	Value json.RawMessage `json:"value"`
 }
 
-// captureFormat is what one tap runs at: the node it targets, and the
-// rate and channel count every command on the pipeline is given.
+// captureFormat is the node that a tap records and the rate and channel
+// count that each command of the tap's pipeline is given.
 type captureFormat struct {
 	NodeID   int
 	Rate     int
@@ -70,17 +67,18 @@ type captureFormat struct {
 }
 
 // defaultCaptureRate is the rate a tap runs at when the graph reports
-// none at all: no running node, and no settings metadata published.
-// 48000 is PipeWire's own default clock.rate.
+// none: no running node, and no settings metadata. 48000 is PipeWire's
+// default clock.rate.
 const defaultCaptureRate = 48000
 
 // defaultCaptureChannels is the channel count a tap runs at when
-// neither Format nor EnumFormat names one.
+// neither Format nor EnumFormat has one.
 const defaultCaptureChannels = 2
 
-// resolveNode finds the node one request names, and the format a tap
-// on it runs at. A name the graph does not hold is what the container
-// answers 404 to.
+// resolveNode returns the node with the given name and direction, and
+// the format that a tap on it records at. It returns an error when the
+// document does not parse or has no such node, and the capture
+// container answers either error with 404.
 func resolveNode(document []byte, name string, direction pwDirection) (captureFormat, error) {
 	objects, err := parseCaptureObjects(document)
 	if err != nil {
@@ -110,10 +108,12 @@ func resolveNode(document []byte, name string, direction pwDirection) (captureFo
 		}
 		return found, nil
 	}
-	return captureFormat{}, fmt.Errorf("PipeWire holds no %s node named %s", direction, name)
+	return captureFormat{}, fmt.Errorf("PipeWire has no %s node named %s", direction, name)
 }
 
-// linkState is where the stream this container started ended up.
+// linkState is what a tap's stream is linked to. linkNone is separate
+// from linkElsewhere because PipeWire builds the link a moment after the
+// stream starts.
 type linkState int
 
 const (
@@ -122,21 +122,19 @@ const (
 	linkElsewhere
 )
 
-// confirmLink says whether the stream one tap started is linked to the
-// node the request named, to some other node, or to nothing yet. One
-// walk of the graph answers all three, because a poll reads the whole
-// dump anyway.
+// confirmLink reports whether a tap's stream is linked to the requested
+// node, to another node, or to nothing yet. A stream with links to both
+// the requested node and another node returns linkOnTarget.
 //
-// A sink tap reads the sink's monitor ports, so the target is the
-// link's output and the stream is its input. A source tap reads the
-// source's output ports, and the ends are the same way round. So one
-// read covers both directions.
+// A sink tap reads the sink's monitor ports and a source tap reads the
+// source's output ports, so in both directions the target is the link's
+// output node and the stream is its input node.
 //
-// The stream is found by the node.name this container gave it. Every
-// client of this socket arrives with the access flatpak, because the
-// kernel cannot translate a peer's pid across PID namespaces, so
-// PipeWire sets no application.process.id to match on and
-// application.name is pw-record for every tap on the node.
+// The stream is found by the node.name that the capture container gave
+// it. Every client of this socket arrives with the flatpak access,
+// because the kernel cannot translate a peer's pid across PID
+// namespaces. So PipeWire sets no application.process.id to match on,
+// and application.name is pw-record for every tap.
 func confirmLink(document []byte, stream string, targetNodeID int) (linkState, error) {
 	objects, err := parseCaptureObjects(document)
 	if err != nil {
@@ -178,10 +176,9 @@ func parseCaptureObjects(document []byte) ([]captureObject, error) {
 	return objects, nil
 }
 
-// graphRate reads clock.rate out of the settings metadata, which is
-// the rate every node in the graph runs at while nothing forces
-// another. A graph with no settings object runs at PipeWire's
-// default.
+// graphRate returns clock.rate from the settings metadata, or
+// PipeWire's default when the graph has no settings object or no
+// positive clock.rate.
 func graphRate(objects []captureObject) int {
 	for _, object := range objects {
 		if object.Type != "PipeWire:Interface:Metadata" {
@@ -202,9 +199,10 @@ func graphRate(objects []captureObject) int {
 	return defaultCaptureRate
 }
 
-// enumChannels reads the channel count the hardware offers. pw-dump
-// prints the field as a plain number, or as a choice whose default is
-// the value the node takes when nothing asks for another.
+// enumChannels returns the channel count that the hardware offers, from
+// EnumFormat. pw-dump prints the field as a number, or as a choice
+// object whose default is the count that the node uses when no client
+// requests another.
 func enumChannels(params []json.RawMessage) int {
 	for _, raw := range params {
 		var block struct {
@@ -220,8 +218,8 @@ func enumChannels(params []json.RawMessage) int {
 	return 0
 }
 
-// choiceValue reads a SPA field that pw-dump printed either as a
-// number or as a choice object with a default.
+// choiceValue reads a SPA field that pw-dump printed as a number or as
+// a choice object, and returns the number or the choice's default.
 func choiceValue(raw json.RawMessage) int {
 	if len(raw) == 0 {
 		return 0
@@ -239,10 +237,9 @@ func choiceValue(raw json.RawMessage) int {
 	return 0
 }
 
-// numericValue reads a whole number pw-dump printed with or without
-// quotes, the way property does for a string. A property value
-// arrives as a JSON string, and a metadata value arrives as raw JSON,
-// so both spellings are read.
+// numericValue parses a whole number that pw-dump printed with or
+// without quotes. A property value is a JSON string and a metadata
+// value is raw JSON, so both forms occur.
 func numericValue(text string) int {
 	var number int
 	if err := json.Unmarshal([]byte(text), &number); err == nil {

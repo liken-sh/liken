@@ -1,10 +1,5 @@
 package main
 
-// These tests cover which BlueZ objects are speakers this operator
-// can play into, when the declare container enables WirePlumber's
-// Bluetooth monitor, and how the operator follows the media bus
-// across a restart of the Bluetooth operator's pod.
-
 import (
 	"context"
 	"errors"
@@ -19,14 +14,11 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-// The UUIDs a test device advertises, in the base form BlueZ prints
-// them in.
 const (
 	inputUUID       = "00001124-0000-1000-8000-00805f9b34fb"
 	avrcpTargetUUID = "0000110c-0000-1000-8000-00805f9b34fb"
 )
 
-// bluezDevice is one org.bluez.Device1 object as a test states it.
 type bluezDevice struct {
 	Path      string
 	Address   string
@@ -36,12 +28,9 @@ type bluezDevice struct {
 	UUIDs     []string
 }
 
-// bluezTree builds one managed-object tree with an adapter in it
-// and one device object for each entry.
-//
-// The adapter advertises AudioSink itself, because a registered
-// media endpoint puts that UUID on the adapter, and the adapter is
-// the machine's own radio rather than a speaker.
+// bluezTree returns a GetManagedObjects result with an adapter and a
+// device object for each argument. The adapter lists AudioSink, as a
+// real adapter does after PipeWire registers its media endpoint.
 func bluezTree(devices ...bluezDevice) map[dbus.ObjectPath]map[string]map[string]dbus.Variant {
 	tree := map[dbus.ObjectPath]map[string]map[string]dbus.Variant{
 		"/org/bluez/hci0": {
@@ -87,23 +76,22 @@ func TestSpeakersFromReadsThePairedAudioSinks(t *testing.T) {
 
 	speakers, err := speakersFrom(tree)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the speakers from the tree: %v", err)
 	}
 	if len(speakers) != 2 {
 		t.Fatalf("speakers = %v, want two", speakers)
 	}
-	// The key is the address in the lowercase colon form, whatever
-	// case BlueZ printed it in, because pw-dump prints the same
-	// address on the sink node in the other case.
+	// The key is the address in lowercase, whatever case BlueZ printed
+	// it in, so that it matches the key that normalizeMAC makes from
+	// the address pw-dump prints on the sink node.
 	connected := speakers["a0:ab:51:33:b7:12"]
 	if connected.Name != "Kitchen Speaker" || !connected.Connected {
-		t.Errorf("the connected speaker = %+v", connected)
+		t.Errorf("the connected speaker is %+v, want Kitchen Speaker, connected", connected)
 	}
-	// A speaker that is switched off is still paired, so it is still
-	// this machine's to offer.
+	// A speaker that is switched off is still paired.
 	off := speakers["7c:66:00:11:22:33"]
 	if off.Name != "Bathroom Speaker" || off.Connected {
-		t.Errorf("the speaker that is off = %+v", off)
+		t.Errorf("the speaker that is off is %+v, want Bathroom Speaker, not connected", off)
 	}
 }
 
@@ -113,8 +101,8 @@ func TestSpeakersFromIgnoresWhatIsNotASpeaker(t *testing.T) {
 		device bluezDevice
 	}{
 		{
-			// A device BlueZ detected on the air and holds no link key
-			// for is not this machine's to offer.
+			// BlueZ found this device in a scan and stores no link key
+			// for it.
 			name: "a speaker that is not paired",
 			device: bluezDevice{
 				Path:    "/org/bluez/hci0/dev_A0_AB_51_33_B7_12",
@@ -123,8 +111,6 @@ func TestSpeakersFromIgnoresWhatIsNotASpeaker(t *testing.T) {
 			},
 		},
 		{
-			// The same adapter carries the keyboards and the speakers,
-			// and this operator publishes only what it can play into.
 			name: "a paired keyboard",
 			device: bluezDevice{
 				Path:    "/org/bluez/hci0/dev_04_4A_11_22_33_44",
@@ -155,7 +141,7 @@ func TestSpeakersFromIgnoresWhatIsNotASpeaker(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			speakers, err := speakersFrom(bluezTree(c.device))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the speakers from the tree: %v", err)
 			}
 			if len(speakers) != 0 {
 				t.Fatalf("speakers = %v, want none", speakers)
@@ -164,23 +150,16 @@ func TestSpeakersFromIgnoresWhatIsNotASpeaker(t *testing.T) {
 	}
 }
 
-// The adapter object is the radio whose media bus this pod claimed,
-// and its own UUIDs include AudioSink once the endpoint registers.
-// It is not a speaker, so nothing about it enters the slice.
 func TestSpeakersFromNeverPublishesTheAdapter(t *testing.T) {
 	speakers, err := speakersFrom(bluezTree())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the speakers from the tree: %v", err)
 	}
 	if len(speakers) != 0 {
-		t.Fatalf("the adapter published as %v", speakers)
+		t.Fatalf("the adapter published as %v, want no speaker", speakers)
 	}
 }
 
-// bluetoothd publishes its object tree a moment after it claims its
-// bus name, and it removes every device object when the adapter
-// goes away. An answer with no adapter arrives in both cases, and
-// neither one means the paired set is empty.
 func TestSpeakersFromReportsATreeWithNoAdapter(t *testing.T) {
 	tree := map[dbus.ObjectPath]map[string]map[string]dbus.Variant{}
 	if _, err := speakersFrom(tree); err != ErrNoAdapter {
@@ -188,8 +167,8 @@ func TestSpeakersFromReportsATreeWithNoAdapter(t *testing.T) {
 	}
 }
 
-// monitorDirectory points the fragment write at a directory the
-// test owns.
+// monitorDirectory makes writeMonitorConfig write into a temporary
+// directory.
 func monitorDirectory(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "wireplumber.conf.d")
@@ -198,10 +177,6 @@ func monitorDirectory(t *testing.T) string {
 	return dir
 }
 
-// The delivered bus address is the switch: a pod whose claim
-// allocated a media bus gets the fragment, and a pod whose claim
-// did not writes nothing and runs as it did before Bluetooth
-// existed here.
 func TestWriteMonitorConfigFollowsTheDeliveredBus(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -209,11 +184,11 @@ func TestWriteMonitorConfigFollowsTheDeliveredBus(t *testing.T) {
 		wrote   bool
 	}{
 		{
-			name:    "the claim delivered a media bus",
+			name:    "the claim includes a media bus",
 			address: "unix:path=/var/run/bluetooth.liken.sh/dbus/system_bus_socket",
 			wrote:   true,
 		},
-		{name: "the claim delivered none"},
+		{name: "the claim includes none"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -222,12 +197,12 @@ func TestWriteMonitorConfigFollowsTheDeliveredBus(t *testing.T) {
 
 			wrote, err := writeMonitorConfig()
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing the monitor fragment: %v", err)
 			}
 			if wrote != c.wrote {
 				t.Fatalf("wrote = %v, want %v", wrote, c.wrote)
 			}
-			written, err := os.ReadFile(filepath.Join(dir, monitorDropInName))
+			written, err := os.ReadFile(filepath.Join(dir, monitorFragmentName))
 			if !c.wrote {
 				if !os.IsNotExist(err) {
 					t.Fatalf("a pod with no bus wrote %s: %v", written, err)
@@ -235,19 +210,17 @@ func TestWriteMonitorConfigFollowsTheDeliveredBus(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the monitor fragment: %v", err)
 			}
 			if string(written) != monitorConfig {
-				t.Fatalf("the file holds something other than the fragment:\n%s", written)
+				t.Fatalf("the file contains something other than the fragment:\n%s", written)
 			}
 		})
 	}
 }
 
-// The fragment states four things, and each one is a name read from
-// the wireplumber 0.5 configuration or the pipewire bluez5 plugin.
-// A name that drifts here turns the monitor off with no error
-// anywhere, so the test pins each one.
+// WirePlumber and PipeWire's bluez5 plugin ignore a misspelled setting
+// name and report no error, so the test fixes the text of each setting.
 func TestMonitorConfigStatesTheProfileAndTheRoles(t *testing.T) {
 	lines := []string{
 		"main-embedded = {",
@@ -262,9 +235,6 @@ func TestMonitorConfigStatesTheProfileAndTheRoles(t *testing.T) {
 			t.Errorf("the fragment does not state %q", line)
 		}
 	}
-	// HFP and HSP need an SCO socket in the host network
-	// namespace, which this pod does not have, so no headset role may
-	// ever appear in the list.
 	for _, role := range []string{"hsp_hs", "hsp_ag", "hfp_hf", "hfp_ag"} {
 		if strings.Contains(monitorConfig, role) {
 			t.Errorf("the fragment enables the headset role %q", role)
@@ -272,8 +242,8 @@ func TestMonitorConfigStatesTheProfileAndTheRoles(t *testing.T) {
 	}
 }
 
-// fakeSubscriptions hands out one scripted subscription per call: a
-// channel, or an error when the channel is nil.
+// fakeSubscriptions returns the next channel in next on each call, and
+// an error when that entry is nil or next is empty.
 type fakeSubscriptions struct {
 	mu    sync.Mutex
 	calls int
@@ -295,18 +265,16 @@ func (f *fakeSubscriptions) subscribe(context.Context) (<-chan struct{}, error) 
 	return events, nil
 }
 
-// A media bus that closes, as it does when the Bluetooth operator's
-// pod restarts, is connected again, and the loop wakes once the new
-// subscription is open. The wake is what makes the next pass read the
-// whole paired set from the new bus, because the subscription missed
-// every change while it was closed. A connection that fails is tried
-// again.
+// When a subscription's channel closes, as it does when the Bluetooth
+// operator's pod restarts, resubscribe tries again every busRetryDelay
+// and sends a value when a new subscription opens.
 func TestTheMediaBusIsFollowedAcrossARestart(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		first, second := make(chan struct{}, 1), make(chan struct{}, 1)
 		bus := &fakeSubscriptions{next: []chan struct{}{first, nil, second}}
-		// The bus closes the subscription when the test ends, as it does
-		// when the operator stops.
+		// resubscribe's goroutine ranges over second and does not read
+		// ctx until second closes, so the bubble ends only after this
+		// close.
 		t.Cleanup(func() { close(second) })
 
 		out := resubscribe(t.Context(), bus.subscribe, busRetryDelay, func(string) {})
@@ -331,7 +299,6 @@ func TestTheMediaBusIsFollowedAcrossARestart(t *testing.T) {
 	})
 }
 
-// The subscription ends with its context, and only then.
 func TestTheMediaBusFollowerEndsWithItsContext(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
@@ -346,11 +313,9 @@ func TestTheMediaBusFollowerEndsWithItsContext(t *testing.T) {
 	})
 }
 
-// A pass that runs while the bus is closed reads no paired set, and
-// the error keeps the speakers the last read found.
-func TestAClosedMediaBusAnswersAnError(t *testing.T) {
+func TestAMediaBusWithNoConnectionReturnsAnError(t *testing.T) {
 	speakers, err := (&mediaBus{}).speakers()
 	if err == nil || speakers != nil {
-		t.Errorf("speakers = %v, %v; want an error", speakers, err)
+		t.Errorf("speakers() = %v, %v, want nil and an error", speakers, err)
 	}
 }

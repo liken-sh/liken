@@ -1,24 +1,23 @@
-# The endpoint API: a Sink for every playback endpoint and a Source
-# for every capture endpoint the operator publishes. The operator
-# creates both, names them by the device name the ResourceSlice
-# carries, and writes the status, apart from a Sink's status.session,
-# which the media operator writes. The spec fields are the cluster
-# owner's to write. The operator writes a declared control or codec
-# back to the hardware when the endpoint diverges from it, and writes
-# a declared level when the spec changes and when the endpoint
-# appears.
+# These kinds describe the audio endpoints that the operator
+# publishes. The operator creates a Sink for each playback endpoint and
+# a Source for each capture endpoint, and gives each one the name of
+# its device in the ResourceSlice. You write spec. The operator writes
+# status, except a Sink's status.session, which media-operator writes.
+# The operator writes a declared control or codec to the hardware
+# whenever the hardware differs from it, and writes a declared level
+# only when the spec changes and when the endpoint appears.
 #
-# The claim and the resource answer two different needs. A pod that
-# plays or records still holds the endpoint through a claim, and it
-# still has its own stream volume. The resource holds everything else
-# about the endpoint: its resting level, its mute, and the card's own
-# controls. Any writer with the right RBAC can set those, whether or
-# not a claim holds the endpoint.
+# A pod that plays or records still gets the endpoint through a claim,
+# and it keeps its own stream volume. These resources cover the rest:
+# the endpoint's default level, its mute, and the card's own controls.
+# Anyone with RBAC to write them can change them, whether or not a
+# claim holds the endpoint.
 #
-# The two kinds have the same shape. They are two kinds and not one
-# kind with a direction field because `kubectl get sinks` and
-# `kubectl get sources` answer two different questions, and because a
-# Role can grant one without the other.
+# Sink and Source have the same shape. They are separate kinds, not one
+# kind with a direction field, so that `kubectl get sinks` lists only
+# playback endpoints and `kubectl get sources` lists only capture
+# endpoints, and so that a Role can grant access to one kind without
+# the other.
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -26,7 +25,7 @@ metadata:
   name: sinks.audio.liken.sh
 spec:
   group: audio.liken.sh
-  # An endpoint is hardware on a machine and belongs to no
+  # An endpoint is hardware on one machine and belongs to no
   # namespace, so the resource is cluster-scoped, like a Node.
   scope: Cluster
   names:
@@ -39,13 +38,12 @@ spec:
       served: true
       storage: true
       subresources:
-        # status is a subresource so that the operator's writes of
-        # status and a person's writes of spec never overwrite each
-        # other.
+        # status is a subresource, so the operator's writes of status
+        # and a person's writes of spec never overwrite each other.
         status: {}
-      # Each machine's operator lists and watches the Sinks whose
+      # Each machine's operator lists and watches only the Sinks whose
       # status.node is that machine. Without the selectable field, a
-      # watch takes every Sink in the cluster, and a status write on
+      # watch receives every Sink in the cluster, and a status write on
       # one machine wakes the operator on every machine.
       selectableFields:
         - jsonPath: .status.node
@@ -62,8 +60,8 @@ spec:
         - name: Mute
           type: boolean
           jsonPath: .status.observed.mute
-        # A printer column prints the first value that its path finds,
-        # so a shared endpoint shows its first claim here, and
+        # A printer column prints only the first value that its path
+        # finds, so a shared endpoint shows its first claim here.
         # status.claims lists every claim.
         - name: Claims
           type: string
@@ -86,60 +84,61 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "One playback endpoint: an analog jack, an HDMI or DisplayPort output, a USB card's playback side, or a Bluetooth speaker. Its status reports hardware facts and the values the operator last read. Its spec declares desired endpoint settings. The name is the machine's name and the card's identity, as the Sink reference gives them. When a USB card's name would pass 63 characters, it holds the first eight hex digits of the SHA-256 of the serial in place of the serial."
+          description: "A `Sink` is one playback endpoint: an analog jack, an HDMI or DisplayPort output, the playback side of a USB card, or a Bluetooth speaker. `spec` has the settings you want for the endpoint, and `status` has the hardware facts and the values that the operator last read. The operator builds the name from the machine's name and the card's identity, as the section \"The name\" of the `Sink` reference describes. When a USB card's name would be longer than 63 characters, the name has the first eight hex digits of the SHA-256 of the serial in place of the serial."
           properties:
             spec:
               type: object
-              description: "The desired settings for the endpoint. Every field is optional. The operator writes volume.level and mute when they change and when the endpoint appears, such as a speaker that reconnects or a node that PipeWire builds again, and otherwise reports the level the endpoint holds. It writes a declared control or codec back when the endpoint diverges from it. It never writes a field that the spec leaves out."
-              # A writer clears the spec by applying one with nothing
-              # in it. Server-side apply prunes the empty object away,
-              # and validation would then read spec as null and refuse
-              # the write. The default puts the empty object back.
+              description: "The settings you want for the endpoint. Every field is optional. The operator writes `volume.level` and `mute` to the endpoint only when you change them and when the endpoint appears, for example when a speaker reconnects or PipeWire creates the node again. Between those times, a level set at the device stays, and the operator reports it in `status.observed`. The operator writes a declared control or codec to the hardware whenever the hardware differs from it. It never writes a setting that `spec` leaves out."
+              # A writer clears the spec by applying an empty one.
+              # Server-side apply prunes the empty object, and
+              # validation then reads spec as null and refuses the
+              # write. The default restores the empty object.
               default: {}
               properties:
                 volume:
                   type: object
-                  description: "The endpoint's volume, in percent of unity. level is the default level that the operator applies. max and step bound the volume asks the media operator writes into status.session, and the operator does not read them."
+                  description: "The endpoint's volume, as a percent of unity gain, where 100 is unity. The operator writes `level` to the endpoint. `max` and `step` control the volume requests that media-operator writes to `status.session.volumeAsk`, and this operator does not read them."
                   properties:
                     level:
                       type: integer
                       minimum: 0
                       maximum: 100
-                      description: "The endpoint's default level, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is the gain PipeWire applies in software. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. The operator applies it when it changes and when the endpoint appears, under a claim or not, and a claim holder's own stream fader is a separate level above it. A level that changes after that, at the device or by a volume ask, stays, and status.observed.volume reports it. When it is absent, a node that PipeWire builds while the operator runs starts at unity."
+                      description: "The default level, as a percent of unity, applied to every channel alike. On an ALSA endpoint it is a software gain in PipeWire. On a Bluetooth speaker it is the speaker's own volume, sent over AVRCP when the speaker supports absolute volume, and a software gain when it does not. The operator writes it when it changes and when the endpoint appears, whether or not a claim holds the endpoint. A pod's own stream volume applies on top of this level. When the level later changes at the device or by a volume request, the operator does not write this value back, and `status.observed.volume` reports the new level. When this field is absent, a node that PipeWire creates while the operator runs starts at unity."
                     max:
                       type: integer
                       minimum: 1
                       maximum: 100
                       default: 100
-                      description: "The highest level a volume ask can set. The media operator holds its asks at or below it. A person at the device can still set a higher level."
+                      description: "The highest level, as a percent of unity, that a volume request can set. The default is 100. media-operator keeps its requests at or below this value. Someone at the device can still set a higher level."
                     step:
                       type: integer
                       minimum: 1
                       maximum: 100
                       default: 5
-                      description: "How far one press of a remote's volume key moves the level the media operator asks for."
+                      description: "How many percentage points one press of a remote's volume key raises or lowers the level that media-operator requests. The default is 5."
                 mute:
                   type: boolean
-                  description: "Whether the endpoint is silent. The operator applies this setting at the same layer as volume.level, and on the same terms."
+                  description: "`true` silences the endpoint, and `false` unmutes it. The operator writes it at the same times as `volume.level`."
                 controls:
                   type: object
                   additionalProperties:
                     type: string
-                  description: "The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Master Playback Volume. An integer control takes a number within its range. A boolean control takes on or off. An enumerated control takes one of its values. The operator writes a control only when spec states it. When two endpoints share one control, the last write wins because the hardware has one register."
+                  description: "The card's own controls, keyed by the kernel's control name as `status.capabilities` lists it, for example `Master Playback Volume`. An integer control takes a number within its range, a boolean control takes `on` or `off`, and an enumerated control takes one of its values. The operator writes a control only when `spec` lists it. When two endpoints share one control, the last write wins, because the hardware has one register."
                 layout:
                   type: array
                   minItems: 1
                   maxItems: 64
-                  # A set: the API server refuses a list that names one
-                  # position twice, because two slots with one position
+                  # A set, so the API server refuses a list that names
+                  # one position twice. Two slots with the same position
                   # leave PipeWire no single port to link a stream's
                   # channel to.
                   x-kubernetes-list-type: set
                   items:
                     type: string
-                    # The short channel names PipeWire's SPA defines,
-                    # the ones audio.position takes. UNK is left out,
-                    # because a stated layout states each position.
+                    # The short channel names that PipeWire's SPA
+                    # defines, the values that audio.position takes.
+                    # UNK is excluded because a declared layout names
+                    # every position.
                     enum: [
                         MONO, FL, FR, FC, LFE, SL, SR, FLC, FRC, RC, RL,
                         RR, TC, TFL, TFC, TFR, TRL, TRC, TRR, RLC, RRC,
@@ -155,219 +154,219 @@ spec:
                         AUX52, AUX53, AUX54, AUX55, AUX56, AUX57, AUX58,
                         AUX59, AUX60, AUX61, AUX62, AUX63
                       ]
-                  description: "The channel positions of an ALSA sink, in PCM slot order, in PipeWire's channel names, such as FL, FR, FC, LFE, RL, RR, SL, SR, RLC, RRC, TFL, TFR, NA for a slot that plays nothing, and AUX0 to AUX63. A 7.1 receiver on HDMI takes [FL, FR, RL, RR, FC, LFE, SL, SR], and a 5.1 one takes [FL, FR, RL, RR, FC, LFE]. When this field is absent, the operator selects the layout from the monitor's ELD on HDMI and DisplayPort, from the device's own channel map on USB, and declares no positions on the analog jack, whose streams then play in stereo. The operator declares the layout to PipeWire, and a change restarts PipeWire inside its container once no stream plays on the machine. The number of positions must be a channel count the device accepts, or PipeWire ignores the layout. The operator does not write the kernel's channel map, so on HDMI each slot reaches the speaker the kernel's standard allocation gives it, and a height position names a slot that the kernel routes elsewhere. A Bluetooth speaker ignores this field."
+                  description: "The channel position of each PCM slot of an ALSA sink, in slot order, in PipeWire's channel names such as `FL`, `FR`, `FC`, `LFE`, `RL`, `RR`, `SL`, and `SR`. `NA` marks a slot that plays nothing. For a 7.1 receiver on HDMI, write `[FL, FR, RL, RR, FC, LFE, SL, SR]`. When this field is absent, the operator reads the layout from the monitor's ELD on HDMI and DisplayPort and from the device's channel map on USB. On the analog jack it declares no positions, so streams there play in stereo. The number of positions must be a channel count that the device accepts, or PipeWire ignores the layout. A Bluetooth speaker ignores this field."
                 sharedClaims:
                   type: integer
                   minimum: 2
-                  description: "The number of claims that can hold the endpoint at the same time. When this field is absent, one claim holds the endpoint, and a second claim waits until the first ends. When it is set, the device in the ResourceSlice allows several allocations and carries a capacity named claims with this value. A claim whose request asks for claims: 1 shares the endpoint with the other claims that ask for one, up to this number, and PipeWire mixes their streams. A claim that asks for no claims capacity takes all of it and holds the endpoint alone, so it never shares with another claim. A change applies to the next allocation, and the claims that hold the endpoint keep it. The count is a policy: neither the hardware nor PipeWire limits how many streams one endpoint mixes. A shared claim cannot state a codec, because a codec switch rebuilds the sink under every claim that plays through it."
+                  description: "How many claims can hold the endpoint at the same time, at least 2. When this field is absent, one claim holds the endpoint, and a second claim stays `Pending` until the first ends. When it is set, the operator publishes the device in the `ResourceSlice` with multiple allocations allowed and a capacity named `claims` of this value. A claim whose request asks for `claims: 1` shares the endpoint with the other claims that ask for one, up to this number, and PipeWire mixes their streams. A claim that asks for no `claims` capacity gets all of it and holds the endpoint alone. A change applies to the next allocation, and the claims that already hold the endpoint keep it. Neither the hardware nor PipeWire limits how many streams one endpoint mixes, so the number is yours to choose. A shared claim cannot set a codec, because a codec switch replaces the speaker's node under every claim that plays through it."
                 codec:
                   type: string
-                  description: "The A2DP codec to apply when no claim allocates the Bluetooth speaker. The value must be one of status.bluetooth.codecs. A claim's codec parameter takes precedence while the claim allocates the speaker. A change here waits until the claim ends because switching codecs replaces the speaker's node and interrupts playback. The operator ignores this field on an ALSA endpoint."
+                  description: "The A2DP codec that a Bluetooth speaker uses when no claim holds it. It must be one of `status.bluetooth.codecs`. While a claim holds the speaker, the claim's `codec` parameter takes precedence. A change waits until the claim ends, because switching codecs replaces the speaker's node and interrupts playback. The operator ignores this field on an ALSA endpoint."
             status:
               type: object
-              description: "What the hardware declares and what the operator last read. The operator owns every field here apart from session, which the media operator owns."
+              description: "The hardware facts and the values that the operator last read. The operator writes every field here except `session`, which media-operator writes."
               properties:
                 session:
                   type: object
-                  description: "The unit that uses the Sink, and the last volume ask a press made. The media operator writes this block by server-side apply under its own field manager. The operator writes its own status fields as a merge patch that never names this block, so its writes leave the block in place. It is status and not spec because no person declares it, and a status write changes no metadata.generation."
+                  description: "The `Player` that uses the `Sink`, and the last volume request from a remote's key. media-operator writes this block by server-side apply under its own field manager. This operator writes the rest of `status` with a merge patch that never includes this block, so neither writer removes the other's fields. The block is in `status` because no person declares it, and a status write does not change `metadata.generation`."
                   properties:
                     player:
                       type: string
-                      description: "The Player whose unit uses the Sink, as namespace/name."
+                      description: "The `Player` that uses the `Sink`, as `namespace/name`."
                     volumeAsk:
                       type: object
                       required: [level, at]
-                      description: "The last level a press asked for. The operator applies each new ask once, to the node or to a Bluetooth speaker's Route, the same write that spec.volume.level takes, without waiting for the settle window that gathers hardware events into one ResourceSlice write. When several asks arrive before the operator applies one, it applies only the newest. It applies no ask that it finds the first time it reads the Sink, as in its first pass after a start, and no ask for an endpoint that has no node. It never writes an ask's level again, so a later press of a speaker's own button stays, and status.observed reports the level the endpoint holds."
+                      description: "The last volume request, from a press of a remote's volume key. The operator applies each new request once, with the same write as `spec.volume.level`. When several requests arrive before the operator applies one, it applies only the newest. It does not apply the request that it finds the first time it reads the `Sink`, for example in its first pass after a start, and it drops a request for an endpoint that has no node. It never writes a request's level again, so a later press of the speaker's own button stays, and `status.observed.volume` reports the level that the endpoint plays at."
                       properties:
                         level:
                           type: integer
                           minimum: 0
                           maximum: 100
-                          description: "The level, as a percent of unity."
+                          description: "The requested level, as a percent of unity."
                         mute:
                           type: boolean
-                          description: "Whether the endpoint is silent. Absent means not muted."
+                          description: "Whether the request mutes the endpoint. Absent means not muted."
                         at:
                           type: string
                           format: date-time
-                          description: "When the press made the ask, with milliseconds. Each new time is one ask."
+                          description: "When the key was pressed, with millisecond precision. Each new time is a new request."
                 node:
                   type: string
-                  description: "The machine that holds the endpoint now. For a Bluetooth speaker, the value changes when the speaker moves. The name of every other Sink starts with this machine's name, so a card that moves to another machine gets a new Sink. The operator on each machine lists and watches the Sinks by this field."
+                  description: "The machine that has the endpoint now. For a Bluetooth speaker, the value changes when the speaker moves to another machine. The name of every other `Sink` starts with this machine's name, so a card that moves to another machine gets a new `Sink`. The operator on each machine lists and watches only the `Sink`s whose `status.node` is that machine."
                 location:
                   type: string
-                  description: "Where the card is on the machine, in the kernel's spelling: a PCI address such as 0000:00:1f.3, or a USB port path such as 1-6. Absent on a Bluetooth speaker."
+                  description: "Where the card is on the machine, in the kernel's notation: a PCI address such as `0000:00:1f.3`, or a USB port path such as `1-6`. Absent on a Bluetooth speaker."
                 connectionType:
                   type: string
                   enum: [analog, hdmi, displayport, usb, bluetooth]
-                  description: "How sound leaves the machine."
+                  description: "The way sound leaves the machine."
                 card:
                   type: object
-                  description: "The ALSA card the endpoint is on. The number and the id are this boot's, and a second card can change both, so nothing durable is keyed to them."
+                  description: "The ALSA card that the endpoint is on. The kernel assigns the number and the id at each boot, and adding a second card can change both, so the endpoint's name does not use them."
                   properties:
                     number:
                       type: integer
-                      description: "The card number the kernel assigned this boot."
+                      description: "The card number that the kernel assigned in this boot."
                     id:
                       type: string
-                      description: "The card's short id, such as PCH, with the suffix the kernel appends on a clash, such as PCH_1."
+                      description: "The card's short id, such as `PCH`, with the suffix that the kernel appends when two cards have the same id, such as `PCH_1`."
                     driver:
                       type: string
-                      description: "The kernel driver that binds the card, such as HDA-Intel."
+                      description: "The kernel driver of the card, such as `HDA-Intel`."
                     name:
                       type: string
-                      description: "The card's name, as the driver states it, such as HDA Intel PCH."
+                      description: "The card's name as its driver reports it, such as `HDA Intel PCH`."
                 pcm:
                   type: object
-                  description: "The PCM device the endpoint plays through."
+                  description: "The PCM device that the endpoint plays through."
                   properties:
                     device:
                       type: integer
-                      description: "The PCM device number on the card, this boot."
+                      description: "The PCM device number on the card, in this boot."
                     id:
                       type: string
-                      description: "The driver's name for the PCM, such as HDMI 0 or USB Audio. It is the part of the endpoint's name that outlives the number."
+                      description: "The driver's name for the PCM, such as `HDMI 0` or `USB Audio`. The endpoint's name uses this id, because it stays the same when the card number changes."
                 monitor:
                   type: object
-                  description: "The monitor an HDMI or DisplayPort slot feeds, from the ELD the graphics driver wrote into the card. Absent while no monitor answers, and absent on every other connection type. An Intel HDMI codec binds a pin to the first free slot when a monitor appears, so a card with two monitors can swap which slot feeds which between plug events, and this object is where that shows."
+                  description: "The monitor that an HDMI or DisplayPort output feeds, from the ELD that the graphics driver wrote into the card. Absent while the output has no ELD, and on every other connection type. An Intel HDMI codec binds a pin to the first free output when a monitor appears, so on a card with two monitors the monitors can swap outputs between plug events. This object shows which monitor the output feeds now."
                   properties:
                     display:
                       type: string
-                      description: "The name of the Display the display operator publishes for the same monitor, which is the pairing identity monitor.liken.sh/id."
+                      description: "The name of the `Display` that display-operator publishes for the same monitor. The name is the monitor's pairing identity, `monitor.liken.sh/id`."
                     manufacturer:
                       type: string
-                      description: "The monitor's three-letter PNP id, such as GSM."
+                      description: "The monitor's three-letter PNP id, such as `GSM`."
                     product:
                       type: string
-                      description: "The monitor's product code, four lowercase hexadecimal digits."
+                      description: "The monitor's product code, as four lowercase hexadecimal digits."
                     name:
                       type: string
-                      description: "The monitor's name, from the same EDID descriptor the Display reports as model."
+                      description: "The monitor's name, from the EDID descriptor that the `Display` reports as `model`."
                 bluetooth:
                   type: object
                   description: "The speaker behind a Bluetooth endpoint. Absent on every other connection type."
                   properties:
                     address:
                       type: string
-                      description: "The speaker's address, uppercase with colons."
+                      description: "The speaker's address, in uppercase with colons."
                     name:
                       type: string
-                      description: "The name the speaker reports for itself."
+                      description: "The name that the speaker reports for itself."
                     peripheral:
                       type: string
-                      description: "The name of the Peripheral the bluetooth operator publishes for this speaker, which is the address in lowercase with dashes."
+                      description: "The name of the `Peripheral` that bluetooth-operator publishes for this speaker, which is the address in lowercase with dashes."
                     codec:
                       type: string
-                      description: "The A2DP codec the transport negotiated, present while the speaker is connected."
+                      description: "The A2DP codec that the transport negotiated. Present while the speaker is connected."
                     codecs:
                       type: array
                       items:
                         type: string
-                      description: "Every codec the speaker and this image both support, the one playing first."
+                      description: "Every codec that both the speaker and the operator's image support, with the codec that is playing first."
                 nodeName:
                   type: string
-                  description: "The PipeWire node a consumer's streams target, the same value a prepared claim delivers as PIPEWIRE_NODE. Absent while PipeWire holds no node for the endpoint."
+                  description: "The name of the PipeWire node that a pod's playback streams target. A prepared claim gives the pod the same value in `PIPEWIRE_NODE`. Absent while PipeWire has no node for the endpoint."
                 format:
                   type: object
-                  description: "The format the node runs at, from PipeWire's own Format parameter. Absent while the node is not running."
+                  description: "The format that the node runs at, from PipeWire's `Format` parameter. Absent while the node is not running."
                   properties:
                     rate:
                       type: integer
                       description: "The sample rate in hertz."
                     channels:
                       type: integer
-                      description: "The channel count."
+                      description: "The number of channels."
                     positions:
                       type: array
                       items:
                         type: string
-                      description: "The channel positions in order, in PipeWire's names: FL, FR, FC, LFE, RL, RR."
+                      description: "The channel positions in order, in PipeWire's names, such as `FL`, `FR`, `FC`, `LFE`, `RL`, `RR`."
                 capabilities:
                   type: object
-                  description: "The card's own controls for this endpoint, keyed by the kernel's control name. A Playback control applies to the card's analog and USB sinks. A control with no direction, such as Auto-Mute Mode, also applies to those sinks. An IEC958 Playback Switch applies to the HDMI slot with the same ordinal. It is the only control an HDMI slot lists because an HDMI PCM has no volume element. The operator omits read-only jack controls because they feed the Connected condition. A Bluetooth speaker lists no card controls."
+                  description: "The card's own controls for this endpoint, keyed by the kernel's control name. A `Playback` control applies to the card's analog and USB sinks, and so does a control with no direction, such as `Auto-Mute Mode`. An `IEC958 Playback Switch` applies to the HDMI output with the same number, and an HDMI output lists no other control, because an HDMI PCM has no volume element. Jack controls are left out, because they are read-only and the operator reads them for the `Connected` condition. A Bluetooth speaker lists no card controls."
                   additionalProperties:
                     type: object
                     properties:
                       type:
                         type: string
                         enum: [integer, boolean, enumerated]
-                        description: "What the control takes."
+                        description: "The kind of value that the control takes."
                       min:
                         type: integer
-                        description: "The smallest number an integer control accepts."
+                        description: "The smallest number that an integer control accepts."
                       max:
                         type: integer
-                        description: "The largest number an integer control accepts."
+                        description: "The largest number that an integer control accepts."
                       step:
                         type: integer
-                        description: "The step between numbers an integer control accepts, absent when every number in the range is accepted."
+                        description: "The difference between neighboring numbers that an integer control accepts. Absent when every number in the range is accepted."
                       minDecibels:
                         type: string
-                        description: "The level at min, in decibels, when the control declares one, as a decimal string such as -65.25. The string form keeps the value exact where a float would not."
+                        description: "The level at `min`, in decibels, as a decimal string such as `-65.25`, when the control declares one. A string keeps the value exact, and a float would not."
                       maxDecibels:
                         type: string
-                        description: "The level at max, in decibels, when the control declares one."
+                        description: "The level at `max`, in decibels, when the control declares one."
                       values:
                         type: array
                         items:
                           type: string
-                        description: "Every value an enumerated control accepts."
+                        description: "Every value that an enumerated control accepts."
                       channels:
                         type: integer
-                        description: "How many channels the control carries. A write from spec sets every channel to the same value."
+                        description: "The number of channels that the control has. A write from `spec` sets every channel to the same value."
                 layout:
                   type: array
                   items:
                     type: string
-                  description: "The channel positions the operator declares the sink's node with, in PCM slot order. Absent when layoutSource is ChannelMap, because PipeWire reads the positions from the device, and absent when it is None. While LayoutApplied is False with the reason Restarting, this is the layout PipeWire loads when its container starts again."
+                  description: "The channel positions that the operator declares the sink's node with, in PCM slot order. Absent when `layoutSource` is `ChannelMap`, because PipeWire reads the positions from the device, and absent when it is `None`. While `LayoutApplied` is `False` with the reason `Restarting`, this is the layout that PipeWire loads when it restarts."
                 layoutSource:
                   type: string
                   enum: [Spec, ELD, ChannelMap, None]
-                  description: "Where the layout came from. Spec is spec.layout. ELD is the monitor's speaker allocation, capped by the largest LPCM channel count it accepts. ChannelMap is the channel map a USB device describes. None is no positions, and a multichannel stream then plays in stereo. An HDMI sink keeps a layout from the ELD while its monitor is off. Absent on a Bluetooth speaker."
+                  description: "Where the layout comes from. `Spec` is `spec.layout`. `ELD` is the monitor's speaker allocation, limited to the largest LPCM channel count that the monitor accepts. `ChannelMap` is the channel map that a USB device describes. `None` means no positions, and a multichannel stream then plays in stereo. An HDMI sink keeps its ELD layout while its monitor is off. Absent on a Bluetooth speaker."
                 passthrough:
                   type: array
                   items:
                     type: string
                     enum: [AC3, DTS, EAC3, DTS-HD, TrueHD]
-                  description: "The encoded formats the sink sends to its monitor without decoding them, in PipeWire's names: AC3 is Dolby Digital, EAC3 is Dolby Digital Plus, and TrueHD and DTS-HD are the lossless formats. Dolby Atmos travels inside EAC3 or TrueHD, and DTS:X inside DTS-HD. The operator declares the sink with the formats that the monitor's ELD lists, so a player sends a track in one of these formats as a bitstream and decodes every other track. Absent when the monitor lists none, on an output of a card whose driver is not HDA-Intel, and on every analog, USB, and Bluetooth sink. An HDMI sink keeps its formats while its monitor is off. A change of the formats is a change of the layout, and LayoutApplied reports it the same way."
+                  description: "The encoded formats that the sink can send to its monitor without decoding them, in PipeWire's names. `AC3` is Dolby Digital, `EAC3` is Dolby Digital Plus, and `TrueHD` and `DTS-HD` are the lossless formats. Dolby Atmos is inside `EAC3` or `TrueHD`, and DTS:X is inside `DTS-HD`. The operator declares the sink with the formats that the monitor's ELD lists, so a player can send a track in one of these formats as a bitstream, and must decode every other track to PCM. Absent when the monitor lists none, on an output of a card whose driver is not `HDA-Intel`, and on every analog, USB, and Bluetooth sink. An HDMI sink keeps its formats while its monitor is off. A change of the formats is a layout change, and `LayoutApplied` reports it in the same way."
                 observed:
                   type: object
-                  description: "The last value the operator read for each setting. The operator reads the card's control device for every event it receives. It reads PipeWire's graph for every change PipeWire reports. A change from a physical knob or a client therefore appears here without polling."
+                  description: "The last value that the operator read for each setting. The operator reads the card's control device on each control event, and PipeWire's graph on each change that PipeWire reports, so a change at a knob or by a client appears here without waiting for a timer."
                   properties:
                     volume:
                       type: integer
-                      description: "The level the endpoint plays at, as a percent of unity, from the node's gain or the Bluetooth device's own volume. A suspended node reports no current level of its own: PipeWire applies a write to it without announcing it, and the node prints no level or the level it last ran at. So a suspended endpoint reports the level the operator last wrote to it, from the spec or a volume ask, which is the level it will run at. With no such write since the node last ran, it reports what the node prints."
+                      description: "The level that the endpoint plays at, as a percent of unity, from the node's gain or the Bluetooth speaker's own volume. A suspended node does not report the level that it will run at, because PipeWire applies a write to a suspended node without announcing the change. So for a suspended endpoint, this field has the level that the operator last wrote, from `spec` or a volume request. When the operator has written no level since the node last ran, this field has what the node reports."
                     mute:
                       type: boolean
-                      description: "Whether the endpoint is silent, on the same terms as volume."
+                      description: "Whether the endpoint is silent, reported in the same way as `volume`."
                     codec:
                       type: string
-                      description: "The codec a Bluetooth speaker plays with now."
+                      description: "The codec that a Bluetooth speaker plays with now."
                     controls:
                       type: object
                       additionalProperties:
                         type: string
-                      description: "The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value."
+                      description: "The value of every control in `capabilities`, in the notation that `spec.controls` takes. For a control with several channels, the value of the first channel."
                 applied:
                   type: object
-                  description: "The node the operator last applied the declared volume and mute to, and the declaration it applied. When the operator starts, a node whose PipeWire cookie and node id match this record ran through the restart, so the operator keeps the level it holds and writes the declaration only when it differs from the one recorded here. Any other node is one PipeWire built since, as after the machine boots, so it takes the declaration, or unity on a sink with no declared level. Absent while the endpoint has no node."
+                  description: "The node that the operator last wrote the declared volume and mute to, and the values that it wrote. When the operator starts, a node whose PipeWire cookie and node id match this record kept running through the restart. The operator keeps that node's level, and writes the declaration only when it differs from the one recorded here. Any other node is one that PipeWire created since, for example after the machine boots, so the operator writes the declaration to it, or unity when the sink declares no level. Absent while the endpoint has no node."
                   properties:
                     pipewireCookie:
                       type: integer
                       format: int64
-                      description: "The random number the PipeWire daemon picked when it started, from its Core object. PipeWire gives out the same node ids again after a restart, so the id names a node only together with this number."
+                      description: "The random number that the PipeWire daemon chose when it started, from its `Core` object. PipeWire reuses node ids after a restart, so an id identifies a node only together with this number."
                     node:
                       type: integer
                       description: "The PipeWire object id of the node."
                     volume:
                       type: integer
-                      description: "The declared level the node was judged against, as a percent of unity. Absent when the spec declared no level."
+                      description: "The declared level that the node was compared with, as a percent of unity. Absent when `spec` declared no level."
                     mute:
                       type: boolean
-                      description: "The declared mute the node was judged against. Absent when the spec declared no mute."
+                      description: "The declared mute that the node was compared with. Absent when `spec` declared no mute."
                 claims:
                   type: array
-                  description: "The claims that hold the endpoint now, sorted by namespace and name. It holds one claim, or up to spec.sharedClaims on a shared endpoint, and it is absent when no claim holds the endpoint. It identifies the workloads that have the speakers. The operator records a claim when the kubelet prepares it on this machine, so after an operator restart a claim shows again when the kubelet prepares it next."
+                  description: "The claims that hold the endpoint now, sorted by namespace and name, so you can see which workloads use the speaker. The list has one claim, or up to `spec.sharedClaims` claims on a shared endpoint, and it is absent when no claim holds the endpoint. The operator records a claim when the kubelet prepares it on this machine, and keeps that record only in memory. So after the operator restarts, a running pod's claim is missing here until the kubelet prepares it again."
                   items:
                     type: object
                     properties:
@@ -377,7 +376,7 @@ spec:
                         type: string
                 conditions:
                   type: array
-                  description: "Connected reports whether the endpoint can play now. It is true for a monitor on an HDMI slot, a plug in an analog jack, a connected speaker, and every USB endpoint. A monitor on an HDMI slot reads as gone only after its ELD has stayed empty for 5 seconds, so a drop of hot plug detect shorter than that, such as an A/V receiver in standby makes, changes neither condition. Ready reports whether PipeWire has a node for the endpoint. These two conditions expose the same facts as the device's no-monitor and no-sink taints, in a form a person can read. LayoutApplied, on a sink of a sound card, reports whether PipeWire runs the sink with the layout and the encoded formats the operator selected. It is False with the reason AwaitingIdle while a new layout waits for every stream on the machine to end, and with the reason Restarting while PipeWire restarts in its container to load it."
+                  description: "The conditions of the endpoint. `Connected` is `True` when the endpoint can play now: a monitor is on the HDMI output, a plug is in the analog jack, the speaker is connected, or the endpoint is USB, which is always connected. The operator treats a monitor as gone only after its ELD has been empty for 5 seconds, so a shorter drop of hot plug detect, such as an A/V receiver in standby causes, changes neither condition. `Ready` is `True` when PipeWire has a node for the endpoint. `Connected` and `Ready` show a person what the device's taints in the `ResourceSlice` tell the scheduler. `LayoutApplied`, on a sink of a sound card, is `True` when PipeWire runs the sink with the layout and the encoded formats that the operator selected. It is `False` with the reason `AwaitingIdle` while a new layout waits for every stream on the machine to end, and with the reason `Restarting` while PipeWire restarts to load it."
                   items:
                     type: object
                     required: [type, status, reason, lastTransitionTime]
@@ -416,7 +415,7 @@ spec:
       subresources:
         status: {}
       # The operator selects its own Sources by status.node, for the
-      # reason the Sink kind gives.
+      # reason given on the Sink kind.
       selectableFields:
         - jsonPath: .status.node
       additionalPrinterColumns:
@@ -432,8 +431,8 @@ spec:
         - name: Mute
           type: boolean
           jsonPath: .status.observed.mute
-        # A printer column prints the first value that its path finds,
-        # so a shared endpoint shows its first claim here, and
+        # A printer column prints only the first value that its path
+        # finds, so a shared endpoint shows its first claim here.
         # status.claims lists every claim.
         - name: Claims
           type: string
@@ -450,156 +449,156 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "One capture endpoint: an analog input, or a USB card's capture side. A Bluetooth headset's microphone is not published yet. An HDA card serves several input jacks through one capture PCM and picks the live jack with its Input Source control, so the Source is the PCM and the jack is a control. The name is the machine's name and the card's identity, as the Sink reference gives them. When a USB card's name would pass 63 characters, it holds the first eight hex digits of the SHA-256 of the serial in place of the serial."
+          description: "A `Source` is one capture endpoint: an analog input, or the capture side of a USB card. A Bluetooth headset's microphone is not published yet. An HDA card serves several input jacks through one capture PCM and selects the active jack with its `Input Source` control, so a `Source` is the PCM, and you choose the jack with that control. The operator builds the name from the machine's name and the card's identity, as the section \"The name\" of the `Sink` reference describes. When a USB card's name would be longer than 63 characters, the name has the first eight hex digits of the SHA-256 of the serial in place of the serial."
           properties:
             spec:
               type: object
-              description: "The settings you want for the endpoint. Every field is optional. The operator writes volume and mute when they change and when the endpoint appears, and otherwise reports the level the endpoint holds. It writes a declared control back when the endpoint diverges from it. It never writes a field the spec leaves out."
+              description: "The settings you want for the endpoint. Every field is optional. The operator writes `volume` and `mute` to the endpoint only when you change them and when the endpoint appears. Between those times, it reports the endpoint's level in `status.observed`. It writes a declared control to the hardware whenever the hardware differs from it. It never writes a setting that `spec` leaves out."
               default: {}
               properties:
                 volume:
                   type: integer
                   minimum: 0
                   maximum: 100
-                  description: "The gain PipeWire applies to what the endpoint captures, as a percent of unity, applied to every channel alike. It applies at once, under a claim or not."
+                  description: "The gain that PipeWire applies to the captured sound, as a percent of unity, the same for every channel. A change applies at once, whether or not a claim holds the endpoint."
                 mute:
                   type: boolean
-                  description: "Whether the endpoint captures silence. It applies at once. A closed microphone is this field, on every Source, and kubectl get sources shows which ones are open."
+                  description: "`true` makes the endpoint capture silence, and a change applies at once. Set it to `true` to close a microphone. The `Mute` column of `kubectl get sources` shows which microphones are closed."
                 controls:
                   type: object
                   additionalProperties:
                     type: string
-                  description: "The card's own controls, keyed by the kernel's control name as status.capabilities lists them, such as Capture Volume or Input Source. An integer control takes a number within its range, a boolean control takes on or off, and an enumerated control takes one of its values. The operator writes a control only when it is stated here."
+                  description: "The card's own controls, keyed by the kernel's control name as `status.capabilities` lists it, for example `Capture Volume` or `Input Source`. An integer control takes a number within its range, a boolean control takes `on` or `off`, and an enumerated control takes one of its values. The operator writes a control only when `spec` lists it."
                 sharedClaims:
                   type: integer
                   minimum: 2
-                  description: "The number of claims that can hold the endpoint at the same time. When this field is absent, one claim holds the endpoint, and a second claim waits until the first ends. When it is set, the device in the ResourceSlice allows several allocations and carries a capacity named claims with this value. A claim whose request asks for claims: 1 shares the endpoint with the other claims that ask for one, up to this number, and each one records the same input. A claim that asks for no claims capacity takes all of it and holds the endpoint alone, so it never shares with another claim. A change applies to the next allocation, and the claims that hold the endpoint keep it. The count is a policy: neither the hardware nor PipeWire limits how many streams record from one endpoint."
+                  description: "How many claims can hold the endpoint at the same time, at least 2. When this field is absent, one claim holds the endpoint, and a second claim stays `Pending` until the first ends. When it is set, the operator publishes the device in the `ResourceSlice` with multiple allocations allowed and a capacity named `claims` of this value. A claim whose request asks for `claims: 1` shares the endpoint with the other claims that ask for one, up to this number, and each of them records the same input. A claim that asks for no `claims` capacity gets all of it and holds the endpoint alone. A change applies to the next allocation, and the claims that already hold the endpoint keep it. Neither the hardware nor PipeWire limits how many streams record from one endpoint, so the number is yours to choose."
             status:
               type: object
-              description: "What the hardware declares and what the operator last read. The operator owns every field here."
+              description: "The hardware facts and the values that the operator last read. The operator writes every field here."
               properties:
                 node:
                   type: string
-                  description: "The machine that holds the endpoint. The name of every Source starts with this machine's name, so a card that moves to another machine gets a new Source. The operator on each machine lists and watches the Sources by this field."
+                  description: "The machine that has the endpoint. The name of every `Source` starts with this machine's name, so a card that moves to another machine gets a new `Source`. The operator on each machine lists and watches only the `Source`s whose `status.node` is that machine."
                 location:
                   type: string
-                  description: "Where the card is on the machine, in the kernel's spelling: a PCI address such as 0000:00:1f.3, or a USB port path such as 1-6."
+                  description: "Where the card is on the machine, in the kernel's notation: a PCI address such as `0000:00:1f.3`, or a USB port path such as `1-6`."
                 connectionType:
                   type: string
                   enum: [analog, usb]
-                  description: "How sound enters the machine."
+                  description: "The way sound enters the machine."
                 card:
                   type: object
-                  description: "The ALSA card the endpoint is on. The number and the id are this boot's, and a second card can change both, so nothing durable is keyed to them."
+                  description: "The ALSA card that the endpoint is on. The kernel assigns the number and the id at each boot, and adding a second card can change both, so the endpoint's name does not use them."
                   properties:
                     number:
                       type: integer
-                      description: "The card number the kernel assigned this boot."
+                      description: "The card number that the kernel assigned in this boot."
                     id:
                       type: string
-                      description: "The card's short id, such as PCH, with the suffix the kernel appends on a clash, such as PCH_1."
+                      description: "The card's short id, such as `PCH`, with the suffix that the kernel appends when two cards have the same id, such as `PCH_1`."
                     driver:
                       type: string
-                      description: "The kernel driver that binds the card, such as USB-Audio."
+                      description: "The kernel driver of the card, such as `USB-Audio`."
                     name:
                       type: string
-                      description: "The card's name, as the driver states it, such as HDA Intel PCH."
+                      description: "The card's name as its driver reports it, such as `HDA Intel PCH`."
                 pcm:
                   type: object
-                  description: "The PCM device the endpoint captures through."
+                  description: "The PCM device that the endpoint captures through."
                   properties:
                     device:
                       type: integer
-                      description: "The PCM device number on the card, this boot."
+                      description: "The PCM device number on the card, in this boot."
                     id:
                       type: string
-                      description: "The driver's name for the PCM, such as USB Audio. It is the part of the endpoint's name that outlives the number."
+                      description: "The driver's name for the PCM, such as `USB Audio`. The endpoint's name uses this id, because it stays the same when the card number changes."
                 nodeName:
                   type: string
-                  description: "The PipeWire node a consumer's capture streams target, the same value a prepared claim delivers as PIPEWIRE_NODE. Absent while PipeWire holds no node for the endpoint."
+                  description: "The name of the PipeWire node that a pod's capture streams target. A prepared claim gives the pod the same value in `PIPEWIRE_NODE`. Absent while PipeWire has no node for the endpoint."
                 format:
                   type: object
-                  description: "The format the node runs at, from PipeWire's own Format parameter. Absent while the node is not running."
+                  description: "The format that the node runs at, from PipeWire's `Format` parameter. Absent while the node is not running."
                   properties:
                     rate:
                       type: integer
                       description: "The sample rate in hertz."
                     channels:
                       type: integer
-                      description: "The channel count."
+                      description: "The number of channels."
                     positions:
                       type: array
                       items:
                         type: string
-                      description: "The channel positions in order, in PipeWire's names: FL, FR, MONO."
+                      description: "The channel positions in order, in PipeWire's names, such as `FL`, `FR`, `MONO`."
                 capabilities:
                   type: object
-                  description: "The card's own controls that belong to this endpoint, keyed by the kernel's control name. A Capture control goes to the card's sources, and a jack control is not listed because it is read-only and feeds the Connected condition."
+                  description: "The card's own controls for this endpoint, keyed by the kernel's control name. A `Capture` control applies to the card's sources, and so does a control that selects, boosts, or sets the automatic gain of an input, such as `Input Source`, `Mic Boost`, or `Auto Gain Control`. Jack controls are left out, because they are read-only and the operator reads them for the `Connected` condition."
                   additionalProperties:
                     type: object
                     properties:
                       type:
                         type: string
                         enum: [integer, boolean, enumerated]
-                        description: "What the control takes."
+                        description: "The kind of value that the control takes."
                       min:
                         type: integer
-                        description: "The smallest number an integer control accepts."
+                        description: "The smallest number that an integer control accepts."
                       max:
                         type: integer
-                        description: "The largest number an integer control accepts."
+                        description: "The largest number that an integer control accepts."
                       step:
                         type: integer
-                        description: "The step between numbers an integer control accepts, absent when every number in the range is accepted."
+                        description: "The difference between neighboring numbers that an integer control accepts. Absent when every number in the range is accepted."
                       minDecibels:
                         type: string
-                        description: "The level at min, in decibels, when the control declares one, as a decimal string such as -65.25."
+                        description: "The level at `min`, in decibels, as a decimal string such as `-65.25`, when the control declares one."
                       maxDecibels:
                         type: string
-                        description: "The level at max, in decibels, when the control declares one."
+                        description: "The level at `max`, in decibels, when the control declares one."
                       values:
                         type: array
                         items:
                           type: string
-                        description: "Every value an enumerated control accepts."
+                        description: "Every value that an enumerated control accepts."
                       channels:
                         type: integer
-                        description: "How many channels the control carries. A write from spec sets every channel to the same value."
+                        description: "The number of channels that the control has. A write from `spec` sets every channel to the same value."
                 observed:
                   type: object
-                  description: "The last value the operator read for each setting. The operator reads the card's control device on every event it delivers, and PipeWire's graph on every change it prints, so a change a person made with a knob or a client shows here without a poll."
+                  description: "The last value that the operator read for each setting. The operator reads the card's control device on each control event, and PipeWire's graph on each change that PipeWire reports, so a change at a knob or by a client appears here without waiting for a timer."
                   properties:
                     volume:
                       type: integer
-                      description: "The gain PipeWire applies, as a percent of unity. An idle node reports no level of its own, so an idle endpoint reports the level the operator last wrote to it, and nothing until a level is declared."
+                      description: "The gain that PipeWire applies, as a percent of unity. An idle node reports no level of its own, so for an idle endpoint this field has the level that the operator last wrote to it, and is absent until `spec.volume` declares a level."
                     mute:
                       type: boolean
-                      description: "Whether the endpoint captures silence, on the same terms as volume."
+                      description: "Whether the endpoint captures silence, reported in the same way as `volume`."
                     controls:
                       type: object
                       additionalProperties:
                         type: string
-                      description: "The value of every control in capabilities, in the same spelling spec.controls takes. A control with several channels reports the first channel's value."
+                      description: "The value of every control in `capabilities`, in the notation that `spec.controls` takes. For a control with several channels, the value of the first channel."
                 applied:
                   type: object
-                  description: "The node the operator last applied the declared volume and mute to, and the declaration it applied. When the operator starts, a node whose PipeWire cookie and node id match this record ran through the restart, so the operator keeps the level it holds and writes the declaration only when it differs from the one recorded here. Any other node is one PipeWire built since, as after the machine boots, so it takes the declaration, or unity on a sink with no declared level. Absent while the endpoint has no node."
+                  description: "The node that the operator last wrote the declared volume and mute to, and the values that it wrote. When the operator starts, a node whose PipeWire cookie and node id match this record kept running through the restart. The operator keeps that node's level, and writes the declaration only when it differs from the one recorded here. Any other node is one that PipeWire created since, for example after the machine boots, so the operator writes the declaration to it. Absent while the endpoint has no node."
                   properties:
                     pipewireCookie:
                       type: integer
                       format: int64
-                      description: "The random number the PipeWire daemon picked when it started, from its Core object. PipeWire gives out the same node ids again after a restart, so the id names a node only together with this number."
+                      description: "The random number that the PipeWire daemon chose when it started, from its `Core` object. PipeWire reuses node ids after a restart, so an id identifies a node only together with this number."
                     node:
                       type: integer
                       description: "The PipeWire object id of the node."
                     volume:
                       type: integer
-                      description: "The declared level the node was judged against, as a percent of unity. Absent when the spec declared no level."
+                      description: "The declared level that the node was compared with, as a percent of unity. Absent when `spec` declared no level."
                     mute:
                       type: boolean
-                      description: "The declared mute the node was judged against. Absent when the spec declared no mute."
+                      description: "The declared mute that the node was compared with. Absent when `spec` declared no mute."
                 claims:
                   type: array
-                  description: "The claims that hold the endpoint now, sorted by namespace and name. It holds one claim, or up to spec.sharedClaims on a shared endpoint, and it is absent when no claim holds the endpoint."
+                  description: "The claims that hold the endpoint now, sorted by namespace and name. The list has one claim, or up to `spec.sharedClaims` claims on a shared endpoint, and it is absent when no claim holds the endpoint."
                   items:
                     type: object
                     properties:
@@ -609,7 +608,7 @@ spec:
                         type: string
                 conditions:
                   type: array
-                  description: "Connected reports that the endpoint can capture now: a plug in an analog jack, and always on USB. Ready reports that PipeWire holds a node for it."
+                  description: "The conditions of the endpoint. `Connected` is `True` when the endpoint can capture now: a plug is in the analog jack, or the endpoint is USB, which is always connected. `Ready` is `True` when PipeWire has a node for the endpoint."
                   items:
                     type: object
                     required: [type, status, reason, lastTransitionTime]

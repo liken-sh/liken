@@ -1,83 +1,78 @@
 package main
 
-// What one pass reads about one endpoint, and the status it composes
-// from that.
+// This file builds the status of one endpoint from the facts that a
+// pass read about it. The card's control device lists the controls and
+// the jacks. The ELD that the graphics driver writes into the card
+// describes the monitor on an HDMI or DisplayPort output. bluetoothd
+// reports whether a speaker is paired and connected, and the PipeWire
+// graph has the node with its gain, mute, and format. Building the
+// status reads no hardware and writes nothing. sinkcontrol.go compares
+// the result with the published status.
 //
-// The facts come from four sources: the card's control device, for
-// the controls and the jacks; the ELD the graphics driver wrote into
-// the card, for the monitor an HDMI slot feeds; bluetoothd, for a
-// speaker's pairing and connection; and PipeWire's graph, for the
-// node, its gain, its mute, and its format. The composition reads no
-// hardware and writes no byte. It turns the facts into the status the
-// resource carries, and sinkcontrol.go decides whether that status
-// differs from the published one.
-//
-// The two conditions report what the endpoint can do now, not what a
-// claim would get. Connected says sound can leave or enter here, and
-// Ready says PipeWire holds a node for it. They carry the same facts
-// as the no-monitor and no-sink taints on the device, for a person
-// rather than the scheduler.
+// Connected means sound can leave or enter through the endpoint now,
+// and Ready means PipeWire has a node for it. The conditions repeat
+// some taints of the device for a person who reads the status: Ready is
+// false when the device has noSinkTaint, and an HDMI or DisplayPort
+// output reports Connected false when its device has noMonitorTaint. An
+// analog jack with no plug reports Connected false, and its device has
+// no taint for that.
 
 import (
 	"time"
 )
 
-// endpointFacts is what one pass read about one endpoint.
+// endpointFacts is what one pass read about one endpoint, and the input
+// of status.
 //
-// An endpoint is either one of a card's PCM devices or a Bluetooth
-// speaker. Endpoint carries the first and Speaker the second, and one
-// of the two is always empty. Everything below them is what the card
-// and the graph said about whichever it is.
+// An endpoint is a PCM device of a card, in Endpoint, or a Bluetooth
+// speaker, in Speaker. The other field is empty.
 type endpointFacts struct {
 	Name      string
 	Direction pwDirection
 	Machine   string
 
-	// The card's half. It is the zero value on a Bluetooth speaker.
 	Endpoint alsaEndpoint
+	Speaker  *speakerFacts
 
-	// The radio's half. It is nil on a card's endpoint.
-	Speaker *speakerFacts
-
-	// The node PipeWire holds for the endpoint now, and the cookie of
-	// the PipeWire that holds it.
+	// Node is valid only when HasNode is true. PipeWire is the cookie of
+	// the PipeWire daemon that has the node.
 	Node     pwNode
 	HasNode  bool
 	PipeWire uint32
 
-	// The card's controls that belong to this endpoint, and the value
-	// each one reads now.
+	// Values has the current value of each control in Controls, keyed by
+	// control name.
 	Controls []control
 	Values   map[string]string
 
-	// What the card's jacks say: whether a plug is in, and whether the
-	// card senses a jack for this endpoint at all.
+	// Sensed is true when the card detects plugs for this endpoint.
+	// Plugged means nothing unless Sensed is true.
 	Plugged bool
 	Sensed  bool
 
-	// The claims that hold the endpoint now, and none between holders.
 	Claims []EndpointClaim
 
-	// The channel layout the declaration holds for a card's sink, and
-	// whether PipeWire runs it. It is nil on a source, on a speaker,
-	// and on a sink the declaration holds no node for.
+	// Layout is the channel layout that the PipeWire drop-in gives a
+	// card's sink, with its LayoutApplied condition. It is nil for a
+	// source, for a speaker, and for a sink with no layout in the
+	// drop-in.
 	Layout *layoutState
 
-	// The level this operator last wrote to the node that stands, from
-	// the spec or an ask, and nil when it wrote none or the node ran
-	// and reported its own level since. PipeWire 1.4.2 announces no
-	// write to a suspended node, which prints no level or the level it
-	// last ran at, so this is what observed reports for an idle
-	// endpoint.
+	// Written is the level that the operator last wrote to the current
+	// node, from the spec or from a volumeAsk (asks.go). It is nil when
+	// the operator wrote none, or when the node has reported its own
+	// level since. PipeWire does not announce a write to a suspended
+	// node, so observed reports this value for an idle endpoint.
 	Written *levelWrite
 
-	// The node the operator last judged the declaration against, which
-	// status.applied publishes.
+	// Applied is published as status.applied: the PipeWire cookie and
+	// node id of the node that the operator last compared with the spec,
+	// and the declared level and mute of that comparison.
 	Applied *EndpointApplied
 }
 
-// speakerFacts is one Bluetooth speaker: what bluetoothd says about
-// the peer, and what the graph holds for it.
+// speakerFacts is what bluetoothd reports about a paired speaker, and
+// its PipeWire sink when HasSink is true.
 type speakerFacts struct {
 	Address string
 	Paired  speaker
@@ -85,15 +80,14 @@ type speakerFacts struct {
 	HasSink bool
 }
 
-// absoluteRoute answers the device and the Route a level write lands
-// on, and nothing at all for every endpoint whose level is a software
-// gain.
+// absoluteRoute returns the device and Route that a level write goes
+// to, and false when the level is the software gain of the node.
 //
 // A write to a speaker's Route becomes AVRCP absolute volume on the
-// speaker itself, so the number on its display moves. A speaker that
-// reports no volume of its own publishes no volumeStep on the Route,
-// and its level is then the node's software gain, like every ALSA
-// endpoint's.
+// speaker, so the volume that the speaker displays changes. A speaker
+// that reports no volume of its own has no volumeStep on its Route, so
+// its level is the software gain of the node, as for every ALSA
+// endpoint.
 func (f endpointFacts) absoluteRoute() (int, pwRoute, bool) {
 	if f.Speaker == nil || f.Speaker.Sink.Route == nil {
 		return 0, pwRoute{}, false
@@ -105,9 +99,10 @@ func (f endpointFacts) absoluteRoute() (int, pwRoute, bool) {
 	return f.Speaker.Sink.Device, route, true
 }
 
-// suspended reports whether the level the endpoint prints can be
-// stale: a software gain on a suspended node. A speaker's Route is the
-// speaker's own report, current whatever the node's state.
+// suspended reports whether the level that PipeWire prints for the
+// endpoint can be stale, which is the case for the software gain of a
+// suspended node. The Route of a speaker with absolute volume is
+// current whatever the state of the node.
 func (f endpointFacts) suspended() bool {
 	if _, _, absolute := f.absoluteRoute(); absolute {
 		return false
@@ -115,8 +110,9 @@ func (f endpointFacts) suspended() bool {
 	return f.HasNode && f.Node.Suspended
 }
 
-// level is the volume and the mute the endpoint reads now, from
-// wherever its level lives.
+// level returns the volume as a percent, the mute, and whether the
+// volume is known. It reads the Route of a speaker with absolute volume
+// and the node of every other endpoint.
 func (f endpointFacts) level() (volume int, mute bool, known bool) {
 	if _, route, absolute := f.absoluteRoute(); absolute {
 		volume, known = volumePercent(route.Volumes)
@@ -129,52 +125,51 @@ func (f endpointFacts) level() (volume int, mute bool, known bool) {
 	return volume, f.Node.Mute, known
 }
 
-// connected reports whether the endpoint can play or record now, with
-// the reason and the line a person reads.
+// connected reports whether the endpoint can play or record, with the
+// reason and message of the Connected condition.
 //
-// Each kind of endpoint has its own witness. A speaker answers with
-// the connection bluetoothd reports. An HDMI or DisplayPort slot
-// answers with the ELD, which the graphics driver writes only while a
-// monitor answers. A USB card is on the bus or it publishes nothing,
-// so it has no cable state to report. An analog jack answers with the
-// plug, where the card senses one, and a card that senses no jack for
-// an endpoint reports it connected, because nothing says otherwise
-// and a claim on it should not park.
+// A speaker is connected when bluetoothd reports it connected. An HDMI
+// or DisplayPort output is connected when it has an ELD, which the
+// graphics driver writes only while a monitor answers. A USB card is
+// always connected, because its endpoint exists only while the card is
+// on the bus. An analog jack is connected when a plug is in it. When the
+// card cannot sense the jack, the endpoint reports connected, because
+// no reading shows that it is not.
 func (f endpointFacts) connected() (bool, string, string) {
 	switch {
 	case f.Speaker != nil:
 		if f.Speaker.Paired.Connected {
 			return true, "SpeakerConnected", "bluetoothd reports the speaker connected"
 		}
-		return false, "SpeakerDisconnected", "the speaker is paired and not connected"
+		return false, "SpeakerDisconnected", "The speaker is paired and not connected"
 	case f.Endpoint.HDMI:
 		if f.Endpoint.Monitor {
-			return true, "MonitorPresent", "a monitor answers on this slot"
+			return true, "MonitorPresent", "A monitor is connected to this output"
 		}
-		return false, "NoMonitor", "no monitor answers on this slot"
+		return false, "NoMonitor", "No monitor is connected to this output"
 	case f.Endpoint.Identity.Bus == usbBus:
-		return true, "CardPresent", "the card is on the bus"
+		return true, "CardPresent", "The card is on the USB bus"
 	case f.Sensed:
 		if f.Plugged {
-			return true, "JackPlugged", "a plug is in the jack"
+			return true, "JackPlugged", "A plug is in the jack"
 		}
-		return false, "JackEmpty", "the card senses no plug in the jack"
+		return false, "JackEmpty", "The card senses no plug in the jack"
 	}
-	return true, "NoJackSensing", "the card senses no jack for this endpoint"
+	return true, "NoJackSensing", "The card senses no jack for this endpoint"
 }
 
-// ready reports whether PipeWire holds a node for the endpoint, which
-// is the same fact the no-sink taint carries.
+// ready reports whether PipeWire has a node for the endpoint, with the
+// reason and message of the Ready condition.
 func (f endpointFacts) ready() (bool, string, string) {
 	if f.HasNode {
-		return true, "NodePresent", "PipeWire holds the node " + f.Node.Name
+		return true, "NodePresent", "PipeWire has the node " + f.Node.Name
 	}
-	return false, "NoNode", "PipeWire holds no node for this endpoint"
+	return false, "NoNode", "PipeWire has no node for this endpoint"
 }
 
-// status composes what the resource reports, from the facts alone.
-// The published status comes in so that a condition that did not
-// change keeps the time it changed last.
+// status builds the status of the endpoint from the facts. It reads the
+// published status so that a condition whose value did not change keeps
+// its last transition time.
 func (f endpointFacts) status(published EndpointStatus, now time.Time) EndpointStatus {
 	status := EndpointStatus{
 		Node:       f.Machine,
@@ -182,9 +177,9 @@ func (f endpointFacts) status(published EndpointStatus, now time.Time) EndpointS
 		Claims:     f.Claims,
 		Conditions: published.Conditions,
 	}
-	// An endpoint whose card lists no control for it carries no
-	// capabilities at all, which is every Bluetooth speaker and every
-	// endpoint of a card this operator could not open.
+	// Capabilities stay unset when the card lists no control for the
+	// endpoint, as for every Bluetooth speaker and for the endpoints
+	// of a card that the operator could not open.
 	if capabilities := capabilitiesOf(f.Controls); len(capabilities) > 0 {
 		status.Capabilities = capabilities
 	}
@@ -223,8 +218,8 @@ func (f endpointFacts) status(published EndpointStatus, now time.Time) EndpointS
 	return status
 }
 
-// nodeName is the name a consumer's PIPEWIRE_NODE holds, and nothing
-// while PipeWire holds no node.
+// nodeName returns the PipeWire node name, which a consumer receives in
+// PIPEWIRE_NODE, or "" when the endpoint has no node.
 func (f endpointFacts) nodeName() string {
 	if !f.HasNode {
 		return ""
@@ -232,9 +227,8 @@ func (f endpointFacts) nodeName() string {
 	return f.Node.Name
 }
 
-// monitor is what the ELD block says about the screen this slot
-// feeds, and nothing on a slot with no monitor and on every endpoint
-// that is not an HDMI or a DisplayPort one.
+// monitor returns the published fields of the ELD block, or nil when
+// the endpoint has no monitor or is not HDMI or DisplayPort.
 func (f endpointFacts) monitor() *EndpointMonitor {
 	if !f.Endpoint.HDMI || !f.Endpoint.Monitor {
 		return nil
@@ -248,9 +242,9 @@ func (f endpointFacts) monitor() *EndpointMonitor {
 	}
 }
 
-// bluetooth is what bluetoothd and the graph say about the speaker.
-// The codec and the offered set come from the transport, so a speaker
-// that is not connected reports the Peripheral alone.
+// bluetooth returns what bluetoothd and the graph report about the
+// speaker. Codec and Codecs come from the speaker's PipeWire sink, so
+// they are empty when the graph has no sink for it.
 func (f endpointFacts) bluetooth() *EndpointBluetooth {
 	facts := &EndpointBluetooth{
 		Address:    publishedMAC(f.Speaker.Address),
@@ -264,8 +258,8 @@ func (f endpointFacts) bluetooth() *EndpointBluetooth {
 	return facts
 }
 
-// format is what the node negotiated, and nothing while the node is
-// suspended: a node that runs no stream reports a rate of zero.
+// format returns the format that the node negotiated, or nil when the
+// rate is zero, as it is while no stream runs on the node.
 func (f endpointFacts) format() *EndpointFormat {
 	if !f.HasNode || f.Node.Format.Rate == 0 {
 		return nil
@@ -277,18 +271,17 @@ func (f endpointFacts) format() *EndpointFormat {
 	}
 }
 
-// observed is the last value the operator read for each setting, and
-// nothing at all when it read none.
+// observed returns the levels, codec, and control values of the
+// endpoint, or nil when it has none.
 //
-// A Props write to a suspended node is applied and kept but never
-// announced (spa/plugins/audioconvert/audioadapter.c in pipewire 1.4.2
-// compares parameter flags and not the serial, so the cached copy
-// every reader sees stays stale). A suspended node prints no level at
-// all, as on liken-1, or the level it last ran at, as on stick-1. So a
-// suspended or levelless node reports the level this operator last
-// wrote, which is the level the node will run at, and the graph's
-// value only for a part the operator did not write. A running node
-// reports the graph.
+// PipeWire applies a Props write to a suspended node but does not
+// announce it. In pipewire 1.4.2, spa/plugins/audioconvert/audioadapter.c
+// compares the parameter flags and not the serial, so every reader of
+// the graph gets a stale copy, with no level or the level the node last
+// ran at. So for a suspended node, and for a node with no level,
+// observed reports the volume and mute that the operator last wrote,
+// because the node runs at that level when it resumes. A field that the
+// operator did not write keeps the graph's value.
 func (f endpointFacts) observed() *EndpointObserved {
 	values := &EndpointObserved{Controls: f.Values}
 	volume, mute, known := f.level()

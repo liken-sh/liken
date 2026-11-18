@@ -23,15 +23,15 @@ func TestTheCheckComparesTheDropInWithTheSocket(t *testing.T) {
 			dropIn, socket := filepath.Join(dir, dropInName), filepath.Join(dir, "pipewire-0")
 			for path, at := range map[string]time.Time{dropIn: c.written, socket: start} {
 				if err := os.WriteFile(path, nil, 0o644); err != nil {
-					t.Fatal(err)
+					t.Fatalf("writing the file: %v", err)
 				}
 				if err := os.Chtimes(path, at, at); err != nil {
-					t.Fatal(err)
+					t.Fatalf("setting the file's times: %v", err)
 				}
 			}
 			stale, err := declarationNewer(dropIn, socket)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("comparing the drop-in with the socket: %v", err)
 			}
 			if stale != c.want {
 				t.Errorf("stale = %v, want %v", stale, c.want)
@@ -40,18 +40,19 @@ func TestTheCheckComparesTheDropInWithTheSocket(t *testing.T) {
 	}
 }
 
-// A file that is not there is an error, which the probe passes: a
-// restart repairs neither a missing drop-in nor a missing socket.
+// A missing file is an error, and runningStale treats an error as not
+// stale, because a restart repairs neither a missing drop-in nor a
+// missing socket.
 func TestTheCheckCannotCompareWhatIsNotThere(t *testing.T) {
 	dir := t.TempDir()
 	present := filepath.Join(dir, "present")
 	if err := os.WriteFile(present, nil, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the present file: %v", err)
 	}
 	missing := filepath.Join(dir, "missing")
 	for _, paths := range [][2]string{{missing, present}, {present, missing}} {
 		if _, err := declarationNewer(paths[0], paths[1]); err == nil {
-			t.Errorf("compared %v", paths)
+			t.Errorf("declarationNewer(%q, %q) returned no error, want one for the missing file", paths[0], paths[1])
 		}
 	}
 }

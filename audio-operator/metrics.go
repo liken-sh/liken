@@ -1,19 +1,14 @@
 package main
 
-// metrics.go serves the operator's Prometheus registry.
+// The operator's Prometheus registry holds liken_build_info, the
+// duration, error, and watch-restart series of the reconcile loop, and
+// the series of plans/completed/08-prometheus-metrics.md: whether each
+// endpoint is connected, ready, and claimed, whether the reads of
+// PipeWire and BlueZ succeeded, and which writes to hardware failed.
 //
-// The registry carries three layers. Layer 1 is liken's own
-// liken_build_info, the one gauge every process in the organization
-// carries under its own component name. Layer 2 is the reconcile loop:
-// how long a pass over one Sink or Source took, whether it failed, and
-// how often a watch reopened. Layer 3 is this operator's own plan: the
-// hardware triple for an endpoint, whether PipeWire and BlueZ still
-// answer, and the writes to hardware that fail.
-//
-// Every reading here comes from a fact sinkstatus.go or reconcile.go
-// already derived for the resource or the slice. A scrape reads the
-// registry in memory; it opens no card, no PipeWire graph, and no
-// D-Bus connection.
+// The recording methods take facts that a reconcile pass already read,
+// so a scrape reads memory and opens no card, PipeWire graph, or D-Bus
+// connection.
 import (
 	"context"
 	"fmt"
@@ -27,35 +22,34 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// metricsDeadline bounds a scrape's headers and the listener's stop.
-const metricsDeadline = 30 * time.Second
+// readHeaderTimeout bounds how long every HTTP server in this package,
+// the audio-api and capture servers included, waits for a request's
+// headers, so a client that connects and sends nothing cannot keep the
+// connection open.
+const readHeaderTimeout = 30 * time.Second
 
-// component is this repository's name on liken_build_info, the label
-// that lets one panel list every process's release in the cluster.
+// component is the value of the component label on liken_build_info.
 const component = "audio-operator"
 
-// The two sources this operator observes. bluetooth-operator owns the
-// radio link and the battery; this name covers only the media bus this
-// pod reads paired speakers over.
+// The values of the source label of audio_observation_valid. bluez is
+// only the media bus that this pod reads paired speakers from, because
+// bluetooth-operator owns the radio link and the battery.
 const (
 	sourcePipeWire = "pipewire"
 	sourceBlueZ    = "bluez"
 )
 
-// The fixed vocabulary audio_control_failures_total takes: the three
-// writes apply makes to hardware. A call site that forgets to name one
-// costs that failure a place on the graph, not a label nobody chose.
+// The values of the operation label of audio_control_failures_total,
+// one for each kind of write that apply makes to hardware.
 const (
 	operationVolume  = "volume"
 	operationControl = "control"
 	operationCodec   = "codec"
 )
 
-// metrics holds the registry the listener serves. Every field but the
-// registry itself is one instrument from the plan; grouping them here,
-// rather than behind a stand-alone Prometheus client, is what makes a
-// scrape reachable from a real registry in a test with no HTTP server
-// behind it.
+// metrics holds the registry that the listener serves and the
+// instruments registered on it. Every recording method does nothing on
+// a nil *metrics.
 type metrics struct {
 	registry *prometheus.Registry
 
@@ -72,15 +66,13 @@ type metrics struct {
 
 	controlFailures *prometheus.CounterVec
 
-	// now is when a successful observation is timestamped. A field
-	// rather than a call to time.Now lets a test read a fixed value
-	// off the gauge instead of a moving one.
+	// now is a field so that a test can fix the time of a successful
+	// read.
 	now func() time.Time
 }
 
-// newMetrics builds the registry and sets liken_build_info once, to
-// the version this binary was built from. version is "dev" outside a
-// release build; main.go says why.
+// newMetrics creates the registry, with version as the version label
+// of liken_build_info.
 func newMetrics(version string) *metrics {
 	m := &metrics{
 		registry: prometheus.NewRegistry(),
@@ -102,7 +94,7 @@ func newMetrics(version string) *metrics {
 		}, []string{"endpoint"}),
 		endpointReady: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "audio_endpoint_ready",
-			Help: "One while PipeWire holds a node for the endpoint, zero while it does not.",
+			Help: "One while PipeWire has a node for the endpoint, zero while it does not.",
 		}, []string{"endpoint"}),
 		endpointClaimed: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "audio_endpoint_claimed",
@@ -118,7 +110,7 @@ func newMetrics(version string) *metrics {
 		}, []string{"source"}),
 		controlFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "audio_control_failures_total",
-			Help: "Writes to hardware that failed, by the write's own kind.",
+			Help: "Writes to hardware that failed, by the kind of write.",
 		}, []string{"operation"}),
 		now: time.Now,
 	}
@@ -130,7 +122,6 @@ func newMetrics(version string) *metrics {
 	buildInfo.WithLabelValues(component, version).Set(1)
 
 	m.registry.MustRegister(
-		// Layer 1 is the runtime's own numbers beside the build info.
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		buildInfo,
@@ -142,10 +133,9 @@ func newMetrics(version string) *metrics {
 	return m
 }
 
-// reconciled records one pass over one endpoint's resource: how long
-// it took, and whether it ended in an error. A pass that changes
-// nothing still counts as a run, so the duration is observed whether
-// or not err is nil.
+// reconciled records the duration of one reconcile pass over one
+// endpoint's resource, and counts an error when err is not nil. A pass
+// that changes nothing is still recorded.
 func (m *metrics) reconciled(kind string, duration time.Duration, err error) {
 	if m == nil {
 		return
@@ -156,9 +146,8 @@ func (m *metrics) reconciled(kind string, duration time.Duration, err error) {
 	}
 }
 
-// watchRestarted counts one watch the API server closed that this
-// operator opened again. The first open of a watch is not a restart,
-// so the caller counts only a reopen.
+// watchRestarted counts a watch that the API server closed and this
+// operator opened again. Callers do not call it for the first open.
 func (m *metrics) watchRestarted(kind string) {
 	if m == nil {
 		return
@@ -166,14 +155,13 @@ func (m *metrics) watchRestarted(kind string) {
 	m.watchRestarts.WithLabelValues(kind).Inc()
 }
 
-// endpoint puts what one pass read about one endpoint's presence on
-// the hardware triple's gauges: the same Connected and Ready facts
-// sinkstatus.go composed into the resource's conditions, and whether a
-// claim holds the endpoint now.
+// endpoint sets the connected, ready, and claimed gauges of one
+// endpoint. Connected and Ready are the facts that sinkstatus.go writes
+// into the resource's conditions.
 //
-// A pass that never runs for an endpoint, because the observation
-// behind it was invalid, calls this for no endpoint, and the gauges
-// keep the value the last pass set: unknown is not disconnected.
+// A pass whose graph read failed does not call endpoint, so the gauges
+// keep the values of the last successful pass, because a failed read
+// does not show that the endpoint disconnected.
 func (m *metrics) endpoint(name string, connected, ready, claimed bool) {
 	if m == nil {
 		return
@@ -183,10 +171,9 @@ func (m *metrics) endpoint(name string, connected, ready, claimed bool) {
 	m.endpointClaimed.WithLabelValues(name).Set(gauge(claimed))
 }
 
-// observationSucceeded marks one source's read as valid, and stamps
-// the moment it succeeded. The timestamp is the event's own time, so a
-// reader computes the age itself instead of reading one this operator
-// counted up between scrapes.
+// observationSucceeded marks the latest read of a source as valid and
+// records its time. Prometheus computes the age of the read at query
+// time, so the operator writes nothing between scrapes.
 func (m *metrics) observationSucceeded(source string) {
 	if m == nil {
 		return
@@ -195,9 +182,9 @@ func (m *metrics) observationSucceeded(source string) {
 	m.observationLastSuccess.WithLabelValues(source).Set(float64(m.now().Unix()))
 }
 
-// observationFailed marks one source's read as invalid. The last
-// success timestamp is left alone, so a reader can see how old the
-// standing observation is.
+// observationFailed marks the latest read of a source as invalid. It
+// leaves the last-success timestamp unchanged, so the age of the last
+// valid read stays visible.
 func (m *metrics) observationFailed(source string) {
 	if m == nil {
 		return
@@ -205,7 +192,6 @@ func (m *metrics) observationFailed(source string) {
 	m.observationValid.WithLabelValues(source).Set(0)
 }
 
-// controlFailed counts one write to hardware that failed.
 func (m *metrics) controlFailed(operation string) {
 	if m == nil {
 		return
@@ -213,8 +199,7 @@ func (m *metrics) controlFailed(operation string) {
 	m.controlFailures.WithLabelValues(operation).Inc()
 }
 
-// gauge carries a state as one or zero, the form every boolean gauge
-// in the registry reports.
+// gauge converts a bool to the 1 or 0 of a boolean gauge.
 func gauge(state bool) float64 {
 	if state {
 		return 1
@@ -222,8 +207,8 @@ func gauge(state bool) float64 {
 	return 0
 }
 
-// listen opens the address METRICS_ADDRESS names. An empty address
-// serves no metrics, which is what a pod under test runs with.
+// listen opens a TCP listener on address, the value of METRICS_ADDRESS.
+// An empty address returns a nil listener and no error.
 func (m *metrics) listen(address string) (net.Listener, error) {
 	if address == "" {
 		return nil, nil
@@ -231,26 +216,26 @@ func (m *metrics) listen(address string) (net.Listener, error) {
 	return net.Listen("tcp", address)
 }
 
-// handler serves the registry at /metrics and nothing else.
+// handler serves the registry at /metrics and no other path.
 func (m *metrics) handler() http.Handler {
-	served := http.NewServeMux()
-	served.Handle("/metrics", promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}))
-	return served
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}))
+	return mux
 }
 
-// serveMetrics answers on the listener until the run ends. A failure
-// here is reported and never fatal: the reconcile loop this operator
-// exists for does not depend on a scraper reaching it.
+// serveMetrics serves HTTP on listener until ctx ends. A failure is
+// logged and does not exit the process, because the reconcile loop does
+// not depend on a scraper reaching it.
 func serveMetrics(ctx context.Context, listener net.Listener, m *metrics) {
-	serving := &http.Server{
+	server := &http.Server{
 		Handler:           m.handler(),
-		ReadHeaderTimeout: metricsDeadline,
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	go func() {
 		<-ctx.Done()
-		_ = serving.Close()
+		_ = server.Close()
 	}()
-	if err := serving.Serve(listener); err != nil && ctx.Err() == nil {
+	if err := server.Serve(listener); err != nil && ctx.Err() == nil {
 		fmt.Fprintf(os.Stderr, "the metrics listener stopped: %v\n", err)
 	}
 }

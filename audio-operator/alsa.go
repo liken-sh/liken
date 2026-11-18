@@ -1,28 +1,20 @@
 package main
 
-// Reading ALSA through the control interface, without ALSA's own
-// library.
+// This file lists the PCM devices of each sound card and reads the ELD
+// block of each HDMI or DisplayPort output. It calls the ALSA control
+// ioctls directly, so the operator does not link alsa-lib. cards.go
+// reads each card's identity.
 //
-// The operator needs three facts from the card: which PCM devices
-// it plays through, which it records through, and the ELD block for
-// each one that drives an HDMI or a DisplayPort output. All three
-// come from the nodes the raw claim delivers, so this file opens
-// /dev/snd and nothing else. What the card is, and where it is on the
-// machine, is cards.go.
+// The ELD comes from the control element named ELD, not from
+// /proc/asound/card<N>/eld#<codec>.<pin>. Both have the same bytes, but
+// only the element's identifier has the PCM device number. The second
+// number in the proc file name is a pin index, so the proc file does
+// not tell you which output a block belongs to.
 //
-// The ELD comes from the control element named ELD, and not from
-// /proc/asound/card<N>/eld#<codec>.<pin>. The two hold the same
-// bytes. The control element holds the PCM device number with them,
-// in the element's own identifier, and the proc file's second number
-// is a pin index instead. The pin index is not the PCM device, so a
-// proc file alone cannot say which output a block describes.
-//
-// The kernel's control interface is three ioctls on
-// /dev/snd/controlC<N>. Their argument structures are in
-// include/uapi/sound/asound.h, and the Go structures below mirror
-// them field for field. alsa_test.go asserts every size, because a
-// size that disagrees with the kernel's builds an ioctl number the
-// kernel does not answer.
+// The structures below mirror the ioctl arguments in
+// include/uapi/sound/asound.h. A request number encodes the size of its
+// argument, and the kernel rejects a request with the wrong size, so
+// alsa_test.go checks every size.
 
 import (
 	"errors"
@@ -35,19 +27,18 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// sndDir is where the ALSA device nodes appear. It is a variable so
-// the tests can point it at a directory they control.
+// sndDir is a variable so that tests can point it at a fixture
+// directory.
 var sndDir = "/dev/snd"
 
-// pcmNodePattern matches an ALSA PCM node, pcmC<card>D<device><p|c>.
-// The trailing letter is the stream direction, p for playback and c
-// for capture, and the operator publishes both: a playback PCM is a
-// sink and a capture PCM is a source.
+// pcmNodePattern matches pcmC<card>D<device><p|c>, where p is playback
+// and c is capture. The operator publishes a playback PCM as a sink and
+// a capture PCM as a source.
 var pcmNodePattern = regexp.MustCompile(`^pcmC(\d+)D(\d+)([pc])$`)
 
-// The control interface's structure sizes, in bytes, on a 64-bit
-// kernel. The ioctl number encodes the size of its argument, so these
-// are part of the protocol and not an implementation detail.
+// The sizes in bytes of the kernel's control structures on a 64-bit
+// kernel. They go into the ioctl request numbers, so they must match
+// the kernel exactly.
 const (
 	ctlElemIDSize    = 64
 	ctlElemListSize  = 80
@@ -55,34 +46,29 @@ const (
 	ctlElemValueSize = 1224
 )
 
-// The three ioctls this operator calls, on the 'U' ioctl group that
-// the ALSA control interface owns. Each one reads and writes its
-// argument, which is what _IOWR means and what the two high bits say.
 var (
 	ctlIoctlElemList = iowr(0x10, ctlElemListSize)
 	ctlIoctlElemInfo = iowr(0x11, ctlElemInfoSize)
 	ctlIoctlElemRead = iowr(0x12, ctlElemValueSize)
 )
 
-// iowr builds an ioctl request number for the ALSA control interface:
-// the read and write direction bits, the argument size, the 'U'
-// group, and the command number.
+// iowr builds an _IOWR request number in the 'U' ioctl group of the
+// ALSA control interface.
 func iowr(number, size uintptr) uintptr {
 	return 3<<30 | size<<16 | 'U'<<8 | number
 }
 
-// ctlElemIfacePCM is the interface a control element belongs to. The
-// ELD element is registered against the PCM interface, and its
-// element identifier holds the PCM device number, which is the whole
-// reason this operator reads elements instead of proc files.
+// ctlElemIfacePCM is SNDRV_CTL_ELEM_IFACE_PCM. The ELD element has this
+// interface, so the Device field of its identifier is a PCM device
+// number.
 const ctlElemIfacePCM = 3
 
-// ctlElemTypeBytes is the element type of a block of bytes. The ELD
-// element is one, and its value count is the block's length.
+// ctlElemTypeBytes is SNDRV_CTL_ELEM_TYPE_BYTES, the type of the ELD
+// element.
 const ctlElemTypeBytes = 4
 
-// eldElementName is the name the HDA driver gives the element that
-// holds an ELD block.
+// eldElementName is the name that the HDA driver gives the element
+// that carries an ELD block.
 const eldElementName = "ELD"
 
 type ctlElemID struct {
@@ -99,9 +85,9 @@ type ctlElemList struct {
 	Space  uint32
 	Used   uint32
 	Count  uint32
-	// IDs points at the caller's array. It is a typed pointer, so the
-	// garbage collector sees the array through it while the kernel
-	// writes into it.
+	// IDs points at the caller's array. It is a typed pointer so that the
+	// garbage collector keeps the array alive while the kernel writes
+	// into it.
 	IDs      *ctlElemID
 	Reserved [50]byte
 }
@@ -110,10 +96,9 @@ type ctlElemInfo struct {
 	ID     ctlElemID
 	Type   int32
 	Access uint32
-	// Count is the number of values the element holds. For the ELD
-	// element it is the length of the block, and the driver reports
-	// zero when the block is invalid, which is what an unplugged
-	// monitor looks like from here.
+	// Count is the number of values in the element, which for the ELD
+	// element is the length of the block. The driver reports zero while
+	// it has no valid block, as when no monitor is connected.
 	Count    uint32
 	Owner    int32
 	Value    [128]byte
@@ -121,10 +106,10 @@ type ctlElemInfo struct {
 	Reserved [56]byte
 }
 
-// ctlElemValue holds one element's value. The value field is a
-// union in the kernel's header, and its largest member is an array of
-// 128 longs, which is what sets the field's size here. A bytes
-// element reads the first maxBytesElement of it.
+// ctlElemValue is the argument of the element read ioctl. The kernel
+// declares Value as a union. Its largest member is an array of 128
+// longs, which sets the size here, and an element of type bytes uses
+// the first maxBytesElement bytes of it.
 type ctlElemValue struct {
 	ID       ctlElemID
 	Indirect uint32
@@ -133,26 +118,21 @@ type ctlElemValue struct {
 	Reserved [128]byte
 }
 
-// maxBytesElement is how many bytes one element of type bytes can
-// hold inline. The union's bytes member is 512 bytes, and an element
-// longer than that holds a pointer instead, which this operator does
-// not read. An ELD block is at most 256 bytes, so no block reaches
-// the limit.
+// maxBytesElement is the size of the bytes member of the kernel's value
+// union. The read ioctl cannot return a longer element, so
+// readBytesElement refuses one. An ELD block is at most ELD_MAX_SIZE,
+// 256 bytes, in include/sound/pcm_drm_eld.h, so it always fits.
 const maxBytesElement = 512
 
-// name reads an element's name out of its fixed-length field.
 func (id ctlElemID) name() string { return cText(id.Name[:]) }
 
-// alsaEndpoint is one endpoint of one card: one PCM device in one
-// direction, what the card says about the monitor behind it, and the
-// identity its device name is built from.
+// alsaEndpoint is one PCM device of one card in one direction.
 //
-// Capture says the PCM device records instead of plays. HDMI says
-// the card declares an ELD element for the device, which is what an
-// HDMI or DisplayPort output has and the analog jack does not, and
-// Monitor says the block read and a monitor answers. Identity and
-// PCMID are the parts endpointName builds the device name from, and
-// DeviceName is what nameEndpoints stamped, empty until it did.
+// HDMI is true when the card has an ELD element for the PCM device, as
+// an HDMI or DisplayPort output has and an analog jack does not.
+// Monitor is true when that element has a valid block, which means a
+// monitor is connected. nameEndpoints sets DeviceName from Identity and
+// PCMID.
 type alsaEndpoint struct {
 	Card       int
 	PCM        int
@@ -165,19 +145,19 @@ type alsaEndpoint struct {
 	DeviceName string
 }
 
-// Name is the DRA device name this endpoint publishes under, and it
-// is empty until nameEndpoints stamps it.
+// Name returns the DRA device name, which is empty until nameEndpoints
+// sets it.
 func (o alsaEndpoint) Name() string { return o.DeviceName }
 
-// Address is the card and device number the kernel assigned this
-// boot. It names the PipeWire node and it reads well in a log line,
-// and nothing durable is keyed to it.
+// Address returns the card and PCM numbers the kernel assigned in this
+// boot, for log lines and PipeWire node names. The numbers can change at
+// the next boot, so nothing durable uses them as a key.
 func (o alsaEndpoint) Address() string { return alsaAddress(o.Card, o.PCM) }
 
-// direction is the half of the graph this endpoint's node is in. It
-// is the endpoint's own and not the card's: one PCM device of a USB
-// card carries a playback endpoint and a capture endpoint, and each
-// one has a node of its own.
+// direction returns whether the endpoint's PipeWire node is a sink or a
+// source. It comes from the endpoint and not from the card, because a
+// PCM device of a USB card can have a playback endpoint and a capture
+// endpoint, each with its own node.
 func (o alsaEndpoint) direction() pwDirection {
 	if o.Capture {
 		return directionSource
@@ -185,20 +165,17 @@ func (o alsaEndpoint) direction() pwDirection {
 	return directionSink
 }
 
-// graphAddress is where this endpoint's node is in PipeWire's graph:
-// the card and PCM numbers and the direction together name one node,
-// and the graph read builds its index on that key.
+// graphAddress returns the key of the endpoint's node in the index of
+// the PipeWire graph.
 func (o alsaEndpoint) graphAddress() nodeAddress {
 	return nodeAddress{pcmAddress: pcmAddress{Card: o.Card, PCM: o.PCM}, Direction: o.direction()}
 }
 
-// connectionType is the value of the device's attribute. An
-// endpoint with an ELD element is an HDMI or DisplayPort output, and
-// one whose block is absent or unreadable publishes no connection
-// type, because the operator cannot tell an HDMI cable from a
-// DisplayPort one without the block. A card on the USB bus publishes
-// usb whichever direction the endpoint runs in, and every other
-// endpoint is the analog jack.
+// connectionType returns the connectionType attribute of the endpoint.
+// An HDMI or DisplayPort output reads it from its ELD block, and with no
+// valid block it returns "", because only the block tells HDMI from
+// DisplayPort. Every endpoint of a USB card returns usb, and every other
+// endpoint is an analog jack.
 func (o alsaEndpoint) connectionType() string {
 	if o.HDMI {
 		if !o.Monitor {
@@ -212,35 +189,29 @@ func (o alsaEndpoint) connectionType() string {
 	return "analog"
 }
 
-// pcmDevice is one PCM device of one card and the direction it runs
-// in.
 type pcmDevice struct {
 	PCM     int
 	Capture bool
 }
 
-// readEndpoints enumerates every PCM device the delivered nodes hold in
-// both directions, reads the ELD element of each playback one that
-// has one, and reads what each card says about itself.
+// readEndpoints lists every playback and capture PCM device in sndDir,
+// reads the ELD element of each playback device that has one, and
+// reads the identity of each card.
 //
-// The membership of this list does not depend on PipeWire. A card's
-// PCM devices are the physical endpoints it has, whether a monitor is
-// connected to one or not and whether a sound server holds one or
-// not, so the published inventory does not change while monitors and
-// sinks come and go.
+// The list depends only on the cards, so a monitor that is plugged in
+// or a PipeWire node that appears or disappears does not add or remove
+// a published device.
 func readEndpoints() ([]alsaEndpoint, error) {
 	entries, err := os.ReadDir(sndDir)
 	if errors.Is(err, os.ErrNotExist) {
-		// A node with no sound card has no /dev/snd for the claim to
-		// deliver. The operator publishes no output and keeps serving, so
-		// a DaemonSet can place a pod on every node and the pod idles
-		// where there is nothing to play. A read error on a directory
-		// that does exist still fails, because that is a delivered card
-		// the operator cannot enumerate.
+		// A Kubernetes node with no sound card has no /dev/snd. Returning
+		// no endpoints and no error lets the DaemonSet run the pod on
+		// every node, and the pod idles where there is no card. Any other
+		// read error fails.
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", sndDir, err)
+		return nil, fmt.Errorf("listing the sound devices: %w", err)
 	}
 
 	var outputs []alsaEndpoint
@@ -251,9 +222,9 @@ func readEndpoints() ([]alsaEndpoint, error) {
 			continue
 		}
 		card, _ := strconv.Atoi(match[1])
-		// The PCM number goes into the 32-bit device field of the
-		// kernel's snd_pcm_info, so a node whose number does not fit is
-		// skipped, the same as a node whose name does not match.
+		// The PCM number must fit the 32-bit device field of the kernel's
+		// snd_pcm_info. A node whose number does not fit is skipped, like
+		// a node whose name does not match.
 		pcm, err := strconv.ParseInt(match[2], 10, 32)
 		if err != nil {
 			continue
@@ -264,10 +235,9 @@ func readEndpoints() ([]alsaEndpoint, error) {
 	for card, devices := range byCard {
 		blocks, err := readELDElements(card)
 		if err != nil {
-			// A card whose control node this operator cannot read still
-			// has outputs, and they publish as analog. Reporting the
-			// failure and continuing is better than publishing nothing,
-			// because the sinks still work.
+			// A card whose control node cannot be read still plays sound,
+			// so its endpoints are published without ELD data, as analog
+			// or USB endpoints.
 			fmt.Fprintf(os.Stderr, "reading the ELD elements of card %d: %v\n", card, err)
 		}
 		identity := readCardIdentity(card)
@@ -279,9 +249,8 @@ func readEndpoints() ([]alsaEndpoint, error) {
 				Identity: identity,
 				PCMID:    readPCMID(card, device.PCM, device.Capture),
 			}
-			// An ELD element belongs to a playback PCM. A capture PCM of
-			// the same device number is a different endpoint, and the
-			// monitor behind the speakers says nothing about it.
+			// An ELD element belongs to the playback PCM, so the capture
+			// PCM with the same number gets no monitor.
 			if block, hasElement := blocks[device.PCM]; hasElement && !device.Capture {
 				output.HDMI = true
 				if block != nil {
@@ -295,10 +264,10 @@ func readEndpoints() ([]alsaEndpoint, error) {
 	return outputs, nil
 }
 
-// readELDElements reads every ELD element of one card. The result
-// holds one entry for each PCM device that has an element, and the
-// value is nil when the element holds no valid block, which is what
-// the driver reports for a pin with no monitor on it.
+// readELDElements returns the parsed ELD block of each PCM device of a
+// card that has an ELD element, keyed by PCM device number. The value
+// is nil when the driver has no valid block, as for a pin with no
+// monitor, and when the block cannot be read or parsed.
 func readELDElements(card int) (map[int]*eld, error) {
 	control, err := os.Open(fmt.Sprintf("%s/controlC%d", sndDir, card))
 	if err != nil {
@@ -325,8 +294,6 @@ func readELDElements(card int) (map[int]*eld, error) {
 			continue
 		}
 		if len(raw) == 0 {
-			// The driver reports a zero length when the block is
-			// invalid. The monitor is gone, or it never answered.
 			continue
 		}
 		block, err := parseELD(raw)
@@ -339,9 +306,9 @@ func readELDElements(card int) (map[int]*eld, error) {
 	return blocks, nil
 }
 
-// listControlElements reads the card's whole element list. The first
-// call asks for the count, and the second reads that many
-// identifiers, which is the protocol the ioctl defines.
+// listControlElements returns the identifiers of all control elements
+// of a card. The first ioctl call has no buffer and returns the count.
+// The second call reads that many identifiers into a buffer.
 func listControlElements(control *os.File) ([]ctlElemID, error) {
 	var list ctlElemList
 	if err := ioctl(control, ctlIoctlElemList, unsafe.Pointer(&list)); err != nil {
@@ -361,17 +328,16 @@ func listControlElements(control *os.File) ([]ctlElemID, error) {
 	return ids[:list.Used], nil
 }
 
-// readBytesElement reads the value of one element of type bytes. It
-// asks for the element's information first, because the information
-// holds the current length, and an ELD element's length changes with
-// the monitor.
+// readBytesElement returns the value of a bytes element. It reads the
+// element's info first to get the current length, because the length of
+// an ELD element changes with the monitor.
 func readBytesElement(control *os.File, id ctlElemID) ([]byte, error) {
 	info := ctlElemInfo{ID: id}
 	if err := ioctl(control, ctlIoctlElemInfo, unsafe.Pointer(&info)); err != nil {
 		return nil, fmt.Errorf("reading the element information: %w", err)
 	}
 	if info.Type != ctlElemTypeBytes {
-		return nil, fmt.Errorf("the element holds type %d, and this reads type %d", info.Type, ctlElemTypeBytes)
+		return nil, fmt.Errorf("the element has type %d, and this function reads only type %d", info.Type, ctlElemTypeBytes)
 	}
 	if info.Count == 0 {
 		return nil, nil
@@ -390,8 +356,6 @@ func readBytesElement(control *os.File, id ctlElemID) ([]byte, error) {
 	return raw, nil
 }
 
-// ioctl sends one request on an open file. The pointer is to a
-// structure the kernel reads and writes in place.
 func ioctl(file *os.File, request uintptr, argument unsafe.Pointer) error {
 	_, _, errno := unix.Syscall(unix.SYS_IOCTL, file.Fd(), request, uintptr(argument))
 	if errno != 0 {

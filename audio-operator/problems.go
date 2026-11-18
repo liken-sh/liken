@@ -1,11 +1,13 @@
 package main
 
-// The RFC 9457 problem document every error in the capture API
-// answers with. Both modes of the binary write the same shape, so the
-// API relays the capture container's own document to the caller
-// unchanged. detail carries the source's own words verbatim, by the
-// rule in AGENTS.md: pw-record's stderr, an encoder's stderr, or the
-// API server's status.message.
+// The capture API returns an RFC 9457 problem document for every
+// error. The API mode and the capture container mode of the binary
+// write the same shape, so the API passes the capture container's
+// document to the caller with only its instance replaced. The detail
+// member holds the failing source's own text word for word, as the
+// section "Errors include their source's text" of AGENTS.md requires:
+// pw-record's stderr, an encoder's stderr, or the API server's
+// status.message.
 
 import (
 	"encoding/json"
@@ -14,11 +16,11 @@ import (
 	"strings"
 )
 
-// The problem types. A type is a URL, and it names the kind of
-// failure rather than the status code, so one status can carry more
-// than one type. The first five are shared by the three capture APIs
-// under liken's own host, and wrong-target is this domain's own under
-// the audio manual's section of liken.sh.
+// A problem type is a URL that names the kind of failure, not the
+// status code, so one status can have several types. The types under
+// problemBase mean the same in the display and media capture APIs, so a
+// client handles each one the same way whichever API returned it. A
+// type that only audio returns is under problemDomainBase.
 const (
 	problemBase       = "https://liken.sh/problems/"
 	problemDomainBase = "https://liken.sh/audio/problems/"
@@ -31,24 +33,24 @@ const (
 
 	problemWrongTarget = problemDomainBase + "wrong-target"
 
-	// about:blank is what RFC 9457 section 4.2.1 names for a problem
-	// with no type of its own, and its title is then the status
+	// RFC 9457 section 4.2.1 defines about:blank as the type of a
+	// problem with no type of its own. Its title is the HTTP status
 	// phrase.
 	problemBlank = "about:blank"
 )
 
-// acceptableType is one entry of a 406's acceptable member: a
-// representation the route serves, and the URI that serves it.
+// acceptableType is one entry of the acceptable member of a 406
+// document: a representation that the route serves, and the URI that
+// serves it.
 type acceptableType struct {
 	Type string `json:"type"`
 	Href string `json:"href"`
 }
 
-// problem is the document itself.
-//
-// Instance is the request path plus a number sign plus the request
-// id. The one log line for the request carries the same id, so a
-// reader joins the answer a client saw to the record the API kept.
+// problem is the RFC 9457 document. Instance is the request path, a
+// "#", and the request ID. The API writes one log line per request
+// with the same ID, so a reader can match a client's response to that
+// line.
 type problem struct {
 	Type       string           `json:"type"`
 	Title      string           `json:"title"`
@@ -58,9 +60,6 @@ type problem struct {
 	Acceptable []acceptableType `json:"acceptable,omitempty"`
 }
 
-// newProblem builds one document. A type of about:blank takes the
-// status phrase as its title, which is what RFC 9457 section 4.2.1
-// says it means.
 func newProblem(kind string, status int, detail, instance string) problem {
 	return problem{
 		Type:     kind,
@@ -71,10 +70,10 @@ func newProblem(kind string, status int, detail, instance string) problem {
 	}
 }
 
-// problemTitle names the failure. Each shared type has one title, and
-// about:blank takes the status phrase. The titles are short noun
-// phrases rather than sentences, because a title is a label a client
-// may show beside the detail.
+// problemTitle returns the title of a problem: one fixed title for each
+// type, and the status phrase for about:blank. A title is a short noun
+// phrase and not a sentence, because a client may show it as a label
+// beside the detail.
 func problemTitle(kind string, status int) string {
 	switch kind {
 	case problemNoNode:
@@ -94,16 +93,14 @@ func problemTitle(kind string, status int) string {
 	}
 }
 
-// instanceOf is the instance member: the request's own path and the
-// id the log line carries.
 func instanceOf(path, requestID string) string {
 	return path + "#" + requestID
 }
 
-// writeProblem sends one document. A HEAD carries the headers and no
-// body (RFC 9110 section 15.5), so the caller says which it is. A
-// problem is never chunked: it is one small document, encoded into
-// memory first so its length goes out with the status line.
+// writeProblem sends a problem document. A response to HEAD has the
+// headers and no body (RFC 9110 section 9.3.2), so the caller passes
+// the request method. The document is small, so it is marshaled into
+// memory first and sent with a Content-Length instead of chunked.
 func writeProblem(w http.ResponseWriter, method string, document problem) {
 	body, err := json.Marshal(document)
 	if err != nil {
@@ -121,9 +118,10 @@ func writeProblem(w http.ResponseWriter, method string, document problem) {
 	_, _ = w.Write(body)
 }
 
-// readProblem reads a document the capture container answered with.
-// An answer that is not a problem document is what the API turns into
-// a 502, so the caller needs to know which it got.
+// readProblem parses the body of a capture container's error response,
+// and returns false when the body is not a problem document. When the
+// API relays a capture container's error, it answers a body that is not
+// a problem document with a 502 upstream-failed problem.
 func readProblem(body []byte) (problem, bool) {
 	var document problem
 	if err := json.Unmarshal(body, &document); err != nil {
@@ -135,10 +133,9 @@ func readProblem(body []byte) (problem, bool) {
 	return document, true
 }
 
-// writeJSON sends one document with a length. Every document this API
-// answers with is small and built in memory, so none of them is
-// chunked, and a HEAD carries the headers alone (RFC 9110 section
-// 9.3.2).
+// writeJSON sends a JSON document with a Content-Length, and only the
+// headers in a response to HEAD. The Content-Type is application/json
+// unless the caller already set one.
 func writeJSON(w http.ResponseWriter, method string, status int, document any) {
 	body, err := json.Marshal(document)
 	if err != nil {

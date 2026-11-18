@@ -1,28 +1,25 @@
 package main
 
-// Applying a new channel layout to a running PipeWire.
+// A sink's channel layout changes only when PipeWire restarts, because
+// PipeWire reads the drop-in that declares its nodes only while it
+// loads its configuration, and WirePlumber reads a node's
+// formats only when it configures the node. After the operator writes a
+// new drop-in, runPipewire, the first process of the PipeWire
+// container, finds the drop-in newer than PipeWire's socket and
+// restarts PipeWire inside the container (declarationloaded.go,
+// restarts.go). WirePlumber exits when PipeWire goes away, and
+// runWireplumber starts it again, so it configures every node again.
+// The pod and the operator keep running.
 //
-// PipeWire reads the declaration once, while it loads its
-// configuration, and WirePlumber reads a node's formats once, when it
-// configures the node. So a sink takes a new layout only from a new
-// PipeWire. The operator writes the new declaration over the old one,
-// and the PipeWire container's first process restarts PipeWire in place
-// when the drop-in is newer than the socket PipeWire created at its
-// start (declarationloaded.go, restarts.go). WirePlumber exits when its
-// PipeWire goes away, and its container's first process starts it
-// again, so it configures every node again. The pod stays,
-// and so do the operator, its watches, and its claims.
+// The selected layout differs from the declared one when spec.layout
+// changed, or when an HDMI output reports an ELD whose layout or
+// encoded formats differ from the declared ones. An ELD that disappears
+// keeps the declared layout (selectLayout), so switching a television
+// off changes nothing.
 //
-// A layout difference is one of two things: a spec.layout that
-// changed, or an HDMI output that now has a valid ELD whose layout
-// differs from the declared one. An ELD that becomes absent is not a
-// difference (selectLayout), so a television that turns off changes
-// nothing.
-//
-// The restart ends every stream PipeWire carries, on every card and
-// every speaker of the machine, because one PipeWire serves them all.
-// So the operator writes the new declaration only while no link
-// touches any node it publishes, and never in the middle of a film.
+// One PipeWire serves every card and speaker on the machine, so the
+// restart ends every stream, and the operator writes a new drop-in only
+// while no link touches a node that it publishes.
 
 import (
 	"fmt"
@@ -31,23 +28,20 @@ import (
 	"time"
 )
 
-// layoutRestartGrace is how long after writing a new declaration a
-// graph read that fails is the restart and not a PipeWire that stopped
-// answering. The PipeWire container's first process restarts PipeWire
-// within a second or two of the write. A minute covers that with room,
-// and a PipeWire that is still silent after it counts toward
-// maxSinkFailures again.
+// layoutRestartGrace is how long after a drop-in write a failed graph
+// read does not count toward maxFailedGraphReads, because PipeWire is
+// restarting. After this time, a failed read counts again.
 const layoutRestartGrace = time.Minute
 
-// The reasons LayoutApplied takes.
+// The reasons of a Sink's LayoutApplied condition.
 const (
 	layoutReasonApplied      = "Applied"
 	layoutReasonAwaitingIdle = "AwaitingIdle"
 	layoutReasonRestarting   = "Restarting"
 )
 
-// layoutState is what one sink's status reports about its layout: the
-// layout the declaration holds, and whether PipeWire runs it.
+// layoutState is one sink's declared layout and its LayoutApplied
+// condition.
 type layoutState struct {
 	Layout  channelLayout
 	Applied bool
@@ -55,17 +49,17 @@ type layoutState struct {
 	Message string
 }
 
-// layoutChange is one sink whose selected layout differs from the
-// declared one.
 type layoutChange struct {
 	Endpoint alsaEndpoint
 	From, To channelLayout
 }
 
-// planLayouts compares the layout each declared sink would be given
-// now with the one it was declared with. An endpoint the declaration
-// holds no node for is left out: it is a PCM device that appeared
-// since PipeWire started, and only a replacement pod declares it.
+// planLayouts returns the sinks whose selected layout differs from the
+// declared one. It skips an endpoint with no declared node, which is a
+// PCM device that appeared after the pod started. The declare init
+// container writes the node list, so only a new pod can add that
+// device, and reconcile logs the change in the card's PCM devices once
+// (driftReported).
 func planLayouts(declared map[nodeAddress]channelLayout, endpoints []alsaEndpoint,
 	specs map[nodeAddress][]string) []layoutChange {
 	var changes []layoutChange
@@ -82,11 +76,12 @@ func planLayouts(declared map[nodeAddress]channelLayout, endpoints []alsaEndpoin
 	return changes
 }
 
-// reconcileLayouts applies the layout changes this pass finds, and
-// answers the layout state of every declared sink, keyed by device
-// name. A pass that cannot read the Sinks changes no layout, because
-// a spec that did not read must not read as a spec that was removed.
-// A pass that cannot read the declaration answers nothing.
+// reconcileLayouts writes the layout changes that this pass finds and
+// returns the layoutState of every declared sink, keyed by the
+// endpoint's Name(). It returns nil when the drop-in does not
+// parse. It writes nothing when it cannot read the Sinks, because a
+// Sink that failed to read has no spec.layout, and the change would
+// revert a layout that the Sink sets.
 func (r *reconciler) reconcileLayouts(endpoints []alsaEndpoint, graph pwGraph) map[string]layoutState {
 	nodes, err := parseDeclaration(r.declared)
 	if err != nil {
@@ -96,7 +91,7 @@ func (r *reconciler) reconcileLayouts(endpoints []alsaEndpoint, graph pwGraph) m
 	declared := declaredLayouts(nodes)
 	specs, err := r.specLayouts(endpoints)
 	if err != nil {
-		r.reportLayout(fmt.Sprintf("%v; the layouts stay as declared", err))
+		r.reportLayout(fmt.Sprintf("the layouts stay as declared: %v", err))
 		return r.layoutStates(endpoints, declared, nil)
 	}
 	r.reportLayout("")
@@ -124,9 +119,9 @@ func (r *reconciler) reconcileLayouts(endpoints []alsaEndpoint, graph pwGraph) m
 	return r.layoutStates(endpoints, declared, waiting)
 }
 
-// applyLayouts writes the declaration with every change in it, and
-// records each change once in the log and once as an Event on its
-// Sink. It answers the layouts the new declaration holds.
+// applyLayouts writes every change in one drop-in, so PipeWire restarts
+// once, then logs each change and posts an Event on its Sink. It
+// returns the layouts of the new drop-in.
 func (r *reconciler) applyLayouts(nodes []declaredNode, declared map[nodeAddress]channelLayout,
 	changes []layoutChange) (map[nodeAddress]channelLayout, error) {
 	next := maps.Clone(declared)
@@ -140,18 +135,18 @@ func (r *reconciler) applyLayouts(nodes []declaredNode, declared map[nodeAddress
 	r.declared = document
 	r.restartRequested = time.Now()
 	for _, change := range changes {
-		message := fmt.Sprintf("the channel layout changes from %s to %s; "+
-			"PipeWire restarts in its container to apply it", change.From, change.To)
-		fmt.Printf("%s: %s\n", change.Endpoint.Name(), message)
-		r.control.noteSinks([]string{change.Endpoint.Name()}, reasonLayoutChanged, message)
+		what := fmt.Sprintf("the channel layout from %s to %s, "+
+			"so PipeWire restarts in its container to apply it", change.From, change.To)
+		fmt.Printf("%s: changed %s\n", change.Endpoint.Name(), what)
+		r.control.noteSinks([]string{change.Endpoint.Name()}, reasonLayoutChanged, "Changed "+what)
 	}
 	return next, nil
 }
 
-// layoutStates composes the LayoutApplied state of every declared
-// sink. A sink whose change waits for idle reports AwaitingIdle, and
-// every sink reports Restarting while the drop-in is newer than the
-// PipeWire that runs.
+// layoutStates returns the layoutState of every declared sink. A sink
+// in waiting reports AwaitingIdle. Every other sink reports Restarting
+// while the drop-in is newer than the running PipeWire, and Applied
+// after that.
 func (r *reconciler) layoutStates(endpoints []alsaEndpoint, declared map[nodeAddress]channelLayout,
 	waiting map[string]layoutChange) map[string]layoutState {
 	restarting := r.declarationStale != nil && r.declarationStale()
@@ -165,20 +160,19 @@ func (r *reconciler) layoutStates(endpoints []alsaEndpoint, declared map[nodeAdd
 			Message: "PipeWire runs the sink with " + layout.String()}
 		if change, ok := waiting[endpoint.Name()]; ok {
 			state = layoutState{Layout: layout, Reason: layoutReasonAwaitingIdle,
-				Message: fmt.Sprintf("the layout changes to %s when no stream plays through this machine's PipeWire",
+				Message: fmt.Sprintf("The layout changes to %s when no stream plays through this machine's PipeWire",
 					change.To)}
 		} else if restarting {
 			state = layoutState{Layout: layout, Reason: layoutReasonRestarting,
-				Message: "the kubelet is restarting the PipeWire container to apply " + layout.String()}
+				Message: "PipeWire is restarting in its container to apply " + layout.String()}
 		}
 		states[endpoint.Name()] = state
 	}
 	return states
 }
 
-// specLayouts reads every named sink's spec.layout. A reconciler with
-// no endpoint controller, which is what a test of the slice alone
-// builds, reads none.
+// specLayouts returns the spec.layout of each Sink, or none when
+// control is nil, as in a test of the ResourceSlice alone.
 func (r *reconciler) specLayouts(endpoints []alsaEndpoint) (map[nodeAddress][]string, error) {
 	if r.control == nil {
 		return nil, nil
@@ -190,9 +184,9 @@ func (r *reconciler) specLayouts(endpoints []alsaEndpoint) (map[nodeAddress][]st
 	return specLayouts(endpoints, sinks), nil
 }
 
-// reportLayout keeps a failure of the layout step to one line for each
-// run of passes that finds it, the way driftReported does for the PCM
-// devices. An empty line clears it.
+// reportLayout writes line to stderr when it differs from the last line,
+// so a failure that lasts is logged once and not on every pass. An
+// empty line clears the last line and writes nothing.
 func (r *reconciler) reportLayout(line string) {
 	if line == r.layoutReport {
 		return
@@ -203,17 +197,14 @@ func (r *reconciler) reportLayout(line string) {
 	}
 }
 
-// awaitingRestart reports whether the PipeWire container is restarting
-// for a layout change this operator wrote, which is when a graph read
-// that fails is expected.
 func (r *reconciler) awaitingRestart() bool {
 	return !r.restartRequested.IsZero() && time.Since(r.restartRequested) < layoutRestartGrace
 }
 
-// reportLayoutWrite reports a declaration that did not write, once
-// for each run of passes that meets the same error: one line, and one
-// Warning on each Sink whose layout waits for the write. The next pass
-// tries the write again, and a write that lands clears the report.
+// reportLayoutWrite logs a failed drop-in write and posts a Warning
+// Event on each Sink that the write would change. Each pass retries the
+// write, and the same error on a later pass is not reported again until
+// a write succeeds.
 func (r *reconciler) reportLayoutWrite(changes []layoutChange, err error) {
 	line := fmt.Sprintf("writing the new layouts: %v", err)
 	if line == r.layoutWriteFailure {
@@ -226,13 +217,11 @@ func (r *reconciler) reportLayoutWrite(changes []layoutChange, err error) {
 		names = append(names, change.Endpoint.Name())
 	}
 	r.control.warnSinks(names, reasonLayoutWriteFailed,
-		fmt.Sprintf("the operator could not write the new channel layout, and the sink keeps its layout: %v", err))
+		fmt.Sprintf("The sink keeps its channel layout: writing the new layout: %v", err))
 }
 
-// playing reports whether a link touches any node this operator
-// publishes: a card's sink or source, or a speaker. A restart of the
-// PipeWire container ends every stream on every one of them, so
-// reconcileLayouts writes no new layout while this is true.
+// playing reports whether a link touches a node that this operator
+// publishes: a card's sink or source, or a Bluetooth speaker.
 func (g pwGraph) playing() bool {
 	for _, node := range g.Nodes {
 		if g.Linked[node.ID] {

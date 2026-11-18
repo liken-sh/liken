@@ -8,8 +8,9 @@ import (
 	"time"
 )
 
-// The two sinks of a card with an HDMI slot and an analog jack, named
-// the way nameEndpoints names them.
+// layoutEndpoints returns the HDMI and analog playback endpoints of one
+// card, with the device names that nameEndpoints gives them. A non-nil
+// monitor is the ELD of a monitor connected to the HDMI output.
 func layoutEndpoints(t *testing.T, monitor *eld) (hdmi, analog alsaEndpoint) {
 	t.Helper()
 	hdmi = alsaEndpoint{Card: 0, PCM: 3, HDMI: true, Identity: cardIdentity{Bus: pciBus},
@@ -72,20 +73,17 @@ func TestPlanLayoutsFindsEachLayoutDifference(t *testing.T) {
 	}
 }
 
-// An endpoint the declaration holds no node for is a PCM device that
-// appeared since PipeWire started. The PCM report covers it, and the
-// layout pass leaves it alone.
 func TestPlanLayoutsSkipsAnEndpointWithNoDeclaredNode(t *testing.T) {
 	receiver := eldWith(t, 8, fiveOne|rearCenterPair)
 	hdmi, _ := layoutEndpoints(t, &receiver)
 	if changes := planLayouts(map[nodeAddress]channelLayout{}, []alsaEndpoint{hdmi}, nil); len(changes) != 0 {
-		t.Errorf("changes = %+v for an endpoint PipeWire has no node for", changes)
+		t.Errorf("planLayouts returned %+v for an endpoint that PipeWire has no node for, want no change", changes)
 	}
 }
 
-// layoutReconciler builds a reconciler whose declaration was written
-// with the stereo jack and an HDMI slot whose monitor was off, the
-// drop-in in a directory the test owns.
+// layoutReconciler returns a reconciler whose drop-in lists the analog
+// jack and an HDMI output with no monitor connected. The drop-in is in a
+// temporary directory.
 func layoutReconciler(t *testing.T) (*reconciler, []alsaEndpoint) {
 	t.Helper()
 	pipewireConfigDir = filepath.Join(t.TempDir(), "pipewire.conf.d")
@@ -93,12 +91,13 @@ func layoutReconciler(t *testing.T) (*reconciler, []alsaEndpoint) {
 	hdmi, analog := layoutEndpoints(t, nil)
 	document, err := writeNodeConfig([]alsaEndpoint{analog, hdmi}, selectLayouts([]alsaEndpoint{analog, hdmi}, nil, nil))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the declaration: %v", err)
 	}
 	return &reconciler{nodeName: "node-1", declared: document}, []alsaEndpoint{hdmi, analog}
 }
 
-// A graph with a stream linked to one of the card's sinks.
+// playingGraph returns a graph in which a stream is linked to the HDMI
+// sink.
 func playingGraph(hdmi alsaEndpoint) pwGraph {
 	return pwGraph{
 		Nodes:  map[nodeAddress]pwNode{hdmi.graphAddress(): {ID: 42, Name: sinkNodeName(0, 3)}},
@@ -115,14 +114,14 @@ func TestAReceiverThatTurnsOnWaitsForTheFilmToEnd(t *testing.T) {
 
 	states := operator.reconcileLayouts(endpoints, playingGraph(hdmi))
 	if operator.declared != declared {
-		t.Errorf("the declaration changed while a stream played")
+		t.Errorf("the declaration changed while a stream played, want no change until the stream ends")
 	}
 	written, err := readNodeConfig()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the drop-in: %v", err)
 	}
 	if written != declared {
-		t.Errorf("the drop-in changed while a stream played")
+		t.Errorf("the drop-in changed while a stream played, want no change until the stream ends")
 	}
 	state := states[hdmi.Name()]
 	if state.Applied || state.Reason != layoutReasonAwaitingIdle {
@@ -132,7 +131,7 @@ func TestAReceiverThatTurnsOnWaitsForTheFilmToEnd(t *testing.T) {
 		t.Errorf("the HDMI sink reports %s, want the declared layout", state.Layout)
 	}
 	if analog := states[endpoints[1].Name()]; !analog.Applied {
-		t.Errorf("the analog sink, whose layout did not change, reports %+v", analog)
+		t.Errorf("the analog sink, whose layout did not change, reports %+v, want Applied", analog)
 	}
 }
 
@@ -147,14 +146,14 @@ func TestAReceiverThatTurnsOnRewritesTheDeclarationWhenIdle(t *testing.T) {
 	states := operator.reconcileLayouts(endpoints, idle)
 	written, err := readNodeConfig()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the drop-in: %v", err)
 	}
 	if written != operator.declared {
-		t.Errorf("the reconciler holds a declaration other than the one it wrote")
+		t.Errorf("the reconciler records a declaration other than the drop-in it wrote, want the same text")
 	}
 	nodes, err := parseDeclaration(written)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the drop-in: %v", err)
 	}
 	want := channelLayout{Source: layoutFromELD, Positions: surround71Layout}
 	if got := declaredLayouts(nodes)[hdmi.graphAddress()]; !got.equal(want) {
@@ -164,15 +163,15 @@ func TestAReceiverThatTurnsOnRewritesTheDeclarationWhenIdle(t *testing.T) {
 		t.Errorf("the rewrite declares %d nodes, want the same two", len(nodes))
 	}
 	if state := states[hdmi.Name()]; !state.Applied || !state.Layout.equal(want) {
-		t.Errorf("the HDMI sink reports %+v", state)
+		t.Errorf("the HDMI sink reports %+v, want Applied with %s", state, want)
 	}
 	if !operator.awaitingRestart() {
-		t.Errorf("the write opened no grace for the restart")
+		t.Errorf("awaitingRestart() = false after the write, want true")
 	}
 }
 
-// Between the write and the restart, the declaration on disk is newer
-// than the PipeWire that runs, and every sink says so.
+// Until PipeWire restarts after a write, the drop-in on disk is newer
+// than the running PipeWire, and every sink reports Restarting.
 func TestEverySinkReportsTheRestart(t *testing.T) {
 	operator, endpoints := layoutReconciler(t)
 	operator.declarationStale = func() bool { return true }
@@ -184,10 +183,10 @@ func TestEverySinkReportsTheRestart(t *testing.T) {
 	}
 }
 
-// A Sink that does not read must not read as a Sink whose spec.layout
-// was removed. The pass changes nothing and reports the layouts it
-// holds.
-func TestASpecThatDoesNotReadChangesNoLayout(t *testing.T) {
+// A Sink that the pass fails to read must not be treated as a Sink whose
+// spec.layout was removed, because that would revert its layout. The
+// pass writes nothing and reports the layouts in the drop-in.
+func TestASinkThatCannotBeReadChangesNoLayout(t *testing.T) {
 	operator, endpoints := layoutReconciler(t)
 	declared := operator.declared
 	receiver := eldWith(t, 8, fiveOne|rearCenterPair)
@@ -199,45 +198,42 @@ func TestASpecThatDoesNotReadChangesNoLayout(t *testing.T) {
 
 	states := operator.reconcileLayouts(endpoints, pwGraph{})
 	if operator.declared != declared {
-		t.Errorf("the declaration changed while the Sinks did not read")
+		t.Errorf("the declaration changed while the Sinks could not be read, want no change")
 	}
 	if state := states[endpoints[0].Name()]; !state.Applied || state.Layout.source() != layoutNone {
 		t.Errorf("the HDMI sink reports %+v, want its declared layout", state)
 	}
 }
 
-// A declaration that does not read gives the layout step nothing to
-// compare, so it reports no layout at all.
-func TestADeclarationThatDoesNotReadReportsNoLayout(t *testing.T) {
+// A drop-in that does not parse leaves nothing to compare the
+// layouts against, so the pass returns no layout state.
+func TestADeclarationThatDoesNotParseReportsNoLayout(t *testing.T) {
 	operator, endpoints := layoutReconciler(t)
 	operator.declared = "# no objects\n"
 	if states := operator.reconcileLayouts(endpoints, pwGraph{}); states != nil {
-		t.Errorf("states = %+v", states)
+		t.Errorf("reconcileLayouts returned %+v, want nil", states)
 	}
 }
 
-// A graph read that fails while PipeWire restarts for a layout change
-// counts toward nothing, and one that fails after the grace counts
-// again.
-func TestTheLayoutRestartIsNotAPipeWireThatStoppedAnswering(t *testing.T) {
+func TestGraphReadFailuresCountOnlyAfterTheLayoutRestartGrace(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
-	operator := testReconciler(t, api, failingSinks, "pcmC0D0p")
+	operator := testReconciler(t, api, failingGraph, "pcmC0D0p")
 	operator.restartRequested = time.Now()
 
-	for pass := 0; pass < maxSinkFailures+1; pass++ {
+	for pass := 0; pass < maxFailedGraphReads+1; pass++ {
 		if err := operator.reconcile(context.Background()); err != nil {
 			t.Fatalf("pass %d during the restart stopped the operator: %v", pass, err)
 		}
 	}
-	if operator.sinkFailures != 0 {
-		t.Errorf("the restart counted %d failures", operator.sinkFailures)
+	if operator.failedGraphReads != 0 {
+		t.Errorf("the restart counted %d failures, want 0", operator.failedGraphReads)
 	}
 	operator.restartRequested = time.Now().Add(-layoutRestartGrace - time.Second)
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling after the grace: %v", err)
 	}
-	if operator.sinkFailures != 1 {
-		t.Errorf("a failure after the grace counted %d", operator.sinkFailures)
+	if operator.failedGraphReads != 1 {
+		t.Errorf("after the grace, the failure count is %d, want 1", operator.failedGraphReads)
 	}
 }
 
@@ -262,14 +258,15 @@ func TestPlayingReadsLinksOnPublishedNodesAlone(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := c.graph.playing(); got != c.want {
-				t.Errorf("playing = %v, want %v", got, c.want)
+				t.Errorf("playing() = %v, want %v", got, c.want)
 			}
 		})
 	}
 }
 
-// failingAPI refuses every request, which is what a ServiceAccount
-// that lost its grant on the Sinks meets.
+// failingAPI returns a handler that responds 403 Forbidden to every
+// request, as the API server does for a ServiceAccount that has lost its
+// permission to read Sinks.
 func failingAPI() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "sinks.audio.liken.sh is forbidden", http.StatusForbidden)

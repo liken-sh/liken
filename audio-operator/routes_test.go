@@ -1,18 +1,15 @@
 package main
 
-// The Route write, byte for byte. The pod in these tests is the one
-// plan 07 states, and a drifted shape is a write the speaker's own
-// volume never hears.
+// These tests compare the Route write byte for byte, because a POD of
+// another shape does not reach the speaker's own volume.
+// audio-operator/plans/completed/07-sinks-and-sources.md describes the
+// Route write.
 
 import (
 	"encoding/json"
 	"testing"
 )
 
-// This string is what reaches
-// spa_bt_transport_set_volume, and that every part of it is load
-// bearing: the index and the device name the route, and save is false
-// because the operator's own declaration is what a restart re-applies.
 func TestRouteProps(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -39,15 +36,14 @@ func TestRouteProps(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := routeProps(c.route, c.volumes, c.mute); got != c.want {
-				t.Errorf("pod = %q, want %q", got, c.want)
+				t.Errorf("routeProps = %q, want %q", got, c.want)
 			}
 		})
 	}
 }
 
-// A device publishes one route for each direction
-// and the operator writes the output one, and that a device with no
-// output route has no level for the operator to write.
+// The operator writes only the Output route of a device. A device with
+// no Output route has no level to write.
 func TestOutputRoute(t *testing.T) {
 	input := json.RawMessage(`{"index": 0, "direction": "Input", "device": 1,
 		"props": {"mute": false, "channelVolumes": [1.0]}}`)
@@ -57,21 +53,21 @@ func TestOutputRoute(t *testing.T) {
 		"props": {"mute": false, "channelVolumes": [0.5, 0.5]}}`)
 
 	if got := outputRoute(nil); got != nil {
-		t.Errorf("a device with no routes reports %+v", got)
+		t.Errorf("a device with no routes reports %+v, want nil", got)
 	}
 	if got := outputRoute([]json.RawMessage{input}); got != nil {
-		t.Errorf("a device with only an input route reports %+v", got)
+		t.Errorf("a device with only an input route reports %+v, want nil", got)
 	}
 	route := outputRoute([]json.RawMessage{input, output})
 	if route == nil {
-		t.Fatal("the output route was not read")
+		t.Fatal("outputRoute = nil, want the output route")
 	}
 	if route.Index != 3 || route.Device != 0 || !route.Mute || !route.AbsoluteVolume {
-		t.Errorf("route = %+v", route)
+		t.Errorf("route = %+v, want index 3, device 0, muted, with absolute volume", route)
 	}
-	// A speaker with no absolute volume publishes no volumeStep, and
-	// the level the operator writes there is software gain.
+	// A speaker with no absolute volume has no volumeStep, and a level
+	// written there is a software gain.
 	if got := outputRoute([]json.RawMessage{software}); got.AbsoluteVolume {
-		t.Errorf("a route with no volumeStep reports absolute volume: %+v", got)
+		t.Errorf("a route with no volumeStep reads as %+v, want no absolute volume", got)
 	}
 }

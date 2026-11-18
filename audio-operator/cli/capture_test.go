@@ -73,13 +73,13 @@ func TestStreamCaptureWritesOnlyMediaBytes(t *testing.T) {
 	const media = "RIFFmedia-bytes"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/audio/sinks/room/audio.wav" {
-			t.Errorf("path = %q", r.URL.Path)
+			t.Errorf("the request's path is %q, want /v1/audio/sinks/room/audio.wav", r.URL.Path)
 		}
 		if r.Header.Get("Accept") != "audio/wav" {
-			t.Errorf("Accept = %q", r.Header.Get("Accept"))
+			t.Errorf("Accept = %q, want audio/wav", r.Header.Get("Accept"))
 		}
 		if r.Header.Get("Authorization") != "Bearer secret" {
-			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+			t.Errorf("Authorization = %q, want Bearer secret", r.Header.Get("Authorization"))
 		}
 		io.WriteString(w, media)
 	}))
@@ -110,10 +110,22 @@ func TestStreamCaptureCarriesTheServerWords(t *testing.T) {
 		t.Fatal("streamCapture returned no error for a 403")
 	}
 	if !strings.Contains(err.Error(), "you may not tap this sink") {
-		t.Fatalf("error %q does not carry the server's words", err)
+		t.Fatalf("the error is %q, want one that includes the API's text", err)
 	}
 	if out.Len() != 0 {
-		t.Fatalf("out carried %q on an error", out.String())
+		t.Fatalf("out = %q after an error, want nothing", out.String())
+	}
+}
+
+func TestAnUnknownFormatListsTheFormats(t *testing.T) {
+	_, err := targetFromOptions(captureOptions{Name: "room", Format: "mp3"})
+	if err == nil {
+		t.Fatal("targetFromOptions returned no error for the format mp3")
+	}
+	for _, want := range []string{"mp3", "wav", "flac", "opus"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error is %q, want one that names %q", err, want)
+		}
 	}
 }
 
@@ -129,7 +141,7 @@ func TestCaptureClientNamesTheServiceDNS(t *testing.T) {
 	client := captureClient(nil, nil)
 	transport, ok := client.Transport.(*http.Transport)
 	if !ok {
-		t.Fatalf("transport is %T", client.Transport)
+		t.Fatalf("the transport is %T, want *http.Transport", client.Transport)
 	}
 	if transport.TLSClientConfig.ServerName != apiServiceDNS {
 		t.Fatalf("ServerName = %q, want %q", transport.TLSClientConfig.ServerName, apiServiceDNS)

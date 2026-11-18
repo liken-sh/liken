@@ -1,9 +1,8 @@
 package main
 
-// The settle and wake tests run in a synctest bubble at the production
-// durations. The fake clock advances only when every goroutine waits,
-// so each test checks the exact moment a wake arrives, and a scheduler
-// that runs late cannot move it.
+// The settle and wake tests run in a synctest bubble with the
+// production durations, so a test can check the exact time that a wake
+// arrives.
 
 import (
 	"context"
@@ -18,8 +17,8 @@ func TestSettleCollapsesABurst(t *testing.T) {
 		in := make(chan struct{}, 16)
 		out := settle(t.Context(), in, settleWindow, settleLimit)
 
-		// A monitor that a person plugs in produces a burst of jack
-		// events, and one write must cover the whole burst.
+		// Plugging in a monitor produces a burst of jack events, and
+		// settle must send once, a full window after the last event.
 		for range 8 {
 			in <- struct{}{}
 			time.Sleep(settleWindow / 4)
@@ -52,9 +51,8 @@ func TestSettleEmitsUnderAConstantFlap(t *testing.T) {
 		in := make(chan struct{})
 		out := settle(t.Context(), in, settleWindow, settleLimit)
 
-		// A cable that somebody wiggles changes the jack faster than the
-		// quiet window, which would restart the wait forever. The limit
-		// keeps the loop publishing.
+		// Events that arrive faster than the quiet window would restart
+		// the wait forever, so settle sends when the limit passes.
 		go func() {
 			tick := time.NewTicker(settleWindow / 2)
 			defer tick.Stop()
@@ -74,8 +72,8 @@ func TestSettleEmitsUnderAConstantFlap(t *testing.T) {
 
 		start := time.Now()
 		waitForWake(t, out)
-		// The first event arrives one tick after the start, and the limit
-		// runs from that event.
+		// The limit counts from the first event, which arrives one tick
+		// after the start.
 		if waited := time.Since(start); waited != settleWindow/2+settleLimit {
 			t.Errorf("settle emitted after %v, want %v", waited, settleWindow/2+settleLimit)
 		}
@@ -90,12 +88,12 @@ func TestSettleStopsWithItsContext(t *testing.T) {
 
 		cancel()
 		if _, ok := <-out; ok {
-			t.Fatal("settle emitted after its context ended")
+			t.Fatal("settle emitted after its context ended, want a closed channel")
 		}
 	})
 }
 
-// waitForWake waits for one wake. In a bubble, a wake that never comes
+// waitForWake receives one wake. In a bubble, a wake that never comes
 // leaves every goroutine blocked, and synctest fails the test.
 func waitForWake(t *testing.T, out <-chan struct{}) {
 	t.Helper()
@@ -104,28 +102,25 @@ func waitForWake(t *testing.T, out <-chan struct{}) {
 	}
 }
 
-// assertQuiet checks that no second wake arrives, however long the
-// test waits.
+// assertQuiet fails the test when a second wake arrives within an hour
+// of fake time.
 func assertQuiet(t *testing.T, out <-chan struct{}) {
 	t.Helper()
 	time.Sleep(time.Hour)
 	synctest.Wait()
 	select {
 	case <-out:
-		t.Fatal("settle emitted a second time for one burst")
+		t.Fatal("settle emitted a second time for one burst, want one wake")
 	default:
 	}
 }
 
-// Every event source ends in one wake, and one pass covers whatever
-// woke it. A control a person turned on the card, a monitor plugged
-// into an HDMI pin, and a spec somebody edited all arrive here. The
-// backstop tick wakes the loop with no event at all.
+// The backstop tick wakes the loop with no event at all.
 func TestWakesCarriesEverySource(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cards := make(chan controlEvent, 1)
-		pokes := make(chan struct{}, 1)
-		out := wakes(t.Context(), nil, cards, pokes, nil)
+		wakeRequests := make(chan struct{}, 1)
+		out := wakes(t.Context(), nil, cards, wakeRequests, nil)
 
 		cards <- controlEvent{Card: 0, Name: "Master Playback Volume", Mask: ctlEventMaskValue}
 		waitForWake(t, out)
@@ -133,7 +128,7 @@ func TestWakesCarriesEverySource(t *testing.T) {
 		cards <- controlEvent{Card: 0, Name: "HDMI/DP,pcm=3 Jack", Mask: ctlEventMaskValue}
 		waitForWake(t, out)
 
-		pokes <- struct{}{}
+		wakeRequests <- struct{}{}
 		waitForWake(t, out)
 
 		start := time.Now()
@@ -144,28 +139,27 @@ func TestWakesCarriesEverySource(t *testing.T) {
 	})
 }
 
-// The merge hands each control event to the monitor hold before the
-// wake reaches the pass, so the pass that reads the card after an ELD
-// change finds it counted.
+// The pass that reads the card after an ELD change must find the
+// change counted by the monitor hold.
 func TestWakesHandsEachEventToTheHoldFirst(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cards := make(chan controlEvent, 1)
-		var heard []string
+		var seenByHold []string
 		out := wakes(t.Context(), nil, cards, make(chan struct{}), func(event controlEvent) {
-			heard = append(heard, event.Name)
+			seenByHold = append(seenByHold, event.Name)
 		})
 
 		cards <- controlEvent{Card: 0, Device: 3, Name: eldElementName, Mask: ctlEventMaskValue}
 		waitForWake(t, out)
 
-		if !slices.Equal(heard, []string{eldElementName}) {
-			t.Errorf("the hold heard %q before the wake, want the ELD change", heard)
+		if !slices.Equal(seenByHold, []string{eldElementName}) {
+			t.Errorf("the monitor hold received %q before the wake, want the ELD change", seenByHold)
 		}
 	})
 }
 
-// A source that closes ends the merge, so the operator stops rather
-// than run on with no way to notice a monitor again.
+// The operator exits when the merge ends, instead of running on with no
+// way to notice a monitor change.
 func TestWakesEndsWhenACardWatcherCloses(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cards := make(chan controlEvent)
@@ -173,7 +167,7 @@ func TestWakesEndsWhenACardWatcherCloses(t *testing.T) {
 		close(cards)
 
 		if _, open := <-out; open {
-			t.Fatal("the merge emitted a wake after its source closed")
+			t.Fatal("the merge emitted a wake after its source closed, want a closed channel")
 		}
 	})
 }

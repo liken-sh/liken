@@ -1,15 +1,10 @@
-# The operator itself: a DaemonSet that runs one pod per node, and the
-# claim that lets each pod run only where sound hardware is.
-#
-# There is no volume for state. PipeWire and WirePlumber keep their
-# graph in memory and build it again from the cards at every start, so
-# a restart loses nothing that a person would have to restore by hand.
+# The pod keeps no state on disk. PipeWire and WirePlumber build their
+# graph in memory from the cards each time they start.
 ---
-# The controller claim. A template rather than a plain claim, so each
-# pod allocates the controllers on its own node. The DaemonSet places a
-# pod on every node, and a claim with zero matching devices parks that
-# pod Pending, so a pod runs only where sound hardware is. Nobody writes
-# down which machine has the speakers.
+# Each pod gets its own claim for the sound controllers on its node.
+# The DaemonSet creates a pod on every node, and where the claim
+# matches no device the pod stays Pending, so the pod runs only on
+# nodes with a sound card and nobody has to list them.
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaimTemplate
 metadata:
@@ -21,17 +16,15 @@ spec:
         - name: controller
           exactly:
             deviceClassName: sound-card
-            # Every sound controller on the node, not one. PipeWire serves
-            # every ALSA card on the machine, and this operator keys each
-            # output by card number, so one pod serves all the node's
-            # cards. A consumer's own claim selects the card and output by
-            # attribute.
+            # Every controller on the node, because one PipeWire serves
+            # every ALSA card on the machine. A consumer's own claim
+            # picks a card and an output by device attribute.
             allocationMode: All
-            # machine-operator taints a card that was unplugged while
-            # this claim held it, and the taint evicts the pods that do
-            # not tolerate it. PipeWire follows the cards by itself, so
-            # an unplugged USB card must not restart the sound of every
-            # other card on the node.
+            # machine-operator taints a card liken.sh/unplugged with
+            # NoExecute when the card is unplugged while allocated.
+            # PipeWire drops a removed card on its own, so without this
+            # toleration, unplugging one USB card would evict the pod
+            # and silence the node's other cards.
             tolerations:
               - key: liken.sh/unplugged
                 operator: Exists
@@ -42,21 +35,19 @@ kind: DaemonSet
 metadata:
   name: audio-operator
   labels:
-    # liken's plugins commands select on this label, and the CLI selects
-    # on it to read the operator's version. Both take the image of the
-    # first container and pull its -cli image at the same tag, so the
-    # label goes on the operator's own workload. The audio-api
-    # Deployment runs the same image now, but the label must not depend
-    # on that.
+    # The liken plugins commands and the CLI find this component by
+    # this label, read the image of the first container, and pull the
+    # -cli image at the same tag. The label is on this DaemonSet and
+    # not on the audio-api Deployment, which runs the same image, so
+    # the lookup works without audio-api.
     cli.liken.sh/plugin: audio
 spec:
   selector:
     matchLabels:
       app: audio-operator
-  # The old pod stops before the new one starts. The operator holds an
-  # exclusive claim on the node's controllers, so a second pod on the
-  # same node would park Pending until the first one released them.
-  # maxSurge 0 keeps two pods from ever coexisting on one node.
+  # The old pod's claim holds the node's controllers, so a new pod
+  # started beside it would stay Pending until the old claim is
+  # released. maxSurge: 0 stops the old pod before the new one starts.
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
@@ -68,23 +59,16 @@ spec:
         app: audio-operator
     spec:
       serviceAccountName: audio-operator
-      # The operator is the machine's hardware layer: every pod that
-      # claims a device it publishes depends on it, and it holds
-      # the sound card and the PipeWire that holds it. So it schedules ahead of
-      # ordinary pods onto a machine that is already full, preempting
-      # one if it must, and it is evicted last. It also runs whatever
-      # the machine is marked with, because liken taints a node while
-      # it starts, and the devices have to publish before anything
-      # can claim them.
+      # Every pod that claims one of this operator's devices depends on
+      # this pod, so it can preempt ordinary pods on a full node, and
+      # the kubelet evicts it last.
       priorityClassName: system-node-critical
-      # A node labeled audio.liken.sh/sound-card: none gets no pod. The
-      # claim alone leaves a pod on a node with no sound card Pending
-      # for good, so a person marks such a node with that one label.
-      # NotIn also matches a node with no such label, so with no
-      # label the DaemonSet makes a pod on every node, and the claim
-      # decides where it can start. A patch that sets its own node
-      # affinity replaces this list of terms, because the list is
-      # atomic.
+      # On a node with no sound card, the claim keeps the pod Pending
+      # forever. Label such a node audio.liken.sh/sound-card=none to
+      # keep the pod off it. NotIn also matches a node without the
+      # label, so an unlabeled node gets a pod and the claim decides
+      # whether it starts. A patch that sets its own nodeAffinity
+      # replaces this whole list of terms, because the list is atomic.
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -93,32 +77,30 @@ spec:
                   - key: audio.liken.sh/sound-card
                     operator: NotIn
                     values: ["none"]
+      # liken taints a node while the node starts, and this operator
+      # must publish its devices before any pod can claim them.
       tolerations:
         - operator: Exists
-      # Five containers, one image, and the kubelet orders them. The
-      # declaration runs to completion, PipeWire and WirePlumber start
-      # in that order and stay up, and the operator and capture
-      # containers start last and stop first. capture is a regular
-      # container beside the operator, so it starts after the two
-      # sidecars pass their probes and finds a socket that answers.
-      # Nothing in this pod supervises anything else.
+      # Every container runs the same image. The kubelet runs declare
+      # to completion, then starts pipewire and wireplumber in that
+      # order as sidecars that keep running. The operator and capture
+      # containers start after both sidecars pass their startup probes,
+      # and stop before them.
       initContainers:
-        # The node declarations, written into the volume that PipeWire
-        # reads as a configuration drop-in directory. A plain init
-        # container runs to completion before the sidecars below
-        # start, and the order matters: PipeWire builds context.objects
-        # while it loads its configuration and never reads a fragment
-        # that arrives later. The container names this pod's claim
-        # because the declarations are generated from the cards the
-        # claim allocated.
+        # Writes the PipeWire node declarations into pipewire-config,
+        # which PipeWire reads as a drop-in directory. It must finish
+        # first, because PipeWire reads context.objects only while it
+        # loads its configuration. It names the claim because it
+        # generates the declarations from the cards the claim
+        # allocated.
         - name: declare
           image: ghcr.io/liken-sh/audio-operator:latest
           args: ["declare"]
-          # The machine's name is the first part of every Sink's name,
-          # and this container reads each Sink's spec.layout before
-          # PipeWire starts. It reads with the pod's ServiceAccount, and
-          # an API server that does not answer leaves the layouts to the
-          # ELD and the channel map, so the pod starts either way.
+          # Each Sink's name starts with the node name. declare reads
+          # each Sink's spec.layout from the API server before PipeWire
+          # starts. When the API server does not respond, the layout
+          # comes from the ELD and the channel map, so the pod starts
+          # either way.
           env:
             - name: NODE_NAME
               valueFrom:
@@ -140,51 +122,42 @@ spec:
           volumeMounts:
             - name: pipewire-config
               mountPath: /etc/pipewire/pipewire.conf.d
-            # WirePlumber's drop-in directory, where this container
-            # writes the fragment that turns the Bluetooth monitor
-            # on. It writes the fragment only when the claim
-            # delivered a media bus, which it reads from
-            # DBUS_SYSTEM_BUS_ADDRESS in its own environment.
+            # declare writes the fragment that enables WirePlumber's
+            # Bluetooth monitor here, only when the claim delivered a
+            # media bus, which declare detects from
+            # DBUS_SYSTEM_BUS_ADDRESS in its environment.
             - name: wireplumber-config
               mountPath: /etc/wireplumber/wireplumber.conf.d
-        # PipeWire, as a native sidecar: an init container that
-        # restarts always, which the kubelet starts before the
-        # operator and stops after it. Both halves of that order
-        # matter. The socket this container serves is what the
-        # operator reads. On the way out the operator ends first, so an
-        # ordinary pod deletion is a clean exit rather than the
-        # operator reporting that PipeWire is gone.
+        # The kubelet starts this sidecar before the operator and stops
+        # it after, so the operator finds PipeWire's socket at startup,
+        # and on pod deletion the operator exits before PipeWire instead
+        # of reporting that PipeWire is gone.
         - name: pipewire
           image: ghcr.io/liken-sh/audio-operator:latest
           restartPolicy: Always
-          # The operator's binary runs PipeWire as its child, and
-          # restarts it in place when the operator writes a new channel
-          # layout into the drop-in directory: the drop-in is newer
-          # than PipeWire's socket. A restart that ended the container
-          # would wait in the kubelet's crash backoff, and every sink
-          # on the machine would stay silent for that wait. A PipeWire
-          # exit that the binary did not cause ends the container, so
-          # the restart count is the count of crashes. restarts.go
-          # holds the details.
+          # The operator's binary runs PipeWire as a child and restarts
+          # it in place when the drop-in directory is newer than
+          # PipeWire's socket, which happens when the operator writes a
+          # new channel layout. A container restart would wait out the
+          # kubelet's crash backoff with every sink on the node silent.
+          # Any other PipeWire exit ends the container, so the restart
+          # count counts only crashes. See restarts.go.
           command: ["/audio-operator", "pipewire"]
           env:
-            # PipeWire looks for its runtime directory in
-            # PIPEWIRE_RUNTIME_DIR first and XDG_RUNTIME_DIR second,
-            # and both name the volume below, so the socket lands
-            # where the operator and every consumer's CDI mount
-            # expect it.
+            # PipeWire creates its socket in PIPEWIRE_RUNTIME_DIR, or in
+            # XDG_RUNTIME_DIR when that is unset. Both name the runtime
+            # volume, where the operator and the consumers' CDI mounts
+            # expect the socket.
             - name: PIPEWIRE_RUNTIME_DIR
               value: /var/run/audio.liken.sh
             - name: XDG_RUNTIME_DIR
               value: /var/run/audio.liken.sh
-          # The readiness fact is a client connection, not a file that
-          # exists. The check runs pw-dump, which connects to the
-          # socket and waits for the whole graph, so a probe that
-          # passes is a PipeWire that answers the same call the
-          # operator makes. The check discards the graph, which is
-          # larger than the output the kubelet keeps of a probe.
-          # graphprobe.go says why. The image holds no shell, so the
-          # probe names the operator's binary.
+          # The probe passes when a client can connect and read the
+          # graph, not only when the socket file exists. It runs
+          # pw-dump, as the operator does, through the operator's
+          # binary, because pw-dump's output can exceed the 10 KiB of
+          # probe output that the kubelet keeps and the image has no
+          # shell to discard it. See graphprobe.go.
           startupProbe:
             exec:
               command: ["/audio-operator", "graph-answers"]
@@ -192,13 +165,13 @@ spec:
             failureThreshold: 30
             timeoutSeconds: 10
           securityContext:
-            # PipeWire and WirePlumber touch hardware only through the
-            # device nodes their claim delivers: the card's control
-            # node, its PCM nodes, and the input nodes of its jacks.
-            # PipeWire asks RTKit for a real-time priority, finds no
-            # RTKit in this pod, and runs without one, so not even
-            # SYS_NICE is here. No process in the pod drops to another
-            # user, so the pod adds no capability back.
+            # PipeWire and WirePlumber reach hardware only through the
+            # device nodes the claim delivers: the card's control node,
+            # its PCM nodes, and the input nodes of its jacks. The image
+            # leaves out PipeWire's rt module, which pipewire.conf loads
+            # only when the file exists, so PipeWire runs at normal
+            # priority and needs no SYS_NICE. No process changes user,
+            # so no capability is added back.
             capabilities:
               drop: ["ALL"]
             privileged: false
@@ -209,10 +182,6 @@ spec:
               memory: 64Mi
             limits:
               memory: 128Mi
-            # The node's audio controllers, claimed from liken. This is
-            # the placement: the scheduler puts the pod where the
-            # hardware is. The claim is named here, on the container that
-            # opens the PCM devices.
             claims:
               - name: controller
           volumeMounts:
@@ -220,59 +189,46 @@ spec:
               mountPath: /etc/pipewire/pipewire.conf.d
             - name: runtime
               mountPath: /var/run/audio.liken.sh
-        # WirePlumber, the second native sidecar. It starts after
-        # PipeWire because a session manager with no graph to manage
-        # exits, and the kubelet starts these in the order they are
-        # listed.
+        # WirePlumber exits when there is no PipeWire to connect to, so
+        # it is listed after pipewire, and the kubelet starts init
+        # containers in the order listed.
         - name: wireplumber
           image: ghcr.io/liken-sh/audio-operator:latest
           restartPolicy: Always
-          # The operator's binary runs WirePlumber as its child, and
-          # starts it again when it exits because a new PipeWire
-          # replaced the one it served. Any other exit ends the
-          # container.
+          # The operator's binary runs WirePlumber as a child and starts
+          # it again when it exits because a new PipeWire replaced the
+          # one it was connected to. Any other exit ends the container.
+          # See restarts.go.
           command: ["/audio-operator", "wireplumber", "--profile=main-embedded"]
           env:
             - name: PIPEWIRE_RUNTIME_DIR
               value: /var/run/audio.liken.sh
             - name: XDG_RUNTIME_DIR
               value: /var/run/audio.liken.sh
-          # Both probes ask the same question: does the adapter
-          # advertise a media profile that bluetoothd hosts, which is
-          # true only while this WirePlumber holds the endpoints it
-          # registered. endpoints.go states why that is the fact to
-          # read and why every other state passes. The check runs the
-          # operator's own binary, which this container already has,
-          # so the probe needs no shell and no second image.
+          # Both probes pass when BlueZ shows a live media endpoint
+          # registration from this WirePlumber. A WirePlumber whose
+          # D-Bus connection was replaced, for example after the
+          # Bluetooth pod restarted, keeps running with no registration.
+          # See endpoints.go for the check and the states that pass.
           #
-          # The startup probe gates the liveness probe, which the
-          # kubelet disables until startup succeeds. Registration
-          # takes a few seconds after WirePlumber opens the bus, so
-          # this ordering is what keeps the liveness probe from
-          # ending a container that is still doing the work. 60
-          # seconds is the allowance.
-          #
-          # PipeWire's own startup probe already proves the socket
-          # answers before this container starts, because the kubelet
-          # starts native sidecars in order and waits for each one's
-          # startup probe. So this probe reads WirePlumber's own work
-          # instead of repeating that.
+          # WirePlumber needs a few seconds after it opens the bus to
+          # register, so the startup probe allows 60 seconds before the
+          # liveness probe begins. It does not check PipeWire, because
+          # the kubelet starts this container only after PipeWire's
+          # startup probe passes.
           startupProbe:
             exec:
               command: ["/audio-operator", "endpoints-registered"]
             periodSeconds: 2
             failureThreshold: 30
             timeoutSeconds: 10
-          # A failure here restarts this container alone, and that is
-          # the whole repair: a new WirePlumber opens the bus that
-          # replaced the one it lost and registers its endpoints
-          # again. PipeWire keeps running, so the card's own sinks
-          # play through the restart.
-          #
-          # The period is 20 seconds because the condition it finds
-          # lasts until somebody acts. A radio that advertises no
-          # audio stays that way, so the check costs one D-Bus call
-          # per period and repairs within a minute of the loss.
+          # A failed probe restarts only this container. The new
+          # WirePlumber connects to the current bus and registers its
+          # endpoints again, and PipeWire keeps running, so the card's
+          # own sinks keep playing. The fault does not clear on its own,
+          # so a check every 20 seconds, one D-Bus call each, finds it,
+          # and three failures in a row, about a minute, restart the
+          # container.
           livenessProbe:
             exec:
               command: ["/audio-operator", "endpoints-registered"]
@@ -295,46 +251,39 @@ spec:
           volumeMounts:
             - name: runtime
               mountPath: /var/run/audio.liken.sh
-            # The same drop-in directory the declare container
-            # wrote. WirePlumber reads its configuration once at
-            # startup, and the declare container ran to completion
-            # first, so the fragment is on disk before this container
-            # starts.
+            # WirePlumber reads its configuration only at startup, after
+            # declare has written this directory.
             - name: wireplumber-config
               mountPath: /etc/wireplumber/wireplumber.conf.d
       containers:
         - name: operator
           image: ghcr.io/liken-sh/audio-operator:latest
           env:
-            # A ResourceSlice names the node whose hardware it
-            # describes, and the downward API is where a pod reads
-            # that.
+            # The node name for the ResourceSlice that describes this
+            # node's hardware.
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            # The operator reads the graph by running pw-dump, and
-            # pw-dump finds the socket the same way every other
-            # client does.
+            # pw-dump, which the operator runs to read the graph, finds
+            # PipeWire's socket through these variables.
             - name: PIPEWIRE_RUNTIME_DIR
               value: /var/run/audio.liken.sh
             - name: XDG_RUNTIME_DIR
               value: /var/run/audio.liken.sh
-            # The Prometheus listener, on liken's shared metrics port.
-            # An empty value serves no metrics, which is the cluster
-            # owner's opt out; the base ships the port bound, because
-            # a scrape reads an in-memory registry and touches no
-            # card, PipeWire, or bus.
+            # The Prometheus listener, on the metrics port that liken
+            # components share. An empty value turns metrics off. A
+            # scrape reads an in-memory registry and touches no card,
+            # PipeWire, or the bus, so the listener is on by default.
             - name: METRICS_ADDRESS
               value: ":9200"
           ports:
             - name: metrics
               containerPort: 9200
           securityContext:
-            # No capabilities. The operator reads the cards through
-            # the control interface, runs pw-dump, writes CDI files,
-            # and serves a socket to the kubelet, and none of that is
-            # privileged.
+            # The operator reads cards through the ALSA control
+            # interface, runs pw-dump, writes CDI files, and serves a
+            # socket to the kubelet. None of that needs a capability.
             capabilities:
               drop: ["ALL"]
             privileged: false
@@ -345,48 +294,45 @@ spec:
               memory: 64Mi
             limits:
               memory: 128Mi
-            # The node's audio controllers, claimed from liken. The
-            # DaemonSet places a pod on every node, and this claim keeps
-            # the pod Pending on a node that has no controller, so a pod
-            # runs only where the hardware is.
             claims:
               - name: controller
           volumeMounts:
-            # The two mounts every DRA driver takes. The registry
-            # directory is where the kubelet discovers plugins, and
-            # the plugin's own directory holds the socket that serves
-            # the prepare calls. Both are writable, because serving a
-            # socket is the actuation.
+            # The kubelet finds DRA plugins through the registry
+            # directory, and the driver serves prepare calls on a socket
+            # in its own plugin directory. The driver creates a socket in
+            # each, so both are writable.
             - name: kubelet-plugin
               mountPath: /var/lib/kubelet/plugins/audio.liken.sh
             - name: kubelet-plugins-registry
               mountPath: /var/lib/kubelet/plugins_registry
-            # Where prepared claims become container edits for the
-            # container runtime to resolve. liken writes its own specs
-            # in this same directory, and the two drivers' file name
-            # prefixes keep them apart.
+            # The driver writes a CDI spec for each prepared claim here,
+            # and the container runtime applies it to the consumer's
+            # container. Other liken drivers write to the same directory,
+            # and their file name prefixes keep the specs apart.
             - name: cdi
               mountPath: /var/run/cdi
-            # Where PipeWire creates its socket. A consumer's CDI spec
-            # binds this same host directory into its container, so
-            # the path is the same on both sides of the mount.
+            # PipeWire's socket directory. A consumer's CDI spec mounts
+            # this host directory into the consumer's container at the
+            # same path.
             - name: runtime
               mountPath: /var/run/audio.liken.sh
-            # The declaration PipeWire loads. The operator reads it back
-            # to notice a card whose PCM devices changed since PipeWire
-            # loaded it, and writes it when a sink's channel layout
-            # changes, so the mount is writable.
+            # The operator reads the declarations to detect a card whose
+            # PCM devices changed after PipeWire loaded them, and
+            # rewrites them when a sink's channel layout changes, so the
+            # mount is writable.
             - name: pipewire-config
               mountPath: /etc/pipewire/pipewire.conf.d
-        # A restart of this container ends every running capture on
-        # the node and takes nothing else with it. There is no
-        # readiness probe: a probe here would decide the pod's Ready
-        # condition, and a late capture credential must not stall the
-        # hardware DaemonSet's rollout. Capture readiness is reported
-        # by the API's 503 and by the audio_capture_ready gauge
-        # instead. The liveness probe reads /healthz over TLS, which
-        # the container answers with a certificate of its own until
-        # audio-api has minted the leaf below.
+        # Serves captures to audio-api. Restarting it ends only the
+        # captures running on this node.
+        #
+        # It has no readiness probe, because a container's readiness
+        # sets the pod's Ready condition, and a capture certificate that
+        # arrives late must not stall the DaemonSet's rollout. While
+        # capture is not ready, audio-api returns 503 and the
+        # audio_capture_ready gauge reads 0. Until audio-api issues the
+        # leaf certificate in capture-tls, the container serves a
+        # self-signed certificate, so the liveness probe still reaches
+        # /healthz over TLS.
         - name: capture
           image: ghcr.io/liken-sh/audio-operator:latest
           args: ["capture"]
@@ -432,8 +378,8 @@ spec:
         - name: controller
           resourceClaimTemplateName: every-sound-card
       volumes:
-        # DirectoryOrCreate on all four, because a node that has never
-        # run this operator or any DRA driver has none of these paths.
+        # DirectoryOrCreate, because a node that has never run this
+        # operator or a DRA driver does not have these directories.
         - name: kubelet-plugin
           hostPath:
             path: /var/lib/kubelet/plugins/audio.liken.sh
@@ -450,31 +396,24 @@ spec:
           hostPath:
             path: /var/run/audio.liken.sh
             type: DirectoryOrCreate
-        # PipeWire's configuration drop-in directory, shared between
-        # the declare container that writes it at pod start, the
-        # operator that writes it for a layout change, and the PipeWire
-        # container that reads it. It is the pod's own volume, because
-        # a declaration is generated again at every start, and a
-        # volume that outlived the pod would let a stale one reach the
-        # next PipeWire.
+        # declare writes this directory at pod start, the operator
+        # rewrites it when a layout changes, and PipeWire reads it. It
+        # is an emptyDir so that no declaration outlives the pod and
+        # reaches the next PipeWire.
         - name: pipewire-config
           emptyDir: {}
-        # WirePlumber's configuration drop-in directory, shared
-        # between the declare container that writes it and the
-        # WirePlumber container that reads it. The image bakes its
-        # own two fragments under /usr/share/wireplumber, which this
-        # mount does not hide, and WirePlumber merges /usr/share
-        # first and /etc second, so the generated fragment overrides
-        # them.
+        # declare writes this directory and WirePlumber reads it. The
+        # image's own fragments are under /usr/share/wireplumber, which
+        # this mount does not hide, and WirePlumber reads /usr/share
+        # before /etc, so the generated fragment overrides them.
         - name: wireplumber-config
           emptyDir: {}
-        # The capture container's TLS leaf, which audio-api signs
-        # from the domain's CA into this Secret. The Secret does not
-        # exist until audio-api mints it, and an optional volume holds
-        # nothing until then rather than parking the pod in
-        # ContainerCreating. The container reloads the leaf when the
-        # file changes, so this pod's ServiceAccount needs no get and
-        # no watch on the Secret.
+        # audio-api signs the capture container's leaf certificate with
+        # its CA and writes it to this Secret. The Secret does not exist
+        # until audio-api creates it, so the volume is optional, or the
+        # pod would stay in ContainerCreating. The container reloads the
+        # certificate when the file changes, so the pod's ServiceAccount
+        # needs no permission on the Secret.
         - name: capture-tls
           secret:
             secretName: audio-capture-server

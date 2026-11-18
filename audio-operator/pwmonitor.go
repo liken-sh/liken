@@ -1,20 +1,19 @@
 package main
 
-// The graph feed: one pw-dump -m for the life of the pod, in place of
-// one pw-dump per pass.
+// The graph feed keeps the operator's copy of the PipeWire graph
+// current from a pw-dump -m that runs for the life of the operator, so
+// a pass starts no process, and every change in the graph wakes the
+// reconcile loop.
 //
-// pw-dump -m prints the whole graph once, then one JSON array for
-// every batch of changes, each element the whole changed object in
-// the shape a plain pw-dump prints. A removed global prints as an
-// object whose info is null. The stream carries only what changed, so
-// the operator keeps its own copy of every object the stream has
-// named and builds the graph again from all of them after each batch.
+// pw-dump -m prints the whole graph once, then a JSON array for each
+// batch of changes. Each element is a changed object in the shape that
+// plain pw-dump prints, and a removed global is an object whose info is
+// null. A batch contains only what changed, so the feed keeps every
+// object that the stream sent and builds the graph from all of them
+// after each batch.
 //
-// That makes a steady state cost no process at all, and it makes
-// every change in the graph a wake: a node that appears, a speaker
-// whose own volume moved, a client that changed a gain. The one place
-// the operator still polls is the startup wait at the bottom of this
-// file, because a graph that is not there yet raises no event.
+// The startup waits at the bottom of this file read on a timer, because
+// a PipeWire that has not started yet raises no event.
 
 import (
 	"bytes"
@@ -31,32 +30,27 @@ import (
 	"time"
 )
 
-// pwMonitor is one running pw-dump -m. A graph arrives on the channel
-// after every batch, and the channel closes when the stream ends,
-// which is how the reconciler learns that the process is gone.
+// pwMonitor is one running pw-dump -m. Its channel receives the whole
+// graph after every batch, and closes when the process ends.
 type pwMonitor struct {
 	graphs chan pwGraph
 	mu     sync.Mutex
 	err    error
 }
 
-// Graphs is the stream. A receive is both the current graph and the
-// wake, so the reconciler needs no second signal.
 func (m *pwMonitor) Graphs() <-chan pwGraph {
 	return m.graphs
 }
 
-// Err says why the stream ended. It answers once Graphs has closed,
-// and it is what the reconciler logs before it starts the monitor
-// again.
+// Err returns why the stream ended, after Graphs closes.
 func (m *pwMonitor) Err() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.err
 }
 
-// stop records the reason before it closes the channel, so a reader
-// that saw the close always finds the reason waiting.
+// stop sets the error before it closes the channel, so a reader that
+// sees the close always finds the error.
 func (m *pwMonitor) stop(err error) {
 	m.mu.Lock()
 	m.err = err
@@ -64,21 +58,20 @@ func (m *pwMonitor) stop(err error) {
 	close(m.graphs)
 }
 
-// watchGraph starts one pw-dump -m under the context. The context is
-// what ends it on the way down. A pw-dump that ends on its own, which
-// happens when PipeWire goes away, closes the channel with the reason
-// in Err, and the reconciler starts another after a short wait.
+// watchGraph starts pw-dump -m. Canceling ctx kills the process. When
+// pw-dump exits on its own, as it does when PipeWire stops, the channel
+// closes with the reason in Err, and the caller starts a new monitor.
 func watchGraph(ctx context.Context) (*pwMonitor, error) {
 	command := exec.CommandContext(ctx, "pw-dump", "-m")
-	// The context's kill bounds the process, and WaitDelay bounds the
-	// wait after the kill, for the reason readGraph gives.
+	// WaitDelay keeps command.Wait from blocking after the kill when
+	// another process inherited the stdout pipe, as in readGraph.
 	command.WaitDelay = time.Second
 	stream, err := command.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("reading pw-dump -m: %w", err)
+		return nil, fmt.Errorf("connecting to the output of pw-dump -m: %w", err)
 	}
-	var complaints bytes.Buffer
-	command.Stderr = &complaints
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
 	if err := command.Start(); err != nil {
 		return nil, fmt.Errorf("starting pw-dump -m: %w", err)
 	}
@@ -93,36 +86,35 @@ func watchGraph(ctx context.Context) (*pwMonitor, error) {
 				return ctx.Err()
 			}
 		})
-		monitor.stop(monitorError(decoded, command.Wait(), complaints.String()))
+		monitor.stop(monitorError(decoded, command.Wait(), stderr.String()))
 	}()
 	return monitor, nil
 }
 
-// monitorError picks the reason the reconciler is told. A decode
-// error names what the stream did wrong. Otherwise the exit and
-// whatever pw-dump said on stderr are the reason, and pw-dump -m ends
-// only when PipeWire goes away or the context does.
-func monitorError(decoded, exit error, complaints string) error {
+// monitorError prefers a decode error, because it describes what was
+// wrong with the stream. Otherwise it combines the exit error with
+// pw-dump's stderr text.
+func monitorError(decoded, exit error, stderr string) error {
 	if decoded != nil {
 		return decoded
 	}
-	said := strings.TrimSpace(complaints)
+	text := strings.TrimSpace(stderr)
 	switch {
-	case exit != nil && said != "":
-		return fmt.Errorf("pw-dump -m stopped: %w: %s", exit, said)
+	case exit != nil && text != "":
+		return fmt.Errorf("pw-dump -m stopped: %w: %s", exit, text)
 	case exit != nil:
 		return fmt.Errorf("pw-dump -m stopped: %w", exit)
-	case said != "":
-		return fmt.Errorf("pw-dump -m stopped: %s", said)
+	case text != "":
+		return fmt.Errorf("pw-dump -m stopped: %s", text)
 	}
 	return errors.New("pw-dump -m stopped")
 }
 
-// decodeGraphs reads the stream: one JSON array for each batch of
-// changes, the first being the whole graph, one after another until
-// the process ends. A decoder on the stream reads them as they come,
-// because the arrays are separated by newlines and not wrapped in an
-// outer document.
+// decodeGraphs calls deliver with the whole graph after each JSON array
+// that pw-dump -m prints. It returns nil when the stream ends, and
+// otherwise the error of the decoder or of deliver. pw-dump -m prints
+// the arrays one after another with no outer array, so a json.Decoder
+// reads each one as it arrives.
 func decodeGraphs(stream io.Reader, deliver func(pwGraph) error) error {
 	decoder := json.NewDecoder(stream)
 	view := pwView{objects: map[int]pwObject{}}
@@ -141,17 +133,16 @@ func decodeGraphs(stream io.Reader, deliver func(pwGraph) error) error {
 	}
 }
 
-// pwView is every object the stream has named, by id. A batch carries
-// only what changed, and the graph is built from all of them.
+// pwView is the newest copy of every object that the stream has sent,
+// by id.
 type pwView struct {
 	objects map[int]pwObject
 }
 
-// apply folds one batch into the view. An element with an info block
-// replaces the object of that id, and an element whose info is null
-// removes it, which is how pw-dump prints a global that went away. A
-// global that never carried an info block holds nothing this graph
-// reads, so dropping it is the same answer.
+// apply deletes each object whose info is null, which is how pw-dump
+// prints a removed global. An object that arrives with no info for
+// another reason is deleted too, which loses nothing, because
+// buildGraph skips every object with no info.
 func (v *pwView) apply(batch []pwObject) {
 	for _, object := range batch {
 		if object.Info == nil {
@@ -162,8 +153,8 @@ func (v *pwView) apply(batch []pwObject) {
 	}
 }
 
-// graph builds the graph again from the whole view. buildGraph takes
-// the objects in any order, because a map has none.
+// graph passes the objects to buildGraph in map order, which buildGraph
+// accepts.
 func (v *pwView) graph() pwGraph {
 	objects := make([]pwObject, 0, len(v.objects))
 	for _, object := range v.objects {
@@ -172,96 +163,85 @@ func (v *pwView) graph() pwGraph {
 	return buildGraph(objects)
 }
 
-// graphRetryDelay is how long the operator waits before it starts the
-// graph feed again. A pw-dump -m ends when PipeWire goes away, and
-// the container beside this one is what comes back, so the retry is
-// short and has no ceiling.
+// graphRetryDelay is short and does not back off, because pw-dump -m
+// ends when PipeWire stops, and Kubernetes restarts PipeWire's
+// container beside this one.
 const graphRetryDelay = 2 * time.Second
 
-// graphFeed is the graph the operator holds now.
+// graphFeed keeps the newest graph that the monitor delivered.
 //
-// It has two states. While the monitor runs, every pass reads the
-// graph the last batch produced, at the cost of no process. While it
-// does not, a pass runs a plain pw-dump instead, which is what the
-// first pass does before the monitor has printed anything and what
-// every pass does while the monitor is starting again. A pw-dump that
-// fails is the failure the reconcile pass counts, so the monitor's
-// absence changes nothing about how a dead PipeWire is reported.
+// When the feed has no graph from a running monitor, as on the first
+// pass and while the monitor restarts, a pass runs a plain pw-dump. A
+// failed pw-dump fails the pass, so a PipeWire that is down is reported
+// the same way whether or not the monitor runs.
 type graphFeed struct {
-	mutex sync.Mutex
-	graph pwGraph
-	held  bool
+	mutex    sync.Mutex
+	graph    pwGraph
+	hasGraph bool
 
-	// moved is the channel changes hands out. The feed closes it when
-	// a graph arrives or the monitor ends, and makes a new one on the
-	// next call to changes. It is nil when no reader holds one.
-	moved chan struct{}
+	// nextChange is closed and set to nil when a graph arrives or the
+	// monitor ends. The next call to changes makes a new one.
+	nextChange chan struct{}
 
-	// poll is the plain read the feed falls back to. It is a field so
-	// that a test drives the feed with no PipeWire behind it.
+	// poll is a field so that a test can drive the feed without
+	// PipeWire.
 	poll func(context.Context) (pwGraph, error)
 }
 
 func newGraphFeed() *graphFeed { return &graphFeed{poll: readGraph} }
 
-// read answers with the newest graph the monitor delivered.
 func (f *graphFeed) read(ctx context.Context) (pwGraph, error) {
 	f.mutex.Lock()
-	graph, held := f.graph, f.held
+	graph, hasGraph := f.graph, f.hasGraph
 	f.mutex.Unlock()
-	if held {
+	if hasGraph {
 		return graph, nil
 	}
 	return f.poll(ctx)
 }
 
-// changes answers with a channel that closes when the next graph
-// arrives, or when the monitor ends and the next read goes to
-// PipeWire itself. A wait for one change in the graph, such as a
-// codec switch, takes the channel, reads the graph, and waits on the
-// channel only when the graph does not yet show the change. The wait
-// then costs one read for each batch of changes, and no timer.
-//
-// One channel serves every reader until it closes, so any number of
-// waits share one signal.
+// changes returns a channel that closes when the next graph arrives, or
+// when the monitor ends and the next read runs a plain pw-dump. A
+// caller that waits for a change gets the channel before it reads the
+// graph, as codecSwitch.await does, so a batch that arrives after the
+// read still closes the caller's channel.
 func (f *graphFeed) changes() <-chan struct{} {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	if f.moved == nil {
-		f.moved = make(chan struct{})
+	if f.nextChange == nil {
+		f.nextChange = make(chan struct{})
 	}
-	return f.moved
+	return f.nextChange
 }
 
-// announce closes the channel the readers hold. The caller holds the
-// mutex.
-func (f *graphFeed) announce() {
-	if f.moved != nil {
-		close(f.moved)
-		f.moved = nil
+// The caller must hold f.mutex.
+func (f *graphFeed) closeChanged() {
+	if f.nextChange != nil {
+		close(f.nextChange)
+		f.nextChange = nil
 	}
 }
 
 func (f *graphFeed) deliver(graph pwGraph) {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	f.graph, f.held = graph, true
-	f.announce()
+	f.graph, f.hasGraph = graph, true
+	f.closeChanged()
 }
 
-// lost says the monitor ended, so the next pass reads PipeWire itself
-// rather than answering from a graph that stopped moving. It wakes
-// every wait too, so that a wait reads PipeWire once and does not
-// wait on a feed that delivers nothing until it starts again.
-func (f *graphFeed) lost() {
+// monitorEnded discards the monitor's graph, because it stopped
+// updating. It also closes the channel from changes, so each waiter
+// runs a plain pw-dump once and does not wait until the monitor
+// restarts.
+func (f *graphFeed) monitorEnded() {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
-	f.held = false
-	f.announce()
+	f.hasGraph = false
+	f.closeChanged()
 }
 
-// follow keeps one pw-dump -m running for the life of the operator,
-// and wakes the reconcile loop after every batch of changes.
+// follow runs pw-dump -m until ctx ends, starts it again each time it
+// exits, and calls wake after every batch.
 func (f *graphFeed) follow(ctx context.Context, wake func()) {
 	for ctx.Err() == nil {
 		monitor, err := watchGraph(ctx)
@@ -272,12 +252,12 @@ func (f *graphFeed) follow(ctx context.Context, wake func()) {
 			}
 			err = monitor.Err()
 		}
-		f.lost()
+		f.monitorEnded()
 		if ctx.Err() != nil {
 			return
 		}
-		fmt.Fprintf(os.Stderr, "the graph feed stopped: %v; starting it again in %s\n",
-			err, graphRetryDelay)
+		fmt.Fprintf(os.Stderr, "the graph feed stopped, and starts again in %s: %v\n",
+			graphRetryDelay, err)
 		select {
 		case <-ctx.Done():
 			return
@@ -286,32 +266,26 @@ func (f *graphFeed) follow(ctx context.Context, wake func()) {
 	}
 }
 
-// pipewireReadyTimeout bounds the wait for PipeWire to answer at
-// startup.
-//
-// A PipeWire that never answers within this window is a container
-// crashlooping beside this one. The operator publishes every output
-// tainted and exits, so the slice says nothing plays, and the
-// kubelet's restart of this container is the retry.
+// pipewireReadyTimeout bounds the startup wait for a graph read to
+// succeed. When it passes, the operator publishes every output with a
+// taint and exits, so the ResourceSlice shows that nothing can play.
+// The kubelet's restart of the container is the retry, and a PipeWire
+// that stays down leaves this pod in a crash loop.
 const pipewireReadyTimeout = 60 * time.Second
 
-// pipewireReadyInterval is how often the two startup waits read
-// again: the wait for PipeWire to answer and the wait for its
-// declared nodes. Each is a clock with a deadline, pipewireReadyTimeout
-// and nodeReadyTimeout, and runs once per start. PipeWire raises no
-// event that says it is ready, and the graph feed does not run yet,
-// so these two waits poll. Every later read is driven by an event.
+// pipewireReadyInterval is how often the startup waits read the graph
+// again. They poll because PipeWire raises no event when it is ready,
+// and the graph feed has not started yet.
 const pipewireReadyInterval = time.Second
 
-// nodeReadyTimeout bounds the wait for the declared nodes to appear
-// in the graph. PipeWire creates the objects its configuration
-// declares while it loads that configuration, which is before it
-// serves the socket, so the nodes are there on the first read or they
-// are not coming.
+// nodeReadyTimeout bounds the startup wait for the declared nodes.
+// PipeWire creates them while it loads its configuration, before it
+// serves its socket, so they are normally in the graph at the first
+// successful read.
 const nodeReadyTimeout = 15 * time.Second
 
-// waitForPipeWire blocks until PipeWire answers a graph read, or
-// until the timeout passes.
+// waitForPipeWire returns an error that wraps the last failed read when
+// the timeout passes.
 func waitForPipeWire(ctx context.Context, read func(context.Context) (pwGraph, error), timeout time.Duration) error {
 	deadline := time.After(timeout)
 	tick := time.NewTicker(pipewireReadyInterval)
@@ -327,21 +301,17 @@ func waitForPipeWire(ctx context.Context, read func(context.Context) (pwGraph, e
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline:
-			return fmt.Errorf("PipeWire did not answer within %s: %w", timeout, last)
+			return fmt.Errorf("PipeWire did not respond within %s: %w", timeout, last)
 		case <-tick.C:
 		}
 	}
 }
 
-// waitForNodes blocks until every endpoint has a node in the graph,
-// or until the timeout passes. It reports what it found and never
-// fails.
-//
-// An endpoint whose node PipeWire could not create is a fact the
-// slice reports as the no-sink taint, so the operator publishes it
-// rather than refusing to start. Failing here instead would restart
-// the pod over one PCM device that cannot open, and take the card's
-// working endpoints down with it on every attempt.
+// waitForNodes reads the graph until every endpoint has a node or the
+// timeout passes. On a timeout it logs what is missing and returns, and
+// each endpoint with no node is published with the no-sink taint. An
+// error would restart the pod over one PCM device that cannot open, and
+// take the card's working endpoints down with it on every attempt.
 func waitForNodes(ctx context.Context, read func(context.Context) (pwGraph, error), outputs []alsaEndpoint, timeout time.Duration) {
 	deadline := time.After(timeout)
 	tick := time.NewTicker(pipewireReadyInterval)
@@ -350,27 +320,26 @@ func waitForNodes(ctx context.Context, read func(context.Context) (pwGraph, erro
 	for {
 		graph, err := read(ctx)
 		if err != nil {
-			report = fmt.Sprintf("PipeWire's graph did not read: %v", err)
+			report = fmt.Sprintf("reading PipeWire's graph: %v", err)
 		} else {
 			missing := missingNodes(outputs, graph)
 			if len(missing) == 0 {
 				return
 			}
-			report = "PipeWire holds no node for " + strings.Join(missing, ", ")
+			report = "PipeWire has no node for " + strings.Join(missing, ", ")
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-deadline:
-			fmt.Fprintf(os.Stderr, "%s after %s; those endpoints publish with the no-sink taint\n",
-				report, timeout)
+			fmt.Fprintf(os.Stderr, "waited %s for the declared nodes, so each endpoint with no node publishes with the no-sink taint: %s\n",
+				timeout, report)
 			return
 		case <-tick.C:
 		}
 	}
 }
 
-// missingNodes names the endpoints that have no node, sorted by name.
 func missingNodes(outputs []alsaEndpoint, graph pwGraph) []string {
 	var missing []string
 	for _, output := range outputs {

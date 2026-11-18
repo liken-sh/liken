@@ -1,13 +1,12 @@
 package main
 
-// The API's own registry.
+// The route label is the RFC 6570 route template and not the request
+// path, so endpoint names do not become label values. The log line of
+// each request writes the same template in its route field.
 //
-// The route label is the RFC 6570 template, never the concrete path,
-// so no endpoint name enters Prometheus. The same string is the route
-// field of the one log line each request writes.
-//
-// These four series are the API's. The capture counters are the
-// container's, and nothing double-counts.
+// This registry holds only the API container's series. The capture
+// containers serve their own audio_capture_* series from
+// capturemetrics.go, so a tap is not counted twice.
 
 import (
 	"net/http"
@@ -19,7 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// apiMetrics holds the registry the API's metrics listener serves.
+// apiMetrics is the registry that the API's metrics listener serves.
 type apiMetrics struct {
 	registry *prometheus.Registry
 
@@ -34,7 +33,7 @@ func newAPIMetrics(version string) *apiMetrics {
 		registry: prometheus.NewRegistry(),
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "audio_api_requests_total",
-			Help: "Requests this API answered, by route template, method, and status.",
+			Help: "Requests this API served, by route template, method, and status.",
 		}, []string{"route", "method", "status"}),
 		duration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: "audio_api_request_seconds",
@@ -65,9 +64,10 @@ func newAPIMetrics(version string) *apiMetrics {
 	return m
 }
 
-// answered counts one request and observes how long it took to its
-// headers, which is the time a caller waits before anything arrives.
-func (m *apiMetrics) answered(route, method string, status int, headers time.Duration) {
+// observeRequest counts a finished request and records the time to its
+// response headers, which is how long the caller waits before any data
+// arrives.
+func (m *apiMetrics) observeRequest(route, method string, status int, headers time.Duration) {
 	if m == nil {
 		return
 	}
@@ -75,7 +75,8 @@ func (m *apiMetrics) answered(route, method string, status int, headers time.Dur
 	m.duration.WithLabelValues(route).Observe(headers.Seconds())
 }
 
-// streaming moves the gauge of the streams this API relays now.
+// streaming adds delta to the gauge of capture streams that the API is
+// relaying for this aspect.
 func (m *apiMetrics) streaming(aspect string, delta float64) {
 	if m == nil || aspect == "" {
 		return
@@ -83,9 +84,9 @@ func (m *apiMetrics) streaming(aspect string, delta float64) {
 	m.streams.WithLabelValues(aspect).Add(delta)
 }
 
-// certificateExpiry reports when the first of this API's certificates
-// runs out. The timestamp is the certificate's own, so a reader
-// computes the remaining life itself.
+// certificateExpiry sets the gauge to the time when the first of the
+// API's certificates expires. The gauge holds a timestamp, so a
+// dashboard computes the time left.
 func (m *apiMetrics) certificateExpiry(at time.Time) {
 	if m == nil || at.IsZero() {
 		return
@@ -93,17 +94,16 @@ func (m *apiMetrics) certificateExpiry(at time.Time) {
 	m.expiry.Set(float64(at.Unix()))
 }
 
-// statusLabel is the status as a label: the number itself, so a panel
-// groups by the exact code a caller saw.
+// statusLabel keeps the exact status code and not its class, so a
+// panel can group by each code.
 func statusLabel(status int) string {
 	return strconv.Itoa(status)
 }
 
-// apiRegistryHandler serves the API's registry, and the two probes
-// beside it, on the metrics port. These three are on the plain
-// metrics port and not on the TLS port the API serves, because a
-// scrape and the kubelet hold no token and no CA, and none of the
-// three carries anything a caller asked for.
+// apiRegistryHandler serves /metrics, /healthz, and /readyz on the
+// plain metrics port and not the API's TLS port, because Prometheus and
+// the kubelet have no token and no CA. None of these paths returns
+// capture data.
 func apiRegistryHandler(m *apiMetrics, ready func() bool) http.Handler {
 	served := http.NewServeMux()
 	served.Handle("/metrics", promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}))
@@ -112,7 +112,7 @@ func apiRegistryHandler(m *apiMetrics, ready func() bool) http.Handler {
 	})
 	served.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
 		if !ready() {
-			writePlain(w, http.StatusServiceUnavailable, "the API holds no certificate yet")
+			writePlain(w, http.StatusServiceUnavailable, "the API has no certificate yet")
 			return
 		}
 		writePlain(w, http.StatusOK, "ok")

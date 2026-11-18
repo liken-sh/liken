@@ -8,1167 +8,1166 @@ toc: true
 
 # Routes
 
-The routes below are generated from the OpenAPI document `audio-api`
-serves at `/v1/audio/openapi.json`. The API renders that document
-from its router table, so this page lists every route the program
-serves.
+The routes below are generated from the OpenAPI document that
+`audio-api` serves at `/v1/audio/openapi.json`. The API renders that
+document from its route table, so this page lists every route that the
+API serves.
 
-[The API page](/docs/reference/api/) is the page beside this one. It
-says what the API is for, how it chooses a format, how it reads a
-time span, who may tap a `Sink` or a `Source`, and what each error
-means.
+The [API page](/docs/reference/api/) explains what the API is for, how
+it chooses a format, how it reads a time span, who may tap a `Sink` or
+a `Source`, and what each error means.
 
 `audio.liken.sh capture API`, version `v1`, described in OpenAPI 3.1.1.
 
-Capture audio from a Sink or Source, and stream it as WAV, FLAC, or Ogg Opus.
+Streams the sound of a `Sink` or a `Source` as WAV, FLAC, or Ogg Opus.
 
-The path identifies the Sink or Source. The extension or Accept header selects the format. A W3C Media Fragments t= query parameter selects the time span. Authenticate with a client certificate signed by the cluster's authority, or with a ServiceAccount token for the audio-api audience. A tap requires get on sinks/audio or sources/audio in the audio.liken.sh group. The API stores no audio. Each response streams from the node that hosts the endpoint.
+The path names the `Sink` or `Source` to tap. You choose the format with the extension of the path or with the `Accept` header, and a W3C Media Fragments `t=` query parameter limits the time span. Authenticate with a client certificate that the cluster's certificate authority signed, or with a `ServiceAccount` token that has the audience `audio-api`. A tap requires `get` on `sinks/audio` or `sources/audio` in the `audio.liken.sh` API group. The capture container on the node that has the `Sink` or `Source` records the sound, and nothing stores it.
 
 ## `GET` `/v1/audio` {data-method=GET}
 
-The discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect.
+The discovery document. It lists each resource that this API serves, with an RFC 6570 URI template for its tap routes.
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | [discovery](#discovery) | The discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect. |
-| 304 | none | | The If-None-Match field matches this document's ETag. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
+| 200 | `application/json` | [discovery](#discovery) | The discovery document. It lists each resource that this API serves, with an RFC 6570 URI template for its tap routes. |
+| 304 | none | | `If-None-Match` matches the `ETag` of this document. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Cache-Control` | 200 | Always no-cache. A client revalidates with If-None-Match and gets a 304. |
-| `ETag` | 200 | The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `Cache-Control` | 200 | Always `no-cache`. A client revalidates with `If-None-Match` and gets a 304. |
+| `ETag` | 200 | The version of the build of this API. The route table is compiled in, so the build version identifies the document. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
 
 ## `HEAD` `/v1/audio` {data-method=HEAD}
 
-The headers of the discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers that GET returns for this route, with no body. HEAD records no sound and makes no request to the capture container (RFC 9110 section 9.3.2).
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | [discovery](#discovery) | The discovery document. It lists every resource this API serves and gives an RFC 6570 template for each aspect. |
-| 304 | none | | The If-None-Match field matches this document's ETag. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
+| 200 | `application/json` | [discovery](#discovery) | The discovery document. It lists each resource that this API serves, with an RFC 6570 URI template for its tap routes. |
+| 304 | none | | `If-None-Match` matches the `ETag` of this document. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Cache-Control` | 200 | Always no-cache. A client revalidates with If-None-Match and gets a 304. |
-| `ETag` | 200 | The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `Cache-Control` | 200 | Always `no-cache`. A client revalidates with `If-None-Match` and gets a 304. |
+| `ETag` | 200 | The version of the build of this API. The route table is compiled in, so the build version identifies the document. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
 
 ## `OPTIONS` `/v1/audio` {data-method=OPTIONS}
 
-The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
+Returns 204 with an `Allow` header that lists the methods this route accepts (RFC 9110 section 10.2.1).
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route allows. |
+| 204 | No body. The `Allow` header lists the methods. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | GET, HEAD, OPTIONS. |
+| `Allow` | 204 | Always `GET, HEAD, OPTIONS`. |
 
 ## `GET` `/v1/audio/openapi.json` {data-method=GET}
 
-The OpenAPI 3.1 document for this API.
+The OpenAPI 3.1 document that describes this API.
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/openapi+json` | string (binary) | The OpenAPI 3.1 document for this API. |
-| 304 | none | | The If-None-Match field matches this document's ETag. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
+| 200 | `application/openapi+json` | string (binary) | The OpenAPI 3.1 document that describes this API. |
+| 304 | none | | `If-None-Match` matches the `ETag` of this document. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Cache-Control` | 200 | Always no-cache. A client revalidates with If-None-Match and gets a 304. |
-| `ETag` | 200 | The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `Cache-Control` | 200 | Always `no-cache`. A client revalidates with `If-None-Match` and gets a 304. |
+| `ETag` | 200 | The version of the build of this API. The route table is compiled in, so the build version identifies the document. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
 
 ## `HEAD` `/v1/audio/openapi.json` {data-method=HEAD}
 
-The headers of the OpenAPI 3.1 document for this API. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers that GET returns for this route, with no body. HEAD records no sound and makes no request to the capture container (RFC 9110 section 9.3.2).
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/openapi+json` | string (binary) | The OpenAPI 3.1 document for this API. |
-| 304 | none | | The If-None-Match field matches this document's ETag. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
+| 200 | `application/openapi+json` | string (binary) | The OpenAPI 3.1 document that describes this API. |
+| 304 | none | | `If-None-Match` matches the `ETag` of this document. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Cache-Control` | 200 | Always no-cache. A client revalidates with If-None-Match and gets a 304. |
-| `ETag` | 200 | The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `Cache-Control` | 200 | Always `no-cache`. A client revalidates with `If-None-Match` and gets a 304. |
+| `ETag` | 200 | The version of the build of this API. The route table is compiled in, so the build version identifies the document. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
 
 ## `OPTIONS` `/v1/audio/openapi.json` {data-method=OPTIONS}
 
-The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
+Returns 204 with an `Allow` header that lists the methods this route accepts (RFC 9110 section 10.2.1).
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route allows. |
+| 204 | No body. The `Allow` header lists the methods. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | GET, HEAD, OPTIONS. |
+| `Allow` | 204 | Always `GET, HEAD, OPTIONS`. |
 
 ## `GET` `/v1/audio/sinks/{name}` {data-method=GET}
 
-The sink format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve.
+The info document of the `Sink`: the node that a tap runs on, the rate and channel count that a tap uses, and the formats that the tap routes return.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | [endpoint](#endpoint) | The sink format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. |
-| 304 | none | | The If-None-Match field matches this document's ETag. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `application/json` | [endpoint](#endpoint) | The info document of the `Sink`: the node that a tap runs on, the rate and channel count that a tap uses, and the formats that the tap routes return. |
+| 304 | none | | `If-None-Match` matches the `ETag` of this document. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Cache-Control` | 200 | Always no-cache. A client revalidates with If-None-Match and gets a 304. |
-| `ETag` | 200 | The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `Cache-Control` | 200 | Always `no-cache`. A client revalidates with `If-None-Match` and gets a 304. |
+| `ETag` | 200 | The version of the build of this API. The route table is compiled in, so the build version identifies the document. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
 
 ## `HEAD` `/v1/audio/sinks/{name}` {data-method=HEAD}
 
-The headers of the sink format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers that GET returns for this route, with no body. HEAD records no sound and makes no request to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | [endpoint](#endpoint) | The sink format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. |
-| 304 | none | | The If-None-Match field matches this document's ETag. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `application/json` | [endpoint](#endpoint) | The info document of the `Sink`: the node that a tap runs on, the rate and channel count that a tap uses, and the formats that the tap routes return. |
+| 304 | none | | `If-None-Match` matches the `ETag` of this document. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Cache-Control` | 200 | Always no-cache. A client revalidates with If-None-Match and gets a 304. |
-| `ETag` | 200 | The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `Cache-Control` | 200 | Always `no-cache`. A client revalidates with `If-None-Match` and gets a 304. |
+| `ETag` | 200 | The version of the build of this API. The route table is compiled in, so the build version identifies the document. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
 
 ## `OPTIONS` `/v1/audio/sinks/{name}` {data-method=OPTIONS}
 
-The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
+Returns 204 with an `Allow` header that lists the methods this route accepts (RFC 9110 section 10.2.1).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route allows. |
+| 204 | No body. The `Allow` header lists the methods. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | GET, HEAD, OPTIONS. |
+| `Allow` | 204 | Always `GET, HEAD, OPTIONS`. |
 
 ## `GET` `/v1/audio/sinks/{name}/audio` {data-method=GET}
 
-The audio the speakers play now. The Accept header selects the format.
+Streams the sound that the speakers of the `Sink` are playing now, in the format that the `Accept` header selects. The default is WAV.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
-| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
+| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, from 6 to 256. When the request has no `bitrate`, `opusenc` chooses one from the sample rate. A request for WAV or FLAC that has a `bitrate` gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | The audio the speakers play now. The Accept header selects the format. |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the speakers play now. The Accept header selects the format. |
-| 200 | `audio/wav` | string (binary) | The audio the speakers play now. The Accept header selects the format. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/flac` | string (binary) | Streams the sound that the speakers of the `Sink` are playing now, in the format that the `Accept` header selects. The default is WAV. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | Streams the sound that the speakers of the `Sink` are playing now, in the format that the `Accept` header selects. The default is WAV. |
+| 200 | `audio/wav` | string (binary) | Streams the sound that the speakers of the `Sink` are playing now, in the format that the `Accept` header selects. The default is WAV. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Content-Location` | 200 | The extension route that serves the representation the negotiation chose. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Content-Location` | 200 | The extension route that serves the format that negotiation chose. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sinks/{name}/audio` {data-method=HEAD}
 
-The headers of the audio the speakers play now. The Accept header selects the format. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers that GET returns for this route, with no body. HEAD records no sound and makes no request to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
-| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
+| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, from 6 to 256. When the request has no `bitrate`, `opusenc` chooses one from the sample rate. A request for WAV or FLAC that has a `bitrate` gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | The audio the speakers play now. The Accept header selects the format. |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the speakers play now. The Accept header selects the format. |
-| 200 | `audio/wav` | string (binary) | The audio the speakers play now. The Accept header selects the format. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/flac` | string (binary) | Streams the sound that the speakers of the `Sink` are playing now, in the format that the `Accept` header selects. The default is WAV. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | Streams the sound that the speakers of the `Sink` are playing now, in the format that the `Accept` header selects. The default is WAV. |
+| 200 | `audio/wav` | string (binary) | Streams the sound that the speakers of the `Sink` are playing now, in the format that the `Accept` header selects. The default is WAV. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Content-Location` | 200 | The extension route that serves the representation the negotiation chose. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Content-Location` | 200 | The extension route that serves the format that negotiation chose. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sinks/{name}/audio` {data-method=OPTIONS}
 
-The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
+Returns 204 with an `Allow` header that lists the methods this route accepts (RFC 9110 section 10.2.1).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route allows. |
+| 204 | No body. The `Allow` header lists the methods. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | GET, HEAD, OPTIONS. |
+| `Allow` | 204 | Always `GET, HEAD, OPTIONS`. |
 
 ## `GET` `/v1/audio/sinks/{name}/audio.flac` {data-method=GET}
 
-The audio the speakers play now, as FLAC.
+Streams the sound that the speakers of the `Sink` are playing now, as FLAC.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | The audio the speakers play now, as FLAC. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/flac` | string (binary) | Streams the sound that the speakers of the `Sink` are playing now, as FLAC. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sinks/{name}/audio.flac` {data-method=HEAD}
 
-The headers of the audio the speakers play now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers that GET returns for this route, with no body. HEAD records no sound and makes no request to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | The audio the speakers play now, as FLAC. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/flac` | string (binary) | Streams the sound that the speakers of the `Sink` are playing now, as FLAC. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sinks/{name}/audio.flac` {data-method=OPTIONS}
 
-The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
+Returns 204 with an `Allow` header that lists the methods this route accepts (RFC 9110 section 10.2.1).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route allows. |
+| 204 | No body. The `Allow` header lists the methods. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | GET, HEAD, OPTIONS. |
+| `Allow` | 204 | Always `GET, HEAD, OPTIONS`. |
 
 ## `GET` `/v1/audio/sinks/{name}/audio.opus` {data-method=GET}
 
-The audio the speakers play now, as Ogg Opus.
+Streams the sound that the speakers of the `Sink` are playing now, as Ogg Opus.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
-| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
+| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, from 6 to 256. When the request has no `bitrate`, `opusenc` chooses one from the sample rate. A request for WAV or FLAC that has a `bitrate` gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the speakers play now, as Ogg Opus. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | Streams the sound that the speakers of the `Sink` are playing now, as Ogg Opus. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sinks/{name}/audio.opus` {data-method=HEAD}
 
-The headers of the audio the speakers play now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers that GET returns for this route, with no body. HEAD records no sound and makes no request to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
-| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
+| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, from 6 to 256. When the request has no `bitrate`, `opusenc` chooses one from the sample rate. A request for WAV or FLAC that has a `bitrate` gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the speakers play now, as Ogg Opus. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | Streams the sound that the speakers of the `Sink` are playing now, as Ogg Opus. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sinks/{name}/audio.opus` {data-method=OPTIONS}
 
-The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
+Returns 204 with an `Allow` header that lists the methods this route accepts (RFC 9110 section 10.2.1).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route allows. |
+| 204 | No body. The `Allow` header lists the methods. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | GET, HEAD, OPTIONS. |
+| `Allow` | 204 | Always `GET, HEAD, OPTIONS`. |
 
 ## `GET` `/v1/audio/sinks/{name}/audio.wav` {data-method=GET}
 
-The audio the speakers play now, as PCM in a RIFF WAVE stream.
+Streams the sound that the speakers of the `Sink` are playing now, as PCM in a RIFF WAVE stream.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/wav` | string (binary) | The audio the speakers play now, as PCM in a RIFF WAVE stream. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/wav` | string (binary) | Streams the sound that the speakers of the `Sink` are playing now, as PCM in a RIFF WAVE stream. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sinks/{name}/audio.wav` {data-method=HEAD}
 
-The headers of the audio the speakers play now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers that GET returns for this route, with no body. HEAD records no sound and makes no request to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/wav` | string (binary) | The audio the speakers play now, as PCM in a RIFF WAVE stream. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/wav` | string (binary) | Streams the sound that the speakers of the `Sink` are playing now, as PCM in a RIFF WAVE stream. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sinks/{name}/audio.wav` {data-method=OPTIONS}
 
-The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
+Returns 204 with an `Allow` header that lists the methods this route accepts (RFC 9110 section 10.2.1).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route allows. |
+| 204 | No body. The `Allow` header lists the methods. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | GET, HEAD, OPTIONS. |
+| `Allow` | 204 | Always `GET, HEAD, OPTIONS`. |
 
 ## `GET` `/v1/audio/sources/{name}` {data-method=GET}
 
-The source format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve.
+The info document of the `Source`: the node that a tap runs on, the rate and channel count that a tap uses, and the formats that the tap routes return.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | [endpoint](#endpoint) | The source format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. |
-| 304 | none | | The If-None-Match field matches this document's ETag. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `application/json` | [endpoint](#endpoint) | The info document of the `Source`: the node that a tap runs on, the rate and channel count that a tap uses, and the formats that the tap routes return. |
+| 304 | none | | `If-None-Match` matches the `ETag` of this document. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Cache-Control` | 200 | Always no-cache. A client revalidates with If-None-Match and gets a 304. |
-| `ETag` | 200 | The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `Cache-Control` | 200 | Always `no-cache`. A client revalidates with `If-None-Match` and gets a 304. |
+| `ETag` | 200 | The version of the build of this API. The route table is compiled in, so the build version identifies the document. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
 
 ## `HEAD` `/v1/audio/sources/{name}` {data-method=HEAD}
 
-The headers of the source format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers that GET returns for this route, with no body. HEAD records no sound and makes no request to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `application/json` | [endpoint](#endpoint) | The source format and capture routes. It gives the target node, the rate and channel count for a capture, and the formats the routes serve. |
-| 304 | none | | The If-None-Match field matches this document's ETag. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `application/json` | [endpoint](#endpoint) | The info document of the `Source`: the node that a tap runs on, the rate and channel count that a tap uses, and the formats that the tap routes return. |
+| 304 | none | | `If-None-Match` matches the `ETag` of this document. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Cache-Control` | 200 | Always no-cache. A client revalidates with If-None-Match and gets a 304. |
-| `ETag` | 200 | The build this API was made from. The router table is compiled in, so the build is the whole of a document's identity. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
+| `Cache-Control` | 200 | Always `no-cache`. A client revalidates with `If-None-Match` and gets a 304. |
+| `ETag` | 200 | The version of the build of this API. The route table is compiled in, so the build version identifies the document. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
 
 ## `OPTIONS` `/v1/audio/sources/{name}` {data-method=OPTIONS}
 
-The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
+Returns 204 with an `Allow` header that lists the methods this route accepts (RFC 9110 section 10.2.1).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route allows. |
+| 204 | No body. The `Allow` header lists the methods. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | GET, HEAD, OPTIONS. |
+| `Allow` | 204 | Always `GET, HEAD, OPTIONS`. |
 
 ## `GET` `/v1/audio/sources/{name}/audio` {data-method=GET}
 
-The audio the microphone captures now. The Accept header selects the format.
+Streams the sound that the microphone of the `Source` is capturing now, in the format that the `Accept` header selects. The default is WAV.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
-| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
+| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, from 6 to 256. When the request has no `bitrate`, `opusenc` chooses one from the sample rate. A request for WAV or FLAC that has a `bitrate` gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | The audio the microphone captures now. The Accept header selects the format. |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the microphone captures now. The Accept header selects the format. |
-| 200 | `audio/wav` | string (binary) | The audio the microphone captures now. The Accept header selects the format. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/flac` | string (binary) | Streams the sound that the microphone of the `Source` is capturing now, in the format that the `Accept` header selects. The default is WAV. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | Streams the sound that the microphone of the `Source` is capturing now, in the format that the `Accept` header selects. The default is WAV. |
+| 200 | `audio/wav` | string (binary) | Streams the sound that the microphone of the `Source` is capturing now, in the format that the `Accept` header selects. The default is WAV. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Content-Location` | 200 | The extension route that serves the representation the negotiation chose. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Content-Location` | 200 | The extension route that serves the format that negotiation chose. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sources/{name}/audio` {data-method=HEAD}
 
-The headers of the audio the microphone captures now. The Accept header selects the format. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers that GET returns for this route, with no body. HEAD records no sound and makes no request to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
-| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
+| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, from 6 to 256. When the request has no `bitrate`, `opusenc` chooses one from the sample rate. A request for WAV or FLAC that has a `bitrate` gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | The audio the microphone captures now. The Accept header selects the format. |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the microphone captures now. The Accept header selects the format. |
-| 200 | `audio/wav` | string (binary) | The audio the microphone captures now. The Accept header selects the format. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/flac` | string (binary) | Streams the sound that the microphone of the `Source` is capturing now, in the format that the `Accept` header selects. The default is WAV. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | Streams the sound that the microphone of the `Source` is capturing now, in the format that the `Accept` header selects. The default is WAV. |
+| 200 | `audio/wav` | string (binary) | Streams the sound that the microphone of the `Source` is capturing now, in the format that the `Accept` header selects. The default is WAV. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Content-Location` | 200 | The extension route that serves the representation the negotiation chose. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Content-Location` | 200 | The extension route that serves the format that negotiation chose. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sources/{name}/audio` {data-method=OPTIONS}
 
-The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
+Returns 204 with an `Allow` header that lists the methods this route accepts (RFC 9110 section 10.2.1).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route allows. |
+| 204 | No body. The `Allow` header lists the methods. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | GET, HEAD, OPTIONS. |
+| `Allow` | 204 | Always `GET, HEAD, OPTIONS`. |
 
 ## `GET` `/v1/audio/sources/{name}/audio.flac` {data-method=GET}
 
-The audio the microphone captures now, as FLAC.
+Streams the sound that the microphone of the `Source` is capturing now, as FLAC.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | The audio the microphone captures now, as FLAC. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/flac` | string (binary) | Streams the sound that the microphone of the `Source` is capturing now, as FLAC. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sources/{name}/audio.flac` {data-method=HEAD}
 
-The headers of the audio the microphone captures now, as FLAC. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers that GET returns for this route, with no body. HEAD records no sound and makes no request to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/flac` | string (binary) | The audio the microphone captures now, as FLAC. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/flac` | string (binary) | Streams the sound that the microphone of the `Source` is capturing now, as FLAC. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sources/{name}/audio.flac` {data-method=OPTIONS}
 
-The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
+Returns 204 with an `Allow` header that lists the methods this route accepts (RFC 9110 section 10.2.1).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route allows. |
+| 204 | No body. The `Allow` header lists the methods. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | GET, HEAD, OPTIONS. |
+| `Allow` | 204 | Always `GET, HEAD, OPTIONS`. |
 
 ## `GET` `/v1/audio/sources/{name}/audio.opus` {data-method=GET}
 
-The audio the microphone captures now, as Ogg Opus.
+Streams the sound that the microphone of the `Source` is capturing now, as Ogg Opus.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
-| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
+| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, from 6 to 256. When the request has no `bitrate`, `opusenc` chooses one from the sample rate. A request for WAV or FLAC that has a `bitrate` gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the microphone captures now, as Ogg Opus. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | Streams the sound that the microphone of the `Source` is capturing now, as Ogg Opus. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sources/{name}/audio.opus` {data-method=HEAD}
 
-The headers of the audio the microphone captures now, as Ogg Opus. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers that GET returns for this route, with no body. HEAD records no sound and makes no request to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
-| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, 6 to 256. opusenc chooses one from the sample rate when this is absent. A bitrate on WAV or FLAC is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
+| `bitrate` | query | no | string | The Opus bitrate in kbit/s per channel, from 6 to 256. When the request has no `bitrate`, `opusenc` chooses one from the sample rate. A request for WAV or FLAC that has a `bitrate` gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/ogg; codecs=opus` | string (binary) | The audio the microphone captures now, as Ogg Opus. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/ogg; codecs=opus` | string (binary) | Streams the sound that the microphone of the `Source` is capturing now, as Ogg Opus. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sources/{name}/audio.opus` {data-method=OPTIONS}
 
-The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
+Returns 204 with an `Allow` header that lists the methods this route accepts (RFC 9110 section 10.2.1).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route allows. |
+| 204 | No body. The `Allow` header lists the methods. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | GET, HEAD, OPTIONS. |
+| `Allow` | 204 | Always `GET, HEAD, OPTIONS`. |
 
 ## `GET` `/v1/audio/sources/{name}/audio.wav` {data-method=GET}
 
-The audio the microphone captures now, as PCM in a RIFF WAVE stream.
+Streams the sound that the microphone of the `Source` is capturing now, as PCM in a RIFF WAVE stream.
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/wav` | string (binary) | The audio the microphone captures now, as PCM in a RIFF WAVE stream. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/wav` | string (binary) | Streams the sound that the microphone of the `Source` is capturing now, as PCM in a RIFF WAVE stream. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `HEAD` `/v1/audio/sources/{name}/audio.wav` {data-method=HEAD}
 
-The headers of the audio the microphone captures now, as PCM in a RIFF WAVE stream. HEAD takes no sample and makes no call to the capture container (RFC 9110 section 9.3.2).
+The headers that GET returns for this route, with no body. HEAD records no sound and makes no request to the capture container (RFC 9110 section 9.3.2).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
-| `t` | query | no | string | The W3C Media Fragments temporal dimension in NPT: t=begin,end, t=begin, or t=,end. The interval is half-open, and its zero is the instant the capture container accepts the request. A begin over 60 seconds is a 400. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
+| `t` | query | no | string | The part of the capture to return, as a W3C Media Fragments time in NPT: `t=begin,end`, `t=begin`, or `t=,end`. The interval includes `begin` and excludes `end`. Zero is the moment that the capture container accepts the request. A `begin` over 60 seconds gets a 400. |
 
 **Answers**
 
 | Status | Media type | Schema | Description |
 | --- | --- | --- | --- |
-| 200 | `audio/wav` | string (binary) | The audio the microphone captures now, as PCM in a RIFF WAVE stream. |
-| 400 | `application/problem+json` | [problem](#problem) | A t= the grammar refuses, a t=a,b with a at or after b, a begin over 60 seconds, a repeated dimension, an unknown query parameter, or a knob the format does not take. |
-| 401 | `application/problem+json` | [problem](#problem) | No client certificate and no token, or a token the TokenReview refuses. The WWW-Authenticate header carries the review's own words. |
-| 403 | `application/problem+json` | [problem](#problem) | The SubjectAccessReview said no. The WWW-Authenticate header names the scope the caller would need. |
-| 404 | `application/problem+json` | [problem](#problem) | No Sink or Source of that name, or PipeWire holds no node for it. |
-| 405 | `application/problem+json` | [problem](#problem) | A method other than GET, HEAD, and OPTIONS. |
-| 406 | `application/problem+json` | [problem](#problem) | Accept excludes every representation the route serves. The acceptable member lists what it does serve, with the URI of each. |
-| 409 | `application/problem+json` | [problem](#problem) | The endpoint has no status.node. The detail says to power the device on. |
-| 500 | `application/problem+json` | [problem](#problem) | The tap's link landed on a node other than the one asked for. |
-| 502 | `application/problem+json` | [problem](#problem) | The capture container answered something that is not HTTP or not a problem document. |
-| 503 | `application/problem+json` | [problem](#problem) | The capture container is at its tap limit, refused the connection, is not ready, has no certificate this API trusts, or PipeWire refused pw-record. |
-| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no headers within the header timeout. |
+| 200 | `audio/wav` | string (binary) | Streams the sound that the microphone of the `Source` is capturing now, as PCM in a RIFF WAVE stream. |
+| 400 | `application/problem+json` | [problem](#problem) | The `t=` value does not match the grammar, `t=a,b` has `a` at or after `b`, the begin is over 60 seconds, a dimension is repeated, a query parameter is unknown, or the format does not accept the parameter. |
+| 401 | `application/problem+json` | [problem](#problem) | The request has no client certificate and no token, or the `TokenReview` refuses the token. The `WWW-Authenticate` header contains the review's message. |
+| 403 | `application/problem+json` | [problem](#problem) | The `SubjectAccessReview` denied the request. The `WWW-Authenticate` header names the scope that the caller needs. |
+| 404 | `application/problem+json` | [problem](#problem) | No `Sink` or `Source` has that name, or PipeWire has no node for it. |
+| 405 | `application/problem+json` | [problem](#problem) | The method is not GET, HEAD, or OPTIONS. |
+| 406 | `application/problem+json` | [problem](#problem) | `Accept` excludes every representation that the route serves. The `acceptable` member lists the representations that it does serve, each with its URI. |
+| 409 | `application/problem+json` | [problem](#problem) | The `Sink` or `Source` has no `status.node`. The `detail` says to power on or connect the device. |
+| 500 | `application/problem+json` | [problem](#problem) | The tap connected to a node other than the one that the request asked for. |
+| 502 | `application/problem+json` | [problem](#problem) | The capture container returned a response that is not HTTP, or an error response that is not a problem document. |
+| 503 | `application/problem+json` | [problem](#problem) | The API could not read the `Sink` or `Source` from the API server, the node has no Ready capture container, or the capture container is at its tap limit, refused the connection, has no certificate that this API trusts, or could not read the PipeWire graph, or PipeWire refused `pw-record`. |
+| 504 | `application/problem+json` | [problem](#problem) | The capture container sent no response headers within the header timeout. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | Always none. A live capture has no byte identity: offset 44 of two requests is two different moments. |
-| `Cache-Control` | 200 | Always no-store. A capture is never cacheable. |
-| `Content-Disposition` | 200 | The save name a browser gets, with the RFC 3339 time's colons replaced by dashes. |
-| `Link` | 200 | The service-desc and service-doc relations on every answer, describedby on every route that names an object, alternate on the extensionless route, and related from an info document to its capture routes. |
-| `Vary` | 200 | Always Accept. RFC 9110 section 12.5.5's second purpose: this answer was subject to negotiation, and an Accept could have made it a 406. |
-| `X-Content-Type-Options` | 200 | Always nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6). |
+| `Accept-Ranges` | 200 | Always `none`, because a live capture has no fixed bytes: byte 44 of two requests comes from two different moments. |
+| `Cache-Control` | 200 | Always `no-store`, because a live capture never returns the same bytes twice. |
+| `Content-Disposition` | 200 | The file name that a browser saves: `<name>-<time>.<ext>`, where the time is RFC 3339 UTC with the colons replaced by dashes. |
+| `Link` | 200 | Every response has the `service-desc` and `service-doc` relations. A route that names an object adds `describedby`. The route with no extension adds `alternate` for each format, and the info document of a `Sink` or `Source` adds `related` for each tap route. |
+| `Vary` | 200 | Always `Accept`. The response depends on negotiation, because an `Accept` header can turn the 200 of any route into a 406 (RFC 9110 section 12.5.5). |
+| `X-Content-Type-Options` | 200 | Always `nosniff`, so a browser uses the `Content-Type` and does not guess a type from the bytes (Fetch Standard section 3.6). |
 
 ## `OPTIONS` `/v1/audio/sources/{name}/audio.wav` {data-method=OPTIONS}
 
-The methods this route allows, as a 204 with Allow (RFC 9110 section 10.2.1).
+Returns 204 with an `Allow` header that lists the methods this route accepts (RFC 9110 section 10.2.1).
 
 **Parameters**
 
 | Parameter | In | Required | Type | Description |
 | --- | --- | --- | --- | --- |
-| `name` | path | yes | string | The Sink or Source name. The operator builds this name from the hardware identity. |
+| `name` | path | yes | string | The name of the `Sink` or `Source`. The operator builds the name from the hardware identity of the device. |
 
 **Answers**
 
 | Status | Description |
 | --- | --- |
-| 204 | The methods this route allows. |
+| 204 | No body. The `Allow` header lists the methods. |
 
 **Headers**
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Allow` | 204 | GET, HEAD, OPTIONS. |
+| `Allow` | 204 | Always `GET, HEAD, OPTIONS`. |
 
 ## Schemas
 
 ### discovery
 
-The discovery document the three capture APIs share.
+The discovery document. The audio, display, and media capture APIs use the same shape.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1177,7 +1176,7 @@ The discovery document the three capture APIs share.
 
 ### endpoint
 
-One endpoint's own document: the node a tap targets, the rate and channel count it would use, the format the node reports now, and the forms served.
+The info document of a `Sink` or `Source`: the node that a tap runs on, the rate and channel count that a tap uses, the format that the node reports now, and the media types and extensions that the capture routes serve.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1194,7 +1193,7 @@ One endpoint's own document: the node a tap targets, the rate and channel count 
 
 ### problem
 
-The RFC 9457 problem document every error answers with. detail carries the source's own words: pw-record's stderr, an encoder's stderr, or the API server's status message. instance is the request path, a number sign, and the request id the log line carries.
+The RFC 9457 problem document that every error response contains. `detail` contains the error text of the part that failed, word for word: the `stderr` of `pw-record` or of an encoder, or the status message of the API server. `instance` is the request path, a `#`, and the request ID, which the log line of the request also has.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1218,13 +1217,14 @@ Every route requires `mutualTLS`, or `bearerToken`, unless its own section state
 
 | Scheme | Type | Description |
 | --- | --- | --- |
-| `bearerToken` | HTTP bearer, JWT | A ServiceAccount token minted with the audience audio-api, which this API checks with a TokenReview. |
-| `mutualTLS` | Mutual TLS | A client certificate the cluster's own authority signed. The subject's common name is the user and its organization values are the groups, which is how the API server reads one. |
+| `bearerToken` | HTTP bearer, JWT | A `ServiceAccount` token with the audience `audio-api`. This API validates it with a `TokenReview`. |
+| `mutualTLS` | Mutual TLS | A client certificate that the cluster's own certificate authority signed. The subject's common name is the user name and its organization values are the groups, as the Kubernetes API server reads a certificate. |
 
 ## The document itself
 
-`audio-api` serves the document this page is made from, at
-`/v1/audio/openapi.json` on the API's own host. This site publishes
-the same copy at [/v1/audio/openapi.json](/v1/audio/openapi.json),
-where the `servers` member is a placeholder: the served copy names
-the origin the request reached.
+`audio-api` serves the document that this page is generated from at
+`/v1/audio/openapi.json`, on the API's own host. This site publishes a
+copy at [/v1/audio/openapi.json](/v1/audio/openapi.json), in which the
+`servers` member is a placeholder origin. The served copy names the
+configured public base URL, or the origin of the request when no base
+URL is configured.

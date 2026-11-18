@@ -1,23 +1,22 @@
 package main
 
-// The card's own mixer: the control elements a sound card declares,
-// read and written through the control interface without libasound.
+// Reads and writes the control elements that a sound card declares on
+// /dev/snd/controlC<N>, with the ioctls of the control interface and
+// without libasound. Examples are a USB DAC's PCM Playback Volume, a
+// Realtek codec's Master Playback Switch, and an Auto-Mute Mode
+// selector.
 //
-// A card publishes its hardware controls as elements on
-// /dev/snd/controlC<N>: a USB DAC's PCM Playback Volume, a Realtek
-// codec's Master Playback Switch, an Auto-Mute Mode selector. Nothing
-// else in this pod touches them. The declared adapter nodes carry no
-// ACP device, so PipeWire never opens the mixer, and every volume it
-// applies is a software gain. That leaves the hardware wherever ALSA
-// left it at boot, and it makes this operator the one writer of these
-// registers.
+// PipeWire sets no volume or switch on the card, because its ALSA
+// monitor is off and the adapter nodes that the operator declares carry
+// no ACP device. So every volume that PipeWire applies is a software
+// gain, and a hardware control keeps the value that ALSA gave it at boot
+// until a spec changes it. The exception is IEC958 Playback Default,
+// which alsa-lib's hdmi device writes for a sink that passes encoded
+// formats (bitstream.go).
 //
-// This file reads what each element declares, spells one value the
-// way spec.controls and status.observed.controls carry it, and writes
-// a declared value back. A jack element is read here too, because it
-// is on the same device, and reported elsewhere: it is not a
-// capability, because nothing can set it. It reports whether a plug
-// is in, and the Connected condition reads it.
+// A jack element is read through the same device. It is not a
+// capability, because nothing can set it. Its value reports whether a
+// plug is in, and the Connected condition reads it.
 
 import (
 	"encoding/binary"
@@ -30,10 +29,9 @@ import (
 	"unsafe"
 )
 
-// The element types the control interface publishes, from
-// include/uapi/sound/asound.h. These three are the three words
-// status.capabilities uses. The others, bytes, an IEC958 channel
-// status, and a 64-bit integer, have no spelling in the API and are
+// The element types that status.capabilities reports, from
+// include/uapi/sound/asound.h. The other types (bytes, IEC958 channel
+// status, and 64-bit integer) have no representation in the API and are
 // not capabilities.
 const (
 	ctlElemTypeBoolean    = 1
@@ -41,34 +39,31 @@ const (
 	ctlElemTypeEnumerated = 3
 )
 
-// The interfaces an element belongs to. A jack is on the card
-// interface, and a control a person sets is on the mixer interface.
-// The PCM interface carries the ELD and the channel map, which
-// alsa.go reads and this file leaves alone.
+// The interfaces an element belongs to. A jack is on the card interface
+// and a control that a spec sets is on the mixer interface. The ELD
+// element is on the PCM interface (alsa.go).
 const (
 	ctlElemIfaceCard  = 0
 	ctlElemIfaceMixer = 2
 )
 
-// The access bits this file reads: whether an element takes a write,
-// whether it declares a dB range through TLV, and whether the card has
-// switched it off for now. An inactive element is one a routing
-// change disabled, and a write to it does nothing.
+// Access bits from include/uapi/sound/asound.h. The card marks an
+// element inactive when a routing change disables it, and a write to an
+// inactive element has no effect.
 const (
 	ctlAccessWrite    = 1 << 1
 	ctlAccessTLVRead  = 1 << 4
 	ctlAccessInactive = 1 << 8
 )
 
-// The request that writes one element's value. It takes the same
-// 1224-byte structure the read does, and alsa.go builds the other
-// three requests the same way.
+// SNDRV_CTL_IOCTL_ELEM_WRITE. Its argument is the same ctlElemValue
+// structure that the read in alsa.go uses.
 var ctlIoctlElemWrite = iowr(0x13, ctlElemValueSize)
 
-// Where each member of the info value union starts, from
-// include/uapi/sound/asound.h. An integer element carries three longs,
-// and an enumerated element carries its item count, the item a caller
-// asks about, and that item's name.
+// The offsets of the fields inside the value union of ctlElemInfo, from
+// include/uapi/sound/asound.h. An integer element has min, max, and
+// step as three longs. An enumerated element has its item count, then
+// the number of the item to look up, then that item's name.
 const (
 	infoIntegerMin      = 0
 	infoIntegerMax      = 8
@@ -79,18 +74,16 @@ const (
 	enumeratedNameSize  = 64
 )
 
-// The type words status.capabilities uses. They are the CRD's
-// enumeration, and a reader of the resource never sees the kernel's
-// numbers.
+// The values of the type field in status.capabilities, as the CRD
+// enumerates them.
 const (
 	capabilityInteger    = "integer"
 	capabilityBoolean    = "boolean"
 	capabilityEnumerated = "enumerated"
 )
 
-// The spelling a boolean control takes in spec.controls and reports
-// in status.observed.controls. amixer uses the same two words, so a
-// person who has set a switch by hand has seen them.
+// The values of a boolean control in spec.controls and
+// status.observed.controls. amixer uses the same words.
 const (
 	controlOn  = "on"
 	controlOff = "off"
@@ -98,9 +91,9 @@ const (
 
 // controlCapability is one control as status.capabilities reports it.
 //
-// The three number fields are pointers because a minimum of zero is
-// the common case, and a reader has to tell it from no minimum at
-// all: a boolean declares no range, and an integer always does.
+// Min, Max, and Step are pointers so that a minimum of zero is not
+// confused with no minimum. A boolean declares no range and an integer
+// always does.
 type controlCapability struct {
 	Type        string   `json:"type"`
 	Min         *int64   `json:"min,omitempty"`
@@ -112,14 +105,14 @@ type controlCapability struct {
 	Channels    int      `json:"channels,omitempty"`
 }
 
-// control is one control element: the identity the kernel gives it,
-// and what it accepts.
+// control is one control element, with the identity that the kernel
+// gives it and its capability.
 //
-// The index is kept beside the name because a name is not unique on
-// a card. An Intel HDMI codec declares one IEC958 Playback Switch per
-// slot, all under one name, and the index is what tells the slots
-// apart. The attach rule hands each HDMI sink the element with its
-// own index, and a write through that element reaches the right slot.
+// Index is kept next to Name because a name is not unique on a card. An
+// Intel HDMI codec declares one IEC958 Playback Switch for each HDMI
+// output under the same name. attachControls gives each HDMI sink the
+// element whose index matches its output, so a write through that
+// element reaches the right output.
 type control struct {
 	NumID      uint32
 	Interface  int32
@@ -129,8 +122,6 @@ type control struct {
 	Capability controlCapability
 }
 
-// mixer is one card's control device, open, with everything the card
-// declares read once.
 type mixer struct {
 	card     int
 	device   *os.File
@@ -139,13 +130,9 @@ type mixer struct {
 	byName   map[string]control
 }
 
-// openMixer opens a card's control device and reads every element it
-// declares.
-//
-// The device is opened for reading and writing because a declared
-// control is written through the same descriptor it is read through,
-// and the kernel checks the element's own write access, not the
-// descriptor's mode.
+// openMixer opens the device read-write because writeElement writes
+// through the same descriptor that enumerate reads. The kernel still
+// refuses a write to an element without its write access flag.
 func openMixer(card int) (*mixer, error) {
 	device, err := os.OpenFile(fmt.Sprintf("%s/controlC%d", sndDir, card), os.O_RDWR, 0)
 	if err != nil {
@@ -161,15 +148,12 @@ func openMixer(card int) (*mixer, error) {
 
 func (m *mixer) Close() error { return m.device.Close() }
 
-// enumerate reads every element the card declares and sorts it into
-// the controls a spec may write and the jacks the Connected condition
-// reads.
-//
-// Four rules leave an element out. It is inactive, so a write would
-// do nothing. It takes no write and is not a jack, so nothing can be
-// declared for it. Its type has no spelling in the API. Or the card
-// refuses to describe it, in which case the rest of the card still
-// reads.
+// enumerate puts the elements that a spec can write in m.controls and
+// the jacks in m.jacks. It skips an inactive element, because a write to
+// it has no effect. It skips an element that accepts no write and is not
+// a jack, and an element whose type has no representation in the API.
+// It logs and skips an element that the card fails to describe, so one
+// bad element does not stop the rest of the card from reading.
 func (m *mixer) enumerate() error {
 	ids, err := listControlElements(m.device)
 	if err != nil {
@@ -208,33 +192,33 @@ func (m *mixer) enumerate() error {
 				element.Name, m.card, err)
 			continue
 		}
-		capability, spelled := capabilityFrom(info, items, m.decibels(info))
-		if !spelled {
+		capability, supported := capabilityFrom(info, items, m.decibels(info))
+		if !supported {
 			continue
 		}
 		element.Capability = capability
 		m.controls = append(m.controls, element)
 		if _, taken := m.byName[element.Name]; !taken {
-			// The first element of a name keeps the name. A card with
-			// several HDMI slots declares one IEC958 control per slot
-			// under one name, and a caller that means a particular slot
-			// holds the element itself and reads or writes through it.
+			// A card with several HDMI outputs declares one IEC958
+			// control for each output under the same name, and byName
+			// keeps the first. A caller that needs a particular output
+			// reads and writes through its element from m.controls.
 			m.byName[element.Name] = element
 		}
 	}
 	return nil
 }
 
-// isJackControl reports whether an element is a jack: a boolean on
-// the card interface whose name ends in the word. The kernel's jack
-// layer creates one for every socket the codec can sense, and the
-// element reports whether a plug is in.
+// isJackControl reports whether an element is on the card interface and
+// has a name that ends in " Jack". enumerate also checks that the
+// element is boolean. The kernel's jack layer creates one such element
+// for each socket that the codec can sense.
 func isJackControl(iface int32, name string) bool {
 	return iface == ctlElemIfaceCard && strings.HasSuffix(name, " Jack")
 }
 
-// capabilityFrom turns one element's information into the capability
-// the API reports, and says whether the element has a spelling at all.
+// capabilityFrom returns false for an element whose type has no
+// representation in the API.
 func capabilityFrom(info ctlElemInfo, items []string, levels *decibelRange) (controlCapability, bool) {
 	capability := controlCapability{Channels: int(info.Count)}
 	switch info.Type {
@@ -248,8 +232,8 @@ func capabilityFrom(info ctlElemInfo, items []string, levels *decibelRange) (con
 		min, max, step := integerRange(info.Value[:])
 		capability.Min, capability.Max = &min, &max
 		if step != 0 {
-			// A step of zero means the control accepts every number
-			// in its range, so the API leaves the field out.
+			// A step of zero means every number in the range is valid,
+			// so Step stays nil.
 			capability.Step = &step
 		}
 		if levels != nil {
@@ -266,21 +250,16 @@ func capabilityFrom(info ctlElemInfo, items []string, levels *decibelRange) (con
 	return capability, true
 }
 
-// integerRange reads an integer element's three numbers out of the
-// value union.
 func integerRange(value []byte) (min, max, step int64) {
 	return int64(binary.NativeEndian.Uint64(value[infoIntegerMin : infoIntegerMin+8])),
 		int64(binary.NativeEndian.Uint64(value[infoIntegerMax : infoIntegerMax+8])),
 		int64(binary.NativeEndian.Uint64(value[infoIntegerStep : infoIntegerStep+8]))
 }
 
-// enumeratedItems reads the name of every value an enumerated control
-// accepts.
-//
-// This is one ioctl per item because the information call answers
-// for the one item number the caller writes into the union. The card
-// returns one name at a time, and a selector with three values costs
-// three calls, once, when the mixer opens.
+// enumeratedItems reads the name of every value that an enumerated
+// control accepts. The info ioctl returns the name of one item, the one
+// whose number the caller writes into the union, so this makes one ioctl
+// for each item. It runs only when the mixer opens.
 func (m *mixer) enumeratedItems(info ctlElemInfo) ([]string, error) {
 	if info.Type != ctlElemTypeEnumerated {
 		return nil, nil
@@ -298,7 +277,6 @@ func (m *mixer) enumeratedItems(info ctlElemInfo) ([]string, error) {
 	return items, nil
 }
 
-// readControl reads one control by the name the card gave it.
 func (m *mixer) readControl(name string) (string, error) {
 	element, declared := m.byName[name]
 	if !declared {
@@ -307,7 +285,6 @@ func (m *mixer) readControl(name string) (string, error) {
 	return m.readElement(element)
 }
 
-// readElement reads one element's current value in the API's spelling.
 func (m *mixer) readElement(element control) (string, error) {
 	value := ctlElemValue{ID: ctlElemID{NumID: element.NumID}}
 	if err := ioctl(m.device, ctlIoctlElemRead, unsafe.Pointer(&value)); err != nil {
@@ -316,7 +293,6 @@ func (m *mixer) readElement(element control) (string, error) {
 	return controlValueFrom(element.Capability, value.Value[:])
 }
 
-// writeControl writes one control by the name the card gave it.
 func (m *mixer) writeControl(name, value string) error {
 	element, declared := m.byName[name]
 	if !declared {
@@ -325,11 +301,9 @@ func (m *mixer) writeControl(name, value string) error {
 	return m.writeElement(element, value)
 }
 
-// writeElement writes one value into every channel of one element.
-//
-// Every channel takes the same value because spec.controls declares
-// one value per control. Per-channel levels are a balance control,
-// and no consumer has asked for one.
+// writeElement writes one value into every channel of an element,
+// because spec.controls has one value for each control. A different
+// level for each channel, as a balance control needs, is not supported.
 func (m *mixer) writeElement(element control, value string) error {
 	raw := ctlElemValue{ID: ctlElemID{NumID: element.NumID}}
 	if err := encodeControlValue(element.Capability, value, raw.Value[:]); err != nil {
@@ -341,9 +315,8 @@ func (m *mixer) writeElement(element control, value string) error {
 	return nil
 }
 
-// jackStates reads every jack the card senses, keyed by the jack's
-// name. The Connected condition reads the result, and a card that
-// senses no jack, such as a USB device, answers with an empty map.
+// jackStates reads every jack of the card, keyed by the jack's name. A
+// card that senses no jacks, such as a USB device, returns an empty map.
 func (m *mixer) jackStates() (map[string]bool, error) {
 	states := map[string]bool{}
 	for _, jack := range m.jacks {
@@ -356,19 +329,18 @@ func (m *mixer) jackStates() (map[string]bool, error) {
 	return states, nil
 }
 
-// controlValueFrom spells one element's value the way the API carries
-// it.
+// controlValueFrom converts the raw value of an element to the string
+// that spec.controls and status.observed.controls use.
 //
-// A control with several channels reports the first channel's value,
-// because the operator writes every channel alike and a person set
-// them together. A card whose channels a hand-run tool set apart
-// shows the first one here, and a declared value brings them back
-// together.
+// A control with several channels reports the value of the first
+// channel, because the operator writes the same value to every channel.
+// When someone sets the channels to different values by hand, the next
+// write of the spec's value sets them all to it again.
 func controlValueFrom(capability controlCapability, raw []byte) (string, error) {
 	switch capability.Type {
 	case capabilityInteger, capabilityBoolean:
 		if len(raw) < 8 {
-			return "", fmt.Errorf("the value holds %d bytes, and a number takes 8", len(raw))
+			return "", fmt.Errorf("the value has %d bytes, and a number needs 8", len(raw))
 		}
 		number := int64(binary.NativeEndian.Uint64(raw[:8]))
 		if capability.Type == capabilityInteger {
@@ -380,7 +352,7 @@ func controlValueFrom(capability controlCapability, raw []byte) (string, error) 
 		return controlOff, nil
 	case capabilityEnumerated:
 		if len(raw) < 4 {
-			return "", fmt.Errorf("the value holds %d bytes, and an item takes 4", len(raw))
+			return "", fmt.Errorf("the value has %d bytes, and an item needs 4", len(raw))
 		}
 		item := int(binary.NativeEndian.Uint32(raw[:4]))
 		if item < 0 || item >= len(capability.Values) {
@@ -388,11 +360,9 @@ func controlValueFrom(capability controlCapability, raw []byte) (string, error) 
 		}
 		return capability.Values[item], nil
 	}
-	return "", fmt.Errorf("a control of type %q has no spelling", capability.Type)
+	return "", fmt.Errorf("a control of type %q has no string form in spec.controls", capability.Type)
 }
 
-// encodeControlValue parses the API's spelling back and writes it into
-// every channel of an element's value union.
 func encodeControlValue(capability controlCapability, value string, raw []byte) error {
 	channels := capability.Channels
 	if channels < 1 {
@@ -402,7 +372,7 @@ func encodeControlValue(capability controlCapability, value string, raw []byte) 
 	case capabilityInteger:
 		number, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			return fmt.Errorf("%q is not a number, and this control takes one", value)
+			return fmt.Errorf("%q is not a number, and this control accepts only a number", value)
 		}
 		if capability.Min != nil && number < *capability.Min ||
 			capability.Max != nil && number > *capability.Max {
@@ -425,11 +395,9 @@ func encodeControlValue(capability controlCapability, value string, raw []byte) 
 		}
 		return fillChannels(raw, 4, channels, uint64(item))
 	}
-	return fmt.Errorf("a control of type %q takes no value", capability.Type)
+	return fmt.Errorf("a control of type %q accepts no value", capability.Type)
 }
 
-// rangeEnd spells one end of a range for an error message, and says
-// so where the control declares no end.
 func rangeEnd(end *int64) string {
 	if end == nil {
 		return "none"
@@ -437,10 +405,9 @@ func rangeEnd(end *int64) string {
 	return strconv.FormatInt(*end, 10)
 }
 
-// fillChannels writes one number into every channel of a value union.
 func fillChannels(raw []byte, width, channels int, number uint64) error {
 	if len(raw) < width*channels {
-		return fmt.Errorf("the control carries %d channels, and the value holds %d", channels, len(raw)/width)
+		return fmt.Errorf("the control has %d channels, and the value contains %d", channels, len(raw)/width)
 	}
 	for channel := range channels {
 		if width == 8 {
@@ -455,7 +422,6 @@ func fillChannels(raw []byte, width, channels int, number uint64) error {
 	return nil
 }
 
-// nullTerminated reads a string out of a fixed-length field.
 func nullTerminated(field []byte) string {
 	for at, character := range field {
 		if character == 0 {

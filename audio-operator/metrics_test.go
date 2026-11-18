@@ -1,9 +1,8 @@
 package main
 
-// These tests scrape a real registry through the promhttp handler, the
-// way milestone 65 proves every operator's metrics: build the
-// registry, read it back through the handler, and check the series it
-// answers with. No test here opens a card, PipeWire, or a bus.
+// These tests read a real registry through the promhttp handler, as
+// root plan 65 describes for every operator, and open no card,
+// PipeWire, or bus.
 
 import (
 	"context"
@@ -18,8 +17,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// scrape reads the registry through the same handler the listener
-// serves, with no network socket behind it.
+// scrape returns the registry's text exposition through the handler
+// that the listener serves, without a network socket.
 func scrape(t *testing.T, readings *metrics) string {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
@@ -27,18 +26,16 @@ func scrape(t *testing.T, readings *metrics) string {
 	readings.handler().ServeHTTP(recorder, request)
 	body, err := io.ReadAll(recorder.Result().Body)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the scrape: %v", err)
 	}
 	return string(body)
 }
 
-// Layer 1 is the one gauge every process in the organization carries,
-// under its own component name and the version it was built from.
 func TestTheRuntimeCollectorsAreOnTheRegistry(t *testing.T) {
 	body := scrape(t, newMetrics("dev"))
 	for _, want := range []string{"go_goroutines ", "process_start_time_seconds "} {
 		if !strings.Contains(body, want) {
-			t.Errorf("the scrape carries no %s series", strings.TrimSpace(want))
+			t.Errorf("the scrape carries no %s series, want one", strings.TrimSpace(want))
 		}
 	}
 }
@@ -52,8 +49,6 @@ func TestBuildInfoNamesTheComponentAndVersion(t *testing.T) {
 	}
 }
 
-// Layer 2's duration is observed on every pass, whether or not it
-// failed, and the error counter moves only on the ones that did.
 func TestReconciledObservesEveryPassAndCountsOnlyErrors(t *testing.T) {
 	readings := newMetrics("test")
 	readings.reconciled(SinkKind, 5*time.Millisecond, nil)
@@ -71,28 +66,25 @@ func TestReconciledObservesEveryPassAndCountsOnlyErrors(t *testing.T) {
 		}
 	}
 	if strings.Contains(body, `audio_reconcile_errors_total{kind="Source"}`) {
-		t.Errorf("a Source pass that never failed drew an error series:\n%s", body)
+		t.Errorf("a Source pass that never failed drew an error series, want none:\n%s", body)
 	}
 }
 
-// An empty METRICS_ADDRESS is how a pod under test runs: no listener,
-// and no port bound.
 func TestAnEmptyMetricsAddressServesNoMetrics(t *testing.T) {
 	listener, err := newMetrics("test").listen("")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatalf(`listen("") returned %v, want no error`, err)
 	}
 	if listener != nil {
-		t.Errorf("listen answered %v, want no listener", listener)
+		t.Errorf(`listen("") returned %v, want no listener`, listener)
 	}
 }
 
-// A real listener serves the same registry a direct scrape reads.
 func TestTheListenerServesTheRegistryAtSlashMetrics(t *testing.T) {
 	readings := newMetrics("2026.09.10-001")
 	listener, err := readings.listen("127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatalf("listening on 127.0.0.1:0: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -106,20 +98,18 @@ func TestTheListenerServesTheRegistryAtSlashMetrics(t *testing.T) {
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the listener's response: %v", err)
 	}
 	if !strings.Contains(string(body), `component="audio-operator"`) {
-		t.Errorf("the listener answered %q, want liken_build_info in it", body)
+		t.Errorf("the listener served %q, want liken_build_info in it", body)
 	}
 }
 
-// The listener stops when the run's context ends, the way every other
-// goroutine in this operator does.
 func TestTheMetricsListenerStopsWithTheRun(t *testing.T) {
 	readings := newMetrics("test")
 	listener, err := readings.listen("127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("listen: %v", err)
+		t.Fatalf("listening on 127.0.0.1:0: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
@@ -132,17 +122,13 @@ func TestTheMetricsListenerStopsWithTheRun(t *testing.T) {
 	select {
 	case <-stopped:
 	case <-time.After(20 * time.Second):
-		t.Fatal("the metrics listener did not stop with the run")
+		t.Fatal("the metrics listener still serves 20 seconds after the run ended, want it stopped")
 	}
 }
 
-// Repeated scrapes read the registry in memory. Nothing here mutates a
-// counter or reaches PipeWire, BlueZ, or a card, so two scrapes with no
-// write between them read the same numbers.
-// ownSeries keeps the lines the operator itself writes. The runtime's
-// go_* and process_* series move between two scrapes with no write in
-// between, because the collector reads the live process, so a test of
-// the operator's own registry leaves them out.
+// ownSeries drops the go_ and process_ series. Their collectors read
+// the live process, so their values change between two scrapes even
+// when nothing is written.
 func ownSeries(body string) string {
 	var kept []string
 	for _, line := range strings.Split(body, "\n") {
@@ -167,9 +153,6 @@ func TestRepeatedScrapesLeaveCountersUnchanged(t *testing.T) {
 	}
 }
 
-// The hardware triple's gauges come straight from the same Connected
-// and Ready facts sinkstatus.go composes into the resource's
-// conditions, and from whether a claim holds the endpoint.
 func TestEndpointGaugesReflectTheFactsOnePassReads(t *testing.T) {
 	cases := []struct {
 		name                      string
@@ -231,9 +214,7 @@ func TestEndpointGaugesReflectTheFactsOnePassReads(t *testing.T) {
 	}
 }
 
-// A monitor that comes back is the same write as one that never left:
-// the gauge takes whatever the latest pass read.
-func TestEndpointConnectedRecoversAfterAPassSeesItAgain(t *testing.T) {
+func TestEndpointConnectedRecoversAfterAPassReadsItAgain(t *testing.T) {
 	readings := newMetrics("test")
 	control := &endpointControl{readings: readings}
 
@@ -241,7 +222,7 @@ func TestEndpointConnectedRecoversAfterAPassSeesItAgain(t *testing.T) {
 		Name: "hdmi-0", Endpoint: alsaEndpoint{HDMI: true, Monitor: false},
 	}})
 	if got := testutil.ToFloat64(readings.endpointConnected.WithLabelValues("hdmi-0")); got != 0 {
-		t.Fatalf("connected = %v while no monitor answered, want 0", got)
+		t.Fatalf("connected = %v while no monitor was connected, want 0", got)
 	}
 
 	control.recordEndpoint(endpoint{facts: endpointFacts{
@@ -249,14 +230,12 @@ func TestEndpointConnectedRecoversAfterAPassSeesItAgain(t *testing.T) {
 		HasNode: true, Node: pwNode{Name: sinkNodeName(0, 0)},
 	}})
 	if got := testutil.ToFloat64(readings.endpointConnected.WithLabelValues("hdmi-0")); got != 1 {
-		t.Errorf("connected = %v after the monitor answered again, want 1", got)
+		t.Errorf("connected = %v after the monitor was connected again, want 1", got)
 	}
 }
 
-// A missing observation is unknown, not disconnected. When PipeWire
-// stops answering, the reconcile pass never reaches the per-endpoint
-// gauges at all, so they keep the value the last good pass set, and
-// only audio_observation_valid falls.
+// A failed graph read says nothing about whether an endpoint is
+// connected, so only audio_observation_valid falls to 0.
 func TestObservationInvalidLeavesTheEndpointGaugesAtTheirLastValue(t *testing.T) {
 	slice := &slicePublishFixture{}
 	endpointAPI := newEndpointAPI()
@@ -272,30 +251,29 @@ func TestObservationInvalidLeavesTheEndpointGaugesAtTheirLastValue(t *testing.T)
 	}
 
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling while PipeWire responds: %v", err)
 	}
 	if got := testutil.ToFloat64(readings.endpointConnected.WithLabelValues(testAnalogName)); got != 1 {
-		t.Fatalf("connected = %v before PipeWire stopped answering, want 1", got)
+		t.Fatalf("connected = %v before PipeWire stopped responding, want 1", got)
 	}
 	if got := testutil.ToFloat64(readings.observationValid.WithLabelValues(sourcePipeWire)); got != 1 {
 		t.Fatalf("audio_observation_valid{source=pipewire} = %v before the failure, want 1", got)
 	}
 
-	operator.graph = failingSinks
+	operator.graph = failingGraph
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling after PipeWire stopped responding: %v", err)
 	}
 	if got := testutil.ToFloat64(readings.observationValid.WithLabelValues(sourcePipeWire)); got != 0 {
-		t.Errorf("audio_observation_valid{source=pipewire} = %v after PipeWire stopped answering, want 0", got)
+		t.Errorf("audio_observation_valid{source=pipewire} = %v after PipeWire stopped responding, want 0", got)
 	}
 	if got := testutil.ToFloat64(readings.endpointConnected.WithLabelValues(testAnalogName)); got != 1 {
 		t.Errorf("connected fell to %v while the observation was only invalid, want the last value of 1", got)
 	}
 }
 
-// A sweep is a confirmed absence, not an invalid observation: the
-// machine no longer publishes the endpoint, so every gauge reports it
-// gone.
+// A sweep removes an endpoint that this machine no longer publishes, so
+// each of its gauges reads 0.
 func TestASweptEndpointReportsFalseOnEveryGauge(t *testing.T) {
 	api := newEndpointAPI()
 	readings := newMetrics("test")
@@ -308,14 +286,14 @@ func TestASweptEndpointReportsFalseOnEveryGauge(t *testing.T) {
 		Claims: []EndpointClaim{{Namespace: "media", Name: "kitchen"}},
 	}})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the Sink before the sweep: %v", err)
 	}
 	if got := testutil.ToFloat64(readings.endpointConnected.WithLabelValues(testAnalogName)); got != 1 {
 		t.Fatalf("connected = %v before the sweep, want 1", got)
 	}
 
 	if err := control.sweep(map[string]bool{}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("sweeping the endpoints: %v", err)
 	}
 	if got := testutil.ToFloat64(readings.endpointConnected.WithLabelValues(testAnalogName)); got != 0 {
 		t.Errorf("a swept endpoint reads connected %v, want 0", got)
@@ -328,9 +306,6 @@ func TestASweptEndpointReportsFalseOnEveryGauge(t *testing.T) {
 	}
 }
 
-// audio_control_failures_total counts a write to hardware by its own
-// kind, so a volume write that fails and a codec switch that fails
-// draw separate lines.
 func TestControlFailuresCountByOperation(t *testing.T) {
 	readings := newMetrics("test")
 	control := recordingControl(&writeRecord{})
@@ -345,7 +320,7 @@ func TestControlFailuresCountByOperation(t *testing.T) {
 	err := control.apply(context.Background(), endpoint{facts: speakerSink(50, "sbc")},
 		endpointWrites{Level: &levelWrite{Volume: pointerTo(25)}, Codec: "aac"})
 	if err == nil {
-		t.Fatal("two failed writes reported nothing")
+		t.Fatal("apply returned nil after two writes that failed, want an error")
 	}
 	if got := testutil.ToFloat64(readings.controlFailures.WithLabelValues(operationVolume)); got != 1 {
 		t.Errorf("audio_control_failures_total{operation=volume} = %v, want 1", got)

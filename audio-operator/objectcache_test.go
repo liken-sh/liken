@@ -1,10 +1,5 @@
 package main
 
-// These tests count the requests a pass sends when it reads this
-// machine's Sinks and Sources from the watches' stores, and cover a
-// status write from a copy the store holds that is older than the API
-// server's.
-
 import (
 	"context"
 	"strings"
@@ -19,8 +14,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// cacheOf is a cache that holds what the fixture holds now, the way the
-// two stores hold it once the watches have delivered every write.
+// cacheOf returns an objectCache whose stores hold the fixture's
+// current resources, as if the watches had received every write.
 func cacheOf(t *testing.T, api *endpointAPI) objectCache {
 	t.Helper()
 	sinks, sources := cache.NewStore(cache.MetaNamespaceKeyFunc), cache.NewStore(cache.MetaNamespaceKeyFunc)
@@ -28,12 +23,12 @@ func cacheOf(t *testing.T, api *endpointAPI) objectCache {
 	defer api.mutex.Unlock()
 	for _, sink := range api.sinks {
 		if err := sinks.Add(asObject(t, *sink)); err != nil {
-			t.Fatal(err)
+			t.Fatalf("adding the Sink to the store: %v", err)
 		}
 	}
 	for _, source := range api.sources {
 		if err := sources.Add(asObject(t, *source)); err != nil {
-			t.Fatal(err)
+			t.Fatalf("adding the Source to the store: %v", err)
 		}
 	}
 	synced := func() bool { return true }
@@ -43,8 +38,6 @@ func cacheOf(t *testing.T, api *endpointAPI) objectCache {
 	}
 }
 
-// reads counts the GET requests among the requests the fixture
-// received.
 func reads(api *endpointAPI) int {
 	api.mutex.Lock()
 	defer api.mutex.Unlock()
@@ -57,12 +50,13 @@ func reads(api *endpointAPI) int {
 	return count
 }
 
-// A settled pass over the lab card's two endpoints and a speaker sends
-// one GET for each endpoint when it reads the API server, and none
-// when it reads the stores. A pass that finds a new set of endpoints
-// also sweeps, which lists both collections from the API server and
-// from nothing when the stores hold their first read. The memo of the
-// first pass's writes costs no read once the stores hold those writes.
+// A pass that changes nothing, over the lab card's endpoints and a
+// speaker, sends one GET per endpoint when it reads the API server, and
+// none when it reads the stores. When the set of endpoints changes, the
+// pass also sweeps. Without stores, the sweep lists the Sinks and the
+// Sources from the API server. With stores that have finished their
+// first list, it sends no GET. The memos of the first pass's writes
+// cause no read, because the stores have those writes.
 func TestAPassFromTheStoresSendsNoRead(t *testing.T) {
 	for _, c := range []struct {
 		name   string
@@ -81,21 +75,21 @@ func TestAPassFromTheStoresSendsNoRead(t *testing.T) {
 			withMemos(control)
 			ctx := context.Background()
 			if err := control.pass(ctx, labEndpoints(), testSpeakers(), labGraph(), nil); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the pass: %v", err)
 			}
 			if c.cached {
-				delivered(t, api, control)
+				fillStores(t, api, control)
 			}
 			speakers := testSpeakers()
 			if c.sweep {
-				// The speaker left, so the endpoints differ from the last
-				// sweep's.
+				// With the speaker gone, the endpoint set differs from the
+				// one the last sweep saw.
 				speakers = nil
 			}
-			forget(api)
+			clearRequests(api)
 
 			if err := control.pass(ctx, labEndpoints(), speakers, labGraph(), nil); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the pass: %v", err)
 			}
 			if got := reads(api); got != c.want {
 				t.Errorf("the pass sent %d reads, want %d: %v", got, c.want, api.requests)
@@ -104,20 +98,19 @@ func TestAPassFromTheStoresSendsNoRead(t *testing.T) {
 	}
 }
 
-// A store's copy can be older than the operator's own last status
-// write. The write from it is refused with a conflict, and the pass
-// reads the resource from the API server and writes once more, so the
-// status lands.
+// When a store's copy is older than the API server's, the status patch
+// computed from it fails with a conflict. The pass then reads the
+// resource from the API server and patches again.
 func TestAStatusWriteFromAnOlderCopyReadsAgainAndLands(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
 	ctx := context.Background()
 	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
 	control.cache = cacheOf(t, api)
-	// The fixture takes a write the store has not seen, so every copy in
-	// the store carries an older version.
+	// Raise every resourceVersion in the fixture without updating the
+	// store, so each store copy is older.
 	api.mutex.Lock()
 	for _, sink := range api.sinks {
 		sink.Metadata.ResourceVersion = api.nextVersion()
@@ -128,23 +121,23 @@ func TestAStatusWriteFromAnOlderCopyReadsAgainAndLands(t *testing.T) {
 	api.mutex.Unlock()
 	control.now = func() time.Time { return factsTime.Add(time.Hour) }
 
-	// The capture endpoint is gone, so the sweep writes its Source's
-	// absence from the older copy.
+	// The capture endpoint is gone, so the sweep patches its Source
+	// from the older copy.
 	if err := control.pass(ctx, labEndpoints()[:1], nil, labGraph(), nil); err != nil {
-		t.Fatalf("the pass failed: %v", err)
+		t.Fatalf("running the pass: %v", err)
 	}
-	for _, held := range api.sources[testSourceName].Status.Conditions {
-		if held.Type == ConnectedCondition && held.Status != conditionFalse {
-			t.Errorf("the Source reports %s %s, want the absence reported", held.Type, held.Status)
+	for _, condition := range api.sources[testSourceName].Status.Conditions {
+		if condition.Type == ConnectedCondition && condition.Status != conditionFalse {
+			t.Errorf("the Source reports %s %s, want the absence reported", condition.Type, condition.Status)
 		}
 	}
 	if !strings.Contains(strings.Join(api.requests, " "), "GET "+SourcesPath+"/"+testSourceName) {
-		t.Errorf("the pass did not read the Source again after the conflict: %v", api.requests)
+		t.Errorf("the pass sent %v, want a GET of the Source after the conflict", api.requests)
 	}
 }
 
-// withMemos gives the pass the memos it runs with in a pod, and no
-// store.
+// withMemos gives the pass the version memos but no stores, so every
+// read goes to the API server.
 func withMemos(control *endpointControl) {
 	control.cache = objectCache{
 		sinks:   informer.Held{Versions: memo.New()},
@@ -152,9 +145,9 @@ func withMemos(control *endpointControl) {
 	}
 }
 
-// delivered fills the stores from the fixture, the way the watches
-// hold every write once they deliver it, and keeps the pass's memos.
-func delivered(t *testing.T, api *endpointAPI, control *endpointControl) {
+// fillStores fills the stores from the fixture, as if the watches had
+// received every write so far, and keeps the pass's memos.
+func fillStores(t *testing.T, api *endpointAPI, control *endpointControl) {
 	t.Helper()
 	memos := control.cache
 	control.cache = cacheOf(t, api)
@@ -162,24 +155,23 @@ func delivered(t *testing.T, api *endpointAPI, control *endpointControl) {
 	control.cache.sources.Versions = memos.sources.Versions
 }
 
-// forget clears the requests the fixture received.
-func forget(api *endpointAPI) {
+func clearRequests(api *endpointAPI) {
 	api.mutex.Lock()
 	defer api.mutex.Unlock()
 	api.requests = nil
 }
 
 // staleCache runs a first pass with the memos, fills the stores from
-// the fixture, and then moves every resource in the fixture to a newer
-// version, the way another writer's change does, so every copy in the
-// stores is older than the API server's and the memo does not know it.
+// the fixture, and then raises every resourceVersion in the fixture, as
+// a write by another client would. Every store copy is then older than
+// the API server's, and the memos do not have the new versions.
 func staleCache(t *testing.T, api *endpointAPI, control *endpointControl) {
 	t.Helper()
 	withMemos(control)
 	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
-	delivered(t, api, control)
+	fillStores(t, api, control)
 	api.mutex.Lock()
 	defer api.mutex.Unlock()
 	for _, sink := range api.sinks {
@@ -190,12 +182,12 @@ func staleCache(t *testing.T, api *endpointAPI, control *endpointControl) {
 	}
 }
 
-// A list before the Sink watch finished its first read comes from the
-// API server. The store can then become ready at an older copy, because
-// the watch's first read can come from the API server's watch cache.
-// The next list must not answer that older copy: a pass that read a
-// claim on the Sink from the first list would read the copy from before
-// the claim, and act as if the Sink were free.
+// A list before the Sink watch has finished its first list comes from
+// the API server. The store can then become ready with an older copy,
+// because the watch's first list can come from the API server's watch
+// cache, which can lag behind etcd. The next list must not return that
+// older copy. If it did, a pass that saw the claim in the first list
+// would then see the Sink without the claim and treat it as free.
 func TestAListBeforeTheStoreIsReadyIsNeverReadOlder(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
@@ -219,26 +211,27 @@ func TestAListBeforeTheStoreIsReadyIsNeverReadOlder(t *testing.T) {
 	}
 }
 
-// A claim on the analog sink changes its status. The write from the
-// store's older copy is refused, and the pass reads the Sink again and
-// writes the claim.
+// A claim on the analog sink changes its status. The patch computed
+// from the store's older copy conflicts, and the pass reads the Sink
+// from the API server and writes the claim.
 func TestAReconcileFromAnOlderCopyReadsAgainAndLands(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
 	staleCache(t, api, control)
-	control.claims.prepared("claim-1", EndpointClaim{Namespace: "media", Name: "den"}, []string{testAnalogName})
+	control.claims.record("claim-1", EndpointClaim{Namespace: "media", Name: "den"}, []string{testAnalogName})
 
 	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
-		t.Fatalf("the pass failed: %v", err)
+		t.Fatalf("running the pass: %v", err)
 	}
 	if claims := api.sinks[testAnalogName].Status.Claims; len(claims) != 1 || claims[0].Name != "den" {
 		t.Errorf("the analog sink's claims are %+v, want den", claims)
 	}
 }
 
-// A Sink that another machine took since the store's copy, such as a
-// Bluetooth speaker that moved, is left alone by this machine's sweep,
-// even after the conflict makes the sweep read it again.
+// When another machine has taken a Sink since the store's copy (a
+// Bluetooth speaker that moved, for example), this machine's sweep
+// leaves it alone, even after a conflict makes the sweep read it from
+// the API server.
 func TestTheSweepLeavesASinkAnotherMachineTook(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
@@ -248,20 +241,21 @@ func TestTheSweepLeavesASinkAnotherMachineTook(t *testing.T) {
 	taken := api.sinks[testAnalogName].Status
 	api.mutex.Unlock()
 
-	// The analog endpoint is gone from this machine, so the sweep finds
-	// its Sink in the store under this machine's name.
+	// The analog endpoint is gone from this machine, and the store's
+	// copy of its Sink still has this machine's name, so the sweep
+	// considers it.
 	if err := control.pass(context.Background(), labEndpoints()[1:], nil, labGraph(), nil); err != nil {
-		t.Fatalf("the pass failed: %v", err)
+		t.Fatalf("running the pass: %v", err)
 	}
 	if got := api.sinks[testAnalogName].Status; got.NodeName != taken.NodeName || got.Node != "node-2" {
-		t.Errorf("the other machine's Sink was swept: %+v", got)
+		t.Errorf("the other machine's Sink is %+v after the sweep, want it unchanged on node-2", got)
 	}
 }
 
-// A Sink somebody deleted after the store took its copy is created
-// again when the pass has a status to write. A pass with nothing to
-// write sends nothing, and the delete's own event takes the copy out of
-// the store and wakes the pass that creates the Sink.
+// A Sink deleted after the store received its copy is created again
+// when the pass has a status to write. A pass with nothing to write
+// sends nothing, and the watch's delete event removes the copy from the
+// store and starts a pass that creates the Sink.
 func TestASinkDeletedSinceTheStoresCopyIsCreatedAgain(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
@@ -269,54 +263,53 @@ func TestASinkDeletedSinceTheStoresCopyIsCreatedAgain(t *testing.T) {
 	api.mutex.Lock()
 	delete(api.sinks, testAnalogName)
 	api.mutex.Unlock()
-	control.claims.prepared("claim-1", EndpointClaim{Namespace: "media", Name: "den"}, []string{testAnalogName})
+	control.claims.record("claim-1", EndpointClaim{Namespace: "media", Name: "den"}, []string{testAnalogName})
 
 	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
-		t.Fatalf("the pass failed: %v", err)
+		t.Fatalf("running the pass: %v", err)
 	}
-	if sink, held := api.sinks[testAnalogName]; !held || sink.Status.Node != "liken-1" {
-		t.Errorf("the analog sink is %+v, %v; want it created again with its status", sink, held)
+	if sink, found := api.sinks[testAnalogName]; !found || sink.Status.Node != "liken-1" {
+		t.Errorf("the analog sink is %+v, %v; want it created again with its status", sink, found)
 	}
 }
 
-// The store can still hold a Sink as it was before this operator wrote
-// a claim into its status. When the claim is released, the status the
-// pass composes matches that older copy. The operator remembers the
-// version its own write produced, reads the Sink from the API server
-// instead of the store's older copy, and writes the release, so the
-// status does not keep a claim that is gone.
+// The store still has the Sink's copy from before the operator wrote a
+// claim into its status. When the claim is released, the status the
+// pass composes equals that copy, so without the memo the pass would
+// skip the write and leave the released claim in the status. The memo
+// has the version of the operator's own write, so the pass reads the
+// Sink from the API server and writes the release.
 func TestAPassDoesNotActOnACopyOlderThanItsOwnWrite(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
 	withMemos(control)
 	ctx := context.Background()
 	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
-	delivered(t, api, control)
-	control.claims.prepared("claim-1", EndpointClaim{Namespace: "media", Name: "den"}, []string{testAnalogName})
+	fillStores(t, api, control)
+	control.claims.record("claim-1", EndpointClaim{Namespace: "media", Name: "den"}, []string{testAnalogName})
 	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
 	if claims := api.sinks[testAnalogName].Status.Claims; len(claims) == 0 {
-		t.Fatal("the pass did not write the claim")
+		t.Fatal("the analog Sink reports no claim after the pass, want the claim")
 	}
 
-	control.claims.released("claim-1")
-	forget(api)
+	control.claims.release("claim-1")
+	clearRequests(api)
 	if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
 
 	if got := reads(api); got != 1 {
 		t.Errorf("the pass sent %d reads, want 1, of the Sink it wrote: %v", got, api.requests)
 	}
 	if claims := api.sinks[testAnalogName].Status.Claims; len(claims) != 0 {
-		t.Errorf("the Sink still reports the released claims %+v", claims)
+		t.Errorf("the Sink reports the released claims %+v, want none", claims)
 	}
 }
 
-// sent counts the requests of one method the fixture received.
 func sent(api *endpointAPI, method string) int {
 	api.mutex.Lock()
 	defer api.mutex.Unlock()
@@ -329,36 +322,36 @@ func sent(api *endpointAPI, method string) int {
 	return count
 }
 
-// ownWriteUndelivered runs a pass that creates the lab card's
-// resources, fills the stores, and runs a pass that writes a claim onto
-// the analog Sink, so the Sink store's copy is older than the
-// operator's own write.
-func ownWriteUndelivered(t *testing.T) (*endpointAPI, *endpointControl) {
+// claimWriteNotInStore runs a pass that creates the lab card's
+// resources, fills the stores, and runs a second pass that writes a
+// claim onto the analog Sink. The Sink store's copy is then older than
+// the operator's own write.
+func claimWriteNotInStore(t *testing.T) (*endpointAPI, *endpointControl) {
 	t.Helper()
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
 	withMemos(control)
 	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
-	delivered(t, api, control)
-	control.claims.prepared("claim-1", EndpointClaim{Namespace: "media", Name: "den"}, []string{testAnalogName})
+	fillStores(t, api, control)
+	control.claims.record("claim-1", EndpointClaim{Namespace: "media", Name: "den"}, []string{testAnalogName})
 	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
-	forget(api)
+	clearRequests(api)
 	return api, control
 }
 
-// The sweep lists from the store. A copy older than the operator's own
-// write is read again from the API server before the sweep writes the
-// absence, so the one write lands and is not refused.
+// The sweep lists from the store, and reads a copy older than the
+// operator's own write from the API server before it writes the
+// absence, so its patch succeeds with no conflict.
 func TestTheSweepReplacesACopyOlderThanItsOwnWrite(t *testing.T) {
-	api, control := ownWriteUndelivered(t)
+	api, control := claimWriteNotInStore(t)
 
 	// The analog endpoint is gone, so the sweep finds its Sink.
 	if err := control.pass(context.Background(), labEndpoints()[1:], nil, labGraph(), nil); err != nil {
-		t.Fatalf("the pass failed: %v", err)
+		t.Fatalf("running the pass: %v", err)
 	}
 
 	if got := sent(api, "GET"); got != 1 {
@@ -372,57 +365,57 @@ func TestTheSweepReplacesACopyOlderThanItsOwnWrite(t *testing.T) {
 	}
 }
 
-// A Sink the API server no longer holds, whose store copy is older than
-// the operator's own write, is left out of the sweep.
+// The Sink was deleted after the operator's own write, and the store
+// still has an older copy. The sweep sends no patch for it and does not
+// create it again.
 func TestTheSweepLeavesOutASinkTheAPIServerNoLongerHolds(t *testing.T) {
-	api, control := ownWriteUndelivered(t)
+	api, control := claimWriteNotInStore(t)
 	api.mutex.Lock()
 	delete(api.sinks, testAnalogName)
 	api.mutex.Unlock()
 
 	if err := control.pass(context.Background(), labEndpoints()[1:], nil, labGraph(), nil); err != nil {
-		t.Fatalf("the pass failed: %v", err)
+		t.Fatalf("running the pass: %v", err)
 	}
 
 	if got := sent(api, "PATCH"); got != 0 {
 		t.Errorf("the pass sent %d writes, want none: %v", got, api.requests)
 	}
-	if _, held := api.sinks[testAnalogName]; held {
-		t.Error("the sweep created the Sink again")
+	if _, found := api.sinks[testAnalogName]; found {
+		t.Error("the sweep created the Sink again, want it left out")
 	}
 }
 
-// conditionOf answers the status of one condition, or nothing.
 func conditionOf(status EndpointStatus, kind string) conditions.Status {
-	for _, held := range status.Conditions {
-		if held.Type == kind {
-			return held.Status
+	for _, condition := range status.Conditions {
+		if condition.Type == kind {
+			return condition.Status
 		}
 	}
 	return ""
 }
 
-// A copy in the store that does not convert is read from the API
-// server, so the sweep still reports the absence of its Sink instead of
-// leaving the Sink out.
+// A store copy that fails to convert to a Sink is read from the API
+// server instead, so the sweep still reports the Sink absent and does
+// not skip it.
 func TestTheSweepReadsACopyThatDoesNotConvertFromTheAPIServer(t *testing.T) {
 	api := newEndpointAPI()
 	control := testEndpointControl(t, api, &writeRecord{})
 	withMemos(control)
 	if err := control.pass(context.Background(), labEndpoints(), nil, labGraph(), nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
-	delivered(t, api, control)
+	fillStores(t, api, control)
 	broken := asObject(t, *api.sinks[testAnalogName])
 	if err := unstructured.SetNestedField(broken.Object, "loud", "spec", "volume"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting spec.volume on the store's copy: %v", err)
 	}
 	if err := control.cache.sinks.View.Store.Update(broken); err != nil {
-		t.Fatal(err)
+		t.Fatalf("replacing the Sink in the store: %v", err)
 	}
 
 	if err := control.pass(context.Background(), labEndpoints()[1:], nil, labGraph(), nil); err != nil {
-		t.Fatalf("the pass failed: %v", err)
+		t.Fatalf("running the pass: %v", err)
 	}
 
 	if connected := conditionOf(api.sinks[testAnalogName].Status.EndpointStatus, ConnectedCondition); connected != conditionFalse {

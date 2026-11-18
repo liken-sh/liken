@@ -7,64 +7,59 @@ description: "Install audio-operator on a liken cluster and confirm it publishes
 # Install the operator
 
 This guide installs `audio-operator` on a
-[`liken`](https://liken.sh/docs/) cluster. At the end, every
-physical audio output on the cluster is a device a workload can
-claim.
+[`liken`](https://liken.sh/docs/) cluster. At the end, every physical
+audio output on the cluster is a device that a workload can claim.
 
 You need:
 
 * A `liken` cluster. The operator claims the sound card through
   [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/),
-  from the devices `liken`'s own driver publishes.
-  [Devices](https://liken.sh/docs/reference/devices/) describes
-  those.
-* A machine in that cluster with a sound card: a monitor with
-  speakers on HDMI or DisplayPort, or something wired to the analog
-  jack.
+  from the devices that `liken`'s own driver publishes.
+  [Devices](https://liken.sh/docs/reference/devices/) describes those
+  devices.
+* A machine in that cluster with a sound card: a monitor with speakers
+  on HDMI or DisplayPort, or something wired to the analog jack.
 * For Bluetooth speakers, the
   [`bluetooth-operator`](https://liken.sh/bluetooth/) on the same
-  machine. Its media bus puts the sound server on `bluetoothd`'s
-  bus. The `bluetooth-operator` is optional, and a machine with a
-  card and no radio installs nothing extra.
-* `kubectl` with cluster-admin access. You create cluster-scoped
+  machine. Its media bus gives the sound server access to
+  `bluetoothd`'s D-Bus socket. The `bluetooth-operator` is optional.
+  A machine with a sound card and no radio needs nothing extra.
+* `kubectl` with cluster-admin access. You create the cluster-scoped
   [`DeviceClasses`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
-  yourself, and the base creates a `ClusterRole` and two
-  `CustomResourceDefinitions`.
+  for your workloads yourself, and the base creates cluster-scoped
+  objects too: its
+  `ClusterRole`s and `ClusterRoleBinding`s, and the
+  `CustomResourceDefinitions` for `Sink` and `Source`.
 
 ## 1. Check that the card publishes
 
 The machine with the speakers must publish its audio controller as a
-device. Look for a device stamped
-`sound.liken.sh/supportsSound: {bool: true}` in that node's
-`liken.sh` `ResourceSlice`, which is the fact the operator's
-`sound-card` class selects:
+device. Look in that node's `liken.sh` `ResourceSlice` for a device
+with the attribute `sound.liken.sh/supportsSound: {bool: true}`. The
+operator's `sound-card` class selects on that attribute:
 
     kubectl get resourceslice <node>-liken.sh -o yaml
 
-If no device has the stamp, the operator's own claim will park and
-its pod will stay `Pending`.
+If no device has the attribute, the operator's own claim cannot be
+allocated, and its pod stays `Pending`.
 [Claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/)
 explains why: `liken` publishes the whole card, and this operator
 claims it and publishes each of its outputs.
 
 ## 2. The device classes
 
-A `DeviceClass` is cluster-scoped policy, yours to name and curate,
-the same convention a `StorageClass` follows. The classes split by
-owner:
+A `DeviceClass` is cluster-scoped policy. You name and manage the
+classes yourself, the same way you do `StorageClass`es.
 
-* `sound-card` is wiring, and the base ships it, served at
-  [`deviceclasses.yaml`](/deploy/deviceclasses.yaml). The
-  operator's own pod claims every sound device on its node through
-  it, and the claim template in the served
-  [`operator.yaml`](/deploy/operator.yaml) names it literally, so
-  the operator cannot start without it. Do not delete it.
-* The classes your workloads claim through are yours to create,
-  because they are your cluster's vocabulary, and the base ships no
-  policy. `audio-sink` and `audio-source` are the ones to start
-  with. Each covers one direction of what this driver publishes: a
-  playback endpoint has the `sink` attribute and a capture
-  endpoint has `source`:
+* `sound-card`: the operator's own pod claims every sound device on
+  its node through this class. The base provides it, in
+  [`deviceclasses.yaml`](/deploy/deviceclasses.yaml). The claim
+  template in [`operator.yaml`](/deploy/operator.yaml) names it, so
+  the operator does not start without it. Do not delete it.
+* You create the classes that your workloads claim through, and the
+  base provides none. Start with `audio-sink` and `audio-source`. Each
+  selects one direction: a playback endpoint has the `sink`
+  attribute, and a capture endpoint has the `source` attribute:
 
         apiVersion: resource.k8s.io/v1
         kind: DeviceClass
@@ -86,13 +81,12 @@ owner:
 
 ### Generic or specific
 
-A class is the cluster's vocabulary for a kind of device, and you
-choose its grain. `audio-sink` above is generic: it matches every
-playback endpoint, it keeps the class list short, and it leaves the
-choice of output to each claim's CEL selector. A specific class
-holds the selector itself. A claim then names the class and writes
-no CEL, and you make the choice once, in cluster policy you
-control:
+You decide how much each class selects. The `audio-sink` class above
+is generic. It matches every playback endpoint, so the list of classes
+stays short, and each claim's CEL selector chooses the output. A
+specific class has the selector itself. A claim then names the class
+and needs no CEL, and you make the choice once, in the cluster policy
+that you control:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -106,19 +100,19 @@ control:
               has(device.attributes["audio.liken.sh"].connectionType) &&
               device.attributes["audio.liken.sh"].connectionType == "analog"
 
-A class that names one monitor's speakers through
-`monitor.liken.sh/id` works the same way, with the same `has()`
-guard on the attribute.
+A class that selects the speakers of one monitor through
+`monitor.liken.sh/id` works the same way, with the same `has()` guard
+on the attribute.
 
-Start generic. When several workloads repeat the same selector, or
-when you want the choice in cluster policy rather than in each
-workload's manifest, create a specific class.
+Start with generic classes. Create a specific class when several
+workloads repeat the same selector, or when you want the choice in
+cluster policy and not in each workload's manifest.
 
 ## 3. Apply the manifests
 
 This site serves the repository's
-[`deploy/`](/deploy/kustomization.yaml) directory as raw YAML, so
-the install needs no clone. Six files are the rest of the install:
+[`deploy/`](/deploy/kustomization.yaml) directory as raw YAML, so you
+do not need a clone. Apply these files:
 
     kubectl apply -n liken-system \
       -f https://liken.sh/audio/deploy/crds.yaml \
@@ -127,46 +121,47 @@ the install needs no clone. Six files are the rest of the install:
       -f https://liken.sh/audio/deploy/operator.yaml \
       -f https://liken.sh/audio/deploy/api.yaml
 
-`api.yaml` binds one `Role` in `kube-system`, which `-n` would
-refuse, so that binding is in a file of its own. Apply it with no
+`audio-api` needs a `RoleBinding` in `kube-system`, and `-n` would make
+`kubectl` refuse it. So that binding is in a separate file,
+`api-authentication.yaml`, and not in `api.yaml`. Apply it without
 `-n`:
 
     kubectl apply -f https://liken.sh/audio/deploy/api-authentication.yaml
 
-`crds.yaml` holds the `Sink` and `Source`
-`CustomResourceDefinitions`, the resources the operator creates for
-every endpoint it publishes. The
-[`Sink`](/docs/reference/sinks/) and
+`crds.yaml` has the `CustomResourceDefinitions` for `Sink` and
+`Source`. The operator creates one of these resources for every
+endpoint that it publishes. The [`Sink`](/docs/reference/sinks/) and
 [`Source`](/docs/reference/sources/) references describe them.
 
-`api.yaml` holds `audio-api`, a `Deployment` and a `Service` that run
-once for the whole cluster, with the RBAC they need. The
-[listen guide](/docs/guides/listen/) depends on it. A cluster that
-needs no capture API can leave this file out.
+`api.yaml` has `audio-api`: one `Deployment` and one `Service` for
+the whole cluster, with the RBAC that the API needs. The
+[listen guide](/docs/guides/listen/) depends on it. If your cluster
+needs no capture API, you can leave this file out.
 
-The `-n` flag places the `ServiceAccount` and the `DaemonSet` in
-`liken-system`, the namespace every `liken` cluster has. The
-`ClusterRoleBinding`'s subject names that namespace, so the binding
-only works there. `DeviceClass` is cluster-scoped, so the flag
-leaves it alone.
+The `-n` flag puts the `ServiceAccount` and the `DaemonSet` in
+`liken-system`, the namespace that every `liken` cluster has. The
+subject of the `ClusterRoleBinding` names that namespace, so the
+binding works only there. `DeviceClass` is cluster-scoped, so the flag
+does not affect it.
 
 Each pod claims every sound card on its node through the
 `ResourceClaimTemplate` `every-sound-card`. The claim tolerates
-`liken.sh/unplugged`, the taint that `liken` puts on a device that a
-claim held when it was unplugged. So when you unplug one USB card,
-PipeWire keeps playing on the other cards, and the pod does not
+`liken.sh/unplugged`, the taint that `liken` adds to a device when it
+is unplugged while a claim has it. So when you unplug one USB card,
+PipeWire keeps playing on the other cards and the pod does not
 restart.
 
-A template's spec cannot change, so an install from before the
-toleration has a template named `sound-card` that no pod uses after
-you apply. A `Kustomization` with pruning deletes it. After a plain
-`kubectl apply`, delete it yourself:
+A template's spec cannot change. If you installed the operator before
+the claim tolerated that taint, you have a template named `sound-card`
+that no pod uses after you apply the new manifests. A `Kustomization`
+with pruning deletes it. After a plain `kubectl apply`, delete it
+yourself:
 
     kubectl delete -n liken-system resourceclaimtemplate sound-card
 
-For GitOps, put your specific classes in a file of your own and
-point a `Kustomization` at it and at the served URLs. `kustomize`
-takes a raw YAML URL as a resource:
+For GitOps, put your specific classes in a file of your own. Point a
+`Kustomization` at that file and at the served URLs. `kustomize`
+accepts a raw YAML URL as a resource:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
@@ -187,52 +182,51 @@ takes a raw YAML URL as a resource:
       - https://liken.sh/audio/deploy/api.yaml
       - https://liken.sh/audio/deploy/api-authentication.yaml
 
-The transformer sets `liken-system` only on the objects that state no
+The transformer sets `liken-system` only on objects that have no
 namespace, so the binding in `api-authentication.yaml` stays in
 `kube-system`. A top-level `namespace:` field would move it, and the
-API couldn't read the client certificate authority.
+API could not read the client certificate authority.
 
-A clone works too: `kubectl apply -k audio-operator/deploy/` from the
-repository applies the same files through
+A clone works too. Run `kubectl apply -k audio-operator/deploy/` from
+the repository to apply the same files through
 [`deploy/kustomization.yaml`](/deploy/kustomization.yaml).
 
 ## 4. Watch the operator find the outputs
 
-The operator runs as a `DaemonSet`, so a pod lands on every node and
-no manifest names the machine with the speakers. Each pod claims
-every audio controller on its own node. On a node with no sound
-card, the claim finds no device and the pod parks `Pending`, which
-costs nothing. A node labeled `audio.liken.sh/sound-card: none` gets
-no pod, as
+The operator runs as a `DaemonSet`, so a pod starts on every node, and
+no manifest names the machine with the speakers. Each pod claims every
+audio controller on its own node. On a node with no sound card, the
+claim matches no device, and the pod stays `Pending`, which costs
+nothing. A node labeled `audio.liken.sh/sound-card: none` gets no pod,
+as
 [Keep the pods off nodes with no sound card](#keep-the-pods-off-nodes-with-no-sound-card)
 describes.
 
     kubectl -n liken-system get pods -o wide
 
-The pod is five containers from one image. A `declare` init
-container writes PipeWire's sink declarations, PipeWire and
-WirePlumber run as sidecars, the `operator` container publishes what
-they hold, and the `capture` container serves the taps that
-`audio-api` forwards. On the machine with the card, the operator's log reports the
-slice it wrote:
+Every container of the pod runs the same image. The `declare` init
+container writes the PipeWire sink declarations. PipeWire and
+WirePlumber run as sidecars. The `operator` container publishes what
+they report, and the `capture` container serves the taps that
+`audio-api` forwards to. On the machine with the card, the operator's
+log shows the slice that it wrote:
 
     kubectl -n liken-system logs ds/audio-operator
     audio.liken.sh: operating the audio controller on kitchen
     slice: created generation 1, 3 devices, 0 tainted
 
-The image is a file closure on `scratch`: no shell, no package
-manager. Use `pw-dump` to inspect the running sound server:
+The image is a file closure on `scratch`, with no shell and no package
+manager. To inspect the running sound server, use `pw-dump`:
 
     kubectl -n liken-system exec ds/audio-operator -c operator -- pw-dump
 
-Three more tools ship in the same image, for the times the graph
-reads correctly and the sound is still wrong. Each runs as its own
-`kubectl exec`, with no shell between. `pw-top -b -n 1` prints one
-reading of every node, and its `ERR` column counts the dropouts.
-`pw-cli` lists any object in the graph and writes a parameter on
-one with `set-param`, with no restart of the daemon. `pw-metadata`
-reads and writes the graph's settings, for example
-`clock.force-quantum`.
+When the graph looks correct and the sound is still wrong, use
+`pw-top`, `pw-cli`, and `pw-metadata`, each with its own
+`kubectl exec`. `pw-top -b -n 1` prints one reading of every node, and
+its `ERR` column counts the dropouts. `pw-cli` lists any object in the
+graph, and `pw-cli` with `set-param` writes a parameter on one without
+a restart of the daemon. `pw-metadata` reads and writes the graph's
+settings, for example `clock.force-quantum`.
 
     kubectl -n liken-system exec ds/audio-operator -c operator -- pw-top -b -n 1
     kubectl -n liken-system exec ds/audio-operator -c operator -- pw-cli info 0
@@ -240,15 +234,15 @@ reads and writes the graph's settings, for example
 
 ## 5. See the devices
 
-The operator publishes one device for each PCM device on the
-claimed card, sinks and sources alike, into a `ResourceSlice` named
+The operator publishes one device for each PCM device on the claimed
+card, sinks and sources alike, in a `ResourceSlice` named
 `<node>-audio.liken.sh`:
 
     kubectl get resourceslice <node>-audio.liken.sh -o yaml
 
-The same endpoints are resources of their own, one `Sink` per
-playback endpoint and one `Source` per capture endpoint, named
-like the devices:
+Each endpoint is also a resource: one `Sink` for each playback
+endpoint and one `Source` for each capture endpoint, with the same
+names as the devices:
 
     kubectl get sinks
     NAME                                            NODE      CONNECTION   VOLUME   MUTE    CLAIMS   CONNECTED   READY   AGE
@@ -259,27 +253,28 @@ like the devices:
     NAME                                                    NODE      CONNECTION   VOLUME   MUTE    CLAIMS   CONNECTED   READY   AGE
     kitchen-usb-0573-1573-a34004801402-usb-audio-capture    kitchen   usb          100      false            True        True    2m
 
-An output whose monitor answers publishes the monitor's attributes.
-An HDMI output with no monitor publishes too, with taints, so a
-claim on it parks until a monitor arrives.
+When the monitor on an output responds, the device has the monitor's
+attributes. An HDMI output with no monitor is published too, with
+taints, so a claim on it stays `Pending` until a monitor responds.
 [Devices](/docs/reference/devices/) describes every attribute.
 
 When the pod's claim also allocated a Bluetooth media bus, the same
-slice holds one device for each paired Bluetooth speaker. A speaker
-that is switched off publishes with taints, the same way an HDMI
-output with no monitor does.
+slice has one device for each paired Bluetooth speaker. A speaker that
+is switched off is published with taints, the same way an HDMI output
+with no monitor is.
 
 Now [play sound to an output](/docs/guides/claim/), or
 [set an endpoint's volume and controls](/docs/guides/rest/).
 
 ## Keep the pods off nodes with no sound card
 
-The `DaemonSet` makes a pod on every node. On a node with no
-sound card, the claim matches no device, and the pod stays `Pending`. To make no
-pod on such a node, label the node `audio.liken.sh/sound-card: none`.
+The `DaemonSet` starts a pod on every node. On a node with no sound
+card, the claim matches no device, and the pod stays `Pending`. To
+start no pod on such a node, label the node
+`audio.liken.sh/sound-card: none`.
 
-The `DaemonSet` in the base carries this node affinity, so no patch is
-needed:
+The `DaemonSet` in the base has this node affinity, so you need no
+patch:
 
 ```yaml
 affinity:
@@ -292,33 +287,34 @@ affinity:
               values: ["none"]
 ```
 
-`NotIn` matches a node whose label has a different value, and also a
-node that has no such label. The Kubernetes page on
+`NotIn` matches a node whose label has a different value, and it also
+matches a node that has no such label. The Kubernetes page on
 [set-based requirements](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement)
-gives this rule. So with no label the `DaemonSet` makes a pod on every
-node, and a node labeled `none` gets no pod. When a label changes, the
+describes this rule. So the `DaemonSet` starts a pod on every node
+that has no label, and starts none on a node labeled `none`. When a
+label changes, the
 [`DaemonSet`](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/)
 controller deletes the pod from a node that no longer matches, and
-adds one to a node that matches again.
+creates a pod on a node that matches again.
 
-Declare the label in the node's `Machine`, so the label is part of
-the record of the machine:
+Declare the label in the node's `Machine`, so that the record of the
+machine includes it:
 
     spec:
       nodeLabels:
         audio.liken.sh/sound-card: none
 
 A `Machine` accepts a key in a `liken.sh` subdomain from `liken`
-2026.09.28-002 on, and an older release refuses it, so on an older
-release use the `kubectl label` way below.
+2026.09.28-002 on, and an older release refuses it. On an older
+release, use the `kubectl label` method below.
 
 The `liken` machine operator applies the label to the running node. A
-machine that is demoted or installed again registers a new Node, and
-the Node has the label from registration. To run the pod on that
-node again, remove the key from `spec.nodeLabels`, and `liken`
-removes the label from the node. `liken` also removes a label that
-you set with `kubectl` before the `Machine` declared it, when the key
-leaves the spec.
+machine that you demote or install again registers a new Node, and the
+new Node has the label from the start. To run the pod on that node
+again, remove the key from `spec.nodeLabels`, and `liken` removes the
+label from the node. `liken` also removes a label that you set with
+`kubectl` before the `Machine` declared it, when the key leaves the
+spec.
 
 You can also label the node with `kubectl`:
 
@@ -326,25 +322,25 @@ You can also label the node with `kubectl`:
 
 The label stays on the node across reboots. `liken` leaves it in
 place, because `liken` removes only the labels that a `Machine`
-declared. The label goes with the Node object: a machine that is
-demoted or installed again registers a new Node, and you label it
-again. To run the pod on that node again, remove the label:
+declared. The label belongs to the Node object. A machine that you
+demote or install again registers a new Node, and you label the new
+Node again. To run the pod on that node again, remove the label:
 
     kubectl label node node-1 audio.liken.sh/sound-card-
 
-A patch of your own that sets a node affinity on this `DaemonSet`
-replaces the list of terms in the base, and the `none` term with it.
-Copy the `none` requirement into each term of your patch.
+If you patch this `DaemonSet` with a node affinity of your own, your
+list of terms replaces the list in the base, including the `none`
+term. Copy the `none` requirement into each term of your patch.
 
 ## Pin a release
 
-The site serves the manifests of the current `main`, and the images
-in the manifests name `:latest`. To pin a release instead, reference
-the operator's `kustomize` base at the operator's version, which is
-the release tag that last published it. The
+The site serves the manifests of the current `main`, and the images in
+the manifests name `:latest`. To pin a release, reference the
+operator's `kustomize` base at the operator's version, which is the
+release tag that last published it. The
 [GitHub release](https://github.com/liken-sh/liken/releases) for each
-tag lists every component and its version. One tag versions the
-manifests and the image together, so pin both to the same version:
+tag lists every component and its version. One tag sets the version of
+the manifests and of the image, so pin both to the same version:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
@@ -357,14 +353,14 @@ manifests and the image together, so pin both to the same version:
 ## Running a development build
 
 A push to `main` that changes the operator publishes a development
-build of it. Its version is the most recent release tag plus a suffix:
-`2026.09.03-007-dev-003-abcdef01` is three commits past release
-`2026.09.03-007`, at commit `abcdef01`. Every image of the operator
-has the same version, and `:latest` still names the most recent
-release.
+build of it. Its version is the most recent release tag plus a suffix.
+For example, `2026.09.03-007-dev-003-abcdef01` is three commits after
+release `2026.09.03-007`, at commit `abcdef01`. Every image of the
+operator has the same version, and `:latest` still names the most
+recent release.
 
-A development build has no git tag, so the manifests pin to the
-commit's full sha, and the image pins to the version:
+A development build has no git tag, so the manifests pin to the full
+sha of the commit, and the image pins to the version:
 
 ```yaml
 resources:
@@ -374,21 +370,22 @@ images:
     newTag: 2026.09.03-007-dev-003-abcdef01
 ```
 
-A git fetch by sha needs all forty characters; the eight in the
+A git fetch by sha needs all forty characters, and the eight in the
 version are not enough. The summary of the CI run for that commit
-gives the version.
+shows the version.
 
 The same build publishes the manifests as the OCI artifact
 `oci://ghcr.io/liken-sh/audio-operator-deploy:<version>`, with each
-image of the operator set to that version. A Flux `OCIRepository`
-can pull that artifact by the version, with no sha.
+image of the operator set to that version. A Flux `OCIRepository` can
+pull that artifact by the version, with no sha.
 
-A Flux `Kustomization` that applies the base must not set
-`targetNamespace`. Flux sets that namespace on every object, the way a
-top-level `namespace:` field does, and the `RoleBinding` in
+Do not set `targetNamespace` on a Flux `Kustomization` that applies
+the base. Flux sets that namespace on every object, the way a
+top-level `namespace:` field does. The `RoleBinding` in
 `api-authentication.yaml` must stay in `kube-system`, where the
-built-in `Role` it binds lives. Moved out of it, the binding names no
-`Role`, and the API can't read the client certificate authority.
+built-in `Role` that it binds is. If the binding moves out of
+`kube-system`, it names no `Role`, and the API cannot read the client
+certificate authority.
 
 ## Remove the operator
 
@@ -402,19 +399,20 @@ published one:
     kubectl delete -f https://liken.sh/audio/deploy/api-authentication.yaml
     kubectl delete resourceslice <node>-audio.liken.sh
 
-The API's own `Secret`s and `ConfigMap` outlive the `Deployment`.
-Delete `audio-api-tls`, `audio-capture-server`, and `audio-api-ca` in
-`liken-system` by hand.
+The `Secret`s and the `ConfigMap` of the API stay after the
+`Deployment` is deleted. Delete `audio-api-tls`, `audio-capture-server`,
+and `audio-api-ca` in `liken-system` by hand.
 
-This leaves the `DeviceClasses` in place: `sound-card` from the
-base, and the consumer classes you created. Delete them when no
-other claim names them. Deleting `crds.yaml` deletes every `Sink`
-and `Source` with it, and the declarations they hold:
+The `DeviceClasses` also stay: `sound-card` from the base, and the
+classes that you created for consumers. Delete them when no other
+claim names them. Deleting `crds.yaml` also deletes every `Sink` and
+`Source`, with the declarations that they contain:
 
     kubectl delete deviceclass sound-card audio-sink audio-source
     kubectl delete -f https://liken.sh/audio/deploy/crds.yaml
 
-The second step is yours because the operator never deletes its
-slice. A device that leaves the inventory while a claim still names
-it strands the kubelet's prepare call. So the operator taints
-devices instead of removing them, and the slice outlives every pod.
+You delete the slice yourself because the operator never deletes it. If
+a device left the slice while a claim still named it, the kubelet's
+prepare call for that claim would never finish. So the
+operator adds taints to devices instead of removing them, and the
+slice stays after every pod is gone.

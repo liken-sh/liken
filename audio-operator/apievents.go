@@ -1,12 +1,10 @@
 package main
 
-// The record a person reads with kubectl.
-//
-// Every request that produces bytes posts a Kubernetes Event on the
-// Sink or the Source: reason Captured, type Normal, with the caller
-// and the aspect in the message, so `kubectl describe sink` answers who
-// listened and when. The log line is the detail record and never
-// carries the token.
+// A capture request posts a Normal Event with the reason Captured on
+// the Sink or Source when it sends the first block of sound. The
+// message names the caller, the aspect, and the format, so kubectl
+// describe sink shows who listened and when. The request's log line
+// has the rest of the detail, and it never contains the token.
 
 import (
 	"fmt"
@@ -14,24 +12,25 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// apiComponent is this process's name on liken_build_info and on every
-// Event it posts.
+// apiComponent names the audio-api process in the liken_build_info
+// metric and as the reporting component of its Events.
 const apiComponent = "audio-api"
 
-// operatorComponent is the operator container's name on every Event it
-// posts.
+// operatorComponent names the operator container as the reporting
+// component of its Events.
 const operatorComponent = "audio-operator"
 
-// endpointReference names a Sink or a Source for an Event. The UID is
-// what `kubectl describe` selects a resource's Events by, so an Event
-// with no UID reaches `kubectl get events` but not the describe output.
+// endpointReference identifies a Sink or Source as the object of an
+// Event. kubectl describe selects a resource's Events by UID, so an
+// Event without a UID appears in kubectl get events and not in the
+// output of kubectl describe.
 func endpointReference(kind, name, uid string) events.ObjectReference {
 	return events.ObjectReference{APIVersion: EndpointAPIVersion, Kind: kind, Name: name, UID: uid}
 }
 
-// recordCapture posts one Captured Event. The recorder queues it and
-// never fails the request: the sound is already on the wire, and the
-// log line holds the same record.
+// recordCapture posts a Captured Event. The recorder queues the Event
+// and returns, and a failure to post does not fail the request, because
+// the sound is already sent and the log line records the same facts.
 func (s *apiServer) recordCapture(kind, name, uid, aspect, format, who string) {
 	s.recorder.Normal(endpointReference(kind, name, uid), reasonCaptured,
 		fmt.Sprintf("%s captured the %s of this %s as %s", who, aspect, kind, format))

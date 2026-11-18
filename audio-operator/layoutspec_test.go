@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// sinkServer is an API server that holds some Sinks.
+// sinkServer is an API server that serves a fixed set of Sinks.
 type sinkServer struct {
 	sinks map[string]Sink
 }
@@ -24,16 +24,16 @@ func (s *sinkServer) handler() http.Handler {
 			}
 			_ = json.NewEncoder(w).Encode(sink)
 		default:
-			http.Error(w, "unexpected", http.StatusBadRequest)
+			http.Error(w, "the fake API server serves only a GET of one Sink", http.StatusBadRequest)
 		}
 	})
 }
 
 // The declare container names the endpoints itself, reads each Sink,
-// and keys the layouts by the node they declare. A Sink that does not
-// exist yet and a Sink with no layout give nothing.
+// and keys each layout by the graph address of its endpoint. A missing
+// Sink and a Sink with no layout produce no entry.
 func TestTheDeclareContainerReadsEachSinksLayout(t *testing.T) {
-	endpoints := likenOne(t)
+	endpoints := liken1Endpoints(t)
 	hdmi := endpoints["liken-1-pci-0000-00-1f-3-hdmi-0"]
 	quad := []string{"FL", "FR", "RL", "RR"}
 	server := &sinkServer{sinks: map[string]Sink{
@@ -51,15 +51,16 @@ func TestTheDeclareContainerReadsEachSinksLayout(t *testing.T) {
 	}
 }
 
-// An API server that refuses the read leaves every layout to the ELD
-// and the channel map, and the pod starts.
-func TestTheDeclareContainerFallsBackWhenTheSinksDoNotRead(t *testing.T) {
-	endpoints := likenOne(t)
+// When the API server refuses the read, the declare container returns no
+// specs, so every layout comes from the ELD and the channel map and the
+// pod still starts.
+func TestTheDeclareContainerFallsBackWhenTheSinksCannotBeRead(t *testing.T) {
+	endpoints := liken1Endpoints(t)
 	var outputs []alsaEndpoint
 	for _, endpoint := range endpoints {
 		outputs = append(outputs, endpoint)
 	}
 	if specs := apiSpecs(testClient(t, failingAPI()), "liken-1", outputs); specs != nil {
-		t.Errorf("specs = %v from an API server that refused", specs)
+		t.Errorf("apiSpecs returned %v from an API server that refused, want nil", specs)
 	}
 }

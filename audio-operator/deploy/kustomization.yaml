@@ -1,25 +1,19 @@
-# The kustomize base for the audio operator.
+# liken does not apply this base itself. Apply it from your own GitOps
+# repository with your own patches, or copy the manifests.
 #
-# This base is for the cluster owner to take. liken does not apply it
-# and does not name it. Take it through your own GitOps with patches
-# of your own, or read it and write your own manifests.
+# The base includes the DeviceClass sound-card, because the operator's
+# claim template in operator.yaml names it and the operator cannot
+# start without it. The DeviceClass that workloads claim through is
+# cluster policy, so you create it, and the install guide gives the
+# YAML for audio-output as a starting point. If you rename sound-card,
+# patch both the DeviceClass and the claim template.
 #
-# The base ships one DeviceClass, sound-card, because the claim
-# template in operator.yaml names it and the operator cannot start
-# without it: it is wiring, not policy. The class workloads claim
-# through is the cluster owner's to create, because it is cluster
-# policy, and the install guide gives the YAML for audio-output,
-# the one to start with. An owner who renames sound-card patches
-# both the class and the template.
-#
-# The namespace below is set with a transformer rather than with the
-# top-level namespace field, because unsetOnly is what keeps the one
-# object that names its own namespace where it belongs: the RoleBinding
-# in kube-system that lets audio-api read the cluster's client
-# certificate authority. The top-level field overwrites a stated
-# namespace, and that binding in any other namespace names a Role that
-# is not there. Every other object here states no namespace, and the
-# transformer sets liken-system on each of them.
+# The namespace comes from a NamespaceTransformer with unsetOnly, not
+# from the top-level namespace field. The top-level field would move
+# the RoleBinding in api-authentication.yaml from kube-system to
+# liken-system, where the Role it refers to does not exist. With
+# unsetOnly, the transformer sets liken-system only on objects that
+# have no namespace.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -32,12 +26,11 @@ transformers:
       namespace: liken-system
     unsetOnly: true
 
-# The transformer above stamps the namespace onto the DeviceClass too,
-# because resource.k8s.io/v1 is not in its compiled OpenAPI schema
-# and an unknown kind is treated as namespaced. The stamp is
-# harmless: the API server ignores a namespace on a cluster-scoped
-# object, and kubectl routes the request by the scope it reads from
-# discovery, not from the object.
+# The transformer also sets a namespace on the DeviceClass, which is
+# cluster-scoped, because kustomize's compiled OpenAPI schema does not
+# include resource.k8s.io/v1 and treats the kind as namespaced. The API
+# server ignores a namespace on a cluster-scoped object, and kubectl
+# takes the scope from API discovery, so the extra field has no effect.
 resources:
   - crds.yaml
   - deviceclasses.yaml

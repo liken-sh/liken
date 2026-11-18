@@ -13,17 +13,17 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// reviewServer stands in for the API server's TokenReview endpoint. It
-// records what it was sent and answers what the test told it to.
+// reviewServer is a fake of the API server's TokenReview endpoint. It
+// records the review it receives and responds with status.
 type reviewServer struct {
 	sent   tokenReview
-	answer tokenReviewStatus
+	status tokenReviewStatus
 	server *httptest.Server
 }
 
-func newReviewServer(t *testing.T, answer tokenReviewStatus) *reviewServer {
+func newReviewServer(t *testing.T, status tokenReviewStatus) *reviewServer {
 	t.Helper()
-	fake := &reviewServer{answer: answer}
+	fake := &reviewServer{status: status}
 	fake.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != tokenReviewPath {
 			http.NotFound(w, r)
@@ -33,10 +33,10 @@ func newReviewServer(t *testing.T, answer tokenReviewStatus) *reviewServer {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		answered := fake.sent
-		answered.Status = fake.answer
+		response := fake.sent
+		response.Status = fake.status
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(&answered)
+		_ = json.NewEncoder(w).Encode(&response)
 	}))
 	t.Cleanup(fake.server.Close)
 	return fake
@@ -46,7 +46,7 @@ func (f *reviewServer) reviewer(audience string) *reviewer {
 	return newReviewer(apiclient.New(f.server.URL, f.server.Client(), ""), audience)
 }
 
-func TestAReviewCarriesTheAudienceAndReadsTheAnswersOwn(t *testing.T) {
+func TestAReviewSendsTheAudienceAndReturnsTheReviewedUser(t *testing.T) {
 	fake := newReviewServer(t, tokenReviewStatus{
 		Authenticated: true,
 		Audiences:     []string{captureAudience},
@@ -62,22 +62,24 @@ func TestAReviewCarriesTheAudienceAndReadsTheAnswersOwn(t *testing.T) {
 		t.Fatalf("reviewing: %v", err)
 	}
 	if fake.sent.Spec.Token != "a.b.c" {
-		t.Errorf("the review carried the token %q", fake.sent.Spec.Token)
+		t.Errorf("the review carried the token %q, want a.b.c", fake.sent.Spec.Token)
 	}
 	if len(fake.sent.Spec.Audiences) != 1 || fake.sent.Spec.Audiences[0] != captureAudience {
-		t.Errorf("the review asked for the audiences %v", fake.sent.Spec.Audiences)
+		t.Errorf("the review requested the audiences %v, want only %s", fake.sent.Spec.Audiences, captureAudience)
 	}
 	if who.Username != captureCaller {
-		t.Errorf("the caller is %q", who.Username)
+		t.Errorf("the caller is %q, want %s", who.Username, captureCaller)
 	}
 	if who.UID == "" || len(who.Groups) != 2 || len(who.Extra) != 1 {
-		t.Errorf("the caller is %+v, and every field a SubjectAccessReview copies must survive", who)
+		t.Errorf("the caller is %+v, want the UID, both groups, and the extra field that a SubjectAccessReview copies", who)
 	}
 }
 
 func TestATokenMintedForAnotherAudienceIsRefused(t *testing.T) {
-	// The API server answers authenticated with the token's own
-	// audiences, so the answer is what decides, not the ask.
+	// A real API server returns in status.audiences only the audiences
+	// that spec.audiences and the token share, so for this token the
+	// list is empty. The fake returns another audience, and review
+	// refuses both lists because neither has audio-api.
 	fake := newReviewServer(t, tokenReviewStatus{
 		Authenticated: true,
 		Audiences:     []string{"https://kubernetes.default.svc"},
@@ -85,33 +87,33 @@ func TestATokenMintedForAnotherAudienceIsRefused(t *testing.T) {
 	})
 	_, err := fake.reviewer(apiAudience).review("a.b.c")
 	if !errors.Is(err, ErrTokenDenied) {
-		t.Fatalf("a token for another audience was accepted: %v", err)
+		t.Fatalf("the review of a token for another audience returned %v, want ErrTokenDenied", err)
 	}
 }
 
-func TestARefusalCarriesTheReviewsOwnWords(t *testing.T) {
+func TestARefusalIncludesTheReviewsErrorText(t *testing.T) {
 	fake := newReviewServer(t, tokenReviewStatus{
 		Authenticated: false,
 		Error:         `[invalid bearer token, token is expired by 3m12s]`,
 	})
 	_, err := fake.reviewer(apiAudience).review("a.b.c")
 	if !errors.Is(err, ErrTokenDenied) {
-		t.Fatalf("a refused token was accepted: %v", err)
+		t.Fatalf("the review of a refused token returned %v, want ErrTokenDenied", err)
 	}
 	if got := err.Error(); !strings.Contains(got, "token is expired by 3m12s") {
-		t.Errorf("the refusal is %q, and it must carry the review's own words", got)
+		t.Errorf("the refusal is %q, want the review's own text", got)
 	}
 }
 
-func TestARefusalWithNoReasonStillSaysSomething(t *testing.T) {
+func TestARefusalWithNoReasonHasErrorText(t *testing.T) {
 	fake := newReviewServer(t, tokenReviewStatus{Authenticated: false})
 	_, err := fake.reviewer(apiAudience).review("a.b.c")
 	if err == nil || err.Error() == "" {
-		t.Fatalf("a refusal with no reason answered %v", err)
+		t.Fatalf("a refusal with no reason returned %v, want an error with text", err)
 	}
 }
 
-func TestAPositiveVerdictIsKeptAndADenialIsNot(t *testing.T) {
+func TestAnAcceptedTokenIsCachedAndARefusedOneIsNot(t *testing.T) {
 	fake := newReviewServer(t, tokenReviewStatus{
 		Authenticated: true,
 		Audiences:     []string{apiAudience},
@@ -124,22 +126,22 @@ func TestAPositiveVerdictIsKeptAndADenialIsNot(t *testing.T) {
 		}
 	}
 	if review.reviews() != 1 {
-		t.Errorf("the API server was asked %d times, want 1", review.reviews())
+		t.Errorf("the API server received %d reviews, want 1", review.reviews())
 	}
 
-	fake.answer = tokenReviewStatus{Authenticated: false, Error: "invalid bearer token"}
+	fake.status = tokenReviewStatus{Authenticated: false, Error: "invalid bearer token"}
 	denied := fake.reviewer(apiAudience)
 	for range 3 {
 		if _, err := denied.review("d.e.f"); err == nil {
-			t.Fatal("a denial was accepted")
+			t.Fatal("the review of a denied token returned no error, want the denial")
 		}
 	}
 	if denied.reviews() != 3 {
-		t.Errorf("a denial was asked %d times, want 3: a denial is never cached", denied.reviews())
+		t.Errorf("a denied token was reviewed %d times, want 3, because a denial is never cached", denied.reviews())
 	}
 }
 
-func TestAVerdictLeavesTheCacheWhenItsMinuteIsUp(t *testing.T) {
+func TestACachedTokenIsReviewedAgainAfterTokenCacheMax(t *testing.T) {
 	fake := newReviewServer(t, tokenReviewStatus{
 		Authenticated: true,
 		Audiences:     []string{apiAudience},
@@ -150,25 +152,25 @@ func TestAVerdictLeavesTheCacheWhenItsMinuteIsUp(t *testing.T) {
 	review.now = func() time.Time { return at }
 
 	if _, err := review.review("a.b.c"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reviewing the token: %v", err)
 	}
 	at = at.Add(59 * time.Second)
 	if _, err := review.review("a.b.c"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reviewing the token 59 seconds later: %v", err)
 	}
 	if review.reviews() != 1 {
-		t.Errorf("the verdict was not kept for its minute: %d reviews", review.reviews())
+		t.Errorf("after 59 seconds the reviewer sent %d reviews, want 1", review.reviews())
 	}
 	at = at.Add(2 * time.Second)
 	if _, err := review.review("a.b.c"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reviewing the token 61 seconds later: %v", err)
 	}
 	if review.reviews() != 2 {
-		t.Errorf("the verdict outlived its minute: %d reviews", review.reviews())
+		t.Errorf("after 61 seconds the reviewer sent %d reviews, want 2", review.reviews())
 	}
 }
 
-func TestAVerdictNeverOutlivesItsOwnToken(t *testing.T) {
+func TestACachedTokenIsReviewedAgainAfterItsExpClaim(t *testing.T) {
 	fake := newReviewServer(t, tokenReviewStatus{
 		Authenticated: true,
 		Audiences:     []string{apiAudience},
@@ -178,17 +180,18 @@ func TestAVerdictNeverOutlivesItsOwnToken(t *testing.T) {
 	at := time.Date(2026, 9, 16, 21, 0, 0, 0, time.UTC)
 	review.now = func() time.Time { return at }
 
-	// A token that expires in ten seconds is kept for ten, not sixty.
+	// The exp claim is ten seconds away, which is sooner than
+	// tokenCacheMax.
 	token := tokenExpiringAt(at.Add(10 * time.Second))
 	if _, err := review.review(token); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reviewing the token: %v", err)
 	}
 	at = at.Add(11 * time.Second)
 	if _, err := review.review(token); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reviewing the token after it expired: %v", err)
 	}
 	if review.reviews() != 2 {
-		t.Errorf("a verdict outlived its token: %d reviews", review.reviews())
+		t.Errorf("after the token expired the reviewer sent %d reviews, want 2", review.reviews())
 	}
 }
 
@@ -198,17 +201,17 @@ func TestTheCacheKeyIsTheDigestAndNotTheToken(t *testing.T) {
 		t.Errorf("the key is %d characters, want a 64-character SHA-256", len(key))
 	}
 	if strings.Contains(key, "a.b.c") {
-		t.Error("the key holds the token")
+		t.Error("the key contains the token, want only its digest")
 	}
 	if tokenKey("a.b.c") != key {
-		t.Error("the key is not stable")
+		t.Error("two keys of the same token differ, want them equal")
 	}
 	if tokenKey("a.b.d") == key {
-		t.Error("two tokens share one key")
+		t.Error("two different tokens have the same key, want different keys")
 	}
 }
 
-func TestABearerHeaderIsReadAndNothingElseIs(t *testing.T) {
+func TestBearerTokenReadsOnlyTheBearerScheme(t *testing.T) {
 	cases := map[string]string{
 		"Bearer a.b.c": "a.b.c",
 		"bearer a.b.c": "a.b.c",
@@ -217,19 +220,18 @@ func TestABearerHeaderIsReadAndNothingElseIs(t *testing.T) {
 	for header, want := range cases {
 		token, found := bearerToken(header)
 		if !found || token != want {
-			t.Errorf("%q read as %q (%v)", header, token, found)
+			t.Errorf("bearerToken(%q) = %q, %v, want %q, true", header, token, found, want)
 		}
 	}
 	for _, header := range []string{"", "Basic dXNlcjpwYXNz", "Bearer", "Bearer ", "a.b.c"} {
 		if _, found := bearerToken(header); found {
-			t.Errorf("%q was read as a bearer token", header)
+			t.Errorf("bearerToken(%q) found a token, want none", header)
 		}
 	}
 }
 
-// tokenExpiringAt builds a token shaped like a ServiceAccount token,
-// with only the claim the cache reads. The signature is not checked
-// here, because the TokenReview above already checked it.
+// tokenExpiringAt builds a JWT whose payload has only the exp claim. Its
+// signature is not valid, and tokenExpiry does not check it.
 func tokenExpiringAt(at time.Time) string {
 	payload, _ := json.Marshal(map[string]any{"exp": at.Unix()})
 	return "header." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"

@@ -13,8 +13,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// graphWithoutAnalogSink is the lab graph with no node for the analog
-// sink, which is a PipeWire that did not build it.
+// graphWithoutAnalogSink is the lab graph with no PipeWire node for the
+// analog sink.
 func graphWithoutAnalogSink() pwGraph {
 	graph := labGraph()
 	delete(graph.Nodes, nodeAddress{pcmAddress: pcmAddress{Card: 0, PCM: 0}, Direction: directionSink})
@@ -22,10 +22,8 @@ func graphWithoutAnalogSink() pwGraph {
 }
 
 // Each condition transition posts one Event with the condition's
-// reason, after the status write lands. A Sink that is Connected and
-// has no node is a Warning, because sound can leave it and PipeWire
-// holds nothing to send it through. A pass that changes nothing posts
-// nothing.
+// reason, and a pass that changes nothing posts nothing. A Sink that is
+// Connected and has no PipeWire node posts a Warning.
 func TestEachConditionTransitionPostsOneEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := newEndpointAPI()
@@ -34,7 +32,7 @@ func TestEachConditionTransitionPostsOneEvent(t *testing.T) {
 
 		for _, graph := range []pwGraph{labGraph(), labGraph(), graphWithoutAnalogSink()} {
 			if err := control.pass(ctx, labEndpoints(), nil, graph, nil); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the pass: %v", err)
 			}
 		}
 		synctest.Wait()
@@ -50,9 +48,8 @@ func TestEachConditionTransitionPostsOneEvent(t *testing.T) {
 	})
 }
 
-// An endpoint that leaves the machine reports its absence, and the
-// absence is no Warning: unplugging a USB card is something a person
-// does.
+// An endpoint that leaves the machine posts Normal Events only,
+// because a person unplugs a USB card on purpose.
 func TestAnEndpointThatLeftPostsNormalEvents(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := newEndpointAPI()
@@ -60,10 +57,10 @@ func TestAnEndpointThatLeftPostsNormalEvents(t *testing.T) {
 		ctx := context.Background()
 
 		if err := control.pass(ctx, labEndpoints(), nil, labGraph(), nil); err != nil {
-			t.Fatal(err)
+			t.Fatalf("running the pass: %v", err)
 		}
 		if err := control.pass(ctx, labEndpoints()[:1], nil, labGraph(), nil); err != nil {
-			t.Fatal(err)
+			t.Fatalf("running the pass: %v", err)
 		}
 		synctest.Wait()
 
@@ -79,8 +76,8 @@ func TestAnEndpointThatLeftPostsNormalEvents(t *testing.T) {
 	})
 }
 
-// refuseStatus answers every status write with 503 while refusing
-// holds, the way an API server that restarts does.
+// refuseStatus wraps api and fails every status write with 503 while
+// refusing is true, as an API server that is restarting does.
 func refuseStatus(api http.Handler, refusing *atomic.Bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if refusing.Load() && strings.HasSuffix(r.URL.Path, "/status") {
@@ -91,8 +88,8 @@ func refuseStatus(api http.Handler, refusing *atomic.Bool) http.Handler {
 	})
 }
 
-// A status write that the API server refuses posts nothing, and the
-// next pass that lands the write posts the transition.
+// A status write that the API server refuses posts no Events, and the
+// next pass whose write succeeds posts the transitions.
 func TestARefusedStatusWritePostsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := newEndpointAPI()
@@ -102,16 +99,16 @@ func TestARefusedStatusWritePostsNothing(t *testing.T) {
 		ctx := context.Background()
 
 		if err := control.pass(ctx, labEndpoints()[:1], nil, labGraph(), nil); err == nil {
-			t.Fatal("the pass met no refusal")
+			t.Fatal("the pass returned no error, want the refused status write")
 		}
 		synctest.Wait()
-		if held := recorded.About(SinkKind, testAnalogName); len(held) != 0 {
-			t.Fatalf("a refused write posted %+v", eventLines(held))
+		if posted := recorded.About(SinkKind, testAnalogName); len(posted) != 0 {
+			t.Fatalf("a refused write posted %+v, want no Event", eventLines(posted))
 		}
 
 		refusing.Store(false)
 		if err := control.pass(ctx, labEndpoints()[:1], nil, labGraph(), nil); err != nil {
-			t.Fatal(err)
+			t.Fatalf("running the pass: %v", err)
 		}
 		synctest.Wait()
 		if got := eventLines(recorded.About(SinkKind, testAnalogName)); len(got) != 2 {
@@ -120,8 +117,8 @@ func TestARefusedStatusWritePostsNothing(t *testing.T) {
 	})
 }
 
-// A spec that states a codec the speaker does not offer posts one
-// SpecRefused Warning for the run of passes that refuses it.
+// A spec that sets a codec the speaker does not offer posts one
+// SpecRefused Warning, however many passes refuse it.
 func TestARefusedSpecPostsOneWarning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := newEndpointAPI()
@@ -135,7 +132,7 @@ func TestARefusedSpecPostsOneWarning(t *testing.T) {
 
 		for range 3 {
 			if err := control.pass(ctx, nil, testSpeakers(), labGraph(), nil); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the pass: %v", err)
 			}
 		}
 		synctest.Wait()
@@ -153,10 +150,9 @@ func TestARefusedSpecPostsOneWarning(t *testing.T) {
 	})
 }
 
-// reasonsAmong answers the lines of the Events with the given reasons.
-func reasonsAmong(held []events.Event, reasons ...string) []eventLine {
+func reasonsAmong(posted []events.Event, reasons ...string) []eventLine {
 	var lines []eventLine
-	for _, line := range eventLines(held) {
+	for _, line := range eventLines(posted) {
 		if slices.Contains(reasons, line.Reason) {
 			lines = append(lines, line)
 		}
@@ -164,18 +160,18 @@ func reasonsAmong(held []events.Event, reasons ...string) []eventLine {
 	return lines
 }
 
-// The first graph read that fails posts PipeWireLost on each Sink of
-// the machine, and the read that succeeds after it posts
-// PipeWireRecovered. The reads that fail between them post nothing.
-func TestAPipeWireThatStopsAnsweringPostsItsFirstFailureAndItsRecovery(t *testing.T) {
+// The first failed PipeWire graph read posts PipeWireLost on each Sink
+// of the machine, the failed reads after it post nothing, and the
+// first successful read posts PipeWireRecovered.
+func TestAPipeWireThatStopsRespondingPostsItsFirstFailureAndItsRecovery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		sinks := failingSinks
+		sinks := failingGraph
 		operator := testReconciler(t, &slicePublishFixture{}, func(ctx context.Context) (pwGraph, error) {
 			return sinks(ctx)
 		}, "pcmC0D0p")
 		outputs, err := readEndpoints()
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the endpoints: %v", err)
 		}
 		named, _ := nameEndpoints(operator.nodeName, outputs)
 		operator.endpoints = &endpointInventory{}
@@ -184,14 +180,14 @@ func TestAPipeWireThatStopsAnsweringPostsItsFirstFailureAndItsRecovery(t *testin
 		operator.control = control
 		sink := named[0].Name()
 
-		for range maxSinkFailures - 1 {
+		for range maxFailedGraphReads - 1 {
 			if err := operator.reconcile(context.Background()); err != nil {
-				t.Fatal(err)
+				t.Fatalf("reconciling: %v", err)
 			}
 		}
 		sinks = staticGraph(outputGraph(map[pcmAddress]string{{Card: 0, PCM: 0}: "alsa_output.test"}))
 		if err := operator.reconcile(context.Background()); err != nil {
-			t.Fatal(err)
+			t.Fatalf("reconciling: %v", err)
 		}
 		synctest.Wait()
 
@@ -206,10 +202,10 @@ func TestAPipeWireThatStopsAnsweringPostsItsFirstFailureAndItsRecovery(t *testin
 	})
 }
 
-// A bluetoothd that stops answering posts BluetoothUnavailable on each
-// speaker it last reported, once, and BluetoothAvailable when it
-// answers again.
-func TestABluetoothdThatStopsAnsweringPostsItsFirstFailureAndItsRecovery(t *testing.T) {
+// When bluetoothd stops responding, the operator posts
+// BluetoothUnavailable once on each speaker it last reported, and
+// BluetoothAvailable when bluetoothd responds again.
+func TestABluetoothdThatStopsRespondingPostsItsFirstFailureAndItsRecovery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		control, recorded := eventedControl(t, newEndpointAPI().handler(t))
 		var failure error

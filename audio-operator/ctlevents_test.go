@@ -9,9 +9,9 @@ import (
 	"unsafe"
 )
 
-// The read on the control device returns whole records, so a
-// structure that disagrees with the kernel's reads every field of
-// every event at the wrong offset.
+// parseControlEvent reads fields at fixed offsets, so a layout that
+// differs from the kernel's struct snd_ctl_event reads every field from
+// the wrong offset.
 func TestControlEventSize(t *testing.T) {
 	if got := unsafe.Sizeof(ctlEvent{}); got != ctlEventSize {
 		t.Errorf("sizeof(snd_ctl_event) = %d, want %d", got, ctlEventSize)
@@ -21,28 +21,25 @@ func TestControlEventSize(t *testing.T) {
 	}
 }
 
-// The subscribe request number, whose argument is one int.
+// SNDRV_CTL_IOCTL_SUBSCRIBE_EVENTS is _IOWR('U', 0x16, int).
 func TestSubscribeIoctlNumber(t *testing.T) {
 	if got, want := ctlIoctlSubscribeEvents, uintptr(0xc0045516); got != want {
 		t.Errorf("SNDRV_CTL_IOCTL_SUBSCRIBE_EVENTS = %#x, want %#x", got, want)
 	}
 }
 
-// eventFixture reads one record the way the control device delivers it.
 func eventFixture(t *testing.T, name string) []byte {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/mixer/" + name)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the event fixture: %v", err)
 	}
 	if len(raw) != ctlEventSize {
-		t.Fatalf("the fixture holds %d bytes, and a record is %d", len(raw), ctlEventSize)
+		t.Fatalf("the fixture %s has %d bytes, want %d, the size of one record", name, len(raw), ctlEventSize)
 	}
 	return raw
 }
 
-// The record names the element that changed and what changed
-// about it.
 func TestParseControlEvent(t *testing.T) {
 	event := parseControlEvent(0, eventFixture(t, "event-master-playback-volume.bin"))
 	cases := []struct {
@@ -70,28 +67,28 @@ func TestParseControlEvent(t *testing.T) {
 	}
 }
 
-// A removed element carries every mask bit, so the value bit
-// alone does not say that a value changed.
+// A removed element has every mask bit set, so the value bit alone does
+// not mean that the value changed.
 func TestRemovedElement(t *testing.T) {
 	raw := eventFixture(t, "event-master-playback-volume.bin")
 	copy(raw[4:8], []byte{0xff, 0xff, 0xff, 0xff})
 
 	event := parseControlEvent(1, raw)
 	if !event.removed() {
-		t.Error("the element reads as present, and the mask says it was removed")
+		t.Error("removed() = false, want true because the mask has every bit set")
 	}
 	if event.valueChanged() {
-		t.Error("a removed element reads as a value change")
+		t.Error("valueChanged() = true for a removed element, want false")
 	}
 }
 
-// The reader carries whole records onto the channel and ends
-// when the context does. A pipe stands in for the control device,
-// because the subscribe ioctl is the only part a pipe cannot answer.
+// The test reads from a pipe in place of a control device, because only
+// the subscribe ioctl needs a real one, and readControlEvents does not
+// call it.
 func TestReadControlEventsEndsWithTheContext(t *testing.T) {
 	reader, writer, err := os.Pipe()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening a pipe: %v", err)
 	}
 	defer writer.Close()
 
@@ -99,12 +96,12 @@ func TestReadControlEventsEndsWithTheContext(t *testing.T) {
 	events := readControlEvents(ctx, 0, reader)
 
 	if _, err := writer.Write(eventFixture(t, "event-master-playback-volume.bin")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the event record to the pipe: %v", err)
 	}
 	select {
 	case event := <-events:
 		if event.Name != "Master Playback Volume" {
-			t.Errorf("the event names %q", event.Name)
+			t.Errorf("the event names %q, want %q", event.Name, "Master Playback Volume")
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("no event arrived within five seconds")
@@ -114,15 +111,15 @@ func TestReadControlEventsEndsWithTheContext(t *testing.T) {
 	select {
 	case _, open := <-events:
 		if open {
-			t.Error("the channel carried an event after the context ended")
+			t.Error("the channel delivered an event after the context ended, want it closed")
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the channel stayed open five seconds after the context ended")
 	}
 }
 
-// The live check. The subscribe ioctl and the non-blocking read
-// run only where a card answers.
+// The test runs the subscribe ioctl and the non-blocking read on a real
+// card, so it runs only on a machine that has card 0.
 func TestWatchControlsOnTheLocalCard(t *testing.T) {
 	sndDir = "/dev/snd"
 	t.Cleanup(func() { sndDir = "/dev/snd" })
@@ -144,19 +141,16 @@ func TestWatchControlsOnTheLocalCard(t *testing.T) {
 	}
 }
 
-// The pass subscribes to every card the claim delivered before it
-// reads any of them, so the card list comes from the control nodes
-// and not from what the read found.
 func TestControlCardsListsTheDeliveredControlNodes(t *testing.T) {
-	deliveredNodes(t, "controlC2", "controlC0", "pcmC0D0p", "pcmC2D3p", "timer")
+	sndDirWith(t, "controlC2", "controlC0", "pcmC0D0p", "pcmC2D3p", "timer")
 	if got := controlCards(); !slices.Equal(got, []int{0, 2}) {
 		t.Errorf("controlCards = %v, want [0 2]", got)
 	}
 }
 
-// A reader that stops on its own wakes the loop, so the next pass
-// opens the card again and reads what changed while nothing watched.
-// A reader that follow stopped, for a card that left, wakes nothing.
+// A reader that stops on its own calls wake, so the next pass starts a
+// new reader and reads what changed while no reader ran. A reader that
+// follow stopped, for a card that is gone, does not call wake.
 func TestAReaderThatStopsOnItsOwnWakesTheLoop(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -182,7 +176,7 @@ func TestAReaderThatStopsOnItsOwnWakesTheLoop(t *testing.T) {
 				t.Errorf("the relay woke the loop %d times, want %d", wakes, c.wakes)
 			}
 			if _, watching := watchers.watching[3]; watching {
-				t.Error("the stopped card is still watched")
+				t.Error("the stopped card is still in the watchers, want it removed")
 			}
 		})
 	}

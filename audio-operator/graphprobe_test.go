@@ -1,8 +1,5 @@
 package main
 
-// The PipeWire container's startup probe, against a pw-dump stand-in
-// on the path.
-
 import (
 	"bytes"
 	"context"
@@ -13,58 +10,56 @@ import (
 	"time"
 )
 
-// stubProbeDump puts a pw-dump on the path that prints a graph larger
-// than the kubelet keeps of a probe's output, writes a line to
+// stubProbeDump puts a pw-dump on PATH that prints a graph larger than
+// the 10 KiB of probe output that the kubelet keeps, writes a line to
 // stderr, and exits with the given status.
 func stubProbeDump(t *testing.T, exitStatus string) {
 	t.Helper()
 	dir := t.TempDir()
 	graph := filepath.Join(dir, "graph.json")
 	if err := os.WriteFile(graph, bytes.Repeat([]byte(`{"id": 1},`), 8192), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the stub graph: %v", err)
 	}
 	script := "#!/bin/sh\ncat " + graph + "\necho 'remote error: Connection refused' >&2\nexit " + exitStatus + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "pw-dump"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the stub pw-dump: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func TestGraphAnswersPassesWhenPWDumpSucceeds(t *testing.T) {
+func TestCheckGraphPassesWhenPWDumpSucceeds(t *testing.T) {
 	stubProbeDump(t, "0")
-	if err := graphAnswers(context.Background()); err != nil {
-		t.Fatalf("a pw-dump that exits 0 passes the probe: %v", err)
+	if err := checkGraph(context.Background()); err != nil {
+		t.Fatalf("checkGraph returned %v, want nil because pw-dump exits 0", err)
 	}
 }
 
-func TestGraphAnswersReportsTheFailureWithoutTheGraph(t *testing.T) {
+func TestCheckGraphReportsTheFailureWithoutTheGraph(t *testing.T) {
 	stubProbeDump(t, "3")
-	err := graphAnswers(context.Background())
+	err := checkGraph(context.Background())
 	if err == nil {
-		t.Fatal("a pw-dump that exits nonzero fails the probe")
+		t.Fatal("checkGraph returned nil, want an error because pw-dump exits 3")
 	}
 	want := "running pw-dump: exit status 3: remote error: Connection refused"
 	if err.Error() != want {
 		t.Errorf("the probe's report = %q, want %q", err.Error(), want)
 	}
 	if strings.Contains(err.Error(), `"id"`) {
-		t.Error("the probe's report holds the graph pw-dump printed")
+		t.Error("the probe's report contains the graph that pw-dump printed, want only pw-dump's stderr")
 	}
 }
 
-// A pw-dump that hangs is stopped at the bound, and the report says
-// so in its own words, not as the signal that stopped it.
-func TestGraphAnswersReportsAPWDumpThatHangs(t *testing.T) {
+func TestCheckGraphReportsAPWDumpThatHangs(t *testing.T) {
 	dir := t.TempDir()
 	script := "#!/bin/sh\nexec sleep 30\n"
 	if err := os.WriteFile(filepath.Join(dir, "pw-dump"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the stub pw-dump: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := graphAnswers(ctx)
+	err := checkGraph(ctx)
 
 	want := "pw-dump did not finish in " + graphProbeTimeout.String()
 	if err == nil || err.Error() != want {

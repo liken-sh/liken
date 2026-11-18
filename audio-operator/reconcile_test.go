@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the reconcile pass's decisions: what it publishes,
-// what it refuses to publish, and when it stops and lets the
-// kubelet restart the pod.
-
 import (
 	"context"
 	"errors"
@@ -13,24 +9,21 @@ import (
 	"time"
 )
 
-// failingSinks stands in for a PipeWire that does not answer.
-func failingSinks(context.Context) (pwGraph, error) {
+func failingGraph(context.Context) (pwGraph, error) {
 	return pwGraph{}, errors.New("running pw-dump: no such file or directory")
 }
 
-// testReconciler builds a reconciler over a fake API server and a
-// fake set of delivered nodes.
+// testReconciler builds a reconciler over a fake API server and the
+// device files in /dev/snd that the test names.
 func testReconciler(t *testing.T, api *slicePublishFixture, graph func(context.Context) (pwGraph, error), nodes ...string) *reconciler {
 	t.Helper()
-	sndDir = deliveredNodes(t, nodes...)
+	sndDir = sndDirWith(t, nodes...)
 	specDirectory(t)
-	// The init container declares the card's outputs to PipeWire before
-	// PipeWire starts, and every later pass compares against that
-	// document, so a reconciler starts out agreeing with the card it
-	// was built over.
+	// declared starts as the drop-in that the init container writes for
+	// these devices, so a pass finds no mismatch with the card.
 	outputs, err := readEndpoints()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the endpoints: %v", err)
 	}
 	return &reconciler{
 		client:   testClient(t, api.handler(t)),
@@ -42,68 +35,67 @@ func testReconciler(t *testing.T, api *slicePublishFixture, graph func(context.C
 }
 
 // A single failed graph read leaves the published slice alone. A
-// slice that tainted every output would evict every consumer for a
-// pw-dump that timed out once.
-func TestReconcileSkipsTheWriteWhenPipeWireDoesNotAnswer(t *testing.T) {
+// slice that tainted every output would evict every pod that uses one
+// for a pw-dump that timed out once.
+func TestReconcileSkipsTheWriteWhenPipeWireDoesNotRespond(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
-	operator := testReconciler(t, api, failingSinks, "pcmC0D0p", "pcmC0D3p")
+	operator := testReconciler(t, api, failingGraph, "pcmC0D0p", "pcmC0D3p")
 
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatalf("one failed graph read stopped the operator: %v", err)
+		t.Fatalf("reconcile after one failed graph read = %v, want nil", err)
 	}
 	if len(api.requests) != 0 {
-		t.Errorf("a failed graph read reached the API server: %v", api.requests)
+		t.Errorf("a failed graph read sent %v to the API server, want no request", api.requests)
 	}
 }
 
-// A run of failed graph reads is a different state from one. The
-// published slice still says every output has a sink, every prepare
-// call fails, and nothing bounds it, so the operator exits and the
-// kubelet's restart is the repair.
-func TestReconcileGivesUpAfterARunOfFailedGraphReads(t *testing.T) {
+// While PipeWire does not respond, the published slice lists every
+// output as playable, and every prepare call fails. So after
+// maxFailedGraphReads failed reads in a row, reconcile returns an
+// error, and the operator exits for the kubelet to restart it.
+func TestReconcileReturnsAnErrorAfterARunOfFailedGraphReads(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
-	operator := testReconciler(t, api, failingSinks, "pcmC0D0p")
+	operator := testReconciler(t, api, failingGraph, "pcmC0D0p")
 
-	for pass := 1; pass < maxSinkFailures; pass++ {
+	for pass := 1; pass < maxFailedGraphReads; pass++ {
 		if err := operator.reconcile(context.Background()); err != nil {
-			t.Fatalf("pass %d of %d stopped early: %v", pass, maxSinkFailures, err)
+			t.Fatalf("pass %d of %d returned %v, want nil", pass, maxFailedGraphReads, err)
 		}
 	}
 	if err := operator.reconcile(context.Background()); err == nil {
-		t.Fatalf("%d failed graph reads in a row did not stop the operator", maxSinkFailures)
+		t.Fatalf("reconcile after %d failed graph reads in a row returned nil, want an error", maxFailedGraphReads)
 	}
 }
 
 // One good read clears the count, so a pw-dump that fails now and
 // then never adds up to a restart.
-func TestReconcileForgetsFailuresAfterAGoodRead(t *testing.T) {
+func TestReconcileClearsTheFailureCountAfterAGoodRead(t *testing.T) {
 	api := &slicePublishFixture{}
-	sinks := failingSinks
+	sinks := failingGraph
 	operator := testReconciler(t, api, func(ctx context.Context) (pwGraph, error) {
 		return sinks(ctx)
 	}, "pcmC0D0p")
 
-	for pass := 1; pass < maxSinkFailures; pass++ {
+	for pass := 1; pass < maxFailedGraphReads; pass++ {
 		if err := operator.reconcile(context.Background()); err != nil {
-			t.Fatalf("pass %d stopped early: %v", pass, err)
+			t.Fatalf("pass %d returned %v, want nil", pass, err)
 		}
 	}
 	sinks = staticGraph(outputGraph(map[pcmAddress]string{{Card: 0, PCM: 0}: "alsa_output.test"}))
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatalf("a good read stopped the operator: %v", err)
+		t.Fatalf("reconcile with a good read = %v, want nil", err)
 	}
-	sinks = failingSinks
-	for pass := 1; pass < maxSinkFailures; pass++ {
+	sinks = failingGraph
+	for pass := 1; pass < maxFailedGraphReads; pass++ {
 		if err := operator.reconcile(context.Background()); err != nil {
-			t.Fatalf("the count survived a good read: %v", err)
+			t.Fatalf("a failed read after a good one returned %v, want nil, because the good read clears the count", err)
 		}
 	}
 }
 
-// An empty enumeration is never a real state of a machine this
-// operator runs on, so the pass publishes nothing and does not read
-// the graph. A capture node is not an empty enumeration: it is the
-// card's microphone, and the operator publishes it as a source.
+// A card with no PCM device is never a real state of a machine where
+// this operator runs, so the pass publishes nothing and does not read
+// the graph.
 func TestReconcileSkipsTheWriteWhenTheCardHasNoPCMDevice(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
 	read := false
@@ -113,13 +105,13 @@ func TestReconcileSkipsTheWriteWhenTheCardHasNoPCMDevice(t *testing.T) {
 	}, "controlC0", "timer", "seq")
 
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
 	if len(api.requests) != 0 {
-		t.Errorf("an empty enumeration reached the API server: %v", api.requests)
+		t.Errorf("an empty enumeration sent %v to the API server, want no request", api.requests)
 	}
 	if read {
-		t.Error("an empty enumeration read PipeWire's graph anyway")
+		t.Error("an empty enumeration read PipeWire's graph, want no read")
 	}
 }
 
@@ -129,20 +121,20 @@ func TestReconcilePublishesWhatItReads(t *testing.T) {
 		map[pcmAddress]string{{Card: 0, PCM: 0}: "alsa_output.analog"})), "pcmC0D0p", "pcmC0D3p")
 
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
 	if api.created == nil {
-		t.Fatal("the first pass published nothing")
+		t.Fatal("the first pass created no slice, want one")
 	}
 	devices := api.created.Spec.Devices
 	if len(devices) != 2 {
 		t.Fatalf("devices = %+v, want two", devices)
 	}
 	if got := stringAttribute(t, devices[0], sinkAttribute); got != testAnalogName {
-		t.Errorf("sink = %q", got)
+		t.Errorf("sink = %q, want %q", got, testAnalogName)
 	}
 	if len(devices[0].Taints) != 0 {
-		t.Errorf("the output with a sink is tainted: %+v", devices[0].Taints)
+		t.Errorf("the output with a sink has the taints %+v, want none", devices[0].Taints)
 	}
 	noSink := []DeviceTaint{
 		{Key: disconnectedTaint, Effect: "NoExecute"},
@@ -153,22 +145,22 @@ func TestReconcilePublishesWhatItReads(t *testing.T) {
 	}
 }
 
-// PipeWire builds its nodes from a document the init container writes
-// once, so a PCM device that appeared or left has no node and can never
-// get one under this PipeWire. Only a replacement pod declares the new
-// set, so the operator keeps running and the new output publishes with
-// the no-sink taint.
+// PipeWire creates its nodes from the drop-in that the init container
+// writes, so a PCM device that appears later gets no node from this
+// PipeWire. Only a replacement pod declares the new set, so the
+// operator keeps running and publishes the new output with the no-sink
+// taint.
 func TestReconcilePublishesWhenTheCardsPCMDevicesChange(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
 	operator := testReconciler(t, api, staticGraph(outputGraph(
 		map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)})), "pcmC0D0p")
 
-	sndDir = deliveredNodes(t, "pcmC0D0p", "pcmC0D3p")
+	sndDir = sndDirWith(t, "pcmC0D0p", "pcmC0D3p")
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatalf("a new PCM device stopped the operator: %v", err)
+		t.Fatalf("reconcile after a new PCM device = %v, want nil", err)
 	}
 	if api.updated == nil {
-		t.Fatal("a new PCM device published nothing")
+		t.Fatal("a new PCM device left the slice unchanged, want an updated slice")
 	}
 	devices := api.updated.Spec.Devices
 	if len(devices) != 2 {
@@ -198,25 +190,25 @@ func TestReconcilePublishesTheSpeakersBluetoothdReports(t *testing.T) {
 	operator.speakers = func() (map[string]speaker, error) { return testSpeakers(), nil }
 
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
 	devices := api.created.Spec.Devices
 	if len(devices) != 2 {
 		t.Fatalf("devices = %+v, want the output and the speaker", devices)
 	}
 	if devices[0].Name != testSpeakerName || devices[1].Name != testAnalogName {
-		t.Fatalf("names = %q, %q", devices[0].Name, devices[1].Name)
+		t.Fatalf("names = %q, %q, want %q, %q", devices[0].Name, devices[1].Name, testSpeakerName, testAnalogName)
 	}
 	if len(devices[0].Taints) != 0 {
-		t.Errorf("a connected speaker with a node is tainted: %+v", devices[0].Taints)
+		t.Errorf("a connected speaker with a node has the taints %+v, want none", devices[0].Taints)
 	}
 }
 
-// A bluetoothd that stops answering says nothing about who is
-// paired, so the speakers keep their place in the slice and the
-// taints say they cannot play. Retracting one would strand the
-// claim that names it.
-func TestReconcileKeepsTheSpeakersWhenBluetoothdStopsAnswering(t *testing.T) {
+// When bluetoothd stops responding, the speakers are still paired, so
+// they stay in the slice with taints that keep pods off them. A speaker
+// removed from the slice would leave a claim that names it with no
+// device.
+func TestReconcileKeepsTheSpeakersWhenBluetoothdStopsResponding(t *testing.T) {
 	api := &slicePublishFixture{}
 	graph := pwGraph{
 		Nodes: map[nodeAddress]pwNode{
@@ -226,28 +218,28 @@ func TestReconcileKeepsTheSpeakersWhenBluetoothdStopsAnswering(t *testing.T) {
 			testSpeakerAddress: {Node: testSpeakerNode, Codec: "sbc"},
 		},
 	}
-	answering := true
+	responding := true
 	operator := testReconciler(t, api, func(context.Context) (pwGraph, error) {
-		if answering {
+		if responding {
 			return graph, nil
 		}
 		return pwGraph{Nodes: graph.Nodes, Speakers: map[string]bluezSink{}}, nil
 	}, "pcmC0D0p")
 	operator.speakers = func() (map[string]speaker, error) {
-		if answering {
+		if responding {
 			return testSpeakers(), nil
 		}
 		return nil, ErrNoAdapter
 	}
 
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
 	api.existing = api.created
 
-	answering = false
+	responding = false
 	if err := operator.reconcile(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
 	devices := api.updated.Spec.Devices
 	if len(devices) != 2 {
@@ -261,21 +253,21 @@ func TestReconcileKeepsTheSpeakersWhenBluetoothdStopsAnswering(t *testing.T) {
 		t.Errorf("the speaker has %+v, want %+v", got, tainted)
 	}
 	if len(devices[1].Taints) != 0 {
-		t.Errorf("the card's output was tainted by a lost bus: %+v", devices[1].Taints)
+		t.Errorf("the card's output has the taints %+v after the bus was lost, want none", devices[1].Taints)
 	}
 }
 
-// A sound server that died takes every output with it, and the slice
-// has to say so before the process ends. Otherwise the consumers of
-// that card hold a dead socket until somebody notices.
+// When PipeWire dies, no output plays, so the slice must taint every
+// output before the process exits. Without the taints, the pods that
+// use the card keep a PipeWire socket that does not respond.
 func TestTaintEverythingTaintsEveryOutput(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
-	operator := testReconciler(t, api, failingSinks, "pcmC0D0p", "pcmC0D3p")
+	operator := testReconciler(t, api, failingGraph, "pcmC0D0p", "pcmC0D3p")
 
 	operator.taintEverything()
 
 	if api.updated == nil {
-		t.Fatal("the outputs were not tainted on the way out")
+		t.Fatal("taintEverything wrote no slice, want every output tainted")
 	}
 	for _, device := range api.updated.Spec.Devices {
 		if len(device.Taints) != 2 {
@@ -285,8 +277,8 @@ func TestTaintEverythingTaintsEveryOutput(t *testing.T) {
 	}
 }
 
-// wakesFor builds a channel that already holds one wake for each pass
-// the loop is meant to run.
+// wakesFor returns a channel with one wake buffered for each pass
+// that the test wants run to start.
 func wakesFor(passes int) <-chan struct{} {
 	settled := make(chan struct{}, passes)
 	for range passes {
@@ -295,21 +287,18 @@ func wakesFor(passes int) <-chan struct{} {
 	return settled
 }
 
-// The operator loses its connection to PipeWire when a run of graph
-// reads fails. The pod's PipeWire container died, and this
-// container cannot restart it, so the slice has to say that nothing
-// plays before the process ends. Otherwise the consumers of that card
-// hold a dead socket until somebody notices.
-func TestRunTaintsAndStopsWhenPipeWireStopsAnswering(t *testing.T) {
+// run taints every output and returns an error after
+// maxFailedGraphReads failed graph reads in a row.
+func TestRunTaintsAndStopsWhenPipeWireStopsResponding(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
-	operator := testReconciler(t, api, failingSinks, "pcmC0D0p", "pcmC0D3p")
+	operator := testReconciler(t, api, failingGraph, "pcmC0D0p", "pcmC0D3p")
 
-	err := run(context.Background(), operator, wakesFor(maxSinkFailures))
+	err := run(context.Background(), operator, wakesFor(maxFailedGraphReads))
 	if err == nil {
-		t.Fatal("a PipeWire that stopped answering did not stop the operator")
+		t.Fatal("run with a PipeWire that stopped responding returned nil, want an error")
 	}
 	if api.updated == nil {
-		t.Fatal("a PipeWire that stopped answering left the slice saying the outputs play")
+		t.Fatal("run with a PipeWire that stopped responding wrote no slice, want every output tainted")
 	}
 	for _, device := range api.updated.Spec.Devices {
 		if len(device.Taints) != 2 {
@@ -319,20 +308,19 @@ func TestRunTaintsAndStopsWhenPipeWireStopsAnswering(t *testing.T) {
 	}
 }
 
-// A PipeWire that never answers at startup is a container crashlooping
-// beside this one. The previous pod's slice still says every output
-// plays, so the operator replaces it with the tainted form before it
-// exits.
-func TestAwaitPipeWireTaintsEveryOutputWhenItNeverAnswers(t *testing.T) {
+// The previous operator's slice lists every output as playable, so
+// when PipeWire never responds at startup, awaitPipeWire taints every
+// output before the operator exits.
+func TestAwaitPipeWireTaintsEveryOutputWhenItNeverResponds(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
-	operator := testReconciler(t, api, failingSinks, "pcmC0D0p", "pcmC0D3p")
+	operator := testReconciler(t, api, failingGraph, "pcmC0D0p", "pcmC0D3p")
 
 	err := operator.awaitPipeWire(context.Background(), 50*time.Millisecond)
 	if err == nil {
-		t.Fatal("a PipeWire that never answered let the operator start")
+		t.Fatal("awaitPipeWire with a PipeWire that never responded returned nil, want an error")
 	}
 	if api.updated == nil {
-		t.Fatal("a PipeWire that never answered left the slice saying the outputs play")
+		t.Fatal("awaitPipeWire with a PipeWire that never responded wrote no slice, want every output tainted")
 	}
 	for _, device := range api.updated.Spec.Devices {
 		if len(device.Taints) != 2 {
@@ -342,46 +330,45 @@ func TestAwaitPipeWireTaintsEveryOutputWhenItNeverAnswers(t *testing.T) {
 	}
 }
 
-// A PipeWire that answers publishes nothing and taints nothing. The
-// first reconcile pass writes the slice.
-func TestAwaitPipeWireWritesNothingWhenPipeWireAnswers(t *testing.T) {
+// When PipeWire responds, awaitPipeWire writes nothing, and the first
+// reconcile pass writes the slice.
+func TestAwaitPipeWireWritesNothingWhenPipeWireResponds(t *testing.T) {
 	api := &slicePublishFixture{existing: publishedSlice(testDevices(), 3)}
 	operator := testReconciler(t, api, staticGraph(outputGraph(
 		map[pcmAddress]string{{Card: 0, PCM: 0}: sinkNodeName(0, 0)})), "pcmC0D0p")
 
 	if err := operator.awaitPipeWire(context.Background(), time.Minute); err != nil {
-		t.Fatalf("a PipeWire that answered failed the wait: %v", err)
+		t.Fatalf("awaitPipeWire with a PipeWire that responded = %v, want nil", err)
 	}
 	if len(api.requests) != 0 {
-		t.Errorf("the startup wait reached the API server: %v", api.requests)
+		t.Errorf("the startup wait sent %v to the API server, want no request", api.requests)
 	}
 }
 
-// The event sources are the cards' control devices, the graph feed,
-// the watch on the two collections, and the backstop tick. A
-// closed channel while the context is live leaves the operator with
-// no way to notice a monitor again, so it stops instead.
+// settled closes when the bluetoothd or card event channel closes.
+// While ctx is live, no pass would run again, so run returns an error
+// and the operator exits.
 func TestRunStopsWhenTheEventSourcesClose(t *testing.T) {
 	api := &slicePublishFixture{}
-	operator := testReconciler(t, api, failingSinks, "pcmC0D0p")
+	operator := testReconciler(t, api, failingGraph, "pcmC0D0p")
 
 	settled := make(chan struct{})
 	close(settled)
 
 	err := run(context.Background(), operator, settled)
 	if err == nil {
-		t.Fatal("the operator ran on after its event sources closed")
+		t.Fatal("run after the event sources closed returned nil, want an error")
 	}
 	if !strings.Contains(err.Error(), "event sources closed") {
-		t.Errorf("error = %v", err)
+		t.Errorf("run = %v, want the error that names the closed event sources", err)
 	}
 }
 
-// The same closed channel during shutdown is the ordinary end of the
-// process, and not a failure to report.
+// When ctx has ended, a closed settled is a shutdown, so run returns
+// nil and writes nothing.
 func TestRunEndsQuietlyWhenTheContextIsDone(t *testing.T) {
 	api := &slicePublishFixture{}
-	operator := testReconciler(t, api, failingSinks, "pcmC0D0p")
+	operator := testReconciler(t, api, failingGraph, "pcmC0D0p")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -389,9 +376,9 @@ func TestRunEndsQuietlyWhenTheContextIsDone(t *testing.T) {
 	close(settled)
 
 	if err := run(ctx, operator, settled); err != nil {
-		t.Fatalf("a shutdown reported a failure: %v", err)
+		t.Fatalf("run during a shutdown = %v, want nil", err)
 	}
 	if len(api.requests) != 0 {
-		t.Errorf("a shutdown wrote to the API server: %v", api.requests)
+		t.Errorf("a shutdown sent %v to the API server, want no request", api.requests)
 	}
 }

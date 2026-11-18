@@ -1,24 +1,24 @@
 package main
 
-// The Route on a Bluetooth device, which is where a speaker's own
-// volume lives.
+// A Bluetooth speaker is two objects in PipeWire's graph: a device,
+// which WirePlumber's bluez monitor builds from the BlueZ transport,
+// and a node, which plays into the device. The device has a Route for
+// each direction of its profile, and the props of a Route have the
+// level.
 //
-// A Bluetooth speaker is two objects in the graph: a device, which
-// WirePlumber's bluez monitor builds from the BlueZ transport, and a
-// node, which plays into it. The device publishes a Route for each
-// direction of its profile, and the Route's props carry the level.
-// A level written on the device's Route reaches
-// spa_bt_transport_set_volume in the bluez5 plugin, which writes the
-// Volume property on org.bluez.MediaTransport1, and that is AVRCP
-// absolute volume: the number on the speaker's own display moves.
-// The same level written on the node is a software gain and nothing
-// more, because the A2DP follower accepts no volume key
-// (spa/plugins/bluez5/media-sink.c in pipewire 1.4.2).
+// The operator writes a speaker's level on the device's Route, because
+// the bluez5 plugin passes a Route level to
+// spa_bt_transport_set_volume, which writes the Volume property of
+// org.bluez.MediaTransport1. That is AVRCP absolute volume, so the
+// speaker's own volume changes. A level written on the node changes
+// only a software gain, because the A2DP follower accepts no volume
+// key (spa/plugins/bluez5/media-sink.c in pipewire 1.4.2).
 //
-// So a Sink's spec.volume.level and its volume asks write a
-// speaker's Route. The Route's read-only volumeStep is how the graph
-// says the transport reports a volume at all, and a speaker without
-// one gets the software gain, like an ALSA endpoint.
+// The operator writes the Route for a Sink's spec.volume.level and for
+// a volume request in status.session.volumeAsk (asks.go). A Route with no
+// volumeStep means that the transport has no volume of its own, and the
+// operator writes the node's software gain instead, as for an ALSA
+// endpoint.
 
 import (
 	"context"
@@ -26,28 +26,25 @@ import (
 	"fmt"
 )
 
-// A device publishes one route for each direction of its current
-// profile. Output is the speaker's, and the one direction this pod
-// plays.
+// The Output route of a device is the speaker. The operator plays to a
+// speaker and does not record from one, so it reads no other route.
 const outputRouteDirection = "Output"
 
-// pwRoute is what one Route carries. The index and the profile device
-// address the route in a write, and the props hold the level.
+// pwRoute is one Route of a device. A write names the route by Index
+// and Device, and the rest is the route's props.
 type pwRoute struct {
 	Index   int
 	Device  int
 	Mute    bool
 	Volumes []float64
-	// AbsoluteVolume says the transport reports a volume of its own.
-	// The graph shows it as a read-only volumeStep, which is
-	// 1/(max+1) of the peer's own scale, and a speaker with no
-	// absolute volume publishes none.
+	// AbsoluteVolume is true when the route has a read-only volumeStep,
+	// which PipeWire sets only for a transport with a volume of its own.
+	// The step is 1/(max+1) of the peer's volume scale.
 	AbsoluteVolume bool
 }
 
-// routeParam is the shape pw-dump prints a Route in. This struct
-// reads the four fields a level write and the status need, and
-// leaves the name, the priority, and the profile list unparsed.
+// routeParam is a Route as pw-dump prints it, with only the fields that
+// a level write and the status read.
 type routeParam struct {
 	Index     int    `json:"index"`
 	Direction string `json:"direction"`
@@ -59,10 +56,9 @@ type routeParam struct {
 	} `json:"props"`
 }
 
-// outputRoute picks the speaker's route out of a device's Route
-// params. A device with no output route is a device with no level to
-// write, and the operator reports none rather than writing to index
-// zero.
+// outputRoute returns the Output route from a device's Route params. It
+// returns nil for a device with no Output route, so the operator
+// reports no level and does not write to route index 0.
 func outputRoute(params []json.RawMessage) *pwRoute {
 	for _, raw := range params {
 		var param routeParam
@@ -83,18 +79,17 @@ func outputRoute(params []json.RawMessage) *pwRoute {
 	return nil
 }
 
-// routeProps is the pod a Route write takes. The index and the device
-// name the route, the props carry the level, and save is false
-// because WirePlumber stores nothing in this pod: the operator's own
-// declaration is what a restart re-applies.
+// routeProps builds the POD for a Route write. save is false so that
+// WirePlumber does not store the level, because the operator applies
+// its declared level again after a restart.
 func routeProps(route pwRoute, volumes []float64, mute *bool) string {
 	return fmt.Sprintf("{ index: %d, device: %d, props: %s, save: false }",
 		route.Index, route.Device, levelProps(volumes, mute))
 }
 
 // setRouteLevel writes a level on a speaker's Route. The write names
-// the device object and not the node, and the channel count comes
-// from the route's own levels.
+// the device object, not the node, and reads the channel count from
+// the route's current levels.
 func setRouteLevel(ctx context.Context, device int, route pwRoute, level levelWrite) error {
 	var levels []float64
 	if level.Volume != nil {

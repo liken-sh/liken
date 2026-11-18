@@ -32,12 +32,12 @@ func TestAFreshInstallMintsECDSAKeys(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			store := newObjectStore(t)
 			if _, err := store.certificates().ensure(); err != nil {
-				t.Fatal(err)
+				t.Fatalf("minting the certificates: %v", err)
 			}
 			held := store.secretData(t, c.secret)
 			certificate, err := parseCertificate(held[c.certificate])
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the certificate: %v", err)
 			}
 			public, ok := certificate.PublicKey.(*ecdsa.PublicKey)
 			if !ok || public.Curve != elliptic.P256() {
@@ -57,10 +57,10 @@ func TestAFreshInstallMintsECDSAKeys(t *testing.T) {
 	}
 }
 
-// rsaKey is the one RSA key the fixtures below sign and serve with.
-// An install gives the CA and each leaf a key of its own, but the
-// tests check the key type and the signatures, which one key shows as
-// well, and an RSA-2048 key takes tens of milliseconds to generate.
+// rsaKey is the RSA key that every fixture below signs and serves with.
+// An install gives the CA and each leaf a key of its own, but these
+// tests check only key types and signatures, and RSA key generation is
+// slow, so they share one key.
 var rsaKey = sync.OnceValue(func() *rsa.PrivateKey {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -69,8 +69,9 @@ var rsaKey = sync.OnceValue(func() *rsa.PrivateKey {
 	return key
 })
 
-// rsaInstall is what an earlier release left in the cluster: an RSA CA
-// with its key in PKCS#1, and the two leaves it signed with RSA keys.
+// rsaInstall is the certificates of a cluster installed with RSA keys:
+// a CA whose key is PKCS#1 PEM, and the API leaf and the capture leaf
+// that the CA signed.
 type rsaInstall struct {
 	authority []byte
 	key       []byte
@@ -78,9 +79,9 @@ type rsaInstall struct {
 	capture   *x509.Certificate
 }
 
-// seedRSAInstall writes an rsaInstall minted at the time given into
-// the store's two Secrets and the ConfigMap.
-func seedRSAInstall(t *testing.T, store *objectStore, at time.Time) rsaInstall {
+// writeRSAInstall creates an rsaInstall that is valid from at, and
+// writes it into the store's two Secrets and its ConfigMap.
+func writeRSAInstall(t *testing.T, store *objectStore, at time.Time) rsaInstall {
 	t.Helper()
 	key := rsaKey()
 	caTemplate := &x509.Certificate{
@@ -94,11 +95,11 @@ func seedRSAInstall(t *testing.T, store *objectStore, at time.Time) rsaInstall {
 	}
 	caBody, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &key.PublicKey, key)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("signing the RSA CA: %v", err)
 	}
 	authority, err := x509.ParseCertificate(caBody)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the RSA CA: %v", err)
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 	leaf := func(serial int64, names []string) (*x509.Certificate, []byte) {
@@ -113,11 +114,11 @@ func seedRSAInstall(t *testing.T, store *objectStore, at time.Time) rsaInstall {
 		}
 		body, err := x509.CreateCertificate(rand.Reader, template, authority, &key.PublicKey, key)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("signing the RSA leaf: %v", err)
 		}
 		parsed, err := x509.ParseCertificate(body)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("parsing the RSA leaf: %v", err)
 		}
 		return parsed, encodeCertificate(body)
 	}
@@ -155,14 +156,13 @@ func seedRSAInstall(t *testing.T, store *objectStore, at time.Time) rsaInstall {
 	return rsaInstall{authority: caPEM, key: keyPEM, public: public, capture: capture}
 }
 
-// A cluster that an earlier release installed keeps working after an
-// upgrade: the API serves the RSA leaf it finds and leaves the RSA CA
-// and the capture leaf in place, so no client has to read a new
-// anchor.
+// The API serves the RSA leaf that it finds, and leaves the RSA CA and
+// the capture leaf as they are, so clients keep the CA that they
+// already trust.
 func TestAnRSAInstallIsServedAsItIs(t *testing.T) {
 	store := newObjectStore(t)
 	at := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
-	install := seedRSAInstall(t, store, at)
+	install := writeRSAInstall(t, store, at)
 
 	certs := store.certificates()
 	certs.now = func() time.Time { return at.Add(30 * 24 * time.Hour) }
@@ -183,7 +183,7 @@ func TestAnRSAInstallIsServedAsItIs(t *testing.T) {
 	}
 	capture, err := parseCertificate(store.secretData(t, captureTLSSecret)[tlsCertFile])
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the capture leaf: %v", err)
 	}
 	if capture.SerialNumber.Cmp(install.capture.SerialNumber) != 0 {
 		t.Error("the RSA capture leaf was minted again before its renewal")
@@ -193,8 +193,8 @@ func TestAnRSAInstallIsServedAsItIs(t *testing.T) {
 	}
 }
 
-// At the renewal point the RSA CA signs ECDSA leaves, with RSA and
-// SHA-256 because the CA's key is RSA, and stays the CA.
+// A renewed leaf has an ECDSA key, and the RSA CA signs it with RSA and
+// SHA-256, because the CA key is RSA. The RSA CA stays the CA.
 func TestAnRSACASignsECDSALeavesAtRenewal(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -207,17 +207,17 @@ func TestAnRSACASignsECDSALeavesAtRenewal(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			store := newObjectStore(t)
 			at := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
-			install := seedRSAInstall(t, store, at)
+			install := writeRSAInstall(t, store, at)
 
 			certs := store.certificates()
 			certs.now = func() time.Time { return at.Add(11 * 30 * 24 * time.Hour) }
 			if _, err := certs.ensure(); err != nil {
-				t.Fatal(err)
+				t.Fatalf("renewing the leaves: %v", err)
 			}
 
 			leaf, err := parseCertificate(store.secretData(t, c.secret)[tlsCertFile])
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the new leaf: %v", err)
 			}
 			if leaf.PublicKeyAlgorithm != x509.ECDSA {
 				t.Errorf("the new leaf's key is %v, want ECDSA", leaf.PublicKeyAlgorithm)
@@ -227,7 +227,7 @@ func TestAnRSACASignsECDSALeavesAtRenewal(t *testing.T) {
 			}
 			authority, err := parseCertificate(install.authority)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the RSA CA: %v", err)
 			}
 			if err := leaf.CheckSignatureFrom(authority); err != nil {
 				t.Errorf("the new leaf is not signed by the RSA CA: %v", err)
@@ -240,32 +240,33 @@ func TestAnRSACASignsECDSALeavesAtRenewal(t *testing.T) {
 	}
 }
 
-// caKeyForm is a CA key in one PEM form, with the public key it must
-// read back as.
+// caKeyForm is a CA private key in one PEM encoding, with the public
+// key that the API must derive from it.
 type caKeyForm struct {
 	name   string
 	body   []byte
 	public crypto.PublicKey
 }
 
-// caKeyForms are the PEM forms of a CA key that the API reads.
+// caKeyForms returns each PEM encoding of a CA key that the API
+// accepts.
 func caKeyForms(t *testing.T) []caKeyForm {
 	t.Helper()
 	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the ECDSA key: %v", err)
 	}
 	sec1, err := x509.MarshalECPrivateKey(ecKey)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the ECDSA key in SEC1: %v", err)
 	}
 	ecPKCS8, err := x509.MarshalPKCS8PrivateKey(ecKey)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the ECDSA key in PKCS#8: %v", err)
 	}
 	rsaPKCS8, err := x509.MarshalPKCS8PrivateKey(rsaKey())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the RSA key in PKCS#8: %v", err)
 	}
 	encode := func(kind string, der []byte) []byte {
 		return pem.EncodeToMemory(&pem.Block{Type: kind, Bytes: der})
@@ -296,11 +297,11 @@ func TestACAKeyIsReadInEachFormASecretHolds(t *testing.T) {
 func TestAKeyThatCannotSignIsARefusal(t *testing.T) {
 	exchange, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the X25519 key: %v", err)
 	}
 	der, err := x509.MarshalPKCS8PrivateKey(exchange)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the X25519 key in PKCS#8: %v", err)
 	}
 	if _, err := parseKey(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})); err == nil {
 		t.Error("an X25519 key was read as a CA key")

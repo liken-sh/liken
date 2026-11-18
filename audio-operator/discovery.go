@@ -1,18 +1,11 @@
 package main
 
-// The discovery document at GET /v1/audio, and the info document each
-// endpoint's own route answers.
-//
-// The discovery shape is the one the three capture APIs share. Every
-// template in it is RFC 6570: simple expansion for the name (section
-// 3.2.2), label expansion for the extension (3.2.5), and form-style
-// query expansion for the knobs (3.2.8).
-//
-// redirects is present on every aspect. It is false on both of this
-// domain's, because an audio route answers with the sound rather than
-// pointing at another API.
+// The discovery document has the same shape as those of media-operator
+// and display-operator. Every aspect has a redirects field, which is
+// false here because an audio route returns sound and does not redirect
+// to another API.
 
-// discoveryDocument is the whole of GET /v1/audio.
+// discoveryDocument is the body of GET /v1/audio.
 type discoveryDocument struct {
 	Resources map[string]discoveryResource `json:"resources"`
 	OpenAPI   string                       `json:"openapi"`
@@ -30,8 +23,6 @@ type discoveryAspect struct {
 	Redirects  bool     `json:"redirects"`
 }
 
-// newDiscovery reads the router table, so a route that is added there
-// appears here with no second edit.
 func newDiscovery() discoveryDocument {
 	document := discoveryDocument{
 		Resources: map[string]discoveryResource{},
@@ -54,16 +45,12 @@ func newDiscovery() discoveryDocument {
 	return document
 }
 
-// endpointDocument is what GET /v1/audio/sinks/{name} answers: the node
-// a tap would target, how the endpoint is attached, the rate and
-// channel count a tap would use, the format the node reports now, and
-// the forms served.
-//
-// Rate and Channels are what the container read from the graph.
-// Format is status.format as the operator last reported it, which is
-// absent while the node is suspended. A tap on a suspended node still
-// answers, with silence at Rate, because the route is "what the
-// speakers play now" and silence is that answer.
+// endpointDocument is the body of GET /v1/audio/sinks/{name} and
+// /v1/audio/sources/{name}. Rate and Channels are what the capture
+// container read from the PipeWire graph. Format is status.format,
+// which is absent while the node is suspended. A tap on a suspended
+// node still returns silence at Rate, because a suspended node plays
+// silence.
 type endpointDocument struct {
 	Name           string          `json:"name"`
 	Kind           string          `json:"kind"`
@@ -77,9 +64,6 @@ type endpointDocument struct {
 	Extensions     []string        `json:"extensions"`
 }
 
-// newEndpointDocument composes one endpoint's answer from the object
-// the API server holds and the format the capture container read from
-// the graph.
 func newEndpointDocument(kind, name string, status EndpointStatus, format captureFormat) endpointDocument {
 	document := endpointDocument{
 		Name:           name,

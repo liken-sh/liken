@@ -1,9 +1,10 @@
 A `Source` is one capture endpoint as a Kubernetes resource: an
-analog input, or the capture side of a USB card. The operator
-creates one for every capture endpoint it publishes, cluster-scoped
-like a `Node`, named the same way a `Sink` is. You never create or
-delete one. The operator writes the whole of `status`, and you write
-`spec`, which states the settings you want for the endpoint.
+analog input, or the capture side of a USB card. The operator creates
+a `Source` for each capture endpoint it publishes. A `Source` is
+cluster-scoped, like a `Node`, and is named in the same way as a
+`Sink`. You never create one, and you delete one only after its card
+has gone. The operator writes all of `status`, and you write `spec`,
+the settings you want for the endpoint.
 
 ```yaml
 apiVersion: audio.liken.sh/v1alpha1
@@ -42,15 +43,17 @@ status:
       status: "True"
 ```
 
-For a microphone, `mute` is the field that matters most. Setting
-`spec.mute: true` on a `Source` closes that microphone for everyone,
-a rule that closes every microphone is one patch per `Source`, and
-`kubectl get sources` shows which ones are open. A pod that records
-still holds the microphone through a claim, and its stream reaches
-the node that `status.nodeName` names.
+For a microphone, `mute` is the most useful field. Setting
+`spec.mute: true` on a `Source` closes that microphone for every
+user. A rule that closes every microphone is one patch for each
+`Source`, and `kubectl get sources` shows which microphones are open.
+A pod that records still gets the microphone through a claim, and
+its capture stream targets the PipeWire node that `status.nodeName`
+names.
 
 An HDA card serves several input jacks through one capture PCM and
-picks the live jack with its `Input Source` control, so the `Source`
-is the PCM and the jack is a control in `spec.controls`. A Bluetooth
-headset's microphone is not published yet, because it needs the
-headset profiles the pod does not run.
+selects the active jack with its `Input Source` control. So a
+`Source` is the PCM, and you choose the jack by setting
+`Input Source` in `spec.controls`. A Bluetooth headset's microphone is not published
+yet, because it needs the headset profiles, which the pod does not
+run.

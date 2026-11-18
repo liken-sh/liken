@@ -1,25 +1,21 @@
 package main
 
-// The control device as an event source.
+// The kernel queues an event on a sound card's control device,
+// /dev/snd/controlC<N>, for each change to one of the card's control
+// elements, and a process that subscribes reads them. A change can be a
+// write from any process, a jack that changes state, an ELD that the
+// graphics driver rewrote, or a knob turned on a USB device, which the
+// device reports on an interrupt endpoint. So the operator reads a change
+// made at the hardware when it happens, and reads nothing from the card
+// on a timer. The pass that an event starts updates status.observed and
+// writes a declared value back.
 //
-// A card reports every change to one of its elements on the same
-// descriptor its controls are read through, once a reader subscribes.
-// The kernel queues a record for every write from any process, for a
-// jack that changes state, for an ELD the graphics driver rewrote,
-// and for a knob turned on a USB device, whose mixer keeps an
-// interrupt endpoint open for exactly that. So a change a person made
-// at the hardware reaches the operator the moment it happens, and the
-// operator asks the card nothing on a timer. status.observed follows
-// these events, and a declared value is written back on the pass one
-// of them wakes.
-//
-// The operator reads no jack's input node, because the control device
-// reports the jacks the operator reads. The HDA and USB audio drivers
-// give each jack they sense a control element and report each plug on
-// it, and the pass reads the jack's state from that element. An ASoC
-// machine driver that creates a jack with no pins gives it an input
-// node and no element. The pass cannot read that jack's state, so an
-// event on its input node would start a pass that finds nothing new.
+// The operator does not watch the input node of a jack. The HDA and USB
+// audio drivers create a control element for each jack they sense, and
+// the pass reads the jack's state from that element. An ASoC machine
+// driver can create a jack with no pins, which has an input node and no
+// element. The pass cannot read the state of such a jack, so an event on
+// its input node would start a pass that finds nothing new.
 
 import (
 	"context"
@@ -35,25 +31,24 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The size of one struct snd_ctl_event on a 64-bit kernel, and the
-// offset of the element identifier inside it. The record is an int
-// type, an unsigned mask, and the 64-byte identifier, and the kernel
+// struct snd_ctl_event is 72 bytes on a 64-bit kernel: an int type, an
+// unsigned mask, and the 64-byte element ID at offset 8. The kernel
 // writes whole records only.
 const (
 	ctlEventSize     = 72
 	ctlEventIDOffset = 8
 )
 
-// The request that turns a control descriptor into an event source.
-// Its argument is one int: 1 subscribes, 0 unsubscribes and drops
-// what was queued.
+// ctlIoctlSubscribeEvents is SNDRV_CTL_IOCTL_SUBSCRIBE_EVENTS. Its
+// argument is an int: 1 subscribes, and 0 unsubscribes and drops the
+// queued events.
 var ctlIoctlSubscribeEvents = iowr(0x16, 4)
 
-// The mask bits a record carries. Value says the element's value
-// moved, info says its description changed, such as an ELD whose
-// count went to zero, add says the card created it, and TLV says its
-// dB range changed. A removed element sets every bit, so that a
-// reader that checks any one bit still notices it went away.
+// The bits of a record's mask. Value means the element's value changed.
+// Info means its description changed, for example an ELD whose count
+// went to zero. Add means the card created the element, and TLV means
+// its dB range changed. A removed element sets every bit, so a reader
+// that tests any single bit still sees the removal.
 const (
 	ctlEventMaskValue  = 1 << 0
 	ctlEventMaskInfo   = 1 << 1
@@ -62,20 +57,19 @@ const (
 	ctlEventMaskRemove = ^uint32(0)
 )
 
-// ctlEvent mirrors struct snd_ctl_event. Nothing reads through it: the
-// reader parses the record by offset. It is here so a test can assert the layout the offsets
-// assume.
+// ctlEvent mirrors struct snd_ctl_event so that a test can check the
+// layout that parseControlEvent's offsets assume. The reader itself
+// parses by offset and does not use this type.
 type ctlEvent struct {
 	Type int32
 	Mask uint32
 	ID   ctlElemID
 }
 
-// controlEvent is one change one card reported on one element.
-//
-// The whole identity comes along, not the numid alone, because the
-// reconciler matches a change to an endpoint by the name and the
-// index, which is what the attach rule sorts on.
+// controlEvent is one change that a card reported on one element. It
+// keeps the whole element ID and not only the numid, because
+// countELDChange finds an ELD change by the element's Name and its
+// Device, the PCM number.
 type controlEvent struct {
 	Card      int
 	NumID     uint32
@@ -86,24 +80,23 @@ type controlEvent struct {
 	Mask      uint32
 }
 
-// valueChanged reports that the element's value moved. The removed
-// test comes first because a removed element sets every bit, and the
-// value bit alone would read it as a change.
+// valueChanged reports that the element's value changed. A removed
+// element has the value bit set along with all the others, so the
+// method excludes it.
 func (e controlEvent) valueChanged() bool {
 	return !e.removed() && e.Mask&ctlEventMaskValue != 0
 }
 
-// removed reports that the card took the element away.
+// removed reports that the card deleted the element.
 func (e controlEvent) removed() bool { return e.Mask == ctlEventMaskRemove }
 
-// String names the change for a log line.
 func (e controlEvent) String() string {
 	return fmt.Sprintf("card %d: %s (numid %d, index %d) changed, mask %#x",
 		e.Card, e.Name, e.NumID, e.Index, e.Mask)
 }
 
-// watchControls subscribes to one card's control events and carries
-// them onto a channel. The channel closes when the context ends.
+// watchControls subscribes to one card's control events and returns
+// them on a channel, which closes when the context ends.
 func watchControls(ctx context.Context, card int) (<-chan controlEvent, error) {
 	path := fmt.Sprintf("%s/controlC%d", sndDir, card)
 	device, err := subscribeControlEvents(path)
@@ -113,15 +106,14 @@ func watchControls(ctx context.Context, card int) (<-chan controlEvent, error) {
 	return readControlEvents(ctx, card, device), nil
 }
 
-// subscribeControlEvents opens a card's control device as an event
-// source.
+// subscribeControlEvents opens a card's control device and subscribes
+// to its events.
 //
-// The ioctl runs on the raw descriptor and not through the open
-// file, because asking an os.File for its descriptor puts the file
-// back into blocking mode and takes it out of the runtime's poller. A
-// read on it would then hold a thread that a Close cannot interrupt.
-// The descriptor is non-blocking from the open, so the runtime polls
-// it and a Close ends a waiting read.
+// The ioctl runs on the raw descriptor, before the os.File exists,
+// because File.Fd switches the descriptor to blocking mode and removes
+// it from the runtime's poller. A read on it would then block a thread
+// that Close cannot interrupt. Opened with O_NONBLOCK, the descriptor
+// stays in the poller, so Close ends a read that is waiting.
 func subscribeControlEvents(path string) (*os.File, error) {
 	descriptor, err := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -137,11 +129,10 @@ func subscribeControlEvents(path string) (*os.File, error) {
 	return os.NewFile(uintptr(descriptor), path), nil
 }
 
-// readControlEvents carries whole records off one open control device.
-//
-// The close runs in a goroutine of its own because the read waits in
-// the poller, and closing the descriptor is what ends it when the
-// context does.
+// readControlEvents reads records from an open control device and sends
+// them on the returned channel until the context ends. A separate
+// goroutine closes the device when the context ends, because that is
+// what wakes a read that is waiting in the poller.
 func readControlEvents(ctx context.Context, card int, device *os.File) <-chan controlEvent {
 	events := make(chan controlEvent, 16)
 	go func() {
@@ -160,8 +151,8 @@ func readControlEvents(ctx context.Context, card int, device *os.File) <-chan co
 				return
 			}
 			if read < ctlEventSize {
-				// The kernel writes whole records, so a short read is
-				// a truncated one and carries no element.
+				// The kernel writes whole records, so a short read has
+				// no complete element ID to parse.
 				continue
 			}
 			select {
@@ -174,18 +165,17 @@ func readControlEvents(ctx context.Context, card int, device *os.File) <-chan co
 	return events
 }
 
-// cardWatchers keeps one event reader per card the claim delivered,
-// and carries what they all report onto one channel.
+// cardWatchers runs one control-event reader for each card whose control
+// node the claim gives the pod, and merges their events onto one channel.
 //
-// Each pass opens the readers before it reads a card, so a change
-// that lands during the read is an event and not a loss. The set
-// follows the delivered control nodes because a USB card that a
-// person plugs in appears between two passes, and its own control
-// device is the only thing that reports the knob on its front. A card
-// that leaves takes its reader with it: a reader of a device node
-// that is gone reports one error and stops. A reader that stops on
-// its own wakes the loop, and that pass opens the card again before
-// it reads it.
+// Each pass starts the readers before it reads a card, so a change made
+// during the read arrives as an event and is not lost. Each pass also
+// starts a reader for a control node that appeared since the last pass,
+// because a USB card can be plugged in between two passes, and only its
+// own control device reports the knob on it. When a card is unplugged,
+// its device node goes away, and its reader logs one error and stops. A
+// reader that stops on its own calls wake, so the next pass starts a new
+// reader before it reads the card.
 type cardWatchers struct {
 	ctx    context.Context
 	events chan controlEvent
@@ -193,27 +183,30 @@ type cardWatchers struct {
 
 	mutex    sync.Mutex
 	watching map[int]*cardReader
-	refused  map[int]bool
+	// subscribeFailed holds the cards whose last subscription failed, so
+	// the error is logged once for each card and not on every pass.
+	subscribeFailed map[int]bool
 }
 
-// cardReader is one card's open reader. The relay holds the pointer,
-// so a relay that ends removes its own reader and never a newer one
-// that a later pass opened for the same card number.
+// cardReader is one card's running reader. relay compares pointers, so
+// a relay that ends removes only its own reader and never a newer one
+// that a later pass started for the same card number.
 type cardReader struct{ stop context.CancelFunc }
 
 func watchCards(ctx context.Context, wake func()) *cardWatchers {
 	return &cardWatchers{
-		ctx:      ctx,
-		events:   make(chan controlEvent, 16),
-		wake:     wake,
-		watching: map[int]*cardReader{},
-		refused:  map[int]bool{},
+		ctx:             ctx,
+		events:          make(chan controlEvent, 16),
+		wake:            wake,
+		watching:        map[int]*cardReader{},
+		subscribeFailed: map[int]bool{},
 	}
 }
 
-// controlCards lists the cards whose control nodes the claim
-// delivered. A pass subscribes to these before it reads any card, so
-// it cannot use what the read found.
+// controlCards lists the cards whose control nodes the claim gives the
+// pod.
+// It reads the device nodes in sndDir and not the result of reading the
+// cards, because a pass subscribes to events before it reads any card.
 func controlCards() []int {
 	entries, err := os.ReadDir(sndDir)
 	if err != nil {
@@ -234,7 +227,9 @@ func controlCards() []int {
 
 var controlNodePattern = regexp.MustCompile(`^controlC(\d+)$`)
 
-// Events is where every card's changes arrive.
+// Events returns the channel that carries the events of every card. It
+// returns nil on a nil cardWatchers, and a receive from nil never
+// proceeds.
 func (w *cardWatchers) Events() <-chan controlEvent {
 	if w == nil {
 		return nil
@@ -242,9 +237,9 @@ func (w *cardWatchers) Events() <-chan controlEvent {
 	return w.events
 }
 
-// follow starts a reader for each card that has none and stops the
-// readers of the cards that are gone. A nil set of watchers takes the
-// call and does nothing, so a caller that has none needs no branch.
+// follow starts a reader for each listed card that has none and stops
+// the readers of cards that are no longer listed. It does nothing on a
+// nil cardWatchers, so a test with no watchers needs no check.
 func (w *cardWatchers) follow(cards []int) {
 	if w == nil {
 		return
@@ -269,42 +264,40 @@ func (w *cardWatchers) follow(cards []int) {
 	}
 }
 
-// start opens one card's control device as an event source. A card
-// that refuses reports once, and the next pass tries it again. While
-// it refuses, a knob turned on it reaches the resource on the
-// backstop tick alone.
+// start subscribes to one card's control events and starts a reader for
+// them. When the subscription fails, start logs the error once for the
+// card, and the next pass tries again. Until a subscription succeeds,
+// a pass reads a knob turned on that card only on the backstop tick.
 func (w *cardWatchers) start(card int) {
 	ctx, stop := context.WithCancel(w.ctx)
 	events, err := watchControls(ctx, card)
 	if err != nil {
 		stop()
-		if !w.refused[card] {
-			w.refused[card] = true
+		if !w.subscribeFailed[card] {
+			w.subscribeFailed[card] = true
 			fmt.Fprintf(os.Stderr, "%v\n", err)
 		}
 		return
 	}
-	delete(w.refused, card)
+	delete(w.subscribeFailed, card)
 	reader := &cardReader{stop: stop}
 	w.watching[card] = reader
 	go w.relay(card, reader, events)
 }
 
-// relay carries one card's events onto the shared channel, and forgets
-// the card when its reader ends, so that a later pass opens it again.
+// relay copies one card's events onto the shared channel. When the
+// reader ends, relay removes the card from the watchers so that a later
+// pass starts a new reader.
 func (w *cardWatchers) relay(card int, reader *cardReader, events <-chan controlEvent) {
 	defer func() {
 		w.mutex.Lock()
-		endedAlone := w.watching[card] == reader
-		if endedAlone {
+		endedOnItsOwn := w.watching[card] == reader
+		if endedOnItsOwn {
 			reader.stop()
 			delete(w.watching, card)
 		}
 		w.mutex.Unlock()
-		// A reader that follow did not stop ended on its own, and a
-		// change on the card from now until the next pass reaches no
-		// one. The wake runs that pass at once.
-		if endedAlone && w.ctx.Err() == nil {
+		if endedOnItsOwn && w.ctx.Err() == nil {
 			w.wake()
 		}
 	}()
@@ -317,9 +310,9 @@ func (w *cardWatchers) relay(card int, reader *cardReader, events <-chan control
 	}
 }
 
-// parseControlEvent reads one record: a type that is always the
-// element type, a mask, and the element identifier, which holds the
-// same five fields the element list carries.
+// parseControlEvent decodes one record. It ignores the type field,
+// because every event on a control device has the element type. The
+// element ID has the same layout as an entry of the element list.
 func parseControlEvent(card int, record []byte) controlEvent {
 	id := record[ctlEventIDOffset : ctlEventIDOffset+ctlElemIDSize]
 	return controlEvent{

@@ -23,42 +23,44 @@ func TestASpanParsesInTheOrderSection511States(t *testing.T) {
 		{"t=00:00:42", 42 * time.Second, 0, false},
 		{"t=00:42", 42 * time.Second, 0, false},
 		{"t=00:00:01.5,00:00:02", 1500 * time.Millisecond, 2 * time.Second, true},
-		// npt-hh is 1*DIGIT, so an hour-long end is a legitimate ask.
+		// The hours field is 1*DIGIT, so an end of any number of hours is
+		// valid.
 		{"t=0,1:00:00", 0, time.Hour, true},
 		{"t=0,100:00:00", 0, 100 * time.Hour, true},
-		// The three section 6.1.1 cases: the query splits on & and =
-		// first, and each part percent-decodes second.
+		// The percent-encoded cases of section 6.1.1. The query splits on
+		// & and = before each part is decoded.
 		{"t=10%2C20", 10 * time.Second, 20 * time.Second, true},
 		{"t=%6ept:10", 10 * time.Second, 0, false},
 		{"t=npt%3a10", 10 * time.Second, 0, false},
-		// An absent t= is the whole stream until the client closes.
+		// With no t=, the body is the whole stream until the client
+		// closes the connection.
 		{"", 0, 0, false},
 		{"bitrate=128", 0, 0, false},
 	}
 	route, _, _ := matchRoute("/v1/audio/sinks/kitchen/audio.opus")
 	for _, row := range cases {
-		knobs, err := parseKnobs(route, row.query)
+		parsed, err := parseCaptureQuery(route, row.query)
 		if err != nil {
-			t.Errorf("%q: %v", row.query, err)
+			t.Errorf("parseCaptureQuery(%q) refused the query: %v, want a span", row.query, err)
 			continue
 		}
-		if knobs.Span.Begin != row.begin {
-			t.Errorf("%q: begin is %v, want %v", row.query, knobs.Span.Begin, row.begin)
+		if parsed.Span.Begin != row.begin {
+			t.Errorf("%q: begin is %v, want %v", row.query, parsed.Span.Begin, row.begin)
 		}
-		if knobs.Span.Ended != row.ended {
-			t.Errorf("%q: ended is %v, want %v", row.query, knobs.Span.Ended, row.ended)
+		if parsed.Span.Ended != row.ended {
+			t.Errorf("%q: ended is %v, want %v", row.query, parsed.Span.Ended, row.ended)
 		}
-		if row.ended && knobs.Span.End != row.end {
-			t.Errorf("%q: end is %v, want %v", row.query, knobs.Span.End, row.end)
+		if row.ended && parsed.Span.End != row.end {
+			t.Errorf("%q: end is %v, want %v", row.query, parsed.Span.End, row.end)
 		}
 	}
 }
 
 func TestAQueryTheGrammarRefusesIsARefusal(t *testing.T) {
 	refused := []string{
-		// A repeated dimension. The spec tells a user agent to keep
-		// the last one; this API refuses, because a query produces a
-		// new resource.
+		// A repeated dimension. The specification tells a user agent
+		// to keep the last one, but this API refuses it, because a
+		// query produces a new resource.
 		"t=2&t=10",
 		// A begin at or past the end.
 		"t=7,5",
@@ -75,9 +77,7 @@ func TestAQueryTheGrammarRefusesIsARefusal(t *testing.T) {
 		"t=-1,5",
 		"t=1,2,3",
 		"t=99:99",
-		// ParseFloat takes these; the NPT grammar does not produce
-		// any of them, and a NaN begin passes every comparison a
-		// number would fail.
+		// ParseFloat accepts these, and the NPT grammar does not.
 		"t=nan",
 		"t=nan,inf",
 		"t=inf",
@@ -95,11 +95,11 @@ func TestAQueryTheGrammarRefusesIsARefusal(t *testing.T) {
 		"t=1:60",
 		"t=00:60",
 		"t=npt:nan,npt:inf",
-		// A knob this API does not take at all.
+		// Parameters that no route of this API accepts.
 		"framerate=15",
 		"xywh=0,0,10,10",
 		"t=0,5&width=480",
-		// A bitrate outside the range opusenc takes.
+		// A bitrate out of range, not a number, or repeated.
 		"bitrate=5",
 		"bitrate=257",
 		"bitrate=fast",
@@ -107,51 +107,52 @@ func TestAQueryTheGrammarRefusesIsARefusal(t *testing.T) {
 	}
 	route, _, _ := matchRoute("/v1/audio/sinks/kitchen/audio.opus")
 	for _, query := range refused {
-		if _, err := parseKnobs(route, query); err == nil {
-			t.Errorf("%q parsed, and the grammar refuses it", query)
+		if _, err := parseCaptureQuery(route, query); err == nil {
+			t.Errorf("parseCaptureQuery(%q) returned no error, want a refusal", query)
 		}
 	}
 }
 
 func TestOnlyOpusTakesABitrate(t *testing.T) {
 	opus, _, _ := matchRoute("/v1/audio/sinks/kitchen/audio.opus")
-	knobs, err := parseKnobs(opus, "bitrate=128")
+	parsed, err := parseCaptureQuery(opus, "bitrate=128")
 	if err != nil {
 		t.Fatalf("opus refused a bitrate: %v", err)
 	}
-	if knobs.Bitrate != 128 {
-		t.Errorf("the bitrate is %d, want 128", knobs.Bitrate)
+	if parsed.Bitrate != 128 {
+		t.Errorf("the bitrate is %d, want 128", parsed.Bitrate)
 	}
 	for _, path := range []string{
 		"/v1/audio/sinks/kitchen/audio.wav",
 		"/v1/audio/sinks/kitchen/audio.flac",
 	} {
 		route, _, _ := matchRoute(path)
-		if _, err := parseKnobs(route, "bitrate=128"); err == nil {
-			t.Errorf("%s took a bitrate", path)
+		if _, err := parseCaptureQuery(route, "bitrate=128"); err == nil {
+			t.Errorf("%s accepted a bitrate, want a refusal because only Opus accepts one", path)
 		}
 	}
 }
 
-func TestADocumentRouteTakesNoKnobs(t *testing.T) {
+func TestADocumentRouteTakesNoQueryParameters(t *testing.T) {
 	route, _, _ := matchRoute("/v1/audio")
-	if _, err := parseKnobs(route, "t=0,5"); err == nil {
-		t.Error("the discovery document took a span")
+	if _, err := parseCaptureQuery(route, "t=0,5"); err == nil {
+		t.Error("the discovery document accepted a span, want a refusal")
 	}
-	if _, err := parseKnobs(route, ""); err != nil {
+	if _, err := parseCaptureQuery(route, ""); err != nil {
 		t.Errorf("the discovery document refused an empty query: %v", err)
 	}
 }
 
-// The round trip the plan asks for: expand the template the discovery
-// document publishes, then call the result.
+// The round trip that plans/completed/09-capture-audio-over-http.md
+// specifies: expand the template that the discovery document
+// publishes, then send the result to the router.
 func TestThePublishedTemplateExpandsIntoACallableQuery(t *testing.T) {
 	template := aspectTemplate("sinks", "audio")
 	if template != "/v1/audio/sinks/{name}/audio{.ext}{?t,bitrate}" {
-		t.Fatalf("the published template is %q", template)
+		t.Fatalf("the published template is %q, want %q", template, "/v1/audio/sinks/{name}/audio{.ext}{?t,bitrate}")
 	}
 	// RFC 6570 form-style query expansion percent-encodes the comma,
-	// which is exactly the t=10%2C20 case above.
+	// which gives the t=10%2C20 form tested above.
 	expanded := expandAspectTemplate(template, "kitchen", "opus", map[string]string{
 		"t":       "5,7",
 		"bitrate": "128",
@@ -166,14 +167,14 @@ func TestThePublishedTemplateExpandsIntoACallableQuery(t *testing.T) {
 		t.Fatalf("the expansion matched no route: %s", path)
 	}
 	if name != "kitchen" {
-		t.Errorf("the expansion named %q", name)
+		t.Errorf("the expansion named %q, want kitchen", name)
 	}
-	knobs, err := parseKnobs(route, query)
+	parsed, err := parseCaptureQuery(route, query)
 	if err != nil {
 		t.Fatalf("the expansion did not parse: %v", err)
 	}
-	if knobs.Span.Begin != 5*time.Second || knobs.Span.End != 7*time.Second || knobs.Bitrate != 128 {
-		t.Errorf("the expansion parsed as %+v", knobs)
+	if parsed.Span.Begin != 5*time.Second || parsed.Span.End != 7*time.Second || parsed.Bitrate != 128 {
+		t.Errorf("the expansion parsed as %+v, want a span from 5s to 7s and a bitrate of 128", parsed)
 	}
 }
 
@@ -185,6 +186,6 @@ func TestASpanCarriesTheBytesItWants(t *testing.T) {
 	}
 	open := timeSpan{}
 	if got := open.bodyBytes(48000, 2); got != 0 {
-		t.Errorf("an open span bounds the body at %d bytes", got)
+		t.Errorf("an open span bounds the body at %d bytes, want 0 for no bound", got)
 	}
 }

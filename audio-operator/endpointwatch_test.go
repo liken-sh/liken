@@ -1,10 +1,5 @@
 package main
 
-// These tests cover what wakes the loop for a Sink or a Source: a spec
-// edit, a deletion request, a resource that enters or leaves this
-// machine's selection, and the end of each watch's first read. A
-// status write does not.
-
 import (
 	"slices"
 	"strings"
@@ -15,8 +10,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// sinkAt is this machine's Sink at a resource version and a generation,
-// as the API server sends it.
+// sinkAt returns this machine's Sink at a resource version and a
+// generation, in the form the API server sends it.
 func sinkAt(version string, generation int64) map[string]any {
 	return map[string]any{
 		"apiVersion": EndpointAPIVersion,
@@ -31,27 +26,25 @@ func sinkAt(version string, generation int64) map[string]any {
 	}
 }
 
-// deleting marks a Sink as being deleted.
 func deleting(sink map[string]any) map[string]any {
 	sink["metadata"].(map[string]any)["deletionTimestamp"] = "2026-09-27T12:00:00Z"
 	return sink
 }
 
-// recreated gives a Sink another UID, as a delete and a create of the
-// same name do.
+// recreated gives a Sink a new UID, as deleting and creating a Sink of
+// the same name does.
 func recreated(sink map[string]any) map[string]any {
 	sink["metadata"].(map[string]any)["uid"] = "9e4d2b7a-1c3f-4a6e-8b5d-0f2a7c9e1b63"
 	return sink
 }
 
-// sinkEvent is one watch event for a Sink.
 func sinkEvent(t *testing.T, kind string, sink map[string]any) string {
 	t.Helper()
 	return encode(t, map[string]any{"type": kind, "object": sink})
 }
 
-// The informer calls a handler in one of three ways. Each builds the
-// call for one case of a table.
+// updated, added, and removed each build the call that the informer
+// makes on a handler for one kind of event, so a table can list them.
 func updated(before, after any) func(cache.ResourceEventHandler) {
 	return func(h cache.ResourceEventHandler) { h.OnUpdate(before, after) }
 }
@@ -64,9 +57,9 @@ func removed(item any) func(cache.ResourceEventHandler) {
 	return func(h cache.ResourceEventHandler) { h.OnDelete(item) }
 }
 
-// Each update starts from a held copy at generation 1.
+// Each update case starts from an old copy at generation 1.
 func TestAChangeWakesTheLoopOnlyForAnEdit(t *testing.T) {
-	held := asObject(t, sinkAt("1", 1))
+	original := asObject(t, sinkAt("1", 1))
 	mistyped := asObject(t, sinkAt("2", 2))
 	mistyped.Object["spec"] = map[string]any{"volume": "loud"}
 	cases := []struct {
@@ -74,18 +67,18 @@ func TestAChangeWakesTheLoopOnlyForAnEdit(t *testing.T) {
 		deliver func(cache.ResourceEventHandler)
 		want    bool
 	}{
-		{name: "a status write", deliver: updated(held, asObject(t, sinkAt("2", 1))), want: false},
-		{name: "a spec edit", deliver: updated(held, asObject(t, sinkAt("2", 2))), want: true},
-		{name: "a deletion request", deliver: updated(held, asObject(t, deleting(sinkAt("2", 1)))), want: true},
+		{name: "a status write", deliver: updated(original, asObject(t, sinkAt("2", 1))), want: false},
+		{name: "a spec edit", deliver: updated(original, asObject(t, sinkAt("2", 2))), want: true},
+		{name: "a deletion request", deliver: updated(original, asObject(t, deleting(sinkAt("2", 1)))), want: true},
 		{name: "a resource deleted and created again with the same name",
-			deliver: updated(held, asObject(t, recreated(sinkAt("2", 1)))), want: true},
-		{name: "a held copy that is not an object", deliver: updated("not an object", held), want: true},
-		{name: "an edit that does not convert", deliver: updated(held, mistyped), want: false},
-		{name: "a resource that entered the selection", deliver: added(held), want: true},
+			deliver: updated(original, asObject(t, recreated(sinkAt("2", 1)))), want: true},
+		{name: "an old copy that is not an object", deliver: updated("not an object", original), want: true},
+		{name: "an edit that does not convert", deliver: updated(original, mistyped), want: false},
+		{name: "a resource that entered the selection", deliver: added(original), want: true},
 		{name: "an object that does not convert", deliver: added("not an object"), want: false},
-		{name: "a resource that left the selection", deliver: removed(held), want: true},
+		{name: "a resource that left the selection", deliver: removed(original), want: true},
 		{name: "a resource removed while the watch was down",
-			deliver: removed(cache.DeletedFinalStateUnknown{Key: testSinkName, Obj: held}), want: true},
+			deliver: removed(cache.DeletedFinalStateUnknown{Key: testSinkName, Obj: original}), want: true},
 		{name: "a removal whose tombstone holds no copy",
 			deliver: removed(cache.DeletedFinalStateUnknown{Key: testSinkName}), want: true},
 	}
@@ -94,13 +87,14 @@ func TestAChangeWakesTheLoopOnlyForAnEdit(t *testing.T) {
 			woke := false
 			c.deliver(editHandler[Sink]{what: "the Sinks", wake: func() { woke = true }}.handler())
 			if woke != c.want {
-				t.Errorf("woke = %v, want %v", woke, c.want)
+				t.Errorf("the handler woke the loop: %v, want %v", woke, c.want)
 			}
 		})
 	}
 }
 
-// asking gives a Sink a volume ask at a time.
+// asking sets status.session.volumeAsk on a Sink, with the given time
+// in its at field.
 func asking(sink map[string]any, at string) map[string]any {
 	sink["status"].(map[string]any)["session"] = map[string]any{
 		"player":    "media/den",
@@ -109,45 +103,41 @@ func asking(sink map[string]any, at string) map[string]any {
 	return sink
 }
 
-// A new volume ask is a status write, which changes no generation, so
-// the Sinks' handler compares the time of the ask as well. A new time
-// calls asked and wakes no pass. Any other status write calls nothing.
-func TestANewVolumeAskCallsAskedAndNothingElse(t *testing.T) {
+// A new status.session.volumeAsk.at calls onVolumeAsk and does not wake
+// the loop. Any other status write does not call onVolumeAsk.
+func TestANewVolumeAskCallsOnVolumeAskAndNothingElse(t *testing.T) {
 	const first, second = "2026-10-04T12:15:25.164Z", "2026-10-04T12:15:25.264Z"
-	held := asObject(t, asking(sinkAt("1", 1), first))
+	original := asObject(t, asking(sinkAt("1", 1), first))
 	cases := []struct {
 		name    string
 		deliver func(cache.ResourceEventHandler)
 		asked   bool
 	}{
-		{name: "a new ask", deliver: updated(held, asObject(t, asking(sinkAt("2", 1), second))), asked: true},
-		{name: "a first ask", deliver: updated(asObject(t, sinkAt("1", 1)), held), asked: true},
-		{name: "a status write that keeps the ask", deliver: updated(held, asObject(t, asking(sinkAt("2", 1), first)))},
-		{name: "a session with no ask", deliver: updated(held, asObject(t, sinkAt("2", 1)))},
-		{name: "a Sink that enters the selection with an ask", deliver: added(held)},
+		{name: "a new request", deliver: updated(original, asObject(t, asking(sinkAt("2", 1), second))), asked: true},
+		{name: "a first request", deliver: updated(asObject(t, sinkAt("1", 1)), original), asked: true},
+		{name: "a status write that keeps the request", deliver: updated(original, asObject(t, asking(sinkAt("2", 1), first)))},
+		{name: "a session with no request", deliver: updated(original, asObject(t, sinkAt("2", 1)))},
+		{name: "a Sink that enters the selection with a request", deliver: added(original)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			asked, woke := false, false
 			c.deliver(sinkHandler{
-				edits: editHandler[Sink]{what: "the Sinks", wake: func() { woke = true }},
-				asked: func() { asked = true },
+				edits:       editHandler[Sink]{what: "the Sinks", wake: func() { woke = true }},
+				onVolumeAsk: func() { asked = true },
 			}.handler())
 			if asked != c.asked {
-				t.Errorf("asked = %v, want %v", asked, c.asked)
+				t.Errorf("the handler called onVolumeAsk: %v, want %v", asked, c.asked)
 			}
 			if woke && c.asked {
-				t.Error("an ask woke the pass")
+				t.Error("a new request woke the pass, want only a call of onVolumeAsk")
 			}
 		})
 	}
 }
 
-// Both collections are watched, because a person declares how a
-// microphone rests as much as a speaker. The list and the watch select
-// the resources whose status.node is this machine: an unselected watch
-// wakes every machine's operator for a write to any Sink in the
-// cluster.
+// Sources are watched as well as Sinks, because a person sets a
+// microphone's resting state the same way as a speaker's.
 func TestTheWatchSelectsThisMachinesResourcesInBothCollections(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind, []string{`[]`})
@@ -169,8 +159,8 @@ func TestTheWatchSelectsThisMachinesResourcesInBothCollections(t *testing.T) {
 	})
 }
 
-// wakeCount drains the wakes that have arrived, and answers how many
-// there were.
+// wakeCount removes the wakes queued on the channel and returns how
+// many there were.
 func wakeCount(wakes chan struct{}) int {
 	count := 0
 	for len(wakes) > 0 {
@@ -180,9 +170,9 @@ func wakeCount(wakes chan struct{}) int {
 	return count
 }
 
-// Through the reflector: each watch wakes the loop when its first read
-// is done, even an empty one, and then a spec edit wakes it while the
-// operator's own status write before it does not.
+// Through a real reflector, each watch wakes the loop when its first
+// list finishes, even an empty list. Then a status write does not wake
+// the loop and a spec edit does.
 func TestASpecEditWakesTheLoopAndAStatusWriteDoesNot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind,
@@ -194,7 +184,7 @@ func TestASpecEditWakesTheLoopAndAStatusWriteDoesNot(t *testing.T) {
 		watchEndpoints(t.Context(), testWatcher(t, serveCollections(t, nil, sinks, sources)),
 			"liken-1", func() { wakes <- struct{}{} }, func() {}, nil)
 		synctest.Wait()
-		// The Sink's add and the two syncs.
+		// The wakes are the Sink's add and the first list of each watch.
 		if got := wakeCount(wakes); got != 3 {
 			t.Errorf("the first reads woke the loop %d times, want 3", got)
 		}
@@ -202,7 +192,7 @@ func TestASpecEditWakesTheLoopAndAStatusWriteDoesNot(t *testing.T) {
 		sinks.release()
 		synctest.Wait()
 		if got := wakeCount(wakes); got != 0 {
-			t.Errorf("the operator's own status write woke the loop %d times", got)
+			t.Errorf("the operator's own status write woke the loop %d times, want 0", got)
 		}
 		sinks.release()
 		synctest.Wait()
@@ -212,9 +202,9 @@ func TestASpecEditWakesTheLoopAndAStatusWriteDoesNot(t *testing.T) {
 	})
 }
 
-// Through the reflector: an edit made while the watch was down reaches
-// the handler when the informer reads the collection again, and a
-// status write made in the same gap does not wake the loop.
+// Through a real reflector, an edit made while the watch was down
+// reaches the handler when the informer lists the collection again, and
+// a status write made in the same gap does not wake the loop.
 func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -252,8 +242,8 @@ func TestAChangeWhileTheWatchWasDownWakesTheLoopOnlyForAnEdit(t *testing.T) {
 	}
 }
 
-// Through the reflector: a Sink that enters the selection, and one
-// that leaves it, each wake the loop.
+// Through a real reflector, a Sink that enters the selection and a Sink
+// that leaves it each wake the loop.
 func TestASinkThatEntersOrLeavesTheSelectionWakesTheLoop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sinks := newWatchServer(SinksPath, EndpointAPIVersion, SinkKind, []string{`[]`},

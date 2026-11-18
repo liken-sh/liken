@@ -1,11 +1,9 @@
 package main
 
-// What the CLI reads from the cluster before it streams: the
-// operator's version from its Deployment image tag, the trust anchor
-// the operator publishes, a Ready pod behind the API Service, and the
-// caller's own credential, a bearer token or a client certificate. The
-// label selector and the names here are the contract the sibling CLIs
-// copy.
+// capture reads these from the cluster before it opens a stream: the
+// operator's version, the CA that signs the capture API's certificate,
+// a Ready audio-api pod to forward to, and the caller's own credential.
+// The names here must match the operator's manifests in deploy/.
 
 import (
 	"context"
@@ -24,34 +22,31 @@ import (
 )
 
 const (
-	// Where liken installs the operator and its API.
 	operatorNamespace = "liken-system"
 
-	// The label the base binary selects on to find an
-	// operator's workload, and this operator's value for it.
+	// kubectl liken plugins finds each operator's workload by this label
+	// and installs the CLI of the same version. This CLI reads the same
+	// label to find its operator's version. pluginDomain is
+	// audio-operator's value.
 	pluginLabel  = "cli.liken.sh/plugin"
 	pluginDomain = "audio"
 
-	// The Service and Deployment that serve the capture
-	// API, and the DNS name its leaf certificate carries.
+	// apiServiceName names the capture API's Service and Deployment, and
+	// its pods have the label app=audio-api. apiServiceDNS is the name in
+	// the API's serving certificate.
 	apiServiceName = "audio-api"
 	apiServiceDNS  = "audio-api.liken-system.svc"
 
-	// The port the API container serves HTTPS on.
 	apiContainerPort = 8443
 
-	// The ConfigMap the operator publishes its CA in,
-	// and the key that holds the PEM.
 	trustConfigMap = "audio-api-ca"
 	trustKey       = "ca.crt"
 )
 
-// The label selector for the operator DaemonSet.
 var pluginSelector = pluginLabel + "=" + pluginDomain
 
-// The Sink and Source resources the capture positional names, as
-// the group, version, and resource a dynamic client lists; completion
-// reads these with no typed client and no generated code>
+// The CLI reads Sink and Source through the dynamic client, so it needs
+// no generated client for these types.
 var sinkGVR = schema.GroupVersionResource{
 	Group:    "audio.liken.sh",
 	Version:  "v1alpha1",
@@ -64,9 +59,8 @@ var sourceGVR = schema.GroupVersionResource{
 	Resource: "sources",
 }
 
-// listEndpoints lists Sink or Source names through a dynamic
-// client for the given GVR; both kinds are cluster-scoped, so there is no
-// namespace to list within>
+// Sink and Source are cluster-scoped, so listEndpoints names no
+// namespace.
 func listEndpoints(ctx context.Context, client dynamic.Interface, gvr schema.GroupVersionResource) ([]string, error) {
 	list, err := client.Resource(gvr).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -79,10 +73,10 @@ func listEndpoints(ctx context.Context, client dynamic.Interface, gvr schema.Gro
 	return names, nil
 }
 
-// operatorVersion reads the version tag off the
-// operator DaemonSet's image, the one source every CLI can read with
-// no new API. The operator runs one pod per node from a DaemonSet, and
-// the label is on that DaemonSet, not on the audio-api Deployment.
+// operatorVersion returns the tag of the first container image of the
+// DaemonSet that has the plugin label. The tag is the operator's release
+// version, so the CLI reads it without calling the operator. The label
+// is on the audio-operator DaemonSet, not on the audio-api Deployment.
 func operatorVersion(ctx context.Context, clientset kubernetes.Interface) (string, error) {
 	daemonSets, err := clientset.AppsV1().DaemonSets("").List(ctx, metav1.ListOptions{
 		LabelSelector: pluginSelector,
@@ -91,17 +85,17 @@ func operatorVersion(ctx context.Context, clientset kubernetes.Interface) (strin
 		return "", err
 	}
 	if len(daemonSets.Items) == 0 {
-		return "", fmt.Errorf("no DaemonSet carries the label %s", pluginSelector)
+		return "", fmt.Errorf("no DaemonSet has the label %s", pluginSelector)
 	}
 	containers := daemonSets.Items[0].Spec.Template.Spec.Containers
 	if len(containers) == 0 {
-		return "", fmt.Errorf("the operator DaemonSet declares no container")
+		return "", fmt.Errorf("the operator DaemonSet has no container")
 	}
 	return imageTag(containers[0].Image), nil
 }
 
-// imageTag reads the tag off an image reference, and
-// reports an empty tag for a bare name or a digest reference.
+// imageTag returns the tag of an image reference. It returns "" when
+// the reference has no tag, and ignores a digest after the tag.
 func imageTag(image string) string {
 	if at := strings.LastIndex(image, "@"); at >= 0 {
 		image = image[:at]
@@ -113,8 +107,6 @@ func imageTag(image string) string {
 	return image[colon+1:]
 }
 
-// trustAnchor reads the CA the operator publishes and
-// builds the pool the capture client trusts.
 func trustAnchor(ctx context.Context, clientset kubernetes.Interface) (*x509.CertPool, error) {
 	configmap, err := clientset.CoreV1().ConfigMaps(operatorNamespace).Get(ctx, trustConfigMap, metav1.GetOptions{})
 	if err != nil {
@@ -122,17 +114,15 @@ func trustAnchor(ctx context.Context, clientset kubernetes.Interface) (*x509.Cer
 	}
 	anchor := configmap.Data[trustKey]
 	if anchor == "" {
-		return nil, fmt.Errorf("the ConfigMap %s holds no %s", trustConfigMap, trustKey)
+		return nil, fmt.Errorf("the ConfigMap %s in %s has no key %s", trustConfigMap, operatorNamespace, trustKey)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM([]byte(anchor)) {
-		return nil, fmt.Errorf("the ConfigMap %s holds no certificate in %s", trustConfigMap, trustKey)
+		return nil, fmt.Errorf("the key %s of the ConfigMap %s in %s contains no PEM certificate", trustKey, trustConfigMap, operatorNamespace)
 	}
 	return pool, nil
 }
 
-// pickReadyPod finds one Ready pod behind the API
-// Service, which is the pod the port-forward targets.
 func pickReadyPod(ctx context.Context, clientset kubernetes.Interface) (string, error) {
 	pods, err := clientset.CoreV1().Pods(operatorNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "app=" + apiServiceName,
@@ -145,11 +135,9 @@ func pickReadyPod(ctx context.Context, clientset kubernetes.Interface) (string, 
 			return pod.Name, nil
 		}
 	}
-	return "", fmt.Errorf("no Ready %s pod runs in %s", apiServiceName, operatorNamespace)
+	return "", fmt.Errorf("no pod with the label app=%s in %s is Ready", apiServiceName, operatorNamespace)
 }
 
-// podReady is true when the pod's Ready condition is
-// true.
 func podReady(pod corev1.Pod) bool {
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodReady {
@@ -159,10 +147,8 @@ func podReady(pod corev1.Pod) bool {
 	return false
 }
 
-// bearerToken reads the caller's own token from the REST config, and
-// reports an empty token when the context carries none. A context that
-// authenticates with a client certificate names no token, and the
-// capture client presents that certificate instead.
+// bearerToken returns "" and no error when the config has no token, as
+// for a context that authenticates with a client certificate.
 func bearerToken(config *rest.Config) (string, error) {
 	if config.BearerToken != "" {
 		return config.BearerToken, nil
@@ -177,11 +163,10 @@ func bearerToken(config *rest.Config) (string, error) {
 	return "", nil
 }
 
-// clientCertificate reads the caller's client certificate from the
-// REST config. The capture API verifies it against the cluster's own
-// client authority and reads the caller's identity from it, so a
-// person captures with the kubeconfig they already hold. It reports a
-// nil accessor when the context authenticates some other way.
+// clientCertificate returns nil when the context has no client
+// certificate. The capture API verifies the certificate against the
+// cluster's client CA and reads the caller's identity from its subject,
+// so a person captures with the kubeconfig they already have.
 func clientCertificate(config *rest.Config) (func(*tls.CertificateRequestInfo) (*tls.Certificate, error), error) {
 	kube, err := rest.TLSConfigFor(config)
 	if err != nil {
