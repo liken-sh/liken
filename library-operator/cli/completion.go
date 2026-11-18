@@ -191,11 +191,7 @@ func flagNames() []string {
 func completeFlagValue(parse completionParse, toComplete string) ([]string, int) {
 	switch parse.pendingValueFlag {
 	case "--only":
-		// retry takes one fact more than reenrich does.
-		if len(parse.positionals) > 0 && parse.positionals[0] == retryVerb {
-			return filterByPrefix(retryFactVocabulary, toComplete), compDirectiveNoFileComp
-		}
-		return filterByPrefix(refreshFactVocabulary, toComplete), compDirectiveNoFileComp
+		return filterByPrefix(retryFactVocabulary, toComplete), compDirectiveNoFileComp
 	case "--kubeconfig":
 		return nil, compDirectiveDefault
 	default:

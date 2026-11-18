@@ -292,6 +292,56 @@ func TestTheTrailerFileGapAgainstTheRealSchema(t *testing.T) {
 	}
 }
 
+// A refresh and a retry ask again for a title with no trailer file. A title
+// that holds a trailer file stays out of the gap under both, because the pull
+// writes no second trailer beside one that is there.
+func TestARefreshOfTheTrailerFilesLeavesATitleThatHoldsOne(t *testing.T) {
+	now := time.Now().UTC()
+	asked := now.Add(-time.Minute)
+	attempt := func(result string) []attemptRow {
+		return []attemptRow{{Library: trailerFileLibrary, Item: trailerFileItem, Fact: factTrailerFile,
+			At: now.Add(-time.Hour).Unix(), Result: result}}
+	}
+	held := []fileRow{featureRow(), trailerFileRow("trailers/Official Trailer.mp4")}
+	cases := []struct {
+		name     string
+		files    []fileRow
+		attempts []attemptRow
+		times    reopenTime
+		want     []string
+	}{
+		{name: "a miss and a retry", files: []fileRow{featureRow()}, attempts: attempt(attemptNothing),
+			times: reopenTime{retry: asked}, want: []string{trailerFileItem}},
+		{name: "a failed pull and a retry", files: []fileRow{featureRow()}, attempts: attempt(attemptError),
+			times: reopenTime{retry: asked}, want: []string{trailerFileItem}},
+		{name: "a miss and a refresh", files: []fileRow{featureRow()}, attempts: attempt(attemptNothing),
+			times: reopenTime{refresh: asked}, want: []string{trailerFileItem}},
+		{name: "a pulled file and a retry", files: held, attempts: attempt(attemptFound),
+			times: reopenTime{retry: asked}},
+		{name: "a pulled file and a refresh", files: held, attempts: attempt(attemptFound),
+			times: reopenTime{refresh: asked}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seedTrailerFileGap(t, catalog, []string{trailerSiteArchive}, test.files)
+			if _, err := catalog.UpsertAttempts(t.Context(), test.attempts); err != nil {
+				t.Fatal(err)
+			}
+
+			ids, err := catalog.queryStrings(t.Context(), gapQueries[factTrailerFile],
+				gapParams(factTrailerFile, trailerFileLibrary, now, test.times))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !slices.Equal(ids, test.want) {
+				t.Errorf("gap = %v, want %v", ids, test.want)
+			}
+		})
+	}
+}
+
 // A title whose folder is the library root is not in the gap, because the
 // pull writes a trailers folder inside the title's own folder, and a title at
 // the root has none.

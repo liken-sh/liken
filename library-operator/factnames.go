@@ -48,20 +48,21 @@ const (
 	factMarks = "marks"
 
 	// The trailerfile fact pulls one of those links into a file beside the
-	// title. Its Job runs beside the enricher, so it is out of factVocabulary,
-	// out of spec.refresh, and served by no provider.
+	// title. It asks no provider, so it is out of factVocabulary. It is in
+	// spec.refresh and spec.retry, as unservedFacts says.
 	factTrailerFile = "trailerfile"
 
 	// The appearances fact names the credited people on screen at each
 	// second of a feature. It runs in a worker Job of its own and asks no
-	// provider, so it is out of factVocabulary. It is in spec.refresh, as
-	// workerRefreshFacts says.
+	// provider, so it is out of factVocabulary. It is in spec.refresh and
+	// spec.retry, as unservedFacts says.
 	factAppearances = "appearances"
 
 	// The titles fact reads the text on screen in the last minutes of a
 	// video, which is what the end titles are placed from (plan 96). It runs
 	// in a worker Job of its own and asks no provider, so it is out of
-	// factVocabulary.
+	// factVocabulary. It is in spec.refresh and spec.retry, as unservedFacts
+	// says.
 	factTitles = "titles"
 
 	factContributorIDs       = "contributor.ids"
@@ -149,27 +150,29 @@ var factVocabulary = []string{
 // request, the Job, and the runs row as one thing.
 const refreshWalk = "scan"
 
-// The worker facts a person may ask again for, though no provider serves
-// them. The appearances fact keeps its answer until the file changes, so a
-// refresh is how a new release of its tool reaches the titles it answered.
-// The library Job writes the reopened titles into the worker's list, so a
-// refresh of one of these is a cause for a library Job as a fact's is.
-var workerRefreshFacts = []string{factAppearances}
+// The facts a person may ask again for, though no provider serves them. The
+// trailerfile fact runs in a phase of the library Job. The appearances and
+// titles facts each run in a worker Job, and each keeps its answer until the
+// file changes, so a refresh is how a new release of its tool reaches the
+// videos it answered, and a retry is how a fix to the tool reaches the videos
+// it failed on. The library Job writes the reopened videos into the worker's
+// list, so a refresh or a retry of one of these is a cause for a library Job
+// as a fact's is.
+var unservedFacts = []string{factTrailerFile, factAppearances, factTitles}
 
-// Every key spec.retry accepts: the facts and the worker facts. The walk
-// records no attempt, so there is nothing of it to retry. The CRD's retry
-// rule holds these names, and a test reads the two together.
-var retryVocabulary = append(slices.Clone(factVocabulary), workerRefreshFacts...)
+// Every key spec.retry accepts: the facts, then the facts no provider
+// serves. The walk records no attempt, so there is nothing of it to retry.
+// The CRD's retry rule holds these names, and a test reads the two together.
+var retryVocabulary = append(slices.Clone(factVocabulary), unservedFacts...)
 
-// Every key spec.refresh accepts: the facts, the worker facts, then the
-// walk. The CRD's refresh rule holds these names, and a test reads the two
+// Every key spec.refresh accepts: the keys of spec.retry, then the walk. The CRD's refresh rule holds these names, and a test reads the two
 // together.
 var refreshVocabulary = append(slices.Clone(retryVocabulary), refreshWalk)
 
 // Whether a refresh target is work a Job's container runs: a fact's gap, or
-// the list of a worker fact that the library Job writes. The walk is not, so
+// the list of a worker's fact that the library Job writes. The walk is not, so
 // the code that hands spec.refresh to an enricher, or reads it for an
 // enrichment cause, skips it.
 func isContainerFact(name string) bool {
-	return slices.Contains(factVocabulary, name) || slices.Contains(workerRefreshFacts, name)
+	return slices.Contains(factVocabulary, name) || slices.Contains(unservedFacts, name)
 }

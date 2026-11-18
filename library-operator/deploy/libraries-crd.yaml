@@ -392,7 +392,7 @@ spec:
                     minLength: 1
                 refresh:
                   type: object
-                  maxProperties: 29
+                  maxProperties: 31
                   additionalProperties:
                     type: string
                     format: date-time
@@ -414,7 +414,8 @@ spec:
                         'season-poster', 'season-banner',
                         'episode-thumb', 'trailer', 'marks',
                         'contributor.ids', 'contributor.biography',
-                        'contributor.headshot', 'appearances', 'scan'])
+                        'contributor.headshot', 'trailerfile', 'appearances',
+                        'titles', 'scan'])
                       message: >-
                         every key of spec.refresh must name a fact the
                         operator runs, or scan for a full walk
@@ -432,7 +433,7 @@ spec:
                     when it arrives.
                 retry:
                   type: object
-                  maxProperties: 28
+                  maxProperties: 30
                   additionalProperties:
                     type: string
                     format: date-time
@@ -453,7 +454,8 @@ spec:
                         'season-poster', 'season-banner',
                         'episode-thumb', 'trailer', 'marks',
                         'contributor.ids', 'contributor.biography',
-                        'contributor.headshot', 'appearances'])
+                        'contributor.headshot', 'trailerfile', 'appearances',
+                        'titles'])
                       message: >-
                         every key of spec.retry must name a fact the operator
                         runs

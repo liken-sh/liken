@@ -3,7 +3,7 @@ package main
 // The reenrich verb. It patches a Library's spec.refresh so the
 // operator's next pass reopens a fact's gap and asks the providers
 // again, the field the operator's enricher watches. With --only it
-// touches one fact; with none it touches every fact reenrich holds.
+// touches one fact; with none it touches every fact a provider serves.
 
 import (
 	"context"
@@ -35,11 +35,14 @@ var libraryResource = schema.GroupVersionResource{
 	Resource: "libraries",
 }
 
-// refreshFacts is every fact when --only names none, or
-// the one it names; an unknown fact is an error before the cluster, the
-// way an unknown format is.
+// refreshFacts is every fact a provider serves when --only names none, or
+// the one fact it names, which may be one no provider serves; an unknown
+// fact is an error before the cluster, the way an unknown format is.
 func refreshFacts(only string) ([]string, error) {
-	return factsOf(refreshFactVocabulary, only)
+	if only == "" {
+		return factVocabulary, nil
+	}
+	return factsOf(retryFactVocabulary, only)
 }
 
 // factsOf is the whole vocabulary when --only names none, or the one fact

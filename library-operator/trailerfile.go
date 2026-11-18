@@ -152,12 +152,17 @@ func titlesWithATrailerFile() string {
 // The gap: an identified title with a trailers row this fact can fetch and no
 // present trailer file under the title's own path. So a hand-placed trailer
 // beside the feature closes it.
+//
+// The test for a trailer file is outside the clause that a refresh opens, so
+// a refresh or a retry asks again only for a title that holds no trailer
+// file. The pull writes no file over one that is there, and a provider that
+// now ranks another trailer first would put a second file beside the first.
 func trailerFileGapQuery() string {
-	held := `id IN (SELECT item FROM trailers WHERE trailers.library = ?1 ` +
-		`AND site IN (` + quotedSites(trailerFetchSites()) + `)) ` +
-		`AND id NOT IN (` + titlesWithATrailerFile() + `)`
+	fetchable := `id IN (SELECT item FROM trailers WHERE trailers.library = ?1 ` +
+		`AND site IN (` + quotedSites(trailerFetchSites()) + `))`
 	return `SELECT id FROM (` + identifiedTitleFolders + `) AS titles ` +
-		`WHERE library = ?1 AND ` + gapClause(factTrailerFile, "id", held)
+		`WHERE library = ?1 AND id NOT IN (` + titlesWithATrailerFile() + `) ` +
+		`AND ` + gapClause(factTrailerFile, "id", fetchable)
 }
 
 // The trailers of one title, which the pick sorts.

@@ -57,13 +57,31 @@ func stringListInFile(t *testing.T, path, name string) []string {
 // The CLI's --only list is the operator's fact list, name for name and in the
 // same order, so a fact one of them gains is a fact the other has.
 func TestTheCLIFactListIsTheOperators(t *testing.T) {
-	cli := stringListInFile(t, "cli/facts.go", "refreshFactVocabulary")
+	cli := stringListInFile(t, "cli/facts.go", "factVocabulary")
 	if !slices.Equal(cli, factVocabulary) {
 		t.Errorf("cli/facts.go names %v, want the operator's %v", cli, factVocabulary)
 	}
-	workers := stringListInFile(t, "cli/facts.go", "workerRetryFacts")
-	if !slices.Equal(workers, workerRefreshFacts) {
-		t.Errorf("cli/facts.go names the worker facts %v, want the operator's %v", workers, workerRefreshFacts)
+	unserved := stringListInFile(t, "cli/facts.go", "unservedFacts")
+	if !slices.Equal(unserved, unservedFacts) {
+		t.Errorf("cli/facts.go names the facts no provider serves %v, want the operator's %v", unserved, unservedFacts)
+	}
+}
+
+// The trailer files, the appearances, and the end titles are facts a person
+// may ask again for, in spec.refresh and in spec.retry.
+func TestTheFactsNoProviderServesAreRefreshAndRetryTargets(t *testing.T) {
+	for _, fact := range []string{factTrailerFile, factAppearances, factTitles} {
+		t.Run(fact, func(t *testing.T) {
+			if !isContainerFact(fact) {
+				t.Errorf("%s is no container fact", fact)
+			}
+			if !slices.Contains(refreshVocabulary, fact) {
+				t.Errorf("%s is no refresh target", fact)
+			}
+			if !slices.Contains(retryVocabulary, fact) {
+				t.Errorf("%s is no retry target", fact)
+			}
+		})
 	}
 }
 
@@ -81,14 +99,9 @@ func TestTheRefreshVocabularyIsTheFactsAndTheWalk(t *testing.T) {
 	if isContainerFact(refreshWalk) {
 		t.Errorf("%s reads as a container fact", refreshWalk)
 	}
-	for _, fact := range workerRefreshFacts {
-		if !isContainerFact(fact) || !slices.Contains(refreshVocabulary, fact) {
-			t.Errorf("the worker fact %s is no refresh target", fact)
-		}
-	}
-	if got, want := len(refreshVocabulary), len(factVocabulary)+len(workerRefreshFacts)+1; got != want {
-		t.Errorf("refreshVocabulary holds %d names, want the %d facts, the %d worker facts, and the walk",
-			got, len(factVocabulary), len(workerRefreshFacts))
+	if got, want := len(refreshVocabulary), len(factVocabulary)+len(unservedFacts)+1; got != want {
+		t.Errorf("refreshVocabulary holds %d names, want the %d facts, the %d facts no provider serves, and the walk",
+			got, len(factVocabulary), len(unservedFacts))
 	}
 }
 

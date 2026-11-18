@@ -706,7 +706,11 @@ covers, how dark the frame is, how much it changed, and the lines that
 the reader read. The worker writes its attempt to `.liken/titles.yaml`.
 A reading stays until the file at its path is replaced. A read that
 fails is asked again after a day, and its attempt holds the tool's own
-error.
+error. To read the failed videos again sooner, such as after a release
+that fixes the tool, set `spec.retry.titles` to the current time. To
+read every video again, set `spec.refresh.titles`. The
+[When a fact asks again](#when-a-fact-asks-again) section describes
+both fields.
 
 #### The model
 
@@ -1339,7 +1343,12 @@ adds gigabytes to the volume the first time this fact runs.**
 
 The `trailer-files` phase of the `Library`'s `Job` runs the fact, and
 two titles pull at once inside it. The phase starts no new title
-fifteen minutes into a run, and the next `Job` goes on with the rest. The fact takes no `spec.refresh`.
+fifteen minutes into a run, and the next `Job` goes on with the rest.
+
+A time under `trailerfile` in `spec.retry` or `spec.refresh` makes the
+fact ask again, as [When a fact asks again](#when-a-fact-asks-again)
+describes. Both ask again only for a title that holds no trailer file,
+so neither one pulls a second trailer for a title.
 
 ### IMDb ratings and credits from the datasets
 
@@ -1484,11 +1493,13 @@ starts a `Job` that fills gaps, without a walk, as soon as the
 `Library` has no other `Job` running, and a refresh set while a `Job`
 runs starts another one after it. The fact
 rewrites its own files and rows in place, and nothing is deleted.
-The `appearances` key works the same way: the reopened videos are in
-the gap the worker reads after the `Job` that fills gaps, and the
-worker matches them again. The worker takes the videos whose detections
-record is on the volume first, because each of them needs only the
-match.
+The `appearances` and `titles` keys work the same way: the reopened
+videos are in the gap the worker reads after the `Job` that fills gaps.
+The appearances worker matches them again, and it takes the videos
+whose detections record is on the volume first, because each of them
+needs only the match. The titles worker reads the end of each video
+again. The `trailerfile` key reopens only the titles that hold no
+trailer file.
 
 To ask a fact again only for the titles it missed, set its time in
 `spec.retry` instead. Use it when a fault made a fact record misses and
@@ -1510,13 +1521,16 @@ nothing is deleted. A miss made after the time counts as usual, so a
 title the fact still cannot answer waits for its window again.
 
 `kubectl liken library reenrich movies` writes `spec.refresh` for you and
-asks every fact again. Add `--only overview` to reopen one fact, and
-`-n` to select the namespace. `kubectl liken library retry movies
---only trickplay` writes `spec.retry` the same way, and with no `--only`
-it retries every fact. `retry` also takes `--only appearances`, which
-`reenrich` does not offer, because a retry of the appearances worker
-decodes only the videos it missed. Both commands read your kubeconfig,
-and in bash they complete the library names and the facts.
+asks again every fact that a provider serves. Add `--only overview` to
+reopen one fact, and `-n` to select the namespace. With no `--only`,
+`reenrich` leaves out `trailerfile`, `appearances`, and `titles`,
+because a refresh of the appearances or the titles worker decodes every
+video again. Name one of them with `--only` to refresh it.
+`kubectl liken library retry movies --only trickplay` writes
+`spec.retry` the same way, and with no `--only` it retries every fact,
+those three too, because a retry reopens only what a fact missed or
+failed on. Both commands read your kubeconfig, and in bash they
+complete the library names and the facts.
 
 The same map takes one key that is not a fact: `scan` asks for a full
 walk of the library, and `kubectl liken library rescan movies` writes

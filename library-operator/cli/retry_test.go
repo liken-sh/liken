@@ -23,7 +23,9 @@ func TestRetryFacts(t *testing.T) {
 	}{
 		{"no --only names every fact", "", retryFactVocabulary},
 		{"one fact", "trickplay", []string{"trickplay"}},
-		{"the worker fact refresh leaves out", "appearances", []string{"appearances"}},
+		{"the appearances", "appearances", []string{"appearances"}},
+		{"the end titles", "titles", []string{"titles"}},
+		{"the trailer files", "trailerfile", []string{"trailerfile"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

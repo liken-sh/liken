@@ -2,12 +2,11 @@ package main
 
 import "slices"
 
-// The facts spec.refresh may name, in the operator's own order.
+// The facts a MetadataProvider may name, in the operator's own order.
 // The CLI shares no code with the operator, so this list copies the
 // operator's factVocabulary, and a fact the operator adds is a fact
-// added here. reenrich with no --only sets every one; trailerfile is
-// out, because it is out of spec.refresh there too.
-var refreshFactVocabulary = []string{
+// added here. reenrich with no --only sets every one.
+var factVocabulary = []string{
 	"probe",
 	"arrival",
 	"trickplay",
@@ -37,14 +36,17 @@ var refreshFactVocabulary = []string{
 	"contributor.headshot",
 }
 
-// The worker facts spec.retry may name beside the facts, a copy of the
-// operator's workerRefreshFacts. A retry reopens only the titles a fact
-// missed, so the appearances worker, which decodes every frame, costs only
-// those titles, and retry names it where reenrich leaves it out.
-var workerRetryFacts = []string{
+// The facts no provider serves, a copy of the operator's unservedFacts.
+// reenrich with no --only leaves them out, because a refresh of one of them
+// works every video again: the appearances and titles workers decode each
+// one. reenrich takes each of them with --only. A retry reopens only what
+// a fact missed or failed on, so retry with no --only names them too.
+var unservedFacts = []string{
+	"trailerfile",
 	"appearances",
+	"titles",
 }
 
-// The facts spec.retry may name. The walk records no attempt, so scan is
-// out.
-var retryFactVocabulary = append(slices.Clone(refreshFactVocabulary), workerRetryFacts...)
+// Every fact --only may name, for reenrich and for retry, and the facts
+// retry sets with no --only. The walk records no attempt, so scan is out.
+var retryFactVocabulary = append(slices.Clone(factVocabulary), unservedFacts...)

@@ -121,6 +121,47 @@ func TestATitlesAttemptHoldsItsFileOutOfTheGap(t *testing.T) {
 	}
 }
 
+// A retry asks again for a read that failed before its time, inside the day
+// that an error otherwise lasts, and leaves a reading that was found. A
+// refresh asks again for both.
+func TestARetryAndARefreshReopenATitlesAttempt(t *testing.T) {
+	asked := ledgerTime.Add(-time.Minute)
+	cases := []struct {
+		name   string
+		result string
+		times  reopenTime
+		gap    bool
+	}{
+		{name: "an error and a retry", result: attemptError, times: reopenTime{retry: asked}, gap: true},
+		{name: "a reading and a retry", result: attemptFound, times: reopenTime{retry: asked}},
+		{name: "an error and a refresh", result: attemptError, times: reopenTime{refresh: asked}, gap: true},
+		{name: "a reading and a refresh", result: attemptFound, times: reopenTime{refresh: asked}, gap: true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			catalog, _ := newSQLiteCatalog(t)
+			seed := &walkResult{
+				files: []fileRow{{Path: "A/a.mkv", Library: titlesLibrary, Present: true, Type: fileTypeVideo,
+					Role: fileRolePrimary, DurationMs: 6000000, VideoCodec: "h264", Items: wholeItems("movie:tmdb:1")}},
+				attempts: []attemptRow{{Library: titlesLibrary, Item: "A/a.mkv", Fact: factTitles,
+					At: ledgerTime.Add(-time.Hour).Unix(), Result: test.result}},
+			}
+			if err := upsertWalk(t.Context(), catalog, seed); err != nil {
+				t.Fatal(err)
+			}
+
+			items, err := catalog.workItems(t.Context(), factTitles, titlesLibrary, ledgerTime, test.times)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if (len(items) == 1) != test.gap {
+				t.Errorf("gap = %+v, want the video in it: %v", items, test.gap)
+			}
+		})
+	}
+}
+
 // The read of one video: the last 15 minutes of a film and the last 6 of an
 // episode, in software with no render node and on the node with one, and a
 // found attempt in the folder's ledger.

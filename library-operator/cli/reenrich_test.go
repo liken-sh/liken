@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -21,8 +22,8 @@ func TestRefreshFacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refreshFacts(all): %v", err)
 	}
-	if len(all) != len(refreshFactVocabulary) {
-		t.Fatalf("refreshFacts(all) named %d facts, want %d", len(all), len(refreshFactVocabulary))
+	if !slices.Equal(all, factVocabulary) {
+		t.Fatalf("refreshFacts(all) = %v, want the facts a provider serves, %v", all, factVocabulary)
 	}
 
 	one, err := refreshFacts("poster")
@@ -31,6 +32,13 @@ func TestRefreshFacts(t *testing.T) {
 	}
 	if len(one) != 1 || one[0] != "poster" {
 		t.Fatalf("refreshFacts(poster) = %v, want [poster]", one)
+	}
+
+	for _, fact := range unservedFacts {
+		named, err := refreshFacts(fact)
+		if err != nil || !slices.Equal(named, []string{fact}) {
+			t.Fatalf("refreshFacts(%s) = %v, %v, want the one fact", fact, named, err)
+		}
 	}
 
 	if _, err := refreshFacts("bogus"); err == nil {
@@ -133,7 +141,7 @@ func TestReenrichWarnsOnDrift(t *testing.T) {
 	if !strings.Contains(stderr.String(), syncCommand) {
 		t.Fatalf("stderr = %q, want the sync command", stderr.String())
 	}
-	if len(refreshOf(t, dyn, "media", "movies")) != len(refreshFactVocabulary) {
+	if len(refreshOf(t, dyn, "media", "movies")) != len(factVocabulary) {
 		t.Fatal("reenrich did not set every fact")
 	}
 }
