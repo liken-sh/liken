@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// A file URI that names no file makes no mount.
+// A file URI with no server, namespace, claim, or file path is refused.
 func TestAFileURIMustNameAFile(t *testing.T) {
 	cases := []string{
 		"nfs:///people/ada.png",
@@ -20,13 +20,13 @@ func TestAFileURIMustNameAFile(t *testing.T) {
 		t.Run(raw, func(t *testing.T) {
 			ref := mustParse(t, raw)
 			if _, err := mounts[ref.Scheme](ref, operatorNS); err == nil {
-				t.Errorf("%s made a mount", raw)
+				t.Errorf("%s returned a mount, want an error", raw)
 			}
 		})
 	}
 }
 
-// A path that climbs out of the mount stays inside it.
+// A path with .. cannot leave the mount: it resolves inside it.
 func TestAFilePathStaysInsideItsMount(t *testing.T) {
 	cases := map[string]string{
 		"claim://media/pictures/../../etc/passwd": "/source/etc/passwd",
@@ -43,8 +43,9 @@ func TestAFilePathStaysInsideItsMount(t *testing.T) {
 	}
 }
 
-// A baker pod's name fits the limit on a pod's name, and two long
-// Person names give two pod names.
+// A baker pod's name stays within the pod name length limit, and two
+// long Person names that differ only at the end get different pod
+// names.
 func TestABakerPodNameFits(t *testing.T) {
 	long := strings.Repeat("a", 250)
 	first, second := bakerPodName(long+"x"), bakerPodName(long+"y")

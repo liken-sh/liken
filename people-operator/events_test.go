@@ -1,11 +1,5 @@
 package main
 
-// These tests read the Events the operator posts about a Person. Each
-// change of AvatarReady posts one Event with the condition's reason,
-// and a new picture that leaves the condition as it was posts
-// AvatarUpdated. A Person is cluster-scoped, so its Events are in
-// default.
-
 import (
 	"net/http"
 	"slices"
@@ -17,15 +11,13 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// posted is the part of an Event a test compares: its type, its
-// reason, and its count.
+// posted is the part of an Event that a test compares.
 type posted struct {
 	kind, reason string
 	count        int32
 }
 
-// postedAbout answers what the operator posted about one Person, in
-// the order it posted it.
+// postedAbout returns the Events about one Person, oldest first.
 func (w *world) postedAbout(name string) []posted {
 	var out []posted
 	for _, event := range w.api.recorded.About(personKind, name) {
@@ -34,8 +26,9 @@ func (w *world) postedAbout(name string) []posted {
 	return out
 }
 
-// Each change of AvatarReady posts one Event, a failed read a Warning,
-// and a new picture under the same reason posts AvatarUpdated.
+// A transition of AvatarReady posts one Event, and it is a Warning for
+// a failed read. A new picture under the same reason posts
+// AvatarUpdated.
 func TestEachChangeOfThePicturePostsOneEvent(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -60,7 +53,7 @@ func TestEachChangeOfThePicturePostsOneEvent(t *testing.T) {
 				w := startWorld(t)
 				w.pictures.serve("/ada.png", servedPicture{body: solid(t, 64, 64, green), etag: `"one"`})
 				w.api.putPerson(ada("https://pictures.example/ada.png"))
-				w.settle()
+				w.waitForIdle()
 
 				second := c.second
 				if second.status == 0 {
@@ -68,7 +61,7 @@ func TestEachChangeOfThePicturePostsOneEvent(t *testing.T) {
 				}
 				w.pictures.serve("/ada.png", second)
 				time.Sleep(recheckInterval)
-				w.settle()
+				w.waitForIdle()
 
 				if got := w.postedAbout("ada"); !slices.Equal(got, c.want) {
 					t.Errorf("the Events about ada = %v, want %v", got, c.want)
@@ -78,21 +71,22 @@ func TestEachChangeOfThePicturePostsOneEvent(t *testing.T) {
 	}
 }
 
-// A failed read's Event says the last good picture stays, and a read
-// that works again posts the recovery. The recovery repeats the first
-// Fetched within ten minutes, so the recorder counts it on that Event.
+// A failed read's Event says that status.thumbnail keeps the last good
+// picture, and a later successful read posts Fetched again. The
+// recorder merges a repeat of an Event within 10 minutes into the first
+// one, so the first Fetched Event has a count of 2.
 func TestARecoveredSourcePostsItsRecovery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.pictures.serve("/ada.png", servedPicture{body: solid(t, 64, 64, green), etag: `"one"`})
 		w.api.putPerson(ada("https://pictures.example/ada.png"))
-		w.settle()
+		w.waitForIdle()
 		w.pictures.serve("/ada.png", servedPicture{status: http.StatusInternalServerError})
 		w.api.putPerson(withAnnotation(ada("https://pictures.example/ada.png"), "again"))
-		w.settle()
+		w.waitForIdle()
 		w.pictures.serve("/ada.png", servedPicture{body: solid(t, 64, 64, green), etag: `"one"`})
 		w.api.putPerson(withAnnotation(ada("https://pictures.example/ada.png"), "and again"))
-		w.settle()
+		w.waitForIdle()
 
 		want := []posted{
 			{events.TypeNormal, reasonFetched, 2},
@@ -102,8 +96,8 @@ func TestARecoveredSourcePostsItsRecovery(t *testing.T) {
 			t.Errorf("the Events about ada = %v, want %v", got, want)
 		}
 		failed := w.api.recorded.About(personKind, "ada")[1]
-		if !strings.HasSuffix(failed.Message, "; the last good picture stays") {
-			t.Errorf("the FetchFailed message = %q, want it to say the last good picture stays", failed.Message)
+		if !strings.Contains(failed.Message, "keeps the last good picture") {
+			t.Errorf("the FetchFailed message = %q, want it to say that status.thumbnail keeps the last good picture", failed.Message)
 		}
 		if failed.Metadata.Namespace != "default" {
 			t.Errorf("the Event is in %q, want default", failed.Metadata.Namespace)
@@ -117,10 +111,10 @@ func TestABakerPodPastItsDeadlinePostsAWarning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.putPerson(ada("nfs://nas.example/people/ada.png"))
-		w.settle()
+		w.waitForIdle()
 
 		time.Sleep(bakeDeadline)
-		w.settle()
+		w.waitForIdle()
 
 		got := w.api.recorded.About(personKind, "ada")
 		if len(got) != 1 || got[0].Type != events.TypeWarning || got[0].Reason != reasonBakeFailed {
@@ -132,20 +126,20 @@ func TestABakerPodPastItsDeadlinePostsAWarning(t *testing.T) {
 	})
 }
 
-// A refused status write posts nothing. The Event follows the write
-// that lands.
+// A status write that the API server rejects posts nothing. The Event
+// is posted after the write that succeeds.
 func TestARefusedWritePostsNoEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.refuseStatusWrites(1)
 		w.api.putPerson(ada(""))
-		w.settle()
+		w.waitForIdle()
 		if got := w.postedAbout("ada"); len(got) != 0 {
-			t.Fatalf("a refused write posted %v", got)
+			t.Fatalf("the Events about ada after a refused write = %v, want none", got)
 		}
 
 		time.Sleep(retryDelay)
-		w.settle()
+		w.waitForIdle()
 
 		want := []posted{{events.TypeNormal, reasonInitials, 1}}
 		if got := w.postedAbout("ada"); !slices.Equal(got, want) {

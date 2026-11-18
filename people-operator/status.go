@@ -1,10 +1,9 @@
 package main
 
-// The status answers a Person's spec.avatar: the thumbnail, a record of
-// what it answers, and the AvatarReady condition. The rules for a read
-// that failed keep a good picture: the last photograph stays, with the
-// reason on the condition, and a Person that never had a good picture
-// shows its initials.
+// The operator writes a Person's status after each read of its
+// spec.avatar. When a read fails, status.thumbnail keeps the last good
+// picture and AvatarReady reports the failure. A Person with
+// no picture gets its initials.
 
 import (
 	"reflect"
@@ -14,29 +13,30 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// outcome is the answer to one Person's spec.avatar.
+// outcome is the result of reading one Person's spec.avatar.
 type outcome struct {
-	// source is the spec.avatar the outcome answers, and checked is the
-	// check-avatar annotation value it answers.
+	// source is the spec.avatar that was read, and checked is the
+	// check-avatar annotation value at that time.
 	source, checked string
 
-	// initials is true when the Person names no picture.
+	// initials is true when spec.avatar is empty.
 	initials bool
 
-	// reading is a read that worked, and reason is its AvatarReady
-	// reason.
+	// reading is the result of a successful read, and reason is the
+	// AvatarReady reason to report for it.
 	reading reading
 	reason  string
 
-	// err is a read that failed. It carries its reason (sourceError).
+	// err is the error of a failed read. reasonOf takes the
+	// AvatarReady reason from it.
 	err error
 }
 
-// needsRead reports whether a Person's status does not answer its
-// spec: it has no thumbnail, it answers another source or another
-// check request, or its condition answers an earlier generation of
-// the spec. The last rule redraws the initials after a person changes
-// their name.
+// needsRead reports whether a Person's status is out of date with its
+// spec: it has no thumbnail, it was read from a different source or
+// for a different check-avatar value, or its condition observed an
+// earlier generation. The generation check redraws the initials after
+// the person changes their name.
 func needsRead(p *person) bool {
 	return p.Status.Thumbnail == "" ||
 		p.Spec.Avatar != p.Status.Avatar.Source ||
@@ -44,27 +44,27 @@ func needsRead(p *person) bool {
 		p.Metadata.Generation != p.Status.ready().ObservedGeneration
 }
 
-// knownVersion answers the version of the picture that the status
-// holds for the Person's current source, and the zero version when the
-// thumbnail is not a picture from that source. A read with the zero
-// version never answers unchanged, so a thumbnail that answers
-// unchanged is always a picture the operator already holds.
+// knownVersion returns the version of the picture in status.thumbnail
+// when it came from the Person's current spec.avatar, and the zero
+// version otherwise. A source reports a picture unchanged only when it
+// matches a version that is not zero. So a source never reports
+// unchanged for a thumbnail from another source or for initials.
 func knownVersion(p *person) pictureVersion {
-	if !heldPicture(p) || p.Status.Avatar.Source != p.Spec.Avatar {
+	if !hasPicture(p) || p.Status.Avatar.Source != p.Spec.Avatar {
 		return pictureVersion{}
 	}
 	return p.Status.Avatar.version()
 }
 
-// heldPicture reports whether the status holds a picture from a source,
-// and not initials.
-func heldPicture(p *person) bool {
+// hasPicture reports whether status.thumbnail is a picture from a
+// source and not drawn initials.
+func hasPicture(p *person) bool {
 	return p.Status.Thumbnail != "" && !isInitials(p.Status.Thumbnail)
 }
 
-// composeStatus answers the status that an outcome gives a Person, and
-// what it changed that posts an Event. now stamps the condition when
-// its status changes.
+// composeStatus returns the status that an outcome gives a Person, and
+// what changed. now becomes the condition's lastTransitionTime when its
+// status changes.
 func composeStatus(p *person, out outcome, now time.Time) (personStatus, change) {
 	next := p.Status
 	next.Avatar = avatarState{Source: out.source, Checked: out.checked}
@@ -73,17 +73,18 @@ func composeStatus(p *person, out outcome, now time.Time) (personStatus, change)
 
 	switch {
 	case out.err != nil:
-		ready.Status, ready.Reason, ready.Message = conditions.False, reasonOf(out.err), out.err.Error()
-		if heldPicture(p) {
-			// The version stays only with a picture from the same
-			// source. A version from another source would make the
-			// next read of this one answer unchanged.
+		ready.Status, ready.Reason = conditions.False, reasonOf(out.err)
+		if hasPicture(p) {
+			// Keep the version only when the picture came from this
+			// source. A version from another source would make the next
+			// read of this source report unchanged.
 			if p.Status.Avatar.Source == out.source {
 				next.Avatar = withVersion(next.Avatar, p.Status.Avatar.version())
 			}
-			ready.Message += "; the last good picture stays"
+			ready.Message = "status.thumbnail keeps the last good picture: " + out.err.Error()
 		} else {
 			next.Thumbnail = drawInitials(p)
+			ready.Message = "status.thumbnail shows the initials: " + out.err.Error()
 		}
 	case out.initials:
 		next.Thumbnail, ready.Reason = drawInitials(p), reasonInitials
@@ -97,10 +98,10 @@ func composeStatus(p *person, out outcome, now time.Time) (personStatus, change)
 		changed.newPicture = next.Thumbnail != p.Status.Thumbnail
 	}
 
-	// The list is cloned, because the held status is the API server's
-	// copy until the write lands. Set moves lastTransitionTime only
-	// when the status changes, so a write that changes nothing else
-	// changes nothing.
+	// Clone the conditions so that composing does not modify the
+	// caller's copy of the Person. conditions.Set changes
+	// lastTransitionTime only when the status changes, so recomputing
+	// an unchanged status gives an equal result.
 	next.Conditions = slices.Clone(p.Status.Conditions)
 	ready.LastTransitionTime = now.UTC().Truncate(time.Second)
 	changed.transitioned = conditions.Set(&next.Conditions, ready)
@@ -112,8 +113,6 @@ func withVersion(state avatarState, version pictureVersion) avatarState {
 	return state
 }
 
-// statusChanged reports whether a composed status differs from the one
-// the API server holds, so the operator writes only a change.
-func statusChanged(held, next personStatus) bool {
-	return !reflect.DeepEqual(held, next)
+func statusChanged(current, next personStatus) bool {
+	return !reflect.DeepEqual(current, next)
 }

@@ -1,9 +1,9 @@
-// people-operator writes each Person's picture into its status. It
-// reads the picture that spec.avatar names, bakes one small thumbnail,
-// and writes it to status.thumbnail, so every screen draws the same
-// face with no work of its own.
+// people-operator reads the picture at each Person's spec.avatar,
+// scales it to a small thumbnail, and writes the thumbnail to
+// status.thumbnail. Screens then draw the thumbnail and do not fetch or
+// decode pictures themselves.
 //
-// The same binary is the baker pod's program: `people-operator bake
+// The same binary is the baker pod's command: `people-operator bake
 // <path> <colour>` bakes one file and prints the result (bake.go).
 package main
 
@@ -22,10 +22,10 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// The downward API sets these. The operator reads its own pod for the
-// image a baker pod runs, starts nfs:// baker pods in its own
-// namespace, holds its Lease in that namespace, and names its pod in
-// the Lease's holder.
+// The Deployment sets these from the downward API. The operator reads
+// its own pod to find the image for baker pods, and creates nfs://
+// baker pods and its Lease in its own namespace. The election uses the
+// pod name as the start of this process's holder identity in the Lease.
 const (
 	podNameVariable      = "POD_NAME"
 	podNamespaceVariable = "POD_NAMESPACE"
@@ -42,8 +42,8 @@ func main() {
 }
 
 // operate builds the in-cluster clients and runs the operator's
-// process (leader.go). A SIGTERM from the kubelet ends the process
-// after the Person in flight, and the process then releases the Lease.
+// process (leader.go). On SIGTERM the process finishes the Person in
+// progress and releases the Lease.
 func operate() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
@@ -54,15 +54,15 @@ func operate() error {
 	}
 	client, err := apiclient.InCluster(apiclient.InClusterOptions{Timeout: election.RequestTimeout})
 	if err != nil {
-		return err
+		return fmt.Errorf("building the API client: %w", err)
 	}
 	watcher, err := informer.InCluster()
 	if err != nil {
-		return err
+		return fmt.Errorf("building the watch client: %w", err)
 	}
 	lease, err := rest.InClusterConfig()
 	if err != nil {
-		return err
+		return fmt.Errorf("reading the in-cluster configuration for the Lease: %w", err)
 	}
 	return process{
 		client:    client.WithWaitContext(ctx),

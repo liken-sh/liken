@@ -1,24 +1,24 @@
 package main
 
-// The operator posts a Kubernetes Event about a Person for each change
-// of its AvatarReady condition, with the condition's reason and
-// message, and for each new picture that leaves the condition as it
-// was. The condition answers what is true now. The Events answer what
-// happened in the last hour: a source that failed overnight and then
-// answered again leaves no trace in the condition. A Person is
-// cluster-scoped, so its Events are in the namespace default.
+// The operator posts a Kubernetes Event about a Person when its
+// AvatarReady condition transitions, and when a new picture arrives
+// without a transition. The condition shows the current state. The
+// Events show what happened recently: a source that failed overnight
+// and then recovered leaves nothing in the condition. A Person is
+// cluster-scoped, so its Events are in the `default` namespace.
 
 import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// component names the operator in each Event's source.
+// component is the source of each Event.
 const component = "people-operator"
 
-// The reasons AvatarReady reports. Each one is also the reason of the
-// Event that a change to it posts. The first four have the status True.
-// The last four have the status False, and their Events are Warnings.
+// The reasons of the AvatarReady condition, which are also the reasons
+// of the Events that its transitions post. Fetched, Inline, Baked, and
+// Initials go with status True. The others go with status False, and
+// their Events are Warnings.
 const (
 	reasonFetched           = "Fetched"
 	reasonInline            = "Inline"
@@ -30,26 +30,26 @@ const (
 	reasonUnsupportedScheme = "UnsupportedScheme"
 )
 
-// reasonAvatarUpdated is the Event of a new picture that changes no
-// condition: the source answered a new copy under the same reason, or
-// spec.avatar names a new source of the same kind.
+// reasonAvatarUpdated is the reason of the Event for a new picture that
+// leaves the condition's status and reason unchanged. It happens when
+// the same source returns a different picture, or when spec.avatar
+// points to a different source that succeeds with the same reason.
 const reasonAvatarUpdated = "AvatarUpdated"
 
-// change is what one status write changed that a person reads as an
-// Event.
+// change is what a status write changed, which decides the Event.
 type change struct {
 	// transitioned is true when AvatarReady is new, or its status or
-	// its reason changed.
+	// reason changed.
 	transitioned bool
 
-	// newPicture is true when the thumbnail holds a picture the status
-	// did not hold before.
+	// newPicture is true when a read replaced status.thumbnail with a
+	// different picture.
 	newPicture bool
 }
 
-// post posts the Events of a change after its status write landed. A
-// write that the API server refused posts nothing, and the next pass
-// finds the same change again.
+// post is called only after the status write succeeds. When the API
+// server rejects the write, the next pass computes the same change and
+// posts its Event then.
 func (o *operator) post(p *person, c change) {
 	about := events.ObjectReference{
 		APIVersion: personAPIVersion,
@@ -61,6 +61,6 @@ func (o *operator) post(p *person, c change) {
 	case c.transitioned:
 		o.recorder.Transition(about, p.Status.ready(), conditions.False)
 	case c.newPicture:
-		o.recorder.Normal(about, reasonAvatarUpdated, "the source answered a new picture, and the thumbnail shows it")
+		o.recorder.Normal(about, reasonAvatarUpdated, "Replaced status.thumbnail with a new picture from spec.avatar")
 	}
 }

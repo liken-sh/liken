@@ -1,11 +1,12 @@
 package main
 
-// A thumbnail is one square JPEG, 256 by 256 pixels, at quality 85,
-// as a data: URI. At that size a face takes about 20 to 35 KB after
-// base64, a small part of the 1.5 MiB that etcd allows one object, and
-// it covers the person picker's 160-pixel circle on a screen that
-// scales by up to 1.6. The thumbnail is square and has no alpha, and
-// each screen crops it to its own shape.
+// A thumbnail is a square JPEG of 256 by 256 pixels at quality 85,
+// stored as a data: URI in status.thumbnail. It is small next to the
+// 1.5 MiB that etcd accepts for one object.
+//
+// 256 pixels fill the person picker's 160-pixel circle on a screen
+// scaled by 1.6. The JPEG has no alpha channel, and each screen crops it
+// to its own shape.
 
 import (
 	"bytes"
@@ -17,9 +18,8 @@ import (
 	"image/draw"
 	"image/jpeg"
 
-	// The decoders register themselves with the image package. These
-	// four formats are the ones Go decodes with the standard library
-	// and golang.org/x/image.
+	// Importing a decoder registers its format with image.Decode. With
+	// image/jpeg, these add GIF, PNG, and WebP.
 	_ "image/gif"
 	_ "image/png"
 
@@ -34,33 +34,31 @@ const (
 	thumbnailPrefix  = "data:image/jpeg;base64,"
 )
 
-// The limits on one picture. A source can name any file, and the
-// operator reads it into memory, so each limit bounds what one Person
-// can cost the process.
+// A Person's spec.avatar can point at any file, and the operator reads
+// and decodes it in memory. These limits bound the memory one Person
+// can use.
 const (
-	// maxPictureBytes bounds the encoded file.
+	// maxPictureBytes is the largest encoded file.
 	maxPictureBytes = 10 << 20
 
-	// maxPictureSide bounds each side of the decoded image. A small
-	// file can declare a huge image, and the decoder allocates the
-	// whole canvas: 8192 by 8192 at four bytes a pixel is 256 MiB. The
-	// check reads only the header, before any pixel is decoded.
+	// maxPictureSide is the largest width or height in pixels. A small
+	// file can declare a huge image, and the decoder allocates the whole
+	// canvas: 8192 by 8192 at four bytes a pixel is 256 MiB. The check
+	// reads only the header, before decoding.
 	maxPictureSide = 8192
 )
 
-// errDecode marks a picture the operator cannot turn into pixels: a
-// format it does not read, a corrupt file, or an image too large to
-// decode. The condition reports it as DecodeFailed, apart from a
-// source it could not read.
+// errDecode wraps every failure to decode a picture: an unsupported
+// format, a corrupt file, or dimensions over maxPictureSide. failure
+// (source.go) reports it with the reason DecodeFailed.
 var errDecode = errors.New("the picture does not decode")
 
-// errTooLarge is a file over maxPictureBytes.
 var errTooLarge = fmt.Errorf("the picture is larger than %d MiB", maxPictureBytes>>20)
 
-// bakeThumbnail decodes one picture and answers its thumbnail. The
-// person's colour fills the square first, so the transparent parts of
-// a PNG, a GIF, or a WebP show that colour and not black.
-func bakeThumbnail(picture []byte, backdrop color.Color) (string, error) {
+// makeThumbnail decodes a picture and returns its thumbnail data: URI.
+// The backdrop colour fills the square first, because JPEG has no
+// alpha channel and transparent pixels would otherwise encode as black.
+func makeThumbnail(picture []byte, backdrop color.Color) (string, error) {
 	if len(picture) > maxPictureBytes {
 		return "", errTooLarge
 	}
@@ -69,7 +67,7 @@ func bakeThumbnail(picture []byte, backdrop color.Color) (string, error) {
 		return "", fmt.Errorf("%w: %v", errDecode, err)
 	}
 	if config.Width > maxPictureSide || config.Height > maxPictureSide {
-		return "", fmt.Errorf("%w: it is %dx%d pixels, over the limit of %d on each side",
+		return "", fmt.Errorf("%w: it is %dx%d pixels, and the limit is %d pixels on each side",
 			errDecode, config.Width, config.Height, maxPictureSide)
 	}
 	source, _, err := image.Decode(bytes.NewReader(picture))
@@ -79,10 +77,9 @@ func bakeThumbnail(picture []byte, backdrop color.Color) (string, error) {
 	return encodeThumbnail(squareScaled(source, backdrop)), nil
 }
 
-// squareScaled crops the centre square out of an image and scales it
-// to the thumbnail's side. Catmull-Rom is the sharpest of the kernels
-// that golang.org/x/image/draw offers, and a face at 256 pixels needs
-// the detail.
+// squareScaled crops the largest centred square from an image and
+// scales it to thumbnailSide. It uses Catmull-Rom, the sharpest scaling
+// kernel in golang.org/x/image/draw, to keep detail in faces.
 func squareScaled(source image.Image, backdrop color.Color) *image.RGBA {
 	bounds := source.Bounds()
 	side := min(bounds.Dx(), bounds.Dy())
@@ -95,8 +92,6 @@ func squareScaled(source image.Image, backdrop color.Color) *image.RGBA {
 	return out
 }
 
-// encodeThumbnail encodes a square as the data: URI that
-// status.thumbnail holds.
 func encodeThumbnail(square image.Image) string {
 	return thumbnailURI(encodeJPEG(square))
 }
@@ -104,7 +99,7 @@ func encodeThumbnail(square image.Image) string {
 func encodeJPEG(square image.Image) []byte {
 	var encoded bytes.Buffer
 	// The encoder fails only when its writer fails, and a bytes.Buffer
-	// never fails a write.
+	// does not.
 	_ = jpeg.Encode(&encoded, square, &jpeg.Options{Quality: thumbnailQuality})
 	return encoded.Bytes()
 }

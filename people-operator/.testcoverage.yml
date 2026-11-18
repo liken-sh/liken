@@ -1,27 +1,24 @@
-# This is the coverage gate, enforced in CI (see
+# The coverage threshold that CI enforces (see
 # .github/workflows/ci.yaml).
 #
-# The threshold only rises over time. It is set just under what the
-# tests measure today. So a change that loses coverage fails the
-# check, and a change that gains coverage should raise the number
-# here to keep the gain.
+# The threshold is set just under the measured coverage, so a change
+# that lowers coverage fails. A change that raises coverage raises the
+# threshold too, and the threshold never goes down.
 #
-# The numbers are measured with Go 1.27.2 and later, which count each basic
-# block once. Go 1.27.1 and earlier count a block once for each row
-# that comments split it into (golang/go#80974), and measure higher.
+# The threshold assumes Go 1.27.2 or later, which counts each basic
+# block once. Go 1.27.1 and earlier count a block once for each line
+# that comments split it into (golang/go#80974), so they measure higher.
 
 profile: coverage.out
 
-# go test never calls main(), so the statements in main.go never run
-# under the gate. main.go holds only the wiring of the in-cluster
-# clients, and the gate measures every other file.
+# No test runs main.go, which only builds the in-cluster clients and
+# starts the operator.
 exclude:
   paths:
     - ^main\.go$
 
 threshold:
-  # One package, so the total is the whole gate. The rest below 100 is
-  # the error paths of writers and parsers that cannot fail on the
-  # values the operator gives them, and a watch handler's report of an
-  # object that does not convert.
+  # The uncovered code is error paths of writers and parsers that
+  # cannot fail on the values the operator gives them, and the watch
+  # handler's report of an object that does not convert.
   total: 95

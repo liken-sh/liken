@@ -1,8 +1,8 @@
 package main
 
-// These tests run the operator against the fake API server and play
-// the kubelet: they finish each baker pod with the line that the bake
-// command wrote for a file on disk.
+// These tests run the operator against the fake API server and act as
+// the kubelet: each test finishes a baker pod with the log line that
+// the bake command writes for a file on disk.
 
 import (
 	"bytes"
@@ -19,13 +19,13 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// bakedLine runs the bake command against a file on disk, and answers
-// the line it wrote, the line a baker pod's log holds.
+// bakedLine runs the bake command on a picture saved to disk and
+// returns the line it writes, which is what a baker pod's log contains.
 func bakedLine(t *testing.T, picture []byte) string {
 	t.Helper()
 	file := filepath.Join(t.TempDir(), "ada.png")
 	if err := os.WriteFile(file, picture, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the picture file: %v", err)
 	}
 	var out bytes.Buffer
 	bake(&out, file, personColour("ada"))
@@ -33,7 +33,7 @@ func bakedLine(t *testing.T, picture []byte) string {
 }
 
 // Each file scheme starts a baker pod in the namespace that can mount
-// the file, with the file's volume, and with no credential.
+// the file, with that file's volume and no service account token.
 func TestAFileSourceStartsABakerPod(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -62,11 +62,11 @@ func TestAFileSourceStartsABakerPod(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				w := startWorld(t)
 				w.api.putPerson(ada(c.avatar))
-				w.settle()
+				w.waitForIdle()
 
 				baker, started := w.api.bakerPod(t, c.wantNamespace, "ada")
 				if !started {
-					t.Fatalf("no baker pod in %s", c.wantNamespace)
+					t.Fatalf("found no baker pod in %s, want one", c.wantNamespace)
 				}
 				spec := baker.Spec
 				if len(spec.Volumes) != 1 || string(mustJSON(spec.Volumes[0])) != string(mustJSON(c.wantVolume)) {
@@ -80,17 +80,18 @@ func TestAFileSourceStartsABakerPod(t *testing.T) {
 					t.Errorf("image = %q, want the operator's own, %q", spec.Containers[0].Image, operatorImage)
 				}
 				if spec.AutomountServiceAccountToken == nil || *spec.AutomountServiceAccountToken {
-					t.Error("the baker pod mounts a service account token")
+					t.Error("the baker pod mounts a service account token, want none")
 				}
 				if !spec.Containers[0].VolumeMounts[0].ReadOnly {
-					t.Error("the baker pod mounts the source for writing")
+					t.Error("the baker pod mounts the source for writing, want read-only")
 				}
 			})
 		})
 	}
 }
 
-// A baker pod's result becomes the status, and the pod is deleted.
+// The result in a baker pod's log becomes the Person's status, and the
+// operator then deletes the pod.
 func TestABakerPodsResultBecomesTheStatus(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -113,79 +114,80 @@ func TestABakerPodsResultBecomesTheStatus(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				w := startWorld(t)
 				w.api.putPerson(ada("claim://media/pictures/ada.png"))
-				w.settle()
+				w.waitForIdle()
 
 				w.api.finishPod("media", bakerPodName("ada"), c.phase, c.log(t))
-				w.settle()
+				w.waitForIdle()
 
 				got := w.api.person(t, "ada")
 				if ready := got.Status.ready(); ready.Status != c.wantStatus || ready.Reason != c.wantReason {
 					t.Errorf("AvatarReady = %+v, want %s, %s", ready, c.wantStatus, c.wantReason)
 				}
-				if _, held := w.api.bakerPod(t, "media", "ada"); held {
-					t.Error("the baker pod stays after its result")
+				if _, exists := w.api.bakerPod(t, "media", "ada"); exists {
+					t.Error("the baker pod exists after its result, want it deleted")
 				}
 			})
 		})
 	}
 }
 
-// A baker pod that does not finish in two minutes is deleted, and the
-// condition says so.
+// A baker pod that has not finished when bakeDeadline passes is
+// deleted, and AvatarReady reports BakeFailed.
 func TestABakerPodThatDoesNotFinishIsDeleted(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.putPerson(ada("nfs://nas.example/people/ada.png"))
-		w.settle()
+		w.waitForIdle()
 
 		time.Sleep(bakeDeadline)
-		w.settle()
+		w.waitForIdle()
 
-		if _, held := w.api.bakerPod(t, operatorNS, "ada"); held {
-			t.Error("the baker pod stays after its deadline")
+		if _, exists := w.api.bakerPod(t, operatorNS, "ada"); exists {
+			t.Error("the baker pod exists after its deadline, want it deleted")
 		}
 		got := w.api.person(t, "ada")
 		if ready := got.Status.ready(); ready.Status != "False" || ready.Reason != reasonBakeFailed {
 			t.Errorf("AvatarReady = %+v, want False, BakeFailed", ready)
 		}
 		if !isInitials(got.Status.Thumbnail) {
-			t.Error("a Person with no picture yet does not show the initials")
+			t.Error("the Person has no initials thumbnail, want one while the picture is unbaked")
 		}
 	})
 }
 
-// The slow check starts a baker pod for each file source, and writes
-// the status only when the file's time or size changed.
-func TestTheSlowCheckBakesAFileAgain(t *testing.T) {
+// After recheckInterval the operator bakes a file source again, and
+// writes the status only when the file's modification time or size
+// changed.
+func TestTheRecheckBakesAFileAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		line := bakedLine(t, solid(t, 64, 64, green))
 		w.api.putPerson(ada("claim://media/pictures/ada.png"))
-		w.settle()
+		w.waitForIdle()
 		w.api.finishPod("media", bakerPodName("ada"), podSucceeded, line)
-		w.settle()
+		w.waitForIdle()
 		before := w.api.person(t, "ada")
 
 		time.Sleep(recheckInterval)
-		w.settle()
+		w.waitForIdle()
 		if _, started := w.api.bakerPod(t, "media", "ada"); !started {
-			t.Fatal("the slow check started no baker pod")
+			t.Fatal("the recheck started no baker pod, want one")
 		}
 		w.api.finishPod("media", bakerPodName("ada"), podSucceeded, line)
-		w.settle()
+		w.waitForIdle()
 
 		if after := w.api.person(t, "ada"); after.Metadata.ResourceVersion != before.Metadata.ResourceVersion {
-			t.Errorf("the status was written for a file that did not change")
+			t.Error("the status was written for a file that did not change, want no write")
 		}
-		if _, held := w.api.bakerPod(t, "media", "ada"); held {
-			t.Error("the baker pod stays after its result")
+		if _, exists := w.api.bakerPod(t, "media", "ada"); exists {
+			t.Error("the baker pod exists after its result, want it deleted")
 		}
 	})
 }
 
-// A baker pod whose Person is gone, or whose Person names another
-// source now, is deleted. An operator that starts after the change
-// finds the pod the same way.
+// A baker pod is deleted when its Person is gone or its Person's
+// spec.avatar differs from the pod's source. An operator that starts after the
+// change finds the pod the same way.
 func TestAStaleBakerPodIsDeleted(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -206,53 +208,54 @@ func TestAStaleBakerPodIsDeleted(t *testing.T) {
 					w.api.putPerson(p)
 				}
 				w.api.putPod(baker)
-				w.settle()
+				w.waitForIdle()
 
-				if _, held := w.api.bakerPod(t, "media", "ada"); held {
-					t.Error("the stale baker pod stays")
+				if _, exists := w.api.bakerPod(t, "media", "ada"); exists {
+					t.Error("the baker pod of the old avatar exists, want it deleted")
 				}
 			})
 		})
 	}
 }
 
-// A malformed file URI shows the initials, and the condition says why.
+// A malformed file URI shows the initials, and AvatarReady reports
+// BakeFailed.
 func TestAMalformedFileSourceShowsTheInitials(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.putPerson(ada("claim://media"))
-		w.settle()
+		w.waitForIdle()
 
 		got := w.api.person(t, "ada")
 		if ready := got.Status.ready(); ready.Status != "False" || ready.Reason != reasonBakeFailed {
 			t.Errorf("AvatarReady = %+v, want False, BakeFailed", ready)
 		}
 		if !isInitials(got.Status.Thumbnail) {
-			t.Error("the thumbnail is not the initials")
+			t.Error("the thumbnail is not the initials, want the initials after a failed bake")
 		}
 	})
 }
 
 // A claim in a namespace that does not exist cannot be mounted, so the
-// operator reports it once instead of trying to start the pod again.
+// operator reports a bake failure instead of retrying the pod create.
 func TestAClaimInANamespaceThatDoesNotExistFailsTheBake(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.dropNamespace("gone")
 		w.api.putPerson(ada("claim://gone/pictures/ada.png"))
-		w.settle()
+		w.waitForIdle()
 
 		ready := w.api.person(t, "ada").Status.ready()
 		if ready.Status != "False" || ready.Reason != reasonBakeFailed {
 			t.Errorf("AvatarReady = %+v, want False, BakeFailed", ready)
 		}
-		if want := "the namespace gone does not exist"; !strings.Contains(ready.Message, want) {
-			t.Errorf("the message %q does not say %q", ready.Message, want)
+		if want := "namespace gone"; !strings.Contains(ready.Message, want) {
+			t.Errorf("the message is %q, want it to contain %q", ready.Message, want)
 		}
 	})
 }
 
-// The operator reads the image a baker pod runs from its own pod.
+// The operator takes the baker pod's image from its own pod.
 func TestTheOperatorReadsItsOwnImage(t *testing.T) {
 	cases := []struct {
 		name    string

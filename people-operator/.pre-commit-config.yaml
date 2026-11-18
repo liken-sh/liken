@@ -1,7 +1,7 @@
-# These checks run before every commit, through pre-commit or prek,
-# its drop-in replacement. They are the fast, local ones: formatters,
-# linters, and hygiene checks. The test suites and the coverage gates
-# run in CI, through the `make` targets that package.toml names.
+# These fast checks run before every commit, with pre-commit or its
+# replacement prek: formatters, linters, and file hygiene checks. CI
+# runs the tests and the coverage check through the `make` targets that
+# package.toml names.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -13,8 +13,8 @@ repos:
         args: [--allow-multiple-documents]
       - id: check-merge-conflict
       - id: check-added-large-files
-  # shellcheck-py wraps a prebuilt shellcheck binary, so the hook
-  # works on a machine with no shellcheck installed.
+  # shellcheck-py packages a prebuilt shellcheck binary, so this hook
+  # works on a machine without shellcheck installed.
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
     hooks:
@@ -35,9 +35,8 @@ repos:
         pass_filenames: false
       - id: go-mod-tidy
         name: go mod tidy
-        # -diff reports what a tidy would change, without changing
-        # it, so a stale go.mod fails the commit instead of changing
-        # under it.
+        # -diff prints what tidy would change without changing go.mod,
+        # so a stale go.mod fails the commit and is not edited during it.
         entry: bash -c 'go mod tidy -diff'
         language: system
         files: \.go$|^go\.(mod|sum)$

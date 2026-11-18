@@ -1,46 +1,40 @@
-# The operator's image: one static Go binary, the CA bundle every TLS
-# call reads, and nothing else. The operator holds the cluster
-# credentials and writes every Person's status, and the same binary
-# decodes pictures from outside the cluster in a baker pod, so the
-# image carries no shell, no libc, and no tools, which is the least
-# there is to attack.
+# The image holds one static Go binary, its license notices, and a CA
+# bundle, with no shell, no libc, and no tools. The binary decodes
+# pictures from outside the cluster, in the operator, which has the
+# cluster credentials, and in the baker pods. A flaw in a decoder
+# therefore gives an attacker no programs to run.
 
 FROM golang AS build
-# proxy.golang.org sometimes drops a module download partway through
-# the stream. With the default comma, `go` tries the origin only when
-# the proxy answers 404 or 410, so a dropped stream fails the build.
-# With a pipe, `go` fetches the module from its origin after any proxy
-# error, with the git that this image includes. `GOSUMDB` keeps its
-# default, so the checksum database still verifies a module that `go`
-# fetched from its origin.
+# proxy.golang.org sometimes drops a module download partway through.
+# With the default comma separator, `go` falls back to the origin only
+# after a 404 or a 410, so a dropped download fails the build. With a
+# pipe, `go` falls back after any proxy error. `GOSUMDB` keeps its
+# default, so the checksum database still verifies those modules.
 ENV GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src
-# The module files come first, so a source edit reuses the cached
-# download layer.
+# The module files are copied first, so a source edit reuses the
+# cached download layer.
 COPY go.mod go.sum ./
-# go.mod replaces the shared kubernetes module with ../kubernetes, and
-# the build takes that directory as a second build context named
-# kubernetes. It lands at /kubernetes, the same place relative to /src
-# that kubernetes/ has relative to this component. Its module file
-# comes first for the same reason as this module's.
+# go.mod replaces the kubernetes module with ../kubernetes, so the
+# build takes that directory as the build context kubernetes and copies
+# it to /kubernetes, next to /src.
 COPY --from=kubernetes go.mod go.sum /kubernetes/
 RUN go mod download
 COPY --from=kubernetes . /kubernetes/
 COPY *.go ./
-# CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
-# static binary with no paths from the build machine in it. It runs
-# from scratch, where there is no loader to need.
+# CGO_ENABLED=0 builds a static binary, which runs on scratch without a
+# dynamic loader.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /people-operator .
-# The license files of the Go standard library and of each module that
-# the binary links. notices/go.sh says why the image needs them.
+# notices/go.sh copies the license files of the Go standard library
+# and of each module that the binary links.
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices .
 
 FROM scratch
 COPY --from=build /people-operator /people-operator
 COPY --from=build /notices /
-# A scratch image carries no trust store, and every HTTPS fetch of a
-# picture fails without one. The bundle is the one that the trust
-# component pins for every image of liken, with its notice.
+# scratch has no CA certificates, so without this bundle every HTTPS
+# picture fetch fails. The trust component pins one bundle for every
+# `liken` image.
 COPY --from=trust / /
 ENTRYPOINT ["/people-operator"]

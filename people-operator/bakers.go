@@ -1,11 +1,10 @@
 package main
 
-// The operator keeps no record of a bake in memory. The baker pod is
-// the record: its annotations name the Person, the source, and the
-// check request, and its phase says whether the bake is done. So an
-// operator that restarts during a bake finds the pod and reads its
-// result, and a pod whose Person is gone, or whose source changed, is
-// deleted.
+// The operator keeps no state about a bake in memory. The baker pod's
+// annotations record the Person, the source, and the check request, and
+// its phase shows whether the bake is done. So an operator that
+// restarts during a bake finds the pod and reads its result. A pod
+// whose Person is gone, or whose Person's avatar changed, is deleted.
 
 import (
 	"errors"
@@ -18,43 +17,44 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// bakeDeadline bounds one baker pod, from its creation. An NFS server
-// that does not answer holds the mount, and so does a claim bound to a
-// node the pod cannot reach, and the pod never runs. The pod's own
-// activeDeadlineSeconds counts only from the start of a pod that
-// runs, so the operator measures the deadline itself.
+// bakeDeadline is how long a baker pod may take from its creation. A
+// pod can stay Pending with no end, for example when no node can
+// schedule it. activeDeadlineSeconds counts from the pod's
+// status.startTime, which an unscheduled pod never gets, so the
+// operator enforces the deadline itself.
 const bakeDeadline = 2 * time.Minute
 
-// bakers starts and follows baker pods.
+// bakers creates baker pods and reads their results.
 type bakers struct {
 	client *apiclient.Client
 
-	// pods is the watch of every baker pod, in every namespace.
+	// pods watches the baker pods in every namespace.
 	pods informer.View
 
-	// image is the operator's own image, which a baker pod runs.
+	// image is the operator's own image, which baker pods also run.
 	image string
 
-	// namespace is the operator's own, where an nfs:// pod runs.
+	// namespace is the operator's own namespace, where baker pods for
+	// nfs:// sources run.
 	namespace string
 }
 
-// byPerson answers each baker pod by the Person it bakes for. It
-// answers false while the watch does not hold every pod, because a
-// pass that sees no pod for a Person starts one.
+// byPerson returns the baker pods keyed by Person name. It returns
+// false until the informer has listed every pod, because a pass that
+// finds no pod for a Person starts one.
 func (b *bakers) byPerson() (map[string]pod, bool) {
 	if !b.pods.Ready() {
 		return nil, false
 	}
-	held := map[string]pod{}
+	byName := map[string]pod{}
 	for _, item := range informer.CachedList[pod](b.pods) {
-		held[item.Metadata.Annotations[bakerPersonKey]] = item
+		byName[item.Metadata.Annotations[bakerPersonKey]] = item
 	}
-	return held, true
+	return byName, true
 }
 
-// start creates the Person's baker pod. A pod that already exists
-// under the name answers 409, and the watch brings it to the next pass.
+// start creates the Person's baker pod. A 409 means the pod exists
+// already (see bakerPodName), and the next pass finds it.
 func (b *bakers) start(p *person, mount bakerMount) error {
 	baker := buildBakerPod(p, mount, b.image)
 	err := b.client.RequestJSON(http.MethodPost, "/api/v1/namespaces/"+mount.namespace+"/pods", mustJSON(baker), nil)
@@ -64,8 +64,6 @@ func (b *bakers) start(p *person, mount bakerMount) error {
 	return err
 }
 
-// remove deletes a baker pod. A pod that is gone already is the
-// answer the delete wants.
 func (b *bakers) remove(baker pod) error {
 	err := b.client.RequestJSON(http.MethodDelete, podPath(baker.Metadata.Namespace, baker.Metadata.Name), nil, nil)
 	if errors.Is(err, apiclient.ErrNotFound) {
@@ -74,13 +72,16 @@ func (b *bakers) remove(baker pod) error {
 	return err
 }
 
-// follow reads a Person's baker pod. It answers the outcome of a pod
-// that finished or ran out of time, and the caller writes the status
-// and then deletes the pod, so an operator that stops between the two
-// reads the same pod again. It answers no outcome for a pod that still
-// runs, with the time of its deadline, or for a pod it deleted because
-// the Person's source changed.
-func (b *bakers) follow(p *person, baker pod, now time.Time) (*outcome, time.Time, error) {
+// inspect checks a Person's baker pod and returns one of these:
+//
+//   - the outcome, when the pod has finished or passed bakeDeadline
+//   - the pod's deadline, while it runs
+//   - neither, when the pod is being deleted, or when inspect deletes it
+//     because the Person's spec.avatar changed
+//
+// The caller writes the status and then deletes the pod, so an operator
+// that stops between the two reads the same pod again.
+func (b *bakers) inspect(p *person, baker pod, now time.Time) (*outcome, time.Time, error) {
 	if baker.Metadata.DeletionTimestamp != "" {
 		return nil, time.Time{}, nil
 	}
@@ -102,15 +103,13 @@ func (b *bakers) follow(p *person, baker pod, now time.Time) (*outcome, time.Tim
 	return out, time.Time{}, nil
 }
 
-// result reads the line a finished baker pod wrote to its log. The
-// line is JSON, so the client decodes the log as the answer to the
-// request. limitBytes bounds the read at the largest line a thumbnail
-// makes, with room to spare.
+// result reads the JSON line that a finished baker pod wrote to its
+// log. limitBytes is well above the size of the largest thumbnail line.
 func (b *bakers) result(baker pod, known pictureVersion) (reading, error) {
 	var line bakeResult
 	logPath := podPath(baker.Metadata.Namespace, baker.Metadata.Name) + "/log?container=" + bakerContainer + "&limitBytes=1048576"
 	if err := b.client.RequestJSON(http.MethodGet, logPath, nil, &line); err != nil {
-		return reading{}, failure(reasonBakeFailed, fmt.Errorf("the baker pod %s/%s wrote no result: %w",
+		return reading{}, failure(reasonBakeFailed, fmt.Errorf("reading the result in the log of the baker pod %s/%s: %w",
 			baker.Metadata.Namespace, baker.Metadata.Name, err))
 	}
 	if line.Error != "" || line.Thumbnail == "" {
@@ -123,7 +122,8 @@ func (b *bakers) result(baker pod, known pictureVersion) (reading, error) {
 	return reading{thumbnail: line.Thumbnail, version: version}, nil
 }
 
-// bakeReason keeps the pod's reason when it is one a bake reports.
+// bakeReason keeps DecodeFailed from the pod and turns any other
+// reason into BakeFailed.
 func bakeReason(reason string) string {
 	if reason == reasonDecodeFailed {
 		return reason
@@ -132,16 +132,16 @@ func bakeReason(reason string) string {
 }
 
 // ownImage reads the image of the operator's own container from its
-// pod. A baker pod runs the same image, so a kustomization that pins
-// the operator's tag pins the baker's too.
+// pod. Baker pods run the same image, so pinning the operator's tag in
+// a kustomization pins the baker's too.
 func ownImage(client *apiclient.Client, namespace, name string) (string, error) {
 	own, err := apiclient.Get[pod](client, podPath(namespace, name))
 	if err != nil {
 		return "", fmt.Errorf("reading the operator's own pod %s/%s: %w", namespace, name, err)
 	}
-	for _, held := range own.Spec.Containers {
-		if held.Name == operatorContainer {
-			return held.Image, nil
+	for _, c := range own.Spec.Containers {
+		if c.Name == operatorContainer {
+			return c.Image, nil
 		}
 	}
 	return "", fmt.Errorf("the pod %s/%s has no container named %s", namespace, name, operatorContainer)
@@ -149,9 +149,10 @@ func ownImage(client *apiclient.Client, namespace, name string) (string, error) 
 
 const operatorContainer = "operator"
 
-// bakedScheme answers the mount of a reference that a baker pod reads,
-// and false for a scheme the operator reads itself.
-func bakedScheme(ref *url.URL, namespace string) (bakerMount, bool, error) {
+// bakerMountFor returns the mount for a reference whose scheme a baker
+// pod reads, and false for a scheme the operator reads in its own
+// process.
+func bakerMountFor(ref *url.URL, namespace string) (bakerMount, bool, error) {
 	mounter, baked := mounts[ref.Scheme]
 	if !baked {
 		return bakerMount{}, false, nil

@@ -1,8 +1,8 @@
 package main
 
-// The limits on one fetch, against the in-memory picture server. Each
-// test runs in a synctest bubble, so the 15-second timeout passes on
-// the fake clock.
+// These tests check the limits on one fetch against the in-memory
+// picture server. Each test runs in a synctest bubble, so fetchTimeout
+// passes on the fake clock.
 
 import (
 	"net/http"
@@ -18,32 +18,32 @@ func TestTheFetchLimits(t *testing.T) {
 		served     servedPicture
 		wantReason string
 	}{
-		{"a server that never answers", servedPicture{hold: true}, reasonFetchFailed},
+		{"a server that never responds", servedPicture{neverResponds: true}, reasonFetchFailed},
 		{"a body over 10 MiB", servedPicture{body: make([]byte, maxPictureBytes+1)}, reasonFetchFailed},
 		{"a picture over 8192 pixels on a side", servedPicture{}, reasonDecodeFailed},
 		{"a file in no format the operator reads", servedPicture{body: []byte("<html>")}, reasonDecodeFailed},
-		{"an answer that is not 200", servedPicture{status: http.StatusForbidden}, reasonFetchFailed},
+		{"a response that is not 200", servedPicture{status: http.StatusForbidden}, reasonFetchFailed},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				pictures := startPictureServer(t)
 				served := c.served
-				if served.body == nil && !served.hold && served.status == 0 {
+				if served.body == nil && !served.neverResponds && served.status == 0 {
 					served.body = solid(t, maxPictureSide+1, 1, green)
 				}
 				pictures.serve("/ada.png", served)
 
 				_, err := newHTTPSource(pictures.server).read(t.Context(), mustParse(t, "https://pictures.example/ada.png"), pictureVersion{}, blue)
 				if got := reasonOf(err); err == nil || got != c.wantReason {
-					t.Errorf("error = %v with reason %s, want reason %s", err, got, c.wantReason)
+					t.Errorf("the read returned %v with reason %s, want reason %s", err, got, c.wantReason)
 				}
 			})
 		})
 	}
 }
 
-// A server that cannot be reached is a failed fetch.
+// A fetch from an unreachable server fails with FetchFailed.
 func TestAFetchFromNoServerFails(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		pictures := startPictureServer(t)
@@ -51,13 +51,13 @@ func TestAFetchFromNoServerFails(t *testing.T) {
 
 		_, err := newHTTPSource(pictures.server).read(t.Context(), mustParse(t, "https://pictures.example/ada.png"), pictureVersion{}, blue)
 		if reasonOf(err) != reasonFetchFailed {
-			t.Errorf("error = %v, want reason FetchFailed", err)
+			t.Errorf("the read returned %v, want reason FetchFailed", err)
 		}
 	})
 }
 
-// The fetch sends the recorded Last-Modified as If-Modified-Since, and
-// records the answer's Last-Modified.
+// The fetch sends the recorded Last-Modified value as If-Modified-Since
+// and reads the response's Last-Modified into the new version.
 func TestAFetchSendsIfModifiedSince(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var sent string
@@ -71,13 +71,13 @@ func TestAFetchSendsIfModifiedSince(t *testing.T) {
 		got, err := newHTTPSource(pictures).read(t.Context(), mustParse(t, "https://pictures.example/ada.png"),
 			pictureVersion{LastModified: "Tue, 29 Sep 2026 14:02:11 GMT"}, blue)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the picture: %v", err)
 		}
 		if sent != "Tue, 29 Sep 2026 14:02:11 GMT" {
 			t.Errorf("If-Modified-Since = %q, want the recorded time", sent)
 		}
 		if got.version.LastModified != "Wed, 30 Sep 2026 12:00:00 GMT" {
-			t.Errorf("the version's Last-Modified = %q, want the answer's", got.version.LastModified)
+			t.Errorf("the version's Last-Modified is %q, want the response's", got.version.LastModified)
 		}
 	})
 }

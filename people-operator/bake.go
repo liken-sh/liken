@@ -1,11 +1,16 @@
 package main
 
-// `people-operator bake <path> <colour>` is the program a baker pod
-// runs. It reads one picture from a mounted file, applies the same
-// limits as a fetch, and writes one line of JSON to standard output.
-// The operator reads that line from the pod's log (bakers.go). The
-// command writes nothing else to either output, because the log holds
-// both.
+// A bake is one read of an nfs:// or claim:// picture by a baker pod,
+// which mounts the export or the claim. The reason Baked reports a
+// successful bake, and BakeFailed or DecodeFailed a failed one.
+//
+// `people-operator bake <path> <colour>` is the command of a baker pod.
+// It reads one picture from a mounted file, with the same size limit and
+// decoder as an HTTP fetch, and prints one line of JSON. The operator
+// decodes the whole pod log as that JSON (bakers.go), and the log has
+// both stdout and stderr. So the command prints nothing else, except
+// the usage message for bad arguments, which only a bug in the
+// operator causes.
 
 import (
 	"encoding/json"
@@ -16,9 +21,8 @@ import (
 	"time"
 )
 
-// bakeResult is the line a baker pod writes. A bake that worked sets
-// the thumbnail and the file's modification time and size. A bake that
-// failed sets the reason and the error.
+// bakeResult is the JSON line a baker pod prints. A successful bake sets
+// the thumbnail, modTime, and size. A failed bake sets reason and error.
 type bakeResult struct {
 	Thumbnail string `json:"thumbnail,omitempty"`
 	ModTime   string `json:"modTime,omitempty"`
@@ -27,28 +31,28 @@ type bakeResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// runBake reads the command's arguments, and answers the exit status.
-// A wrong argument writes to problems and exits with 2, because the
-// operator builds every argument and a wrong one is a fault in the
-// operator, not in the picture.
-func runBake(out, problems io.Writer, args []string) int {
+// runBake returns exit status 2 for bad arguments and 1 for a picture
+// that fails. The operator builds the arguments, so status 2 means a
+// bug in the operator and not a bad picture.
+func runBake(out, stderr io.Writer, args []string) int {
 	if len(args) != 2 {
-		fmt.Fprintln(problems, "usage: people-operator bake <path> <#rrggbb>")
+		fmt.Fprintf(stderr, "bake takes a path and a colour, and got %d arguments\nusage: people-operator bake <path> <#rrggbb>\n", len(args))
 		return 2
 	}
 	backdrop, err := parseColour(args[1])
 	if err != nil {
-		fmt.Fprintln(problems, err)
+		fmt.Fprintln(stderr, err)
 		return 2
 	}
 	return bake(out, args[0], backdrop)
 }
 
-// bake writes the result for the file at path, and answers the exit
-// status: 0 when the thumbnail is in the line, and 1 when the line
-// holds an error. The backdrop is the Person's colour, which the pod
-// cannot compute without the Person, so the operator passes it as the
-// command's second argument (colourArgument).
+// bake prints the result for the file at path and returns 0 when the
+// result has a thumbnail and 1 when it has an error. backdrop is the
+// Person's colour. personColour hashes the Person's name, and the
+// operator passes the result in the second argument (colourArgument),
+// so the pod and the operator cannot disagree on the colour of one
+// Person.
 func bake(out io.Writer, path string, backdrop color.Color) int {
 	result := bakeFile(path, backdrop)
 	line, _ := json.Marshal(result)
@@ -76,8 +80,10 @@ func bakeFile(path string, backdrop color.Color) bakeResult {
 	if err != nil {
 		return bakeResult{Reason: reasonBakeFailed, Error: err.Error()}
 	}
-	thumbnail, err := bakeThumbnail(picture, backdrop)
+	thumbnail, err := makeThumbnail(picture, backdrop)
 	if err != nil {
+		// failure gives DecodeFailed for a picture that does not decode,
+		// and BakeFailed for any other error.
 		return bakeResult{Reason: reasonOf(failure(reasonBakeFailed, err)), Error: err.Error()}
 	}
 	return bakeResult{
@@ -87,13 +93,11 @@ func bakeFile(path string, backdrop color.Color) bakeResult {
 	}
 }
 
-// colourArgument writes a colour as #rrggbb, the form parseColour
-// reads.
+// colourArgument formats a colour as #rrggbb, which parseColour reads.
 func colourArgument(c color.RGBA) string {
 	return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
 }
 
-// parseColour reads a colour in the form #rrggbb.
 func parseColour(text string) (color.RGBA, error) {
 	var c color.RGBA
 	if _, err := fmt.Sscanf(text, "#%02x%02x%02x", &c.R, &c.G, &c.B); err != nil || len(text) != 7 {

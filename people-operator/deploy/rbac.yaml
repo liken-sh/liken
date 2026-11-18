@@ -1,52 +1,49 @@
-# The operator's identity. It reads every Person and writes each one's
-# status, and posts the Events about each Person. It starts, reads, and
-# deletes the baker pods that read a picture from NFS or a claim.
+# The operator reads every Person, writes each Person's status, posts
+# Events about each Person, and creates, reads, and deletes the baker
+# pods that read a picture from NFS or from a claim.
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: people-operator
 ---
-# A ClusterRole and not a Role, because a Person is cluster-scoped and
-# a claim's baker pod runs in the claim's own namespace, which can be
-# any namespace.
+# This is a ClusterRole because a Person is cluster-scoped, and a
+# claim's baker pod runs in the claim's namespace, which can be any
+# namespace.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: people-operator
 rules:
-  # The watch wakes the pass, and the pass reads each Person from the
-  # watch's store. get reads one Person again after a status write that
-  # met a conflict.
+  # list and watch fill the operator's cache of Persons. get reads one
+  # Person again after a status write fails with a conflict.
   - apiGroups: [people.liken.sh]
     resources: [people]
     verbs: [get, list, watch]
-  # The status is the one thing the operator writes to a Person. It
-  # replaces the whole status with a PUT, which is the update verb, and
-  # it never writes the spec.
+  # The operator writes only the status of a Person, never the spec,
+  # with a PUT, which needs the update verb.
   - apiGroups: [people.liken.sh]
     resources: [people/status]
     verbs: [update]
-  # The baker pods. The watch selects them by the label
-  # people.liken.sh/baker, and a list or a watch by label selector needs
-  # list and watch on every pod. get reads the operator's own pod for
-  # its image. create starts a baker pod, and delete removes one that
-  # finished, ran out of time, or bakes for a source no Person names.
-  # The operator deletes only a pod that carries the baker label.
+  # The operator watches the baker pods by the label
+  # people.liken.sh/baker, but RBAC cannot limit a rule by label, so
+  # list and watch cover every pod. get reads the operator's own pod to
+  # find its image. delete removes a baker pod that finished, timed out,
+  # or reads a picture that no Person uses anymore. The operator deletes
+  # only pods that have the baker label.
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch, create, delete]
-  # A baker pod writes its result to its log, and the operator reads
-  # that one line.
+  # A baker pod writes its result as one line in its log, and the
+  # operator reads that line.
   - apiGroups: [""]
     resources: [pods/log]
     verbs: [get]
-  # The Events about a Person, one for each change of its AvatarReady
-  # condition and one for each new picture. A Person is cluster-scoped, and the API server takes an Event about a
-  # cluster-scoped object only in default or kube-system, so the Events go
-  # to default. The ClusterRole grants them, so a namespace override of the
-  # install moves no grant away from default. patch counts a repeat on the
-  # Event it repeats.
+  # The API server accepts an Event about a cluster-scoped object, such
+  # as a Person, only in the default or kube-system namespace, so the
+  # operator posts its Events in default. The rule is in the
+  # ClusterRole so that it applies in default wherever the operator is
+  # installed. patch raises the count of an Event that repeats.
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]
@@ -64,11 +61,10 @@ subjects:
     name: people-operator
     namespace: liken-system
 ---
-# The Lease that elects the one copy of the operator that acts
-# (leader.go). client-go's election reads the Lease with a get, takes
-# and renews it with an update, and releases it with an update. A
-# namespaced Role, because the Lease is in the operator's own namespace,
-# and the operator has no reason to read any other Lease.
+# Only the copy of the operator that holds this Lease acts. client-go's
+# leader election reads the Lease with get, and acquires, renews, and
+# releases it with update. The Lease is in the operator's own
+# namespace, so a Role is enough.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -78,8 +74,8 @@ rules:
     resources: [leases]
     resourceNames: [people-operator]
     verbs: [get, update]
-  # create carries no resourceNames, because RBAC cannot read a name off
-  # a create. The first copy to start creates the Lease.
+  # create has no resourceNames because RBAC cannot match a name on a
+  # create request.
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
     verbs: [create]

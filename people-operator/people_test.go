@@ -49,7 +49,7 @@ func TestCRDIdentity(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if c.got != c.want {
-				t.Errorf("got %q, want %q", c.got, c.want)
+				t.Errorf("the CRD has %s %q, want %q", c.name, c.got, c.want)
 			}
 		})
 	}
@@ -59,17 +59,17 @@ func TestCRDHasOneServedStorageVersion(t *testing.T) {
 	crd := loadCRD(t)
 
 	if len(crd.Spec.Versions) != 1 {
-		t.Fatalf("got %d versions, want 1", len(crd.Spec.Versions))
+		t.Fatalf("the CRD has %d versions, want 1", len(crd.Spec.Versions))
 	}
 	v := crd.Spec.Versions[0]
 	if v.Name != "v1alpha1" {
-		t.Errorf("got version %q, want v1alpha1", v.Name)
+		t.Errorf("the CRD version is %q, want v1alpha1", v.Name)
 	}
 	if !v.Served {
-		t.Error("version v1alpha1 is not served")
+		t.Error("version v1alpha1 has served false, want true")
 	}
 	if !v.Storage {
-		t.Error("version v1alpha1 is not the storage version")
+		t.Error("version v1alpha1 has storage false, want true")
 	}
 }
 
@@ -120,10 +120,8 @@ func TestCRDPrinterColumns(t *testing.T) {
 	}
 }
 
-// schemaValidator builds the validator the API server itself would
-// run a Person through, from the CRD's own schema. The validation
-// package works against the internal JSONSchemaProps type, so the
-// scheme converts the CRD's v1 schema into it.
+// schemaValidator builds, from the CRD's schema, the validator that the
+// API server runs on a Person.
 func schemaValidator(t *testing.T) validation.SchemaValidator {
 	t.Helper()
 	validator, _, err := validation.NewSchemaValidator(internalSchema(t))
@@ -133,7 +131,8 @@ func schemaValidator(t *testing.T) validation.SchemaValidator {
 	return validator
 }
 
-// internalSchema is the CRD's schema as the API server's own type.
+// internalSchema converts the CRD's v1 schema to the internal
+// JSONSchemaProps type, which the validation and pruning packages take.
 func internalSchema(t *testing.T) *apiextensions.JSONSchemaProps {
 	t.Helper()
 	crd := loadCRD(t)
@@ -258,15 +257,15 @@ func TestCRDValidatesExamples(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			errs := validation.ValidateCustomResource(field.NewPath(""), c.person, validator)
 			if got := len(errs) > 0; got != c.wantErr {
-				t.Errorf("got errors %v, want an error: %v", errs, c.wantErr)
+				t.Errorf("the schema returned errors %v, want errors: %v", errs, c.wantErr)
 			}
 		})
 	}
 }
 
-// The status the operator composes is one the CRD's schema takes, and
-// the API server prunes none of its fields.
-func TestTheOperatorsStatusValidates(t *testing.T) {
+// The status that the operator writes passes the CRD's schema, and the
+// API server does not prune any of its fields.
+func TestOperatorStatusPassesTheSchema(t *testing.T) {
 	validator := schemaValidator(t)
 	p := ada("https://pictures.example/ada.png")
 	p.APIVersion, p.Kind = personAPIVersion, personKind
@@ -280,14 +279,14 @@ func TestTheOperatorsStatusValidates(t *testing.T) {
 
 	var object map[string]any
 	if err := json.Unmarshal(mustJSON(p), &object); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the Person the operator wrote: %v", err)
 	}
 	if errs := validation.ValidateCustomResource(field.NewPath(""), object, validator); len(errs) > 0 {
 		t.Errorf("the schema refuses the operator's status: %v", errs)
 	}
 	structural, err := structuralschema.NewStructural(internalSchema(t))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the structural schema: %v", err)
 	}
 	pruned := pruning.PruneWithOptions(object, structural, true, structuralschema.UnknownFieldPathOptions{TrackUnknownFieldPaths: true})
 	if len(pruned) > 0 {

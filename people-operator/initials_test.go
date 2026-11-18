@@ -26,7 +26,7 @@ func TestInitials(t *testing.T) {
 	}
 }
 
-// A Person's colour comes from its name, so it is the same on every
+// A Person's colour depends only on its name, so it is the same on every
 // pass and after a change of display name.
 func TestAPersonKeepsOneColour(t *testing.T) {
 	first, second := personColour("ada"), personColour("ada")
@@ -35,14 +35,14 @@ func TestAPersonKeepsOneColour(t *testing.T) {
 	}
 }
 
-// The initials fill the square with the Person's colour, and carry the
-// mark that tells them from a photograph.
+// The initials drawing is filled with the Person's colour and carries
+// the mark that tells it from a picture from a source.
 func TestTheInitialsAreMarked(t *testing.T) {
 	p := ada("")
 	thumbnail := drawInitials(&p)
 
 	if !isInitials(thumbnail) {
-		t.Error("the initials carry no mark")
+		t.Error("isInitials is false for the drawn initials, want true")
 	}
 	r, g, b, _ := decodeThumbnail(t, thumbnail).At(2, 2).RGBA()
 	if got := colourOf(r, g, b); !near(got, personColour("ada")) {
@@ -50,15 +50,15 @@ func TestTheInitialsAreMarked(t *testing.T) {
 	}
 }
 
-// A picture from a source never reads as initials.
+// A picture from a source is never detected as initials.
 func TestAPictureIsNotInitials(t *testing.T) {
-	photo, err := bakeThumbnail(solid(t, 8, 8, green), blue)
+	photo, err := makeThumbnail(solid(t, 8, 8, green), blue)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the thumbnail of a picture: %v", err)
 	}
 	for _, thumbnail := range []string{photo, "", "data:image/jpeg;base64,/9j/"} {
 		if isInitials(thumbnail) {
-			t.Errorf("%.40q reads as initials", thumbnail)
+			t.Errorf("isInitials(%.40q) is true, want false", thumbnail)
 		}
 	}
 }

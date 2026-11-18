@@ -5,6 +5,5 @@ weight: 20
 
 # Reference
 
-The reference has one page, the fields of a
-[`Person`](/docs/reference/people/). It's generated from the resource
-definition in the repository.
+[`Person`](/docs/reference/people/) lists the fields of a `Person`,
+generated from the resource definition in the repository.

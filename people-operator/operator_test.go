@@ -1,8 +1,8 @@
 package main
 
-// These tests run the operator's loop against the fake API server and
-// the picture server, and read what the operator wrote to each
-// Person's status.
+// These tests run the operator's loop against a fake API server and a
+// picture server, then read the status that the operator wrote to each
+// Person.
 
 import (
 	"encoding/base64"
@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// Each source gives the Person a thumbnail and the reason it came from.
+// Each kind of source produces a thumbnail and the AvatarReady reason for it.
 func TestEachSourceGivesAThumbnail(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -38,7 +38,7 @@ func TestEachSourceGivesAThumbnail(t *testing.T) {
 					avatar += base64.StdEncoding.EncodeToString(picture)
 				}
 				w.api.putPerson(ada(avatar))
-				w.settle()
+				w.waitForIdle()
 
 				got := w.api.person(t, "ada")
 				ready := got.Status.ready()
@@ -46,7 +46,7 @@ func TestEachSourceGivesAThumbnail(t *testing.T) {
 					t.Errorf("AvatarReady = %+v, want True, %s, generation 1", ready, c.wantReason)
 				}
 				if !c.wantColour(&got) {
-					t.Errorf("the thumbnail is not the picture the source names")
+					t.Error("the thumbnail does not have the colours of the picture at the source, want them")
 				}
 				if got.Status.Avatar.Source != avatar {
 					t.Errorf("status.avatar.source = %q, want %q", got.Status.Avatar.Source, avatar)
@@ -59,14 +59,14 @@ func TestEachSourceGivesAThumbnail(t *testing.T) {
 	}
 }
 
-// A fetched picture's ETag goes into the status, so the slow check can
-// ask whether it changed.
+// The operator records the ETag of a fetched picture in the status, so
+// that the recheck can send a conditional request.
 func TestAFetchRecordsTheETag(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.pictures.serve("/ada.png", servedPicture{body: solid(t, 64, 64, green), etag: `"one"`})
 		w.api.putPerson(ada("https://pictures.example/ada.png"))
-		w.settle()
+		w.waitForIdle()
 
 		if got := w.api.person(t, "ada").Status.Avatar.ETag; got != `"one"` {
 			t.Errorf("status.avatar.etag = %q, want %q", got, `"one"`)
@@ -74,10 +74,10 @@ func TestAFetchRecordsTheETag(t *testing.T) {
 	})
 }
 
-// Every six hours the operator asks each HTTP source whether its
-// picture changed. A 304 changes nothing, and a new picture replaces
-// the thumbnail.
-func TestTheSlowCheckAsksWhetherThePictureChanged(t *testing.T) {
+// Each recheckInterval the operator sends an HTTP source a request with
+// If-None-Match. A 304 leaves the status unchanged, and a new picture
+// replaces the thumbnail.
+func TestRecheckReplacesTheThumbnailOnlyForANewPicture(t *testing.T) {
 	cases := []struct {
 		name        string
 		etag        string
@@ -93,12 +93,12 @@ func TestTheSlowCheckAsksWhetherThePictureChanged(t *testing.T) {
 				w := startWorld(t)
 				w.pictures.serve("/ada.png", servedPicture{body: solid(t, 64, 64, green), etag: `"one"`})
 				w.api.putPerson(ada("https://pictures.example/ada.png"))
-				w.settle()
+				w.waitForIdle()
 				before := w.api.person(t, "ada")
 
 				w.pictures.serve("/ada.png", servedPicture{body: solid(t, 64, 64, c.colour), etag: c.etag})
 				time.Sleep(recheckInterval)
-				w.settle()
+				w.waitForIdle()
 
 				after := w.api.person(t, "ada")
 				if got := w.pictures.requests(); !slices.Equal(got, []string{"", `"one"`}) {
@@ -119,20 +119,20 @@ func TestTheSlowCheckAsksWhetherThePictureChanged(t *testing.T) {
 	}
 }
 
-// A new value of the check-avatar annotation reads the picture again,
-// and the status records the value it answered.
-func TestTheAnnotationReadsThePictureAgain(t *testing.T) {
+// A new value of the check-avatar annotation makes the operator read
+// the picture again and record the value in status.avatar.checked.
+func TestAnnotationChangeRereadsThePicture(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.pictures.serve("/ada.png", servedPicture{body: solid(t, 64, 64, green), etag: `"one"`})
 		w.api.putPerson(ada("https://pictures.example/ada.png"))
-		w.settle()
+		w.waitForIdle()
 
 		w.api.putPerson(withAnnotation(ada("https://pictures.example/ada.png"), "2026-09-30T19:00:00Z"))
-		w.settle()
+		w.waitForIdle()
 
 		if got := len(w.pictures.requests()); got != 2 {
-			t.Errorf("the picture server took %d requests, want 2", got)
+			t.Errorf("the picture server received %d requests, want 2", got)
 		}
 		if got := w.api.person(t, "ada").Status.Avatar.Checked; got != "2026-09-30T19:00:00Z" {
 			t.Errorf("status.avatar.checked = %q, want the annotation's value", got)
@@ -140,9 +140,9 @@ func TestTheAnnotationReadsThePictureAgain(t *testing.T) {
 	})
 }
 
-// A source that fails after it worked keeps the last good picture, and
-// the condition says why. A source that never worked shows the
-// initials.
+// When a source fails after it has worked, the status keeps the last
+// good thumbnail and the condition gives the reason. When a source has
+// never worked, the thumbnail shows the initials.
 func TestAFailedReadKeepsTheLastGoodPicture(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -162,11 +162,11 @@ func TestAFailedReadKeepsTheLastGoodPicture(t *testing.T) {
 				}
 				w.pictures.serve("/ada.png", first)
 				w.api.putPerson(ada("https://pictures.example/ada.png"))
-				w.settle()
+				w.waitForIdle()
 
 				w.pictures.serve("/ada.png", servedPicture{status: http.StatusInternalServerError})
 				w.api.putPerson(withAnnotation(ada("https://pictures.example/ada.png"), "again"))
-				w.settle()
+				w.waitForIdle()
 
 				got := w.api.person(t, "ada")
 				ready := got.Status.ready()
@@ -181,45 +181,45 @@ func TestAFailedReadKeepsTheLastGoodPicture(t *testing.T) {
 	}
 }
 
-// A scheme the operator does not read shows the initials, and the
-// condition names the scheme.
-func TestAnUnsupportedSchemeShowsTheInitials(t *testing.T) {
+// A spec.avatar that is not a URI, or whose scheme the operator does
+// not read, gets the initials and the reason UnsupportedScheme.
+func TestUnsupportedSchemeGetsTheInitials(t *testing.T) {
 	cases := []string{"ftp://pictures.example/ada.png", "ada.png", "https://pictures.example/%zz"}
 	for _, avatar := range cases {
 		t.Run(avatar, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				w := startWorld(t)
 				w.api.putPerson(ada(avatar))
-				w.settle()
+				w.waitForIdle()
 
 				got := w.api.person(t, "ada")
 				if ready := got.Status.ready(); ready.Status != "False" || ready.Reason != reasonUnsupportedScheme {
 					t.Errorf("AvatarReady = %+v, want False, UnsupportedScheme", ready)
 				}
 				if !isInitials(got.Status.Thumbnail) {
-					t.Error("the thumbnail is not the initials")
+					t.Error("the thumbnail is not the initials, want the initials")
 				}
 			})
 		})
 	}
 }
 
-// A new name redraws the initials.
+// A changed name redraws the initials.
 func TestANewNameRedrawsTheInitials(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.putPerson(ada(""))
-		w.settle()
+		w.waitForIdle()
 		before := w.api.person(t, "ada").Status.Thumbnail
 
 		renamed := ada("")
 		renamed.Spec.Nickname = "Countess"
 		w.api.putPerson(renamed)
-		w.settle()
+		w.waitForIdle()
 
 		after := w.api.person(t, "ada")
 		if after.Status.Thumbnail == before {
-			t.Error("the initials stayed the same after the name changed")
+			t.Error("the initials are unchanged after the nickname changed, want new initials")
 		}
 		if got := after.Status.ready().ObservedGeneration; got != 2 {
 			t.Errorf("observedGeneration = %d, want 2", got)
@@ -227,41 +227,40 @@ func TestANewNameRedrawsTheInitials(t *testing.T) {
 	})
 }
 
-// A status that already answers the spec is not written again, so a
-// pass that finds nothing to do writes nothing.
-func TestAPassWritesOnlyAChange(t *testing.T) {
+// A pass does not write a status that already matches the spec.
+func TestPassDoesNotRewriteAnUnchangedStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.putPerson(ada(""))
-		w.settle()
+		w.waitForIdle()
 		before := w.api.person(t, "ada").Metadata.ResourceVersion
 
 		time.Sleep(recheckInterval)
-		w.settle()
+		w.waitForIdle()
 
 		if after := w.api.person(t, "ada").Metadata.ResourceVersion; after != before {
-			t.Errorf("the status was written again: version %s, then %s", before, after)
+			t.Errorf("the Person changed from resourceVersion %s to %s, want no status write", before, after)
 		}
 	})
 }
 
-// A status write that fails is sent again after the retry delay, with
-// no event to wake the pass.
-func TestAFailedWriteIsSentAgain(t *testing.T) {
+// After a failed status write, the operator retries after retryDelay
+// with no watch event.
+func TestFailedStatusWriteIsRetried(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := startWorld(t)
 		w.api.refuseStatusWrites(1)
 		w.api.putPerson(ada(""))
-		w.settle()
+		w.waitForIdle()
 		if got := w.api.person(t, "ada").Status.Thumbnail; got != "" {
-			t.Fatal("the refused write landed")
+			t.Fatal("the status has a thumbnail after the refused write, want none")
 		}
 
 		time.Sleep(retryDelay)
-		w.settle()
+		w.waitForIdle()
 
 		if !isInitials(w.api.person(t, "ada").Status.Thumbnail) {
-			t.Error("the write was not sent again")
+			t.Error("the status has no initials after the retry, want the initials")
 		}
 	})
 }

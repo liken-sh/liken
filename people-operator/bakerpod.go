@@ -4,8 +4,8 @@ package main
 // the kubelet can mount. The pod runs this program's own image as
 // `people-operator bake <path> <colour>` (bake.go), with the source
 // mounted read-only, and writes its result as one line of JSON to its
-// log. It mounts no service account token, so the program that decodes
-// the picture holds no credential for the API server.
+// log. It mounts no service account token, so the code that decodes
+// the picture has no credentials for the API server.
 
 import (
 	"crypto/sha256"
@@ -17,10 +17,10 @@ import (
 	"strings"
 )
 
-// The labels and annotations of a baker pod. The label selects the
-// pods the operator watches. The annotations record which Person the
-// pod bakes for and what the bake answers, because a label value holds
-// at most 63 characters and a Person's name and source can be longer.
+// The label selects the baker pods that the operator watches. The
+// Person, the avatar source, and the check request of a bake are
+// annotations, because a label value is limited to 63 characters and a
+// Person's name or source can be longer.
 const (
 	bakerLabel          = "people.liken.sh/baker"
 	bakerLabelValue     = "avatar"
@@ -33,31 +33,30 @@ const (
 	bakerPodMaxNameSize = 253
 )
 
-// bakerMount is where a baker pod finds its picture: the namespace the
-// pod runs in, the volume it mounts, and the file's path under the
-// mount.
+// bakerMount describes how a baker pod reaches its picture: the
+// namespace the pod runs in, the volume it mounts, and the path of the
+// file inside the container.
 type bakerMount struct {
 	namespace string
 	volume    volume
 	file      string
 }
 
-// mounts holds the schemes a baker pod reads, and how each one mounts
-// its picture. operatorNamespace is where an nfs:// pod runs, because
-// an NFS volume needs nothing from a namespace. A claim's pod runs in
-// the claim's own namespace, because a pod mounts only a claim in its
-// own namespace.
+// mounts maps each URI scheme that a baker pod reads to the function
+// that builds its mount. An nfs:// pod runs in operatorNamespace. A
+// claim:// pod runs in the claim's namespace, because a pod can mount
+// only a claim in its own namespace.
 var mounts = map[string]func(ref *url.URL, operatorNamespace string) (bakerMount, error){
 	schemeNFS:   nfsMount,
 	schemeClaim: claimMount,
 }
 
-// nfsMount mounts the directory that holds the file, so the pod can
+// nfsMount mounts the directory that contains the file, so the pod can
 // read that directory and nothing above it.
 func nfsMount(ref *url.URL, namespace string) (bakerMount, error) {
 	file := path.Clean("/" + ref.Path)
 	if ref.Host == "" || file == "/" {
-		return bakerMount{}, fmt.Errorf("the URI %s names no server and file; write nfs://<server>/<path>", ref.Redacted())
+		return bakerMount{}, fmt.Errorf("the URI %s has no server or file, so write it as nfs://<server>/<path>", ref.Redacted())
 	}
 	return bakerMount{
 		namespace: namespace,
@@ -69,15 +68,15 @@ func nfsMount(ref *url.URL, namespace string) (bakerMount, error) {
 	}, nil
 }
 
-// claimMount reads claim://<namespace>/<claim>/<path>. A Person is
-// cluster-scoped, so the URI names the claim's namespace first. The
-// claim mounts at its root, because the claim already bounds what the
+// claimMount parses claim://<namespace>/<claim>/<path>. A Person is
+// cluster-scoped, so the URI must include the claim's namespace. The
+// pod mounts the whole claim, because the claim already limits what the
 // pod can read.
 func claimMount(ref *url.URL, _ string) (bakerMount, error) {
 	claim, file, _ := strings.Cut(strings.TrimPrefix(ref.Path, "/"), "/")
 	file = path.Clean("/" + file)
 	if ref.Host == "" || claim == "" || file == "/" {
-		return bakerMount{}, fmt.Errorf("the URI %s names no namespace, claim, and file; write claim://<namespace>/<claim>/<path>", ref.Redacted())
+		return bakerMount{}, fmt.Errorf("the URI %s has no namespace, claim, or file, so write it as claim://<namespace>/<claim>/<path>", ref.Redacted())
 	}
 	return bakerMount{
 		namespace: ref.Host,
@@ -89,11 +88,12 @@ func claimMount(ref *url.URL, _ string) (bakerMount, error) {
 	}, nil
 }
 
-// bakerPodName answers the one name of a Person's baker pod. One name
-// for each Person means a second create answers 409, so a pass that
-// runs before the watch shows the first pod starts no second one. A
-// name over the limit on a pod's name ends in a hash of the whole
-// name, so two long names stay apart.
+// bakerPodName returns the name of a Person's baker pod. The name
+// depends only on the Person's name. So when a pass runs before the
+// informer shows the pod that an earlier pass created, the create gets
+// a 409 and no second pod starts. Kubernetes limits a pod name to 253
+// characters, so a longer name is cut and ends with a hash of the
+// Person's name, which keeps two long names distinct.
 func bakerPodName(person string) string {
 	name := "avatar-" + person
 	if len(name) <= bakerPodMaxNameSize {
@@ -104,7 +104,7 @@ func bakerPodName(person string) string {
 	return strings.TrimRight(name[:bakerPodMaxNameSize-len(suffix)], "-.") + suffix
 }
 
-// buildBakerPod answers the pod that bakes one Person's picture.
+// buildBakerPod returns the pod that bakes one Person's picture.
 func buildBakerPod(p *person, mount bakerMount, image string) pod {
 	no, yes := false, true
 	return pod{
@@ -124,8 +124,8 @@ func buildBakerPod(p *person, mount bakerMount, image string) pod {
 			},
 		},
 		Spec: podSpec{
-			// The pod's end is the bake's end, and the operator reads
-			// the result of a pod that failed as well.
+			// The operator reads the log of a failed pod as well as a
+			// successful one, so the pod is never restarted.
 			RestartPolicy:                "Never",
 			AutomountServiceAccountToken: &no,
 			EnableServiceLinks:           &no,
@@ -138,13 +138,12 @@ func buildBakerPod(p *person, mount bakerMount, image string) pod {
 					AllowPrivilegeEscalation: &no,
 					ReadOnlyRootFilesystem:   &yes,
 					// The image runs as root. DAC_OVERRIDE lets root
-					// read a picture whatever its owner and mode on a
-					// claim, and the mount is read-only, so the pod
-					// still writes nothing. An NFS server maps root to
-					// its anonymous user unless the export says
-					// otherwise, so a picture on NFS must be readable
-					// by that user. Pod Security's baseline level
-					// allows this capability.
+					// read a picture on a claim whatever its owner and
+					// mode, and the read-only mount still stops writes.
+					// An NFS server maps root to its anonymous user
+					// unless the export sets no_root_squash, so a
+					// picture on NFS must be readable by that user. The
+					// Pod Security baseline level allows DAC_OVERRIDE.
 					Capabilities: &capabilities{Drop: []string{"ALL"}, Add: []string{"DAC_OVERRIDE"}},
 				},
 				Resources: &resources{
@@ -157,8 +156,7 @@ func buildBakerPod(p *person, mount bakerMount, image string) pod {
 	}
 }
 
-// pictureMemoryMiB is the memory limit of a process that decodes one
-// picture. The largest image the limits allow is 8192 by 8192 pixels,
-// which decodes to 256 MiB at four bytes a pixel, and the thumbnail and
-// the Go runtime need the rest.
+// pictureMemoryMiB is the memory limit of a baker pod. An image of
+// maxPictureSide on each side decodes to 256 MiB at four bytes a pixel.
+// The rest is for the thumbnail and the Go runtime.
 const pictureMemoryMiB = 384

@@ -1,8 +1,8 @@
 package main
 
-// The part of a Pod that the operator writes for a baker and reads
-// back. The operator declares its own structs so it does not link
-// k8s.io/api, whose core package is the largest part of that module.
+// The fields of a Pod that the operator writes for a baker pod and reads
+// back. The operator declares its own structs so that it does not link
+// k8s.io/api, whose core package is large.
 
 import "encoding/json"
 
@@ -83,7 +83,7 @@ type podStatus struct {
 	Phase string `json:"phase,omitempty"`
 }
 
-// The phases after which a pod runs no more.
+// The pod phases that are final.
 const (
 	podSucceeded = "Succeeded"
 	podFailed    = "Failed"
@@ -97,8 +97,9 @@ func podPath(namespace, name string) string {
 	return "/api/v1/namespaces/" + namespace + "/pods/" + name
 }
 
-// mustJSON encodes an object the operator built. Its structs hold only
-// strings, numbers, booleans, maps, and slices, which always encode.
+// mustJSON encodes an object that the operator built. The structs hold
+// only strings, numbers, booleans, maps, and slices, so encoding cannot
+// fail.
 func mustJSON(object any) []byte {
 	body, _ := json.Marshal(object)
 	return body

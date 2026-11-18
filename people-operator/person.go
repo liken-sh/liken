@@ -1,9 +1,9 @@
 package main
 
-// The Person kind, as the operator reads and writes it. The struct
-// holds only the fields the operator reads, and every status field,
-// because a write to the status subresource replaces the whole status:
-// a status field missing here would be erased by each write.
+// The Person kind, as the operator reads and writes it. The struct has
+// the spec fields the operator reads and every status field. A write to
+// the status subresource replaces the whole status, so a status field
+// missing here would be erased by each write.
 
 import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
@@ -16,9 +16,9 @@ const (
 	peoplePath       = "/apis/people.liken.sh/v1alpha1/people"
 )
 
-// checkAvatarAnnotation asks the operator to read a Person's picture
-// again. Its value has no meaning. A value that differs from
-// status.avatar.checked is the request.
+// A new value of checkAvatarAnnotation makes the operator read the
+// Person's picture again. Any value works: the operator reads the
+// picture when the value differs from status.avatar.checked.
 const checkAvatarAnnotation = "people.liken.sh/check-avatar"
 
 type personMeta struct {
@@ -50,18 +50,18 @@ type personSpec struct {
 }
 
 type personStatus struct {
-	// UID is declared in the CRD for a controller that assigns uids.
-	// This operator does not write it, and carries it so a status write
-	// keeps it.
+	// The CRD declares status.uid for a controller that assigns uids.
+	// This operator never sets it, but keeps the value it read so that
+	// its status writes do not erase it.
 	UID        *int64      `json:"uid,omitempty"`
 	Thumbnail  string      `json:"thumbnail,omitempty"`
 	Avatar     avatarState `json:"avatar,omitzero"`
 	Conditions []condition `json:"conditions,omitempty"`
 }
 
-// avatarState records what the thumbnail answers: the source it read,
-// the version of the picture it read there, and the check request it
-// answered.
+// avatarState records where the thumbnail came from: the source URL,
+// the version of the picture read from it, and the value of the
+// check-avatar annotation at that read.
 type avatarState struct {
 	Source       string `json:"source,omitempty"`
 	ETag         string `json:"etag,omitempty"`
@@ -70,28 +70,22 @@ type avatarState struct {
 	Checked      string `json:"checked,omitempty"`
 }
 
-// version is the part of the record that identifies one copy of the
-// picture at its source.
 func (a avatarState) version() pictureVersion {
 	return pictureVersion{ETag: a.ETag, LastModified: a.LastModified, Size: a.Size}
 }
 
-// condition is the condition type that every liken component reports,
-// with the shape of metav1.Condition. A condition with no message
-// writes an empty message, which the CRD's schema takes.
+// condition has the shape of metav1.Condition. It always writes
+// message, as an empty string when there is none, and the CRD's schema
+// accepts an empty message.
 type condition = conditions.Condition
 
 const avatarReady = "AvatarReady"
 
-// ready answers the AvatarReady condition, or the zero condition when
-// the status holds none.
 func (s personStatus) ready() condition {
 	c, _ := conditions.Find(s.Conditions, avatarReady)
 	return c
 }
 
-// checkRequest answers the value of the check-avatar annotation, or the
-// empty string when the Person has none.
 func (p *person) checkRequest() string {
 	return p.Metadata.Annotations[checkAvatarAnnotation]
 }

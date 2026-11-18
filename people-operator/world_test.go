@@ -1,9 +1,9 @@
 package main
 
-// The world a test runs the operator in: the fake API server, a web
-// server that serves pictures, and the operator's loop. Both servers
-// answer over the in-memory connections of apiservertest, so a test
-// runs in a synctest bubble, and a six-hour wait takes no real time.
+// The environment that tests run the operator in: a fake API server, a
+// picture web server, and the operator's loop. Both servers use the
+// in-memory connections of apiservertest, so a test runs in a synctest
+// bubble and waiting for recheckInterval takes no real time.
 
 import (
 	"bytes"
@@ -28,18 +28,18 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// servedPicture is one file the picture server answers.
+// servedPicture is one file that the picture server serves.
 type servedPicture struct {
 	body   []byte
 	etag   string
 	status int
-	// hold keeps the answer until the request ends, for a server that
-	// never answers.
-	hold bool
+	// neverResponds makes the server wait until the client cancels the request,
+	// and never respond.
+	neverResponds bool
 }
 
-// pictureServer answers each path with its picture, and a 304 for a
-// request whose If-None-Match names the picture's ETag.
+// pictureServer serves a picture for each path, and returns 304 when
+// the request's If-None-Match matches the picture's ETag.
 type pictureServer struct {
 	server *apiservertest.Server
 
@@ -60,7 +60,7 @@ func (s *pictureServer) serve(path string, picture servedPicture) {
 	s.pictures[path] = picture
 }
 
-// requests answers the If-None-Match of each request so far.
+// requests returns the If-None-Match header of each request so far.
 func (s *pictureServer) requests() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -69,13 +69,13 @@ func (s *pictureServer) requests() []string {
 
 func (s *pictureServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	picture, held := s.pictures[r.URL.Path]
+	picture, found := s.pictures[r.URL.Path]
 	s.conditional = append(s.conditional, r.Header.Get("If-None-Match"))
 	s.mu.Unlock()
 	switch {
-	case !held:
+	case !found:
 		http.NotFound(w, r)
-	case picture.hold:
+	case picture.neverResponds:
 		<-r.Context().Done()
 	case picture.status != 0:
 		w.WriteHeader(picture.status)
@@ -95,18 +95,18 @@ type world struct {
 	pictures *pictureServer
 }
 
-// startWorld runs the operator until the test ends. The test runs in a
-// synctest bubble.
+// startWorld runs the operator until the test ends. The caller must be
+// in a synctest bubble.
 func startWorld(t *testing.T) *world {
 	w := &world{api: startFakeAPI(t), pictures: startPictureServer(t)}
 	client := apiclient.New(apiservertest.Host, w.api.server.Client(), "").WithContext(t.Context())
 	watcher, err := dynamic.NewForConfig(w.api.server.Config())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the dynamic client: %v", err)
 	}
 	image, err := ownImage(client, operatorNS, operatorPodName)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the operator's image from its own pod: %v", err)
 	}
 	bakers := &bakers{client: client, image: image, namespace: operatorNS}
 	recorder := events.New(t.Context(), client, component, events.Options{Instance: operatorPodName, Log: io.Discard})
@@ -117,17 +117,18 @@ func startWorld(t *testing.T) *world {
 		operator.run(t.Context(), watcher)
 	}()
 	t.Cleanup(func() { <-done })
-	w.settle()
+	w.waitForIdle()
 	return w
 }
 
-// settle lets the operator do all it can at the present moment.
-func (w *world) settle() {
+// waitForIdle advances the fake clock by one second, then waits until the
+// operator is idle.
+func (w *world) waitForIdle() {
 	time.Sleep(time.Second)
 	synctest.Wait()
 }
 
-// ada is the Person most tests declare, with the avatar they name.
+// ada returns the Person that most tests create, with the given avatar.
 func ada(avatar string) person {
 	p := person{Spec: personSpec{DisplayName: "Ada Lovelace", Avatar: avatar}}
 	p.Metadata.Name = "ada"
@@ -139,7 +140,7 @@ func withAnnotation(p person, value string) person {
 	return p
 }
 
-// solid encodes a PNG of one colour.
+// solid encodes a PNG of a single colour.
 func solid(t *testing.T, width, height int, c color.Color) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
@@ -150,7 +151,7 @@ func solid(t *testing.T, width, height int, c color.Color) []byte {
 	}
 	var out bytes.Buffer
 	if err := png.Encode(&out, img); err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the PNG: %v", err)
 	}
 	return out.Bytes()
 }
@@ -161,7 +162,7 @@ var (
 	blue  = color.RGBA{0x00, 0x00, 0xFF, 0xFF}
 )
 
-// decodeThumbnail decodes a status.thumbnail.
+// decodeThumbnail decodes the value of status.thumbnail.
 func decodeThumbnail(t *testing.T, thumbnail string) image.Image {
 	t.Helper()
 	payload, found := strings.CutPrefix(thumbnail, thumbnailPrefix)
@@ -170,29 +171,30 @@ func decodeThumbnail(t *testing.T, thumbnail string) image.Image {
 	}
 	encoded, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the base64 of the thumbnail: %v", err)
 	}
 	img, err := jpeg.Decode(bytes.NewReader(encoded))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the JPEG of the thumbnail: %v", err)
 	}
 	return img
 }
 
-// centre answers the colour at the middle of a thumbnail.
+// centre returns the colour of the middle pixel of a thumbnail.
 func centre(t *testing.T, thumbnail string) color.RGBA {
 	t.Helper()
 	r, g, b, _ := decodeThumbnail(t, thumbnail).At(thumbnailSide/2, thumbnailSide/2).RGBA()
 	return colourOf(r, g, b)
 }
 
-// colourOf is the 8-bit colour of the 16-bit channels that
-// color.Color.RGBA answers.
+// colourOf converts the 16-bit channels that color.Color.RGBA returns
+// to an 8-bit colour.
 func colourOf(r, g, b uint32) color.RGBA {
 	return color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), 0xFF}
 }
 
-// near reports whether two colours differ by no more than JPEG's loss.
+// near reports whether two colours differ by no more than JPEG
+// compression can change them.
 func near(a, b color.RGBA) bool {
 	close := func(x, y uint8) bool { return max(x, y)-min(x, y) <= 12 }
 	return close(a.R, b.R) && close(a.G, b.G) && close(a.B, b.B)
@@ -202,7 +204,7 @@ func mustParse(t *testing.T, raw string) *url.URL {
 	t.Helper()
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the URL %q: %v", raw, err)
 	}
 	return parsed
 }

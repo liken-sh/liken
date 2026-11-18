@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// encodeAs encodes one solid picture in a format.
+// encodeAs encodes a solid 40 by 30 picture as jpeg, gif, or png.
 func encodeAs(t *testing.T, format string, c color.Color) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 40, 30))
@@ -32,17 +32,17 @@ func encodeAs(t *testing.T, format string, c color.Color) []byte {
 		err = png.Encode(&out, img)
 	}
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the test picture: %v", err)
 	}
 	return out.Bytes()
 }
 
-// The operator reads JPEG, PNG, GIF, and WebP, and each one makes a
+// The operator reads JPEG, PNG, GIF, and WebP, and each produces a
 // 256-pixel square JPEG.
 func TestEachFormatMakesASquareThumbnail(t *testing.T) {
 	webp, err := os.ReadFile("testdata/picture.webp")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the WebP picture: %v", err)
 	}
 	cases := map[string][]byte{
 		"jpeg": encodeAs(t, "jpeg", green),
@@ -52,9 +52,9 @@ func TestEachFormatMakesASquareThumbnail(t *testing.T) {
 	}
 	for name, picture := range cases {
 		t.Run(name, func(t *testing.T) {
-			thumbnail, err := bakeThumbnail(picture, blue)
+			thumbnail, err := makeThumbnail(picture, blue)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("making the thumbnail of the %s picture: %v", name, err)
 			}
 			if bounds := decodeThumbnail(t, thumbnail).Bounds(); bounds.Dx() != thumbnailSide || bounds.Dy() != thumbnailSide {
 				t.Errorf("the thumbnail is %v, want %dx%d", bounds, thumbnailSide, thumbnailSide)
@@ -63,7 +63,6 @@ func TestEachFormatMakesASquareThumbnail(t *testing.T) {
 	}
 }
 
-// A wide picture keeps its centre square.
 func TestAWidePictureKeepsItsCentre(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 300, 100))
 	for y := range 100 {
@@ -73,30 +72,30 @@ func TestAWidePictureKeepsItsCentre(t *testing.T) {
 	}
 	var picture bytes.Buffer
 	if err := png.Encode(&picture, img); err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the three-band picture: %v", err)
 	}
 
-	thumbnail, err := bakeThumbnail(picture.Bytes(), blue)
+	thumbnail, err := makeThumbnail(picture.Bytes(), blue)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the thumbnail of the three-band picture: %v", err)
 	}
 	if got := centre(t, thumbnail); !near(got, green) {
 		t.Errorf("the centre is %v, want the green middle third", got)
 	}
 }
 
-// The transparent parts of a picture show the backdrop.
 func TestATransparentPictureShowsTheBackdrop(t *testing.T) {
-	thumbnail, err := bakeThumbnail(solid(t, 32, 32, color.RGBA{}), red)
+	thumbnail, err := makeThumbnail(solid(t, 32, 32, color.RGBA{}), red)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the thumbnail of the transparent picture: %v", err)
 	}
 	if got := centre(t, thumbnail); !near(got, red) {
 		t.Errorf("the centre is %v, want the red backdrop", got)
 	}
 }
 
-// Each limit on a picture refuses the picture before it is decoded.
+// A file over either limit, and a file that does not decode, fail with
+// the error that tells them apart.
 func TestThePictureLimits(t *testing.T) {
 	truncated := solid(t, 64, 64, green)
 	cases := []struct {
@@ -112,16 +111,16 @@ func TestThePictureLimits(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := bakeThumbnail(c.picture, blue); !errors.Is(err, c.want) {
-				t.Errorf("error = %v, want %v", err, c.want)
+			if _, err := makeThumbnail(c.picture, blue); !errors.Is(err, c.want) {
+				t.Errorf("makeThumbnail error = %v, want one that wraps %v", err, c.want)
 			}
 		})
 	}
 }
 
-// The largest picture the limits allow still bakes.
-func TestAPictureAtTheLimitBakes(t *testing.T) {
-	if _, err := bakeThumbnail(solid(t, maxPictureSide, 1, green), blue); err != nil {
-		t.Errorf("a picture %d pixels wide did not bake: %v", maxPictureSide, err)
+// A picture exactly at the side limit still produces a thumbnail.
+func TestAPictureAtTheLimitMakesAThumbnail(t *testing.T) {
+	if _, err := makeThumbnail(solid(t, maxPictureSide, 1, green), blue); err != nil {
+		t.Errorf("makeThumbnail of a picture %d pixels wide returned %v, want a thumbnail", maxPictureSide, err)
 	}
 }

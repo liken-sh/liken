@@ -1,11 +1,9 @@
 package main
 
-// A fake API server that holds the people and the pods, and serves the
-// requests the operator sends: a list and a watch of each collection,
-// a status write, and a pod's create, read, log, and delete. It answers
-// over the in-memory connections of apiservertest, so each test runs in
-// a synctest bubble on the fake clock. A test plays the kubelet: it
-// finishes a baker pod and writes the pod's log.
+// A fake API server that stores Persons and pods and serves the
+// requests the operator sends. It serves over the in-memory connections
+// of apiservertest, so each test runs in a synctest bubble on the fake
+// clock. A test acts as the kubelet with finishPod.
 
 import (
 	"encoding/json"
@@ -29,8 +27,8 @@ const (
 	operatorImage   = "ghcr.io/liken-sh/people-operator:test"
 )
 
-// kinds names the apiVersion and kind of each collection's objects,
-// which a list and a bookmark carry.
+// kinds maps each collection to the apiVersion and kind of its objects,
+// for list responses and watch bookmarks.
 var kinds = map[string][2]string{
 	peoplePath: {personAPIVersion, personKind},
 	podsPath:   {"v1", "Pod"},
@@ -46,7 +44,7 @@ type fakeEvent struct {
 type fakeAPI struct {
 	server *apiservertest.Server
 
-	// recorded holds the Events the operator posts.
+	// recorded collects the Events the operator posts.
 	recorded *eventstest.Events
 
 	mu      sync.Mutex
@@ -56,48 +54,49 @@ type fakeAPI struct {
 	events  []fakeEvent
 	changed chan struct{}
 
-	// refusals is how many status writes the server refuses next, the
-	// way an API server that restarts does.
+	// refusals is the number of next status writes to reject with a
+	// 503, as an API server does while it restarts.
 	refusals int
 
-	// absent holds the namespaces that do not exist, where a pod
-	// create answers 404 as a real API server does.
+	// absent holds the namespaces that do not exist. A pod create in one
+	// of them returns 404.
 	absent map[string]bool
 
-	// statusDelay holds each status write this long before it lands,
-	// the way a loaded API server does. statusLanded runs as each
-	// status write lands.
-	statusDelay  time.Duration
-	statusLanded func()
-	// eventDelay and eventLanded do the same for each Event write.
-	eventDelay  time.Duration
-	eventLanded func()
+	// statusDelay and eventDelay imitate a loaded API server.
+	// afterStatusWrite runs once a status write is stored.
+	// afterEventWrite runs after the delay, just before the Event is
+	// stored.
+	statusDelay      time.Duration
+	afterStatusWrite func()
+	eventDelay       time.Duration
+	afterEventWrite  func()
 }
 
-// slowEventWrites holds each Event write for delay, and runs landed as
-// each one lands.
-func (a *fakeAPI) slowEventWrites(delay time.Duration, landed func()) {
+// slowEventWrites delays each Event write by delay and calls after
+// just before the Event is stored.
+func (a *fakeAPI) slowEventWrites(delay time.Duration, after func()) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.eventDelay, a.eventLanded = delay, landed
+	a.eventDelay, a.afterEventWrite = delay, after
 }
 
-// slowStatusWrites holds each status write for delay, and runs landed
-// as each one lands.
-func (a *fakeAPI) slowStatusWrites(delay time.Duration, landed func()) {
+// slowStatusWrites delays each status write by delay and calls after
+// when the write is stored.
+func (a *fakeAPI) slowStatusWrites(delay time.Duration, after func()) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.statusDelay, a.statusLanded = delay, landed
+	a.statusDelay, a.afterStatusWrite = delay, after
 }
 
-// dropNamespace makes a namespace one that does not exist.
+// dropNamespace makes a namespace not exist.
 func (a *fakeAPI) dropNamespace(namespace string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.absent[namespace] = true
 }
 
-// refuseStatusWrites makes the server refuse the next status writes.
+// refuseStatusWrites makes the server reject the next count status
+// writes.
 func (a *fakeAPI) refuseStatusWrites(count int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -113,21 +112,22 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 
 		recorded: &eventstest.Events{},
 	}
-	answer := api.recorded.Around(api)
+	handler := api.recorded.Around(api)
 	api.server = apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		api.mu.Lock()
-		delay, landed := api.eventDelay, api.eventLanded
+		delay, after := api.eventDelay, api.afterEventWrite
 		api.mu.Unlock()
-		if landed != nil && strings.Contains(r.URL.Path, "/events") {
+		if after != nil && strings.Contains(r.URL.Path, "/events") {
 			time.Sleep(delay)
-			landed()
+			after()
 		}
-		answer.ServeHTTP(w, r)
+		handler.ServeHTTP(w, r)
 	}))
-	// The reflector waits out its backoff after a refused list without
-	// reading its context, so the bubble waits past it (apiservertest).
+	// After a rejected list, the reflector sleeps through its backoff
+	// without watching its context. The bubble cannot end until that
+	// sleep ends, so the cleanup moves the fake clock past it.
 	t.Cleanup(func() { time.Sleep(time.Minute) })
-	// The operator's own pod, which names the image a baker pod runs.
+	// The operator's own pod, which ownImage reads.
 	api.store(podsPath, operatorNS+"/"+operatorPodName, map[string]any{
 		"apiVersion": "v1", "kind": "Pod",
 		"metadata": map[string]any{"name": operatorPodName, "namespace": operatorNS},
@@ -136,7 +136,8 @@ func startFakeAPI(t *testing.T) *fakeAPI {
 	return api
 }
 
-// store records an object at the next version and tells each watch.
+// store saves an object at the next resource version and wakes every
+// watch. A kind of DELETED removes it.
 func (a *fakeAPI) store(collection, key string, object map[string]any, kind string) map[string]any {
 	a.version++
 	object = clone(object)
@@ -184,7 +185,7 @@ func (a *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// servePod answers namespaces/<ns>/pods, namespaces/<ns>/pods/<name>,
+// servePod serves namespaces/<ns>/pods, namespaces/<ns>/pods/<name>,
 // and namespaces/<ns>/pods/<name>/log.
 func (a *fakeAPI) servePod(w http.ResponseWriter, r *http.Request, parts []string) {
 	switch {
@@ -196,10 +197,10 @@ func (a *fakeAPI) servePod(w http.ResponseWriter, r *http.Request, parts []strin
 		a.get(w, podsPath, parts[0]+"/"+parts[2])
 	case len(parts) == 4 && parts[3] == "log":
 		a.mu.Lock()
-		log, held := a.logs[parts[0]+"/"+parts[2]]
+		log, found := a.logs[parts[0]+"/"+parts[2]]
 		_, exists := a.objects[podsPath][parts[0]+"/"+parts[2]]
 		a.mu.Unlock()
-		if !held || !exists {
+		if !found || !exists {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -209,8 +210,8 @@ func (a *fakeAPI) servePod(w http.ResponseWriter, r *http.Request, parts []strin
 	}
 }
 
-// selects answers whether an object carries the label a selector of
-// the form key=value names. An empty selector selects every object.
+// selects reports whether an object has the label that a key=value
+// selector requires. An empty selector matches every object.
 func selects(selector string, object map[string]any) bool {
 	key, value, found := strings.Cut(selector, "=")
 	if !found {
@@ -236,10 +237,10 @@ func (a *fakeAPI) list(w http.ResponseWriter, r *http.Request, collection string
 	})
 }
 
-// watch answers a streaming list the way the API server does: an ADDED
-// event for each object, a bookmark that ends the initial events, and
-// then every later change. A watch from a version sends each change
-// after that version.
+// watch serves a watch as the API server does. With sendInitialEvents
+// it sends an ADDED event for each object, then the bookmark that ends
+// the initial events, and then every later change. Without it, the
+// watch sends each change after resourceVersion.
 func (a *fakeAPI) watch(w http.ResponseWriter, r *http.Request, collection string) {
 	selector := r.URL.Query().Get("labelSelector")
 	a.mu.Lock()
@@ -287,16 +288,16 @@ func writeEvent(w http.ResponseWriter, kind string, object map[string]any) {
 func (a *fakeAPI) get(w http.ResponseWriter, collection, key string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	object, held := a.objects[collection][key]
-	if !held {
+	object, found := a.objects[collection][key]
+	if !found {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	_ = json.NewEncoder(w).Encode(object)
 }
 
-// writeStatus replaces a Person's status, and refuses a write from a
-// copy older than the stored one, as the API server does.
+// writeStatus replaces a Person's status. As the API server does, it
+// returns 409 when the request's resourceVersion is not the stored one.
 func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, name string) {
 	var written map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&written)
@@ -306,7 +307,7 @@ func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, name strin
 	time.Sleep(delay)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	held, exists := a.objects[peoplePath][name]
+	current, exists := a.objects[peoplePath][name]
 	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -316,15 +317,15 @@ func (a *fakeAPI) writeStatus(w http.ResponseWriter, r *http.Request, name strin
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	if written["metadata"].(map[string]any)["resourceVersion"] != held["metadata"].(map[string]any)["resourceVersion"] {
+	if written["metadata"].(map[string]any)["resourceVersion"] != current["metadata"].(map[string]any)["resourceVersion"] {
 		w.WriteHeader(http.StatusConflict)
 		return
 	}
-	next := clone(held)
+	next := clone(current)
 	next["status"] = written["status"]
 	stored := a.store(peoplePath, name, next, "MODIFIED")
-	if a.statusLanded != nil {
-		a.statusLanded()
+	if a.afterStatusWrite != nil {
+		a.afterStatusWrite()
 	}
 	_ = json.NewEncoder(w).Encode(stored)
 }
@@ -354,18 +355,19 @@ func (a *fakeAPI) createPod(w http.ResponseWriter, r *http.Request, namespace st
 func (a *fakeAPI) deletePod(w http.ResponseWriter, key string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	held, exists := a.objects[podsPath][key]
+	stored, exists := a.objects[podsPath][key]
 	if !exists {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	a.store(podsPath, key, clone(held), "DELETED")
+	a.store(podsPath, key, clone(stored), "DELETED")
 	delete(a.logs, key)
 	_, _ = fmt.Fprint(w, `{"kind":"Status","status":"Success"}`)
 }
 
-// putPerson creates a Person, or replaces its spec and metadata the way
-// kubectl apply does. A change of the spec moves the generation.
+// putPerson creates a Person, or replaces its spec and metadata as
+// kubectl apply does and keeps its status. A change to the spec
+// increments metadata.generation.
 func (a *fakeAPI) putPerson(p person) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -375,14 +377,14 @@ func (a *fakeAPI) putPerson(p person) {
 	object["apiVersion"], object["kind"] = personAPIVersion, personKind
 	metadata := object["metadata"].(map[string]any)
 	kind := "ADDED"
-	if held, exists := a.objects[peoplePath][p.Metadata.Name]; exists {
+	if stored, exists := a.objects[peoplePath][p.Metadata.Name]; exists {
 		kind = "MODIFIED"
-		heldMeta := held["metadata"].(map[string]any)
-		metadata["uid"] = heldMeta["uid"]
-		metadata["generation"] = heldMeta["generation"]
-		object["status"] = held["status"]
-		if fmt.Sprint(held["spec"]) != fmt.Sprint(object["spec"]) {
-			metadata["generation"] = heldMeta["generation"].(float64) + 1
+		storedMeta := stored["metadata"].(map[string]any)
+		metadata["uid"] = storedMeta["uid"]
+		metadata["generation"] = storedMeta["generation"]
+		object["status"] = stored["status"]
+		if fmt.Sprint(stored["spec"]) != fmt.Sprint(object["spec"]) {
+			metadata["generation"] = storedMeta["generation"].(float64) + 1
 		}
 	} else {
 		metadata["uid"] = "uid-" + p.Metadata.Name
@@ -392,7 +394,7 @@ func (a *fakeAPI) putPerson(p person) {
 	a.store(peoplePath, p.Metadata.Name, object, kind)
 }
 
-// person answers the stored Person.
+// person returns the stored Person.
 func (a *fakeAPI) person(t *testing.T, name string) person {
 	t.Helper()
 	a.mu.Lock()
@@ -400,31 +402,31 @@ func (a *fakeAPI) person(t *testing.T, name string) person {
 	var out person
 	body, _ := json.Marshal(a.objects[peoplePath][name])
 	if err := json.Unmarshal(body, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the stored object: %v", err)
 	}
 	return out
 }
 
-// bakerPod answers the stored baker pod of a Person, and false when
+// bakerPod returns the stored baker pod of a Person, and false when
 // there is none.
 func (a *fakeAPI) bakerPod(t *testing.T, namespace, personName string) (pod, bool) {
 	t.Helper()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	object, held := a.objects[podsPath][namespace+"/"+bakerPodName(personName)]
-	if !held {
+	object, found := a.objects[podsPath][namespace+"/"+bakerPodName(personName)]
+	if !found {
 		return pod{}, false
 	}
 	var out pod
 	body, _ := json.Marshal(object)
 	if err := json.Unmarshal(body, &out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the stored object: %v", err)
 	}
 	return out, true
 }
 
-// putPod stores a pod the way another process made it, such as a baker
-// pod an earlier copy of the operator started.
+// putPod stores a pod that the operator did not create in this test,
+// such as a baker pod from an earlier copy of the operator.
 func (a *fakeAPI) putPod(item pod) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -433,8 +435,8 @@ func (a *fakeAPI) putPod(item pod) {
 	a.store(podsPath, item.Metadata.Namespace+"/"+item.Metadata.Name, object, "ADDED")
 }
 
-// finishPod plays the kubelet: the pod's container wrote the log and
-// ended in the phase.
+// finishPod acts as the kubelet: it sets the pod's log and moves the
+// pod to the given phase.
 func (a *fakeAPI) finishPod(namespace, name, phase, log string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

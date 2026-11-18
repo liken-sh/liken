@@ -1,5 +1,6 @@
-# The Person kind: the people a household's services know, and the
-# operator that writes each person's picture into their status.
+# The Person resource, which declares the people who use a household's
+# services, and the operator that writes a thumbnail of each person's
+# picture into their status.
 [package]
 name = "people-operator"
 license = "MIT"
@@ -10,9 +11,8 @@ components = ["kubernetes", "notices", "toolchains", "trust"]
 [docs]
 prefix = "people"
 
-# gofmt, vet, a tidy check of go.mod, and one run of the tests that
-# checks for races and writes the coverage profile, then the coverage
-# gate on that profile. .testcoverage.yml holds the floor.
+# gofmt, go vet, go mod tidy, the tests with the race detector, and the
+# coverage threshold in .testcoverage.yml.
 [[jobs]]
 name = "go"
 toolchain = "go"
@@ -20,29 +20,27 @@ run = "make test-go"
 timeout = 15
 coverage = ["coverage.out"]
 
-# The link check, the generated skills, and the site build.
+# The links, the generated reference page and skills, and the site
+# build.
 [[jobs]]
 name = "docs"
 toolchain = "hugo"
 module = "docs"
 run = "make test-docs"
 
-# The hooks in .pre-commit-config.yaml: the formatters, the linters,
-# and the hygiene checks. The jobs above run the tests and the
-# coverage gates.
+# The hooks in .pre-commit-config.yaml.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-# The go job runs the same checks as these hooks.
+# The go job already runs these three checks.
 skip = ["gofmt", "go-vet", "go-mod-tidy"]
 
 [outputs]
 deploy = "deploy"
 
-# The image builds from this module's go.mod, which replaces the shared
-# kubernetes module with ../kubernetes, so it takes that directory as a
-# build context. The notices context holds the script that copies the
-# license files of the modules the binary links.
+# go.mod replaces the kubernetes module with ../kubernetes, so the
+# image build needs that directory as a build context. The notices
+# context holds the script that copies the license files.
 [[outputs.images]]
 name = "people-operator"
 description = "people-operator, which keeps the Person objects of a cluster and decodes their pictures."

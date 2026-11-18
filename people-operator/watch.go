@@ -1,9 +1,8 @@
 package main
 
-// Two watches wake the pass: one of every Person, and one of every
-// baker pod in every namespace. Both run on client-go's reflector,
-// through the shared informer package. A handler only wakes the pass,
-// and the pass reads what it needs.
+// A watch on every Person and a watch on the baker pods in every
+// namespace start passes. The event handlers only request a pass, and
+// the pass reads the state it needs.
 
 import (
 	"context"
@@ -24,26 +23,27 @@ var (
 	podsResource   = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 )
 
-// recheckInterval is the slow check. An HTTP URL has no watch, and
-// neither has a file on NFS or on a claim, so a picture replaced at the
-// same source changes nothing in the Person and wakes no pass. Every
-// six hours the pass reads each such source again: a conditional GET
-// that costs a 304 when the picture has not changed, or a baker pod
-// that writes the status only when the file's time or size changed. A
-// person who wants the new picture at once sets the check-avatar
-// annotation.
+// recheckInterval is how often the operator reads every source except
+// data: again. It cannot watch an HTTP URL, an NFS file, or a file on a
+// claim, so a picture replaced at the same URI changes nothing in the
+// Person. An HTTP recheck is a conditional GET. A file recheck runs a
+// baker pod, and the operator compares the file's modification time and
+// size with the last read. So an unchanged picture causes no status
+// write. To read a picture sooner,
+// change the check-avatar annotation.
 const recheckInterval = 6 * time.Hour
 
-// retryDelay is the wait after a pass that failed, such as a status
-// write the API server refused while it restarts.
+// retryDelay is the wait before the pass that follows a failed pass,
+// for example one whose status write failed while the API server
+// restarted.
 const retryDelay = 30 * time.Second
 
-// run watches until the context ends, and runs a pass for each wake.
-// It returns after the pass in flight, once the watches have ended, so
-// the caller may release the Lease when it returns.
+// run starts the watches and runs a pass for each wake until ctx ends.
+// It returns after the running pass finishes and both watches stop, so
+// the caller can release the Lease on return.
 func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 	wake := make(chan struct{}, 1)
-	signal := func() { poke(wake) }
+	signal := func() { requestPass(wake) }
 
 	people := informer.Start(ctx, watcher, informer.Source{Resource: peopleResource}, informer.Options{
 		Handler: markHandler(signal, personMark),
@@ -71,9 +71,9 @@ func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 		case <-deadline:
 		case <-retry:
 		}
-		// select picks at random among the cases that are ready, so a
-		// wake that came with the stop is checked here and starts no
-		// pass.
+		// select chooses randomly among ready cases, so a wake that
+		// arrives together with ctx.Done may be chosen. Check ctx here so
+		// that no pass starts after the stop.
 		if ctx.Err() != nil {
 			<-people.Done()
 			<-pods.Done()
@@ -94,34 +94,33 @@ func (o *operator) run(ctx context.Context, watcher dynamic.Interface) {
 	}
 }
 
-// poke wakes the pass. The channel holds one wake, so a burst of
-// events makes one pass.
-func poke(wake chan<- struct{}) {
+// requestPass does not block. The channel buffers one signal, so a
+// burst of events leads to one pass.
+func requestPass(wake chan<- struct{}) {
 	select {
 	case wake <- struct{}{}:
 	default:
 	}
 }
 
-// personMark is the part of a Person whose change needs a pass: its
-// spec, through the generation, and the check-avatar annotation. A
-// status write changes neither, so the operator's own writes wake
-// nothing. The UID is in the mark because a Person deleted and created
-// again under one name while the watch was down arrives as an update.
+// personMark returns the parts of a Person whose change starts a pass:
+// the generation, which changes with the spec, and the check-avatar
+// annotation. A status write changes neither, so the operator's own
+// writes start no pass. The mark includes the UID because, after a gap
+// in the watch, a Person deleted and created again under the same name
+// arrives as an update.
 func personMark(item person) string {
 	return fmt.Sprint(item.Metadata.UID, item.Metadata.Generation, item.checkRequest())
 }
 
-// podMark is the part of a baker pod whose change needs a pass: its
-// phase, and the start of its deletion.
 func podMark(item pod) string {
 	return item.Status.Phase + " " + item.Metadata.DeletionTimestamp
 }
 
-// markHandler wakes the pass for a new object, a removed object, and
-// an update that changes the object's mark. An object that does not
-// convert is reported and wakes the pass, because one extra pass costs
-// less than a missed edit.
+// markHandler starts a pass when an object is added or deleted, and
+// when an update changes the object's mark. An object that fails to
+// convert is reported and also starts a pass, because an unneeded pass
+// costs less than a missed change.
 func markHandler[T any](signal func(), mark func(T) string) cache.ResourceEventHandler {
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(any) { signal() },

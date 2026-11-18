@@ -5,5 +5,5 @@ weight: 5
 
 # Concepts
 
-[The `Person`](/docs/concepts/the-person/) explains what a `Person`
-holds, and how other operators use it.
+[The `Person`](/docs/concepts/the-person/) describes the fields of a
+`Person` and how other operators use it.

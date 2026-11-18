@@ -8,13 +8,13 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// The operator reads its image from its own pod, by the container's
-// name, and reads its pod's name and namespace from the environment
-// the Deployment sets.
-func TestTheDeploymentGivesTheOperatorWhatItReads(t *testing.T) {
+// The operator finds its image in its own pod by container name, and
+// reads the pod's name and namespace from environment variables. The
+// Deployment must define all of them.
+func TestDeploymentDefinesWhatTheOperatorReads(t *testing.T) {
 	raw, err := os.ReadFile("deploy/operator.yaml")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading deploy/operator.yaml: %v", err)
 	}
 	var deployment struct {
 		Spec struct {
@@ -31,7 +31,7 @@ func TestTheDeploymentGivesTheOperatorWhatItReads(t *testing.T) {
 		} `json:"spec"`
 	}
 	if err := yaml.Unmarshal(raw, &deployment); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding deploy/operator.yaml: %v", err)
 	}
 	containers := deployment.Spec.Template.Spec.Containers
 	if len(containers) != 1 || containers[0].Name != operatorContainer {
