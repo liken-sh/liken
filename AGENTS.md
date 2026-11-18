@@ -60,8 +60,9 @@ people here test against their own home clusters, and a home cluster
 holds that person's real hardware, workloads, services, and data. Keep
 those details out of every comment, plan, document, commit message,
 change description, and chat message. That includes hostnames, the
-names of workloads and services, personal data, and the people or
-places behind them.
+names of workloads and services, personal data, the people or places
+behind them, and the titles in a media library. For an example title,
+invent one or use a work in the public domain.
 
 When a fact comes from a home cluster, describe the cluster only as far
 as the point needs: "a home cluster", "a three-node fleet". When you

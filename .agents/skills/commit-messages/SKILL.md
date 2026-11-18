@@ -22,15 +22,22 @@ a command, with no period:
   Node"
 - "Test the real flux seed in CI's go job"
 
-Name the component or the object, and state the condition when the
-change applies only under one. "Fix bug", "Update publish.go", and
+Keep it to 72 characters. Name the component or the object, and state
+the condition when the change applies only under one. Use the words
+of the manual, because the reader of `git log --oneline` does not
+have the code's private names. A commit that changes only tests
+starts with "Test", and one that changes only a plan or a document
+says what the document now states: "Close plan 96, which the
+publish retry completes". "Fix bug", "Update publish.go", and
 "Improve error handling" name no behavior, and a reader of
 `git log --oneline` learns nothing from them.
 
 ## The body
 
 After one blank line, the body gives the reason in one or two short
-paragraphs. Write each paragraph as one line with no line breaks
+paragraphs. A change that needs more than three is usually two
+changes, and each one gets its own commit. A change whose first line
+says everything needs no body. Write each paragraph as one line with no line breaks
 inside it, because GitHub shows a hard-wrapped paragraph as ragged
 lines.
 
@@ -63,6 +70,8 @@ enough.
   failure that no longer occurs.
 - An account of the session: what you were asked, and the steps you
   took.
+- A word for time that depends on the day of the commit, such as
+  "today" or "this morning". Write the date.
 
 ## Pull requests
 

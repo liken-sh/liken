@@ -202,7 +202,9 @@ source file. Four more rules apply to comments:
   Kubernetes kind or API name (`PairingRequest`, `ResourceClaim`,
   `Secret`, `Deployment`), a command, a file name, a field name, a
   label or attribute key, a device class name, and a hostname that
-  names software. Write "the `Secret` holds the deploy key", not
+  names software. The description of a field in a CRD takes the
+  code face too, with backticks, because the reference page of the
+  kind is made from it. Write "the `Secret` holds the deploy key", not
   "the secret holds the deploy key".
 - Write `liken` in the code face everywhere it appears, because it
   names the code.

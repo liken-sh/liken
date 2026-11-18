@@ -44,15 +44,32 @@ a message needs.
   asterisk as it is. An identifier keeps its exact spelling and
   case, and that is enough to mark it.
 
+## Capital letters and periods
+
+A message follows the practice of the system that prints it, so that
+it reads like the lines around it.
+
+- **A fragment starts in lowercase and ends with no period.** An
+  error value is a fragment, because a caller adds to it. So is a
+  line that follows the name of a program, such as
+  `liken: reading the channel document: ...`. Go, Rust, the Unix
+  tools, and the kernel all print these in lowercase.
+- **A message that is a field of its own starts with a capital
+  letter and ends with no period.** The message of a condition, the
+  message of an `Event`, and the message of a structured log line
+  are each printed alone in a column or a field. Kubernetes writes
+  its `Event`s and its log messages this way: "Created pod",
+  "Successfully assigned".
+- A word that is always lowercase, such as a field path or a
+  command, stays lowercase at the start of a message. A kind keeps
+  its capital anywhere.
+
 ## Error values in Go and Rust
 
 An error value moves up through the callers, and each caller can add
 to it. The reader sees the whole chain on one line, so each part is a
 fragment that reads well after the part before it.
 
-- **Start with a lowercase letter and end with no period.** The
-  exception is a word that is always capitalized, such as a kind:
-  "reading the ResourceClaimTemplate gpu: ...".
 - **The first error of a chain is a clause that states the fact.**
   "the cluster URL has no host", "the answer names no hostname".
 - **A caller adds what it was doing and to which object, as an
@@ -67,8 +84,11 @@ fragment that reads well after the part before it.
   names the path, so "opening /etc/liken/machine.yaml: open
   /etc/liken/machine.yaml: permission denied" says it twice. When a
   caller has nothing to add, it returns the error as it is.
-- **Put `%w` last**, so the newest context comes first and the cause
-  comes last.
+- **Put the cause last**, so the newest context comes first:
+  "reading the catalog: %w". A sentinel that a caller compares with
+  `errors.Is` can come first, with the detail after it:
+  "%w: no monitor is connected to HDMI-A-1". A sentinel is a clause
+  that reads well when it is printed alone.
 - **Return an error or log it, not both.** An error that a function
   logs and also returns is printed once by each caller that does the
   same.
@@ -94,23 +114,24 @@ chain to a person. That line is where the next step goes.
 ## Log lines
 
 A log line is a record that a person searches and filters, so the
-text that names the event is the same on every occurrence and the
-values are in fields.
+text that names the event is the same on every occurrence.
 
-- **The message is a fixed clause in lowercase with no period.** It
-  states what happened: "the metrics listener stopped". It holds no
-  formatted value.
-- **Each value is a key and a value.** `slog.Warn("the scan pod
-  exited", "pod", name, "exitCode", code)`, not
-  `slog.Warn(fmt.Sprintf("scan pod %s exited with %d", name, code))`.
+- **The message states what happened and names the object by its
+  kind**: "The scan pod exited", not "exited" or "no events". Write
+  it in the past tense for an action, and in the present tense for a
+  state that continues.
+- **With a logger that takes fields, the message is fixed text and
+  each value is a key and a value.**
+  `slog.Warn("The scan pod exited", "pod", name, "exitCode", code)`,
+  not `slog.Warn(fmt.Sprintf("scan pod %s exited with %d", name,
+  code))`.
 - **A key is a whole word in lowerCamelCase, and one thing has one
   key in every component.** The error is `error`. An object is
   under its kind: `pod`, `machine`, `claim`.
-- **The level states who must act.** `Error` is for a state that
-  the component cannot leave without a person. `Warn` is for a
-  fault that the component handles, such as a write that it sends
-  again. `Info` is for an action the component took. `Debug` is for
-  each attempt and each reading.
+- **A component that prints formatted lines keeps the same order in
+  each**: its prefix, what it was doing or what happened, the
+  object, and the cause last. `liken: machine node-3 sent no
+  heartbeat for 90 seconds, and is now Lost`.
 - A log line holds the detail that an `Event` leaves out. The root
   `AGENTS.md` says which facts go to a condition, an `Event`, and a
   log line.
@@ -123,18 +144,25 @@ writes them. These rules are for the message.
 
 - **A condition's message says what is true now**, in the present
   tense, because `kubectl wait` and a person read it at any later
-  time. "the receiver reports input HDMI 2, and the `Player`
-  declares HDMI 1".
-- **An `Event`'s message says what happened**, in the past tense.
-  "the display restarted 2 times: Error (exit code 1)".
+  time. "The receiver reports input HDMI 2, and the Player declares
+  HDMI 1".
+- **The `Event` of a transition has the condition's message**,
+  because `Recorder.SetCondition` posts it. So write the message to
+  read correctly in both places.
+- **The `Event` of an action that changes no condition says what the
+  component did**, in the past tense: "Created the scan pod
+  scan-films-7f3a again after it was deleted".
 - **A message of a condition that needs a person names the field to
-  change** and the value that the component read from it: "the
+  change** and the value that the component read from it: "The
   ResourceClaimTemplate appearances-gpu that
   spec.appearances.gpuResourceClaimTemplate names is not in the
   namespace films".
-- A message is a clause in lowercase with no period, like an error.
-  It holds the values and repeats nothing that the reason and the
-  condition type already state.
+- A message that reports an error states the condition first and
+  the cause after it: "The Node does not have the declared labels:
+  the API server answered 403". An error chain alone says what the
+  operator was doing, and not what is true.
+- A message holds the values, and repeats nothing that the reason
+  and the condition type already state.
 
 ## Test failures
 

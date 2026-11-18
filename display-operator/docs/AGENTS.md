@@ -3,8 +3,7 @@
 @../../brand/voice.md
 
 Every word this site publishes follows the voice rules in that file. The
-base under them is ASD-STE100: short sentences, active voice, plain
-words, one instruction per sentence. The rules are in the brand theme,
+base under them is ASD-STE100. The rules are in the brand theme,
 `brand/` at the top of the repository, which also gives the site its
 shell.
 

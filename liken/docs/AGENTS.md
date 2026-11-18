@@ -3,7 +3,7 @@
 @../../brand/voice.md
 
 Everything this domain publishes follows the voice rules in that file and
-ASD-STE100: short sentences, one instruction per sentence, no metaphor.
+ASD-STE100.
 Scan a page against the rules before you publish it.
 
 The guides in `content/docs/guides/` are written by hand. The reference
