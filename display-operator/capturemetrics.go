@@ -1,20 +1,18 @@
 package main
 
-// This file holds the sidecar's own series. They are counted on the
-// node where the bytes are made, so the API counts requests and the
-// node counts frames, bytes, seconds, and failures, and nothing is
-// counted twice.
-
 import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// The four reasons a capture fails: the compositor denied it, the
-// output was busy, the compositor could not be reached, or the
-// encoder failed. The label is bounded to these four so an alert can
-// name each one and a series count never grows with the error text.
+// These are the values of the reason label of
+// display_capture_failures_total. denied is a capture that weston
+// refused, busy is an output that already runs its limit of captures,
+// compositor is any other compositor error, such as a missing socket
+// or a lost connection, and encoder is an ffmpeg failure. The label
+// never holds error text, so the number of series stays fixed and an
+// alert can match each reason.
 const (
 	deniedReason     = "denied"
 	busyReason       = "busy"
@@ -22,24 +20,26 @@ const (
 	encoderReason    = "encoder"
 )
 
+// captureMetrics holds the metrics of the capture sidecar, which takes
+// frames from the compositor on its node and encodes them.
 type captureMetrics struct {
-	registry *prometheus.Registry
-	readyNow prometheus.Gauge
-	graph    *prometheus.GaugeVec
-	bytes    *prometheus.CounterVec
-	seconds  *prometheus.CounterVec
-	active   *prometheus.GaugeVec
-	frames   *prometheus.CounterVec
-	failures *prometheus.CounterVec
+	registry  *prometheus.Registry
+	readiness prometheus.Gauge
+	graph     *prometheus.GaugeVec
+	bytes     *prometheus.CounterVec
+	seconds   *prometheus.CounterVec
+	active    *prometheus.GaugeVec
+	frames    *prometheus.CounterVec
+	failures  *prometheus.CounterVec
 }
 
 func newCaptureMetrics(component, version string) *captureMetrics {
 	registry := newProcessRegistry(component, version)
 	m := &captureMetrics{
 		registry: registry,
-		readyNow: prometheus.NewGauge(prometheus.GaugeOpts{
+		readiness: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "display_capture_ready",
-			Help: "1 while this sidecar holds the certificate the API verifies it under, 0 while it does not.",
+			Help: "1 while this sidecar has a certificate that the API can verify, 0 while it does not.",
 		}),
 		graph: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "display_capture_conversion",
@@ -59,18 +59,18 @@ func newCaptureMetrics(component, version string) *captureMetrics {
 		}, []string{"aspect"}),
 		frames: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "display_capture_frames_total",
-			Help: "Frames this sidecar took from the compositor, by format.",
+			Help: "Frames this sidecar received from the compositor, by format.",
 		}, []string{"format"}),
 		failures: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "display_capture_failures_total",
-			Help: "Captures that failed, by why.",
+			Help: "Captures that failed, by reason.",
 		}, []string{"reason"}),
 	}
-	registry.MustRegister(m.readyNow, m.graph, m.bytes, m.seconds, m.active, m.frames, m.failures)
+	registry.MustRegister(m.readiness, m.graph, m.bytes, m.seconds, m.active, m.frames, m.failures)
 
-	// A counter a scrape has never seen is a counter an alert cannot
-	// rate, so every bounded label this process can write starts at
-	// zero.
+	// rate() and increase() cannot count the first value of a series
+	// that appears above zero, so an alert would miss the first
+	// failures. So every series this process can write starts at 0.
 	m.active.WithLabelValues(screenAspect).Set(0)
 	m.graph.WithLabelValues(vaapiGraph).Set(0)
 	m.graph.WithLabelValues(softwareGraph).Set(0)
@@ -85,22 +85,24 @@ func newCaptureMetrics(component, version string) *captureMetrics {
 	return m
 }
 
-// Every recording here is safe with no registry behind it, which is
-// how the tests drive a capture.
+// ready sets display_capture_ready to 1 while the sidecar serves the
+// certificate that display-api issued, and to 0 while it serves its
+// own self-signed one. Every recording method does nothing on a nil
+// *captureMetrics, so a test can run a capture without metrics.
 func (m *captureMetrics) ready(held bool) {
 	if m == nil {
 		return
 	}
 	if held {
-		m.readyNow.Set(1)
+		m.readiness.Set(1)
 		return
 	}
-	m.readyNow.Set(0)
+	m.readiness.Set(0)
 }
 
-// Which graph this node converts with, as a pair of gauges: the one
-// it runs reads 1 and the other reads 0, so a fleet panel counts the
-// nodes that fell back to the CPU without reading a log.
+// converting sets the gauge of the ffmpeg graph the node uses to 1
+// and the other to 0, so a dashboard can count the nodes that fell
+// back to software conversion.
 func (m *captureMetrics) converting(software bool) {
 	if m == nil {
 		return
@@ -141,6 +143,8 @@ func (m *captureMetrics) framed(format string) {
 	m.frames.WithLabelValues(format).Inc()
 }
 
+// failed counts one failed capture. reason is one of the reason
+// constants above.
 func (m *captureMetrics) failed(reason string) {
 	if m == nil {
 		return

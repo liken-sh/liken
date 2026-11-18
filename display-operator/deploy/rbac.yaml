@@ -1,9 +1,5 @@
-# The operator's identity in the cluster, and deliberately nothing
-# more. It writes one ResourceSlice, writes the status of every
-# Display it created, reads the claims on the screens it drives and
-# the pods that hold them, reads the Layouts a Display names, reads
-# its own Node, posts Events about the Displays, and reviews the token
-# the API sends its capture container.
+# The service account of display-operator, with only the permissions
+# that its code uses.
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -15,90 +11,76 @@ kind: ClusterRole
 metadata:
   name: display-operator
 rules:
-  # The device inventory (slices.go): this node's ResourceSlice under
-  # display.liken.sh. The verbs cover the collection, because RBAC
-  # cannot say "only the slice named for your node": resourceNames
-  # cannot be templated per pod. The program only ever writes its own,
-  # whose name it builds from NODE_NAME. No list and no watch: the name
-  # is deterministic, and reading anyone else's inventory is the
-  # scheduler's job.
+  # The operator writes only the `ResourceSlice` of its own node
+  # (slices.go), but the rule covers every slice, because
+  # `resourceNames` cannot hold a name that differs for each node. The
+  # operator gets its slice by name, so it needs no list or watch.
   #
-  # No delete either. This operator never removes its slice. A monitor
-  # that leaves is a taint, and a device that left the inventory would
-  # strand the kubelet's prepare call for the next consumer, with no
-  # bound on the retry. The Node owns the slice, so a node that leaves
-  # the cluster takes it away. A person who uninstalls the operator
-  # for good deletes the slice by name with their own credentials.
+  # The rule has no delete. When a monitor leaves, the operator taints
+  # its device and keeps it in the slice, because the kubelet's prepare
+  # call for the next claim of a device that left the slice fails and
+  # retries with no limit. The `Node` owns the slice, so the garbage
+  # collector deletes it when the node leaves the cluster. To remove the
+  # operator for good, delete the slice yourself.
   - apiGroups: [resource.k8s.io]
     resources: [resourceslices]
     verbs: [get, create, update]
-  # The DRA plugin (dra.go): when the kubelet asks this driver to
-  # prepare a claim, the request names the claim and nothing more. The
-  # allocation is on the claim's status, so the driver reads it
-  # back. This is read-only across every namespace, because claims
-  # belong to workloads and the driver serves whichever namespace
-  # claims a screen.
+  # The kubelet's prepare request names only the claim, so the DRA
+  # driver gets the claim to read its allocation (dra.go). The placement
+  # pass lists claims to find the claim behind a surface, and reads the
+  # pods that hold it from status.reservedFor (claimholders.go). Before
+  # the `Display` pass restarts the compositor, it lists claims to find
+  # one that holds a screen before its prepare has finished
+  # (screenholds.go). Workloads in any namespace claim screens, so the
+  # rule covers every namespace.
   - apiGroups: [resource.k8s.io]
     resources: [resourceclaims]
-    # The list and the watch serve the pass that places surfaces, not
-    # the prepare call: a surface arrives on a claim's own socket, and
-    # the claim's status.reservedFor names the pods whose labels a
-    # region's selector reads. The Display pass lists the claims too,
-    # before it restarts the compositor, to learn whether a claim
-    # whose prepare has not finished holds a screen (screenholds.go).
     verbs: [get, list, watch]
-  # The layouts a Display names (layouts.go). The get reads the one a
-  # Display states, the list serves a pass that reads several, and the
-  # watch turns an edited Layout into one wake. No write of any kind: a
-  # Layout is a declaration the cluster owner writes.
+  # The operator gets the `Layout` that a `Display` names (layouts.go),
+  # and lists and watches `Layout` objects so that an edit to one starts
+  # a new pass.
   - apiGroups: [display.liken.sh]
     resources: [layouts]
     verbs: [get, list, watch]
-  # The pods that hold a claim on a screen. Their shared labels are
-  # what a region's selector matches, so a pod that gains or loses a
-  # label restacks the screen, and the watch is what makes that
-  # prompt. Read-only across every namespace, because a screen serves
-  # whichever namespace claims it. The get has a second use: the
-  # operator reads its own pod, whose status carries how often the
-  # kubelet started the compositor's container again after a crash.
+  # The selector of a `Layout` region matches the labels of the pods
+  # that hold a screen's claim, so the operator watches the pods of its
+  # node and arranges the screen again when a pod's labels change. The
+  # same store gives the restart count of the compositor container from
+  # the operator's own pod. The get reads a pod that the store does not
+  # have yet. Pods in any namespace can hold a claim.
   - apiGroups: [""]
     resources: [pods]
     verbs: [get, list, watch]
-  # The panels' own resources (displays.go, displaycontrol.go).
-  # The operator creates one Display for every monitor it probes and
-  # writes the whole of its status. The list and the watch are here
-  # because a spec a person or a machine writer edited is what the
-  # operator reconciles, and because a panel that left the node is
-  # found by listing the resources this node owns. No delete: a
-  # Display holds the captured state of a panel that may come back.
+  # The operator creates a `Display` for each monitor it probes and
+  # writes its status (displays.go, displaycontrol.go). It watches them
+  # to apply an edited spec. It never deletes one, because a `Display`
+  # keeps the saved state of a panel that can be plugged in again.
   - apiGroups: [display.liken.sh]
     resources: [displays]
     verbs: [get, list, watch, create, update]
   - apiGroups: [display.liken.sh]
     resources: [displays/status]
     verbs: [get, update]
-  # This node, read once at startup for the UID that the slice's owner
-  # reference needs. The Node owns the slice, so a Node that leaves the
-  # cluster takes the slice with it, and the garbage collector cleans
-  # up after an operator that exits without running any code.
+  # The operator gets its own `Node` at startup for the UID that the
+  # owner reference of its `ResourceSlice` needs.
   - apiGroups: [""]
     resources: [nodes]
     verbs: [get]
-  # The capture container checks the API's bearer token with a
-  # TokenReview for the audience display-capture, so the pod needs
-  # this one verb. It is written out here rather than taken from the
-  # built-in system:auth-delegator role, because that role also
-  # grants a SubjectAccessReview, which this pod never makes.
+  # The capture container verifies the bearer token that display-api
+  # sends with a `TokenReview` for the audience `display-capture`. The
+  # rule grants only this verb, because the built-in
+  # `system:auth-delegator` role also allows a `SubjectAccessReview`,
+  # which this pod never creates.
   - apiGroups: [authentication.k8s.io]
     resources: [tokenreviews]
     verbs: [create]
-  # The Events about the Displays (displayevents.go, reasons.go): a
-  # condition that changed, a write the panel did not confirm, a mode
-  # change, a compositor the operator ended. A Display is cluster-scoped, and the API server takes an Event about a
-  # cluster-scoped object only in default or kube-system, so the Events go
-  # to default. The ClusterRole grants them, so a namespace override of the
-  # install moves no grant away from default. patch counts a repeat on the
-  # Event it repeats.
+  # The operator posts `Event`s about each `Display` (displayevents.go).
+  # A `Display` is cluster-scoped, and the API server accepts an `Event`
+  # about a cluster-scoped object only in `default` or `kube-system`, so
+  # the operator posts them in `default`. The grant is in a
+  # `ClusterRole` so that it does not depend on the namespace you
+  # install the base in. The patch updates the count of an `Event` that
+  # repeats.
   - apiGroups: [""]
     resources: [events]
     verbs: [create, patch]

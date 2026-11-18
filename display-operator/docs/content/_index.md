@@ -9,8 +9,8 @@ cluster a screen to draw on, with no privilege and no host path. You
 write a claim that names the screen, such as the connector
 `HDMI-A-1`, a monitor by its model or serial, or any screen at least
 1920 pixels wide. The pod that holds the claim gets a Wayland socket,
-and its window is on that screen. You don't configure anything on the
-machine.
+and a window it opens on that socket shows on that screen. You don't
+configure anything on the machine.
 
 Things you can run this way:
 
@@ -45,15 +45,15 @@ compositor opens a Wayland socket for it, and a window on that socket
 shows on that screen.
 
 The operator also creates a [`Display`](/docs/reference/displays/)
-for each monitor. It reports the panel's brightness, power, and other
-controls, and you can set them there without a claim. A monitor's
-speakers pair with its screen through `monitor.liken.sh/id`, which
-this operator and [`audio-operator`](https://liken.sh/audio/) both
-read from the same monitor.
+for each monitor. The `Display` shows the panel's brightness, power,
+and other controls, and you can change them there without a claim.
+This operator and [`audio-operator`](https://liken.sh/audio/) both
+publish the monitor's id as the device attribute `monitor.liken.sh/id`,
+so a claim can select a monitor's screen and its speakers together.
 
 `display-operator` is one of the extension operators for
 [claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/).
-You install it only if your cluster needs screens.
+Install it only when your cluster needs screens.
 
 * [The source](https://github.com/liken-sh/liken/tree/main/display-operator)
 * [The `liken` manual](https://liken.sh/docs/)

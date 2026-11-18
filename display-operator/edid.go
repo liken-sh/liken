@@ -1,36 +1,31 @@
 package main
 
-// Reading a monitor's EDID.
+// Parsing a monitor's EDID.
 //
-// EDID is the block of bytes a monitor answers with over the display
-// cable's I2C wire. The kernel reads it when a connector detects a
-// monitor and exposes it at
-// /sys/class/drm/<card>-<connector>/edid, so this operator reads a
-// file rather than a bus, and it needs no privilege to read what is
-// plugged in.
+// EDID is the block of bytes that a monitor returns over the display
+// cable's I2C lines. The kernel reads it when a connector detects a
+// monitor and writes it to /sys/class/drm/<card>-<connector>/edid.
+// This operator reads that file, so it needs no privilege and no bus
+// access.
 //
-// The format is VESA's, and most of what this operator reads is in the
-// first 128-byte block. Byte 0 to byte 7 are a fixed header. Bytes 8 and 9
-// hold the manufacturer's PNP id as three five-bit letters. Bytes 10
+// Most of what the operator publishes is in the first 128-byte block
+// (VESA's format). Bytes 0 to 7 are a fixed header. Bytes 8 and 9 hold
+// the manufacturer's PNP id as three five-bit letters, and bytes 10
 // and 11 hold the product code. Bytes 54 to 125 hold four 18-byte
-// descriptors: a descriptor whose first two bytes are zero holds
-// text or timing limits, and any other descriptor is a detailed
-// timing.
+// descriptors. A descriptor that starts with two zero bytes holds text
+// or timing limits. Any other descriptor is a detailed timing.
 //
-// The first detailed timing is the preferred mode, which is the mode
-// the operator writes into weston.ini as mode=preferred, so the
-// published pixel size is the size the compositor drives.
+// The first detailed timing is the monitor's preferred mode. weston
+// drives that mode for mode=preferred, which weston.ini gets for every
+// connector whose claim or Display sets no mode. The currentMode
+// attribute reports the mode that the output actually runs.
 //
-// One exception qualifies that: a connector whose claim states a
-// mode runs that mode instead. weston.ini names it, and the
-// currentMode attribute says which mode the output runs now.
-//
-// A monitor may state its physical size twice. Bytes 21 and 22 give
-// it in whole centimeters, and the detailed timing gives it in
-// millimeters. The millimeters win where they exist: the portable
-// monitor on the lab machine reports 29 by 27 centimeters in bytes 21
-// and 22, and 344 by 196 millimeters in its timing. Only the
-// second one describes a 15.6-inch panel.
+// A monitor can report its physical size twice: in whole centimeters
+// in bytes 21 and 22, and in millimeters in the detailed timing. The
+// parser takes the millimeters when the timing has them, because the
+// centimeters are coarse and can be wrong. The portable-display
+// fixture reports 29 by 27 centimeters and 344 by 196 millimeters, and
+// only the millimeters match its 15.6-inch panel.
 
 import (
 	"errors"
@@ -39,13 +34,11 @@ import (
 )
 
 // blockSize is the length of one EDID block. A monitor with extension
-// blocks answers with several of them. The identity and the preferred
-// mode are in the first one, and a CTA-861 extension can add text
-// descriptors and the HDMI vendor block.
+// blocks returns the base block followed by each extension.
 const blockSize = 128
 
-// descriptor tags. The tag is byte 3 of a descriptor whose first
-// three bytes are zero.
+// Display descriptor tags. The tag is byte 3 of a descriptor that
+// starts with zero bytes.
 const (
 	tagSerialNumber = 0xff
 	tagMonitorName  = 0xfc
@@ -53,82 +46,76 @@ const (
 
 var edidHeader = []byte{0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00}
 
-// ErrNoEDID reports a connector that answered with nothing. The
-// kernel leaves the file empty while no monitor is attached, and a
-// read of it succeeds, so the empty answer is what says the monitor
-// is gone.
-var ErrNoEDID = errors.New("the connector reports no EDID")
+// ErrNoEDID means the connector returned no EDID. The kernel leaves the
+// file empty while no monitor is attached, and reading it still
+// succeeds, so an empty file is the only sign that the monitor is gone.
+var ErrNoEDID = errors.New("the connector has no EDID, so no monitor is attached")
 
-// EDID holds the facts this operator publishes about one monitor.
+// EDID holds the fields of one monitor that the operator publishes.
 type EDID struct {
-	// Manufacturer is the three-letter PNP id, uppercase, as the
-	// registry spells it: GSM is LG Electronics, BOE is BOE
-	// Technology.
+	// Manufacturer is the three-letter uppercase PNP id, for example
+	// GSM for LG Electronics or BOE for BOE Technology.
 	Manufacturer string
-	// ProductCode is the model number the manufacturer assigns. It is
-	// a number, and every tool that prints it prints it as four
-	// hexadecimal digits.
+	// ProductCode is the manufacturer's model number. Tools print it as
+	// four hexadecimal digits.
 	ProductCode uint16
-	// Serial is the serial number descriptor's text, or the base
-	// block's 32-bit serial in decimal when the monitor writes no
-	// descriptor, or empty when it states neither.
+	// Serial is the text of the serial number descriptor. When the
+	// monitor has no such descriptor, it is the base block's 32-bit
+	// serial in decimal. It is empty when the monitor has neither.
 	Serial string
-	// ModelName is the monitor name descriptor's text. A panel that
-	// was built into a laptop often has none, because nobody reads a
-	// model name off a screen with no bezel button.
+	// ModelName is the text of the monitor name descriptor. A laptop's
+	// built-in panel often has none.
 	ModelName string
-	// WidthPixels and HeightPixels are the preferred mode's active
-	// area.
+	// WidthPixels and HeightPixels are the active area of the preferred
+	// mode.
 	WidthPixels  int
 	HeightPixels int
-	// RefreshMillihertz is the preferred mode's refresh rate, in
-	// millihertz, or zero when the timing states no raster. See
-	// refreshMillihertz for why the unit is not hertz.
+	// RefreshMillihertz is the refresh rate of the preferred mode, or
+	// zero when the timing has no pixel clock or no raster size. See
+	// refreshMillihertz for why the unit is millihertz.
 	RefreshMillihertz int
 	// WidthMillimeters and HeightMillimeters are the panel's physical
 	// size.
 	WidthMillimeters  int
 	HeightMillimeters int
-	// PhysicalAddress is the CEC physical address that the HDMI
-	// vendor block states for the sink's port this cable is in, in the
-	// dotted form 1.2.0.0. It is empty when the monitor serves no HDMI
-	// vendor block, or an address that names no path.
-	// physicaladdress.go has the rules.
+	// PhysicalAddress is the CEC physical address of the sink port that
+	// this cable is plugged into, in dotted form such as 1.2.0.0. The
+	// HDMI vendor block supplies it. It is empty when the monitor has no
+	// HDMI vendor block or the address is not valid. physicaladdress.go
+	// has the rules.
 	PhysicalAddress string
 }
 
-// ParseEDID reads the facts this operator publishes out of one
-// monitor's EDID.
-//
-// The checksum is a hard test. Every byte of the first block sums to
-// zero modulo 256, and a block that fails it was read off a noisy
-// wire, so publishing its manufacturer and its serial would name the
-// wrong monitor.
+// ParseEDID parses one monitor's EDID. It returns ErrNoEDID for an
+// empty file. It fails when the base block is short, has a wrong
+// header, or has bytes that do not sum to zero modulo 256. A block that
+// fails the checksum may have been corrupted on the wire, and
+// publishing its manufacturer and serial could identify the wrong
+// monitor.
 func ParseEDID(raw []byte) (EDID, error) {
 	if len(raw) == 0 {
 		return EDID{}, ErrNoEDID
 	}
 	if len(raw) < blockSize {
-		return EDID{}, fmt.Errorf("an EDID block is %d bytes, this one is %d", blockSize, len(raw))
+		return EDID{}, fmt.Errorf("the EDID holds %d bytes, and a base block is %d bytes", len(raw), blockSize)
 	}
 	block := raw[:blockSize]
 	if string(block[:8]) != string(edidHeader) {
-		return EDID{}, errors.New("the EDID header is missing")
+		return EDID{}, errors.New("the EDID does not start with the header 00 ff ff ff ff ff ff 00")
 	}
 	var sum byte
 	for _, b := range block {
 		sum += b
 	}
 	if sum != 0 {
-		return EDID{}, errors.New("the EDID checksum does not add up")
+		return EDID{}, errors.New("the bytes of the EDID base block do not sum to 0 modulo 256")
 	}
 
 	edid := EDID{
 		Manufacturer: manufacturerID(block[8], block[9]),
 		ProductCode:  uint16(block[10]) | uint16(block[11])<<8,
-		// Bytes 21 and 22 are whole centimeters, which is the coarse
-		// answer. A detailed timing below overwrites it in
-		// millimeters.
+		// Whole centimeters, until the detailed timing below
+		// replaces them with millimeters.
 		WidthMillimeters:  int(block[21]) * 10,
 		HeightMillimeters: int(block[22]) * 10,
 	}
@@ -143,7 +130,7 @@ func ParseEDID(raw []byte) (EDID, error) {
 		descriptor := block[offset : offset+18]
 		if descriptor[0] != 0 || descriptor[1] != 0 {
 			// A detailed timing. Only the first one is the preferred
-			// mode, and the physical size is in the same descriptor.
+			// mode, and the physical size is read from it too.
 			if !preferred {
 				continue
 			}
@@ -164,16 +151,13 @@ func ParseEDID(raw []byte) (EDID, error) {
 	return edid, nil
 }
 
-// refreshMillihertz computes the preferred mode's refresh rate from
-// its detailed timing. The rate is not a field of the descriptor: a
-// monitor states a pixel clock and a raster, and the refresh is the
-// clock divided by the whole raster, blanking included. The unit is
-// millihertz because real modes land near a round number and not on
-// it. This repository's own fixtures run at 59.999 and 59.998 Hz,
-// and an attribute in whole hertz would erase the difference.
-//
-// A zero clock or a zero total is a descriptor that states no mode,
-// so the answer is zero and the caller publishes nothing.
+// refreshMillihertz computes the refresh rate of a detailed timing.
+// The descriptor has no refresh field. It has a pixel clock and the
+// raster size including blanking, and the rate is the clock divided by
+// the raster. The unit is millihertz because real modes run close to a
+// round rate without matching it, and whole hertz would hide the
+// difference: the fixtures in testdata run at 59.999 Hz and 59.998 Hz.
+// It returns zero when the clock or either raster total is zero.
 func refreshMillihertz(descriptor []byte) int {
 	pixelClockHz := (int(descriptor[0]) | int(descriptor[1])<<8) * 10_000
 	horizontalTotal := int(descriptor[2]) | int(descriptor[4]>>4)<<8
@@ -186,24 +170,24 @@ func refreshMillihertz(descriptor []byte) int {
 	return pixelClockHz * 1_000 / (horizontalTotal * verticalTotal)
 }
 
-// readDescriptor takes the text out of one display descriptor. A
-// descriptor whose tag this operator does not publish is left alone.
+// readDescriptor reads the model name or the serial number from a
+// display descriptor. It ignores any other tag.
 func (edid *EDID) readDescriptor(descriptor []byte) {
 	switch descriptor[3] {
 	case tagMonitorName:
-		// Only a name that says something replaces one that is
-		// already there. A monitor may write the descriptor twice,
-		// once in the base block and once in a CTA extension, and the
-		// second one is sometimes 13 spaces. An empty name would drop
-		// the model attribute and shorten monitor.liken.sh/id, which
-		// the audio operator matches byte for byte.
+		// A blank name does not replace an earlier one. Some monitors
+		// write this descriptor in the base block and again in a CTA
+		// extension, with 13 spaces in the second. An empty name would
+		// drop the model attribute and shorten monitor.liken.sh/id.
+		// audio-operator pairs a screen with its speakers by that id,
+		// so the pairing would fail with no error to explain it.
 		if text := descriptorText(descriptor); text != "" {
 			edid.ModelName = text
 		}
 	case tagSerialNumber:
-		// The text serial wins over the number. It is what the label
-		// on the back of the monitor reads, and it is what a person
-		// writes into a claim that names one unit.
+		// The text serial replaces the numeric one, because it matches
+		// the serial on the monitor's label, which is what a person
+		// writes in a claim to select one unit.
 		if text := descriptorText(descriptor); text != "" {
 			edid.Serial = text
 		}
@@ -211,18 +195,14 @@ func (edid *EDID) readDescriptor(descriptor []byte) {
 }
 
 // readExtensions reads the display descriptors and the HDMI vendor
-// block in the CTA-861 extension blocks. The first extension that
-// states a valid physical address sets it.
+// block from the CTA-861 extension blocks that follow the base block.
+// A monitor can put its name or its text serial in an extension
+// instead of the base block, as the lg-hdr-wqhd fixture does with its
+// serial. The first extension with a valid physical address sets
+// PhysicalAddress.
 //
-// A monitor with a CTA extension often writes its name and its serial
-// there rather than in the base block, and the LG ultrawide on the lab
-// machine is one: its base block states the numeric serial 420070 and
-// its extension states the string 202NTRLCC070, which is the number
-// printed on the back of the monitor.
-//
-// The descriptors and the HDMI vendor block are read. The extension's
-// own detailed timings are alternative modes, and the preferred mode is
-// the base block's first timing, which is what the compositor drives.
+// It skips the extension's detailed timings, because they are
+// alternative modes and the preferred mode is in the base block.
 func (edid *EDID) readExtensions(raw []byte, count int) {
 	for block := 1; block <= count; block++ {
 		start := block * blockSize
@@ -234,9 +214,10 @@ func (edid *EDID) readExtensions(raw []byte, count int) {
 		for _, b := range extension {
 			sum += b
 		}
-		// Tag 0x02 is CTA-861. A revision below 3 has no descriptor
-		// area, and byte 2 holds the offset where the descriptors
-		// start. An offset of 0 says the block holds none.
+		// Read only a CTA-861 extension (tag 0x02) of revision 3 or
+		// later with a valid checksum. Byte 2 is the offset where the
+		// detailed timings and descriptors start. 0 means the block has
+		// none, and 1 to 3 are not valid offsets.
 		if sum != 0 || extension[0] != 0x02 || extension[1] < 3 || extension[2] < 4 {
 			continue
 		}
@@ -253,10 +234,11 @@ func (edid *EDID) readExtensions(raw []byte, count int) {
 	}
 }
 
-// manufacturerID decodes the PNP id. The two bytes are big-endian,
-// and they hold three five-bit letters where 1 is A. The top bit is
-// reserved and this decoder ignores it, because a monitor that sets it
-// still names a real manufacturer in the other fifteen.
+// manufacturerID decodes the PNP id from two big-endian bytes that hold
+// three five-bit letters, where 1 is A. It ignores the top bit, which
+// is reserved, because a monitor that sets it still has a valid id in
+// the other 15 bits. It returns an empty string when a letter is out
+// of range.
 func manufacturerID(high, low byte) string {
 	packed := uint16(high)<<8 | uint16(low)
 	letters := []byte{
@@ -272,10 +254,9 @@ func manufacturerID(high, low byte) string {
 	return string(letters)
 }
 
-// descriptorText reads the 13 bytes of text a display descriptor
-// holds. The text ends at a line feed and pads with spaces to the
-// end of the field, so both have to come off before the value is
-// published.
+// descriptorText returns the 13 bytes of text in a display descriptor.
+// The text ends at a line feed and the rest of the field is padded
+// with spaces, so it drops both.
 func descriptorText(descriptor []byte) string {
 	text := string(descriptor[5:18])
 	if end := strings.IndexByte(text, '\n'); end >= 0 {

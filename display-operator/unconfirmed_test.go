@@ -1,8 +1,8 @@
 package main
 
-// Writes a device did not confirm are made once per spec generation,
-// and the record of them in status is what holds a restarted operator
-// to the same bound.
+// A write that a device did not confirm is made once per spec
+// generation. The record in status stops a restarted operator from
+// writing it again.
 
 import (
 	"context"
@@ -13,9 +13,8 @@ import (
 	"time"
 )
 
-// The operator container restarts: a new controller, a new probe
-// cache, and nothing in memory, over the same API server, the same
-// panels, and the same screens.
+// restartOperator replaces the controller with a new one that has no
+// in-memory state, over the same API server, panels, and screens.
 func (f *displayFixture) restartOperator() {
 	f.t.Helper()
 	panels := map[string]*fakeMonitor{}
@@ -37,7 +36,8 @@ func (f *displayFixture) restartOperator() {
 	f.bench = bench
 }
 
-// A person edits spec, and the API server counts a new generation.
+// edit changes spec and raises the Display's generation, as the API
+// server does on a spec edit.
 func (f *displayFixture) edit(change func(spec *DisplaySpec)) {
 	display := f.display()
 	change(&display.Spec)
@@ -48,9 +48,9 @@ func (f *displayFixture) passes(count int) {
 	f.t.Helper()
 	for range count {
 		f.advance(pollInterval)
-		// A pass that writes and is not confirmed reports it, and the
-		// passes after it report nothing, which the tests read from
-		// the panel and from status.
+		// A pass that makes an unconfirmed write returns an error.
+		// The tests check the outcome through the panel and status
+		// instead.
 		_ = f.pass()
 	}
 }
@@ -63,8 +63,6 @@ func unconfirmedControls(display *Display) []string {
 	return controls
 }
 
-// A restarted operator against a panel that already holds every
-// declared value writes nothing.
 func TestARestartAgainstAMatchingPanelWritesNothing(t *testing.T) {
 	cases := []struct {
 		name string
@@ -76,7 +74,7 @@ func TestARestartAgainstAMatchingPanelWritesNothing(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			panel := drillPanel(t, "lg-hdr-wqhd")
+			panel := recordedPanel(t, "lg-hdr-wqhd")
 			panel.values[vcpBrightness] = 30
 			panel.values[vcpInput] = 0x11
 			fixture := newDisplayFixture(t, panel)
@@ -86,17 +84,17 @@ func TestARestartAgainstAMatchingPanelWritesNothing(t *testing.T) {
 			fixture.passes(3)
 
 			if got := panel.writes(); len(got) != 0 {
-				t.Errorf("the panel took %v, want nothing", got)
+				t.Errorf("the panel received the writes %v, want nothing", got)
 			}
 		})
 	}
 }
 
-// The panel takes the input write and reads another input back. The
-// write is made once in this generation, a restarted operator does not
-// make it again, and an edit to spec makes it once more.
+// The panel accepts the input write and reads back a different input.
+// The operator writes once in this generation, a restarted operator
+// does not write again, and an edit to spec allows one more write.
 func TestAnInputThePanelReadsBackDifferentlyIsWrittenOncePerGeneration(t *testing.T) {
-	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel := recordedPanel(t, "lg-hdr-wqhd")
 	panel.clamps[vcpInput] = 0x0f
 	fixture := newDisplayFixture(t, panel)
 	fixture.declare(DisplaySpec{Input: stringOf("HDMI-1")})
@@ -108,8 +106,8 @@ func TestAnInputThePanelReadsBackDifferentlyIsWrittenOncePerGeneration(t *testin
 	fixture.restartOperator()
 	fixture.passes(5)
 
-	if got := panel.took(vcpInput); !slices.Equal(got, []uint16{0x11}) {
-		t.Errorf("the panel took %v, want one write of the input", got)
+	if got := panel.writesTo(vcpInput); !slices.Equal(got, []uint16{0x11}) {
+		t.Errorf("the panel received the writes %v, want one write of the input", got)
 	}
 	entries := fixture.display().Status.Unconfirmed
 	if len(entries) != 1 || entries[0].Control != inputControl || entries[0].Value != "HDMI-1" ||
@@ -120,24 +118,22 @@ func TestAnInputThePanelReadsBackDifferentlyIsWrittenOncePerGeneration(t *testin
 	fixture.edit(func(spec *DisplaySpec) { spec.Brightness = intOf(40) })
 	fixture.passes(3)
 
-	if got := panel.took(vcpInput); !slices.Equal(got, []uint16{0x11, 0x11}) {
-		t.Errorf("the panel took %v, want one more write of the input after the edit", got)
+	if got := panel.writesTo(vcpInput); !slices.Equal(got, []uint16{0x11, 0x11}) {
+		t.Errorf("the panel received the writes %v, want one more write of the input after the edit", got)
 	}
 	if got := unconfirmedControls(fixture.display()); !slices.Equal(got, []string{"input=HDMI-1 gen 1"}) {
 		t.Errorf("unconfirmed = %v, want the one record of the new generation", got)
 	}
 }
 
-// The record goes when the panel holds the declared value, whoever
-// put it there, so a settled Display carries no record.
 func TestTheRecordClearsWhenThePanelHoldsTheValue(t *testing.T) {
-	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel := recordedPanel(t, "lg-hdr-wqhd")
 	panel.clamps[vcpInput] = 0x0f
 	fixture := newDisplayFixture(t, panel)
 	fixture.declare(DisplaySpec{Input: stringOf("HDMI-1")})
 	fixture.passes(1)
 
-	panel.turnedTo(vcpInput, 0x11)
+	panel.setWithButtons(vcpInput, 0x11)
 	fixture.passes(1)
 
 	if got := fixture.display().Status.Unconfirmed; len(got) != 0 {
@@ -146,29 +142,30 @@ func TestTheRecordClearsWhenThePanelHoldsTheValue(t *testing.T) {
 }
 
 // A restore that the panel never confirms stops after restoreAttempts
-// writes. The capture stands, status names the control, and neither
-// a later pass nor a restarted operator writes it again.
+// writes. status.captured keeps the value to restore, status.unconfirmed
+// names the control, and neither a later pass nor a restarted operator
+// writes again.
 func TestARestoreThePanelNeverConfirmsStops(t *testing.T) {
-	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel := recordedPanel(t, "lg-hdr-wqhd")
 	fixture := newDisplayFixture(t, panel)
 	display := fixture.declare(DisplaySpec{Override: &DisplayOverride{Backlight: overrideOff}})
 	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running a pass: %v", err)
 	}
 
 	panel.stubborn[vcpBrightness] = 1000
 	display.Spec.Override = nil
 	display.Metadata.Generation++
 	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running a pass: %v", err)
 	}
 	fixture.awaitRestore()
 	fixture.passes(3)
 	fixture.restartOperator()
 	fixture.passes(3)
 
-	if got := panel.took(vcpBrightness); len(got) != 1+restoreAttempts {
-		t.Errorf("the panel took %v, want the override and %d restore writes", got, restoreAttempts)
+	if got := panel.writesTo(vcpBrightness); len(got) != 1+restoreAttempts {
+		t.Errorf("the panel received the writes %v, want the override and %d restore writes", got, restoreAttempts)
 	}
 	if got := unconfirmedControls(fixture.display()); !slices.Equal(got, []string{"brightness=50 gen 1"}) {
 		t.Errorf("unconfirmed = %v, want the brightness the restore did not land", got)
@@ -178,14 +175,14 @@ func TestARestoreThePanelNeverConfirmsStops(t *testing.T) {
 	}
 }
 
-// The compositor declines the resting mode. The restart is made once
-// in this generation, a restarted operator does not make it again, and
-// an edit to spec makes it once more.
+// The compositor does not serve the declared mode. The operator
+// restarts it once in this generation, a restarted operator does not
+// restart it again, and an edit to spec allows one more restart.
 func TestAModeTheCompositorDeclinesRestartsItOncePerGeneration(t *testing.T) {
 	fixture := newDisplayBench(t, wiredPanel{
 		Connector: "HDMI-A-1",
 		Monitor:   labMonitor(),
-		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+		Panel:     recordedPanel(t, "lg-hdr-wqhd"),
 		Modes:     []string{"3840x1600@60", "1920x1080@60"},
 		Current:   "3840x1600@60",
 	})
@@ -215,13 +212,14 @@ func TestAModeTheCompositorDeclinesRestartsItOncePerGeneration(t *testing.T) {
 	}
 }
 
-// A switch that failed for another reason, such as a compositor that
-// could not be ended, is not a decline and is tried again.
+// A mode switch that fails for another reason, such as a compositor
+// that cannot be stopped, is not recorded as unconfirmed, so the
+// operator tries it again.
 func TestAModeSwitchThatFailedIsNotADecline(t *testing.T) {
 	fixture := newDisplayBench(t, wiredPanel{
 		Connector: "HDMI-A-1",
 		Monitor:   labMonitor(),
-		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+		Panel:     recordedPanel(t, "lg-hdr-wqhd"),
 		Modes:     []string{"3840x1600@60", "1920x1080@60"},
 		Current:   "3840x1600@60",
 	})
@@ -241,14 +239,14 @@ func TestAModeSwitchThatFailedIsNotADecline(t *testing.T) {
 	}
 }
 
-// A screen that already runs the resting mode, as a new pod's first
-// compositor does once the declare container seeds the mode, takes no
-// switch, before or after an operator restart.
-func TestAScreenAtItsRestingModeTakesNoSwitch(t *testing.T) {
+// A screen that already runs the declared mode gets no switch, before
+// or after an operator restart. This is the case for a new pod, because
+// the declare container starts its compositor in the declared mode.
+func TestAScreenThatRunsTheDeclaredModeGetsNoSwitch(t *testing.T) {
 	fixture := newDisplayBench(t, wiredPanel{
 		Connector: "HDMI-A-1",
 		Monitor:   labMonitor(),
-		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+		Panel:     recordedPanel(t, "lg-hdr-wqhd"),
 		Modes:     []string{"3840x1600@60", "1920x1080@60"},
 		Current:   "1920x1080@60",
 	})
@@ -263,9 +261,7 @@ func TestAScreenAtItsRestingModeTakesNoSwitch(t *testing.T) {
 	}
 }
 
-// The ledger keeps the records of the Display's current generation
-// and drops the rest.
-func TestTheLedgerKeepsOnlyTheCurrentGeneration(t *testing.T) {
+func TestRecordsOfEarlierGenerationsAreDropped(t *testing.T) {
 	display := &Display{
 		Metadata: DisplayMeta{Generation: 4},
 		Status: DisplayStatus{Unconfirmed: []DisplayUnconfirmed{
@@ -274,33 +270,33 @@ func TestTheLedgerKeepsOnlyTheCurrentGeneration(t *testing.T) {
 		}},
 	}
 
-	ledger := ledgerOf(display)
+	records := writeRecordsOf(display)
 
-	if ledger.declined(inputControl, "HDMI-1") {
-		t.Error("a record of an earlier generation still holds the write back")
+	if records.isUnconfirmed(inputControl, "HDMI-1") {
+		t.Error("a record of an earlier generation still blocks the write")
 	}
-	if !ledger.declined(modeControl, "1920x1080@60") {
-		t.Error("the record of this generation does not hold the switch back")
+	if !records.isUnconfirmed(modeControl, "1920x1080@60") {
+		t.Error("the record of this generation does not block the switch")
 	}
-	ledger.record(modeControl, "1280x720@60", "", nil, time.Unix(0, 0))
-	if got := ledger.published(); len(got) != 1 || got[0].Value != "1280x720@60" {
+	records.record(modeControl, "1280x720@60", "", nil, time.Unix(0, 0))
+	if got := records.publishedUnconfirmed(); len(got) != 1 || got[0].Value != "1280x720@60" {
 		t.Errorf("published = %+v, want one record per control", got)
 	}
 }
 
-// A panel that confirms the input write and then switches input by
-// itself, as a panel does when it moves to the input that carries a
-// signal. The operator writes the input, writes it back three times,
-// then stops and records why, and a restarted operator stays stopped.
-// An edit to spec starts the count again.
+// A panel confirms the input write and then switches input itself, as
+// a panel does when it moves to the input that has a signal. The
+// operator writes the input, writes it back writeBackLimit times, then
+// stops and records why. A restarted operator stays stopped, and an
+// edit to spec resets the count.
 func TestAPanelThatChangesAValueByItselfGetsThreeWritesBack(t *testing.T) {
-	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel := recordedPanel(t, "lg-hdr-wqhd")
 	fixture := newDisplayFixture(t, panel)
 	fixture.declare(DisplaySpec{Input: stringOf("HDMI-1")})
 	switchesAway := func(count int) {
 		for range count {
 			fixture.passes(1)
-			panel.turnedTo(vcpInput, 0x0f)
+			panel.setWithButtons(vcpInput, 0x0f)
 		}
 	}
 
@@ -308,37 +304,37 @@ func TestAPanelThatChangesAValueByItselfGetsThreeWritesBack(t *testing.T) {
 	fixture.restartOperator()
 	switchesAway(3)
 
-	if got := panel.took(vcpInput); len(got) != 1+writeBackLimit {
-		t.Errorf("the panel took %v, want the first write and %d writes back", got, writeBackLimit)
+	if got := panel.writesTo(vcpInput); len(got) != 1+writeBackLimit {
+		t.Errorf("the panel received the writes %v, want the first write and %d writes back", got, writeBackLimit)
 	}
 	entries := fixture.display().Status.Unconfirmed
 	if len(entries) != 1 || entries[0].Control != inputControl || entries[0].Readback != "DP-1" ||
-		!strings.Contains(entries[0].Message, "keeps changing the input by itself") {
+		!strings.Contains(entries[0].Message, "by itself") {
 		t.Fatalf("unconfirmed = %+v, want the input the panel keeps changing", entries)
 	}
 
 	fixture.edit(func(spec *DisplaySpec) { spec.Brightness = intOf(40) })
 	switchesAway(6)
 
-	if got := panel.took(vcpInput); len(got) != 2*(1+writeBackLimit) {
-		t.Errorf("the panel took %d input writes, want %d after the edit started the count again",
+	if got := panel.writesTo(vcpInput); len(got) != 2*(1+writeBackLimit) {
+		t.Errorf("the panel received %d input writes, want %d after the edit started the count again",
 			len(got), 2*(1+writeBackLimit))
 	}
 }
 
-// A person who changes a value at the panel's buttons once gets it
-// written back, and the Display records one write back in the count.
+// A person changes a value at the panel's buttons once. The operator
+// writes the declared value back, and status counts both writes.
 func TestOneChangeAtThePanelIsWrittenBackAndCounted(t *testing.T) {
-	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel := recordedPanel(t, "lg-hdr-wqhd")
 	fixture := newDisplayFixture(t, panel)
 	fixture.declare(DisplaySpec{Brightness: intOf(30)})
 	fixture.passes(1)
 
-	panel.turnedTo(vcpBrightness, 80)
+	panel.setWithButtons(vcpBrightness, 80)
 	fixture.passes(3)
 
-	if got := panel.took(vcpBrightness); !slices.Equal(got, []uint16{30, 30}) {
-		t.Errorf("the panel took %v, want the write and one write back", got)
+	if got := panel.writesTo(vcpBrightness); !slices.Equal(got, []uint16{30, 30}) {
+		t.Errorf("the panel received the writes %v, want the write and one write back", got)
 	}
 	written := fixture.display().Status.Written
 	if len(written) != 1 || written[0].Control != brightnessControl || written[0].Count != 2 {

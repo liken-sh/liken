@@ -1,13 +1,9 @@
 package main
 
-// The store: what the layout module reports about the compositor it
-// runs in, and the rectangles the operator states back to it.
-//
-// The module is the one party that sees a surface arrive, change
-// size, and go, so this store is the operator's whole picture of what
-// each screen shows. It holds no decision: a placement pass reads a
-// snapshot of it, decides, and states the placements through the
-// link.
+// The store keeps what the layout module in the compositor reports:
+// outputs, surfaces, and arrangers. It is the operator's only record of
+// what each screen shows. A placement pass reads a copy of it and sends
+// its placements back through the link.
 
 import (
 	"fmt"
@@ -17,8 +13,8 @@ import (
 	"strings"
 )
 
-// The verbs the module sends. A line that starts with anything else
-// is a line this operator does not read.
+// The first word of each line the module sends. The operator ignores
+// a line that starts with any other word.
 const (
 	layoutHelloEvent       = "hello"
 	layoutOutputEvent      = "output"
@@ -28,18 +24,17 @@ const (
 	layoutSurfaceGoneEvent = "surface-gone"
 )
 
-// rect is a rectangle in one output's logical pixels. The module adds
-// the output's own position in the global space, so a rectangle is
-// stated against the screen it shows on and never against the desktop
-// the compositor lays out.
+// rect is a rectangle in one output's logical pixels, relative to that
+// output. The module adds the output's position in the compositor's
+// global coordinate space.
 type rect struct {
 	X, Y, W, H int
 }
 
-// layoutOutput is what the module reports about one output: the
-// logical size the compositor lays out in, and the scale it states to
-// its clients. On a 4K panel at scale 2 the logical size is 1920 by
-// 1080, which is the size every rectangle for that screen is in.
+// layoutOutput is one output the module reports: the logical size the
+// compositor lays out in, and the scale it tells its clients. A 4K
+// panel at scale 2 has a logical size of 1920 by 1080, and every
+// rectangle for that output is in those units.
 type layoutOutput struct {
 	Connector string
 	Width     int
@@ -47,46 +42,44 @@ type layoutOutput struct {
 	Scale     int
 }
 
-// layoutSurface is one surface the compositor holds. The socket is
-// the claim: the module reports the listening socket the client
-// arrived on, and a prepared claim's socket is wayland-<claim UID>. A
-// surface on wayland-0 belongs to no claim.
+// layoutSurface is one surface in the compositor. Socket is the
+// Wayland socket the client connected through. A claim's socket is
+// wayland-<claim UID>, so the socket identifies the claim. A surface
+// on wayland-0 belongs to no claim.
 type layoutSurface struct {
 	ID     int
 	Socket string
 	Width  int
 	Height int
-	// AppID is the xdg app_id the client set on the surface, and
-	// empty until it sets one. An arrangement names surfaces by it
+	// AppID is the xdg app_id the client set on the surface, empty
+	// until it sets one. An arrangement refers to surfaces by app_id
 	// (arrangerstore.go).
 	AppID string
 }
 
-// layoutState is one reading of the store. Serving says whether the
-// module answers this operator, and Reason says why it does not. The
-// maps are copies, so a reader holds a picture that no event changes
-// under it.
+// layoutState is a copy of the store at one moment. Serving is false
+// when the module is not connected, and Reason says why. The maps are
+// copies, so later events do not change what a reader holds.
 type layoutState struct {
 	Serving  bool
 	Reason   string
 	Outputs  map[string]layoutOutput
 	Surfaces map[int]layoutSurface
-	// Arrangers holds the arranger of each claim that has one, by the
-	// name of the claim's socket.
+	// Arrangers holds the arranger of each claim that has one, keyed
+	// by the claim's socket.
 	Arrangers map[string]layoutArranger
 	// Departures holds why each claim's arranger last left, released
-	// or disconnected, by the claim's socket.
+	// or disconnected, keyed by the claim's socket.
 	Departures map[string]string
-	// Generation names the connection this reading came from. A reader
-	// that remembers what it sent to the module re-sends all of it when
-	// the generation moves, because the module holds nothing of its own
-	// and the compositor it ran in is gone.
+	// Generation counts the connections to the module. A reader that
+	// tracks what it already sent must send everything again when the
+	// generation changes, because the compositor may have restarted
+	// with new surface ids and none of the placements.
 	Generation int
 }
 
-// state reads the store. The placement pass reads it once per pass
-// and decides from the copy, so an event that lands mid-pass belongs
-// to the next one.
+// state returns a copy of the store. A placement pass reads it once,
+// so an event that arrives during the pass is handled by the next pass.
 func (l *layoutLink) state() layoutState {
 	if l == nil {
 		return layoutState{Reason: "the operator wired no layout module"}
@@ -104,24 +97,25 @@ func (l *layoutLink) state() layoutState {
 	}
 }
 
-// event puts one event in the store and wakes the operator's loop.
+// event updates the store from one line of the module and wakes the
+// operator's loop.
 func (l *layoutLink) event(text string) {
-	if !l.remember(text) {
-		fmt.Fprintf(os.Stderr, "the layout module sent %q, which this operator does not read\n", text)
+	if !l.apply(text) {
+		fmt.Fprintf(os.Stderr, "the layout module sent a line that display-operator does not recognize: %q\n", text)
 		return
 	}
 	l.signal()
 }
 
-// remember is the store's one writer, and it answers whether it read
-// the event. The caller reports what it could not read, because a
-// message this operator drops is a surface it will not place.
+// apply updates the store from one line and returns false when it
+// cannot read the line. The caller logs unreadable lines, because a
+// dropped line can mean a surface that is never placed.
 //
-// A size for a surface this store never saw is dropped with the rest:
-// the socket the surface arrived on is its identity, and a size
-// carries none.
-func (l *layoutLink) remember(text string) bool {
-	if read, arranging := l.rememberArrangement(text); arranging {
+// apply rejects a surface-size line for an unknown surface. Only the
+// surface line carries the socket, and without the socket the store
+// cannot tell which claim the surface belongs to.
+func (l *layoutLink) apply(text string) bool {
+	if read, arranging := l.applyArrangement(text); arranging {
 		return read
 	}
 	fields := strings.Fields(text)
@@ -194,14 +188,13 @@ func (l *layoutLink) remember(text string) bool {
 	return false
 }
 
-// layoutNumber reads one decimal integer off the wire.
 func layoutNumber(field string) (int, bool) {
 	value, err := strconv.Atoi(field)
 	return value, err == nil
 }
 
-// layoutNumbers reads a run of them, and answers false unless every
-// one of them read.
+// layoutNumbers parses each field as an integer, and returns false
+// unless all of them parse.
 func layoutNumbers(fields []string) ([]int, bool) {
 	values := make([]int, len(fields))
 	for i, field := range fields {

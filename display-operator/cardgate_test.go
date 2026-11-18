@@ -15,42 +15,40 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// A file that stands where the card node would. It opens read-write
-// like the card, and every DRM ioctl on it fails, so a read that got
-// past the gate fails on its first request to the card.
-func cardStandIn(t *testing.T) string {
+// fakeCard returns a regular file to open in place of the card node.
+// Every DRM ioctl on it fails, so a read that passes the gate fails at
+// its first request to the card.
+func fakeCard(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "card1")
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the fake card file: %v", err)
 	}
 	return path
 }
 
-// The gate on a stand-in card, with a compositor that serves or not,
-// and a drop that answers what the test states. Drops counts the
-// opens, because every open drops master before anything else.
-type gateBench struct {
+// gateFixture is a cardGate on a fake card, with a chosen connection
+// state and DROP_MASTER result. drops counts the DROP_MASTER calls.
+type gateFixture struct {
 	gate  *cardGate
 	drops int
 }
 
-func newGateBench(t *testing.T, serving bool, drop error) *gateBench {
+func newGateFixture(t *testing.T, serving bool, drop error) *gateFixture {
 	t.Helper()
-	bench := &gateBench{}
-	bench.gate = newCardGate(cardStandIn(t), fakeProc(t, map[string]string{
+	fixture := &gateFixture{}
+	fixture.gate = newCardGate(fakeCard(t), fakeProc(t, map[string]string{
 		"1":  "/usr/bin/display-operator",
 		"14": westonBinary,
 	}))
-	bench.gate.live = func() bool { return serving }
-	bench.gate.dropMaster = func(int) error {
-		bench.drops++
+	fixture.gate.live = func() bool { return serving }
+	fixture.gate.dropMaster = func(int) error {
+		fixture.drops++
 		return drop
 	}
-	return bench
+	return fixture
 }
 
-// The two reads the gate serves, so every test covers both.
 var gateReads = []struct {
 	name string
 	read func(*cardGate) error
@@ -59,39 +57,40 @@ var gateReads = []struct {
 	{"connector modes", func(g *cardGate) error { _, err := g.connectorModes(); return err }},
 }
 
-// An open while no compositor has opened the card would take DRM master,
-// and the compositor that opens the card next could never get it.
+// An open while no compositor has opened the card would take DRM
+// master, and the compositor that opens the card next could never get
+// it.
 func TestTheGateOpensNothingWhileNoCompositorServes(t *testing.T) {
 	for _, read := range gateReads {
 		t.Run(read.name, func(t *testing.T) {
-			bench := newGateBench(t, false, unix.EACCES)
+			fixture := newGateFixture(t, false, unix.EACCES)
 
-			if err := read.read(bench.gate); !errors.Is(err, errCompositorAbsent) {
-				t.Errorf("error = %v, want %v", err, errCompositorAbsent)
+			if err := read.read(fixture.gate); !errors.Is(err, errCompositorAbsent) {
+				t.Errorf("the read returned %v, want %v", err, errCompositorAbsent)
 			}
-			if bench.drops != 0 {
-				t.Errorf("the gate opened the card %d times with no compositor serving", bench.drops)
+			if fixture.drops != 0 {
+				t.Errorf("the gate opened the card %d times with no compositor serving", fixture.drops)
 			}
 		})
 	}
 }
 
-// EACCES is the answer for a file that was never master, which is
-// every open while the compositor holds master. The read goes on to
-// the card, and the stand-in refuses the first request.
+// DROP_MASTER returns EACCES for a file that was never master, which
+// is every open while the compositor is master. The read goes on to the
+// card.
 func TestTheGateReadsWhileACompositorServes(t *testing.T) {
 	for _, read := range gateReads {
 		t.Run(read.name, func(t *testing.T) {
-			bench := newGateBench(t, true, unix.EACCES)
+			fixture := newGateFixture(t, true, unix.EACCES)
 
-			err := read.read(bench.gate)
+			err := read.read(fixture.gate)
 			if err == nil || !strings.Contains(err.Error(), "counting the card's resources") {
-				t.Errorf("error = %v, want the first request to the card to fail", err)
+				t.Errorf("the read returned %v, want the first request to the card to fail", err)
 			}
-			if bench.drops != 1 {
-				t.Errorf("the read dropped master %d times, want 1", bench.drops)
+			if fixture.drops != 1 {
+				t.Errorf("the read dropped master %d times, want 1", fixture.drops)
 			}
-			if len(bench.gate.masterless) != 0 {
+			if len(fixture.gate.masterless) != 0 {
 				t.Error("a file that was never master reported a compositor with no master")
 			}
 		})
@@ -99,19 +98,19 @@ func TestTheGateReadsWhileACompositorServes(t *testing.T) {
 }
 
 // A drop that succeeds means the operator's file was master, so the
-// compositor that serves holds none. The read reports the
-// compositor's pid and goes on.
+// running compositor is not. The read reports the compositor's pid and
+// goes on.
 func TestADropThatSucceedsReportsTheCompositor(t *testing.T) {
 	for _, read := range gateReads {
 		t.Run(read.name, func(t *testing.T) {
-			bench := newGateBench(t, true, nil)
+			fixture := newGateFixture(t, true, nil)
 
-			err := read.read(bench.gate)
+			err := read.read(fixture.gate)
 			if err == nil || !strings.Contains(err.Error(), "counting the card's resources") {
-				t.Errorf("error = %v, want the read to go on to the card", err)
+				t.Errorf("the read returned %v, want it to go on to the card", err)
 			}
 			select {
-			case pid := <-bench.gate.masterless:
+			case pid := <-fixture.gate.masterless:
 				if pid != 14 {
 					t.Errorf("the report names pid %d, want the compositor's 14", pid)
 				}
@@ -127,11 +126,11 @@ func TestADropThatSucceedsReportsTheCompositor(t *testing.T) {
 func TestADropThatFailsOtherwiseFailsTheRead(t *testing.T) {
 	for _, read := range gateReads {
 		t.Run(read.name, func(t *testing.T) {
-			bench := newGateBench(t, true, unix.EINVAL)
+			fixture := newGateFixture(t, true, unix.EINVAL)
 
-			err := read.read(bench.gate)
+			err := read.read(fixture.gate)
 			if err == nil || !strings.Contains(err.Error(), "invalid argument") {
-				t.Errorf("error = %v, want it to carry the errno", err)
+				t.Errorf("the read returned %v, want it to include the errno", err)
 			}
 			if strings.Contains(err.Error(), "counting the card's resources") {
 				t.Error("the read went on to the card after the drop failed")
@@ -140,32 +139,25 @@ func TestADropThatFailsOtherwiseFailsTheRead(t *testing.T) {
 	}
 }
 
-// The gate's own drop is the kernel's DROP_MASTER. A file that is no
-// card answers it with ENOTTY, which is neither of the two answers
-// a card gives, so the read fails and names the errno.
-func TestTheGatesDropIsARealIoctl(t *testing.T) {
-	gate := newCardGate(cardStandIn(t), t.TempDir())
+// A file that is not a card fails the DROP_MASTER ioctl with ENOTTY.
+func TestTheDefaultDropMasterIsTheKernelIoctl(t *testing.T) {
+	gate := newCardGate(fakeCard(t), t.TempDir())
 	gate.live = func() bool { return true }
 
 	_, err := gate.currentModes()
 	if err == nil || !strings.Contains(err.Error(), "inappropriate ioctl for device") {
-		t.Errorf("error = %v, want the kernel's ENOTTY", err)
+		t.Errorf("the read returned %v, want the kernel's ENOTTY", err)
 	}
 }
 
-// A gate that no watch is wired to opens nothing.
 func TestAGateWithNoWatchOpensNothing(t *testing.T) {
-	gate := newCardGate(cardStandIn(t), t.TempDir())
+	gate := newCardGate(fakeCard(t), t.TempDir())
 
 	if _, err := gate.currentModes(); !errors.Is(err, errCompositorAbsent) {
-		t.Errorf("error = %v, want %v", err, errCompositorAbsent)
+		t.Errorf("the read returned %v, want %v", err, errCompositorAbsent)
 	}
 }
 
-// The report arrives once per compositor. A second report about the
-// same compositor restarts nothing more, a compositor that has
-// already exited is not restarted, and a new compositor gets its own
-// restart. The restart ends the pid in the report and no other.
 func TestACompositorWithNoMasterRestartsOnce(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -194,8 +186,8 @@ func TestACompositorWithNoMasterRestartsOnce(t *testing.T) {
 					ended = append(ended, pid)
 					return nil
 				},
-				orders:  restartOrders(t.TempDir()),
-				metrics: readings,
+				restartRequests: restartRequests(t.TempDir()),
+				metrics:         readings,
 			}
 
 			plugin.restartMasterless(context.Background(), masterlessReports(c.reports...))
@@ -211,8 +203,8 @@ func TestACompositorWithNoMasterRestartsOnce(t *testing.T) {
 	}
 }
 
-// The reports the card gate sends, closed so the restart returns once
-// it has handled them.
+// masterlessReports returns a closed channel that holds the given
+// reports, so restartMasterless returns once it has handled them.
 func masterlessReports(pids ...int) chan int {
 	reports := make(chan int, len(pids))
 	for _, pid := range pids {
@@ -223,15 +215,15 @@ func masterlessReports(pids ...int) chan int {
 }
 
 // Weston closes the card before it closes its client connections, so a
-// compositor that the operator ended for another reason can be reported
-// on its way out. The operator already ended it, so the report restarts
-// nothing and counts nothing.
+// compositor that the operator already ended can be reported while it
+// exits. The restart record has that compositor, so the report does
+// not restart it or count a restart.
 func TestACompositorTheOperatorEndedIsNotRestartedAgain(t *testing.T) {
 	cases := []struct {
 		name string
 		end  func(*draPlugin) error
 	}{
-		{"a heal", (*draPlugin).restartCompositor},
+		{"a restart that repairs the canvases", (*draPlugin).restartCompositor},
 		{"a hung compositor", (*draPlugin).killHungCompositor},
 	}
 	for _, c := range cases {
@@ -239,14 +231,14 @@ func TestACompositorTheOperatorEndedIsNotRestartedAgain(t *testing.T) {
 			var ended []int
 			readings := newMetrics(componentName, "dev")
 			plugin := &draPlugin{
-				card:        "card1",
-				compositors: func() []int { return []int{14} },
-				signal:      func(int, syscall.Signal) error { return nil },
-				orders:      restartOrders(t.TempDir()),
-				metrics:     readings,
+				card:            "card1",
+				compositors:     func() []int { return []int{14} },
+				signal:          func(int, syscall.Signal) error { return nil },
+				restartRequests: restartRequests(t.TempDir()),
+				metrics:         readings,
 			}
 			if err := c.end(plugin); err != nil {
-				t.Fatal(err)
+				t.Fatalf("ending the compositor: %v", err)
 			}
 			plugin.signal = func(pid int, _ syscall.Signal) error {
 				ended = append(ended, pid)
@@ -266,13 +258,12 @@ func TestACompositorTheOperatorEndedIsNotRestartedAgain(t *testing.T) {
 	}
 }
 
-// A process that stands in for a compositor: a real child that runs
-// until a signal ends it.
+// startProcess starts a process to signal in place of a compositor.
 func startProcess(t *testing.T) *exec.Cmd {
 	t.Helper()
 	process := exec.Command("sleep", "60")
 	if err := process.Start(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("starting the stand-in process: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = process.Process.Kill()
@@ -281,13 +272,11 @@ func startProcess(t *testing.T) *exec.Cmd {
 	return process
 }
 
-// The restart ends the process that the report names with SIGTERM,
-// the same signal a mode switch sends.
 func TestEndingAMasterlessCompositorSendsItSIGTERM(t *testing.T) {
 	process := startProcess(t)
 
 	if err := signalProcess(process.Process.Pid, syscall.SIGTERM); err != nil {
-		t.Fatal(err)
+		t.Fatalf("signaling the process: %v", err)
 	}
 
 	err := process.Wait()
@@ -297,11 +286,9 @@ func TestEndingAMasterlessCompositorSendsItSIGTERM(t *testing.T) {
 	}
 }
 
-// A process that has exited and been reaped answers os.ErrProcessDone.
-// The kernel could give the reaped pid to a new process before the
-// signal, and that process would take the SIGTERM. The kernel hands out
-// pids in rising order, so a reuse this soon needs the pid space to
-// wrap around, and the risk is small.
+// A new process that the kernel gave the reaped pid to before the
+// signal would receive the SIGTERM. The kernel assigns pids in rising
+// order, so that reuse needs the pid space to wrap around first.
 func TestEndingACompositorThatHasExitedSignalsNothing(t *testing.T) {
 	process := startProcess(t)
 	pid := process.Process.Pid
@@ -309,6 +296,6 @@ func TestEndingACompositorThatHasExitedSignalsNothing(t *testing.T) {
 	_ = process.Wait()
 
 	if err := signalProcess(pid, syscall.SIGTERM); !errors.Is(err, os.ErrProcessDone) {
-		t.Errorf("error = %v, want %v", err, os.ErrProcessDone)
+		t.Errorf("signalProcess returned %v, want %v", err, os.ErrProcessDone)
 	}
 }

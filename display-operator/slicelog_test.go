@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the lines the operator prints about its slice: one
-// line for every write that names what moved, and a rate-limited line
-// for the passes that write nothing.
-
 import (
 	"bytes"
 	"strings"
@@ -11,13 +7,12 @@ import (
 	"time"
 )
 
-// otherTaint is a taint key that this operator does not write. The
-// published slice comes back from the API server, and the reporter
-// names every key it reads there.
+// otherTaint is a taint key that another client added to the
+// published slice. The reporter lists it like the operator's own.
 const otherTaint = "example.com/unusable"
 
-// sliceLogCapture replaces the operator's reporter with one that
-// writes to a buffer and reads a clock the test moves.
+// sliceLogCapture replaces sliceLog with a reporter that writes to a
+// buffer and reads a clock that the test advances.
 type sliceLogCapture struct {
 	out   bytes.Buffer
 	clock time.Time
@@ -45,7 +40,7 @@ func (c *sliceLogCapture) lines() []string {
 	return strings.Split(text, "\n")
 }
 
-// only reads the one line the test expects, and fails on any other
+// only returns the one line printed, and fails the test on any other
 // count.
 func (c *sliceLogCapture) only(t *testing.T) string {
 	t.Helper()
@@ -56,8 +51,7 @@ func (c *sliceLogCapture) only(t *testing.T) string {
 	return lines[0]
 }
 
-// loggedDevice is one device as the slice holds it, with the taint
-// keys the case needs.
+// loggedDevice returns a slice device with a taint for each key.
 func loggedDevice(name string, keys ...string) SliceDevice {
 	device := SliceDevice{
 		Name:       name,
@@ -69,8 +63,8 @@ func loggedDevice(name string, keys ...string) SliceDevice {
 	return device
 }
 
-// relabelled copies a device with a different attribute value, which
-// is the one change that moves no taint.
+// relabelled returns a copy of device with a different attribute and
+// the same taints.
 func relabelled(device SliceDevice, where string) SliceDevice {
 	device.Attributes = map[string]DeviceAttribute{"where": AttrString(where)}
 	return device
@@ -139,9 +133,6 @@ func TestSliceLogNamesWhatAWriteChanged(t *testing.T) {
 	}
 }
 
-// A create names the devices that arrive unable to serve. Every device
-// in a new slice is new, so naming them all would only repeat the
-// count on the front of the line.
 func TestSliceLogCreateListsTheTaintedDevices(t *testing.T) {
 	capture := captureSliceLog(t)
 
@@ -157,23 +148,20 @@ func TestSliceLogCreateListsTheTaintedDevices(t *testing.T) {
 	}
 }
 
-// The quiet line is what separates a live operator from a dead one, so
-// it has to arrive, and it has to arrive rarely enough that a fleet of
-// operators does not fill the log with it.
 func TestSliceLogRateLimitsTheUnchangedLine(t *testing.T) {
 	capture := captureSliceLog(t)
 	devices := []SliceDevice{loggedDevice("device-a"), loggedDevice("device-b", disconnectedTaint)}
 
-	// The first quiet pass prints at once, so a person who starts
-	// reading a log does not wait for the interval to pass first.
+	// The first unchanged pass prints at once, so a person who reads the
+	// log does not wait a whole interval for the first line.
 	sliceLog.unchangedSlice(4, devices)
 	want := "slice: unchanged at generation 4, 2 devices, 1 tainted (1 pass)"
 	if got := capture.only(t); got != want {
 		t.Fatalf("first line = %q, want %q", got, want)
 	}
 
-	// The backstop runs a pass every 60 seconds. Nine more of them
-	// inside the interval add nothing.
+	// Nine more passes, one each backstopInterval, stay inside the
+	// interval and print nothing.
 	for range 9 {
 		capture.advance(time.Minute)
 		sliceLog.unchangedSlice(4, devices)
@@ -188,17 +176,12 @@ func TestSliceLogRateLimitsTheUnchangedLine(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines, want 2: %q", len(lines), lines)
 	}
-	// The pass count is what proves the loop ran the whole interval
-	// instead of once.
 	want = "slice: unchanged at generation 4, 2 devices, 1 tainted (10 passes)"
 	if lines[1] != want {
 		t.Errorf("second line = %q, want %q", lines[1], want)
 	}
 }
 
-// A write is its own proof that the operator is alive, so it starts
-// the quiet interval again and no unchanged line follows straight
-// after it.
 func TestSliceLogWriteRestartsTheQuietInterval(t *testing.T) {
 	capture := captureSliceLog(t)
 	devices := []SliceDevice{loggedDevice("device-a")}

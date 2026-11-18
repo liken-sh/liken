@@ -1,28 +1,22 @@
 package main
 
-// The operator's side of the control socket that liken-layout.so
-// listens on. The module is the compositor's controller: it opens a
-// Wayland socket for each claim, reports every surface it sees, and
-// places a surface where this link tells it to.
+// This file is the operator's client for the control socket of
+// liken-layout.so, the module that weston loads. The module opens one
+// Wayland socket for each claim, reports the compositor's outputs and
+// surfaces, and places each surface where the operator tells it.
 //
-// The protocol is lines of UTF-8 text, one message per line, tokens
-// separated by single spaces. The operator is the one writer, and the
-// module holds no layout of its own, so a restart on either side
-// converges: a new connection clears this store, and the replay hook
-// re-opens every socket the prepared claims hold.
+// The protocol is text, one message per line, with tokens separated by
+// single spaces. The operator puts a sequence number on each request,
+// and the module replies with "ok <sequence>" or
+// "error <sequence> <reason>". Every other line from the module is an
+// event, which updates the store in layoutstore.go and wakes the
+// operator's loop.
 //
-// A request carries a sequence number the operator picks, and the
-// module answers each one with one ok or one error line for that
-// number. Every other line is an event the module sends on its own,
-// and an event updates the store and wakes the operator's loop. The
-// store is the operator's whole picture of what the compositor shows,
-// so nothing else in this operator asks the compositor what surfaces
-// it holds.
-//
-// A module whose protocol version this operator does not speak is a
-// module that serves nothing, the same answer moduleServing gives for
-// a socket nothing listens on. The taint that reports it is a later
-// plan's work.
+// The module keeps no layout of its own. On each new connection the
+// link empties the store, the module sends its current state, and the
+// replay hook opens the Wayland socket of each prepared claim again.
+// So a restart of the compositor and a restart of the operator recover
+// the same way.
 
 import (
 	"bufio"
@@ -37,94 +31,82 @@ import (
 	"time"
 )
 
-// layoutSocketPath is where the module listens, in the pod's own
-// config volume.
-//
-// The volume is an emptyDir that only this pod's three containers
-// mount, where the Wayland socket directory is a hostPath that every
-// consumer mounts. A consumer that could reach this socket could
-// place surfaces, so the control socket is not in the directory
-// consumers reach. It is a variable so the tests can point it at a
-// directory they control.
+// layoutSocketPath is where the module listens. It is in the
+// weston-config emptyDir, which only this pod mounts, and not in the
+// Wayland socket directory, a hostPath that every consumer pod mounts,
+// because a consumer that reaches this socket can place any surface.
 var layoutSocketPath = "/etc/weston/layout.sock"
 
-// layoutProtocolVersion is the version of the line protocol this
-// operator speaks. The module states its own in its hello, and a
-// version that is not this one leaves the link serving nothing.
+// layoutProtocolVersion is the protocol version this operator speaks.
+// When the module's hello line has another version, the handshake
+// fails and moduleServing returns false.
 const layoutProtocolVersion = 1
 
-// layoutReplyTimeout bounds every wait on the module: the hello, and
-// each request after it. The module answers a request out of its own
-// event loop with no work on the wire, so an answer that takes longer
-// than this means the compositor is not running its loop.
+// layoutReplyTimeout is how long the link waits for the module's
+// hello and for the reply to each request. The module handles each
+// request on the compositor's event loop and replies at once, so no
+// reply in this time means the event loop has stopped.
 const layoutReplyTimeout = 2 * time.Second
 
 // layoutDialInterval is the first wait before the link dials again,
-// and layoutDialLimit is the longest that wait grows to. The socket's
-// arrival ends a wait early, so these bound only the dials that no
-// arrival starts: the dial into a socket that is bound and not yet
-// listening, and a module that answers the dial and fails the
-// handshake.
+// and layoutDialLimit is the longest the wait grows to. A new socket
+// file ends the wait early (arrivals.go), so these waits apply when a
+// dial or a handshake fails and no new file appears.
 const (
 	layoutDialInterval = 250 * time.Millisecond
 	layoutDialLimit    = 4 * time.Second
 )
 
-// layoutLineLimit bounds one line off the socket. Every message in
-// this protocol is a verb, a few numbers, and at most one name, such
-// as an app_id or the name of an arrangement, so a line longer than
-// this is a corrupt stream, and the bound keeps it from allocating
-// whatever the bytes happen to say.
+// layoutLineLimit is the longest line the link reads. A message is a
+// verb, some numbers, and at most one name, such as an app_id, so a
+// longer line means a corrupt stream. The scanner fails on it, and the
+// link closes the connection and dials again.
 const layoutLineLimit = 4096
 
-// The names the two ends give themselves in their hello lines.
 const (
 	layoutOperatorName = "liken-operator"
 	layoutModuleName   = "liken-layout"
 )
 
-// helloSequence is the number the hello carries. Every connection
-// starts its own count, because the module answers a sequence number
-// on the connection it read it on.
+// helloSequence is the sequence number of the operator's hello. Each
+// connection numbers its requests from this value.
 const helloSequence = 1
 
-// The transitions a placement may name. The module animates a fade
-// with ivi-layout's visibility transition and a move with its
-// destination transition, and it ignores the duration of none.
+// The transitions of a placement. The module animates a fade and a
+// move itself, on each repaint of the output, and does not use
+// ivi-layout's transitions. It ignores the duration of none, and it
+// refuses a fade or a move of 0 milliseconds.
 const (
 	transitionNone = "none"
 	transitionFade = "fade"
 	transitionMove = "move"
 )
 
-// One answer to one request. A nil error is the module's ok line.
+// layoutReply is the module's reply to one request. A nil err means
+// "ok".
 type layoutReply struct {
 	err error
 }
 
-// layoutLink is one standing connection to the module, and what that
-// connection reported.
+// layoutLink is the operator's connection to the module and the state
+// that the module has reported over it.
 type layoutLink struct {
 	socketPath string
-	// Reports carries one wake for every event the module sends. It
-	// joins the operator's other wake sources in wakes(), and it holds
-	// no state: a wake means read the store again.
+	// reports wakes the operator's loop, which receives from it
+	// through wakes in main.go and then reads the store.
 	reports chan struct{}
-	// Replay re-opens the sockets the prepared claims hold. It runs on
-	// every new connection, because the compositor's restart took
-	// every socket the module had opened. It is nil until the operator
-	// wires it, and a nil hook replays nothing.
+	// replay opens the Wayland sockets of the prepared claims again
+	// after each handshake, because a compositor restart closes every
+	// socket the module had opened. A nil replay does nothing.
 	replay func() error
-	// The bounds of a wait on the module and of the wait between two
-	// dials. They are fields so a test drives the whole link inside
-	// one short test.
-	reply     time.Duration
-	dial      time.Duration
-	dialLimit time.Duration
+	// These are fields so that tests can shorten them.
+	replyTimeout  time.Duration
+	dialWait      time.Duration
+	dialWaitLimit time.Duration
 
-	// Writes serializes the writes to the socket. It is a second lock
-	// so that a write which blocks in the kernel never holds the lock
-	// the read loop needs to deliver a reply.
+	// writes serializes writes to the socket. It is separate from mu
+	// so that a write blocked in the kernel does not hold the lock
+	// that the read loop needs to deliver a reply.
 	writes sync.Mutex
 
 	mu       sync.Mutex
@@ -135,45 +117,37 @@ type layoutLink struct {
 	waiting  map[int]chan layoutReply
 	outputs  map[string]layoutOutput
 	surfaces map[int]layoutSurface
-	// Arrangers is what the module reported about each claim's
-	// arranger, keyed by the claim's socket (arrangerstore.go).
-	arrangers map[string]layoutArranger
-	// Departures is the reason each claim's arranger last left, keyed
-	// by the claim's socket, until a client of the claim is granted
-	// again (arrangerstore.go).
+	// arrangers and departures are keyed by the claim's socket
+	// (arrangerstore.go).
+	arrangers  map[string]layoutArranger
 	departures map[string]string
-	// Generation counts the connections this link has opened. A reader
-	// that remembers what it sent compares it with the generation it
-	// sent on, because a new connection is a new compositor: the
-	// surfaces and their ids went with the old one, and everything the
-	// reader stated has to be stated again.
+	// generation counts the connections this link has opened. A new
+	// connection can be to a restarted compositor, whose surfaces and
+	// surface ids differ, so a caller that tracks what it sent sends
+	// everything again when the generation changes.
 	generation int
 }
 
 func newLayoutLink(socketPath string) *layoutLink {
 	return &layoutLink{
-		socketPath: socketPath,
-		reports:    make(chan struct{}, 1),
-		reply:      layoutReplyTimeout,
-		dial:       layoutDialInterval,
-		dialLimit:  layoutDialLimit,
-		reason:     "the link has not connected yet",
-		waiting:    map[int]chan layoutReply{},
-		outputs:    map[string]layoutOutput{},
-		surfaces:   map[int]layoutSurface{},
-		arrangers:  map[string]layoutArranger{},
-		departures: map[string]string{},
+		socketPath:    socketPath,
+		reports:       make(chan struct{}, 1),
+		replyTimeout:  layoutReplyTimeout,
+		dialWait:      layoutDialInterval,
+		dialWaitLimit: layoutDialLimit,
+		reason:        "the link has not connected yet",
+		waiting:       map[int]chan layoutReply{},
+		outputs:       map[string]layoutOutput{},
+		surfaces:      map[int]layoutSurface{},
+		arrangers:     map[string]layoutArranger{},
+		departures:    map[string]string{},
 	}
 }
 
-// moduleServing reports whether the module answers this operator
-// right now. It is the layout module's half of the gate that
-// compositorServing is the compositor's half of: a prepare that
-// passed both delivers a socket that a client can connect to and a
-// controller that will place what the client draws.
-//
-// A link the operator never wired serves nothing, which is what the
-// tests that drive a prepare with no module behind it rely on.
+// moduleServing reports whether the handshake with the module has
+// succeeded and the connection is still open. A prepare call fails
+// while it returns false (waylandServing in dra.go). A nil link
+// returns false, so tests of a prepare call can run without a module.
 func (l *layoutLink) moduleServing() bool {
 	if l == nil {
 		return false
@@ -183,64 +157,56 @@ func (l *layoutLink) moduleServing() bool {
 	return l.serving
 }
 
-// Listen asks the module to open one Wayland socket and to remember
-// which output the surfaces that arrive on it go on. The call is
-// idempotent, so a replay re-issues it for a socket that is already
-// open.
+// Listen asks the module to open a Wayland socket and to put the
+// surfaces of its clients on the given output. The replay sends Listen
+// again for a socket that is already open, and that is not an error.
 func (l *layoutLink) Listen(socketName, connector string) error {
 	return l.request(fmt.Sprintf("listen %s %s", socketName, connector))
 }
 
-// Close asks the module to unlink one Wayland socket and stop
-// accepting on it. It names the socket, not this link: the link's own
-// connection ends with its context. Clients already connected to the
-// socket keep their connections, because the compositor keeps their
-// surfaces.
+// Close asks the module to stop accepting connections on a Wayland
+// socket and remove it. Clients already connected keep their
+// connections and surfaces. Close does not close this link.
 func (l *layoutLink) Close(socketName string) error {
 	return l.request("close " + socketName)
 }
 
-// Place states where one surface shows. Nothing reaches the screen
-// until Commit, so a whole batch of placements lands in one frame.
+// Place sets the rectangle and the transition of a surface. The screen
+// changes only at Commit.
 func (l *layoutLink) Place(id int, connector string, where rect, transition string, milliseconds int) error {
 	switch transition {
 	case transitionNone, transitionFade, transitionMove:
 	default:
-		return fmt.Errorf("%q is no transition this module runs: %s, %s, or %s",
+		return fmt.Errorf("unknown transition %q for a placement, use %s, %s, or %s",
 			transition, transitionNone, transitionFade, transitionMove)
 	}
 	return l.request(fmt.Sprintf("place %d %s %d %d %d %d %s %d",
 		id, connector, where.X, where.Y, where.W, where.H, transition, milliseconds))
 }
 
-// Hide makes one surface invisible, and Commit is what takes it off
-// the screen. It carries the two tokens a placement carries: a fade
-// runs ivi-layout's visibility-off transition, which is how a surface
-// that is still drawing leaves a region, and none takes it off at
-// once.
-//
-// A hide runs no move. The surface is leaving the screen, so there is
-// no rectangle to glide it to.
+// Hide takes a surface off the screen at the next Commit. With fade,
+// the module fades out a surface that is on the screen and hides it
+// when the fade ends. With none, or for a surface that is not on the
+// screen, it hides the surface at once. A hide cannot move, because a
+// hidden surface has no destination rectangle.
 func (l *layoutLink) Hide(id int, transition string, milliseconds int) error {
 	switch transition {
 	case transitionNone, transitionFade:
 	default:
-		return fmt.Errorf("%q is no transition a hide runs: %s or %s",
+		return fmt.Errorf("unknown transition %q for a hide, use %s or %s",
 			transition, transitionNone, transitionFade)
 	}
 	return l.request(fmt.Sprintf("hide %d %s %d", id, transition, milliseconds))
 }
 
-// Order states the stacking order of one output's surfaces, bottom
-// first. A surface on the output that the list leaves out keeps its
-// relative order below the listed ones.
-//
-// An order that names no surface says nothing, and the protocol has
-// no line for it, so this refuses it here rather than sending a verb
-// with no argument.
+// Order sets the stacking order of surfaces on an output, bottom
+// first. Surfaces on the output that are not in the list stay below
+// the listed ones, in their previous order. The protocol has no
+// message for an empty list, so Order returns an error for one and
+// sends nothing.
 func (l *layoutLink) Order(connector string, ids []int) error {
 	if len(ids) == 0 {
-		return fmt.Errorf("the order for %s names no surface", connector)
+		return fmt.Errorf("the order for %s lists no surface", connector)
 	}
 	var line strings.Builder
 	fmt.Fprintf(&line, "order %s", connector)
@@ -250,35 +216,33 @@ func (l *layoutLink) Order(connector string, ids []int) error {
 	return l.request(line.String())
 }
 
-// Commit is one ivi commit_changes for every placement since the last
-// one.
+// Commit applies every placement, hide, and order sent since the last
+// Commit, in one ivi-layout commit_changes, and starts their
+// transitions.
 func (l *layoutLink) Commit() error {
 	return l.request("commit")
 }
 
-// request sends one line and waits for the module's answer to that
-// line's sequence number.
-//
-// The wait is bounded, because the caller is the kubelet's prepare
-// call or the operator's own loop, and neither may hang on a
-// compositor that stopped running its event loop. A connection that
-// ends while a request waits fails that request at once, for the same
-// reason.
+// request sends a request and waits for the reply with its sequence
+// number. The callers are the kubelet's prepare call and the
+// operator's loop, and neither can block on a stopped compositor, so
+// the wait ends after replyTimeout, and at once when the connection
+// ends.
 func (l *layoutLink) request(request string) error {
 	if l == nil {
-		return errors.New("the operator wired no layout module")
+		return errors.New("the operator has no link to the layout module")
 	}
 	l.mu.Lock()
 	socket := l.conn
 	if socket == nil {
 		reason := l.reason
 		l.mu.Unlock()
-		return fmt.Errorf("the layout module is not serving %s: %s", l.socketPath, reason)
+		return fmt.Errorf("the layout module at %s is not serving: %s", l.socketPath, reason)
 	}
 	l.sequence++
 	sequence := l.sequence
-	answers := make(chan layoutReply, 1)
-	l.waiting[sequence] = answers
+	replies := make(chan layoutReply, 1)
+	l.waiting[sequence] = replies
 	l.mu.Unlock()
 	defer func() {
 		l.mu.Lock()
@@ -287,47 +251,46 @@ func (l *layoutLink) request(request string) error {
 	}()
 
 	if err := l.write(socket, fmt.Sprintf("%d %s", sequence, request)); err != nil {
-		return fmt.Errorf("sending %q to the layout module: %w", request, err)
+		return fmt.Errorf("writing %q to the layout module: %w", request, err)
 	}
 	select {
-	case answer := <-answers:
-		if answer.err != nil {
-			return fmt.Errorf("the layout module refused %q: %w", request, answer.err)
+	case reply := <-replies:
+		if reply.err != nil {
+			return fmt.Errorf("the layout module refused %q: %w", request, reply.err)
 		}
 		return nil
-	case <-time.After(l.reply):
-		return fmt.Errorf("the layout module did not answer %q within %s", request, l.reply)
+	case <-time.After(l.replyTimeout):
+		return fmt.Errorf("the layout module sent no reply to %q within %s", request, l.replyTimeout)
 	}
 }
 
-// write puts one line on the socket, under a deadline of its own. A
-// module that stopped reading fills the socket's buffer, and a write
-// with no deadline would block for as long as that lasted.
+// write sends one line with a deadline, because a module that stops
+// reading fills the socket buffer, and a write without a deadline
+// would then block.
 func (l *layoutLink) write(socket net.Conn, line string) error {
 	l.writes.Lock()
 	defer l.writes.Unlock()
-	if err := socket.SetWriteDeadline(time.Now().Add(l.reply)); err != nil {
+	if err := socket.SetWriteDeadline(time.Now().Add(l.replyTimeout)); err != nil {
 		return err
 	}
 	_, err := io.WriteString(socket, line+"\n")
 	return err
 }
 
-// run keeps one connection to the module for as long as the operator
-// runs. The module's socket goes with every compositor restart, so the
-// link dials the moment the new socket arrives (arrivals.go). A
-// connection that served resets the fallback wait, and a dial that
-// found nothing doubles it, so a module that is gone costs one dial
-// every few seconds.
+// run connects to the module and reconnects until ctx ends. A
+// compositor restart creates a new socket file, and run dials as soon
+// as it appears (arrivals.go). Otherwise it dials after a wait, which
+// nextDialWait resets after a connection that served and doubles after
+// each failure, up to dialWaitLimit.
 func (l *layoutLink) run(ctx context.Context) {
 	watch := newArrivals(l.socketPath)
 	defer watch.close()
-	wait := l.dial
+	wait := l.dialWait
 	arrived := false
 	for {
 		watch.ready()
 		served := l.connection(ctx)
-		wait = nextDialWait(served, arrived, wait, l.dial, l.dialLimit)
+		wait = nextDialWait(served, arrived, wait, l.dialWait, l.dialWaitLimit)
 		arrived = watch.wait(ctx, wait)
 		if ctx.Err() != nil {
 			return
@@ -335,18 +298,18 @@ func (l *layoutLink) run(ctx context.Context) {
 	}
 }
 
-// connection runs one connection from the dial to the end of the
-// module, and answers whether the handshake succeeded.
+// connection dials the module and reads from it until the connection
+// ends. It returns whether the handshake succeeded.
 func (l *layoutLink) connection(ctx context.Context) bool {
 	socket, err := net.DialTimeout("unix", l.socketPath, socketDialTimeout)
 	if err != nil {
-		l.down(fmt.Sprintf("dialing %s: %v", l.socketPath, err))
+		l.down(fmt.Sprintf("dialing the layout module: %v", err))
 		return false
 	}
 	defer func() { _ = socket.Close() }()
 
-	// The read loop below blocks in the kernel, so the way the context
-	// ends this connection is by closing the socket under it.
+	// The scanner blocks in a read, so the socket must be closed when
+	// ctx ends.
 	ended := make(chan struct{})
 	defer close(ended)
 	go func() {
@@ -357,9 +320,6 @@ func (l *layoutLink) connection(ctx context.Context) bool {
 		}
 	}()
 
-	// Every connection starts from an empty store. The compositor's
-	// surfaces went with the compositor, and the outputs the module
-	// reports at connect time are what it has now.
 	l.opened()
 	lines := bufio.NewScanner(socket)
 	lines.Buffer(make([]byte, 0, layoutLineLimit), layoutLineLimit)
@@ -370,26 +330,24 @@ func (l *layoutLink) connection(ctx context.Context) bool {
 	l.up(socket)
 	defer l.down("the connection to the layout module ended")
 
-	// The replay's own requests need the read loop below to deliver
-	// their replies, so it runs beside the loop and not before it.
+	// The replay's requests wait for replies that only the read loop
+	// below delivers, so the replay runs in its own goroutine.
 	if l.replay != nil {
 		go func() {
 			if err := l.replay(); err != nil {
-				fmt.Fprintf(os.Stderr, "re-opening the Wayland sockets the prepared claims hold: %v\n", err)
+				fmt.Fprintf(os.Stderr, "opening the Wayland sockets of the prepared claims again: %v\n", err)
 			}
 		}()
 	}
 	for lines.Scan() {
-		l.line(lines.Text())
+		l.receive(lines.Text())
 	}
 	return true
 }
 
-// handshake reads the module's hello, states this operator's own, and
-// waits for the module to accept it.
-//
-// The module reports every output it has before it answers, so the
-// wait for the answer reads events as they arrive.
+// handshake reads the module's hello, sends the operator's hello, and
+// waits for the reply. An event that arrives before the reply goes to
+// the store.
 func (l *layoutLink) handshake(socket net.Conn, lines *bufio.Scanner) error {
 	greeting, err := l.readLine(socket, lines)
 	if err != nil {
@@ -405,33 +363,33 @@ func (l *layoutLink) handshake(socket net.Conn, lines *bufio.Scanner) error {
 	}
 	if err := l.write(socket, fmt.Sprintf("%d %s %s %d",
 		helloSequence, layoutHelloEvent, layoutOperatorName, layoutProtocolVersion)); err != nil {
-		return fmt.Errorf("stating this operator's hello: %w", err)
+		return fmt.Errorf("sending the operator's hello: %w", err)
 	}
 	for {
 		line, err := l.readLine(socket, lines)
 		if err != nil {
 			return fmt.Errorf("waiting for the layout module to accept the hello: %w", err)
 		}
-		sequence, answer, isReply := parseLayoutReply(line)
+		sequence, reply, isReply := parseLayoutReply(line)
 		if !isReply {
 			l.event(line)
 			continue
 		}
 		if sequence != helloSequence {
-			return fmt.Errorf("the layout module answered sequence %d before it answered the hello", sequence)
+			return fmt.Errorf("the layout module replied to sequence %d before it replied to the hello", sequence)
 		}
-		if answer.err != nil {
-			return fmt.Errorf("the layout module refused the hello: %w", answer.err)
+		if reply.err != nil {
+			return fmt.Errorf("the layout module refused the hello: %w", reply.err)
 		}
 		return nil
 	}
 }
 
-// readLine reads one line under the reply timeout. Every wait on the
-// module is bounded, and the handshake's waits are the two that run
-// before there is a read loop to bound them.
+// readLine reads one line with replyTimeout as the read deadline. Only
+// the handshake uses it. The read loop after the handshake has no
+// deadline.
 func (l *layoutLink) readLine(socket net.Conn, lines *bufio.Scanner) (string, error) {
-	if err := socket.SetReadDeadline(time.Now().Add(l.reply)); err != nil {
+	if err := socket.SetReadDeadline(time.Now().Add(l.replyTimeout)); err != nil {
 		return "", err
 	}
 	defer func() { _ = socket.SetReadDeadline(time.Time{}) }()
@@ -444,33 +402,33 @@ func (l *layoutLink) readLine(socket net.Conn, lines *bufio.Scanner) (string, er
 	return lines.Text(), nil
 }
 
-// moduleVersion reads the version off the module's hello line and
-// refuses a first line that is not one.
+// moduleVersion returns the protocol version in the module's hello
+// line, and an error when the line is not a hello from the module.
 func moduleVersion(greeting string) (int, error) {
 	fields := strings.Fields(greeting)
 	if len(fields) != 3 || fields[0] != layoutHelloEvent || fields[1] != layoutModuleName {
-		return 0, fmt.Errorf("%q is not the layout module's hello", greeting)
+		return 0, fmt.Errorf("the first line %q is not the layout module's hello", greeting)
 	}
 	version, read := layoutNumber(fields[2])
 	if !read {
-		return 0, fmt.Errorf("the layout module states protocol version %q", fields[2])
+		return 0, fmt.Errorf("the layout module's hello has the protocol version %q, which is not a number", fields[2])
 	}
 	return version, nil
 }
 
-// line routes one line off the socket: a reply goes to the request
-// that is waiting for it, and everything else is an event.
-func (l *layoutLink) line(text string) {
-	if sequence, answer, isReply := parseLayoutReply(text); isReply {
-		l.answer(sequence, answer)
+// receive delivers a reply to its request and applies any other line
+// to the store as an event.
+func (l *layoutLink) receive(text string) {
+	if sequence, reply, isReply := parseLayoutReply(text); isReply {
+		l.deliver(sequence, reply)
 		return
 	}
 	l.event(text)
 }
 
-// parseLayoutReply reads an ok or an error line and the sequence
-// number it answers. An error line with no text of its own still
-// carries an error, because a caller reports what the module refused.
+// parseLayoutReply parses an "ok" or "error" line. The last result is
+// false when the line is not a reply. An "error" line with no reason
+// gets a default message, so the caller always has an error to report.
 func parseLayoutReply(text string) (int, layoutReply, bool) {
 	verb, rest, split := strings.Cut(text, " ")
 	if !split {
@@ -490,30 +448,29 @@ func parseLayoutReply(text string) (int, layoutReply, bool) {
 			return 0, layoutReply{}, false
 		}
 		if message == "" {
-			message = "the module gave no reason"
+			message = "the module sent no reason"
 		}
 		return sequence, layoutReply{err: errors.New(message)}, true
 	}
 	return 0, layoutReply{}, false
 }
 
-// answer hands one reply to the request waiting for it. A reply for a
-// sequence nobody waits on is a request that already ran out its
-// timeout, which is worth reading in the log: the module answered,
-// late.
-func (l *layoutLink) answer(sequence int, answer layoutReply) {
+// deliver sends a reply to the request that waits for it. When no
+// request waits, the request already timed out, and deliver logs the
+// late reply.
+func (l *layoutLink) deliver(sequence int, reply layoutReply) {
 	l.mu.Lock()
 	waiting, expected := l.waiting[sequence]
 	delete(l.waiting, sequence)
 	l.mu.Unlock()
 	if !expected {
-		fmt.Fprintf(os.Stderr, "the layout module answered sequence %d, which nothing is waiting for\n", sequence)
+		fmt.Fprintf(os.Stderr, "the layout module replied to sequence %d, which no request is waiting for\n", sequence)
 		return
 	}
-	waiting <- answer
+	waiting <- reply
 }
 
-// opened empties the store for a new connection.
+// opened empties the store and starts a new generation.
 func (l *layoutLink) opened() {
 	l.mu.Lock()
 	l.outputs = map[string]layoutOutput{}
@@ -526,7 +483,6 @@ func (l *layoutLink) opened() {
 	l.signal()
 }
 
-// up marks the link serving on the connection the handshake accepted.
 func (l *layoutLink) up(socket net.Conn) {
 	l.mu.Lock()
 	l.conn, l.serving, l.reason = socket, true, ""
@@ -534,27 +490,25 @@ func (l *layoutLink) up(socket net.Conn) {
 	l.signal()
 }
 
-// down records why the link serves nothing and fails every request
-// that is still waiting.
-//
-// The store keeps what the ended connection reported until the next
-// connection empties it. Nothing acts on it in the meantime, because
-// the state a reader holds says the module is not serving.
+// down records why the link is not serving and fails the requests
+// that are still waiting. The store keeps what the old connection
+// reported until the next connection empties it, so the placement pass
+// checks Serving before it reads the store.
 func (l *layoutLink) down(reason string) {
 	l.mu.Lock()
 	l.conn, l.serving, l.reason = nil, false, reason
 	waiting := l.waiting
 	l.waiting = map[int]chan layoutReply{}
 	l.mu.Unlock()
-	for _, answers := range waiting {
-		answers <- layoutReply{err: errors.New(reason)}
+	for _, replies := range waiting {
+		replies <- layoutReply{err: errors.New(reason)}
 	}
 	l.signal()
 }
 
-// signal wakes the operator's loop. The channel holds one wake,
-// because a wake means read the store again and two of them mean the
-// same thing.
+// signal wakes the operator's loop. The channel buffers one wake, and
+// signal drops a second one, because the loop reads the whole store on
+// each wake.
 func (l *layoutLink) signal() {
 	select {
 	case l.reports <- struct{}{}:

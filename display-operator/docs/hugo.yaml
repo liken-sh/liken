@@ -1,48 +1,36 @@
-# The site's configuration. The shell comes from the brand theme,
-# brand/ at the top of the repository, which every liken site shares: the
-# layouts, the nav, and the stylesheet arrive with it, so this file
-# only has to say what is particular to this site. The site is served
-# at https://liken.sh/display/. Every manual is titled with its
-# component's name, the name the rest of the project uses for it.
+# The layouts, navigation, and stylesheet come from the brand theme in
+# brand/, which every liken site shares, so this file sets only what is
+# specific to this site.
 baseURL: https://liken.sh/display/
 
-# The generated reference page marks each field's table row with an
-# id, a raw-HTML span the crdref generator emits, so a link can land
-# on exactly one field. Goldmark drops raw HTML unless this is set,
-# and everything this site renders is authored in this repository.
+# crdref marks each field's row on the reference page with a raw HTML
+# span, so that a link can go to one field. Goldmark drops raw HTML
+# unless `unsafe` is set. That is safe because the site renders only
+# files of this repository.
 markup:
   goldmark:
     renderer:
       unsafe: true
 title: display-operator
-# Hugo looks for a theme by name under themesDir, and the repository
-# root holds brand/, so the site and the theme it builds with are
-# always the same commit.
+# The theme is brand/ at the top of the repository, so the site builds
+# with the theme of its own commit.
 themesDir: ../..
 theme: brand
 
-# The theme reads this for the nav's repository entry and for the
-# project name in the sidebar's "manual" heading.
 params:
   repository: https://github.com/liken-sh/liken/tree/main/display-operator
-  # The site serves the test coverage report at /coverage.html. This
-  # parameter puts the footer link to it on every page.
+  # Adds a link to the coverage report at /coverage.html in the footer
+  # of every page.
   coverage: true
-# No taxonomies and no feeds: the site is a manual, not a blog. The
-# sitemap stays, because it is free and crawlers use it.
+# The site is a manual, so it has no taxonomies or feeds. It keeps the
+# sitemap for search crawlers.
 disableKinds: [taxonomy, term, rss]
 
-# The theme renders every page twice, once as HTML for people and
-# once as the authored Markdown for agents and scripts. The two files
-# land side by side, so the Markdown twin of / is /index.md. The
-# theme provides the templates, but a theme cannot declare output
-# formats, so this block is the site's part of the contract
-# (brand/README.md states it).
+# The theme renders each page as HTML and as its authored Markdown, for
+# agents and scripts, so the Markdown of / is /index.md. A theme cannot
+# declare output formats, so each site declares them (brand/README.md).
 outputFormats:
   markdown:
-    # text/markdown is a media type Hugo already has, with the md
-    # suffix. baseName index makes the output index.md, beside
-    # index.html in the same pretty-URL directory.
     mediaType: text/markdown
     baseName: index
     isPlainText: true
@@ -52,25 +40,19 @@ outputs:
   section: [html, markdown]
   page: [html, markdown]
 
-# The site serves the repository's deploy/ manifests whole, as raw
-# YAML, at /deploy/<file>.yaml. A reader reads the real manifests in
-# place, `kubectl apply -f` takes the URLs directly, and a
-# Kustomization can name them as resources, so an install needs no
-# clone. The mount publishes the files the repository holds: there
-# is no copy to drift.
+# The site serves the manifests in deploy/ at /deploy/<file>.yaml, so
+# `kubectl apply -f` and a `Kustomization` can use the URLs and an
+# install needs no clone.
 #
-# Declaring any mount replaces every default mount for the site, so
-# the content mount comes back explicitly. The theme's own mounts,
-# which provide the favicon and the brand images, are the theme's
-# and stay as they are.
+# Declaring any mount replaces the default mounts, so the content mount
+# is declared again. The theme's own mounts are not affected.
 module:
   mounts:
     - source: content
       target: content
     - source: ../deploy
       target: static/deploy
-    # The generated OpenAPI document is served beside the page that
-    # describes it, so a client reads the description from the site
-    # as well as from the API.
+    # A client can read the generated OpenAPI document from the site as
+    # well as from the API.
     - source: content/docs/reference/openapi.json
       target: static/docs/reference/openapi.json

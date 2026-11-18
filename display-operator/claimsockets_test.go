@@ -1,10 +1,8 @@
 package main
 
-// These tests drive the prepare and unprepare paths against a real
-// layout module on a real socket, and read what the module was asked
-// to open and close. What they cover is the rule that names a claim's
-// socket, and the replay that opens it again after the compositor
-// restarts.
+// These tests run prepare and unprepare against a fake layout module
+// on a Unix socket, and check which sockets the module was asked to
+// open and close.
 
 import (
 	"strings"
@@ -16,8 +14,6 @@ func TestClaimSocketNamesGivesOneClaimOneSocket(t *testing.T) {
 		results []AllocatedDevice
 		want    map[string]string
 	}{
-		// The output and the draw companion on one connector are one
-		// screen, so both deliver the claim's own name.
 		"one screen and its draw companion": {
 			results: []AllocatedDevice{
 				{Request: "screen", Driver: DriverName, Device: "hdmi-a-1"},
@@ -25,9 +21,6 @@ func TestClaimSocketNamesGivesOneClaimOneSocket(t *testing.T) {
 			},
 			want: map[string]string{"hdmi-a-1": "wayland-" + testClaimUID},
 		},
-		// A socket belongs to one output, because the module remembers
-		// which output the surfaces on it go on, so a second connector
-		// takes a name of its own.
 		"two screens": {
 			results: []AllocatedDevice{
 				{Request: "left", Driver: DriverName, Device: "hdmi-a-1"},
@@ -38,8 +31,6 @@ func TestClaimSocketNamesGivesOneClaimOneSocket(t *testing.T) {
 				"hdmi-a-2": "wayland-" + testClaimUID + "-hdmi-a-2",
 			},
 		},
-		// A control result draws nothing, and another driver's result
-		// is that driver's own to prepare.
 		"a control channel and another driver": {
 			results: []AllocatedDevice{
 				{Request: "panel", Driver: DriverName, Device: "hdmi-a-1-control"},
@@ -62,16 +53,13 @@ func TestClaimSocketNamesGivesOneClaimOneSocket(t *testing.T) {
 }
 
 func TestPrepareOpensTheClaimsOwnSocket(t *testing.T) {
-	// The socket is the claim's identity, so the module opens it for
-	// the connector the claim allocated before the spec that names it
-	// is written.
 	plugin, _, module := labPluginWithModule(t, []AllocatedDevice{
 		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-1"},
 	}, "")
 
 	claim := prepare(t, plugin)
 	if claim.Error != "" {
-		t.Fatalf("prepare refused a live output: %s", claim.Error)
+		t.Fatalf("prepare returned the error %q for a connected output", claim.Error)
 	}
 	want := "listen wayland-" + testClaimUID + " HDMI-A-1"
 	if requests := module.read(); !containsString(requests, want) {
@@ -80,9 +68,6 @@ func TestPrepareOpensTheClaimsOwnSocket(t *testing.T) {
 }
 
 func TestPrepareOpensOneSocketForEachConnector(t *testing.T) {
-	// A claim on two screens holds one socket on each of them, and the
-	// second one carries the output's name so that the module can tell
-	// which screen a surface arrived for.
 	plugin, _, module := labPluginWithModule(t, []AllocatedDevice{
 		{Request: "left", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-1"},
 		{Request: "right", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-2"},
@@ -90,7 +75,7 @@ func TestPrepareOpensOneSocketForEachConnector(t *testing.T) {
 
 	claim := prepare(t, plugin)
 	if claim.Error != "" {
-		t.Fatalf("prepare refused two live outputs: %s", claim.Error)
+		t.Fatalf("prepare returned the error %q for two connected outputs", claim.Error)
 	}
 	requests := module.read()
 	for _, want := range []string{
@@ -101,10 +86,9 @@ func TestPrepareOpensOneSocketForEachConnector(t *testing.T) {
 			t.Errorf("the module read %q, want %q in it", requests, want)
 		}
 	}
-	// The spec is what tells each container which name is its own.
 	spec := preparedSpec(t)
 	if len(spec.Devices) != 2 {
-		t.Fatalf("spec devices = %+v", spec.Devices)
+		t.Fatalf("the CDI spec has devices %+v, want 2", spec.Devices)
 	}
 	for _, device := range spec.Devices {
 		want := "wayland-" + testClaimUID
@@ -112,16 +96,16 @@ func TestPrepareOpensOneSocketForEachConnector(t *testing.T) {
 			want += "-hdmi-a-2"
 		}
 		if got := waylandSocket(device.ContainerEdits); got != want {
-			t.Errorf("%s delivers %q, want %q", device.Name, got, want)
+			t.Errorf("the socket of %s is %q, want %q", device.Name, got, want)
 		}
 	}
 }
 
 func TestPrepareRefusesWhileTheLayoutModuleIsNotServing(t *testing.T) {
-	// The compositor answers on its socket and its module answers
-	// nothing, which is the window a compositor restart opens. A
-	// delivery now would name a socket that nothing listens on, so the
-	// kubelet holds the pod and retries.
+	// During a compositor restart, the compositor accepts connections
+	// before the module serves. A CDI spec written then would name a
+	// socket that nothing listens on, so prepare fails and the kubelet
+	// retries.
 	plugin, _, _ := labPluginWithModule(t, []AllocatedDevice{
 		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-1"},
 	}, "")
@@ -129,10 +113,10 @@ func TestPrepareRefusesWhileTheLayoutModuleIsNotServing(t *testing.T) {
 
 	claim := prepare(t, plugin)
 	if !strings.Contains(claim.Error, "layout module is not serving") {
-		t.Errorf("prepare answered %q, want the module named", claim.Error)
+		t.Errorf("prepare returned the error %q, want one that reports the layout module is not serving", claim.Error)
 	}
 	if files := specFiles(t); len(files) != 0 {
-		t.Errorf("prepare wrote %v with no module serving", files)
+		t.Errorf("prepare wrote the spec files %v while the module was not serving, want none", files)
 	}
 }
 
@@ -141,7 +125,7 @@ func TestUnprepareClosesTheClaimsSocket(t *testing.T) {
 		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-1"},
 	}, "")
 	if claim := prepare(t, plugin); claim.Error != "" {
-		t.Fatalf("prepare refused a live output: %s", claim.Error)
+		t.Fatalf("prepare returned the error %q for a connected output", claim.Error)
 	}
 
 	unprepare(t, plugin)
@@ -153,14 +137,11 @@ func TestUnprepareClosesTheClaimsSocket(t *testing.T) {
 }
 
 func TestUnprepareSucceedsWithNoModuleServing(t *testing.T) {
-	// The sockets exist only in the running compositor, so a module
-	// that is gone took them already. An unprepare that failed here
-	// would hold the kubelet for a socket that is gone.
 	plugin, _, _ := labPluginWithModule(t, []AllocatedDevice{
 		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-1"},
 	}, "")
 	if claim := prepare(t, plugin); claim.Error != "" {
-		t.Fatalf("prepare refused a live output: %s", claim.Error)
+		t.Fatalf("prepare returned the error %q for a connected output", claim.Error)
 	}
 	plugin.layout = newLayoutLink(layoutSocketPath)
 
@@ -172,31 +153,28 @@ func TestUnprepareSucceedsWithNoModuleServing(t *testing.T) {
 }
 
 func TestReplayOpensEverySocketThePreparedClaimsHold(t *testing.T) {
-	// The compositor restarts on every mode change, and every socket
-	// the module opened goes with it. The specs on disk are what says
-	// which claims still hold one.
 	plugin, _, module := labPluginWithModule(t, []AllocatedDevice{
 		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-1"},
 	}, "")
 	if claim := prepare(t, plugin); claim.Error != "" {
-		t.Fatalf("prepare refused a live output: %s", claim.Error)
+		t.Fatalf("prepare returned the error %q for a connected output", claim.Error)
 	}
-	// A pod prepared before the per-claim sockets existed holds
-	// wayland-0, which weston opens itself, and the draw companion of
-	// another claim holds that claim's own socket.
+	// A draw device of another claim sets that claim's socket. A spec
+	// that sets wayland-0, the compositor's own socket, must not be
+	// replayed.
 	if err := writeCDISpec("idle", []cdiDevice{
 		{Name: "idle-hdmi-a-2-draw", ContainerEdits: outputEdits(plugin.socketDir, "wayland-idle", "hdmi-a-2")},
 	}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 	if err := writeCDISpec("old", []cdiDevice{
 		{Name: "old-hdmi-a-2", ContainerEdits: outputEdits(plugin.socketDir, socketName, "hdmi-a-2")},
 	}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 
 	if err := plugin.replaySockets(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("replaying the sockets: %v", err)
 	}
 
 	requests := module.read()
@@ -209,33 +187,31 @@ func TestReplayOpensEverySocketThePreparedClaimsHold(t *testing.T) {
 		}
 	}
 	if containsString(requests, "listen wayland-0 HDMI-A-2") {
-		t.Errorf("the replay re-opened the compositor's own socket: %q", requests)
+		t.Errorf("the replay opened the compositor's own socket again: %q", requests)
 	}
 }
 
 func TestReplayReportsASocketWhoseOutputTheCardDoesNotCarry(t *testing.T) {
-	// A monitor that left between the prepare and the restart has no
-	// connector to open a socket on. One such claim must not cost
-	// every other claim its socket, so the failure names it and the
-	// rest are opened.
+	// A monitor unplugged between prepare and the restart has no
+	// connector to open a socket on.
 	plugin, _, module := labPluginWithModule(t, nil, "")
 	if err := writeCDISpec("gone", []cdiDevice{
 		{Name: "gone-hdmi-a-9", ContainerEdits: outputEdits(plugin.socketDir, "wayland-gone", "hdmi-a-9")},
 	}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 	if err := writeCDISpec("live", []cdiDevice{
 		{Name: "live-hdmi-a-1", ContainerEdits: outputEdits(plugin.socketDir, "wayland-live", "hdmi-a-1")},
 	}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 
 	err := plugin.replaySockets()
 	if err == nil {
-		t.Fatal("the replay answered no error for an output the card does not carry")
+		t.Fatal("replaySockets returned no error for an output the card does not have, want an error")
 	}
 	if !strings.Contains(err.Error(), "hdmi-a-9") {
-		t.Errorf("the error is %q, and it does not name the output", err)
+		t.Errorf("the error is %q, want it to name hdmi-a-9", err)
 	}
 	if want := "listen wayland-live HDMI-A-1"; !containsString(module.read(), want) {
 		t.Errorf("the module read %q, want %q in it", module.read(), want)
@@ -244,26 +220,22 @@ func TestReplayReportsASocketWhoseOutputTheCardDoesNotCarry(t *testing.T) {
 
 func TestPreparedSocketsReadsTheSpecsTheDriverWrote(t *testing.T) {
 	cdiDir = t.TempDir()
-	// One claim on two screens, and a control device that delivers no
-	// socket at all.
 	if err := writeCDISpec("two", []cdiDevice{
 		{Name: "two-hdmi-a-1", ContainerEdits: outputEdits("/run/display", "wayland-two", "hdmi-a-1")},
 		{Name: "two-hdmi-a-1-draw", ContainerEdits: outputEdits("/run/display", "wayland-two", "hdmi-a-1")},
 		{Name: "two-hdmi-a-2", ContainerEdits: outputEdits("/run/display", "wayland-two-hdmi-a-2", "hdmi-a-2")},
 		{Name: "two-hdmi-a-2-control", ContainerEdits: controlEdits("/dev/i2c-4")},
 	}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 
-	// The draw device shares the output's socket, so the claim holds
-	// two names and not three.
 	sockets, err := preparedSockets("two")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the sockets of claim two: %v", err)
 	}
 	want := []string{"wayland-two", "wayland-two-hdmi-a-2"}
 	if len(sockets) != len(want) {
-		t.Fatalf("the claim holds %v, want %v", sockets, want)
+		t.Fatalf("the claim has the sockets %v, want %v", sockets, want)
 	}
 	for i, socket := range want {
 		if sockets[i] != socket {
@@ -273,7 +245,7 @@ func TestPreparedSocketsReadsTheSpecsTheDriverWrote(t *testing.T) {
 
 	outputs, err := preparedSocketOutputs()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the prepared socket outputs: %v", err)
 	}
 	for socket, output := range map[string]string{
 		"wayland-two":          "hdmi-a-1",
@@ -289,16 +261,15 @@ func TestPreparedSocketsReadsTheSpecsTheDriverWrote(t *testing.T) {
 }
 
 func TestPreparedSocketsReadsAClaimThatIsAlreadyGone(t *testing.T) {
-	// The kubelet repeats an unprepare whenever it has no record that
-	// the call succeeded, so the second call finds the file gone and
-	// has nothing left to close.
+	// The kubelet repeats an unprepare when it has no record that the
+	// first one succeeded, and the spec file is already deleted.
 	cdiDir = t.TempDir()
 
 	sockets, err := preparedSockets("never-prepared")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the sockets of a claim that was never prepared: %v", err)
 	}
 	if len(sockets) != 0 {
-		t.Errorf("a claim with no spec holds %v", sockets)
+		t.Errorf("a claim with no spec has the sockets %v, want none", sockets)
 	}
 }

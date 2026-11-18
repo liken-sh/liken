@@ -1,41 +1,25 @@
 package main
 
-// Reading the mode each output runs right now, straight from
-// the card node, with the DRM mode-getting ioctls.
+// readCurrentModes and readConnectorModes read the card node with the
+// DRM mode ioctls. The first returns the mode each output runs, and the
+// second the modes each connector offers.
 //
-// Why the ioctls and not sysfs, weston, or debugfs: sysfs
-// publishes the modes a connector accepts and never the one it runs;
-// weston reports the running mode only over its private IPC; debugfs
-// is not mounted in a container. GETCRTC needs no DRM master, no
-// capability, and no library, and it answers while the compositor
-// holds master, which the feasibility drill proved on the lab
-// machine.
+// The current mode has no other source in the container. sysfs lists
+// the modes a connector offers but not the one it runs, weston reports
+// the running mode only over its private IPC, and debugfs is not
+// mounted. These ioctls need no DRM master, so they work while the
+// compositor is master. Each read uses a file that the gate in
+// cardgate.go opens.
 //
-// Each read takes a file on the card from the gate in cardgate.go.
-// The gate opens the card only while the operator holds a connection
-// to a compositor, and it
-// drops DRM master before the walk sends its first request.
+// The ioctl numbers and structs copy the kernel's ABI, because the
+// operator links no libdrm. Each struct must match the kernel's layout
+// field for field, because the kernel reads and writes each field at
+// its offset and copies only as many bytes as the size in the request
+// number.
 //
-// The walk is GETRESOURCES to list the connectors and crtcs,
-// GETCONNECTOR for each connector's encoder, GETENCODER for that
-// encoder's crtc, and GETCRTC for the mode the crtc drives. A
-// connector with no encoder and an encoder on no crtc are both an
-// output that drives nothing.
-//
-// The ioctl numbers and the structs are the kernel's ABI, in
-// full here because this operator links no libdrm. Each struct must
-// keep its field order and its size: the request number carries the
-// size, and the kernel refuses a call whose size it does not
-// recognize.
-//
-// The two-pass GETRESOURCES is the kernel's counting protocol.
-// The first pass answers how many connectors and crtcs the card has,
-// and the second pass fills the arrays the caller allocated for them.
-
-// This file answers two questions from that same walk: the mode
-// each output runs now, and the modes each connector offers. The
-// second uses GETCONNECTOR's own counting protocol, one call to
-// count and one to fill, the same shape GETRESOURCES takes.
+// GETRESOURCES and GETCONNECTOR each take two calls. The first, with
+// zero counts, returns how many entries exist. The second fills arrays
+// that the caller allocated to that size.
 
 import (
 	"fmt"
@@ -45,8 +29,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The four mode-getting requests, encoded with their direction
-// and their struct size, as <drm/drm.h> writes them.
+// The request numbers from <drm/drm.h>. Each encodes the direction and
+// the size of its struct.
 const (
 	drmGetResources = 0xC04064A0
 	drmGetCrtc      = 0xC06864A1
@@ -54,10 +38,10 @@ const (
 	drmGetConnector = 0xC05064A7
 )
 
-// Drm_mode_modeinfo, the timings of one mode. Two fields are read
-// here. The name is the vocabulary a claim, the sysfs list, and
-// weston.ini all speak. Vrefresh is the kernel's rounded rate, the
-// integer weston compares a claim's @refresh against.
+// drmModeInfo is the kernel's drm_mode_modeinfo, the timings of one
+// mode. The operator reads Name, which has the format of the sysfs mode
+// list, a claim's mode, and weston.ini, and Vrefresh, the refresh rate
+// rounded to an integer, which weston compares with a claim's @refresh.
 type drmModeInfo struct {
 	Clock                                         uint32
 	Hdisplay, HsyncStart, HsyncEnd, Htotal, Hskew uint16
@@ -66,17 +50,16 @@ type drmModeInfo struct {
 	Name                                          [32]byte
 }
 
-// Drm_mode_card_res. The pointer fields carry the addresses of
-// arrays the caller allocated, and the count fields carry their
-// lengths in and the card's own numbers out.
+// drmCardResources is the kernel's drm_mode_card_res. The count fields
+// hold the lengths of the caller's arrays on input and the card's totals
+// on output.
 type drmCardResources struct {
 	FbIDPtr, CrtcIDPtr, ConnectorIDPtr, EncoderIDPtr     uint64
 	CountFbs, CountCrtcs, CountConnectors, CountEncoders uint32
 	MinWidth, MaxWidth, MinHeight, MaxHeight             uint32
 }
 
-// Drm_mode_crtc. ModeValid is the field that says whether Mode
-// describes anything.
+// drmCrtc is the kernel's drm_mode_crtc.
 type drmCrtc struct {
 	SetConnectorsPtr                    uint64
 	CountConnectors, CrtcID, FbID, X, Y uint32
@@ -84,8 +67,8 @@ type drmCrtc struct {
 	Mode                                drmModeInfo
 }
 
-// Drm_mode_get_connector. The counts are left at zero, so the
-// kernel fills in the scalar fields and copies no arrays.
+// drmConnector is the kernel's drm_mode_get_connector. With every count
+// zero, the kernel fills only the scalar fields and copies no arrays.
 type drmConnector struct {
 	EncodersPtr, ModesPtr, PropsPtr, PropValuesPtr uint64
 	CountModes, CountProps, CountEncoders          uint32
@@ -94,17 +77,16 @@ type drmConnector struct {
 	MmWidth, MmHeight, Subpixel, Pad               uint32
 }
 
-// Drm_mode_get_encoder. CrtcID is the whole reason for this
-// call: it is what ties a connector to the crtc that drives it.
+// drmEncoder is the kernel's drm_mode_get_encoder. CrtcID is the crtc
+// that drives the encoder's connector, or 0 for none.
 type drmEncoder struct {
 	EncoderID, EncoderType, CrtcID uint32
 	PossibleCrtcs, PossibleClones  uint32
 }
 
-// The kernel's own connector-type names, in its own numbering.
-// sysfs names a connector directory by this table and a counter per
-// type, so the same pair reproduces the name that everything else
-// here keys on.
+// drmConnectorTypes maps the kernel's connector type numbers to the
+// type names in the kernel's connector names, such as HDMI-A in
+// HDMI-A-1.
 var drmConnectorTypes = map[uint32]string{
 	1: "VGA", 2: "DVI-I", 3: "DVI-D", 4: "DVI-A", 5: "Composite",
 	6: "SVIDEO", 7: "LVDS", 8: "Component", 9: "DIN", 10: "DP",
@@ -112,10 +94,11 @@ var drmConnectorTypes = map[uint32]string{
 	16: "DSI", 17: "DPI", 18: "Writeback", 19: "SPI", 20: "USB",
 }
 
-// ConnectorName rebuilds the sysfs name of one connector.
-// A type this table does not carry answers nothing, and the caller
-// publishes no mode for it, because a name this operator guessed
-// would key a record that weston.ini never matches.
+// connectorName returns the kernel's name for a connector, the name
+// that sysfs, weston.ini, and the rest of the operator use. It returns
+// "" for a type that the table lacks, and the callers skip that
+// connector, because a guessed name would match no connector in sysfs
+// or weston.ini.
 func connectorName(connectorType, typeID uint32) string {
 	name, known := drmConnectorTypes[connectorType]
 	if !known {
@@ -124,12 +107,11 @@ func connectorName(connectorType, typeID uint32) string {
 	return fmt.Sprintf("%s-%d", name, typeID)
 }
 
-// CrtcMode is the mode a crtc drives, as NAME@REFRESH, the same
-// vocabulary a claim states, and nothing while it drives none. The
-// name stands alone when the card reports no refresh, because
-// 1280x720@0 names a mode nothing accepts. The kernel sets
-// ModeValid only while the crtc is enabled, and it leaves whatever
-// the caller sent in the Mode field otherwise.
+// crtcMode returns the mode a crtc drives as NAME@REFRESH, the format
+// that claims use, or "" when the crtc drives none. The kernel fills
+// Mode only when it sets ModeValid. When the card reports no refresh,
+// crtcMode returns the name alone, because a mode such as 1280x720@0
+// matches nothing.
 func crtcMode(crtc drmCrtc) string {
 	if crtc.ModeValid == 0 {
 		return ""
@@ -141,9 +123,8 @@ func crtcMode(crtc drmCrtc) string {
 	return fmt.Sprintf("%s@%d", name, crtc.Mode.Vrefresh)
 }
 
-// ModeName reads the kernel's fixed 32-byte name field. The name
-// ends at a NUL unless it fills the whole array, so the copy stops
-// at the first zero and takes all 32 bytes when there is none.
+// modeName reads the kernel's 32-byte name field, which ends at the
+// first NUL byte or fills all 32 bytes.
 func modeName(info drmModeInfo) string {
 	name := info.Name[:]
 	for i, b := range name {
@@ -154,18 +135,16 @@ func modeName(info drmModeInfo) string {
 	return string(name)
 }
 
-// A drmMode is one timing a connector offers right now: the name
-// every mode list here speaks, and the kernel's rounded vrefresh.
-// Sysfs publishes the same names with no refresh beside them, which
-// is why validation reads these and not the file.
+// drmMode is one mode that a connector offers. sysfs lists the same
+// names without refresh rates, so a claim's mode is validated against
+// these.
 type drmMode struct {
 	Name    string
 	Refresh int
 }
 
-// ReadConnectorModes answers what each connector offers right now,
-// keyed by the connector name sysfs uses, from a file the gate
-// opened. This is the list a claim's mode is validated against.
+// readConnectorModes returns the modes each connector offers, keyed by
+// connector name.
 func readConnectorModes(fd int) (map[string][]drmMode, error) {
 	connectors, err := cardConnectors(fd)
 	if err != nil {
@@ -182,11 +161,10 @@ func readConnectorModes(fd int) (map[string][]drmMode, error) {
 	return offered, nil
 }
 
-// ConnectorModeList runs the counting protocol for one connector's
-// modes: the first call answers how many there are, and the second
-// fills the array the caller sized from the count. A list that grew
-// between the two calls answers nothing, and the next pass reads it
-// whole.
+// connectorModeList returns one connector's name and offered modes. It
+// calls GETCONNECTOR once to count the modes and once to fill an array
+// of that size. If the list grew between the two calls it returns no
+// modes, and the next pass reads the list again.
 func connectorModeList(fd int, id uint32) (string, []drmMode, error) {
 	counted := drmConnector{ConnectorID: id}
 	if err := drmIoctl(fd, drmGetConnector, unsafe.Pointer(&counted)); err != nil {
@@ -217,13 +195,10 @@ func connectorModeList(fd int, id uint32) (string, []drmMode, error) {
 	return name, modes, nil
 }
 
-// ReadCurrentModes answers the mode each of the card's outputs
-// runs right now, keyed by the connector name sysfs uses, from a file
-// the gate opened.
-//
-// An output that runs no mode is absent from the map rather
-// than present with an empty value, because absent is what the slice
-// publishes for it and what a wait for a mode change must not accept.
+// readCurrentModes returns the mode each output runs, keyed by connector
+// name. An output that runs no mode is absent from the map, not present
+// with an empty value. The slice publishes nothing for it, and a wait
+// for a mode change must not treat it as a mode.
 func readCurrentModes(fd int) (map[string]string, error) {
 	connectors, err := cardConnectors(fd)
 	if err != nil {
@@ -233,9 +208,8 @@ func readCurrentModes(fd int) (map[string]string, error) {
 	for _, id := range connectors {
 		name, mode, err := connectorMode(fd, id)
 		if err != nil || name == "" || mode == "" {
-			// One connector that answers nothing costs its own
-			// entry and never the whole read. A card removes a connector
-			// while this walk runs when its driver unbinds.
+			// Skip only this connector, because the kernel can remove a
+			// connector between GETRESOURCES and GETCONNECTOR.
 			continue
 		}
 		modes[name] = mode
@@ -243,8 +217,7 @@ func readCurrentModes(fd int) (map[string]string, error) {
 	return modes, nil
 }
 
-// CardConnectors runs the counting protocol and answers the
-// card's connector ids.
+// cardConnectors returns the ids of the card's connectors.
 func cardConnectors(fd int) ([]uint32, error) {
 	var resources drmCardResources
 	if err := drmIoctl(fd, drmGetResources, unsafe.Pointer(&resources)); err != nil {
@@ -255,9 +228,9 @@ func cardConnectors(fd int) ([]uint32, error) {
 	}
 	connectors := make([]uint32, resources.CountConnectors)
 	resources.ConnectorIDPtr = uint64(uintptr(unsafe.Pointer(&connectors[0])))
-	// The framebuffer, crtc, and encoder arrays stay unasked
-	// for. A count of zero tells the kernel to copy none of them, and
-	// this walk reaches the crtc through the connector's encoder.
+	// Zero counts make the kernel skip the framebuffer, crtc, and
+	// encoder arrays. connectorMode reaches each crtc through its
+	// connector's encoder.
 	resources.CountFbs, resources.CountCrtcs, resources.CountEncoders = 0, 0, 0
 	err := drmIoctl(fd, drmGetResources, unsafe.Pointer(&resources))
 	runtime.KeepAlive(connectors)
@@ -267,9 +240,9 @@ func cardConnectors(fd int) ([]uint32, error) {
 	return connectors, nil
 }
 
-// ConnectorMode follows one connector to its encoder, that
-// encoder to its crtc, and answers the connector's name and the mode
-// the crtc drives.
+// connectorMode follows one connector to its encoder with GETCONNECTOR
+// and GETENCODER, and reads the mode of the encoder's crtc with
+// GETCRTC. It returns the connector's name and that mode.
 func connectorMode(fd int, id uint32) (string, string, error) {
 	connector := drmConnector{ConnectorID: id}
 	if err := drmIoctl(fd, drmGetConnector, unsafe.Pointer(&connector)); err != nil {
@@ -277,9 +250,8 @@ func connectorMode(fd int, id uint32) (string, string, error) {
 	}
 	name := connectorName(connector.ConnectorType, connector.ConnectorTypeID)
 	if connector.EncoderID == 0 {
-		// A connector with no encoder drives nothing, which is
-		// every connector with no monitor on it and every connector the
-		// compositor left disabled.
+		// The connector drives nothing: no monitor is on it, or the
+		// compositor left it disabled.
 		return name, "", nil
 	}
 	encoder := drmEncoder{EncoderID: connector.EncoderID}
@@ -296,9 +268,7 @@ func connectorMode(fd int, id uint32) (string, string, error) {
 	return name, crtcMode(crtc), nil
 }
 
-// DrmIoctl is the one syscall this file makes. The kernel
-// answers an errno, and Go's ioctl wrappers cover none of these
-// requests.
+// drmIoctl sends one DRM ioctl and returns its errno.
 func drmIoctl(fd int, request uint, arg unsafe.Pointer) error {
 	_, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(request), uintptr(arg))
 	if errno != 0 {

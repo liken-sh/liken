@@ -1,30 +1,24 @@
 package main
 
-// The DDC/CI client: how the operator reaches a monitor's own
-// controls.
+// A DDC/CI client for monitor controls such as brightness, power, and
+// input source.
 //
-// Two wires of a display cable are an I2C bus, and the monitor
-// answers on that bus in DDC/CI, the VESA protocol that reads and
-// sets the same controls as the buttons on the monitor's bezel:
-// brightness, power, input source. The kernel exposes each
-// connector's bus as a /dev/i2c-N node, so a process that holds the
-// node can set those controls with a few bytes, without a compositor,
-// a library, or a helper binary. This file is the protocol: it builds
-// the request packets, reads the replies, and waits the delays the
-// specification requires.
+// DDC/CI is the VESA protocol that a monitor speaks over two wires of
+// its display cable, which form an I2C bus. The kernel exposes each
+// connector's bus as a /dev/i2c-N node, so a process that opens the
+// node can read and set a control with a few bytes. No compositor,
+// library, or helper binary is needed.
 //
-// The operator speaks the protocol itself rather than running
-// ddcutil, because the operator's image holds one static binary and
-// nothing else, and the whole exchange is five bytes out and eleven
-// back. That is less code than running another program and parsing
-// its output.
+// The operator implements the protocol itself instead of running
+// ddcutil, because its image holds only its own static binary, and a
+// Get is five bytes out and eleven bytes back.
 //
-// The delays below come from the specification. A monitor's DDC
-// receiver is a slow microcontroller, and the specification states
-// how long the host must wait between messages. A host that reads
-// early gets a garbled reply from a working panel.
+// A monitor's DDC receiver is a slow microcontroller, and the
+// specification sets how long the host must wait between messages. A
+// host that reads too early gets a garbled reply from a working
+// monitor.
 //
-// Section numbers in this file cite VESA DDC/CI 1.1.
+// Section numbers in this file refer to VESA DDC/CI 1.1.
 
 import (
 	"errors"
@@ -37,17 +31,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// DDC/CI addressing, which the specification writes in 8-bit form and
-// Linux writes in 7-bit form. The display answers at 7-bit 0x37. The
-// wire carries that address shifted left with a direction bit behind
-// it: 0x6e writes to the display and 0x6f reads from it. The host has
-// a pair of its own, virtual because no hardware answers at it: 0x50
-// and 0x51, and a request names 0x51 as its source. (Sections 2.2
-// and 2.3.)
-//
-// 0x6e appears in two places. It is the byte the kernel drives on the
-// wire to address the display, and it is the first byte of a reply,
-// the source address the display writes.
+// The specification writes DDC/CI addresses in 8-bit form, and Linux
+// uses the 7-bit form. The display is at 7-bit address 0x37. On the
+// wire the address is shifted left one bit and followed by a direction
+// bit, so 0x6e is a write to the display and 0x6f is a read from it.
+// The host has its own virtual pair, 0x50 and 0x51, where no hardware
+// responds, and a request uses 0x51 as its source address (sections
+// 2.2 and 2.3). A reply starts with 0x6e, the display's write address,
+// as its source address.
 const (
 	ddcDisplayAddress = 0x37
 	ddcWriteAddress   = ddcDisplayAddress << 1
@@ -56,106 +47,102 @@ const (
 	ddcReplySource    = 0x6e
 )
 
-// The three opcodes this operator sends and reads. VCP, the Virtual
-// Control Panel, is the register file behind DDC/CI: every control is
-// a numbered code, and the MCCS specification names many more codes
-// than the ones this operator touches.
+// Opcodes of the VCP (Virtual Control Panel) messages. VCP is the set
+// of numbered controls, such as 0x10 for brightness, that a host reads
+// and writes over DDC/CI.
 const (
 	vcpGetRequest = 0x01
 	vcpGetReply   = 0x02
 	vcpSetRequest = 0x03
 )
 
-// The length byte of every DDC/CI message: the high bit is always
-// set, and the low seven bits count the data bytes that follow. The
-// source address before the count and the checksum after it are not
-// in the count.
+// The length byte of a DDC/CI message always has its high bit set,
+// and its low seven bits count the data bytes that follow. The count
+// excludes the source address before the length byte and the checksum
+// after the data.
 const (
 	ddcLengthFlag = 0x80
 	ddcLengthMask = 0x7f
 )
 
-// The result code of a Get reply. Zero says the display answered the
-// code. One says the display has no such control, which is a
-// well-formed answer. The wire did not fail.
+// The result code in a Get reply. Zero means the display returned the
+// control's value. One means the display has no such control. That is
+// a valid reply, not a bus failure.
 const (
 	vcpResultOK          = 0x00
 	vcpResultUnsupported = 0x01
 )
 
-// A Get VCP Feature reply is eight data bytes, eleven with the source
-// address and the checksum around them. The specification draws the
-// frame with a twelfth byte in front, the 0x6f that addresses the
-// read, but the kernel consumes that byte and it never reaches this
-// buffer.
+// A Get VCP Feature reply has eight data bytes, and eleven with the
+// source address and the checksum. The specification's frame has a
+// twelfth byte at the front, the 0x6f read address, but the kernel
+// consumes it, so it is not in the buffer that Read fills.
 const (
 	getReplyDataLength = 8
 	getReplyLength     = getReplyDataLength + 3
 )
 
-// These delays are the specification's numbers. A display needs 40ms
-// to decode a request and prepare its reply before the host may read
-// it (sections 4.3 and 6.6). After a Set, a display needs 50ms before
-// it accepts the next message (section 4.4). Between a failed attempt
-// and its retry, the host waits 40ms (section 5).
+// The delays come from the specification. A display needs 40ms to
+// decode a request and prepare its reply before the host reads it
+// (sections 4.3 and 6.6). After a Set, it needs 50ms before it accepts
+// the next message (section 4.4). The host waits 40ms between a failed
+// attempt and its retry (section 5).
 //
-// The reply delay is the first attempt's wait, and each retry
-// doubles it: 40ms, then 80ms, then 160ms. The lab's LG answers
-// DDC/CI later than the specification's number, and a probe that
-// waited 40ms three times read it as a panel with no DDC/CI at all.
-// ddcutil finds the same panel because it waits longer. Doubling
-// keeps a panel that answers on time at 40ms.
+// ddcReplyDelay is the wait before the first read, and each retry
+// doubles it: 40ms, 80ms, then 160ms. Some monitors reply later than
+// 40ms, and with a fixed 40ms wait the probe reports such a monitor as
+// one with no DDC/CI. A monitor that replies on time still gets its
+// reply read after 40ms.
 const (
 	ddcReplyDelay = 40 * time.Millisecond
 	ddcSetDelay   = 50 * time.Millisecond
 	ddcRetryDelay = 40 * time.Millisecond
 )
 
-// The gap between the end of one exchange on a bus and the start of the
-// next, when the two belong to different callers. Each caller waits the
-// specification's delays inside its own exchange, and this gap is the
-// same 50ms for the message that follows another caller's (section 4.4).
+// ddcBusGap is how long a caller waits after another caller's
+// exchange on the same bus ends. It is the 50ms that section 4.4
+// requires after a Set.
 const ddcBusGap = 50 * time.Millisecond
 
-// One refusal says nothing about a monitor. A panel that is busy with
-// its own menu, or that just powered on, drops one message and
-// answers the next, so a Get runs up to three attempts. Section 5 asks the host
-// for three retries, which is four attempts; this operator stops at
-// three because the probe runs against every connector on the card,
-// and each attempt against a dead address costs its full delay.
+// A monitor that is busy with its own menu or has just powered on
+// drops one message and replies to the next, so one failed read does not
+// show that the monitor lacks DDC/CI. Section 5 asks the host for
+// three retries, which is four attempts. The operator stops at three,
+// because the probe reads every connector on the card, and on a
+// connector with no monitor each attempt fails and adds its delay.
 const ddcGetAttempts = 3
 
 // I2C_SLAVE, from <linux/i2c-dev.h>. The ioctl binds a slave address
-// to the open descriptor, and every later read and write on that
-// descriptor talks to the bound address. That is why no packet in
-// this file carries the display's address: the kernel adds it on the
-// wire.
+// to an open descriptor, and the kernel sends that address before
+// every later read and write on it. So no packet in this file contains
+// the display's address.
 const i2cSlaveRequest = 0x0703
 
-// The three failures a caller must tell apart. ErrNoAnswer: nothing
-// answered the address, so this connector has no monitor or no
-// DDC/CI. ErrGarbledReply: something answered outside the protocol,
-// and a retry may get a clean reply. ErrUnsupportedVCP: the display
-// answered plainly that it has no such control, so the capability is
-// absent and asking again changes nothing.
+// Callers handle each of these failures differently:
+//
+//   - ErrNoAnswer: nothing responded at the address, so the connector
+//     has no monitor or the monitor has no DDC/CI.
+//   - ErrGarbledReply: something responded with bytes that are not a
+//     valid reply. A retry may get a clean one.
+//   - ErrUnsupportedVCP: the display replied that it has no such
+//     control. Asking again gives the same reply.
 var (
-	ErrNoAnswer       = errors.New("no display answered on the DDC/CI address")
-	ErrGarbledReply   = errors.New("the display answered bytes that are not a DDC/CI reply")
-	ErrUnsupportedVCP = errors.New("the display carries no such VCP code")
+	ErrNoAnswer       = errors.New("no device replied on the DDC/CI address")
+	ErrGarbledReply   = errors.New("the bytes that the display returned are not a valid DDC/CI reply")
+	ErrUnsupportedVCP = errors.New("the display does not support the VCP code")
 )
 
-// The bus is an interface because the packet format and the timing
-// are the parts worth testing, and neither needs a monitor. A Write
-// is one I2C write transaction and a Read is one I2C read
-// transaction, both to the address the node was bound to at open.
+// i2cBus is an interface so tests can check the packets and the
+// timing without a monitor. Write is one I2C write transaction and
+// Read is one I2C read transaction, both to the address that was bound
+// when the node was opened.
 type i2cBus interface {
 	Write(request []byte) error
 	Read(reply []byte) error
 }
 
-// A DDC speaks the protocol over one bus. sleep is a field so a test
-// can run the exchanges without waiting out the specification's
-// delays.
+// A DDC runs the protocol over one bus. sleep is a field so tests can
+// record the delays without waiting.
 type DDC struct {
 	bus   i2cBus
 	sleep func(time.Duration)
@@ -166,15 +153,9 @@ func newDDC(bus i2cBus) *DDC {
 	return &DDC{bus: bus, sleep: time.Sleep}
 }
 
-// GetVCP asks the display for one control and returns the value the
-// control holds now and the largest value it accepts, both 16-bit.
-// The maximum is what turns a raw value into a percentage. A caller
-// probes for a control by asking for it and checking for
-// ErrUnsupportedVCP, the display's answer that the control is absent.
-//
-// The retry is here rather than in the caller, because one refusal
-// says nothing about the monitor and every caller would need the same
-// loop.
+// GetVCP reads one control and returns its current value and its
+// maximum value, both 16-bit. A caller finds out whether a control
+// exists by reading it and checking for ErrUnsupportedVCP.
 func (d *DDC) GetVCP(code byte) (uint16, uint16, error) {
 	var err error
 	wait := ddcReplyDelay
@@ -189,22 +170,16 @@ func (d *DDC) GetVCP(code byte) (uint16, uint16, error) {
 			return current, max, nil
 		}
 		if errors.Is(err, ErrUnsupportedVCP) {
-			// A display that named the code unsupported will name it
-			// unsupported again. Two more attempts would wait 80ms
-			// for the same answer.
+			// The display gives the same result on every attempt.
 			break
 		}
 	}
 	return 0, 0, fmt.Errorf("reading VCP code %#04x: %w", code, err)
 }
 
-// getOnce is the one exchange: write the request, wait, read the
-// fixed-length reply. Reading a fixed length is safe even when the
-// display's answer is shorter, because section 6.5 makes a display
-// pad a short answer rather than hold the bus.
-//
-// The caller states the wait, because the wait grows with each
-// attempt.
+// getOnce writes the request, waits, and reads a fixed-length reply.
+// A fixed length is safe because section 6.5 has the display pad a
+// shorter reply instead of holding the bus.
 func (d *DDC) getOnce(code byte, wait time.Duration) (uint16, uint16, error) {
 	if err := d.bus.Write(getRequest(code)); err != nil {
 		return 0, 0, fmt.Errorf("%w: %w", ErrNoAnswer, err)
@@ -217,11 +192,10 @@ func (d *DDC) getOnce(code byte, wait time.Duration) (uint16, uint16, error) {
 	return parseGetReply(reply, code)
 }
 
-// SetVCP writes one control. The display acknowledges the bytes on
-// the wire and sends nothing back, so the only proof the control
-// moved is a Get afterwards. The caller owns that readback. The delay
-// here is what makes the readback meaningful: a Get inside the
-// display's settle window reads the value the Set replaced.
+// SetVCP writes one control. The display sends no reply to a Set, so
+// a caller that must confirm the change reads it back with GetVCP, as
+// writeControl does. SetVCP waits ddcSetDelay before it returns,
+// because a Get sent sooner reads the value that the Set replaced.
 func (d *DDC) SetVCP(code byte, value uint16) error {
 	if err := d.bus.Write(setRequest(code, value)); err != nil {
 		return fmt.Errorf("setting VCP code %#04x: %w: %w", code, ErrNoAnswer, err)
@@ -231,16 +205,13 @@ func (d *DDC) SetVCP(code byte, value uint16) error {
 }
 
 // getRequest builds a Get VCP Feature request: source, length,
-// opcode, code, checksum (section 4.3). The destination address is
-// not in the buffer, because the kernel drives it from the bound
-// address. The checksum still covers it, which is why the sum is
-// seeded with a constant rather than a byte copied from the buffer.
+// opcode, code, checksum (section 4.3).
 func getRequest(code byte) []byte {
 	return withChecksum([]byte{ddcHostAddress, ddcLengthFlag | 2, vcpGetRequest, code})
 }
 
-// setRequest builds a Set VCP Feature request: four data bytes, with
-// the value big-endian (section 4.4).
+// setRequest builds a Set VCP Feature request. It has four data bytes,
+// and the value is big-endian (section 4.4).
 func setRequest(code byte, value uint16) []byte {
 	return withChecksum([]byte{
 		ddcHostAddress, ddcLengthFlag | 4, vcpSetRequest, code,
@@ -248,18 +219,18 @@ func setRequest(code byte, value uint16) []byte {
 	})
 }
 
-// withChecksum ends a request with the sum of everything before it,
-// seeded with the address byte the kernel will drive.
+// withChecksum appends the checksum of a request. The checksum covers
+// the write address that the kernel sends before the buffer, so the
+// sum starts from that address.
 func withChecksum(packet []byte) []byte {
 	return append(packet, ddcChecksum(ddcWriteAddress, packet))
 }
 
-// ddcChecksum is an exclusive-or over the whole frame, the leading
-// address byte included. The seed is that address byte: 0x6e for a
-// request the host sends. A reply is the exception that section 6.3
-// calls out: the display drives 0x6f on the wire but seeds its
-// checksum with 0x50, the host's virtual write address. A reader that
-// folds in the byte it saw computes the wrong sum on every monitor.
+// ddcChecksum XORs seed and every byte of packet. seed is the address
+// byte that comes before the packet on the wire. A request uses 0x6e.
+// For a reply, section 6.3 has the display send 0x6f on the wire but
+// compute its checksum from 0x50, the host's virtual write address, so
+// a reply checked against 0x6f fails on every monitor.
 func ddcChecksum(seed byte, packet []byte) byte {
 	sum := seed
 	for _, b := range packet {
@@ -268,41 +239,39 @@ func ddcChecksum(seed byte, packet []byte) byte {
 	return sum
 }
 
-// parseGetReply checks that the bytes are a DDC/CI reply at all
-// before it reads any field: source, length, and opcode first, the
-// checksum next, and the fields only after that. A wrong source or
-// length means the bytes are not a reply, and an error that named a
-// field inside them would name the wrong fault.
+// parseGetReply returns the current and maximum values from a reply.
+// It checks the source address, length, opcode, and checksum before it
+// reads any field, because when the frame is wrong an error about a
+// field inside it would report the wrong fault.
 //
-// The length check also rejects the null message of section 6.4, the
-// three bytes a display sends when it is not ready to answer yet. The
-// retry in GetVCP covers it.
+// The length check also rejects the null message of section 6.4, which
+// a display sends when it is not ready to reply. GetVCP retries it.
 func parseGetReply(reply []byte, code byte) (uint16, uint16, error) {
 	if silent(reply) {
 		return 0, 0, ErrNoAnswer
 	}
 	if reply[0] != ddcReplySource {
-		return 0, 0, fmt.Errorf("%w: it starts with %#04x, not %#04x", ErrGarbledReply, reply[0], ddcReplySource)
+		return 0, 0, fmt.Errorf("%w: the first byte is %#04x, want %#04x", ErrGarbledReply, reply[0], ddcReplySource)
 	}
 	if int(reply[1]&ddcLengthMask) != getReplyDataLength || reply[1]&ddcLengthFlag == 0 {
-		return 0, 0, fmt.Errorf("%w: its length byte is %#04x", ErrGarbledReply, reply[1])
+		return 0, 0, fmt.Errorf("%w: the length byte is %#04x", ErrGarbledReply, reply[1])
 	}
 	if reply[2] != vcpGetReply {
-		return 0, 0, fmt.Errorf("%w: its opcode is %#04x, not %#04x", ErrGarbledReply, reply[2], vcpGetReply)
+		return 0, 0, fmt.Errorf("%w: the opcode is %#04x, want %#04x", ErrGarbledReply, reply[2], vcpGetReply)
 	}
 	body := reply[:getReplyLength-1]
 	if sum := ddcChecksum(ddcVirtualHost, body); sum != reply[getReplyLength-1] {
-		return 0, 0, fmt.Errorf("%w: its checksum is %#04x, and the bytes add up to %#04x",
+		return 0, 0, fmt.Errorf("%w: the checksum byte is %#04x, and the bytes sum to %#04x",
 			ErrGarbledReply, reply[getReplyLength-1], sum)
 	}
 	if reply[3] == vcpResultUnsupported {
 		return 0, 0, fmt.Errorf("%w: %#04x", ErrUnsupportedVCP, code)
 	}
 	if reply[3] != vcpResultOK {
-		return 0, 0, fmt.Errorf("%w: its result code is %#04x", ErrGarbledReply, reply[3])
+		return 0, 0, fmt.Errorf("%w: the result code is %#04x", ErrGarbledReply, reply[3])
 	}
 	if reply[4] != code {
-		return 0, 0, fmt.Errorf("%w: it answers VCP code %#04x, and the request asked for %#04x",
+		return 0, 0, fmt.Errorf("%w: the reply is for VCP code %#04x, and the request was for %#04x",
 			ErrGarbledReply, reply[4], code)
 	}
 	max := uint16(reply[6])<<8 | uint16(reply[7])
@@ -310,10 +279,9 @@ func parseGetReply(reply []byte, code byte) (uint16, uint16, error) {
 	return current, max, nil
 }
 
-// silent reports a bus with nothing driving it. An undriven I2C data
-// line floats high and reads as all ones, and a line held low reads
-// as all zeros. Neither pattern is a reply that went wrong; both are
-// the absence of a reply.
+// silent reports whether nothing drove the bus. An undriven I2C data
+// line floats high and reads as all ones, and a line held low reads as
+// all zeros. Both mean no reply, not a corrupted one.
 func silent(reply []byte) bool {
 	ones, zeros := true, true
 	for _, b := range reply {
@@ -327,15 +295,15 @@ func silent(reply []byte) bool {
 	return ones || zeros
 }
 
-// connectorBus maps a connector to the /dev node of its DDC channel.
-// The kernel publishes the channel as a ddc symlink beside the
-// connector's edid and status files. The link names the I2C adapter,
-// and the adapter's number is the /dev node's number.
+// connectorBus returns the /dev/i2c-N node for a connector's DDC
+// channel. The kernel publishes the channel as a ddc symlink next to
+// the connector's edid and status files, and the link target ends in
+// the I2C adapter's name, i2c-N.
 //
-// An absent link returns an empty path rather than an error. A
-// connector with no DDC wire has no channel, and a DisplayPort
-// connector behind an MST hub carries its DDC inside the AUX stream,
-// where no i2c-dev node reaches it.
+// It returns an empty path, not an error, when the link is missing or
+// does not end in i2c-N. A connector with no DDC channel has no link,
+// and a DisplayPort connector behind an MST hub carries DDC inside the
+// AUX channel, which no i2c-dev node exposes.
 func connectorBus(sysRoot, card, connector string) string {
 	link := filepath.Join(sysRoot, "class", "drm", card+"-"+connector, "ddc")
 	target, err := os.Readlink(link)
@@ -349,21 +317,18 @@ func connectorBus(sysRoot, card, connector string) string {
 	return filepath.Join("/dev", adapter)
 }
 
-// An i2cDevice is one open i2c-dev node whose slave address is
-// already bound, so every read and write on it is a DDC/CI message
-// and nothing else.
+// An i2cDevice is an open i2c-dev node with the display's address
+// already bound, so every read and write on it is a DDC/CI message.
 type i2cDevice struct {
 	fd int
 }
 
-// openI2C opens the node and binds the display's address once, at
-// open, rather than before every message.
-//
-// The kernel refuses the bind with EBUSY when a driver is already
-// bound to the address. A graphics card's DDC channel has no such
-// driver, so a refusal reports a real conflict. This operator reports
-// it rather than overriding it with I2C_SLAVE_FORCE, because forcing
-// an address another driver holds writes on that driver's wire.
+// openI2C opens the node and binds the display's address. The kernel
+// fails the bind with EBUSY when a driver already owns the address. A
+// graphics card's DDC channel has no such driver, so a failure is a
+// real conflict. openI2C returns it and does not retry with
+// I2C_SLAVE_FORCE, because forcing an address that another driver owns
+// would write to that driver's device.
 func openI2C(path string) (*i2cDevice, error) {
 	fd, err := unix.Open(path, unix.O_RDWR|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -376,9 +341,8 @@ func openI2C(path string) (*i2cDevice, error) {
 	return &i2cDevice{fd: fd}, nil
 }
 
-// A short write fails the whole message. A truncated packet has a
-// length byte and a checksum that no longer match its bytes, so the
-// display discards it.
+// Write fails on a short write, because a truncated packet no longer
+// matches its length byte and checksum, so the display discards it.
 func (d *i2cDevice) Write(request []byte) error {
 	written, err := unix.Write(d.fd, request)
 	if err != nil {
@@ -390,8 +354,8 @@ func (d *i2cDevice) Write(request []byte) error {
 	return nil
 }
 
-// A short read fails the same way. The display's reply arrives in one
-// transaction of the length the caller asked for.
+// Read fails on a short read, because a DDC/CI reply arrives in one
+// read transaction of the requested length.
 func (d *i2cDevice) Read(reply []byte) error {
 	read, err := unix.Read(d.fd, reply)
 	if err != nil {

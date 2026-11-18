@@ -1,11 +1,11 @@
 package main
 
-// Every power value has two spellings: the lowercase word and its
-// PascalCase form. The operator reports the PascalCase form. An object
-// can hold either one, depending on the build of the writer that made
-// it, so both spellings must reach the panel as the same value, and a
-// stored value that differs from a new one only in case is the same
-// value: it never makes a restarted operator write to a panel.
+// Every power value has two spellings, the lowercase word and the
+// PascalCase form, and the operator reports the PascalCase form. A
+// stored object can contain either spelling, depending on the version
+// of the program that wrote it. Both spellings set the panel the same
+// way, and a restarted operator does not write to the panel for a
+// stored value that differs from the new one only in case.
 
 import (
 	"slices"
@@ -27,7 +27,7 @@ func TestBothSpellingsOfAClaimsPowerAreOneValue(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			controls, err := claimControls(resolvedConfig(t, claimControl(`{"power": `+c.power+`}`)))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the claim controls: %v", err)
 			}
 			if got := controls.forRequest("screen").Power; got != c.want {
 				t.Errorf("power = %q, want %q", got, c.want)
@@ -36,20 +36,20 @@ func TestBothSpellingsOfAClaimsPowerAreOneValue(t *testing.T) {
 	}
 }
 
-// A spelling outside the two forms is a typo, and the claim fails on
-// it the way it fails on any other value this driver does not take.
+// The claim fails on any other spelling, as on any other value that
+// the driver does not accept.
 func TestAnotherSpellingOfAClaimsPowerFails(t *testing.T) {
 	for _, power := range []string{`"ON"`, `"onwhileclaimed"`} {
 		t.Run(power, func(t *testing.T) {
 			if _, err := claimControls(resolvedConfig(t, claimControl(`{"power": `+power+`}`))); err == nil {
-				t.Errorf("the parse accepted the power %s", power)
+				t.Errorf("the parse accepted the power %s, want an error", power)
 			}
 		})
 	}
 }
 
-// The panel's power state reports under the PascalCase names, in
-// status.observed and in the values status.capabilities lists.
+// status.observed and the values in status.capabilities use the
+// PascalCase names.
 func TestThePanelsPowerReportsInPascalCase(t *testing.T) {
 	cases := []struct {
 		raw  uint16
@@ -71,10 +71,10 @@ func TestThePanelsPowerReportsInPascalCase(t *testing.T) {
 }
 
 func TestTheDisplayReportsItsPowerInPascalCase(t *testing.T) {
-	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	fixture := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
 
 	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
 
 	status := fixture.display().Status
@@ -86,35 +86,35 @@ func TestTheDisplayReportsItsPowerInPascalCase(t *testing.T) {
 	}
 }
 
-// A capture an operator saved in either spelling brings the panel back
-// on.
-func TestACaptureInEitherSpellingRestoresThePower(t *testing.T) {
+// A captured power value in either spelling turns the panel back on.
+func TestACapturedPowerInEitherSpellingIsRestored(t *testing.T) {
 	for _, power := range []string{"on", "On"} {
 		t.Run(power, func(t *testing.T) {
-			panel := drillPanel(t, "lg-hdr-wqhd")
+			panel := recordedPanel(t, "lg-hdr-wqhd")
 			panel.values[vcpPowerMode] = powerModeOff
 			fixture := newDisplayFixture(t, panel)
 			fixture.captured(labDisplayName(), "HDMI-A-1", DisplayValues{Power: stringOf(power)})
 
 			if err := fixture.pass(); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the pass: %v", err)
 			}
 			fixture.awaitRestore()
 
-			if got := fixture.holds(vcpPowerMode); got != powerModeOn {
-				t.Errorf("the panel holds the power mode %#02x, want %#02x", got, powerModeOn)
+			if got := fixture.value(vcpPowerMode); got != powerModeOn {
+				t.Errorf("the panel reports the power mode %#02x, want %#02x", got, powerModeOn)
 			}
 		})
 	}
 }
 
-// A restore the panel never confirmed is recorded in status, and the
-// record holds a restarted operator off the panel. A record in the
-// lowercase spelling holds it the same way.
-func TestARecordInEitherSpellingHoldsARestartOffThePanel(t *testing.T) {
+// When the panel does not confirm a restore, the operator records it
+// in status.unconfirmed, and a restarted operator that finds the
+// record does not write to the panel. A record in either spelling has
+// this effect.
+func TestAnUnconfirmedRestoreInEitherSpellingIsNotRetriedAfterARestart(t *testing.T) {
 	for _, power := range []string{"on", "On"} {
 		t.Run(power, func(t *testing.T) {
-			panel := drillPanel(t, "lg-hdr-wqhd")
+			panel := recordedPanel(t, "lg-hdr-wqhd")
 			panel.values[vcpPowerMode] = powerModeOff
 			fixture := newDisplayFixture(t, panel)
 			display := fixture.captured(labDisplayName(), "HDMI-A-1", DisplayValues{Power: stringOf(power)})
@@ -124,24 +124,25 @@ func TestARecordInEitherSpellingHoldsARestartOffThePanel(t *testing.T) {
 			fixture.passes(3)
 
 			if fixture.control.restoresRunning() {
-				t.Error("a restore started against a panel the record holds it off")
+				t.Error("a restore started on a panel that the record marks as off, want no restore")
 			}
-			if got := panel.took(vcpPowerMode); len(got) != 0 {
-				t.Errorf("the panel took the power writes %v, want none", got)
+			if got := panel.writesTo(vcpPowerMode); len(got) != 0 {
+				t.Errorf("the panel received the power writes %v, want none", got)
 			}
 		})
 	}
 }
 
-// The power record file keeps the lowercase word, whichever spelling
-// the claim stated, so the release after the claim ends finds it.
-func TestThePascalCasePowerRecordsAndReleasesTheLowercaseWord(t *testing.T) {
+// The power record file stores onWhileClaimed whichever spelling the
+// claim used, because releasePower schedules standby only for a
+// connector whose record is exactly onWhileClaimed.
+func TestThePowerRecordFileUsesTheLowercaseWordForAPascalCaseClaim(t *testing.T) {
 	panel := newFakeMonitor()
 	plugin, _ := labPluginWithPanels(t, claimControl(`{"power": "OnWhileClaimed"}`), claimedPanel(panel))
 	grace := holdGrace(plugin)
 
 	if claim := prepare(t, plugin); claim.Error != "" {
-		t.Fatal(claim.Error)
+		t.Fatalf("preparing the claim: %s", claim.Error)
 	}
 	if got := powerRecord(t, plugin)["HDMI-A-2"]; got != powerOnWhileClaimed {
 		t.Errorf("record = %q, want %s", got, powerOnWhileClaimed)
@@ -156,7 +157,7 @@ func TestThePascalCasePowerRecordsAndReleasesTheLowercaseWord(t *testing.T) {
 	}
 }
 
-func TestBothSpellingsOfAnOverrideDarkenThePanel(t *testing.T) {
+func TestBothSpellingsOfAnOverrideTurnThePanelOff(t *testing.T) {
 	cases := []struct {
 		name     string
 		override DisplayOverride
@@ -170,11 +171,11 @@ func TestBothSpellingsOfAnOverrideDarkenThePanel(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+			fixture := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
 			fixture.declare(DisplaySpec{Override: &c.override})
 
 			if err := fixture.pass(); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the pass: %v", err)
 			}
 
 			journal := fixture.lines()

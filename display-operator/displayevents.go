@@ -1,10 +1,9 @@
 package main
 
 // The Events about a Display. A Display is cluster-scoped, so the
-// recorder writes its Events in the namespace default, and `kubectl
-// describe display` finds them there. Each Event names the Display's
-// UID, because kubectl describe searches a resource's Events by UID
-// and finds none written without it.
+// recorder writes its Events in the default namespace. Each Event
+// carries the Display's UID, because `kubectl describe display` selects
+// Events by the involved object's UID and shows none without it.
 
 import (
 	"fmt"
@@ -16,7 +15,6 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// displayReference names one Display as an Event's involved object.
 func displayReference(display *Display) events.ObjectReference {
 	return events.ObjectReference{
 		APIVersion: DisplayAPIVersion,
@@ -26,18 +24,17 @@ func displayReference(display *Display) events.ObjectReference {
 	}
 }
 
-// announce posts the Events of a status write that landed: one for
-// each condition that transitioned from before, and one Warning for
-// each write the device did not confirm that the status now records
-// for the first time.
+// announce posts the Events for a status write that succeeded: one for
+// each condition whose status or reason changed, and a Warning for each
+// new entry of status.unconfirmed.
 func (s *displayStore) announce(display *Display, before DisplayStatus) {
 	if s.recorder == nil {
 		return
 	}
 	object := displayReference(display)
 	for _, next := range display.Status.Conditions {
-		held, found := conditions.Find(before.Conditions, next.Type)
-		if found && held.Status == next.Status && held.Reason == next.Reason {
+		previous, found := conditions.Find(before.Conditions, next.Type)
+		if found && previous.Status == next.Status && previous.Reason == next.Reason {
 			continue
 		}
 		s.recorder.Transition(object, next, badStatus(next))
@@ -50,37 +47,34 @@ func (s *displayStore) announce(display *Display, before DisplayStatus) {
 	}
 }
 
-// unconfirmedMessage states one unconfirmed write: what the operator
-// wrote, what the device held after it, and the failure in the words
-// of the party that reported it.
 func unconfirmedMessage(entry DisplayUnconfirmed) string {
-	message := fmt.Sprintf("the operator wrote %s %s and the device did not confirm it", entry.Control, entry.Value)
+	message := fmt.Sprintf("The device did not confirm the write of %s %s", entry.Control, entry.Value)
 	if entry.Readback != "" {
-		message += "; it reads back " + entry.Readback
+		message += ", and it reports " + entry.Readback
 	}
 	if entry.Message != "" {
 		message += ": " + entry.Message
 	}
-	return message + ". The operator does not write it again until spec changes"
+	return message + ". The operator does not write the value again until spec changes"
 }
 
-// screenNotices posts the Events of an action on the screens of this
-// node, such as a compositor restart, from the code that takes the
-// action. That code knows a connector, not a Display, so the notices
-// find the Display that names this node and the connector in its
-// status.
+// screenNotices posts Events about actions that the operator takes on
+// this node's screens, such as restarting the compositor. The code that
+// acts has a connector and no Display, so screenNotices finds the
+// Display whose status has this node and that connector.
 //
-// The DRA plugin is built before the Display watch opens, and a
-// standby that a restarted operator resumes can fire before the store
-// is set, so the store is an atomic pointer. A notice before the store
-// is set, and a notice on a nil screenNotices, posts nothing.
+// main creates the DRA plugin before it opens the Display watch, and
+// resumeReleases can start a standby that fails before the store
+// exists. So main sets the store later, through an atomic pointer.
+// Until then, and on a nil *screenNotices, post does nothing.
 type screenNotices struct {
 	node     string
 	displays atomic.Pointer[displayStore]
 }
 
-// post puts one Event on the Display of a connector of this node, or
-// on every Display of this node when connector is empty.
+// post sends one Event about the Display of this node that has this
+// connector, or about every Display of this node when connector is
+// empty.
 func (n *screenNotices) post(connector, eventType, reason, message string) {
 	if n == nil {
 		return

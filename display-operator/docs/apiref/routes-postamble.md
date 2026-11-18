@@ -1,6 +1,6 @@
 ## The document itself
 
-`display-api` serves the document this page is made from at
-`/v1/display/openapi.json`, and this site publishes the same copy at
-[/docs/reference/openapi.json](/docs/reference/openapi.json). A
-client generator reads either one.
+`display-api` serves the OpenAPI document that this page is generated
+from at `/v1/display/openapi.json`. This site publishes a copy at
+[/docs/reference/openapi.json](/docs/reference/openapi.json). You can
+give either one to a client generator.

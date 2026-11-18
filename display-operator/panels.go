@@ -1,10 +1,12 @@
 package main
 
-// What the operator holds about one panel: whether it answers DDC/CI
-// at all, the controls it declares, and the last value the operator
-// read or wrote for each control. The probe runs once per monitor,
-// and every later value comes from an actuation, because a DDC read
-// wakes some panels and a periodic read would light a dark screen.
+// panelControls caches, for each connector, whether its panel responds
+// to DDC/CI, which controls it declares, and the last value read or
+// written for each control. A monitor is probed once, and a probe that
+// got no response is retried after probeRetryInterval. After the probe
+// the operator reads a panel only to confirm a write, to save a value
+// before an override, and in the poll. The poll skips a panel last
+// seen in standby or off, because a DDC read wakes some panels.
 
 import (
 	"errors"
@@ -13,45 +15,41 @@ import (
 	"time"
 )
 
-// What one probe answered. Responsive is the panel's answer to
-// the protocol itself, apart from the controls it carries: a panel
-// that names every code unsupported still answers.
+// panelFacts is the result of one probe. Responsive is true for any
+// panel that responds to DDC/CI, including one that reports every
+// control as unsupported.
 type panelFacts struct {
 	Responsive   bool
 	Capabilities map[string]panelCapability
 	Observed     map[byte]uint16
 }
 
-// The two booleans the slice publishes, out of the capability
-// list.
+// controls returns which of the controls that the Display status
+// publishes the panel has.
 func (f panelFacts) controls() supportedControls {
 	_, brightness := f.Capabilities[brightnessControl]
 	_, power := f.Capabilities[powerControl]
 	return supportedControls{Brightness: brightness, Power: power}
 }
 
-// FactsFor answers what one output's panel carries, from the cache when the
-// same monitor was probed before and from the wire otherwise. A nil
-// panelControls answers no controls and opens nothing, which is what
-// the tests that publish slices with no probe wired rely on.
-//
-// A connector with nothing on it is never probed. A dark connector
-// can still hold the last EDID its driver read, and there is no panel
-// behind it to answer.
+// factsFor returns the cached facts when the same monitor on the same
+// connector was probed before, and otherwise probes the panel. A nil
+// panelControls returns no facts and opens no bus, which tests without
+// a probe rely on. A disconnected connector is never probed, because
+// the driver can still report the last EDID it read.
 func (c *panelControls) factsFor(output Output) panelFacts {
 	if c == nil || !output.Connected {
 		return panelFacts{}
 	}
-	// The cache's lock is not held while the probe reads the panel.
-	// The probe waits for its turn on the bus, and a caller that holds
-	// the bus records what it reads in the cache, so a probe that held
-	// the cache while it waited would wait on that caller forever.
+	// The cache lock is released during the probe, because the probe
+	// waits for the bus, and the goroutine that has the bus calls
+	// observe, which takes the cache lock. A second caller for the same
+	// connector waits on c.probing and then reads the cache.
 	for {
 		c.mu.Lock()
-		if probed, known := c.probed[output.Connector]; known && probed.monitor == output.Monitor && !c.askAgain(probed) {
-			// The copy is made under the lock, because a restore that
-			// runs on its own goroutine records each readback in the
-			// same map (observe).
+		if probed, known := c.probed[output.Connector]; known && probed.monitor == output.Monitor && !c.probeAgain(probed) {
+			// Copy under the lock, because observe writes to the same
+			// Observed map.
 			facts := probed.facts.copy()
 			c.mu.Unlock()
 			return facts
@@ -79,27 +77,25 @@ func (c *panelControls) factsFor(output Output) panelFacts {
 	if c.probed == nil {
 		c.probed = map[string]probedPanel{}
 	}
-	// The probe just read every carried control, so the poll's
-	// window starts here too.
+	// The probe just read every control, so the first poll is due
+	// pollInterval from now.
 	asked := c.clock()
 	c.probed[output.Connector] = probedPanel{
-		monitor: output.Monitor, facts: &facts, asked: asked, polled: asked,
+		monitor: output.Monitor, facts: &facts, probed: asked, polled: asked,
 	}
 	return facts.copy()
 }
 
-// How long the operator leaves a panel alone between reads of what
-// it holds. The window opens at the first pass after it comes due, and
-// the loop ticks at the same period, so a poll runs every 10 to 20 s.
-// A person at the panel's buttons is found within that time, and a burst of passes inside one window costs one
-// read. The refusal's window above stays at the slower backstop,
-// because a probe of a silent panel spends the whole retry ladder
-// on every code and gains nothing from running sooner.
+// pollInterval is the minimum time between two polls of one panel's
+// control values. The poll finds a value that a person changed with
+// the panel's own buttons. The control loop also ticks at pollInterval,
+// so a panel is polled every 10 to 20 seconds.
 const pollInterval = 10 * time.Second
 
-// Whether this connector's window has passed, and the stamp
-// that opens the next one. The check and the stamp are one step under
-// the lock, so two goroutines that pass at once read the wire once.
+// pollDue reports whether pollInterval has passed since the last poll
+// of this connector, and if so records the time. It checks and
+// records under one lock, so two goroutines that call it at once cause
+// one read of the panel.
 func (c *panelControls) pollDue(connector string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -115,12 +111,11 @@ func (c *panelControls) pollDue(connector string) bool {
 	return true
 }
 
-// The read itself: every carried core control on one open bus,
-// with each answer recorded the way an actuation's readback is. A code
-// that fails to answer is reported and leaves its last value standing,
-// because one control that went quiet says nothing about the others.
-// The names of the controls that failed come back beside the error,
-// so the caller can tell one quiet control from a quiet panel.
+// pollControls reads and records every core control that the panel
+// declares. A control that fails keeps its last recorded value, and
+// the read goes on to the next control. It returns the names of the
+// controls that failed with the joined error, so the caller can tell
+// one failing control from a panel that stopped responding.
 func (c *panelControls) pollControls(connector string) ([]string, error) {
 	facts, known := c.cached(connector)
 	if !known {
@@ -150,8 +145,8 @@ func (c *panelControls) pollControls(connector string) ([]string, error) {
 	return quiet, errors.Join(failures...)
 }
 
-// The cached facts of one connector, without the probe that
-// factsFor would run. The poll holds no lock while it reads the wire.
+// cached returns a copy of the cached facts for a connector and never
+// probes.
 func (c *panelControls) cached(connector string) (panelFacts, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -162,27 +157,28 @@ func (c *panelControls) cached(connector string) (panelFacts, bool) {
 	return probed.facts.copy(), true
 }
 
-// How long a refusal is held before the panel is asked again.
-// One window per backstop tick, because a cable's uevents arrive in
-// bursts and each burst is a pass, and a probe of a silent panel
-// spends its full delay on every code.
+// probeRetryInterval is the wait before a panel that did not respond
+// to the probe is probed again. A probe of such a panel waits out
+// every DDC retry before it fails, and one cable change sends a burst
+// of uevents that each cause a pass, so a shorter wait would repeat
+// that delay on every pass of the burst.
 const probeRetryInterval = backstopInterval
 
-// Whether a cached answer is asked again. Only a refusal is:
-// DDC/CI is a state the monitor's own menu turns on, and an input
-// switch fires no uevent and changes no EDID, so nothing but this
-// window would ever tell the operator to look. A panel that answered
-// is never asked twice, which is what keeps a steady pass off the
-// wire.
-func (c *panelControls) askAgain(probed probedPanel) bool {
+// probeAgain reports whether a panel that did not respond to its probe
+// is due for another. A person can turn DDC/CI on in the monitor's own
+// menu, which raises no uevent and does not change the EDID, so the
+// retry is the only way the operator finds out. A panel that responded
+// is never probed again.
+func (c *panelControls) probeAgain(probed probedPanel) bool {
 	if probed.facts == nil || probed.facts.Responsive {
 		return false
 	}
-	return !c.clock().Before(probed.asked.Add(probeRetryInterval))
+	return !c.clock().Before(probed.probed.Add(probeRetryInterval))
 }
 
-// The caller gets its own values, because the entry behind them
-// changes on every write the operator makes.
+// copy returns facts with their own Observed map, because observe
+// changes the cached map. Capabilities is shared, because nothing
+// writes to it after the probe.
 func (f panelFacts) copy() panelFacts {
 	observed := make(map[byte]uint16, len(f.Observed))
 	for code, value := range f.Observed {
@@ -191,17 +187,16 @@ func (f panelFacts) copy() panelFacts {
 	return panelFacts{Responsive: f.Responsive, Capabilities: f.Capabilities, Observed: observed}
 }
 
-// The probe. It reads the capability string first, because that
-// is the panel's own statement of what it carries, and asks each
-// declared core control for its value and its maximum. A panel that
-// answers no capability string is asked for the core codes one by one,
-// and a first code that answers nothing ends the probe, because a
-// silent wire answers every other code the same way.
+// probe reads the panel's DDC/CI capability string, which lists its
+// controls, and then the value and maximum of each declared core
+// control. With no capability string, probe reads each core code in
+// turn. It stops when the first read gets no reply, because a bus with
+// no device on it gives the same result for every code.
 func (c *panelControls) probe(connector string) panelFacts {
 	facts := panelFacts{Observed: map[byte]uint16{}}
 	bus, err := c.busFor(connector)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "reading the controls %s carries: %v\n", connector, err)
+		fmt.Fprintf(os.Stderr, "reading the controls that %s supports: %v\n", connector, err)
 		return facts
 	}
 	defer bus.Close()
@@ -236,10 +231,9 @@ func (c *panelControls) probe(connector string) panelFacts {
 	return facts
 }
 
-// One entry of the published list. A control the panel declared
-// values for publishes them, and a continuous control publishes the
-// maximum the panel answered, which is what turns a declared number
-// into a value the panel accepts.
+// capabilityOf builds the published capability of one control. A
+// control with declared values publishes their names. A control with
+// none is continuous and publishes the maximum that the panel returned.
 func capabilityOf(code byte, values []uint16, max uint16) panelCapability {
 	capability := panelCapability{}
 	for _, value := range values {
@@ -251,9 +245,9 @@ func capabilityOf(code byte, values []uint16, max uint16) panelCapability {
 	return capability
 }
 
-// The codes the panel declares, and nothing when it declares no
-// capability string. A refusal here is an ordinary state: the string is
-// an optional part of the protocol and the probe falls back to asking.
+// declaredCodes returns the controls in the panel's capability
+// string, or nil when there is none. The string is optional in
+// DDC/CI, so a failed read is not an error.
 func declaredCodes(ddc *DDC) map[byte][]uint16 {
 	text, err := ddc.Capabilities()
 	if err != nil {
@@ -266,9 +260,9 @@ func declaredCodes(ddc *DDC) map[byte][]uint16 {
 	return codes
 }
 
-// What the operator last saw of one control, recorded in the
-// cache entry so that the next pass writes only on divergence and the
-// resource reports a value that no read went out to fetch.
+// observe records the last value read or written for a control, so
+// the next pass writes only when the panel differs from the wanted
+// value, and the Display status reports the value without another read.
 func (c *panelControls) observe(connector string, code byte, raw uint16) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -282,8 +276,8 @@ func (c *panelControls) observe(connector string, code byte, raw uint16) {
 	probed.facts.Observed[code] = raw
 }
 
-// One read of one control, with what it read recorded. This is
-// the read the capture makes before the panel goes dark.
+// readControl reads one control and records its value.
+// displayControl.capture uses it to save a value before an override.
 func (c *panelControls) readControl(connector string, code byte) (uint16, uint16, error) {
 	bus, err := c.busFor(connector)
 	if err != nil {
@@ -299,9 +293,9 @@ func (c *panelControls) readControl(connector string, code byte) (uint16, uint16
 	return current, max, nil
 }
 
-// One write, and the readback that proves the control moved. A
-// display acknowledges a write on the wire whether it takes the value
-// or not.
+// writeControl sets a control and reads it back to confirm the new
+// value, because a display acknowledges a write on the bus even when
+// it ignores the value.
 func (c *panelControls) writeControl(connector string, code byte, raw uint16) error {
 	bus, err := c.busFor(connector)
 	if err != nil {
@@ -320,15 +314,15 @@ func (c *panelControls) writeControl(connector string, code byte, raw uint16) er
 	}
 	c.observe(connector, code, current)
 	if current != raw {
-		return fmt.Errorf("%s holds a %s of %d after the operator set %d",
-			connector, capabilityName(code), current, raw)
+		return fmt.Errorf("the %s of %s reads %d after the operator set it to %d",
+			capabilityName(code), connector, current, raw)
 	}
 	return nil
 }
 
-// The write with no readback, for the power-down. The panel is
-// leaving the state where it answers, so a readback that failed would
-// report a failure for a panel that did as it was told.
+// writeControlBlind sets a control without reading it back, for the
+// power-down. A panel that is turning off stops responding, so a
+// readback would fail for a write that worked.
 func (c *panelControls) writeControlBlind(connector string, code byte, raw uint16) error {
 	bus, err := c.busFor(connector)
 	if err != nil {
@@ -344,23 +338,22 @@ func (c *panelControls) writeControlBlind(connector string, code byte, raw uint1
 	return nil
 }
 
-// Every write to a panel changes what a person sees or hears, so
-// each one prints one line in the operator's log. The line names the
-// value the operator last saw beside the value it writes, so a person
-// who saw the screen change reads why.
+// announce logs each write to a panel with the last observed value
+// and the new one, so a person who saw the screen change can find the
+// cause in the log.
 func (c *panelControls) announce(connector string, code byte, raw uint16) {
 	facts, _ := c.cached(connector)
 	from, known := facts.Observed[code]
 	announceWrite(connector, code, from, known, raw)
 }
 
-// The line itself, for the callers that read the value on the wire
-// before they write and hold no cache entry to read it from.
+// announceWrite prints the log line for a write. A caller that
+// already has the previous value calls it directly.
 func announceWrite(connector string, code byte, from uint16, known bool, to uint16) {
 	name := capabilityName(code)
 	if !known {
-		fmt.Printf("%s: the %s goes to %s\n", connector, name, spokenValue(code, to))
+		fmt.Printf("%s: the %s goes to %s\n", connector, name, statusValue(code, to))
 		return
 	}
-	fmt.Printf("%s: the %s goes from %s to %s\n", connector, name, spokenValue(code, from), spokenValue(code, to))
+	fmt.Printf("%s: the %s goes from %s to %s\n", connector, name, statusValue(code, from), statusValue(code, to))
 }

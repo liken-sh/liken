@@ -1,5 +1,3 @@
-# The operator that claims a machine's displays and GPUs. Its images
-# build on the weston and ffmpeg base images.
 [package]
 name = "display-operator"
 license = "MIT"
@@ -10,9 +8,6 @@ components = ["ffmpeg", "kubernetes", "notices", "toolchains", "trust", "weston"
 [docs]
 prefix = "display"
 
-# gofmt, vet, a tidy check of go.mod, and one run of the tests that
-# checks for races and writes the coverage profile, then the coverage
-# gate on that profile. .testcoverage.yml holds the floor.
 [[jobs]]
 name = "go"
 toolchain = "go"
@@ -20,16 +15,12 @@ run = "make test-go"
 timeout = 20
 coverage = ["coverage.out"]
 
-# The link check, the generated skills, and the site build.
 [[jobs]]
 name = "docs"
 toolchain = "hugo"
 module = "docs"
 run = "make test-docs"
 
-# The hooks in .pre-commit-config.yaml: the formatters, the linters,
-# and the hygiene checks. The jobs above run the tests and the
-# coverage gates.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
@@ -39,9 +30,8 @@ skip = ["gofmt", "go-vet", "go-mod-tidy"]
 [outputs]
 deploy = "deploy"
 
-# The three images of the Dockerfile run its build stage, which takes
-# the shared kubernetes module as a build context, because go.mod
-# replaces it with ../kubernetes.
+# go.mod replaces the kubernetes module with ../kubernetes, so each
+# image needs it as a build context.
 [[outputs.images]]
 name = "display-operator"
 description = "display-operator on the weston image, for the DaemonSet that runs the compositor on each machine with a monitor."
@@ -64,9 +54,8 @@ file = "Dockerfile"
 target = "display-api"
 contexts = { kubernetes = "kubernetes", notices = "notices" }
 
-# The CLI image carries the same version as the operator, so the base
-# binary pulls a CLI that never drifts from the operator it faces. It is
-# built for linux/amd64 only.
+# The CLI image has the same version as the operator, so the CLI that
+# the liken toolkit pulls matches the operator.
 [[outputs.images]]
 name = "display-operator-cli"
 description = "kubectl-liken-display, the kubectl plugin that the liken toolkit pulls from this image."

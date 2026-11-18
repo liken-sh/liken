@@ -8,15 +8,15 @@ toc: true
 
 You can read what a `Display` shows with a plain HTTP `GET`: one
 frame as PNG or JPEG, a clip as H.264 in fragmented MP4, or an MJPEG
-stream. Nothing is stored. Each capture is taken when you ask for it
-and streamed to you while it is made. Two processes are involved.
-`display-api` is a `Deployment` in `liken-system`. It authenticates
-you, authorizes the request, reads the `Display` to find its node,
-and streams the answer back. The capture container in the
-`display-operator` pod on that node takes the frames from the
-compositor and encodes them on the node's GPU.
+stream. The API stores nothing: each request starts a new capture,
+and the API streams it to you as it is encoded. The
+[screenshot guide](/docs/guides/screenshot/) shows how to use it.
 
-**At a glance**
+Two processes handle each request. `display-api` is a `Deployment` in
+`liken-system`. It authenticates you, authorizes the request, reads
+the `Display` to find its node, and streams the response back. The
+capture container in the `display-operator` pod on that node takes
+the frames from the compositor and encodes them on the node's GPU.
 
 | Item | Value |
 | --- | --- |
@@ -29,58 +29,59 @@ compositor and encodes them on the node's GPU.
 | Route reference | [Routes](/docs/reference/routes/) |
 
 The audio and media operators have the same kind of API for a
-`Sink`, a `Source`, and a `Player`. The three APIs share the same
-paths, the same HTTP behavior, and the same standards, but no code.
+`Sink`, a `Source`, and a `Player`, with the same path layout, HTTP
+behavior, and standards.
 
 ## Authentication
 
-There are two ways to identify yourself: a client certificate or a
-Bearer token. The API checks for a certificate first, then for a
-token, in the same order as the Kubernetes API server.
+You identify yourself with a client certificate or a Bearer token.
+The API looks for a certificate first and then for a token, in the
+same order as the Kubernetes API server.
 
 ### Client certificate
 
 If your TLS connection presents a client certificate signed by the
-cluster's own certificate authority, you are that certificate's
-subject. Your user name is the subject's common name, and your groups
-are the subject's organization values. This is exactly how the
-Kubernetes API server reads a client certificate, so the credentials
-in your kubeconfig identify you here the same way they identify you
-to `kubectl`. The API reads the authority from the `ConfigMap`
-`extension-apiserver-authentication` in `kube-system`, which is where
-the API server publishes it, and watches it for changes. A rotated
-authority takes effect as the API server publishes it, with no
-restart. A certificate from
-any other authority ends the TLS handshake.
+cluster's own certificate authority, the API identifies you as the
+subject of that certificate. Your user name is the subject's common
+name, and your groups are the subject's organization values. The
+Kubernetes API server reads a client certificate the same way, so the
+credentials in your kubeconfig identify you here as they do to
+`kubectl`. The API reads the certificate authority from the
+`ConfigMap` `extension-apiserver-authentication` in `kube-system`,
+where the API server publishes it. It watches that `ConfigMap`, so
+it uses a rotated authority without a restart.
+A certificate from any other authority fails the TLS handshake.
 
 ### Bearer token
 
 If the connection has no client certificate, the API looks for a
 Bearer token (RFC 6750 section 2.1). It sends the token in a
-`TokenReview` with the audience `display-api`, and checks that the
-answer names that audience. A pod's ordinary API server token does
-not have that audience, so it does not work here. If your kubeconfig
-uses OIDC, you have no client certificate. In that case, mint a
-`ServiceAccount` token for the `display-api` audience, as the recipe
-under [Examples](#examples) does.
+`TokenReview` with the audience `display-api`, and it checks that the
+audiences in the review result include `display-api`. A pod's default
+`ServiceAccount` token does not have that audience, so the API refuses
+it. If your kubeconfig uses OIDC, you have no client certificate, so
+create a `ServiceAccount` token for the `display-api` audience, as the
+recipe under [Examples](#examples) does.
 
 ### Authorization
 
-After it identifies you, the API sends a `SubjectAccessReview` for
-the verb `get` on the resource `displays/screen` in the API group
-`display.liken.sh`, with the name of the `Display`. That subresource
-does not exist in any CRD. It is a string that RBAC rules match, like
-`pods/log`. The discovery and OpenAPI documents need authentication
-but no authorization. The info route needs `get` on `displays`. Every
-route authorizes before it reads anything, so a 403 never tells you
-whether a name exists.
+After the API identifies you, it sends a `SubjectAccessReview` for the
+verb `get` on the resource `displays/screen` in the API group
+`display.liken.sh`, with the name of the `Display`. No CRD defines
+`displays/screen`. It is only a resource name that RBAC rules match,
+like `pods/log`. The discovery and OpenAPI documents need
+authentication and no authorization. The info route needs `get` on
+`displays`. Every route authorizes the request before it reads
+anything, so a 403 does not show whether a `Display` with that name
+exists.
 
 ### Grants
 
 The base manifests include a `ClusterRole` named
 `display-capture-viewer` with both rules: `displays/screen` for the
-capture routes and `displays` for the info route. Nothing is bound to
-it. A cluster owner binds it, for example to a `ServiceAccount`:
+capture routes and `displays` for the info route. The manifests do not
+bind it to anyone. A cluster owner binds it, for example to a
+`ServiceAccount`:
 
 ```yaml
 apiVersion: v1
@@ -103,33 +104,32 @@ subjects:
     namespace: liken-system
 ```
 
-The same `ClusterRole` binds to a person. Use `kind: User` with the
+To bind the same `ClusterRole` to a person, use `kind: User` with the
 common name from their certificate, or `kind: Group` with one of its
 organization values.
 
-A role that grants `resources: ["*"]` on `display.liken.sh` already
-includes `displays/screen`, and so does `cluster-admin`. Every
-subject with one of those may look at every screen.
+A role that grants `resources: ["*"]` on `display.liken.sh` includes
+`displays/screen`, and so does `cluster-admin`. Every subject with one
+of those roles can capture every screen.
 
-`pods/exec` in `liken-system` is also a capture grant. The
-`display-operator` pod shares its process namespace between its
-containers, so a shell in that pod can reach the capture socket.
+`pods/exec` in `liken-system` also lets a subject capture a screen.
+The containers of the `display-operator` pod share one process
+namespace, so a shell in that pod can reach the capture socket.
 
-Every request that returned bytes writes a `Captured` `Event` on the
-`Display`. The message names the subject and the aspect, so `kubectl
-describe display` tells you who looked at a screen and when.
+The API writes a `Captured` `Event` on the `Display` for every request
+that returned data. The message names the subject and the aspect, so
+`kubectl describe display` shows who captured a screen and when.
 
 ## Routes
 
 Every path has the form
 `/v1/{domain}/[namespaces/{ns}/]{plural}/{name}/{aspect}[.{ext}]`.
 `domain` is the first label of the CRD's API group, `plural` is the
-CRD's plural name, and `aspect` is the thing you capture. A
-namespaced kind has `namespaces/{ns}` before its plural. A `Display`
-is cluster-scoped, so its paths have no namespace. The domain segment
-is there so that one ingress can later serve every domain's API under
-one host name without a path clash. Until then, each domain is its
-own `Service`.
+CRD's plural name, and `aspect` is what you capture. A namespaced kind
+has `namespaces/{ns}` before its plural. A `Display` is
+cluster-scoped, so its paths have no namespace. Each domain has its
+own `Service`, and the domain segment lets one ingress serve all of
+them under one host name without paths that conflict.
 
 | Method | Path | Response | Notes |
 | --- | --- | --- | --- |
@@ -144,72 +144,73 @@ own `Service`.
 | OPTIONS | any of the above | 204, no body | `Allow: GET, HEAD, OPTIONS` |
 
 The [OpenAPI 3.1 document](/docs/reference/openapi.json) is generated
-from the router itself, so it lists every route above. The
+from the API's router, so it lists every route above. The
 [Routes](/docs/reference/routes/) page renders that document with the
 parameters, responses, and fields of each route. The media type
-`application/openapi+json` is provisional
-(draft-ietf-httpapi-rest-api-mediatypes) and not yet registered. The
+`application/openapi+json` is a draft
+(draft-ietf-httpapi-rest-api-mediatypes) and is not registered. The
 copy on this site comes from a development build, so its
 `info.version` is `dev`. A release serves its own version.
 
 ## Query parameters
 
-The API checks every parameter before it captures anything.
+The API validates every parameter before it starts a capture.
 
 | Parameter | Applies to | Values | Default | Rejected with 400 when |
 | --- | --- | --- | --- | --- |
-| `t` | every capture route | Media Fragments NPT: `t=begin,end`, `t=begin`, or `t=,end` | none: a clip or a stream runs until you hang up | `t=a,b` with `a >= b`; a begin over 60 s (`captureBeginMax`); an end on a still |
+| `t` | every capture route | Media Fragments NPT: `t=begin,end`, `t=begin`, or `t=,end` | none: a clip or a stream runs until you hang up | `t=a,b` with `a >= b`, a begin over 60 s, or an end on a still |
 | `xywh` | every capture route | `pixel:` or `percent:`, then `x,y,w,h` | `pixel:`, and the whole screen | the origin is at or past an edge of the screen |
-| `width` | every capture route | the width in pixels, after the crop | none: the region's own width | `width` together with `height`; a value larger than the source |
-| `height` | every capture route | the height in pixels, after the crop | none: the region's own height | `height` together with `width`; a value larger than the source |
-| `framerate` | a clip or a stream: `screen.mp4`, `screen.mjpeg` | frames per second, at most the output's refresh rate | 15 | a value above the refresh rate; a still |
-| `quality` | JPEG output: `screen.jpg`, `screen.mjpeg` | the JPEG quality, 1 to 100 | 85 | PNG and MP4 |
+| `width` | every capture route | the width in pixels, after the crop | none: the region's own width | `width` together with `height`, or a value larger than the source |
+| `height` | every capture route | the height in pixels, after the crop | none: the region's own height | `height` together with `width`, or a value larger than the source |
+| `framerate` | a clip or a stream: `screen.mp4`, `screen.mjpeg` | frames per second, at most the output's refresh rate | 15 | a value above the refresh rate, or on a still |
+| `quality` | JPEG output: `screen.jpg`, `screen.mjpeg` | the JPEG quality, 1 to 100 | 85 | on PNG or MP4 |
 
-`width=` and `height=` are this API's own parameters. Either one
-scales the region down after the crop and keeps the aspect ratio. At
-quality 85, a 1080p MJPEG frame is about 100 KB, which is 12 Mbit/s
-at 15 fps.
+`width=` and `height=` are parameters of this API, not of Media
+Fragments. Either one scales the region down after the crop and keeps
+the aspect ratio.
 
 `t=` and `xywh=` follow W3C Media Fragments 1.0 (Recommendation,
-25 September 2012), sections 4.2.1 and 4.2.2. They go in the query,
-not in the URL fragment. Section 3.1 says "a URI query produces a new
-resource, while a URI fragment provides a secondary resource", and
-section 7.4 says that with the query form "media type changes are
-possible". A request like `screen.png?t=5&xywh=...` is exactly that.
-The parser follows section 5.1.1: it splits on `&` and `=` first and
-percent-decodes second, so `t=10%2C20` and `t=npt%3a10` mean the same
-as their literal forms.
+25 September 2012), sections 4.2.1 and 4.2.2. You write them in the
+query and not in the URL fragment. Section 3.1 says "a URI query
+produces a new resource, while a URI fragment provides a secondary
+resource", and section 7.4 says that with the query form "media type
+changes are possible", which a capture needs. The parser follows
+section 5.1.1. It
+splits on `&` and `=` first and percent-decodes second, so `t=10%2C20`
+and `t=npt%3a10` mean the same as `t=10,20` and `t=npt:10`.
 
-Media Fragments puts the zero of `t=` at the start of the source
-media. A live screen has no start, so this API puts the zero at the
-instant the capture container accepts the request. The container
-sends the response headers at once, starts its encoder at once, and
-discards frames until the begin time on its own clock. `t=5,7`
+In Media Fragments, `t=0` is the start of the source media. A live
+screen has no start, so this API sets zero at the time the capture
+container accepts the request. The container sends the response
+headers and starts its encoder immediately, and it discards frames
+until the begin time, which it measures on its own clock. `t=5,7`
 discards five seconds and then records two. `t=,10` records ten
-seconds from now. `t=5` on a still waits five seconds and takes one
-frame.
+seconds from now. `t=5` on a still waits five seconds and then takes
+one frame.
 
 Media Fragments tells a user agent to ignore an invalid, unknown, or
-non-existent dimension. This API returns 400 instead. A query
-produces a new resource, so a client that asked for a region must not
-silently get the whole screen. A repeated dimension and an unknown
-key are 400 as well. A region that runs off an edge is clipped to the
-screen (section 6.1.2), not refused. With `percent:`, the origin
+non-existent dimension. This API returns 400 instead, because a
+client that asked for a region must not get the whole screen without
+warning. A repeated dimension and an unknown key also return 400. A
+region that extends past an edge is clipped to the screen (section
+6.1.2), and the API does not refuse it. With `percent:`, the origin
 rounds down and the size rounds up, and then the width and height
-round up to an even number for the encoder. `pixel:` counts the
-frame's own physical pixels. If you work in logical pixels, multiply
-by the `scale` that the info document reports.
+round up to an even number because the encoder needs one. `pixel:`
+counts the physical pixels of the frame. If you work in logical
+pixels, multiply by the `scale` that the info document reports.
 
 ## Content negotiation
 
-An extension names one fixed representation. If your `Accept` header
-excludes that representation, you get a 406. RFC 9110 section 12.5.1
-lets a server send 406 or ignore `Accept`, and this API tells you
-when the two things you said contradict each other. Without an
-extension, the API negotiates on `Accept` with q-values, per section
-12.5.1. No `Accept` header means any type is acceptable, so you get
-the default, `image/png`. Ties and wildcards resolve in this order:
-`image/png`, `image/jpeg`, `video/mp4`, `multipart/x-mixed-replace`.
+A path with an extension selects one representation. If your `Accept`
+header excludes that representation, the API returns 406. RFC 9110
+section 12.5.1 lets a server return 406 or ignore `Accept`, and this
+API returns 406 so that you learn when the path and the header
+contradict each other. A path with no extension is negotiated on
+`Accept` with q-values, as section 12.5.1 describes. With no `Accept`
+header, any type is acceptable, so you get the default, `image/png`.
+When types tie or `Accept` has a wildcard, the API picks the first
+that matches in this order: `image/png`, `image/jpeg`, `video/mp4`,
+`multipart/x-mixed-replace`.
 
 | Request | Response |
 | --- | --- |
@@ -236,11 +237,11 @@ Every response has these headers:
 | `Link` | on a route about one `Display`: `<https://kubernetes.default.svc/apis/display.liken.sh/v1alpha1/displays/{name}>; rel="describedby"` | RFC 8288 section 3.1 |
 
 `Vary: Accept` is also on the extension routes, where `Accept` only
-decides between 200 and 406. Section 12.5.5 gives a second reason for
-`Vary`: to say that the response was subject to negotiation. The
-`describedby` URL is absolute because RFC 8288 section 3.1 resolves a
-relative reference against the API's own origin, which is the wrong
-server.
+decides between 200 and 406, because section 12.5.5 also uses `Vary`
+to say that the response depended on a negotiation. The `describedby`
+URL is absolute because a client resolves a relative reference
+against the API's own origin (RFC 8288 section 3.1), and the
+Kubernetes API server is a different origin.
 
 A document (discovery, OpenAPI, or the info route) has an `ETag` and
 `Cache-Control: no-cache`. A capture has these headers instead:
@@ -255,50 +256,51 @@ A document (discovery, OpenAPI, or the info route) has an `ETag` and
 | `Content-Location` | on `screen` only: the absolute path of the extension route that was served | RFC 9110 section 8.7 |
 | `Link` | on `screen` only: one `rel="alternate"; type="image/png"` and so on, per extension route | RFC 8288 |
 
-`Content-Location` is only sent on the negotiated route. Section 8.7
-calls it "a more specific identifier for the selected
-representation". The same section says a `GET` on that URL returns
-the same representation. That is not true for a live capture, and it
-is also why `Accept-Ranges` is `none`. There is no `Content-Length`,
-because RFC 9112 section 6.2 forbids one next to
-`Transfer-Encoding`. A still is streamed the same way as a clip. On
-HTTP/2 (RFC 9113), the protocol frames the body itself.
+The API sends `Content-Location` only on the negotiated route.
+Section 8.7 calls it "a more specific identifier for the selected
+representation", and says that a `GET` on that URL returns the same
+representation. A live capture is different every time, which is also
+why `Accept-Ranges` is `none`. There is no `Content-Length`, because
+RFC 9112 section 6.2 does not allow one with `Transfer-Encoding`. The
+API streams a still in the same way as a clip. On HTTP/2 (RFC 9113),
+the protocol frames the body itself.
 
 `X-Content-Type-Options: nosniff` tells a browser to use the
-`Content-Type` and not to guess a type from the bytes. A capture is
-an image or a video, so a browser that opens one never renders it as
-a page.
+`Content-Type` and not to guess a type from the bytes. A capture is an
+image or a video, so a browser never renders one as a page.
 
 The time in `filename` is RFC 3339 UTC with the colons replaced by
-hyphens, for example `HDMI-A-1-2026-09-16T21-02-16Z.png`. A colon is
-not a legal file name character on every system a browser saves to.
-This is the only place the API writes a time in a non-standard form.
+hyphens, for example `HDMI-A-1-2026-09-16T21-02-16Z.png`, because not
+every file system that a browser saves to allows a colon in a file
+name. It is the only time that the API writes in a form other than
+RFC 3339.
 
-`HEAD` takes no frame and does not call the capture container. A
-`HEAD` on an error returns the status and the headers with no body
-(RFC 9110 section 15.5).
+`HEAD` does not take a frame and does not call the capture container.
+A `HEAD` request that fails returns the status and the headers with no
+body (RFC 9110 section 15.5).
 
 ## Errors
 
 Every error is an `application/problem+json` document (RFC 9457) with
 `type`, `title`, `status`, `detail`, and `instance`. `instance` is
 the request path, then `#`, then the request id. The API's log line
-for the request has the same id, so you can find one from the other.
-`detail` quotes the source of the error: the compositor's refusal,
-the `TokenReview` error, the `Display` condition message, or the
-encoder's last lines.
+for the request has the same id, so you can find the log line from
+the response and the response from the log line. `detail` quotes the
+source of the error: the compositor's refusal, the `TokenReview`
+error, the message of a `Display` condition, or the last lines of the
+encoder's output.
 
 | Status | When | Extra header | Standard |
 | --- | --- | --- | --- |
-| 400 | a query the grammar rejects, or any condition the query parameter table above names | | RFC 9110 section 15.5.1 |
-| 401 | no client certificate and no token: `WWW-Authenticate: Bearer realm="display-api"`. A token the `TokenReview` refuses: the same header plus `error="invalid_token"` and an `error_description` with the review's own words | as stated | section 15.5.2, RFC 6750 section 3 |
-| 403 | the `SubjectAccessReview` said no | `WWW-Authenticate: Bearer realm="display-api", error="insufficient_scope", scope="displays/screen"` | section 15.5.4, RFC 6750 section 3 |
+| 400 | a query that does not parse, or a value that the query parameter table rejects | | RFC 9110 section 15.5.1 |
+| 401 | no client certificate and no token, or a token that the `TokenReview` refuses | `WWW-Authenticate: Bearer realm="display-api"`. For a refused token it adds `error="invalid_token"` and an `error_description` with the review's message | section 15.5.2, RFC 6750 section 3 |
+| 403 | the `SubjectAccessReview` did not allow the request | `WWW-Authenticate: Bearer realm="display-api", error="insufficient_scope", scope="displays/screen"` | section 15.5.4, RFC 6750 section 3 |
 | 404 | no `Display` has that name | | section 15.5.5 |
 | 405 | a method other than GET, HEAD, or OPTIONS | `Allow: GET, HEAD, OPTIONS` | section 15.5.6 |
 | 406 | `Accept` excludes everything the route can serve | | section 15.5.7 |
 | 409 | the `Display` has no panel on its connector: its `Connected` condition is False. A retry does not help until the monitor is connected | | section 15.5.10 |
-| 500 | the compositor denied the capture, and a retry does not help; or the encoder produced no picture | | section 15.6.1 |
-| 502 | the capture container answered with something that is not HTTP, or not a problem document | | section 15.6.3 |
+| 500 | the compositor denied the capture, which a retry does not fix, or the encoder produced no picture | | section 15.6.1 |
+| 502 | the capture container returned a response that is not HTTP, or an error that is not a problem document | | section 15.6.3 |
 | 503 | the output is already being captured, the compositor is not serving the screen, the capture container refused the connection, is absent, or is not ready, or the `Display` has no `status.node` yet | `Retry-After: 5` | sections 15.6.4 and 10.2.3 |
 | 504 | the capture container sent no headers within the header timeout | | section 15.6.5 |
 
@@ -323,37 +325,41 @@ encoder's last lines.
 | `https://liken.sh/display/problems/compositor-down` | the compositor is not serving the screen. `detail` is the `CompositorServing` condition's message | 503 |
 | `https://liken.sh/display/problems/encoder-failed` | the encode produced no picture | 500 |
 
-The first five types are the ones the three capture APIs share. The
-last three are this API's own, because only the display domain has a
-compositor or an encoder. A screen with no node and a screen whose
-compositor is down are both a 503, with different types, because you
-are waiting for different things: the scheduler in one case, and the
-operator starting the compositor again in the other. A screen with no
-panel is away. It is a 409 with no `Retry-After`, because no wait
-brings an unplugged monitor back: you connect the monitor, or you ask
-for another screen. The audio API answers the same type for a `Sink`
-or a `Source` with no node. An error with no type of its own has
+The audio and media capture APIs return the types under
+`https://liken.sh/problems/` too, so a client handles each one the
+same way whichever API returned it. The types under
+`https://liken.sh/display/problems/` belong to this API, because only
+the display domain has a compositor and an encoder.
+
+A screen with no node and a screen whose
+compositor is down both return 503, with different types, because you
+wait for different things. In the first case you wait for the
+scheduler to place the claim, and in the second you wait for the
+operator to start the compositor again. A screen with no panel
+returns 409 with no `Retry-After`, because waiting does not connect a
+monitor. You connect the monitor, or you capture another screen. An
+error with no type of its own has
 `type: about:blank` and the status phrase as its `title`. The OpenAPI
 document lists every type.
 
 When `detail` describes a failure on a node, it names the node and
-what went wrong, for example "the capture sidecar on node-2 did not
-present a certificate this API trusts". It never includes the pod's
-address, the port of the private connection, or the path this API
-called. Those describe the shape of the cluster, and a caller who may
-read screens does not need them. The API's log line for the request
-has the whole dial error under the same request id.
+the failure, for example "the capture sidecar on node-2 did not
+present a certificate this API trusts". It does not include the pod's
+address, the port of the private connection, or the path that the API
+called. They describe the layout of the cluster, and a caller who can
+capture screens does not need them. The API's log line for the
+request has the whole connection error under the same request id.
 
 ## Discovery
 
-`GET /v1/display` returns the discovery document. All three capture
-APIs use the same shape. It lists the resources the API serves, keyed
-by plural name. Each resource has a `self` template and its aspects.
-Each aspect has an RFC 6570 URI template, its media types, its
-extensions, and a `redirects` flag. Here `redirects` is `false`,
-because a `Display` is the thing captured and not a pointer to
-something else. A client that expands the template sends `t=5%2C7`,
-which the parser accepts.
+`GET /v1/display` returns the discovery document, in the same format
+as the audio and media APIs. It lists the resources that the API serves,
+keyed by plural name. Each resource has a `self` template and its
+aspects. Each aspect has an RFC 6570 URI template, its media types, its
+extensions, and a `redirects` flag. `redirects` is `false` here,
+because a capture of a `Display` is a capture of that screen, and does
+not redirect to another resource. A client that expands the template
+sends `t=5%2C7`, which the parser accepts.
 
 ```json
 {
@@ -376,9 +382,10 @@ which the parser accepts.
 
 ## Examples
 
-This version has no CORS support and no `kubectl` plugin. A browser
-can only reach the API on the same origin through a port-forward.
-The everyday tool is `curl`.
+The `kubectl liken display capture` command calls this API for you,
+as the [screenshot guide](/docs/guides/screenshot/) shows. To call it
+yourself, use `curl`. The API has no CORS support, so a web page
+served from another origin cannot read a capture.
 
 With a `ServiceAccount` token:
 
@@ -393,9 +400,10 @@ curl --cacert display-api-ca.crt -H "Authorization: Bearer $TOKEN" \
   'https://localhost:8443/v1/display/displays/HDMI-A-1/screen.mp4?t=,10' > clip.mp4
 ```
 
-With the client certificate from your kubeconfig, there is no token
-to mint. The port-forward is a TCP tunnel, so the TLS handshake runs
-end to end and the certificate reaches the API unchanged:
+If you use the client certificate from your kubeconfig, you do not
+need a token. The port-forward is a TCP tunnel, so the TLS handshake
+runs between `curl` and the API, and the API receives the certificate
+unchanged:
 
 ```sh
 kubectl config view --raw --minify \
@@ -410,58 +418,52 @@ From a pod on the cluster network, the same two files work against
 `https://display-api.liken-system.svc/v1/display/displays/HDMI-A-1/screen.png`
 with no port-forward.
 
-**Port-forward limits.** A port-forward is fine for a still and bad
-for a stream. It is a single TCP connection through the API server.
-In our tests it moved about 2 Mbit/s: a 3 second MJPEG stream that
-the node captured in 3.06 s took 25 s to read through the forward,
-and 3.09 s from a pod on the cluster network. A 1080p MJPEG stream
-needs about 15 Mbit/s, so through the forward you see it at about one
-eighth of real time. Stills are not affected. `screen.png` took 0.9 s
-to first byte through the forward and 0.76 s from the cluster
-network. Read a stream from a pod on the cluster network, or through
-a `Service` the cluster owner exposes.
+**Port-forward limits.** A port-forward works for a still and is too
+slow for a stream. It is one TCP connection through the Kubernetes API
+server, and its throughput is far below the bit rate of an MJPEG
+stream of a 1080p screen, so the stream plays slower than real time.
+Read a stream from a pod on the cluster network, or through a
+`Service` that the cluster owner exposes.
 
 ## Notes
 
-**The codec string.** `screen.mp4` names its codec in `Content-Type`
-the way RFC 6381 specifies. `avc1.640029` is High profile, no
-constraint flags, level 4.1, which covers every output up to 1920x1080
-at 60 fps. `avc1.640033` is level 5.1, for outputs above that. The
-encoder pins the profile and level instead of letting them follow the
-stream, so the parameter is correct before the first byte. The info
-document has the same string in its `codecs` field, and media-api
-copies it from this header into the `Content-Type` of a composed
-stream.
+**The codec string.** `screen.mp4` gives its codec in `Content-Type`
+as RFC 6381 specifies. `avc1.640029` is High profile, no constraint
+flags, level 4.1, which covers every output up to 1920x1080 at 60 fps.
+`avc1.640033` is level 5.1, for larger outputs. The encoder is set to
+a fixed profile and level, so the API can send the codec string before
+the encoder produces its first byte. The info document has the same
+string in its `codecs` field, and media-api copies it from this
+header into the `Content-Type` of a composed stream.
 
-**A re-minted `Secret`.** If you delete the `Secret`
-`display-capture-server`, the API mints it again as soon as its watch
-reports the delete. The screens come back when the kubelet next syncs
-the projected volume, and that sync period is the kubelet's own, which
-nothing in this operator controls. A capture container reads the new
-files as the kubelet writes them. A
-capture container that still has the old leaf certificate keeps
-returning 200 the whole time, because that leaf is still valid and
-this API still trusts it. You only see a 503 where the capture
-container also restarted and found no certificate files. Then the
-`detail` reads "the capture sidecar on node-2 did not present a
-certificate this API trusts".
+**Deleting the `display-capture-server` `Secret`.** If you delete the
+`Secret` `display-capture-server`, the API creates it again as soon as
+its watch reports the delete. Captures work again after the kubelet
+next syncs the projected volume, and the kubelet sets that interval,
+not this operator. A capture container reads the new files as the
+kubelet writes them. A capture container that still has the old leaf
+certificate keeps returning 200 the whole time, because that
+certificate is still valid and the API still trusts it. You see a 503
+only when the capture container also restarted and found no
+certificate files. Then `detail` reads "the capture sidecar on node-2
+did not present a certificate this API trusts".
 
-**The info route on a screen that is down.** You do not need the
-screen to be up to ask what it is.
+**The info route on a screen that is down.** The screen does not need
+to be working for you to read its info document.
 `GET /v1/display/displays/{name}` returns 200 for a screen with no
 panel on its connector, for a screen whose compositor is not serving,
-and for a node this API cannot reach. The document has the name, the
-node, and the size and refresh rate from the `Display` status, plus
-`panel: disconnected`, `compositor: down`, or `sidecar: unreachable`
-with the words of the cause in `detail`.
-`scale`, `formats`, and `conversion` come from the node, so they are
-absent instead of guessed.
+and for a node that the API cannot reach. The document has the name,
+the node, and the size and refresh rate from the `Display` status. It
+also has `panel: disconnected`, `compositor: down`, or
+`sidecar: unreachable`, with the cause in `detail`. `scale`,
+`formats`, and `conversion` come from the node, so the document omits
+them when the API cannot read them.
 
-**What a capture costs.** A capture turns off the compositor's
-hardware planes for its whole length. A film that a plane would
-normally show goes through the GL renderer instead while a clip runs.
-On a node whose driver has no VA-API post-processing, the color
-conversion runs on the CPU too, which costs about four times the
-cores at 1080p. The info document's `conversion` field names the
-pipeline the node uses, and the `display_capture_conversion` metric
-reports the same value to a dashboard.
+**What a capture costs.** While a capture runs, the compositor does
+not use the display's hardware planes. A video that a plane would
+show directly goes through the GL renderer instead. On a node whose
+driver has no VA-API post-processing, the color conversion also runs
+on the CPU, which needs several times more CPU cores at 1080p. The
+`conversion` field of the info document names the pipeline that the
+node uses, and the `display_capture_conversion` metric reports the
+same value.

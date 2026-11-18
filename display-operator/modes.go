@@ -1,29 +1,23 @@
 package main
 
-// Choosing the mode a screen runs.
+// A claim can ask for a screen mode in its opaque parameters. Weston
+// reads weston.ini only at startup, so a mode change rewrites the file
+// and restarts the compositor, which ends every Wayland client on every
+// output of the card.
 //
-// What a claim states, how the operator makes it true, and what
-// it costs. A mode arrives as an opaque parameter on the claim, the
-// same channel the audio operator reads a codec on. Weston parses
-// weston.ini once at startup, so the only way to change a mode is to
-// write the file and restart the compositor, and that ends every
-// Wayland client on every output of the card.
+// The operator keeps the requested modes in modes.json beside
+// weston.ini, one entry per connector. It builds weston.ini from the
+// connector list and that record, and never parses weston.ini back.
 //
-// The record is a small JSON file beside weston.ini in the
-// pod's own volume, one entry per connector. weston.ini is always
-// derived from the connector walk plus the record, and never parsed
-// back, so the operator holds one writer and one format to read.
+// Both files are in an emptyDir, so the record survives a compositor
+// restart and is deleted with the pod. The declare container of a new
+// pod writes each Display's declared mode into the record. A monitor
+// whose Display sets no mode starts at the mode the monitor prefers.
 //
-// What survives what. The volume is the pod's own, so a
-// compositor restart keeps the record and a pod restart erases it. A
-// new pod's declare container fills the record again from each
-// monitor's Display, so a screen with a resting mode starts at it, and
-// every other screen starts at the mode its monitor prefers.
-//
-// Weston falls back to the preferred mode silently when it
-// cannot match the name in the config, with no log line and no failed
-// exit. So the operator validates before it writes and reads the mode
-// back after, and trusts neither the log nor the exit status.
+// When weston cannot match the mode name in the config, it falls back
+// to the preferred mode with no log line and no failed exit. So the
+// operator checks the mode against the kernel's list before it writes
+// the config, and reads the mode back from the compositor afterward.
 
 import (
 	"context"
@@ -41,106 +35,88 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// The one key this driver reads out of a claim's opaque
-// parameters. The value is a resolution name, with a refresh after
-// an @ when the claim cares which rate the name runs at: 1280x720,
-// or 3840x1600@24. The refresh is a whole number of hertz, because
-// weston parses it as an integer.
+// modeParameter is the key of a claim's opaque parameters that holds
+// the mode: a resolution name, optionally followed by @ and a refresh
+// rate, as in 1280x720 or 3840x1600@24. The refresh is a whole number
+// of hertz, because weston parses it as an integer.
 const modeParameter = "mode"
 
-// What weston.ini states for a connector the record says
-// nothing about. Weston reads the monitor's own preference then, which
-// is what an unclaimed screen should run.
+// preferredMode is the mode that weston.ini sets for a connector with
+// no entry in the record, so weston uses the monitor's preferred mode.
 const preferredMode = "preferred"
 
-// ModeSwitchTimeout bounds the wait for the new compositor to serve
-// the requested mode, from the moment it answers. The drill measured
-// 134 milliseconds of compositor startup, so ten seconds has room for
-// a monitor that syncs slowly. A timeout is a decline.
+// modeSwitchTimeout is how long the restarted compositor has to report
+// the requested mode, counted from the first connection to it. After
+// that, the compositor has declined the mode.
 const modeSwitchTimeout = 10 * time.Second
 
-// ModeSwitchFallback bounds each wait inside that wait. The output
-// watch reports each change to what the compositor serves, and the
-// report ends a wait early, so this bounds only the look that no
-// report starts: a source of served modes that raises no report.
+// modeSwitchFallback is the longest a mode switch waits before it reads
+// the compositor's outputs again. A switch usually wakes sooner, when
+// the output watch closes its changed channel. The timer covers the
+// case where no output watch is connected and changed is nil.
 const modeSwitchFallback = time.Second
 
-// CompositorReturnLimit bounds the wait for the new compositor to
-// answer at all. The compositor role starts weston again at once after
-// a restart the operator orders (restartorders.go). A weston that
-// crashes instead exits its container, and the kubelet holds the next
-// start in its crash backoff, which doubles up to five minutes. The
-// limit is past that cap, so a compositor in backoff is waited for and
-// never read as a decline. A compositor that does not answer by the
-// limit fails the switch without a decline.
+// compositorReturnLimit is how long a mode switch waits for the
+// restarted compositor to accept a connection. After the operator ends
+// weston, the compositor container starts it again at once. When weston
+// crashes instead, the kubelet delays the next start with a crash
+// backoff of up to five minutes. The limit is longer than that, so a
+// compositor in backoff is slow and has not declined the mode. A
+// compositor that is not back by the limit fails the switch with an
+// error that is not errModeDeclined.
 const compositorReturnLimit = 6 * time.Minute
 
-// errModeDeclined marks a switch whose restart ran and whose
-// compositor serves another mode. A caller that reads it knows a
-// second restart would give the same answer, so the Display pass
-// records the mode in status.unconfirmed and does not restart the
-// compositor for it again until spec changes.
+// errModeDeclined means the compositor restarted and still reports a
+// different mode, so another restart would give the same result. The
+// Display pass records the mode in status.unconfirmed and does not try
+// that mode again.
 var errModeDeclined = errors.New("the compositor declined the mode")
 
-// AllocatedConfig is one entry of the configuration the scheduler
-// resolved for an allocation.
-//
-// An opaque block is DRA's channel for a driver's own
-// parameters: the scheduler validates none of it and copies it into
-// the allocation unread. An entry with no requests applies to every
-// request in the claim, and the source says whether the claim's author
-// wrote the entry or the DeviceClass carried it in.
+// AllocatedConfig is one entry of the configuration that the scheduler
+// resolved for an allocation. The scheduler copies the opaque block
+// into the allocation without validating it. An entry with no requests
+// applies to every request in the claim.
 type AllocatedConfig struct {
 	Source   string              `json:"source"`
 	Requests []string            `json:"requests"`
 	Opaque   *OpaqueDeviceConfig `json:"opaque"`
 }
 
-// The two places a resolved config entry comes from: the claim
-// its author wrote, and the DeviceClass the claim allocates through.
-//
-// The claim's own choice wins over the class's, because a class
-// is the cluster's default and a claim is the workload's say. The
-// precedence reads the source field rather than the list's order,
-// because the order is the allocator's habit and no API promises it.
+// The values of AllocatedConfig.Source. A claim's entry takes
+// precedence over the DeviceClass's, because the class sets the
+// cluster's default and the claim sets one workload's choice. The code
+// reads Source and not the order of the list, because the allocator
+// does not promise an order.
 const (
 	configFromClaim = "FromClaim"
 	configFromClass = "FromClass"
 )
 
-// OpaqueDeviceConfig is one driver's own parameters inside a claim.
-//
-// The driver name decides whose parameters these are. A claim
-// that pairs two drivers, a screen with that screen's speakers, holds
-// one block per driver, and each driver reads only its own.
+// OpaqueDeviceConfig is one driver's parameters inside a claim. A claim
+// for a screen and its speakers has a block for each driver, and each
+// driver reads only its own.
 type OpaqueDeviceConfig struct {
 	Driver     string          `json:"driver"`
 	Parameters json.RawMessage `json:"parameters"`
 }
 
-// ModeChoice is one mode a config entry stated, and whether the
-// claim stated it or the class did.
 type modeChoice struct {
 	Mode      string
 	FromClaim bool
 }
 
-// ModeSelection is the mode each request asks for. The requests
-// map holds what a block that names its requests stated, and every
-// holds what a block with no requests stated, which applies to every
-// request in the claim.
+// modeSelection is the modes that a claim's config sets. requests has
+// the modes of entries that name their requests, and every has the
+// mode of an entry with no requests.
 type modeSelection struct {
 	requests map[string]modeChoice
 	every    modeChoice
 }
 
-// State records one entry's mode, and refuses to let a class's
-// entry overwrite the claim's own.
-//
-// A later entry of the same source overwrites an earlier one,
-// the plain reading of a list. An entry from the class never
-// overwrites one from the claim, whatever the order.
-func (s *modeSelection) state(request string, choice modeChoice) {
+// set records one entry's mode. A later entry from the same source
+// replaces an earlier one, and a class entry never replaces a claim
+// entry, so the claim's mode wins whichever comes first in the list.
+func (s *modeSelection) set(request string, choice modeChoice) {
 	current := s.every
 	if request != "" {
 		current = s.requests[request]
@@ -158,12 +134,10 @@ func (s *modeSelection) state(request string, choice modeChoice) {
 	s.requests[request] = choice
 }
 
-// ForRequest answers what one allocation result must run.
-//
-// Two rules, applied in this order: the claim's own choice
-// beats the class's, and within one source a block that names the
-// request beats a block that names none. So a claim's every-request
-// block still beats a class block that names this request.
+// forRequest returns the mode for one request. A claim's entry takes
+// precedence over a class's entry, even when the claim's entry names no
+// requests and the class's entry names this one. Within one source, an
+// entry that names the request takes precedence.
 func (s modeSelection) forRequest(request string) string {
 	named := s.requests[request]
 	if named.Mode == "" {
@@ -175,13 +149,9 @@ func (s modeSelection) forRequest(request string) string {
 	return named.Mode
 }
 
-// ClaimModes reads this driver's own config blocks out of the
-// configuration the scheduler resolved for an allocation.
-//
-// A block of another driver is not this driver's to judge, so
-// it is skipped. A parameter this driver does not read fails whichever
-// source wrote it: a typo in cluster policy drives the wrong mode as
-// surely as a typo in a claim.
+// claimModes reads this driver's blocks from an allocation's config.
+// An unknown parameter is an error in a class's block as well as in a
+// claim's.
 func claimModes(config []AllocatedConfig) (modeSelection, error) {
 	selection := modeSelection{}
 	for _, entry := range config {
@@ -197,21 +167,19 @@ func claimModes(config []AllocatedConfig) (modeSelection, error) {
 		}
 		choice := modeChoice{Mode: mode, FromClaim: entry.Source == configFromClaim}
 		if len(entry.Requests) == 0 {
-			selection.state("", choice)
+			selection.set("", choice)
 			continue
 		}
 		for _, request := range entry.Requests {
-			selection.state(request, choice)
+			selection.set(request, choice)
 		}
 	}
 	return selection, nil
 }
 
-// ModeParameters reads one opaque block's parameters.
-//
-// An unknown key fails instead of being ignored, because a
-// silently dropped typo would leave the screen at a mode nobody asked
-// for with nothing said anywhere.
+// modeParameters returns the mode in one opaque block. An unknown key is
+// an error, because an ignored typo would leave the screen at a mode
+// nobody asked for, with nothing to report it.
 func modeParameters(raw json.RawMessage) (string, error) {
 	if len(raw) == 0 {
 		return "", nil
@@ -225,11 +193,9 @@ func modeParameters(raw json.RawMessage) (string, error) {
 		if !slices.Contains(claimParameterNames, key) {
 			return "", unknownParameter(key)
 		}
-		// A control parameter is this block's too, and
-		// controlParameters is the parser that reads it. Both parsers
-		// judge an unknown key against the one list of what this
-		// driver reads, so a typo fails from either side and a real
-		// key is never mistaken for one.
+		// The same block can hold the keys that controlParameters
+		// reads, so both parsers check keys against
+		// claimParameterNames and skip each other's keys.
 		if key != modeParameter {
 			continue
 		}
@@ -240,35 +206,32 @@ func modeParameters(raw json.RawMessage) (string, error) {
 	return mode, nil
 }
 
-// A requestedMode is a claim's mode taken apart: the name every
-// mode list here speaks, and the refresh. A refresh of zero means
-// the claim stated none, and any refresh of that name will do.
+// requestedMode is a claim's mode split into its name and its refresh.
+// A refresh of zero means the claim set none, and any refresh of that
+// name is acceptable.
 type requestedMode struct {
 	Name    string
 	Refresh int
 }
 
-// ParseMode takes a claim's mode apart. A refresh that is not a
-// whole number is refused here, because weston reads 59.94 as 59,
-// matches nothing, and falls back with no log line and no failed
-// exit, so this refusal is the only signal a person would get.
+// parseMode rejects a refresh that is not a whole number. Weston would
+// read 59.94 as 59, find no match, and fall back to the preferred mode
+// with no error, so this error is the only report the person gets.
 func parseMode(mode string) (requestedMode, error) {
-	name, refresh, stated := strings.Cut(mode, "@")
-	if !stated {
+	name, refresh, hasRefresh := strings.Cut(mode, "@")
+	if !hasRefresh {
 		return requestedMode{Name: mode}, nil
 	}
 	value, err := strconv.Atoi(refresh)
 	if err != nil || value <= 0 {
 		return requestedMode{}, fmt.Errorf(
-			"the mode %q states the refresh %q, and a refresh is a whole number of hertz", mode, refresh)
+			"the mode %q has the refresh %q, and a refresh must be a whole number of hertz", mode, refresh)
 	}
 	return requestedMode{Name: name, Refresh: value}, nil
 }
 
-// ModeMatches compares a claim's mode against the card's readback.
-// A claim that stated no refresh matches whichever refresh the card
-// runs under that name, because the claim left that choice to
-// weston.
+// modeMatches reports whether the current mode satisfies the requested
+// mode. A request with no refresh matches any refresh of the same name.
 func modeMatches(requested, current string) bool {
 	if current == "" {
 		return false
@@ -276,23 +239,20 @@ func modeMatches(requested, current string) bool {
 	if requested == current {
 		return true
 	}
-	name, _, stated := strings.Cut(requested, "@")
-	if stated {
+	name, _, hasRefresh := strings.Cut(requested, "@")
+	if hasRefresh {
 		return false
 	}
 	currentName, _, _ := strings.Cut(current, "@")
 	return name == currentName
 }
 
-// ValidateMode compares a claim's mode against the connector's
-// live list from the kernel, never against the published attribute:
-// the attribute stops at 64 characters and carries no refresh, so
-// it advertises and the ioctl is the truth. One name can appear in
-// several entries, split apart by the kernel's aspect-ratio flags,
-// and the claim passes when any of them matches. The failure names
-// what does exist, refreshes when the name was right and names when
-// it was not, because the error is the one place a person reads the
-// list.
+// validateMode checks a claim's mode against the connector's modes from
+// the DRM connector ioctl. The kernel can list one name and refresh in
+// several entries that differ only in aspect ratio flags. When the mode
+// is not offered, the error lists the refreshes of that name, or the
+// names when the name is wrong, because no published attribute lists
+// the refreshes.
 func validateMode(connector string, offered []drmMode, mode string) error {
 	requested, err := parseMode(mode)
 	if err != nil {
@@ -322,21 +282,17 @@ func validateMode(connector string, offered []drmMode, mode string) error {
 		return nil
 	}
 	if len(refreshes) > 0 {
-		return fmt.Errorf("%s does not offer the mode %q; it offers %s at %s",
+		return fmt.Errorf("%s does not offer the mode %q, only %s at %s",
 			connector, mode, requested.Name, strings.Join(refreshes, " "))
 	}
-	return fmt.Errorf("%s does not offer the mode %q; it offers %s",
+	return fmt.Errorf("%s does not offer the mode %q, only %s",
 		connector, mode, strings.Join(names, " "))
 }
 
-// ReadModeRecord reads the modes the claims on this machine
-// have stated, keyed by the connector name sysfs uses.
-//
-// A file that is not there answers an empty record, because a
-// pod that has stated no mode yet has none, and every caller goes on
-// to write one. A file that will not parse is an error: this operator
-// is the file's only writer, so content it cannot read means something
-// else wrote it, and a write that overwrote it would hide that.
+// readModeRecord reads the requested modes, keyed by the sysfs connector
+// name. A missing file is an empty record. A file that does not parse
+// is an error, because the operator is its only writer, so the content
+// came from something else, and overwriting it would hide that.
 func readModeRecord(path string) (map[string]string, error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -347,16 +303,13 @@ func readModeRecord(path string) (map[string]string, error) {
 	}
 	record := map[string]string{}
 	if err := json.Unmarshal(raw, &record); err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
+		return nil, fmt.Errorf("parsing the mode record %s: %w", path, err)
 	}
 	return record, nil
 }
 
-// WriteModeRecord replaces the record.
-//
-// The write is atomic, because the compositor's container may
-// restart at any moment and its declare container reads this file to
-// build the config it starts from.
+// writeModeRecord replaces the record through a temporary file and a
+// rename, so the declare container never reads a partial file.
 func writeModeRecord(path string, record map[string]string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -372,35 +325,27 @@ func writeModeRecord(path string, record map[string]string) error {
 	return os.Rename(temporary, path)
 }
 
-// ApplyMode makes one screen run the mode a claim states.
-//
-// The order is validate, read back, write, restart, wait. The
-// readback before the write is what makes the flow idempotent and the
-// kubelet's retry free: a screen already at the requested mode
-// delivers with no write and no restart.
-//
-// One claim at a time holds this. The record is one file for
-// every connector, and two prepares that rewrote it at once would
-// restart the compositor twice for one config.
+// applyMode sets one screen to the mode a claim asks for: it validates
+// the mode, reads the current mode, writes the config, restarts the
+// compositor, and waits for the new mode. It reads the current mode
+// before it writes, so a kubelet retry of a prepare that already
+// succeeded does no write and no restart.
 func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) error {
 	p.modeSwitches.Lock()
 	defer p.modeSwitches.Unlock()
 
-	// Validation reads the connector's own kernel list through the
-	// ioctl, never the published attribute and never sysfs. The
-	// attribute stops at 64 characters and drops real modes, and
-	// sysfs prints names with no refresh beside them, so only the
-	// ioctl can judge an @refresh.
+	// Validate against the ioctl's list. The published modes attribute
+	// stops at 64 characters, and sysfs lists names without refreshes.
 	offered, err := p.connectorModes()
 	if err != nil {
-		return fmt.Errorf("reading the modes %s offers: %w", output.Connector, err)
+		return fmt.Errorf("reading the modes of %s: %w", output.Connector, err)
 	}
 	if err := validateMode(output.Connector, offered[output.Connector], mode); err != nil {
 		return err
 	}
 	current, err := p.currentModes()
 	if err != nil {
-		return fmt.Errorf("reading the mode %s runs: %w", output.Connector, err)
+		return fmt.Errorf("reading the current mode of %s: %w", output.Connector, err)
 	}
 	if modeMatches(mode, current[output.Connector]) {
 		p.republishSlice()
@@ -411,10 +356,9 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) e
 	if err != nil {
 		return err
 	}
-	// The restart budget. The config already asks for this mode
-	// and a restart already ran, so weston declined the mode, and a
-	// second restart would blank every screen on the machine for the
-	// same wrong answer.
+	// A restart for this mode already ran and the screen is not at it,
+	// so weston declined it. Another restart would blank every screen
+	// on the card for the same result.
 	if record[output.Connector] == mode && p.restarted[output.Connector] == mode {
 		return fmt.Errorf("%w %s on %s", errModeDeclined, mode, output.Connector)
 	}
@@ -423,23 +367,19 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) e
 		return err
 	}
 
-	// The connection standing now, read before the restart ends
-	// it. The readback below takes no answer from this connection,
-	// because this compositor still serves the mode the claim
-	// replaced.
+	// awaitMode ignores reports from this connection, because the
+	// compositor it belongs to still reports the previous mode.
 	before := p.compositorOutputs().session
 
-	// A restart blanks every screen on the card, so each one prints
-	// one line that names the screen and the change that caused it.
-	fmt.Printf("%s: the mode goes from %s to %s, and the compositor restarts\n",
+	// A restart blanks every screen on the card, so the log and the
+	// Event say which screen's mode change caused it.
+	fmt.Printf("%s: changing the mode from %s to %s, which restarts the compositor\n",
 		output.Connector, reportedMode(current[output.Connector]), mode)
 	p.notices.post(output.Connector, events.TypeNormal, ModeChangedReason,
-		fmt.Sprintf("the mode of %s goes from %s to %s; the compositor restarts, and every screen on the card blanks",
+		fmt.Sprintf("Changed the mode of %s from %s to %s. The compositor restarts, and every screen on the card goes blank",
 			output.Connector, reportedMode(current[output.Connector]), mode))
-	// The blast. The compositor role starts weston again, the new
-	// compositor parses the rewritten config, and every client on every
-	// output of this card loses its connection. That is the accepted
-	// cost of a mode change, and the manual's claim guide states it.
+	// The compositor container starts weston again, and the new weston
+	// reads the rewritten config.
 	if err := p.endCompositors(syscall.SIGTERM); err != nil {
 		return fmt.Errorf("ending the compositor: %w", err)
 	}
@@ -455,13 +395,11 @@ func (p *draPlugin) applyMode(ctx context.Context, output Output, mode string) e
 	return nil
 }
 
-// RepublishSlice runs the operator's own reconcile pass, on every
-// prepare that reached the card. The compositor probes the link on
-// its way up, and a mode list that grows in that probe raises no
-// uevent, so the slice can hold a short list until something reads
-// again. A prepare has just read the kernel, which makes it the
-// moment to look, and the pass writes only on divergence, so the
-// common case costs one read.
+// republishSlice runs the operator's publish pass after a prepare that
+// read the card. The compositor probes the link as it starts, and the
+// kernel sends no uevent when that probe adds modes, so the published
+// slice can keep a short mode list until the next read. The pass writes
+// the slice only when it differs.
 func (p *draPlugin) republishSlice() {
 	if p.republish == nil {
 		return
@@ -469,12 +407,9 @@ func (p *draPlugin) republishSlice() {
 	p.republish()
 }
 
-// RewriteConfig writes the record and regenerates weston.ini
-// from the connector walk plus the record.
-//
-// The record is written first, so a compositor that restarts
-// between the two writes reads a config the next call rebuilds from
-// the record it already holds.
+// rewriteConfig writes the record first, so a compositor that restarts
+// between the two writes starts on a config that the next call
+// rebuilds from the record.
 func (p *draPlugin) rewriteConfig(record map[string]string) error {
 	if err := writeModeRecord(p.recordPath, record); err != nil {
 		return fmt.Errorf("writing the mode record: %w", err)
@@ -485,27 +420,17 @@ func (p *draPlugin) rewriteConfig(record map[string]string) error {
 	return nil
 }
 
-// AwaitMode waits for the compositor that started after the
-// restart to serve the requested mode.
+// awaitMode waits until the restarted compositor reports the requested
+// mode. It reads the mode from the compositor's wl_output events and
+// not from the kernel, because a client draws at the mode weston
+// reports, which can differ from the mode the kernel set on the
+// connector. A new connection also proves that clients can connect, so
+// the socket needs no separate check.
 //
-// The compositor is the source, not the card. The kernel
-// syncing a mode on a connector and weston serving canvases at that
-// mode are two different facts, and a client draws at the second
-// one. The compositor's own wl_output events carry that second fact.
-//
-// The wait requires a connection newer than the one the
-// restart ended, because the compositor on its way out still reports
-// the mode the claim replaced. A compositor with a standing
-// connection is also a compositor a consumer can connect to, so the
-// socket needs no separate check.
-//
-// The wait has two parts. The first waits for the new compositor to
-// answer, for as long as the kubelet's crash backoff can hold a
-// compositor that crashed. The
-// second gives that compositor switchTimeout to serve the mode. Only
-// the second part can decline: a compositor that answers at another
-// mode is the decline, and a compositor that has not answered yet has
-// said nothing about the mode.
+// First it waits up to compositorReturnLimit for a connection newer
+// than before. Then the compositor has p.switchTimeout to report the
+// mode. Only a timeout in the second wait returns errModeDeclined,
+// because a compositor that is not back yet has not reported any mode.
 func (p *draPlugin) awaitMode(ctx context.Context, connector, mode string, before uint64) error {
 	if err := p.awaitCompositor(ctx, before); err != nil {
 		return err
@@ -525,11 +450,7 @@ func (p *draPlugin) awaitMode(ctx context.Context, connector, mode string, befor
 			if served.session > before && modeMatches(mode, served.modes[connector]) {
 				return nil
 			}
-			// The failure names the connector, the mode the
-			// claim stated, the budget it had, and the mode the
-			// compositor serves instead, because a person reads
-			// this line to learn which of the two the screen runs.
-			return fmt.Errorf("%w: %s did not report the mode %s within %s; it reports %s",
+			return fmt.Errorf("%w: %s did not report the mode %s within %s, and reports %s",
 				errModeDeclined, connector, mode, p.switchTimeout, reportedMode(served.modes[connector]))
 		case <-served.changed:
 		case <-time.After(p.switchFallback):
@@ -537,8 +458,6 @@ func (p *draPlugin) awaitMode(ctx context.Context, connector, mode string, befor
 	}
 }
 
-// awaitCompositor waits for a connection newer than the one the
-// restart ended.
 func (p *draPlugin) awaitCompositor(ctx context.Context, before uint64) error {
 	limit := time.NewTimer(compositorReturnLimit)
 	defer limit.Stop()
@@ -551,16 +470,15 @@ func (p *draPlugin) awaitCompositor(ctx context.Context, before uint64) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-limit.C:
-			return fmt.Errorf("the compositor did not answer within %s of its restart", compositorReturnLimit)
+			return fmt.Errorf("the compositor was not running again within %s of its restart", compositorReturnLimit)
 		case <-served.changed:
 		case <-time.After(p.switchFallback):
 		}
 	}
 }
 
-// What a failure states for a connector the compositor named
-// no mode for, which is a compositor that never came back or an
-// output it never re-created.
+// reportedMode formats a mode for a message. An empty mode means the
+// compositor is not running or has no output for the connector.
 func reportedMode(mode string) string {
 	if mode == "" {
 		return "no mode"
@@ -568,8 +486,6 @@ func reportedMode(mode string) string {
 	return mode
 }
 
-// What the compositor reports it serves, and nothing at all
-// when this operator holds no connection to one.
 func (p *draPlugin) compositorOutputs() servedOutputs {
 	if p.served == nil {
 		return servedOutputs{}
@@ -577,36 +493,32 @@ func (p *draPlugin) compositorOutputs() servedOutputs {
 	return p.served()
 }
 
-// restartCompositor ends the compositor with no config change,
-// the restart half of the path a mode prepare takes. It holds the
-// same lock, so a restart and a mode switch never run at once: a
-// restart in the middle of a switch would end the compositor the
-// switch is waiting on and fail the prepare.
+// restartCompositor ends the compositor with no change to the config.
+// displayControl calls it to repair the canvas sizes after an output
+// was destroyed and re-created.
 func (p *draPlugin) restartCompositor() error {
 	return p.restart("heal", func() error { return p.endCompositors(syscall.SIGTERM) })
 }
 
-// KillHungCompositor is the restart for a compositor that accepts on
-// its socket and answers nothing. The socket watch orders it after the
-// probe has read Hung for compositorHungLimit. The compositor exits on
-// SIGKILL, the probe reads Down until the compositor role starts weston
-// again, and that Down is the path the taint and the clients already
-// take.
+// killHungCompositor sends SIGKILL to a compositor that accepts
+// connections on its socket and never responds. The socket watch calls
+// it after the probe has reported Hung for compositorHungLimit. The
+// probe then reports Down until the compositor container starts weston
+// again, and Down already sets the taint and lets clients handle the
+// outage.
 func (p *draPlugin) killHungCompositor() error {
 	if err := p.restart("hung", func() error { return p.endCompositors(syscall.SIGKILL) }); err != nil {
 		return err
 	}
 	p.notices.post("", events.TypeWarning, CompositorKilledReason,
-		fmt.Sprintf("the compositor answered nothing for %s; the operator ended it, and it starts again", compositorHungLimit))
+		fmt.Sprintf("Ended the compositor, which did not reply for %s. Its container starts it again", compositorHungLimit))
 	return nil
 }
 
-// Restart ends the compositor and counts the restart under the reason
-// this operator ordered it for. It holds the mode switches' lock for
-// the reason a mode switch holds it: a restart in the middle of a
-// switch would end the compositor the switch is waiting on. An end
-// that found no compositor returns before the count, so it counts
-// nothing.
+// restart ends the compositor and counts the restart under reason. It
+// takes the modeSwitches lock, because a restart during a mode switch
+// would end the compositor that the switch waits for and fail the
+// prepare. When end returns an error, nothing is counted.
 func (p *draPlugin) restart(reason string, end func() error) error {
 	p.modeSwitches.Lock()
 	defer p.modeSwitches.Unlock()
@@ -618,14 +530,12 @@ func (p *draPlugin) restart(reason string, end func() error) error {
 	return nil
 }
 
-// releaseModes takes the connectors of one ended claim out of
-// the record and regenerates the config.
-//
-// Nothing restarts. The device allocates to one claim at a
-// time, and a revert would restart every screen on the machine to
-// serve nobody. The screen keeps the mode until the next compositor
-// start, which comes up at the mode the monitor prefers, and the
-// slice's currentMode says what it runs meanwhile.
+// releaseModes removes the connectors of an ended claim from the record
+// and rewrites the config. It does not restart the compositor, because
+// no claim holds the screen any more and a restart would blank every
+// screen on the card. The screen keeps its mode until the next
+// compositor start, and the slice's currentMode attribute shows the
+// mode in use.
 func (p *draPlugin) releaseModes(devices []string) error {
 	p.modeSwitches.Lock()
 	defer p.modeSwitches.Unlock()
@@ -640,9 +550,7 @@ func (p *draPlugin) releaseModes(devices []string) error {
 			continue
 		}
 		delete(record, connector)
-		// The restart this operator ordered is forgotten with
-		// the entry, so the next claim that states this mode gets its
-		// own restart and its own budget.
+		// The next claim for this mode gets its own restart.
 		delete(p.restarted, connector)
 		released = true
 	}

@@ -1,9 +1,9 @@
 package main
 
 // These tests cover which screens a claim holds, as the API server
-// answers it: a claim whose prepare has not finished holds its screen
-// as firmly as one the kubelet prepared, and the Display pass reads
-// the answer only before a compositor restart.
+// reports it. A claim whose prepare has not finished holds its screen
+// as much as one the kubelet prepared, and the Display pass lists the
+// claims only before a compositor restart.
 
 import (
 	"encoding/json"
@@ -15,9 +15,8 @@ import (
 	"testing"
 )
 
-// A claim on the lab machine's API server, allocated the devices it
-// names from the driver and pool it names, and reserved for the pods
-// it names.
+// heldClaim is a ResourceClaim allocated devices from a driver and
+// pool, and reserved for the listed pods.
 type heldClaim struct {
 	driver  string
 	pool    string
@@ -25,9 +24,9 @@ type heldClaim struct {
 	pods    []string
 }
 
-// claimServer is an API server that serves the claims of every
-// namespace and the running pods it names. A pod in deleting is one
-// the API server has begun to delete.
+// claimServer serves the given claims in the claims list, and a pod for
+// each name in running. A pod whose name is true in deleting has a
+// deletion timestamp.
 func claimServer(t *testing.T, claims []heldClaim, deleting map[string]bool, running ...string) http.Handler {
 	t.Helper()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -75,8 +74,8 @@ func TestAClaimHoldsItsScreenWhileALivePodHoldsTheClaim(t *testing.T) {
 		held     bool
 	}{
 		{
-			// The pod exists whether or not its prepare has finished,
-			// so the answer is the same while the kubelet retries it.
+			// The pod exists whether or not the prepare has finished, so
+			// the result is the same while the kubelet retries.
 			name:    "an output a pod holds",
 			claim:   heldClaim{driver: DriverName, pool: "stick-1", devices: []string{"hdmi-a-1"}, pods: []string{"film"}},
 			running: true,
@@ -97,8 +96,8 @@ func TestAClaimHoldsItsScreenWhileALivePodHoldsTheClaim(t *testing.T) {
 			claim: heldClaim{driver: DriverName, pool: "stick-1", devices: []string{"hdmi-a-1"}},
 		},
 		{
-			// Many claims share the draw device, and none of them owns
-			// the mode.
+			// Many claims share a draw device, and none of them owns the
+			// mode.
 			name:    "a draw device",
 			claim:   heldClaim{driver: DriverName, pool: "stick-1", devices: []string{"hdmi-a-1-draw"}, pods: []string{"film"}},
 			running: true,
@@ -130,25 +129,25 @@ func TestAClaimHoldsItsScreenWhileALivePodHoldsTheClaim(t *testing.T) {
 			held, err := allocatedOutputs(client, "stick-1", clusterStores{})
 
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the allocated outputs of node stick-1: %v", err)
 			}
 			if held["hdmi-a-1"] != c.held {
-				t.Errorf("hdmi-a-1 held = %v, want %v (the answer was %v)", held["hdmi-a-1"], c.held, held)
+				t.Errorf("hdmi-a-1 is held: %v, want %v (the outputs are %v)", held["hdmi-a-1"], c.held, held)
 			}
 		})
 	}
 }
 
-// The pass that finds the screen away from its resting mode leaves
-// it alone while a claim holds it, even when the claim's prepare has
-// not finished and no spec on disk names it. That prepare switched the
-// screen to the claim's mode, and a pass that switched it back would
-// make the kubelet's next retry switch it again.
-func TestTheRestingModeWaitsForAClaimWhosePrepareHasNotFinished(t *testing.T) {
+// While a claim holds a screen that is not at its declared mode, the
+// pass leaves the mode alone, even when the claim's prepare has not
+// finished and no spec on disk lists it. The prepare already switched
+// the screen to the claim's mode, and switching it back would make the
+// kubelet's next retry switch it again.
+func TestTheDeclaredModeIsNotRestoredWhileAnUnpreparedClaimHoldsTheScreen(t *testing.T) {
 	fixture := newDisplayBench(t, wiredPanel{
 		Connector: "HDMI-A-1",
 		Monitor:   labMonitor(),
-		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+		Panel:     recordedPanel(t, "lg-hdr-wqhd"),
 		Modes:     []string{"1920x1080@60", "1280x720@60"},
 		Current:   "1280x720@60",
 	})
@@ -156,7 +155,7 @@ func TestTheRestingModeWaitsForAClaimWhosePrepareHasNotFinished(t *testing.T) {
 	fixture.declare(DisplaySpec{Mode: stringOf("1920x1080@60")})
 
 	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the first pass while a claim holds the screen: %v", err)
 	}
 	if len(fixture.modeSets) != 0 {
 		t.Fatalf("the controller set %q while a claim held the screen", fixture.modeSets)
@@ -164,45 +163,46 @@ func TestTheRestingModeWaitsForAClaimWhosePrepareHasNotFinished(t *testing.T) {
 
 	fixture.allocated = nil
 	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running a pass after the claim ended: %v", err)
 	}
 	if want := "HDMI-A-1=1920x1080@60"; len(fixture.modeSets) != 1 || fixture.modeSets[0] != want {
 		t.Errorf("the controller set %q after the claim ended, want %q", fixture.modeSets, want)
 	}
 }
 
-// A pass that cannot read the claims cannot know the screen is free,
-// so it switches nothing and reports why.
+// When the pass cannot list the claims, it does not know whether the
+// screen is free. It changes no mode and returns the error.
 func TestAPassThatCannotReadTheClaimsSwitchesNothing(t *testing.T) {
 	fixture := newDisplayBench(t, wiredPanel{
 		Connector: "HDMI-A-1",
 		Monitor:   labMonitor(),
-		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+		Panel:     recordedPanel(t, "lg-hdr-wqhd"),
 		Modes:     []string{"1920x1080@60", "1280x720@60"},
 		Current:   "1280x720@60",
 	})
+	errClaimListing := errors.New("the API server refused the listing")
 	fixture.control.allocated = func() (map[string]bool, error) {
-		return nil, errors.New("the API server refused the listing")
+		return nil, errClaimListing
 	}
 	fixture.declare(DisplaySpec{Mode: stringOf("1920x1080@60")})
 
 	err := fixture.pass()
 
-	if err == nil || !strings.Contains(err.Error(), "refused the listing") {
-		t.Errorf("the pass reported %v, want the failed listing", err)
+	if !errors.Is(err, errClaimListing) {
+		t.Errorf("the pass returned %v, want the error of the claim listing", err)
 	}
 	if len(fixture.modeSets) != 0 {
-		t.Errorf("the controller set %q without knowing the screen was free", fixture.modeSets)
+		t.Errorf("the controller set %q when it could not read whether a claim holds the screen", fixture.modeSets)
 	}
 }
 
-// The listing of every claim in the cluster runs only when a restart
-// would follow, so a pass over a screen at its resting mode reads none.
+// The pass lists every claim in the cluster only when a restart would
+// follow, so it lists none while the screen is at its declared mode.
 func TestAPassThatRestartsNothingListsNoClaims(t *testing.T) {
 	fixture := newDisplayBench(t, wiredPanel{
 		Connector: "HDMI-A-1",
 		Monitor:   labMonitor(),
-		Panel:     drillPanel(t, "lg-hdr-wqhd"),
+		Panel:     recordedPanel(t, "lg-hdr-wqhd"),
 		Modes:     []string{"1920x1080@60", "1280x720@60"},
 		Current:   "1920x1080@60",
 	})
@@ -210,7 +210,7 @@ func TestAPassThatRestartsNothingListsNoClaims(t *testing.T) {
 
 	for range 3 {
 		if err := fixture.pass(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("running a pass at the declared mode: %v", err)
 		}
 	}
 
@@ -219,19 +219,20 @@ func TestAPassThatRestartsNothingListsNoClaims(t *testing.T) {
 	}
 }
 
-// The canvas heal waits on a claim whose prepare has not finished, for
-// the reason the resting mode does.
-func TestTheHealWaitsForAClaimWhosePrepareHasNotFinished(t *testing.T) {
-	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+// The canvas repair restarts the compositor only after no claim holds
+// a screen, including a claim whose prepare has not finished, for the
+// same reason as the declared mode.
+func TestTheCanvasRepairWaitsWhileAnUnpreparedClaimHoldsTheScreen(t *testing.T) {
+	fixture := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
 	fixture.allocated = map[string]bool{"hdmi-a-1": true}
 	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the first pass while a claim holds the screen: %v", err)
 	}
 
 	fixture.flap(t)
-	fixture.advance(canvasSettleWindow)
+	fixture.advance(outputSettleWindow)
 	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running a pass after the screen flapped: %v", err)
 	}
 	if fixture.restarts != 0 {
 		t.Fatalf("the compositor restarted %d times while a claim held a screen", fixture.restarts)
@@ -239,15 +240,15 @@ func TestTheHealWaitsForAClaimWhosePrepareHasNotFinished(t *testing.T) {
 
 	fixture.allocated = nil
 	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running a pass after the claim ended: %v", err)
 	}
 	if fixture.restarts != 1 {
 		t.Errorf("the compositor restarted %d times after the claim ended, want 1", fixture.restarts)
 	}
 }
 
-// A claim is still preparing when the API server says a live claim
-// holds the output and no spec on disk names it yet.
+// A claim is preparing when a live claim holds the output and no spec
+// on disk lists it yet.
 func TestAClaimIsPreparingUntilItsSpecIsWritten(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -262,7 +263,7 @@ func TestAClaimIsPreparingUntilItsSpecIsWritten(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := preparingOutputs(c.allocated, c.prepared); !maps.Equal(got, c.want) {
-				t.Errorf("preparing = %v, want %v", got, c.want)
+				t.Errorf("the preparing outputs are %v, want %v", got, c.want)
 			}
 		})
 	}

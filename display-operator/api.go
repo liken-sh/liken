@@ -1,12 +1,11 @@
 package main
 
-// This file is display-api, the one door a caller reaches a screen
-// through. It names the caller from a verified client certificate or
-// from a TokenReview, authorizes the request with a
-// SubjectAccessReview, reads the Display to find its node, and
-// forwards the request to the capture sidecar on that node. It stores
-// nothing, and it never decodes, encodes, or holds a frame: the bytes
-// the sidecar sends are the bytes the caller reads.
+// display-api is the HTTPS API that callers use to read and capture a
+// screen. It identifies the caller from a verified client certificate
+// or a TokenReview, authorizes the request with a SubjectAccessReview,
+// reads the Display to find its node, and forwards the request to the
+// capture sidecar on that node. It never decodes or encodes a frame:
+// the caller receives the bytes that the sidecar sends.
 
 import (
 	"context"
@@ -25,19 +24,21 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// The role argument the display-api Deployment passes to the binary.
+// apiMode is the role argument that the display-api Deployment passes
+// to the binary.
 const apiMode = "api"
 
-// The component label this process carries on liken_build_info, and
-// the port it serves HTTPS on. The Service maps 443 to it.
+// apiComponent is the component label on liken_build_info.
+// defaultAPIAddr is the listen address, and the Service maps port 443
+// to it.
 const (
 	apiComponent   = "display-api"
 	defaultAPIAddr = ":8443"
 )
 
-// The two Secrets and the ConfigMap the API owns, and the Service
-// whose names its own leaf carries. Its one CA signs that leaf and
-// the sidecar's, which carries the single SAN certs.go names.
+// The API creates these Secrets and the ConfigMap. One CA signs the
+// API's serving certificate, which has the DNS names of the Service,
+// and the sidecar's certificate, which has the name sidecarName.
 const (
 	apiTLSSecret     = "display-api-tls"
 	sidecarTLSSecret = "display-capture-server"
@@ -45,39 +46,41 @@ const (
 	apiServiceName   = "display-api"
 )
 
-// The record a request that the caller abandoned carries. See hungUp.
+// statusClientClosed is the status that the log and the metrics record
+// for a request whose caller closed the connection. See hungUp.
 const statusClientClosed = 499
 
-// The describedby link names the Display object on the API server.
-// It is absolute because RFC 8288 section 3.1 resolves a relative
-// reference against the API's own origin, which is not the API
-// server.
+// describedByBase is the prefix of the describedby link, which points
+// at the Display object on the Kubernetes API server. It is absolute
+// because RFC 8288 section 3.1 resolves a relative reference against
+// this API's origin, and the Display is not served there.
 const describedByBase = "https://kubernetes.default.svc/apis/" +
 	DisplayGroup + "/" + DisplayVersion + "/" + displaysPlural + "/"
 
-// The manual page the service-doc relation (RFC 8631) points at.
+// serviceDocument is the manual page that the service-doc link
+// relation (RFC 8631) points at.
 const serviceDocument = "https://liken.sh/display/docs/reference/api/"
 
-// The time in the Content-Disposition file name (RFC 6266 section 4)
-// is RFC 3339 UTC with the colons replaced by hyphens, because a
-// colon is not legal in a file name everywhere a browser saves. This
-// is the one place the API states a time outside the standard form.
+// dispositionTimeLayout formats the time in the Content-Disposition
+// file name (RFC 6266 section 4). It is RFC 3339 in UTC with hyphens
+// in place of colons, because Windows does not allow a colon in a file
+// name.
 const dispositionTimeLayout = "2006-01-02T15-04-05Z"
 
-// headerDeadline bounds how long the API waits for the sidecar's
-// response headers, plus the t= begin the caller asked for.
-// idleDeadline bounds the quiet a body may hold before the API ends
-// the capture.
+// headerDeadline is how long the API waits for a caller's request
+// headers and for the sidecar's response headers. For a capture whose
+// query sets a t= start time, the wait for the sidecar's headers is
+// headerDeadline plus that start time, because the sidecar drops every
+// frame before the start time. idleDeadline is how long a capture may
+// send no bytes before the API ends it.
 const (
 	headerDeadline = 10 * time.Second
 	idleDeadline   = 30 * time.Second
 )
 
-// The server holds the cluster client it reads Displays with, the
-// sidecar index it answers "which node" from memory with, the token
-// cache that holds review verdicts, and the private-leg client it
-// forwards captures on. record writes the Captured Event, and now is
-// a field so a test can hold the clock still.
+// apiServer is the http.Handler of display-api. sidecars is filled by
+// an informer, so finding a node's sidecar makes no API request. record
+// posts the Captured Event.
 type apiServer struct {
 	client     *apiclient.Client
 	sidecars   *sidecarIndex
@@ -89,10 +92,9 @@ type apiServer struct {
 	now        func() time.Time
 }
 
-// The api role. The certificate comes first, because the API serves
-// HTTPS only and has nothing to listen with before it holds one.
-// Then the pod informer starts, and then the two listeners: the
-// process listener for metrics and health, and the API listener.
+// serveAPI runs the api role. It loads or creates the serving
+// certificate before it opens a listener, because the API serves only
+// HTTPS.
 func serveAPI() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -107,8 +109,9 @@ func serveAPI() {
 		fatal("in-cluster config for the watches: %v", err)
 	}
 	readings := newAPIMetrics(apiComponent, version)
-	// The Events' reportingInstance is the host name, which is the
-	// pod's name, so a person can tell which replica wrote one.
+	// events.Options{} leaves the reportingInstance as the host name,
+	// which is the pod name, so a reader can tell which replica posted
+	// an Event.
 	recorder := events.New(ctx, client, apiComponent, events.Options{})
 
 	holder := &certificateHolder{}
@@ -117,15 +120,13 @@ func serveAPI() {
 		fatal("the serving certificate: %v", err)
 	}
 
-	// The cluster's client authority is read before the listener
-	// starts, and a watch on the ConfigMap takes up each change after
-	// that. A read that fails is reported and never fatal: an API that
-	// cannot read the ConfigMap still answers every caller that sends
-	// a Bearer token, and the watch loads the authority once the grant
-	// or the API server is back.
+	// A failed read of the client CA bundle is logged and does not stop
+	// the API, because a caller with a Bearer token does not need the
+	// bundle. The watch on the ConfigMap loads it when the read starts
+	// to work, and applies each later change.
 	anchors := &clientAnchors{}
 	if err := anchors.load(client); err != nil {
-		fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
+		fmt.Fprintf(os.Stderr, "the API starts without a client CA bundle: %v\n", err)
 	}
 	go keepClientAnchors(ctx, watcher, anchors)
 
@@ -150,7 +151,7 @@ func serveAPI() {
 		if err != nil {
 			fatal("metrics listener: %v", err)
 		}
-		go serveProcess(ctx, listener, processHandler(readings.registry, holder.held))
+		go serveProcess(ctx, listener, processHandler(readings.registry, holder.verifiable))
 	}
 
 	address := envOr("API_ADDR", defaultAPIAddr)
@@ -173,8 +174,8 @@ func serveAPI() {
 	}
 }
 
-// The metrics, health, and readiness listener is the same in every
-// role of this binary; only the handler behind it differs.
+// serveProcess serves metrics, health, and readiness for every role
+// of this binary.
 func serveProcess(ctx context.Context, listener net.Listener, handler http.Handler) {
 	serving := &http.Server{Handler: handler, ReadHeaderTimeout: metricsDeadline}
 	go func() {
@@ -182,15 +183,13 @@ func serveProcess(ctx context.Context, listener net.Listener, handler http.Handl
 		_ = serving.Close()
 	}()
 	if err := serving.Serve(listener); err != nil && ctx.Err() == nil {
-		slog.Warn("the process listener stopped", "error", err)
+		slog.Warn("The metrics and health listener stopped", "error", err)
 	}
 }
 
-// One request, in this order: the route, the method, the token, the
-// authorization verdict, the Display, the media type, the query, and
-// only then the node. Authorization comes before the read, so a 403
-// never says whether a name exists, and every knob is checked before
-// anything on a node is asked to capture.
+// ServeHTTP checks a request in this order: route, method, caller,
+// authorization, the Display, the media type, and the query
+// parameters. It contacts the sidecar only after every check passes.
 func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := s.now()
 	id := newRequestID()
@@ -199,7 +198,7 @@ func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	route, name, matched := matchRoute(r.URL.Path)
 	if !matched {
 		s.refuse(w, r, apiRoute{template: "unmatched"}, id, start, head,
-			notFound(fmt.Sprintf("this API serves no route at %s", r.URL.Path)))
+			notFound(fmt.Sprintf("the API has no route at %s", r.URL.Path)))
 		return
 	}
 	switch r.Method {
@@ -209,7 +208,7 @@ func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	default:
 		s.refuse(w, r, route, id, start, head,
-			methodNotAllowed(fmt.Sprintf("%s is not a method this API answers", r.Method)))
+			methodNotAllowed(fmt.Sprintf("the API does not accept the method %s", r.Method)))
 		return
 	}
 
@@ -218,8 +217,7 @@ func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.refuse(w, r, route, id, start, head, f)
 		return
 	}
-	// The subject travels with the request from here on, so every
-	// line this request logs names who asked.
+	// The log line of the request reads the caller from the context.
 	r = r.WithContext(context.WithValue(r.Context(), subjectKey{}, who.Username))
 	if f := s.authorize(route, name, who); f != nil {
 		s.refuse(w, r, route, id, start, head, f)
@@ -232,9 +230,9 @@ func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	screen, notServing := s.readDisplay(name)
-	// A screen that is down still has a name, a node, and a mode, and
-	// the info route answers those. Every other route needs the
-	// screen itself, so the refusal stands for them.
+	// The info route responds from the Display object when the screen
+	// cannot be captured, as long as the Display was read. Every other
+	// route returns the fault.
 	if notServing != nil && (route.kind != infoRoute || screen == nil) {
 		s.refuse(w, r, route, id, start, head, notServing)
 		return
@@ -267,13 +265,11 @@ func (s *apiServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.serveCapture(w, r, route, name, screen, mediaType, chosen, who, id, start, head)
 }
 
-// A caller names itself two ways, and this API reads them in the
-// order kube-apiserver reads them. A connection that carries a client
-// certificate the cluster's authority signed is that certificate's
-// subject. Otherwise the caller carries a token in the Authorization
-// field, RFC 6750 section 2.1: a request with no token gets the bare
-// challenge, and a token the TokenReview refuses gets the review's
-// own words.
+// authenticate tries a client certificate that the cluster's CA signed
+// first, as kube-apiserver does, and then a Bearer token in the
+// Authorization header (RFC 6750 section 2.1). A request with neither
+// gets a 401 with the challenge alone. A rejected token gets the
+// TokenReview's error text.
 func (s *apiServer) authenticate(r *http.Request) (*caller, *fault) {
 	if who, held := certificateCaller(r.TLS); held {
 		return who, nil
@@ -283,14 +279,15 @@ func (s *apiServer) authenticate(r *http.Request) (*caller, *fault) {
 	if !split || !strings.EqualFold(scheme, "Bearer") || strings.TrimSpace(token) == "" {
 		return nil, unauthenticated("")
 	}
-	return s.tokens.verdict(strings.TrimSpace(token))
+	return s.tokens.lookup(strings.TrimSpace(token))
 }
 
-// Every route authorizes before it reads, so a 403 never says whether
-// a name exists. The documents need no authorization; the info route
-// needs get on displays; a capture needs get on displays/screen. The
-// subresource exists in no CRD. It is a string RBAC matches, the way
-// pods/log is matched.
+// authorize runs a SubjectAccessReview before the Display is read, so
+// a 403 does not reveal whether a Display exists. The documents need
+// no authorization. The info route needs get on displays, and a
+// capture needs get on displays/screen. The CRD does not define the
+// screen subresource, but RBAC matches a subresource by its name
+// alone, as it does for pods/log.
 func (s *apiServer) authorize(route apiRoute, name string, who *caller) *fault {
 	if route.kind == documentRoute {
 		return nil
@@ -304,9 +301,8 @@ func (s *apiServer) authorize(route apiRoute, name string, who *caller) *fault {
 		return f
 	}
 	if !allowed {
-		// The API server states a reason for most refusals and states
-		// none for a subject that simply matches no rule, so the rule
-		// that was asked for is the answer when it says nothing.
+		// The API server returns no reason when no rule matches the
+		// subject. Then the 403 names the rule that was checked.
 		if reason == "" {
 			reason = fmt.Sprintf("not allowed to get %s on %s", captureScope, name)
 			if subresource == "" {
@@ -318,22 +314,17 @@ func (s *apiServer) authorize(route apiRoute, name string, who *caller) *fault {
 	return nil
 }
 
-// A Display is absent, present with no node, present with no panel on
-// its connector, or present with a node whose compositor may or may
-// not be serving. A screen with no node and a screen whose compositor
-// is not serving are each a 503 with Retry-After, not a 409: 409 is
-// for a state the caller can act on, and neither wait is one. The two
-// carry different types, because they are different waits. A screen
-// with no node is waiting for the scheduler, which is a state every
-// capture API has and which they share the type for. A compositor
-// that is not serving is display's own: the operator restarts it, and
-// the words the Display's own condition carries say what it is doing.
+// readDisplay reads the Display and returns a fault when the screen
+// cannot be captured. A Display with no node, or whose compositor is
+// not serving, gets a 503 with Retry-After, because the caller can
+// only wait. no-node is a problem type that the audio and media APIs
+// share, and compositor-down belongs to display alone. Its detail is
+// the message of the CompositorServing condition.
 //
-// A screen with no panel is the 409. No wait brings an unplugged
-// monitor back, and a person acts on it by connecting the monitor. It
-// is checked before the compositor, because a Display whose monitor
-// left keeps whatever compositor condition it last had, and the
-// missing panel is the answer that holds either way.
+// A Display whose Connected condition is False gets a 409, because
+// retrying does not help until someone connects a monitor. Connected
+// is checked first, because a Display keeps its last CompositorServing
+// condition after the monitor is unplugged.
 func (s *apiServer) readDisplay(name string) (*Display, *fault) {
 	screen, err := apiclient.Get[Display](s.client, DisplaysPath+"/"+name)
 	if err == apiclient.ErrNotFound {
@@ -343,7 +334,7 @@ func (s *apiServer) readDisplay(name string) (*Display, *fault) {
 		return nil, unavailable(problemUpstreamFailed, err.Error())
 	}
 	if screen.Status.Node == "" {
-		return nil, unavailable(problemNoNode, fmt.Sprintf("the Display %s names no node yet", name))
+		return nil, unavailable(problemNoNode, fmt.Sprintf("the Display %s has no status.node yet", name))
 	}
 	for _, condition := range screen.Status.Conditions {
 		if condition.Type == ConnectedCondition && condition.Status == conditionFalse {
@@ -352,20 +343,19 @@ func (s *apiServer) readDisplay(name string) (*Display, *fault) {
 	}
 	for _, condition := range screen.Status.Conditions {
 		if condition.Type == CompositorServingCondition && condition.Status == conditionFalse {
-			// The object comes back with the refusal, because the
-			// info route answers a screen that is down from the
-			// object alone.
+			// The info route needs the Display even with this fault.
 			return screen, unavailable(problemCompositorDown, condition.Message)
 		}
 	}
 	return screen, nil
 }
 
-// An extension names one fixed representation, and an Accept that
-// excludes it is a 406: RFC 9110 section 12.5.1 lets a server send
-// 406 or ignore Accept, and a client that said two contradictory
-// things is told. Without an extension, Accept negotiates among the
-// screen's four forms.
+// selectType returns the media type of the response. A route with a
+// file extension has one fixed type, and an Accept header that excludes
+// it gets a 406. RFC 9110 section 12.5.1 lets a server either return
+// 406 or ignore Accept, and this API returns 406 so that a client
+// learns that its Accept and its extension disagree. Without an
+// extension, Accept chooses among screenForms.
 func (s *apiServer) selectType(route apiRoute, name, accept string) (string, *fault) {
 	if route.mediaType != "" {
 		if acceptsType(accept, route.mediaType) {
@@ -383,9 +373,10 @@ func (s *apiServer) selectType(route apiRoute, name, accept string) (string, *fa
 	return chosen, nil
 }
 
-// The mode the Display reports is what the knobs are checked
-// against: width and height bound the scale, and the refresh bounds
-// the framerate. A Display that reports no mode refuses no knob.
+// screenMode returns the size and refresh rate from the Display's
+// status, which limit the scale and framerate query parameters. It
+// returns zeros when the status has no mode that parses, and then
+// validate applies no limit.
 func screenMode(screen *Display) (width, height, refresh int) {
 	if screen.Status.Mode == nil {
 		return 0, 0, 0
@@ -400,8 +391,8 @@ func screenMode(screen *Display) (width, height, refresh int) {
 	return width, height, mode.Refresh
 }
 
-// OPTIONS answers the methods in Allow and nothing else, RFC 9110
-// section 9.3.7, with a 204 and no body.
+// allow responds to OPTIONS with the Allow header, a 204, and no body
+// (RFC 9110 section 9.3.7).
 func (s *apiServer) allow(w http.ResponseWriter, r *http.Request, route apiRoute, name, id string, start time.Time) {
 	w.Header().Set("Allow", allowedMethods)
 	w.Header().Set("Vary", "Accept")
@@ -410,9 +401,9 @@ func (s *apiServer) allow(w http.ResponseWriter, r *http.Request, route apiRoute
 	s.logged(r, route, id, "", http.StatusNoContent, 0, start)
 }
 
-// The discovery and OpenAPI documents change only with the build,
-// so the build version is their ETag, and a client that holds it
-// gets a 304.
+// serveDocument serves the discovery or OpenAPI document. Both change
+// only with a new build, so document uses the build version as the
+// ETag.
 func (s *apiServer) serveDocument(w http.ResponseWriter, r *http.Request, route apiRoute, id string, start time.Time, head bool) {
 	mediaType, f := s.selectType(route, "", r.Header.Get("Accept"))
 	if f != nil {
@@ -433,17 +424,15 @@ func (s *apiServer) serveDocument(w http.ResponseWriter, r *http.Request, route 
 	s.document(w, r, route, "", mediaType, id, start, head, body)
 }
 
-// The info document carries the screen's own numbers, read from the
-// sidecar on the node, which has them from the compositor's wl_output
-// events. Its Links point at the routes that capture the screen with
-// the related relation. A HEAD asks the node for nothing.
+// serveInfo serves the info document, which the sidecar builds from
+// the compositor's wl_output events. A HEAD request does not contact
+// the sidecar.
 //
-// A screen with no panel, a screen whose compositor is down, and a
-// screen whose sidecar this API cannot reach answer 200 from the
-// Display object alone: the name, the node, and the mode the
-// Display's status reports, with what is wrong beside them. A caller
-// asking what a screen is must not need the screen to be up, and the
-// members that come from the node are left out rather than guessed.
+// When the monitor is unplugged, the compositor is not serving, or the
+// sidecar cannot be reached, the response is still a 200, built by
+// staticInfo from the Display. That way a caller can read a screen's
+// node and mode, and what is wrong with it, while it cannot be
+// captured.
 func (s *apiServer) serveInfo(w http.ResponseWriter, r *http.Request, route apiRoute,
 	name string, screen *Display, down *fault, id string, start time.Time, head bool) {
 	if head {
@@ -467,8 +456,9 @@ func (s *apiServer) serveInfo(w http.ResponseWriter, r *http.Request, route apiR
 	s.document(w, r, route, name, jsonMediaType, id, start, head, body)
 }
 
-// What the info route answers with: the node's own reading of the
-// screen, or the Display's when the node cannot be asked.
+// screenInfo returns the sidecar's info document, or staticInfo when
+// the sidecar cannot be reached. It returns a fault only when the
+// caller's request was canceled.
 func (s *apiServer) screenInfo(r *http.Request, screen *Display, down *fault) (screenInfo, *fault) {
 	if down != nil && down.kind == problemAway {
 		return staticInfo(screen, "panel", "disconnected", down.detail), nil
@@ -490,10 +480,11 @@ func (s *apiServer) screenInfo(r *http.Request, screen *Display, down *fault) (s
 	return info, nil
 }
 
-// The screen as the Display states it, for a node that cannot be
-// asked. The mode status reports gives the size and the refresh;
-// scale, formats, and conversion come from the compositor and the
-// encoder, so they are absent rather than invented.
+// staticInfo builds the info document from the Display's status, for a
+// screen whose compositor or sidecar cannot answer. part is "panel",
+// "compositor", or "sidecar", and staticInfo sets the field of that
+// name to state. The scale, formats, and conversion come from the
+// compositor and the encoder, so they are left empty.
 func staticInfo(screen *Display, part, state, detail string) screenInfo {
 	width, height, refresh := screenMode(screen)
 	info := screenInfo{Width: width, Height: height, Refresh: refresh, Detail: detail}
@@ -508,10 +499,11 @@ func staticInfo(screen *Display, part, state, detail string) screenInfo {
 	return info
 }
 
-// Every document answer carries an ETag, Vary: Accept, and
-// Cache-Control: no-cache. no-cache lets a cache hold the document
-// and asks it to revalidate with If-None-Match on every use, so a
-// client after an upgrade reads the new build's document.
+// document writes a discovery, OpenAPI, or info response with the
+// build version as its ETag, and a 304 when If-None-Match matches it.
+// Cache-Control: no-cache lets a cache store the document but makes it
+// revalidate on every use, so a client gets the new document after an
+// upgrade.
 func (s *apiServer) document(w http.ResponseWriter, r *http.Request, route apiRoute,
 	name, mediaType, id string, start time.Time, head bool, body []byte) {
 	tag := `"` + version + `"`
@@ -521,25 +513,25 @@ func (s *apiServer) document(w http.ResponseWriter, r *http.Request, route apiRo
 	s.links(w, route, name, "")
 	if matchesTag(r.Header.Get("If-None-Match"), tag) {
 		w.WriteHeader(http.StatusNotModified)
-		s.readings.answered(route.template, r.Method, http.StatusNotModified, s.now().Sub(start))
+		s.readings.recordRequest(route.template, r.Method, http.StatusNotModified, s.now().Sub(start))
 		s.logged(r, route, id, "", http.StatusNotModified, 0, start)
 		return
 	}
 	w.Header().Set("Content-Type", mediaType)
 	if head {
-		s.readings.answered(route.template, r.Method, http.StatusOK, s.now().Sub(start))
+		s.readings.recordRequest(route.template, r.Method, http.StatusOK, s.now().Sub(start))
 		s.logged(r, route, id, "", http.StatusOK, 0, start)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 	written, _ := w.Write(body)
-	s.readings.answered(route.template, r.Method, http.StatusOK, s.now().Sub(start))
+	s.readings.recordRequest(route.template, r.Method, http.StatusOK, s.now().Sub(start))
 	s.logged(r, route, id, "", http.StatusOK, written, start)
 }
 
-// If-None-Match is a star, which matches any representation, or a
-// list of entity tags. RFC 9110 section 13.1.2 asks for the weak
-// comparison, so a W/ prefix is dropped before the tags are compared.
+// matchesTag reports whether an If-None-Match value matches tag. RFC
+// 9110 section 13.1.2 requires the weak comparison for If-None-Match,
+// so a W/ prefix is ignored.
 func matchesTag(field, tag string) bool {
 	field = strings.TrimSpace(field)
 	if field == "" {
@@ -556,24 +548,20 @@ func matchesTag(field, tag string) bool {
 	return false
 }
 
-// A route's own path is its template with the one name filled in.
-// An href in a 406 document names a route this way.
 func routePath(route apiRoute, name string) string {
 	return strings.ReplaceAll(route.template, "{name}", name)
 }
 
-// A capture answer carries Cache-Control: no-store (RFC 9111 section
-// 5.2.2.5), Accept-Ranges: none (RFC 9110 section 14.3), Vary: Accept
-// (section 12.5.5), and Content-Disposition with a file name (RFC
-// 6266 section 4). Content-Location goes on the negotiated route
-// alone, as section 8.7's "more specific identifier for the selected
-// representation". Section 8.7's identity guarantee, that a GET on it
-// returns the same representation, does not hold for a live capture,
-// which is also why Accept-Ranges is none. Vary is on the extension
-// routes too, where Accept only decides between 200 and 406, for
-// section 12.5.5's second purpose: to say the response was subject to
-// negotiation. The Content-Type and X-Content-Type-Options are set
-// where the body is written, next to the bytes they describe.
+// captureHeaders sets the headers of a capture response. Every capture
+// is a new frame or stream, so Cache-Control is no-store (RFC 9111
+// section 5.2.2.5) and Accept-Ranges is none (RFC 9110 section 14.3).
+// Content-Location is set only on the negotiated route, where it gives
+// the extension route of the chosen type (RFC 9110 section 8.7).
+//
+// Vary: Accept is set on the extension routes too, because Accept
+// chooses between 200 and 406 there, and RFC 9110 section 12.5.5
+// requires Vary whenever Accept can change the response. The callers
+// set Content-Type and X-Content-Type-Options.
 func (s *apiServer) captureHeaders(w http.ResponseWriter, route apiRoute,
 	name, mediaType string, at time.Time) {
 	ext := route.ext
@@ -589,11 +577,12 @@ func (s *apiServer) captureHeaders(w http.ResponseWriter, route apiRoute,
 	s.links(w, route, name, mediaType)
 }
 
-// Every response carries the two RFC 8631 relations, and every
-// response about one Display carries describedby. The info route
-// adds related links to the capture routes (RFC 4287, registered).
-// The negotiated capture route alone adds alternate links, one per
-// extension form, with a type that carries no media type parameters.
+// links sets the Link headers. Every response has the service-desc and
+// service-doc relations (RFC 8631), and every response about one
+// Display has describedby. The info route adds a related link to each
+// capture route (RFC 4287). The negotiated capture route adds an
+// alternate link to each extension route, with a type that has no
+// media type parameters.
 func (s *apiServer) links(w http.ResponseWriter, route apiRoute, name, mediaType string) {
 	serviceLinks(w)
 	if name == "" {
@@ -614,35 +603,35 @@ func (s *apiServer) links(w http.ResponseWriter, route apiRoute, name, mediaType
 	}
 }
 
-// The caller hung up while the API was reaching the node. There is
-// nobody to answer, so the request writes no problem document and
-// ends on its log line. The status the record carries is 499, which
-// no RFC defines and nothing sends on the wire: it is the number
-// every proxy writes down for a client that closed, and it keeps the
-// request in the count instead of hiding it under a 503 nobody read.
+// hungUp reports whether the caller closed the connection while the
+// API waited for the sidecar. Then nobody can read a response, so it
+// writes none, and records the request in the log and the metrics with
+// statusClientClosed. No RFC defines 499. nginx logs it for a client
+// that closed the connection, and it keeps these requests apart from
+// a 503 that a caller received.
 func (s *apiServer) hungUp(r *http.Request, route apiRoute, id string, start time.Time) bool {
 	if r.Context().Err() == nil {
 		return false
 	}
-	s.readings.answered(route.template, r.Method, statusClientClosed, s.now().Sub(start))
+	s.readings.recordRequest(route.template, r.Method, statusClientClosed, s.now().Sub(start))
 	s.logged(r, route, id, "the client closed the connection", statusClientClosed, 0, start)
 	return true
 }
 
-// A refusal is a problem document. A HEAD carries none, and the
-// request id in the document's instance is the id in the log line.
+// refuse writes the fault as a problem document, without a body for a
+// HEAD request. The document's instance field and the log line have
+// the same request id.
 func (s *apiServer) refuse(w http.ResponseWriter, r *http.Request, route apiRoute,
 	id string, start time.Time, head bool, f *fault) {
 	writeFault(w, f, r.URL.Path, id, head)
-	s.readings.answered(route.template, r.Method, f.status, s.now().Sub(start))
+	s.readings.recordRequest(route.template, r.Method, f.status, s.now().Sub(start))
 	s.logged(r, route, id, f.logged(), f.status, 0, start)
 }
 
-// Every request writes one log line: the route as its template, the
-// method, the status, the bytes, the seconds, the request id, and
-// the subject. The token is never in it.
+// logged writes the log line of a request. It never includes the
+// token.
 func (s *apiServer) logged(r *http.Request, route apiRoute, id, detail string, status, bytes int, start time.Time) {
-	slog.Info("request",
+	slog.Info("Served a request",
 		"route", route.template,
 		"method", r.Method,
 		"status", status,
@@ -653,9 +642,8 @@ func (s *apiServer) logged(r *http.Request, route apiRoute, id, detail string, s
 		"detail", detail)
 }
 
-// The subject a log line names comes from the client certificate or
-// the TokenReview, and is empty for a request refused before either
-// one named a caller.
+// subjectOf returns the caller's username from the request context.
+// It is empty when the request was refused before authenticate.
 func subjectOf(r *http.Request) string {
 	if who, held := r.Context().Value(subjectKey{}).(string); held {
 		return who
@@ -665,9 +653,9 @@ func subjectOf(r *http.Request) string {
 
 type subjectKey struct{}
 
-// A capture goes to the sidecar pod on the Display's node. No sidecar
-// on that node, a pod with no address yet, and a pod the kubelet does
-// not call Ready are all 503, because each one clears on its own.
+// reach returns the sidecar pod on the Display's node. It returns a
+// 503 when the node has no sidecar pod, or when the pod has no IP
+// address or is not Ready, because the caller can only wait.
 func (s *apiServer) reach(screen *Display) (sidecarPod, *fault) {
 	pod, held := s.sidecars.on(screen.Status.Node)
 	if !held {

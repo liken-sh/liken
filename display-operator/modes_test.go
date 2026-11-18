@@ -14,39 +14,36 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// configEntry is one resolved config block of this driver's own, from
-// the given source, for the given requests.
+// configEntry is one entry of an allocation's config with a block for
+// this driver.
 func configEntry(source, requests, parameters string) string {
 	return fmt.Sprintf(`{"source": %q, "requests": [%s], "opaque": {"driver": %q, "parameters": %s}}`,
 		source, requests, DriverName, parameters)
 }
 
-// claimMode is what the claim's author wrote, applying to every
-// request in the claim.
+// claimMode is a claim's entry that applies to every request.
 func claimMode(parameters string) string {
 	return configEntry(configFromClaim, "", parameters)
 }
 
-// classMode is the same block written in the DeviceClass, which is
-// cluster policy rather than one workload's choice.
+// classMode is a DeviceClass's entry that applies to every request.
 func classMode(parameters string) string {
 	return configEntry(configFromClass, "", parameters)
 }
 
-// resolvedConfig reads the config array out of the allocation the
-// scheduler wrote on a claim's status. A claim's own
-// spec.devices.config is not what the driver reads: the scheduler
-// copies each block here, beside the DeviceClass's own, and marks
-// where it came from.
+// resolvedConfig parses entries as the config of a claim's
+// status.allocation. The driver reads this list and not the claim's
+// spec.devices.config, because the scheduler copies the claim's entries
+// here beside the DeviceClass's entries and records the source of each.
 func resolvedConfig(t *testing.T, entries string) []AllocatedConfig {
 	t.Helper()
 	claim := &ResourceClaim{}
 	document := fmt.Sprintf(`{"status":{"allocation":{"devices":{"results":[],"config":[%s]}}}}`, entries)
 	if err := json.Unmarshal([]byte(document), claim); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the claim document: %v", err)
 	}
 	if claim.Status.Allocation == nil {
-		t.Fatal("the claim document holds no allocation")
+		t.Fatal("the claim document has no allocation, want one")
 	}
 	return claim.Status.Allocation.Devices.Config
 }
@@ -92,8 +89,6 @@ func TestClaimModesReadsTheOpaqueBlock(t *testing.T) {
 			want:    "1280x720",
 		},
 		{
-			// The class is cluster policy, and it answers for a claim
-			// that states nothing of its own.
 			name:    "the class's mode, with none in the claim",
 			config:  classMode(`{"mode": "1920x1080"}`),
 			request: "screen",
@@ -106,9 +101,8 @@ func TestClaimModesReadsTheOpaqueBlock(t *testing.T) {
 			want:    "1280x720",
 		},
 		{
-			// The allocator lists the class's config first, and the
-			// precedence reads the source rather than the order, so the
-			// answer does not move when the order does.
+			// The allocator lists the class's entries first, but the
+			// result must not depend on the order.
 			name:    "the claim's mode, listed before the class's",
 			config:  claimMode(`{"mode": "1280x720"}`) + "," + classMode(`{"mode": "1920x1080"}`),
 			request: "screen",
@@ -138,54 +132,50 @@ func TestClaimModesReadsTheOpaqueBlock(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			selection, err := claimModes(resolvedConfig(t, c.config))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("claimModes: %v", err)
 			}
 			if got := selection.forRequest(c.request); got != c.want {
-				t.Errorf("mode = %q, want %q", got, c.want)
+				t.Errorf("the mode is %q, want %q", got, c.want)
 			}
 		})
 	}
 }
 
-// A typo in the parameters is a mode nobody asked for, driven with
-// nothing said anywhere, so the parse refuses what it does not know.
-// The source does not soften it: a typo in cluster policy is as wrong
-// as one in a claim.
 func TestClaimModesRefusesParametersItCannotRead(t *testing.T) {
 	cases := []struct {
-		name   string
-		config string
-		says   string
+		name        string
+		config      string
+		wantInError string
 	}{
 		{
-			name:   "a key this driver does not read",
-			config: claimMode(`{"resolution": "1280x720"}`),
-			says:   `"resolution"`,
+			name:        "a key this driver does not read",
+			config:      claimMode(`{"resolution": "1280x720"}`),
+			wantInError: `"resolution"`,
 		},
 		{
-			name:   "a key the class does not read either",
-			config: classMode(`{"resolution": "1280x720"}`),
-			says:   `"resolution"`,
+			name:        "a key the class does not read either",
+			config:      classMode(`{"resolution": "1280x720"}`),
+			wantInError: `"resolution"`,
 		},
 		{
-			name:   "a mode that is not a string",
-			config: claimMode(`{"mode": 720}`),
-			says:   "not a string",
+			name:        "a mode that is not a string",
+			config:      claimMode(`{"mode": 720}`),
+			wantInError: "not a string",
 		},
 		{
-			name:   "parameters that are not an object",
-			config: claimMode(`["1280x720"]`),
-			says:   "parameters",
+			name:        "parameters that are not an object",
+			config:      claimMode(`["1280x720"]`),
+			wantInError: "parameters",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := claimModes(resolvedConfig(t, c.config))
 			if err == nil {
-				t.Fatal("the parse accepted parameters it cannot read")
+				t.Fatal("claimModes accepted parameters it cannot read, want an error")
 			}
-			if !strings.Contains(err.Error(), c.says) {
-				t.Errorf("error = %q, want it to say %q", err, c.says)
+			if !strings.Contains(err.Error(), c.wantInError) {
+				t.Errorf("error is %q, want it to contain %q", err, c.wantInError)
 			}
 		})
 	}
@@ -205,7 +195,7 @@ func TestParseModeReadsTheRefresh(t *testing.T) {
 		t.Run(c.mode, func(t *testing.T) {
 			parsed, err := parseMode(c.mode)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parseMode(%q): %v", c.mode, err)
 			}
 			if parsed.Name != c.wantName || parsed.Refresh != c.wantRefresh {
 				t.Errorf("parseMode(%q) = %+v, want %s at %d", c.mode, parsed, c.wantName, c.wantRefresh)
@@ -214,15 +204,12 @@ func TestParseModeReadsTheRefresh(t *testing.T) {
 	}
 }
 
-// Weston parses the refresh as an integer, so @59.94 would read as
-// 59, match nothing, and fall back to preferred with nothing said.
-// The parse is where that claim must fail.
 func TestParseModeRefusesARefreshThatIsNotAWholeNumber(t *testing.T) {
 	cases := []string{"3840x1600@59.94", "1280x720@sixty", "1280x720@", "1280x720@0", "1280x720@-60"}
 	for _, mode := range cases {
 		t.Run(mode, func(t *testing.T) {
 			if _, err := parseMode(mode); err == nil {
-				t.Fatalf("parseMode accepted %q", mode)
+				t.Fatalf("parseMode(%q) returned no error, want one", mode)
 			}
 		})
 	}
@@ -251,10 +238,9 @@ func TestModeMatchesTheReadback(t *testing.T) {
 	}
 }
 
-// PortableModes is what GETCONNECTOR answers for the lab's portable
-// panel: one entry per timing, so a name with two refreshes appears
-// twice, and an aspect-ratio variant appears again under the same
-// name and refresh.
+// portableModes is the GETCONNECTOR list of the lab's portable panel.
+// A name with two refreshes appears twice, and an aspect ratio variant
+// repeats a name and refresh.
 func portableModes() []drmMode {
 	return []drmMode{
 		{Name: "1920x1080", Refresh: 60},
@@ -279,7 +265,7 @@ func TestValidateModeAcceptsWhatTheConnectorOffers(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if err := validateMode("HDMI-A-2", portableModes(), c.mode); err != nil {
-				t.Errorf("validateMode refused %q: %v", c.mode, err)
+				t.Errorf("validateMode(%q) = %v, want no error", c.mode, err)
 			}
 		})
 	}
@@ -287,47 +273,44 @@ func TestValidateModeAcceptsWhatTheConnectorOffers(t *testing.T) {
 
 func TestValidateModeRefusesWhatTheConnectorDoesNotOffer(t *testing.T) {
 	cases := []struct {
-		name  string
-		modes []drmMode
-		mode  string
-		says  []string
+		name        string
+		modes       []drmMode
+		mode        string
+		wantInError []string
 	}{
 		{
-			name:  "a name the connector does not carry",
-			modes: portableModes(),
-			mode:  "1234x567",
-			says:  []string{"1234x567", "1920x1080 1280x720 640x480"},
+			name:        "a name the connector does not offer",
+			modes:       portableModes(),
+			mode:        "1234x567",
+			wantInError: []string{"1234x567", "1920x1080 1280x720 640x480"},
 		},
 		{
-			// The refusal names the refreshes that do exist, because
-			// no attribute publishes them and the error is the one
-			// place a person reads them.
-			name:  "a refresh the connector does not carry",
-			modes: portableModes(),
-			mode:  "1920x1080@24",
-			says:  []string{"1920x1080@24", "60", "50"},
+			name:        "a refresh the connector does not offer",
+			modes:       portableModes(),
+			mode:        "1920x1080@24",
+			wantInError: []string{"1920x1080@24", "60", "50"},
 		},
 		{
-			name:  "a refresh that is not a whole number",
-			modes: portableModes(),
-			mode:  "1920x1080@59.94",
-			says:  []string{"59.94"},
+			name:        "a refresh that is not a whole number",
+			modes:       portableModes(),
+			mode:        "1920x1080@59.94",
+			wantInError: []string{"59.94"},
 		},
 		{
-			name: "a connector the card reports no modes for",
-			mode: "1920x1080",
-			says: []string{"HDMI-A-2"},
+			name:        "a connector the card reports no modes for",
+			mode:        "1920x1080",
+			wantInError: []string{"HDMI-A-2"},
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			err := validateMode("HDMI-A-2", c.modes, c.mode)
 			if err == nil {
-				t.Fatalf("validateMode accepted %q", c.mode)
+				t.Fatalf("validateMode(%q) returned no error, want one", c.mode)
 			}
-			for _, want := range c.says {
+			for _, want := range c.wantInError {
 				if !strings.Contains(err.Error(), want) {
-					t.Errorf("error = %q, want it to say %q", err, want)
+					t.Errorf("error is %q, want it to contain %q", err, want)
 				}
 			}
 		})
@@ -335,14 +318,12 @@ func TestValidateModeRefusesWhatTheConnectorDoesNotOffer(t *testing.T) {
 }
 
 func TestReadModeRecordOfAFileThatIsNotThere(t *testing.T) {
-	// A pod whose declare container never ran leaves no record, and a
-	// claim that states a mode must still be able to write one.
 	record, err := readModeRecord(filepath.Join(t.TempDir(), "modes.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading a record that does not exist: %v", err)
 	}
 	if len(record) != 0 {
-		t.Fatalf("record = %v", record)
+		t.Fatalf("the record is %v, want no entries", record)
 	}
 }
 
@@ -350,28 +331,25 @@ func TestModeRecordSurvivesAWriteAndARead(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "weston", "modes.json")
 
 	if err := writeModeRecord(path, map[string]string{"HDMI-A-2": "1280x720"}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the mode record: %v", err)
 	}
 	record, err := readModeRecord(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the mode record: %v", err)
 	}
 	if record["HDMI-A-2"] != "1280x720" {
-		t.Fatalf("record = %v", record)
+		t.Fatalf("the record is %v, want HDMI-A-2 at 1280x720", record)
 	}
 }
 
 func TestReadModeRecordRefusesAFileItCannotParse(t *testing.T) {
-	// The operator is the only writer of this file, so unreadable
-	// content means something else wrote it, and a prepare that
-	// overwrote it would hide that.
 	path := filepath.Join(t.TempDir(), "modes.json")
 	if err := os.WriteFile(path, []byte("1280x720"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the record file: %v", err)
 	}
 
 	if _, err := readModeRecord(path); err == nil {
-		t.Fatal("the read accepted a file it cannot parse")
+		t.Fatal("readModeRecord returned no error for a file it cannot parse, want one")
 	}
 }
 
@@ -384,16 +362,16 @@ func TestEndingAHungCompositorKillsItAndCountsItAsHung(t *testing.T) {
 			killed = append(killed, signal)
 			return nil
 		},
-		orders:  restartOrders(t.TempDir()),
-		metrics: readings,
+		restartRequests: restartRequests(t.TempDir()),
+		metrics:         readings,
 	}
 
 	if err := plugin.killHungCompositor(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("killHungCompositor: %v", err)
 	}
 
 	if !slices.Equal(killed, []syscall.Signal{syscall.SIGKILL}) {
-		t.Errorf("the repair sent %v, want one SIGKILL", killed)
+		t.Errorf("killHungCompositor sent %v, want one SIGKILL", killed)
 	}
 	if got := testutil.ToFloat64(readings.compositorRestarts.WithLabelValues("hung")); got != 1 {
 		t.Errorf("display_compositor_restarts_total{reason=\"hung\"} = %v, want 1", got)
@@ -408,18 +386,17 @@ func TestAKillThatFoundNoCompositorCountsNothing(t *testing.T) {
 	}
 
 	if err := plugin.killHungCompositor(); err == nil {
-		t.Fatal("a kill that found no compositor reported no error")
+		t.Fatal("killHungCompositor returned no error when it found no compositor, want one")
 	}
 	if got := testutil.ToFloat64(readings.compositorRestarts.WithLabelValues("hung")); got != 0 {
 		t.Errorf("display_compositor_restarts_total{reason=\"hung\"} = %v, want 0", got)
 	}
 }
 
-// The Display pass records a declined mode in status and restarts
-// nothing for it again, so both answers of a decline carry the mark it
-// reads: the switch whose restart served another mode, and the switch
-// the in-memory budget refused.
-func TestADeclinedModeCarriesTheMarkTheDisplayPassReads(t *testing.T) {
+// The Display pass tests for errModeDeclined, so both declines return
+// it: the switch whose restart left another mode, and the next switch,
+// which p.restarted refuses without a restart.
+func TestADeclinedModeReturnsErrModeDeclined(t *testing.T) {
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), "")
 	compositor.declines = true
 	var portable Output
@@ -433,10 +410,10 @@ func TestADeclinedModeCarriesTheMarkTheDisplayPassReads(t *testing.T) {
 	second := plugin.applyMode(t.Context(), portable, "1280x720")
 
 	if !errors.Is(first, errModeDeclined) {
-		t.Errorf("the switch that restarted answered %v, want the decline", first)
+		t.Errorf("the switch that restarted the compositor returned %v, want errModeDeclined", first)
 	}
 	if !errors.Is(second, errModeDeclined) {
-		t.Errorf("the switch the budget refused answered %v, want the decline", second)
+		t.Errorf("the second switch, which p.restarted refuses, returned %v, want errModeDeclined", second)
 	}
 	if compositor.ended() != 1 {
 		t.Errorf("the compositor was ended %d times, want once", compositor.ended())

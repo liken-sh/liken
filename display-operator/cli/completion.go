@@ -1,13 +1,13 @@
 package main
 
-// How the CLI completes a command line for the shell, and the
-// contract the sibling CLIs copy. kubectl completes a plugin by running
-// an executable named kubectl_complete-<domain> on PATH, and that shim
-// runs this binary's hidden __complete verb. The verb answers in cobra's
-// completion protocol: one candidate per line, then a final ":N" line
-// that carries the ShellCompDirective bitmask. A hand-rolled CLI joins
-// that protocol with this one file and a one-line shim, and never takes
-// on cobra to do it.
+// Shell completion for this CLI. The sibling CLIs copy this file.
+//
+// kubectl completes a plugin by running an executable named
+// kubectl_complete-<plugin> from PATH. That shim runs this binary's
+// hidden __complete verb, which writes cobra's completion protocol to
+// stdout: one candidate per line, then a last line ":N" where N is the
+// ShellCompDirective bitmask. This CLI does not use cobra, so this file
+// writes the protocol itself.
 
 import (
 	"context"
@@ -21,34 +21,30 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-// The ShellCompDirective bits this CLI emits, cobra's own
-// numbering. The default is 0. NoFileComp stops the shell from offering
-// file names when the CLI has nothing to add, and Error marks a request
-// the CLI could not answer.
+// cobra's ShellCompDirective values. Default lets the shell offer file
+// names, and NoFileComp stops it. This CLI never sends Error.
 const (
 	compDirectiveError      = 1
 	compDirectiveNoFileComp = 4
 	compDirectiveDefault    = 0
 )
 
-// The verb the capture command answers to, and the whole verb
-// vocabulary a sibling CLI edits to match its own commands.
+// The verbs completion offers. A sibling CLI edits this list to match
+// its own commands.
 const captureVerb = "capture"
 
 var completionVerbs = []string{captureVerb}
 
-// One flag the CLI accepts, and whether it reads a value from the
-// next word. Completion walks the words with this table so it can tell a
-// flag's value apart from a positional argument.
+// completionFlag is one flag the CLI accepts. takesValue lets
+// completion tell a flag's value in the next word from a positional
+// argument.
 type completionFlag struct {
 	name       string
 	takesValue bool
 }
 
-// Every flag run() binds, in the completion table's own form. A
-// Display is cluster-scoped, so this CLI binds no namespace flag, and
-// the table holds none. A sibling CLI keeps this list beside the flag
-// set it parses, so the two never drift.
+// Every flag that run binds, and it must stay the same as that flag
+// set. A Display is cluster-scoped, so there is no namespace flag.
 var completionFlags = []completionFlag{
 	{name: "--version"},
 	{name: "--format", takesValue: true},
@@ -57,9 +53,9 @@ var completionFlags = []completionFlag{
 	{name: "--context", takesValue: true},
 }
 
-// What the words before the cursor amount to: the positional
-// arguments already given, the cluster-selecting flag values, and the
-// one flag whose value the cursor is about to type.
+// completionParse is the words before the cursor: the positional
+// arguments, the --context and --kubeconfig values, and the flag, if
+// any, whose value is the word under the cursor.
 type completionParse struct {
 	positionals      []string
 	context          string
@@ -67,14 +63,12 @@ type completionParse struct {
 	pendingValueFlag string
 }
 
-// A source of Display names for the resolved context. The real
-// one queries the cluster; a test hands back a fixed list, so the
-// routing logic tests without a cluster.
+// outputLister returns the names of the Displays in the cluster that
+// the parsed flags select. A test passes a fixed list.
 type outputLister func(parse completionParse) []string
 
-// runComplete answers a __complete request and writes the protocol to
-// stdout. It stays silent on every failure, because a completer that
-// prints an error corrupts the command line the shell is drawing.
+// runComplete handles a __complete request. It never prints an error,
+// because the shell would show the message inside the command line.
 func runComplete(ctx context.Context, args []string, stdout io.Writer) error {
 	candidates, directive := completeArgs(args, realOutputLister(ctx))
 	for _, candidate := range candidates {
@@ -84,10 +78,8 @@ func runComplete(ctx context.Context, args []string, stdout io.Writer) error {
 	return nil
 }
 
-// completeArgs reads the request words and returns the candidates. The last
-// word is the one under the cursor, and the words before it are already
-// typed. It is the whole of the completion logic, so a test drives it
-// with words and a stub lister.
+// completeArgs returns the candidates and the directive for a request.
+// The last word in args is the one under the cursor.
 func completeArgs(args []string, lister outputLister) ([]string, int) {
 	if len(args) == 0 {
 		return completionVerbs, compDirectiveNoFileComp
@@ -95,21 +87,16 @@ func completeArgs(args []string, lister outputLister) ([]string, int) {
 	toComplete := args[len(args)-1]
 	parse := parseCompletionArgs(args[:len(args)-1])
 
-	// The word under the cursor is the value of a flag that reads
-	// one, so complete that flag's values, not a positional.
 	if parse.pendingValueFlag != "" {
 		return completeFlagValue(parse.pendingValueFlag, toComplete)
 	}
 
-	// The word under the cursor starts a flag, so complete flag
-	// names.
 	if strings.HasPrefix(toComplete, "-") {
 		return filterByPrefix(flagNames(), toComplete), compDirectiveNoFileComp
 	}
 
-	// The word is a positional. With none given yet it names a
-	// verb; after the capture verb it names the output the operator
-	// serves.
+	// The first positional argument is a verb, and the one after
+	// capture is the name of a Display.
 	switch len(parse.positionals) {
 	case 0:
 		return filterByPrefix(completionVerbs, toComplete), compDirectiveNoFileComp
@@ -121,9 +108,8 @@ func completeArgs(args []string, lister outputLister) ([]string, int) {
 	return nil, compDirectiveNoFileComp
 }
 
-// parseCompletionArgs walks the words before the cursor into their
-// positionals and the cluster-selecting flag values, and marks a flag
-// left waiting for its value.
+// parseCompletionArgs sorts the words before the cursor into
+// positional arguments and flag values.
 func parseCompletionArgs(prior []string) completionParse {
 	var parse completionParse
 	for i := 0; i < len(prior); i++ {
@@ -151,7 +137,8 @@ func parseCompletionArgs(prior []string) completionParse {
 	return parse
 }
 
-// record stores a flag value against the field it selects.
+// record keeps the value of --context or --kubeconfig and ignores
+// every other flag.
 func (parse *completionParse) record(name, value string) {
 	switch name {
 	case "--context":
@@ -161,8 +148,6 @@ func (parse *completionParse) record(name, value string) {
 	}
 }
 
-// splitFlag splits a "--name=value" word into its name and value, and
-// reports a bare "--name" as a name with no value.
 func splitFlag(token string) (name, value string, hasEquals bool) {
 	if equals := strings.IndexByte(token, '='); equals >= 0 {
 		return token[:equals], token[equals+1:], true
@@ -170,7 +155,6 @@ func splitFlag(token string) (name, value string, hasEquals bool) {
 	return token, "", false
 }
 
-// lookupCompletionFlag finds a flag by its exact name.
 func lookupCompletionFlag(name string) (completionFlag, bool) {
 	for _, flag := range completionFlags {
 		if flag.name == name {
@@ -180,7 +164,6 @@ func lookupCompletionFlag(name string) (completionFlag, bool) {
 	return completionFlag{}, false
 }
 
-// flagNames lists every flag name completion can offer.
 func flagNames() []string {
 	names := make([]string, 0, len(completionFlags))
 	for _, flag := range completionFlags {
@@ -189,9 +172,9 @@ func flagNames() []string {
 	return names
 }
 
-// completeFlagValue offers the values a flag accepts. The format flag has
-// a fixed set; the kubeconfig flag names a file, so the shell completes a
-// path; the rest have open values.
+// completeFlagValue returns the values to offer for a flag. For
+// --kubeconfig it returns the default directive, so the shell completes
+// a file path.
 func completeFlagValue(flag, toComplete string) ([]string, int) {
 	switch flag {
 	case "--format":
@@ -203,7 +186,6 @@ func completeFlagValue(flag, toComplete string) ([]string, int) {
 	}
 }
 
-// formatNames lists the capture formats in a stable order.
 func formatNames() []string {
 	names := make([]string, 0, len(captureFormats))
 	for name := range captureFormats {
@@ -213,7 +195,6 @@ func formatNames() []string {
 	return names
 }
 
-// filterByPrefix keeps the candidates the cursor's word begins.
 func filterByPrefix(items []string, prefix string) []string {
 	var kept []string
 	for _, item := range items {
@@ -224,30 +205,27 @@ func filterByPrefix(items []string, prefix string) []string {
 	return kept
 }
 
-// A dynamic client built from a parse. The real factory reads the
-// standard kube flags; a test hands back a fake client, so the lister's
-// own logic tests without a cluster.
+// clientFactory builds a Kubernetes client from the parsed flags. A
+// test passes one that returns a fake client.
 type clientFactory func(parse completionParse) (dynamic.Interface, error)
 
-// realOutputLister queries the cluster for Display names over the
-// standard kube flags. Every failure yields no names, because completion
-// must not stall or speak.
 func realOutputLister(ctx context.Context) outputLister {
 	return newOutputLister(ctx, kubeClientFactory)
 }
 
-// newOutputLister lists Display names through a client the factory
-// builds. It bounds the query, because a completion must be quick and
-// then give up with no names.
+// newOutputLister returns an outputLister that lists Displays through
+// a client from factory. It returns no names on any failure, because
+// completion must not print an error. The query times out after 5
+// seconds, because the user waits at the prompt.
 func newOutputLister(ctx context.Context, factory clientFactory) outputLister {
 	return func(parse completionParse) []string {
 		client, err := factory(parse)
 		if err != nil {
 			return nil
 		}
-		reach, cancel := context.WithTimeout(ctx, 5*time.Second)
+		queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		names, err := listDisplays(reach, client)
+		names, err := listDisplays(queryCtx, client)
 		if err != nil {
 			return nil
 		}
@@ -255,9 +233,10 @@ func newOutputLister(ctx context.Context, factory clientFactory) outputLister {
 	}
 }
 
-// kubeClientFactory builds a dynamic client from the standard kube flags,
-// honoring the context and kubeconfig the completion words carry, so a
-// completion reaches the same cluster the command would.
+// kubeClientFactory builds a dynamic client the way run does, with the
+// --context and --kubeconfig values typed before the cursor, so
+// completion lists the Displays of the cluster that the command would
+// use.
 func kubeClientFactory(parse completionParse) (dynamic.Interface, error) {
 	flags := genericclioptions.NewConfigFlags(true)
 	if parse.context != "" {
@@ -277,24 +256,21 @@ func kubeClientFactory(parse completionParse) (dynamic.Interface, error) {
 	return client, nil
 }
 
-// completionScript prints the bash script that completes a direct
-// invocation of the binary. The shell sources it, and from then on it
-// runs the hidden __complete verb and reads the protocol back. kubectl
-// needs none of this: it runs the kubectl_complete-liken-display shim
-// instead, which runs the same verb.
+// completionScript writes the bash script that completes a direct call
+// of kubectl-liken-display. kubectl does not use the script, because it
+// runs the kubectl_complete-liken-display shim, which calls the same
+// __complete verb.
 func completionScript(shell string, stdout io.Writer) error {
 	if shell != "bash" {
-		return fmt.Errorf("completion supports bash, not %q", shell)
+		return fmt.Errorf("no completion script for the shell %q, only for bash", shell)
 	}
 	fmt.Fprint(stdout, bashCompletionScript)
 	return nil
 }
 
-// The bash completion for a direct kubectl-liken-display call. It
-// mirrors the small part of cobra's generated script this CLI needs: run
-// __complete with the words before the cursor and the word under it, read
-// the candidates, and read the final ":N" directive. A sibling CLI copies
-// this text and changes only the binary name and the two function names.
+// bashCompletionScript is the part of cobra's generated bash script
+// that this CLI needs. A sibling CLI copies it and changes the binary
+// name and the function name.
 const bashCompletionScript = `# bash completion for kubectl-liken-display
 __kubectl_liken_display_complete()
 {

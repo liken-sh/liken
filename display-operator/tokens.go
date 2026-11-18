@@ -1,12 +1,14 @@
 package main
 
-// This file holds the two reviews the API server answers identity
-// with, TokenReview and SubjectAccessReview, and the cache that
-// holds one verdict. Identity comes from Kubernetes and never from a
-// shared secret: a ServiceAccount token names a subject RBAC already
-// has rules for, a grant on displays/screen is an ordinary
-// ClusterRole, and there is no second identity system to mint,
-// rotate, or leak.
+// Authentication and authorization of API callers through the
+// Kubernetes API server: a TokenReview finds who the caller is, and a
+// SubjectAccessReview checks what it may do.
+//
+// Callers send Kubernetes tokens, or client certificates
+// (clientcerts.go), and not a secret that this operator issues. RBAC
+// already has rules for those users and groups, so a grant on
+// displays/screen is an ordinary ClusterRole, and the operator has no
+// credential of its own to issue, rotate, or leak.
 
 import (
 	"crypto/sha256"
@@ -22,17 +24,17 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The two audiences. A caller's token names display-api to reach the
-// API, and the API's own projected token names display-capture to
-// reach a sidecar, so neither token opens the other door.
+// The API reviews callers' tokens for apiAudience. The capture sidecar
+// reviews the API's projected token for captureAudience. So a token
+// minted for one server is refused by the other.
 const (
 	apiAudience     = "display-api"
 	captureAudience = "display-capture"
 )
 
-// The two review kinds and the paths they POST to. Both are creates
-// of an object the API server answers in the response and never
-// stores, so the API needs create on each and nothing else.
+// The API server returns a review's result in the response to the
+// create and stores nothing, so the operator needs only the create
+// verb on each resource.
 const (
 	authenticationAPIVersion = "authentication.k8s.io/v1"
 	authorizationAPIVersion  = "authorization.k8s.io/v1"
@@ -40,12 +42,10 @@ const (
 	accessReviewsPath        = "/apis/" + authorizationAPIVersion + "/subjectaccessreviews"
 )
 
-// Who is asking. A TokenReview answers with all five fields, and a
-// verified client certificate answers with the user and the groups
-// alone, so every route and every record reads one type and never
-// checks which credential arrived. Expires bounds a cache entry and
-// nothing else; the API server judged the token's validity, not this
-// program.
+// caller is the identity behind a request. A TokenReview fills in
+// every field, and a verified client certificate fills in only
+// Username and Groups. Expires is the token's exp claim, and only
+// limits how long the cache keeps the entry.
 type caller struct {
 	Username string
 	UID      string
@@ -54,9 +54,7 @@ type caller struct {
 	Expires  time.Time
 }
 
-// The TokenReview fields this program writes and reads, the way
-// displays.go holds its resource: the token and audiences in the
-// spec, and the verdict in the status.
+// tokenReview has only the TokenReview fields this program uses.
 type tokenReview struct {
 	APIVersion string            `json:"apiVersion"`
 	Kind       string            `json:"kind"`
@@ -69,9 +67,8 @@ type tokenReviewSpec struct {
 	Audiences []string `json:"audiences,omitempty"`
 }
 
-// audiences is the field that makes a verdict mean this API: the
-// server lists the audiences the token names that the review asked
-// for. error carries the API server's own words about a refusal.
+// Audiences lists which of the requested audiences the token is valid
+// for.
 type tokenReviewStatus struct {
 	Authenticated bool       `json:"authenticated"`
 	User          reviewUser `json:"user"`
@@ -86,12 +83,16 @@ type reviewUser struct {
 	Extra    map[string][]string `json:"extra,omitempty"`
 }
 
-// reviewToken sends one TokenReview for one audience.
+// reviewToken sends a TokenReview for one audience and returns the
+// caller.
 //
-// A verdict is good only when the review both authenticated the token
-// and named the audience that was asked for, so a pod's ordinary
-// API-server token, whose audience is the API server, does not open
-// the door.
+// status.authenticated alone does not prove the audience. An
+// authenticator that does not support audiences ignores
+// spec.audiences and can return authenticated with an empty
+// status.audiences. So reviewToken refuses the token unless
+// status.audiences has the requested audience. That also refuses a
+// pod's default service account token, whose audience is the API
+// server.
 func reviewToken(c *apiclient.Client, token, audience string) (*caller, *fault) {
 	body, err := json.Marshal(tokenReview{
 		APIVersion: authenticationAPIVersion,
@@ -102,12 +103,12 @@ func reviewToken(c *apiclient.Client, token, audience string) (*caller, *fault) 
 		return nil, unavailable(problemUpstreamFailed, err.Error())
 	}
 
-	answer := &tokenReview{}
-	if err := c.RequestJSON(http.MethodPost, tokenReviewsPath, body, answer); err != nil {
+	result := &tokenReview{}
+	if err := c.RequestJSON(http.MethodPost, tokenReviewsPath, body, result); err != nil {
 		return nil, unavailable(problemUpstreamFailed, err.Error())
 	}
 
-	status := answer.Status
+	status := result.Status
 	if !status.Authenticated || !slices.Contains(status.Audiences, audience) {
 		return nil, unauthenticated(refusedDetail(status, audience))
 	}
@@ -120,19 +121,19 @@ func reviewToken(c *apiclient.Client, token, audience string) (*caller, *fault) 
 	}, nil
 }
 
-// A refusal answers with the review's own words. A review that
-// authenticated the token but named no audience carries no error,
-// and then the audience the API asked for is the one fact to state.
+// refusedDetail returns the review's error message, or names the
+// missing audience when a token was authenticated without it and the
+// review has no message.
 func refusedDetail(status tokenReviewStatus, audience string) string {
 	if status.Error != "" {
 		return status.Error
 	}
-	return "the token does not name the audience " + audience
+	return "the TokenReview did not return the audience " + audience + " in status.audiences"
 }
 
-// The exp claim is read out of the payload segment with no signature
-// check. Verifying is the API server's job, and this value only
-// bounds a cache entry, which the minute bounds as well.
+// tokenExpiry returns the token's exp claim, or the zero time when the
+// token has none. It does not verify the signature, because the
+// TokenReview already did.
 func tokenExpiry(token string) time.Time {
 	segments := strings.Split(token, ".")
 	if len(segments) != 3 {
@@ -151,43 +152,41 @@ func tokenExpiry(token string) time.Time {
 	return time.Unix(claims.Expires, 0).UTC()
 }
 
-// The cache holds positive verdicts, keyed by the hash of the token,
-// and never holds a denial. The clock is a field so a test can move
-// it past a verdict's horizon.
+// tokenCache caches successful TokenReview results by token hash, so
+// a busy client does not send a TokenReview for each request.
 type tokenCache struct {
 	review func(token string) (*caller, *fault)
 	now    func() time.Time
 
-	mu   sync.Mutex
-	held map[string]heldVerdict
+	mu      sync.Mutex
+	entries map[string]cacheEntry
 }
 
-type heldVerdict struct {
+type cacheEntry struct {
 	who   *caller
 	until time.Time
 }
 
-// A positive verdict is held for at most a minute, so a deleted
-// ServiceAccount stops opening the door within one. A token that
-// expires sooner bounds its own entry. Only authentication is held;
-// the SubjectAccessReview runs on every request.
-const verdictLife = 60 * time.Second
+// tokenCacheTTL is the longest the cache keeps an entry, so a deleted
+// ServiceAccount stops working within a minute. The
+// SubjectAccessReview is not cached, so it runs on every request.
+const tokenCacheTTL = 60 * time.Second
 
 func newTokenCache(review func(token string) (*caller, *fault)) *tokenCache {
-	return &tokenCache{review: review, now: time.Now, held: map[string]heldVerdict{}}
+	return &tokenCache{review: review, now: time.Now, entries: map[string]cacheEntry{}}
 }
 
-// A denial is never held, so a token the API server refused once is
-// asked about again on the next request, and a refusal that was an
-// API-server hiccup is never remembered as one.
-func (t *tokenCache) verdict(token string) (*caller, *fault) {
+// lookup returns the caller for a token from the cache, or from a
+// new review on a miss. A failure is not cached, so a temporary API
+// server error does not keep refusing the token.
+func (t *tokenCache) lookup(token string) (*caller, *fault) {
 	key, now := tokenKey(token), t.now()
 
 	t.mu.Lock()
-	held, ok := t.held[key]
+	entry, ok := t.entries[key]
 	t.mu.Unlock()
-	if ok && now.Before(held.until) {
-		return held.who, nil
+	if ok && now.Before(entry.until) {
+		return entry.who, nil
 	}
 
 	who, f := t.review(token)
@@ -197,36 +196,36 @@ func (t *tokenCache) verdict(token string) (*caller, *fault) {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	// Stale entries are dropped on the way past, so a cache fed
-	// one-shot tokens does not grow without end.
-	for stale, entry := range t.held {
+	// Deleting expired entries on each insert keeps tokens that are used
+	// once from growing the map without limit.
+	for stale, entry := range t.entries {
 		if !now.Before(entry.until) {
-			delete(t.held, stale)
+			delete(t.entries, stale)
 		}
 	}
-	t.held[key] = heldVerdict{who: who, until: verdictHorizon(who, now)}
+	t.entries[key] = cacheEntry{who: who, until: entryExpiry(who, now)}
 	return who, nil
 }
 
-// A verdict outlives neither the minute nor the token itself.
-func verdictHorizon(who *caller, now time.Time) time.Time {
-	horizon := now.Add(verdictLife)
-	if !who.Expires.IsZero() && who.Expires.Before(horizon) {
+// entryExpiry returns the earlier of tokenCacheTTL from now and the
+// token's own expiry.
+func entryExpiry(who *caller, now time.Time) time.Time {
+	limit := now.Add(tokenCacheTTL)
+	if !who.Expires.IsZero() && who.Expires.Before(limit) {
 		return who.Expires
 	}
-	return horizon
+	return limit
 }
 
-// The key is the SHA-256 of the raw token in hex, so the cache holds
-// no token. The API never logs the key and never answers with it.
+// tokenKey hashes the token, so the cache never stores the token
+// itself.
 func tokenKey(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
 
-// The SubjectAccessReview fields this program writes and reads: the
-// resource and the subject in the spec, and the verdict with the API
-// server's reason in the status.
+// subjectAccessReview has only the SubjectAccessReview fields this
+// program uses.
 type subjectAccessReview struct {
 	APIVersion string                    `json:"apiVersion"`
 	Kind       string                    `json:"kind"`
@@ -234,8 +233,8 @@ type subjectAccessReview struct {
 	Status     subjectAccessReviewStatus `json:"status,omitempty"`
 }
 
-// The four subject fields are the caller the request named, so the
-// API server judges that caller and never the API's own account.
+// User, Groups, UID, and Extra name the caller of the request, so the
+// API server checks that caller's permissions and not the operator's.
 type subjectAccessReviewSpec struct {
 	ResourceAttributes resourceAttributes  `json:"resourceAttributes"`
 	User               string              `json:"user,omitempty"`
@@ -244,9 +243,8 @@ type subjectAccessReviewSpec struct {
 	Extra              map[string][]string `json:"extra,omitempty"`
 }
 
-// A Display is cluster-scoped, so its namespace is empty, and the
-// field is written as empty rather than left out so the review says
-// so.
+// Namespace has no omitempty, because a Display is cluster-scoped and
+// the review must send an explicit empty namespace.
 type resourceAttributes struct {
 	Namespace   string `json:"namespace"`
 	Verb        string `json:"verb"`
@@ -263,12 +261,11 @@ type subjectAccessReviewStatus struct {
 	EvaluationError string `json:"evaluationError,omitempty"`
 }
 
-// authorizeSubject asks the API server whether one subject may take
-// one verb on one named resource, or on its subresource.
+// authorizeSubject sends a SubjectAccessReview for a caller, a verb,
+// and a resource or subresource.
 //
-// The subresource exists in no CRD. It is a string RBAC matches, as
-// pods/log is, so a ClusterRole names displays/screen and the API
-// server answers without any object of that name.
+// RBAC matches a subresource as a string, so a ClusterRole can grant
+// displays/screen although the CRD defines no screen subresource.
 func authorizeSubject(c *apiclient.Client, who *caller,
 	verb, group, resource, subresource, namespace, name string) (allowed bool, reason string, f *fault) {
 	body, err := json.Marshal(subjectAccessReview{
@@ -293,17 +290,15 @@ func authorizeSubject(c *apiclient.Client, who *caller,
 		return false, "", unavailable(problemUpstreamFailed, err.Error())
 	}
 
-	answer := &subjectAccessReview{}
-	if err := c.RequestJSON(http.MethodPost, accessReviewsPath, body, answer); err != nil {
+	result := &subjectAccessReview{}
+	if err := c.RequestJSON(http.MethodPost, accessReviewsPath, body, result); err != nil {
 		return false, "", unavailable(problemUpstreamFailed, err.Error())
 	}
-	return answer.Status.Allowed, verdictReason(answer.Status), nil
+	return result.Status.Allowed, accessReason(result.Status), nil
 }
 
-// The reason carries the API server's own words. An evaluation error
-// is more words about the same verdict, not a second verdict, so the
-// two are joined.
-func verdictReason(status subjectAccessReviewStatus) string {
+// accessReason joins the review's reason and its evaluation error.
+func accessReason(status subjectAccessReviewStatus) string {
 	if status.EvaluationError == "" {
 		return status.Reason
 	}
@@ -313,8 +308,8 @@ func verdictReason(status subjectAccessReviewStatus) string {
 	return status.Reason + "; " + status.EvaluationError
 }
 
-// servesAccount reports whether an authenticated username is one
-// ServiceAccount's, in the form the API server spells it.
-func servesAccount(username, namespace, name string) bool {
+// isServiceAccount reports whether username is the API server's username
+// for the named ServiceAccount.
+func isServiceAccount(username, namespace, name string) bool {
 	return username == "system:serviceaccount:"+namespace+":"+name
 }

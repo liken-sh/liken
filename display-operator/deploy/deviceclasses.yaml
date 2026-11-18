@@ -1,15 +1,11 @@
-# The two classes this operator's own pod claims through. They ship
-# with the base because the claim template in operator.yaml names
-# them literally: they are wiring, not policy, and the operator
-# cannot start without them. The classes your workloads claim
-# through, such as an output class, are the cluster owner's
-# vocabulary to create, and the install guide gives the YAML.
+# The classes that the operator's own pod claims through. The claim
+# template in operator.yaml refers to them by name, so the pod cannot
+# start without them. Each selector checks an attribute that liken
+# publishes, not a vendor and product ID, so it matches any graphics
+# card.
 ---
-# The graphics card's card node, as liken publishes it. The card
-# node allocates once, which is what makes the claim holder the only
-# program setting a mode on it. The selector reads the displayNode
-# attribute rather than a vendor and a product id, so it stays
-# correct across a fleet of different machines.
+# The card node of the graphics card. Only one claim can allocate it,
+# so the operator is the only program that sets a mode on it.
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass
 metadata:
@@ -21,10 +17,8 @@ spec:
           device.driver == "liken.sh" &&
           has(device.attributes["liken.sh"].displayNode)
 ---
-# The graphics card's render node, as liken publishes it. The render
-# node is shareable, so the operator's hold takes nothing away from
-# the transcoders that use the same GPU. The selector reads the
-# renderNode attribute for the same fleet reason as the card node's.
+# The render node of the graphics card. Several claims can share it,
+# so the operator's claim does not stop transcoders from using the GPU.
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass
 metadata:
@@ -36,14 +30,10 @@ spec:
           device.driver == "liken.sh" &&
           has(device.attributes["liken.sh"].renderNode)
 ---
-# The graphics card's monitor-control wires. liken publishes the
-# card's i2c buses as one exclusive companion device, apart from the
-# card node, because raw wire access has one writer and no
-# arbitration contract. This operator is that writer: it claims the
-# companion, probes each panel over DDC/CI, and re-publishes the
-# wires at the per-connector grain as its control devices. The
-# selector reads the subsystem and the class, so it stays correct
-# across a fleet of different cards.
+# The DDC/CI i2c buses of the graphics card's connectors. liken
+# publishes them as one exclusive device, because raw i2c has no
+# arbitration between writers. The operator claims it, probes each
+# panel over DDC/CI, and publishes a control device for each connector.
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass
 metadata:

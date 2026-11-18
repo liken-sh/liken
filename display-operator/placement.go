@@ -1,88 +1,76 @@
 package main
 
-// The decision: from the surfaces on one screen and the Layout that
-// screen names, to where each surface is drawn.
-//
-// The function reads no clock, opens no socket, and calls nothing,
-// so its tests are tables and its result depends on its inputs
-// alone. Its return type is the seam where a different layout engine
-// would plug in: another engine would produce the same placement from
-// the same surfaces and labels, and the compositor's module would
-// commit it the same way. The module executes placements and decides
-// nothing, and this function decides placements and executes nothing.
-// plans/open-problems/an-external-layout-engine.md says what a second
-// engine would need.
+// placeSurfaces decides where each surface on one screen is drawn. It
+// reads no clock and opens no socket, so its tests are tables. The
+// placement pass in placementpass.go sends the result to the
+// compositor module, which draws what it is told.
 
 import (
 	"cmp"
 	"slices"
 )
 
-// The two words the status uses where there is nothing to name. A
-// screen that names no Layout is drawn to the default, and a region
-// that took no surface shows nothing.
+// The region names that the Display status reports for a screen with
+// no Layout (defaultLayoutName) and for a region with no surface
+// (emptyRegion).
 const (
 	defaultLayoutName = "default"
 	emptyRegion       = "empty"
 )
 
-// The whole screen, which is the default layout's one region.
 var wholeScreen = LayoutRect{Width: 1, Height: 1}
 
-// One surface the compositor reported, and the labels of the pods
-// that hold its claim.
+// A surface is one window that the compositor reported.
 type surface struct {
-	// The id the compositor's controller assigned.
 	id string
-	// The claim whose socket the surface arrived on, as
-	// namespace/name. A surface on the shared socket belongs to no
-	// claim and carries no key.
+	// The claim, as namespace/name, whose Wayland socket the program
+	// connected on. It is empty for a surface on the compositor's own
+	// socket, wayland-0, which belongs to no claim.
 	claimKey string
-	// The labels every holder of the claim carries with the same
-	// value. A claim-less surface carries none.
+	// The labels that every pod holding the claim has, with the same
+	// value on each pod.
 	labels map[string]string
-	// The order the surface arrived in, lowest first.
+	// A lower value arrived earlier.
 	arrival int
 }
 
-// Where one surface is drawn. Stack is its position in the render
-// order, and a higher one is nearer the viewer.
+// A placement says where one surface is drawn. A higher stack is drawn
+// over a lower one.
 type placement struct {
 	surface string
 	region  string
 	rect    LayoutRect
 	stack   int
-	// The region's transition, both halves. The enter half runs on
-	// this placement. The exit half runs on the later pass that
-	// finds the surface no longer matching the region, so what
-	// executes this placement has to keep the exit until then.
+	// The enter half runs when this placement is drawn. The exit half
+	// runs on a later pass, when the surface leaves the region, so the
+	// compositor module keeps it until then.
 	transition LayoutTransition
 }
 
-// What one region of the layout shows: a surface id, or the word
-// empty.
+// A placedRegion gives the surface id that one region shows, or
+// emptyRegion.
 type placedRegion struct {
 	name    string
 	surface string
 }
 
-// The decision for one screen.
 type screenPlacement struct {
-	placed   []placement
+	placed []placement
+	// The ids of the surfaces that no region shows.
 	unplaced []string
 	regions  []placedRegion
 }
 
-// placeSurfaces decides where every surface on one screen is drawn. A
-// nil layout is the screen that names none.
+// placeSurfaces takes a nil layout when the screen's Display names no
+// Layout.
 //
-// A region shows one claim: the first claim to arrive whose labels
-// match its selector. Every surface of that claim is drawn in the
-// region's rectangle, oldest at the bottom, so a program that opens a
-// second window over its first, the way a player draws its overlay
-// over its video, keeps both on the screen. A second matching claim
-// stays unplaced, because a region is one rectangle and another
-// program would either hide the first one or fight it for the space.
+// A region shows the surfaces of one claim: the earliest claim whose
+// labels match the region's selector and that no earlier region took.
+// Every surface of that claim is drawn in the region's rectangle,
+// oldest at the bottom, so a player that opens an overlay window over
+// its video keeps both on the screen. A later claim that matches is not
+// drawn in the same region, because its windows would cover the first
+// claim's windows.
 func placeSurfaces(surfaces []surface, layout *LayoutSpec) screenPlacement {
 	arrived := byArrival(surfaces)
 	if layout == nil {
@@ -94,10 +82,9 @@ func placeSurfaces(surfaces []surface, layout *LayoutSpec) screenPlacement {
 	for stack, region := range layout.Regions {
 		shown := placedRegion{name: region.Name, surface: emptyRegion}
 		for _, candidate := range arrived {
-			// A surface that holds no claim matches no selector: its
-			// socket names no claim, so there are no holders and no
-			// labels to read, and an empty selector must not sweep it
-			// into a region a workload was meant to fill.
+			// A surface with no claim matches no selector. Without this
+			// check, an empty selector, which matches any labels, would
+			// put it in a region that a workload is meant to fill.
 			if taken[candidate.claimKey] || candidate.claimKey == "" {
 				continue
 			}
@@ -105,26 +92,22 @@ func placeSurfaces(surfaces []surface, layout *LayoutSpec) screenPlacement {
 				continue
 			}
 			taken[candidate.claimKey] = true
-			for _, held := range arrived {
-				if held.claimKey != candidate.claimKey {
+			for _, member := range arrived {
+				if member.claimKey != candidate.claimKey {
 					continue
 				}
-				// The surfaces of one claim share the region's place
-				// in the list, and the order they are appended in,
-				// oldest first, is their order within it. The
-				// region's position in the list is the stacking
-				// order, so a small region written after a large one
-				// draws in the corner of it.
+				// The stack value is the region's index in
+				// layout.Regions, so a small region that the Layout lists
+				// after a large one is drawn over it.
 				decision.placed = append(decision.placed, placement{
-					surface:    held.id,
+					surface:    member.id,
 					region:     region.Name,
 					rect:       region.Rect,
 					stack:      stack,
 					transition: transitionOf(region),
 				})
-				// The region reports the surface on top, which is
-				// the newest of the claim's.
-				shown.surface = held.id
+				// The status reports the newest surface, which is on top.
+				shown.surface = member.id
 			}
 			break
 		}
@@ -139,10 +122,8 @@ func placeSurfaces(surfaces []surface, layout *LayoutSpec) screenPlacement {
 	return decision
 }
 
-// The default: one region over the whole screen that shows every
-// surface, with the newest on top. That is what kiosk-shell did, so a
-// cluster that writes no Layout keeps every screen showing what it
-// showed.
+// defaultPlacement draws every surface over the whole screen with the
+// newest on top.
 func defaultPlacement(arrived []surface) screenPlacement {
 	region := placedRegion{name: defaultLayoutName, surface: emptyRegion}
 	var placed []placement
@@ -153,16 +134,14 @@ func defaultPlacement(arrived []surface) screenPlacement {
 			rect:    wholeScreen,
 			stack:   stack,
 		})
-		// The last surface to arrive is the top of the stack, so it is
-		// the one the region shows.
 		region.surface = candidate.id
 	}
 	return screenPlacement{placed: placed, regions: []placedRegion{region}}
 }
 
-// The surfaces in the order they arrived, oldest first. The caller's
-// order is not read, because the arrival order decides which surface a
-// region takes and which surface is on top.
+// byArrival returns a copy of surfaces sorted oldest first, because
+// arrival order decides which claim a region shows and which surface is
+// on top.
 func byArrival(surfaces []surface) []surface {
 	arrived := slices.Clone(surfaces)
 	slices.SortStableFunc(arrived, func(a, b surface) int {
@@ -171,8 +150,8 @@ func byArrival(surfaces []surface) []surface {
 	return arrived
 }
 
-// The transition a region states. A region that states none carries
-// two empty halves, which enter and leave a surface at once.
+// transitionOf returns an empty transition for a region that sets
+// none, so its surfaces appear and disappear with no animation.
 func transitionOf(region LayoutRegion) LayoutTransition {
 	if region.Transition == nil {
 		return LayoutTransition{}
@@ -180,10 +159,9 @@ func transitionOf(region LayoutRegion) LayoutTransition {
 	return *region.Transition
 }
 
-// Whether one set of labels satisfies a selector, by the rules a
-// Service's selector follows: every entry of matchLabels and every
-// requirement of matchExpressions has to hold, and a selector that
-// states neither matches any labels.
+// matchesSelector follows the rules of a Kubernetes label selector:
+// every entry of matchLabels and every requirement of matchExpressions
+// must match, and a selector with neither matches any labels.
 func matchesSelector(selector LabelSelector, labels map[string]string) bool {
 	for key, want := range selector.MatchLabels {
 		held, ok := labels[key]
@@ -199,9 +177,7 @@ func matchesSelector(selector LabelSelector, labels map[string]string) bool {
 	return true
 }
 
-// One requirement of matchExpressions. NotIn holds for labels that do
-// not carry the key at all, the same as DoesNotExist, which is the
-// upstream rule.
+// As in Kubernetes, NotIn matches labels that do not have the key.
 func matchesRequirement(requirement LabelSelectorRequirement, labels map[string]string) bool {
 	held, ok := labels[requirement.Key]
 	switch requirement.Operator {
@@ -214,8 +190,7 @@ func matchesRequirement(requirement LabelSelectorRequirement, labels map[string]
 	case selectorDoesNotExist:
 		return !ok
 	}
-	// An operator the schema does not state matches nothing. A
-	// selector this program cannot read must not place a surface,
-	// because the region it would fill was written for another one.
+	// An unknown operator matches nothing, so a selector that this
+	// program cannot read places no surface.
 	return false
 }

@@ -1,12 +1,10 @@
 package main
 
-// A short hotplug drop, as each reader of the card sees it through the
-// hold. An A/V receiver in standby drops hot plug detect for a fraction
-// of a second, several times a minute, and the monitor behind it comes
-// back unchanged each time. These tests prove that the Display
-// controller, the placement pass, and the slice publisher write
-// nothing for such a drop, and that each one still reports a monitor
-// that stays away.
+// An A/V receiver in standby can drop hot plug detect for a moment and
+// then serve the same monitor again. The hotplug hold hides a drop
+// shorter than hotplugSettle, so the Display controller, the placement
+// pass, and the slice publisher write nothing for it. Each of them
+// still reports a monitor that stays away for hotplugSettle.
 
 import (
 	"net/http"
@@ -20,8 +18,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// statusWrites counts the status writes the Display fixture's API
-// server took.
+// statusWrites counts the status writes that the Display fixture's
+// API server received.
 func statusWrites(f *displayFixture) int {
 	writes := 0
 	for _, line := range f.journal.read() {
@@ -33,11 +31,11 @@ func statusWrites(f *displayFixture) int {
 }
 
 // The Display controller writes no status and posts no Event for a
-// drop shorter than the settle time. A drop that lasts the settle time
-// is a monitor that left, and the pass after the deadline reports it.
+// drop shorter than hotplugSettle. A drop that lasts hotplugSettle is
+// a monitor that left, and the next pass reports it.
 func TestTheDisplayOfAShortDropKeepsItsStatus(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+		fixture := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
 		fixture.control.outputs = newHotplugHold(nil, nil).view().wrap(fixture.outputs)
 		fixture.passes(2)
 		synctest.Wait()
@@ -66,20 +64,19 @@ func TestTheDisplayOfAShortDropKeepsItsStatus(t *testing.T) {
 		synctest.Wait()
 
 		got := eventLines(fixture.events.About("Display", labDisplayName())[events:])
-		if want := []string{"Normal NoPanel no panel on HDMI-A-1"}; !slices.Equal(got, want) {
+		if want := []string{"Normal NoPanel No panel is connected to HDMI-A-1"}; !slices.Equal(got, want) {
 			t.Errorf("a monitor that stayed away posted %q, want %q", got, want)
 		}
 	})
 }
 
-// An operator that starts while its screen is in a drop reads the
-// connector dark before it has read it lit. The Display it published
-// before carries the monitor, so the new process holds the screen for
-// the settle time like any other drop, and reports the panel gone only
-// if it stays away.
+// An operator that starts during a drop has never read a monitor on the
+// connector. assumeConnected fills the hotplug view from the Displays
+// that the earlier process published, so the new process waits hotplugSettle
+// for this drop like any other before it reports the panel gone.
 func TestAnOperatorThatStartsDuringADropKeepsTheDisplay(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+		fixture := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
 		fixture.passes(2)
 		synctest.Wait()
 		writes := statusWrites(fixture)
@@ -91,9 +88,9 @@ func TestAnOperatorThatStartsDuringADropKeepsTheDisplay(t *testing.T) {
 		for _, display := range fixture.displays {
 			published = append(published, *display)
 		}
-		links.seed(published, "liken-1", fixture.outputs())
+		links.loadFromDisplays(published, "liken-1", fixture.outputs())
 		view := newHotplugHold(nil, nil).view()
-		view.seed(rememberedScreens(fixture.outputs(), links))
+		view.assumeConnected(rememberedScreens(fixture.outputs(), links))
 		fixture.control.outputs = view.wrap(fixture.outputs)
 		fixture.passes(1)
 		synctest.Wait()
@@ -107,16 +104,15 @@ func TestAnOperatorThatStartsDuringADropKeepsTheDisplay(t *testing.T) {
 		synctest.Wait()
 
 		got := eventLines(fixture.events.About("Display", labDisplayName())[events:])
-		if want := []string{"Normal NoPanel no panel on HDMI-A-1"}; !slices.Equal(got, want) {
+		if want := []string{"Normal NoPanel No panel is connected to HDMI-A-1"}; !slices.Equal(got, want) {
 			t.Errorf("a panel that stayed away posted %q, want %q", got, want)
 		}
 	})
 }
 
-// The placement pass keeps a screen's windows and layout through a
-// short drop: the compositor destroys the output and creates it again,
-// and the Display reports the same windows before and after. A
-// monitor that stays away past the settle time loses them.
+// The compositor removes the output during a drop and adds it again
+// after. The Display reports the same windows before and after a short
+// drop, and none after a monitor stays away for hotplugSettle.
 func TestTheWindowsOfAShortDropStayReported(t *testing.T) {
 	fixture := newPlacementFixture(t)
 	clock := time.Unix(0, 0)
@@ -124,18 +120,18 @@ func TestTheWindowsOfAShortDropStayReported(t *testing.T) {
 	hold.now = func() time.Time { return clock }
 	fixture.pass.outputs = hold.view().wrap(fixture.outputs)
 	fixture.screen(labMonitor(), DisplaySpec{})
-	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
-	fixture.pod("living-room", "film-0", nil)
+	film := fixture.prepareClaim("media", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	fixture.pod("media", "film-0", nil)
 	fixture.surface(film, 1920, 1080)
 	fixture.run()
 	before := fixture.status(labMonitor())
 	writes := displayStatusWrites(fixture)
 
-	fixture.darken("HDMI-A-1")
+	fixture.disconnect("HDMI-A-1")
 	fixture.run()
 	clock = clock.Add(hotplugSettle / 2)
 	fixture.run()
-	fixture.light(livingRoomScreen())
+	fixture.reconnect(primaryScreen())
 	fixture.run()
 
 	if got := displayStatusWrites(fixture) - writes; got != 0 {
@@ -145,18 +141,18 @@ func TestTheWindowsOfAShortDropStayReported(t *testing.T) {
 		t.Errorf("the screen reports %+v after the drop, want %+v", after.Surfaces, before.Surfaces)
 	}
 
-	fixture.darken("HDMI-A-1")
+	fixture.disconnect("HDMI-A-1")
 	fixture.run()
 	clock = clock.Add(hotplugSettle)
 	fixture.run()
 
 	if status := fixture.status(labMonitor()); status.Surfaces != nil || status.Layout != nil {
-		t.Errorf("a monitor that stayed away reports %+v and %+v", status.Surfaces, status.Layout)
+		t.Errorf("a monitor that stayed away reports surfaces %+v and layout %+v, want both nil", status.Surfaces, status.Layout)
 	}
 }
 
-// displayStatusWrites counts the Display status writes the placement
-// fixture's API server took.
+// displayStatusWrites counts the Display status writes that the
+// placement fixture's API server received.
 func displayStatusWrites(f *placementFixture) int {
 	writes := 0
 	for _, request := range f.requests {
@@ -167,9 +163,9 @@ func displayStatusWrites(f *placementFixture) int {
 	return writes
 }
 
-// slicePass runs the slice publisher's pass against one hold and one
-// link history, which both live as long as the operator does, and
-// answers the device it published for HDMI-A-1.
+// slicePass runs the slice publisher's pass with the same hotplug hold
+// and link history on each run, as one operator process keeps them. run
+// returns the device it published for HDMI-A-1.
 type slicePass struct {
 	t       *testing.T
 	fixture *slicePublishFixture
@@ -199,22 +195,21 @@ func (p *slicePass) run() SliceDevice {
 	}
 	if err := reconcile(p.client, "liken-1", testOwner(), "card1", p.socket, current, noPanelControls,
 		p.links, p.view, nil); err != nil {
-		p.t.Fatal(err)
+		p.t.Fatalf("reconciling the ResourceSlice: %v", err)
 	}
 	for _, device := range p.fixture.created.Spec.Devices {
 		if device.Name == "hdmi-a-1" {
 			return device
 		}
 	}
-	p.t.Fatal("the slice published no hdmi-a-1 device")
+	p.t.Fatal("the ResourceSlice has no device hdmi-a-1, want one")
 	return SliceDevice{}
 }
 
-// The slice publishes the same device for a connector through a short
-// drop, read as it starts, while it lasts, and after the monitor
-// answers again, so the drop wakes no pod that waits on a device. A
-// connector that stays dark past the settle time publishes what sysfs
-// says.
+// The slice publishes the same device at the start of a short drop,
+// during it, and after it, so the drop does not wake a pod that waits
+// for a device. After hotplugSettle with no monitor, the slice
+// publishes what sysfs reports.
 func TestTheSliceOfAShortDropIsTheSame(t *testing.T) {
 	clock := time.Unix(0, 0)
 	slice := newSlicePass(t, &clock)
@@ -236,14 +231,13 @@ func TestTheSliceOfAShortDropIsTheSame(t *testing.T) {
 	slice.run()
 	clock = clock.Add(hotplugSettle)
 	if dark := slice.run(); reflect.DeepEqual(dark, lit) {
-		t.Error("a connector dark past the settle time still publishes its lit device")
+		t.Error("a connector disconnected past the settle time still publishes its connected device")
 	}
 }
 
-// A different monitor that arrives inside the hold is a monitor swap,
-// and the device taints for it the way it does for a swap the hold
-// never saw: the claim on the connector asked for the monitor that
-// left.
+// A different monitor that arrives during a drop is a swap. The device
+// gets the disconnected taint, as for any swap, because the claim on
+// the connector asked for the monitor that left.
 func TestAMonitorSwappedInsideTheHoldTaintsTheDevice(t *testing.T) {
 	clock := time.Unix(0, 0)
 	slice := newSlicePass(t, &clock)

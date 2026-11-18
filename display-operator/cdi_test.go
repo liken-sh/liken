@@ -8,12 +8,9 @@ import (
 	"testing"
 )
 
-func TestOutputEditsDeliverTheSocketAndTheAppID(t *testing.T) {
+func TestOutputEditsSetTheSocketMountAndEnvironment(t *testing.T) {
 	edits := outputEdits("/var/run/display.liken.sh", "wayland-0", "hdmi-a-1")
 
-	// A Wayland client resolves the socket from XDG_RUNTIME_DIR and
-	// WAYLAND_DISPLAY, and it passes DISPLAY_APP_ID to its own toolkit
-	// with a flag the pod spec carries.
 	want := []string{
 		"XDG_RUNTIME_DIR=/var/run/display.liken.sh",
 		"WAYLAND_DISPLAY=wayland-0",
@@ -23,51 +20,37 @@ func TestOutputEditsDeliverTheSocketAndTheAppID(t *testing.T) {
 		t.Errorf("env = %v, want %v", edits.Env, want)
 	}
 	if len(edits.Mounts) != 1 {
-		t.Fatalf("mounts = %+v", edits.Mounts)
+		t.Fatalf("the edits hold %d mounts, want 1: %+v", len(edits.Mounts), edits.Mounts)
 	}
 	mount := edits.Mounts[0]
-	// One path on both ends. The operator's own pod mounts the socket
-	// directory from the host at the path it names here, so it never
-	// has to read its own mount table.
 	if mount.HostPath != "/var/run/display.liken.sh" || mount.ContainerPath != mount.HostPath {
-		t.Errorf("mount = %+v", mount)
+		t.Errorf("the mount is %+v, want the socket directory at the same path in the container", mount)
 	}
-	// rw, because connecting to a Unix socket needs write permission
-	// on it.
 	if !slices.Contains(mount.Options, "rw") || !slices.Contains(mount.Options, "bind") {
-		t.Errorf("options = %v", mount.Options)
+		t.Errorf("the mount options are %v, want rw and bind", mount.Options)
 	}
 }
 
-func TestControlEditsDeliverTheNodeAndItsPath(t *testing.T) {
+func TestControlEditsSetTheDeviceNodeAndItsPath(t *testing.T) {
 	edits := controlEdits("/dev/i2c-4")
 
-	// The node is the DDC/CI wire, and the variable is the path,
-	// because the kernel numbers i2c adapters in the order it
-	// registers them and a consumer cannot guess the number.
 	if !slices.Equal(edits.Env, []string{"DISPLAY_CONTROL_BUS=/dev/i2c-4"}) {
-		t.Errorf("env = %v", edits.Env)
+		t.Errorf("env is %v, want DISPLAY_CONTROL_BUS=/dev/i2c-4", edits.Env)
 	}
 	if len(edits.DeviceNodes) != 1 {
-		t.Fatalf("deviceNodes = %+v", edits.DeviceNodes)
+		t.Fatalf("the edits hold %d device nodes, want 1: %+v", len(edits.DeviceNodes), edits.DeviceNodes)
 	}
 	node := edits.DeviceNodes[0]
-	// rw, because every DDC/CI exchange writes a request before it
-	// reads the reply.
 	if node.Path != "/dev/i2c-4" || node.Permissions != "rw" {
-		t.Errorf("deviceNodes[0] = %+v", node)
+		t.Errorf("the device node is %+v, want /dev/i2c-4 with rw", node)
 	}
-	// A control device grants the wire and nothing else. The socket
-	// belongs to a claim on the output.
 	if len(edits.Mounts) != 0 {
-		t.Errorf("mounts = %+v", edits.Mounts)
+		t.Errorf("the edits hold mounts %+v, want none", edits.Mounts)
 	}
 }
 
-// cdiDocument is the CDI 0.6.0 schema's own spelling of the fields
-// this driver writes. It is declared apart from the operator's own
-// structs so that a field renamed on one side fails here instead of
-// agreeing with itself.
+// cdiDocument declares the CDI 0.6.0 fields apart from the operator's
+// structs, so a JSON tag changed in the operator fails the test.
 type cdiDocument struct {
 	CDIVersion string `json:"cdiVersion"`
 	Kind       string `json:"kind"`
@@ -87,12 +70,9 @@ type cdiDocument struct {
 	} `json:"devices"`
 }
 
-func TestWriteCDISpecCarriesBothDeliveriesUnderOneKind(t *testing.T) {
+func TestWriteCDISpecWritesOutputAndControlDevicesToOneFile(t *testing.T) {
 	cdiDir = t.TempDir()
 
-	// A claim that holds a screen and that screen's control channel
-	// gets one file, because a spec file states one kind and one file
-	// is one thing for an unprepare to remove.
 	devices := []cdiDevice{
 		{
 			Name:           "claim-uid-hdmi-a-1",
@@ -104,50 +84,48 @@ func TestWriteCDISpecCarriesBothDeliveriesUnderOneKind(t *testing.T) {
 		},
 	}
 	if err := writeCDISpec("claim-uid", devices); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(cdiDir, "display.liken.sh-claim-uid.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CDI spec file: %v", err)
 	}
 	var document cdiDocument
 	if err := json.Unmarshal(raw, &document); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the CDI spec: %v", err)
 	}
 	if document.CDIVersion != "0.6.0" || document.Kind != "display.liken.sh/output" {
-		t.Errorf("document = %+v", document)
+		t.Errorf("the document is %+v, want cdiVersion 0.6.0 and kind display.liken.sh/output", document)
 	}
 	if len(document.Devices) != 2 {
-		t.Fatalf("devices = %+v", document.Devices)
+		t.Fatalf("the document holds %d devices, want 2: %+v", len(document.Devices), document.Devices)
 	}
 	screen, control := document.Devices[0], document.Devices[1]
 	if len(screen.ContainerEdits.Mounts) != 1 || len(screen.ContainerEdits.DeviceNodes) != 0 {
-		t.Errorf("the screen's edits = %+v", screen.ContainerEdits)
+		t.Errorf("the screen's edits are %+v, want one mount and no device nodes", screen.ContainerEdits)
 	}
 	if control.Name != "claim-uid-hdmi-a-1-control" {
-		t.Errorf("the control device is named %q", control.Name)
+		t.Errorf("the control device is named %q, want claim-uid-hdmi-a-1-control", control.Name)
 	}
 	if len(control.ContainerEdits.DeviceNodes) != 1 {
-		t.Fatalf("the control device's edits = %+v", control.ContainerEdits)
+		t.Fatalf("the control device's edits are %+v, want one device node", control.ContainerEdits)
 	}
 	node := control.ContainerEdits.DeviceNodes[0]
 	if node.Path != "/dev/i2c-4" || node.Permissions != "rw" {
-		t.Errorf("deviceNodes[0] = %+v", node)
+		t.Errorf("the device node is %+v, want /dev/i2c-4 with rw", node)
 	}
 
-	// Unprepare names a claim's UID and nothing else, so the file is
-	// what says which devices the claim held.
 	held, err := preparedDevices("claim-uid")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the prepared devices: %v", err)
 	}
 	if !slices.Equal(held, []string{"hdmi-a-1", "hdmi-a-1-control"}) {
-		t.Errorf("preparedDevices = %v", held)
+		t.Errorf("preparedDevices is %v, want hdmi-a-1 and hdmi-a-1-control", held)
 	}
 }
 
-func TestWriteCDISpecLeavesTheFileTheRuntimeReads(t *testing.T) {
+func TestWriteCDISpecWritesAFileTheRuntimeCanRead(t *testing.T) {
 	cdiDir = t.TempDir()
 
 	devices := []cdiDevice{{
@@ -155,40 +133,34 @@ func TestWriteCDISpecLeavesTheFileTheRuntimeReads(t *testing.T) {
 		ContainerEdits: outputEdits("/var/run/display.liken.sh", "wayland-0", "hdmi-a-1"),
 	}}
 	if err := writeCDISpec("claim-uid", devices); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 
-	// The file name carries this driver's prefix, so liken's specs in
-	// the same directory and this driver's specs never collide.
 	raw, err := os.ReadFile(filepath.Join(cdiDir, "display.liken.sh-claim-uid.json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CDI spec file: %v", err)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the CDI spec: %v", err)
 	}
 	if spec.Kind != "display.liken.sh/output" || spec.Version != "0.6.0" {
-		t.Errorf("spec = %+v", spec)
+		t.Errorf("the spec is %+v, want version 0.6.0 and kind display.liken.sh/output", spec)
 	}
 	if len(spec.Devices) != 1 || spec.Devices[0].Name != "claim-uid-hdmi-a-1" {
-		t.Fatalf("devices = %+v", spec.Devices)
+		t.Fatalf("the spec holds devices %+v, want claim-uid-hdmi-a-1 alone", spec.Devices)
 	}
-	// The delivery is a mount and environment variables. A Wayland
-	// client receives no device node at all.
 	if len(spec.Devices[0].ContainerEdits.Env) != 3 || len(spec.Devices[0].ContainerEdits.Mounts) != 1 {
-		t.Errorf("edits = %+v", spec.Devices[0].ContainerEdits)
+		t.Errorf("the edits are %+v, want 3 environment variables and 1 mount", spec.Devices[0].ContainerEdits)
 	}
 
-	// No temporary file is left behind. The runtime lists this
-	// directory, and a spec it reads mid-write fails a container
-	// creation.
+	// The temporary file was renamed into place.
 	entries, err := os.ReadDir(cdiDir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 	if len(entries) != 1 {
-		t.Errorf("the directory holds %d files", len(entries))
+		t.Errorf("the directory holds %d files, want only the spec", len(entries))
 	}
 }
 
@@ -196,23 +168,17 @@ func TestRemoveCDISpecIsIdempotent(t *testing.T) {
 	cdiDir = t.TempDir()
 
 	if err := writeCDISpec("claim-uid", nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the CDI directory: %v", err)
 	}
 	if err := removeCDISpec("claim-uid"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the first CDI spec: %v", err)
 	}
-	// The kubelet repeats unprepare whenever it has no record that
-	// the call succeeded.
 	if err := removeCDISpec("claim-uid"); err != nil {
-		t.Fatalf("removing an absent spec: %v", err)
+		t.Fatalf("removing a spec that is already gone: %v", err)
 	}
 }
 
-// What a resting mode and a compositor restart wait on. Both
-// take the screen away from whatever draws on it, and the specs this
-// driver wrote are where the operator reads which screens a workload
-// holds.
-func TestPreparedOutputsNamesTheScreensClaimsHold(t *testing.T) {
+func TestPreparedOutputsReturnsTheOutputsClaimsHold(t *testing.T) {
 	restoreCDIDir := cdiDir
 	t.Cleanup(func() { cdiDir = restoreCDIDir })
 	cdiDir = t.TempDir()
@@ -221,10 +187,9 @@ func TestPreparedOutputsNamesTheScreensClaimsHold(t *testing.T) {
 		Name:           "film-hdmi-a-1",
 		ContainerEdits: outputEdits("/var/run/display.liken.sh", "wayland-0", "hdmi-a-1"),
 	}}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the CDI spec: %v", err)
 	}
-	// The idle client's own claim: a shared draw device and the
-	// panel's control wire, and neither owns a screen's mode.
+	// Draw and control devices do not set the screen's mode.
 	if err := writeCDISpec("idle", []cdiDevice{
 		{
 			Name:           "idle-hdmi-a-2-draw",
@@ -235,12 +200,12 @@ func TestPreparedOutputsNamesTheScreensClaimsHold(t *testing.T) {
 			ContainerEdits: controlEdits("/dev/i2c-4"),
 		},
 	}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the film's CDI spec: %v", err)
 	}
 
 	held, err := preparedOutputs()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the idle CDI spec: %v", err)
 	}
 
 	if len(held) != 1 || !held["hdmi-a-1"] {
@@ -248,8 +213,7 @@ func TestPreparedOutputsNamesTheScreensClaimsHold(t *testing.T) {
 	}
 }
 
-// A node where the kubelet has prepared nothing has no
-// directory at all, and that is no failure.
+// A node where the kubelet has prepared nothing has no spec directory.
 func TestPreparedOutputsReadsANodeWithNoClaims(t *testing.T) {
 	restoreCDIDir := cdiDir
 	t.Cleanup(func() { cdiDir = restoreCDIDir })
@@ -257,7 +221,7 @@ func TestPreparedOutputsReadsANodeWithNoClaims(t *testing.T) {
 
 	held, err := preparedOutputs()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the prepared outputs: %v", err)
 	}
 	if len(held) != 0 {
 		t.Errorf("the prepared outputs are %v, want none", held)

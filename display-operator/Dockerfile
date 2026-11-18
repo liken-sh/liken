@@ -1,91 +1,67 @@
-# Three images from one file, all of them the operator's one binary.
+# This file builds three images from one Go binary.
 #
 #   --target display-operator
-#                      ghcr.io/liken-sh/display-operator, the weston
-#                      image plus the operator's binary. The DaemonSet
-#                      runs it.
+#       ghcr.io/liken-sh/display-operator: the weston image plus the
+#       binary. The DaemonSet runs it.
 #   --target display-capture
-#                      ghcr.io/liken-sh/display-capture, the ffmpeg
-#                      image plus the same binary, which is the
-#                      capture container of the operator's pod.
+#       ghcr.io/liken-sh/display-capture: the ffmpeg image plus the
+#       binary. It is the capture container in the operator's pod.
 #   --target display-api
-#                      ghcr.io/liken-sh/display-api, the same binary
-#                      on nothing else, which is the whole of the
-#                      API's image.
+#       ghcr.io/liken-sh/display-api: the binary on `scratch`.
 #
-# weston and ffmpeg are base images of the repository, each in its own
-# directory at the top. The bake file at the top of the repository
-# gives this build each one as a named context, so FROM weston builds
-# on the weston image of this commit's recipe: the published image when
-# its recipe matches the tree, and otherwise the image that the bake
-# file builds from the same commit. The compositor that the pod runs is
-# then the same set of bytes that the weston image holds, and a node
-# that draws with the compositor and the clients holds glibc, libdrm
-# and LLVM once.
+# weston and ffmpeg are base images of this repository, and the bake
+# file passes the build of this commit's recipe of each as a named
+# context. The operator image builds on the weston image, so a node that
+# runs the compositor and Wayland clients built on the same base stores
+# glibc, libdrm, and LLVM once.
 
 FROM golang AS build
-# proxy.golang.org sometimes drops a module download partway through
-# the stream. With the default comma, `go` tries the origin only when
-# the proxy answers 404 or 410, so a dropped stream fails the build.
-# With a pipe, `go` fetches the module from its origin after any proxy
-# error, with the git that this image includes. `GOSUMDB` keeps its
-# default, so the checksum database still verifies a module that `go`
-# fetched from its origin.
+# proxy.golang.org can drop a module download partway through. With
+# the default comma, `go` falls back to the origin only when the proxy
+# returns 404 or 410, so the build fails. With a pipe, `go` falls back
+# after any proxy error. `GOSUMDB` keeps its default, so the checksum
+# database still verifies a module fetched from its origin.
 ENV GOPROXY="https://proxy.golang.org|direct"
 WORKDIR /src
-# The module files come first, so a source edit reuses the cached
-# download layer.
 COPY go.mod go.sum ./
-# go.mod replaces the shared kubernetes module with ../kubernetes, and
-# the build takes that directory as a second build context named
-# kubernetes. It lands at /kubernetes, the same place relative to /src
-# that kubernetes/ has relative to this component. Its module file
-# comes first for the same reason as this module's.
+# go.mod replaces the kubernetes module with ../kubernetes, so the
+# build context kubernetes is copied to /kubernetes, the same path
+# relative to /src. The module files are copied before the source so
+# that a source edit reuses the cached download layer.
 COPY --from=kubernetes go.mod go.sum /kubernetes/
 RUN go mod download
 COPY --from=kubernetes . /kubernetes/
 COPY *.go ./
-# The version reaches the binary through -ldflags, so a running
-# operator's liken_build_info names the release it was built from,
-# not the "dev" default main.go carries.
+# The version goes into the liken_build_info metric.
 ARG VERSION=dev
-# CGO_ENABLED=0 with -trimpath is liken's own build discipline: a
-# static binary with no paths from the build machine in it. The binary
-# is the whole of the operator image, so it also has to run with no
-# loader and no libc under it.
+# The display-api image has no libc and no dynamic loader, so the
+# binary must be static.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /display-operator .
-# The license files of the Go standard library and of each module that
-# the binary links. notices/go.sh says why the image needs them.
 COPY --from=notices go.sh /
 RUN CGO_ENABLED=0 sh /go.sh /notices .
 
 FROM weston AS display-operator
-# The operator's binary is the entrypoint of every container of the
-# pod. The argument the manifest passes selects the role: the config
-# write, the compositor it execs, the capture server, or, with no
-# argument, the DRA driver.
+# The argument in the manifest selects the role of each container in
+# the pod: write the configuration, exec the compositor, run the
+# capture server, or, with no argument, run the DRA driver.
 COPY --from=build /display-operator /display-operator
 COPY --from=build /notices /
 
 ENTRYPOINT ["/display-operator"]
 
-# The capture sidecar runs an ffmpeg process for every request, so
-# its image is the ffmpeg image plus the binary. It carries no
-# compositor: the sidecar is a Wayland client of the weston container
-# beside it.
+# The capture container runs ffmpeg for each request, as a Wayland
+# client of the compositor container in the same pod.
 FROM ffmpeg AS display-capture
 COPY --from=build /display-operator /display-operator
 COPY --from=build /notices /
 
 ENTRYPOINT ["/display-operator"]
 
-# The API talks to the Kubernetes API and to the sidecars, and opens
-# no library and no device, so the static binary is the whole image
-# and there is nothing else in it to patch.
+# The API only calls the Kubernetes API and the capture containers, so
+# it needs no library and the image has no other software to patch.
 FROM scratch AS display-api
 COPY --from=build /display-operator /display-operator
 COPY --from=build /notices /
-# deploy/api.yaml runs the API as this user, and the image names the
-# same one.
+# deploy/api.yaml runs the API as this user.
 USER 65532:65532
 ENTRYPOINT ["/display-operator"]

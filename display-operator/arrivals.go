@@ -1,12 +1,11 @@
 package main
 
-// Three waits in this operator wait for a file to appear: the output
-// watch and the layout link wait for a socket between two
-// compositors, and the compositor role waits for the weston.ini the
-// declare container writes. Each one waits for the kernel to report
-// that the file arrived, and looks then. A look on a short fixed
-// interval would cost several wakes a second for as long as the file
-// stays missing.
+// Several parts of this operator wait for a file to appear: a
+// compositor's socket, the weston.ini that the declare container
+// writes, and the files of the serving certificate. Each waits on an
+// inotify event for the file and checks for it when the event arrives.
+// Polling on a short fixed interval would wake the operator several
+// times a second for as long as the file is missing.
 
 import (
 	"bytes"
@@ -21,23 +20,21 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The wait after a try that failed, from the wait before it. The
-// arrival of the file ends a wait early, so the doubling bounds only
-// the tries that no arrival starts.
 func nextDialDelay(delay, limit time.Duration) time.Duration {
 	return min(2*delay, limit)
 }
 
-// A process creates its socket file with bind and accepts connections
-// only after listen, so a dial right after the file arrives can meet a
-// refusal. The wait after that dial is this short, because listen
-// follows bind at once.
+// listenGrace is the wait after a failed dial that the socket's arrival
+// triggered. A server creates the socket file in bind and accepts
+// connections only after listen, so a dial right after the file
+// appears can be refused. listen follows bind almost at once, so the
+// retry waits only this long.
 const listenGrace = 20 * time.Millisecond
 
-// The wait before the next dial of a socket. A connection that served
-// starts the wait over at first. A dial that the socket's arrival
-// started and that failed waits listenGrace. Any other failed dial
-// doubles the wait, up to limit.
+// nextDialWait returns the wait before the next dial of a socket: first
+// after a connection that served, listenGrace after a failed dial that
+// the socket's arrival triggered, and otherwise double the last wait,
+// up to limit.
 func nextDialWait(served, arrived bool, wait, first, limit time.Duration) time.Duration {
 	switch {
 	case served:
@@ -49,22 +46,21 @@ func nextDialWait(served, arrived bool, wait, first, limit time.Duration) time.D
 	}
 }
 
-// An inotify watch on one directory for one or more file names. A process
-// creates a socket with bind and a file with open, which the kernel
-// reports as a create in the directory, and a file renamed into place
-// reports as a move.
+// arrivals is an inotify watch on a directory for files with the given
+// names. A socket created with bind and a file created with open both
+// raise IN_CREATE, and a file renamed into place raises IN_MOVED_TO.
 //
-// The watch is on the directory's inode, so a directory that is
-// removed ends it: the kernel sends IN_IGNORED. The watch then wakes
-// its waiter and starts again on the next ready, on whatever directory
-// holds the path by then. The directories this operator watches are
-// volume mounts, which no process can remove while they are mounted,
-// so this is the path of a mount that went away under a live pod.
+// The watch is on the directory's inode, so when the directory is
+// removed the kernel sends IN_IGNORED and the watch ends. The watch
+// then wakes its waiter, and the next call to ready starts a new watch
+// on whatever directory is at the path by then. The directories this
+// operator watches are volume mounts, so this happens only when a
+// mount goes away under a running pod.
 type arrivals struct {
 	dir   string
 	names []string
-	// Arrived holds one wake at most. A waiter needs to know that the
-	// file arrived, not how many times.
+	// arrived has a buffer of one, because a waiter needs to know that
+	// the file arrived, not how many events there were.
 	arrived chan struct{}
 
 	mu      sync.Mutex
@@ -72,20 +68,19 @@ type arrivals struct {
 	closed  bool
 }
 
-// A watch for path. The directory need not exist yet: until it does,
-// the watch is down, and a wait lasts its whole fallback.
+// newArrivals returns a watch for the file at path. The directory does
+// not have to exist yet. Until it does, the watch is not running and
+// each wait lasts its whole fallback time.
 func newArrivals(path string) *arrivals {
 	return newArrivalsIn(filepath.Dir(path), filepath.Base(path))
 }
 
-// A watch for any of several names in one directory.
 func newArrivalsIn(dir string, names ...string) *arrivals {
 	a := &arrivals{dir: dir, names: names, arrived: make(chan struct{}, 1)}
 	_ = a.arm()
 	return a
 }
 
-// Start the watch when it is down.
 func (a *arrivals) arm() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -100,15 +95,16 @@ func (a *arrivals) arm() error {
 		_ = unix.Close(fd)
 		return os.NewSyscallError("inotify_add_watch", err)
 	}
-	// A non-blocking descriptor joins Go's poller, so the read parks
-	// the goroutine instead of a thread, and a close ends the read.
+	// A non-blocking descriptor is registered with Go's network
+	// poller, so a blocked read does not use an OS thread, and closing
+	// the file ends the read.
 	a.inotify = os.NewFile(uintptr(fd), "inotify")
 	go a.read(a.inotify)
 	return nil
 }
 
-// Read events until the watch closes or its directory goes, and wake
-// on each event that names the file.
+// read wakes the waiter for each event that names a watched file, until
+// the file is closed or the directory is removed.
 func (a *arrivals) read(file *os.File) {
 	buffer := make([]byte, 64*(unix.SizeofInotifyEvent+unix.NAME_MAX+1))
 	for {
@@ -117,8 +113,8 @@ func (a *arrivals) read(file *os.File) {
 			return
 		}
 		for offset := 0; offset+unix.SizeofInotifyEvent <= n; {
-			// The mask and the name's length are fields of the event
-			// header, in the machine's own byte order.
+			// struct inotify_event is in native byte order, with mask
+			// at offset 4 and len at offset 12.
 			mask := binary.NativeEndian.Uint32(buffer[offset+4 : offset+8])
 			length := int(binary.NativeEndian.Uint32(buffer[offset+12 : offset+16]))
 			start := offset + unix.SizeofInotifyEvent
@@ -127,8 +123,8 @@ func (a *arrivals) read(file *os.File) {
 				a.lost(file)
 				return
 			}
-			// An overflow means the kernel dropped events, and one of
-			// them can be the arrival, so the waiter looks again.
+			// After an overflow the kernel has dropped events, and one
+			// of them can be the arrival, so wake the waiter to check.
 			if mask&unix.IN_Q_OVERFLOW != 0 || slices.Contains(a.names, string(bytes.TrimRight(buffer[start:end], "\x00"))) {
 				a.wake()
 			}
@@ -137,8 +133,8 @@ func (a *arrivals) read(file *os.File) {
 	}
 }
 
-// The directory went, and the watch with it. The waiter wakes so it
-// looks again at once and ready starts a new watch.
+// lost ends the watch after the directory is removed and wakes the
+// waiter, whose next call to ready starts a new watch.
 func (a *arrivals) lost(file *os.File) {
 	a.mu.Lock()
 	if a.inotify == file {
@@ -156,9 +152,9 @@ func (a *arrivals) wake() {
 	}
 }
 
-// Start the watch if it is down, and forget every arrival so far. A
-// caller runs this before it looks for the file: the look sees
-// whatever arrived before it, so that arrival owes no second look.
+// ready starts the watch if it is not running and discards any pending
+// wake. Call it before checking for the file: the check finds anything
+// that arrived earlier, and a pending wake would only repeat the check.
 func (a *arrivals) ready() {
 	_ = a.arm()
 	select {
@@ -167,9 +163,9 @@ func (a *arrivals) ready() {
 	}
 }
 
-// Wait for the file to arrive, for at most fallback. The answer is
-// true when the watch woke, which is an arrival or the loss of the
-// directory; either one means look again now.
+// wait blocks until the watch wakes, ctx ends, or fallback passes. It
+// returns true when the watch woke, because the file arrived or the
+// directory was removed.
 func (a *arrivals) wait(ctx context.Context, fallback time.Duration) bool {
 	timer := time.NewTimer(fallback)
 	defer timer.Stop()

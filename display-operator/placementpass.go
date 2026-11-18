@@ -1,30 +1,21 @@
 package main
 
-// The placement pass: the surfaces the compositor's module reports
-// become rectangles on each screen.
+// The placement pass decides where each window goes on this node's
+// screens. The compositor's layout module reports every surface and
+// the Wayland socket it connected on. The pass finds the claim that
+// holds each socket, matches the regions of the screen's Layout
+// against the labels that every pod of that claim shares, sends the
+// placements to the module, and writes the result to each Display's
+// status.
 //
-// One pass reads four things and writes two. It reads the compositor's
-// own socket; the module's store, which is every surface on this
-// node's screens with the socket each one arrived on; the claim behind
-// each socket and the labels its holders share; and each screen's
-// Display and the Layout it names. It writes placements to the module,
-// and it writes what it decided to the Display's status. A compositor
-// that answers nothing on its socket empties every screen's report,
-// and the pass places nothing.
+// placeSurfaces decides the placements as a pure function, and this
+// file sends its result, so another layout engine could replace
+// placeSurfaces with no change here
+// (plans/open-problems/an-external-layout-engine.md).
 //
-// The decision is placeSurfaces, which is a pure function, and this
-// file is what executes its result. Keeping the two apart is the seam
-// a different layout engine would plug into: another engine would
-// produce the same placement from the same inputs, and this file
-// would commit it the same way (plans/open-problems/an-external-layout-engine.md).
-//
-// The pass keeps a memo of the last placement it sent for each
-// surface, so a pass that decides the same thing again sends nothing.
-// Most wakes carry no news for the screen, and a commit with nothing
-// in it would still cost the compositor a repaint. A new connection to
-// the module empties the memo, because a compositor that restarted
-// holds nothing the operator sent before, and the module re-reports
-// every surface it holds so the pass places them all again.
+// The pass remembers the last placement it sent for each surface and
+// sends nothing for a surface that has not changed, because a commit
+// makes the compositor repaint even when nothing changed.
 
 import (
 	"cmp"
@@ -39,17 +30,18 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// claimIDPrefix is how much of a claim's UID the surface id carries.
-// Eight characters of a UUID name the claim to a person reading the
-// resource, and the module's own id makes the whole thing unique.
+// claimIDPrefix is the number of characters of a claim's UID that a
+// surface id includes. Eight characters are enough for a person to
+// tell the claims apart, and the module's surface id makes the whole
+// id unique.
 const claimIDPrefix = 8
 
-// sharedSurface stands in for the claim prefix of a surface on the
-// compositor's own socket, which belongs to no claim.
+// sharedSurface is the id prefix of a surface on the compositor's own
+// socket, which has no claim.
 const sharedSurface = "shared"
 
-// One surface on one screen: what the module reported about it, and
-// what the claim behind its socket answered.
+// screenSurface is a surface that the module reported, with the
+// claim, pods, and labels behind the socket it connected on.
 type screenSurface struct {
 	layoutSurface
 	id     string
@@ -58,165 +50,141 @@ type screenSurface struct {
 	labels map[string]string
 }
 
-// Where one surface was last placed. The pass compares the connector
-// and the rectangle with what it decided, and sends nothing for a
-// surface whose rectangle and screen did not move.
+// placedSurface is the last placement that the pass sent for one
+// surface.
 //
-// The exit is the transition the region stated for a surface that
-// leaves it. The memo keeps it because the pass that hides a surface
-// is a later pass than the one that placed it: by then the surface
-// matches no region, and the Layout may state none, so what runs is
-// what the region stated while the surface was in it.
+// exit is the exit transition of the region the surface was placed
+// in. The pass hides a surface when it matches no region any more, so
+// it reads the transition from here.
 type placedSurface struct {
 	connector string
 	where     rect
 	exit      LayoutTransitionHalf
 }
 
-// placementPass runs the whole placement: it reads the surfaces the
-// module reports, resolves each one to the pods that hold its claim,
-// runs the decision for each screen, states what changed to the
-// module, and writes each Display's status.
 type placementPass struct {
 	client *apiclient.Client
-	// displays and stores answer the Displays, the Layouts, and this
-	// node's pods from the watches' stores (objectcache.go). A pass
-	// built with no watch reads them from the API server.
+	// displays and stores read the Displays, the Layouts, and this
+	// node's pods from the watch caches (objectcache.go). A pass
+	// created with no watch reads them from the API server.
 	displays *displayStore
 	stores   clusterStores
 	node     string
 	link     *layoutLink
 	claims   *claimIndex
-	// Outputs is the same walk of the card the slice publisher and the
-	// Display controller make, so all three name one set of
-	// connectors and monitors.
+	// outputs lists the card's outputs the same way the slice
+	// publisher and the Display controller do, so all three see the
+	// same connectors and monitors.
 	outputs func() []Output
-	// Sockets names the claim and the output device of every socket a
-	// prepared claim holds. It is a field so a test drives a pass with
-	// no CDI directory of its own.
+	// sockets returns the claim and the output device of each socket
+	// that a prepared claim holds. A test replaces it to run without a
+	// CDI directory.
 	sockets func() (map[string]preparedSocket, error)
-	// Compositor is the probe of the compositor's own socket, the same
-	// handshake the slice publisher taints by. It is a field so a test
-	// drives a pass against a compositor it states rather than one it
-	// runs.
+	// compositor probes the compositor's own socket with the handshake
+	// that the slice publisher uses to taint devices. A test replaces
+	// it to run without a compositor.
 	compositor func() compositorLiveness
 	now        func() time.Time
 
-	// Generation is the module connection the memo below belongs to.
+	// generation is the link connection that placed and ordered were
+	// sent on.
 	generation int
-	// Placed is the memo: the rectangle each surface was last placed
-	// at, and ordered is the stacking order each connector was last
-	// sent. A pass that decides what the last one decided sends
-	// nothing at all.
+	// placed is the last placement sent for each surface, by the
+	// module's surface id, and ordered is the last stacking order sent
+	// for each connector.
 	placed  map[int]placedSurface
 	ordered map[string][]int
-	// Reconnected is true for the one pass that first reads a new
-	// connection to the module. Every arranger went with the old
-	// compositor, so that pass posts no Event for the arrangers it no
-	// longer finds (announceArrangers).
+	// reconnected is true only during the first pass on a new link
+	// connection. That pass posts no Event for an arranger it no
+	// longer finds (announceArrangers), because a restarted compositor
+	// ends every arranger.
 	reconnected bool
-	// Unswept is true while a Display on this node whose monitor is
-	// off the wire can carry a status that no longer holds. A screen's
-	// report writes only the Displays of lit outputs, so a Display
-	// keeps the windows it reported when its monitor left, and the
-	// compositor condition that dark wrote, until a sweep writes it
-	// again. A new process does not know what an earlier one wrote, so
-	// the flag starts true.
-	unswept bool
-	// Wired is the name of each Display whose monitor was on the wire
-	// at the last pass, sorted. A change in it is a monitor that left
-	// or came back, which is what sets unswept again.
-	wired []string
-	// Metrics counts the surfaces this pass places on each output. It
-	// is nil in every test that drives a pass with no listener behind
-	// it, and a nil metrics records nothing.
+	// sweepPending is true while a Display on this node whose monitor
+	// is disconnected may have an out-of-date status. Each screen's
+	// report writes only the Displays of connected monitors, so such a
+	// Display keeps its last surfaces and compositor condition until
+	// sweep writes it. It starts true because a new process does not
+	// know what the previous process wrote.
+	sweepPending bool
+	// connectedDisplays is the sorted list of the Displays whose monitors were
+	// connected in the last pass. A change means that a monitor left
+	// or returned, and sets sweepPending.
+	connectedDisplays []string
+	// metrics is nil in tests, and a nil metrics records nothing.
 	metrics *metrics
 }
 
 func newPlacementPass(client *apiclient.Client, node, socketPath string, link *layoutLink, claims *claimIndex,
 	outputs func() []Output) *placementPass {
 	return &placementPass{
-		client:     client,
-		displays:   newDisplayStore(client, informer.View{}),
-		node:       node,
-		link:       link,
-		claims:     claims,
-		outputs:    outputs,
-		sockets:    preparedSocketClaims,
-		compositor: func() compositorLiveness { return probeCompositor(socketPath) },
-		now:        time.Now,
-		placed:     map[int]placedSurface{},
-		ordered:    map[string][]int{},
-		unswept:    true,
+		client:       client,
+		displays:     newDisplayStore(client, informer.View{}),
+		node:         node,
+		link:         link,
+		claims:       claims,
+		outputs:      outputs,
+		sockets:      preparedSocketClaims,
+		compositor:   func() compositorLiveness { return probeCompositor(socketPath) },
+		now:          time.Now,
+		placed:       map[int]placedSurface{},
+		ordered:      map[string][]int{},
+		sweepPending: true,
 	}
 }
 
-// pass places every surface the module reports and reports every
-// screen.
+// pass places every surface that the module reports and writes the
+// status of every screen.
 //
-// A pass whose compositor does not answer the probe reports every
-// screen with no surfaces and places nothing. Every surface ended with
-// the compositor, so a status that still named them would tell the
-// screen's owner that programs are on a screen that does not change.
-//
-// A pass with no module serving does nothing. The module keeps the
-// last layout it committed while nothing is connected to it, and the
-// connection that follows reports every surface again, so there is
-// nothing to read and nowhere to send in the meantime.
-//
-// The first pass that finds the compositor and the module serving, in
-// this process, after each dark pass, and after a monitor leaves or
-// comes back, also sweeps every Display of this node, because no
-// screen reports a Display whose monitor is off the wire.
+// When the compositor does not reply to the probe, its surfaces are
+// gone, so the pass writes every Display with no surfaces and places
+// nothing. When the link to the module is down, the pass does nothing,
+// because the module keeps its last committed layout and reports every
+// surface again on the next connection.
 func (p *placementPass) pass() error {
 	live := p.compositor()
 	if !live.serving {
-		return p.dark(live)
+		return p.reportNoCompositor(live)
 	}
 	state := p.link.state()
 	if !state.Serving {
 		return nil
 	}
 	outputs := p.outputs()
-	if wired := wiredDisplays(outputs); !slices.Equal(wired, p.wired) {
-		p.wired, p.unswept = wired, true
+	if connected := connectedDisplayNames(outputs); !slices.Equal(connected, p.connectedDisplays) {
+		p.connectedDisplays, p.sweepPending = connected, true
 	}
 	var failures []error
-	if p.unswept {
+	if p.sweepPending {
 		if err := p.sweep(live); err != nil {
 			failures = append(failures, err)
 		} else {
-			p.unswept = false
+			p.sweepPending = false
 		}
 	}
-	// The record of which claim holds which socket is what turns a
-	// surface into a claim. A read of it that failed would leave every
-	// surface with no claim, which falls out of every region and hides
-	// the whole screen, so the pass ends here instead.
+	// Without the sockets every surface would have no claim, match no
+	// region, and be hidden, so the pass stops here.
 	sockets, err := p.sockets()
 	if err != nil {
 		return errors.Join(append(failures, err)...)
 	}
-	// A new connection is a new compositor: every surface and every id
-	// went with the old one, so the memo goes and this pass states
-	// every placement again.
+	// On a new connection the compositor may have restarted, with new
+	// surface ids and none of the placements, so the pass sends every
+	// placement again.
 	p.reconnected = state.Generation != p.generation
 	if p.reconnected {
 		p.generation = state.Generation
 		p.forget()
 	}
 	for id, was := range p.placed {
-		if _, held := state.Surfaces[id]; !held {
+		if _, reported := state.Surfaces[id]; !reported {
 			delete(p.placed, id)
 			continue
 		}
-		// The output this surface sat on is gone. The module destroyed
-		// that output's layer, cleared the surface's placement, and hid
-		// it, and the client kept its connection through all of it. So
-		// the memo now describes a screen the surface is no longer on.
-		// Dropping it makes the next pass state the placement again
-		// when the output returns, which is what puts the picture back.
-		if _, lit := state.Outputs[was.connector]; !lit {
+		// When an output goes away, the module hides its surfaces and
+		// clears their placements while the clients stay connected.
+		// Forgetting the placement makes the pass send it again when
+		// the output returns.
+		if _, present := state.Outputs[was.connector]; !present {
 			delete(p.placed, id)
 			delete(p.ordered, was.connector)
 		}
@@ -224,28 +192,27 @@ func (p *placementPass) pass() error {
 
 	screens, unresolved := p.resolve(state, sockets, outputs)
 	failures = append(failures, unresolved...)
-	stated := false
+	changed := false
 	for _, connector := range slices.Sorted(maps.Keys(state.Outputs)) {
-		held := screens[connector]
-		if held != nil && held.unresolved {
-			// A screen is rearranged from a whole reading and no other.
-			// The surface whose claim this pass could not read would
-			// fall out of every region, and one request that failed
-			// must not take a program off the screen.
+		onScreen := screens[connector]
+		if onScreen != nil && onScreen.unresolved {
+			// A surface whose claim could not be read would match no
+			// region and be hidden, so one failed request would remove
+			// a program from the screen.
 			continue
 		}
-		on := surfacesOn(held)
+		on := surfacesOn(onScreen)
 		p.metrics.recordSurfaces(connector, len(on))
-		sent, err := p.screen(state.Outputs[connector], held, outputs, live)
-		stated = stated || sent
+		sent, err := p.screen(state.Outputs[connector], onScreen, outputs, live)
+		changed = changed || sent
 		if err != nil {
-			failures = append(failures, fmt.Errorf("%s: %w", connector, err))
+			failures = append(failures, fmt.Errorf("placing the surfaces on %s: %w", connector, err))
 		}
 	}
-	if stated {
+	if changed {
 		if err := p.link.Commit(); err != nil {
-			// Nothing this pass sent reached the screen, so the memo
-			// goes and the next pass states all of it again.
+			// Nothing sent in this pass reached the screen, so the next
+			// pass sends everything again.
 			p.forget()
 			failures = append(failures, err)
 		}
@@ -258,24 +225,21 @@ func (p *placementPass) forget() {
 	p.ordered = map[string][]int{}
 }
 
-// dark reports every screen of this node while the compositor serves
-// nobody: no surfaces, no layout, and the condition that states which
-// of the two failures it is.
+// reportNoCompositor writes every Display of this node with no
+// surfaces, no layout, and no arrangers, and with the
+// CompositorServing condition from the failed probe. It lists the
+// Displays, not the connectors, so that the Display of a disconnected
+// monitor gets the same status.
 //
-// It reads the Display resources and not the connectors, because a
-// Display whose monitor also left is as wrong about its surfaces as
-// one whose monitor is still on the wire.
-//
-// The memo goes with the surfaces, because the compositor that comes
-// back holds nothing this pass sent and assigns its ids from the start
-// again.
-func (p *placementPass) dark(live compositorLiveness) error {
+// A compositor that starts again has none of the placements and
+// numbers its surfaces from 1 again, so the pass forgets what it sent.
+func (p *placementPass) reportNoCompositor(live compositorLiveness) error {
 	p.forget()
 	p.metrics.forgetSurfaces()
-	// The compositor that comes back does not rewrite the condition
-	// on a Display whose monitor is off the wire, so the first pass
-	// that finds it serving sweeps.
-	p.unswept = true
+	// No screen report writes the Display of a disconnected monitor,
+	// so the first pass that finds the compositor serving again must
+	// sweep to clear the condition written here.
+	p.sweepPending = true
 	return p.settleEach(func(_ string, published DisplayStatus) DisplayStatus {
 		status := published
 		status.Surfaces = nil
@@ -286,9 +250,9 @@ func (p *placementPass) dark(live compositorLiveness) error {
 	})
 }
 
-// The surfaces of one screen, and whether every one of them
-// resolved. A claim the API server could not answer for leaves the
-// screen unresolved, and the pass leaves such a screen as it is.
+// screenSurfaces is what the pass found for one screen. unresolved is
+// true when reading a claim from the API server failed, and the pass
+// then leaves the screen as it is.
 type screenSurfaces struct {
 	on         []screenSurface
 	arrangers  []screenArranger
@@ -296,8 +260,6 @@ type screenSurfaces struct {
 	unresolved bool
 }
 
-// The surfaces of one screen, and none for a screen the module
-// reports with nothing on it.
 func surfacesOn(screen *screenSurfaces) []screenSurface {
 	if screen == nil {
 		return nil
@@ -305,12 +267,12 @@ func surfacesOn(screen *screenSurfaces) []screenSurface {
 	return screen.on
 }
 
-// resolve puts each surface the module reported on the screen its
-// socket was opened for, with the claim and the labels that place it.
+// resolve assigns each reported surface to the screen that its socket
+// was opened for, with the claim, pods, and labels behind it.
 //
-// The surfaces of one screen come out in the order the module
-// assigned their ids, which is the order they arrived in: the ids
-// count up for the compositor's whole life.
+// Each screen's surfaces are sorted by the module's id, which is the
+// order they connected in, because the module numbers surfaces upward
+// for the life of the compositor.
 func (p *placementPass) resolve(state layoutState, sockets map[string]preparedSocket,
 	outputs []Output) (map[string]*screenSurfaces, []error) {
 	var failures []error
@@ -327,11 +289,11 @@ func (p *placementPass) resolve(state layoutState, sockets map[string]preparedSo
 	screens := map[string]*screenSurfaces{}
 	for _, reported := range state.Surfaces {
 		on := screenSurface{layoutSurface: reported, id: surfaceID("", reported.ID)}
-		// A surface on the compositor's own socket belongs to no
-		// claim, so nothing in its connection says which screen it was
-		// meant for, and it goes on the first connected output.
+		// A surface on the compositor's own socket has no claim to say
+		// which screen it is for, so it goes on the first connected
+		// output.
 		connector, unresolved := shared, false
-		if socket, held := sockets[reported.Socket]; held {
+		if socket, claimed := sockets[reported.Socket]; claimed {
 			connector = connectors[socket.device]
 			on.id = surfaceID(socket.claim, reported.ID)
 			by, err := holders.holders(socket.claim)
@@ -341,10 +303,10 @@ func (p *placementPass) resolve(state layoutState, sockets map[string]preparedSo
 			}
 			on.claim, on.pods, on.labels = by.key, by.pods, by.labels
 		} else if reported.Socket != socketName {
-			// The claim was given back while its client kept drawing.
-			// The surface belongs to no claim from here on, which is
-			// what a surface on the compositor's own socket is.
-			failures = append(failures, fmt.Errorf("surface %d arrived on %s, which no prepared claim holds",
+			// The claim of this socket was released while the client
+			// kept drawing. The surface is treated like one on the
+			// compositor's own socket.
+			failures = append(failures, fmt.Errorf("surface %d is on socket %s, which no prepared claim holds",
 				reported.ID, reported.Socket))
 		}
 		if connector == "" {
@@ -365,12 +327,12 @@ func (p *placementPass) resolve(state layoutState, sockets map[string]preparedSo
 	return screens, failures
 }
 
-// screen decides the layout of one screen, states what changed to the
-// module, and writes the status. It answers whether anything reached
-// the module, which is what earns the commit.
-func (p *placementPass) screen(output layoutOutput, held *screenSurfaces, outputs []Output,
+// screen decides the layout of one screen, sends the changes to the
+// module, and writes the status. It returns true when it sent the
+// module anything, so that the pass commits.
+func (p *placementPass) screen(output layoutOutput, onScreen *screenSurfaces, outputs []Output,
 	live compositorLiveness) (bool, error) {
-	on := surfacesOn(held)
+	on := surfacesOn(onScreen)
 	display, err := p.display(output.Connector, outputs)
 	if err != nil {
 		return false, err
@@ -384,25 +346,21 @@ func (p *placementPass) screen(output layoutOutput, held *screenSurfaces, output
 		return false, err
 	}
 	decision := placeSurfaces(surfacesOf(on), layout)
-	stated, failure := p.send(output, decision, moduleIDs(on))
+	sent, failure := p.send(output, decision, moduleIDs(on))
 	if display == nil {
-		// A connector whose monitor answers no identity carries no
-		// resource of its own. The screen is still placed, and nothing
-		// reports what it shows.
-		return stated, failure
+		// The monitor reports no identity, or its Display does not
+		// exist yet. The surfaces are placed, and no status is written.
+		return sent, failure
 	}
-	return stated, errors.Join(failure,
-		p.report(display, held, decision, layoutName(named, layout), resolved, p.serving(live)))
+	return sent, errors.Join(failure,
+		p.report(display, onScreen, decision, layoutName(named, layout), resolved, p.serving(live)))
 }
 
-// The resource of the panel on one connector, and nothing at all for
-// a connector whose monitor answers no identity. The name is built
-// the way the Display controller builds it, from the monitor's own
-// EDID, so the two never write two resources for one panel.
-//
-// A resource that is not there yet is the Display controller's own
-// pass to create, and this pass reports the screen on the pass after
-// that.
+// display returns the Display of the monitor on one connector, or nil
+// when the monitor reports no identity or the Display does not exist
+// yet. It names the Display from the monitor's EDID with monitorID,
+// as the Display controller does. The Display controller creates a
+// missing Display, and a later pass writes its status.
 func (p *placementPass) display(connector string, outputs []Output) (*Display, error) {
 	name := ""
 	for _, output := range outputs {
@@ -420,40 +378,39 @@ func (p *placementPass) display(connector string, outputs []Output) (*Display, e
 	return display, err
 }
 
-// The Layout one screen is drawn to, and the condition that reports
-// how the name resolved. A screen that names none and a name the
-// cluster does not hold are both drawn to the default, which is what
-// a nil layout means to the decision.
+// layoutOf returns the Layout that a screen is drawn with, and the
+// LayoutResolved condition. With no layout name, or a name that no
+// Layout has, it returns nil, which is the default layout.
 //
-// A read that failed for any other reason fails the screen. A pass
-// that read the default here would rearrange every surface because
-// one request to the API server failed.
+// Any other read failure fails the screen, because falling back to
+// the default would rearrange every surface after one failed API
+// request.
 func (p *placementPass) layoutOf(named string) (*LayoutSpec, DisplayCondition, error) {
 	if named == "" {
 		return nil, p.condition(true, DefaultLayoutReason,
-			"this screen names no layout, so every surface is drawn over the whole screen with the newest on top"), nil
+			"spec.layout is empty, so every surface fills the whole screen with the newest on top"), nil
 	}
 	layout, err := p.stores.layout(p.client, named)
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return nil, p.condition(false, LayoutNotFoundReason,
-			"no Layout is named "+named+", so this screen is drawn to the default"), nil
+			"The Layout "+named+" that spec.layout names does not exist, so this screen uses the default layout"), nil
 	}
 	if err != nil {
 		return nil, DisplayCondition{}, err
 	}
-	return &layout.Spec, p.condition(true, LayoutFoundReason, named+" is the layout this screen shows"), nil
+	return &layout.Spec, p.condition(true, LayoutFoundReason, "The screen shows the Layout "+named), nil
 }
 
-// send states one screen's decision to the module, and answers
-// whether anything reached it.
+// send sends the changes in one screen's decision to the module and
+// returns true when it sent anything.
 //
-// A placement the memo already holds sends nothing, which is what
-// makes a pass over an unchanged screen silent. The order goes with
-// every batch that placed a surface here, because the module puts a
-// surface that is new to an output on top until an order arrives.
+// The stacking order is sent after any placement or hide, because the
+// module puts a surface that is new to an output on top until it
+// receives an order. Otherwise it is sent only when it differs from
+// the last order sent.
 func (p *placementPass) send(output layoutOutput, decision screenPlacement, ids map[string]int) (bool, error) {
 	var failures []error
-	stated := false
+	sent := false
 	order := make([]int, 0, len(decision.placed))
 	for _, place := range inStackOrder(decision.placed) {
 		id, known := ids[place.surface]
@@ -465,10 +422,8 @@ func (p *placementPass) send(output layoutOutput, decision screenPlacement, ids 
 		next := placedSurface{connector: output.Connector, where: where, exit: place.transition.Exit}
 		last, before := p.placed[id]
 		if before && last.connector == next.connector && last.where == next.where {
-			// A Layout a person edited may state another exit for the
-			// same rectangle, so the memo takes the new one. The
-			// screen is where the decision says, and nothing goes to
-			// the module.
+			// Nothing is sent, but an edit of the Layout can have
+			// changed the region's exit, so the new exit is saved.
 			p.placed[id] = next
 			continue
 		}
@@ -478,12 +433,12 @@ func (p *placementPass) send(output layoutOutput, decision screenPlacement, ids 
 			continue
 		}
 		p.placed[id] = next
-		stated = true
+		sent = true
 	}
-	// A surface no region took leaves the screen with the exit of the
-	// region it was in. A surface the module reported gone is already
-	// off the screen and lost its memo at the top of the pass, so
-	// nothing is sent for it: there is no surface left to fade.
+	// A surface that no region matches any more is hidden with the
+	// exit of the region it was in. A surface that the module reported
+	// gone lost its saved placement at the start of the pass, so it
+	// gets no hide.
 	for _, unplaced := range decision.unplaced {
 		id, known := ids[unplaced]
 		if !known {
@@ -499,52 +454,50 @@ func (p *placementPass) send(output layoutOutput, decision screenPlacement, ids 
 			continue
 		}
 		delete(p.placed, id)
-		stated = true
+		sent = true
 	}
 	if len(order) == 0 {
 		delete(p.ordered, output.Connector)
-		return stated, errors.Join(failures...)
+		return sent, errors.Join(failures...)
 	}
-	if stated || !slices.Equal(p.ordered[output.Connector], order) {
+	if sent || !slices.Equal(p.ordered[output.Connector], order) {
 		if err := p.link.Order(output.Connector, order); err != nil {
 			failures = append(failures, err)
 		} else {
 			p.ordered[output.Connector] = order
-			stated = true
+			sent = true
 		}
 	}
-	return stated, errors.Join(failures...)
+	return sent, errors.Join(failures...)
 }
 
-// The decision's own input: the surfaces of one screen, each with the
-// labels a region's selector reads.
+// surfacesOf converts the surfaces of one screen to the input of
+// placeSurfaces.
 func surfacesOf(on []screenSurface) []surface {
 	surfaces := make([]surface, 0, len(on))
-	for _, held := range on {
+	for _, s := range on {
 		surfaces = append(surfaces, surface{
-			id:       held.id,
-			claimKey: held.claim,
-			labels:   held.labels,
-			// The module's id counts up for the compositor's whole
-			// life, so it is the order the surfaces arrived in.
-			arrival: held.ID,
+			id:       s.id,
+			claimKey: s.claim,
+			labels:   s.labels,
+			arrival:  s.ID,
 		})
 	}
 	return surfaces
 }
 
-// The module's own id for each surface on the screen, which is what
-// every request names. The decision speaks in the ids status reports.
+// moduleIDs maps the surface ids that status reports to the module's
+// own ids, which the requests to the module use.
 func moduleIDs(on []screenSurface) map[string]int {
 	ids := make(map[string]int, len(on))
-	for _, held := range on {
-		ids[held.id] = held.ID
+	for _, s := range on {
+		ids[s.id] = s.ID
 	}
 	return ids
 }
 
-// The placements bottom first, which is the order the module's own
-// render order takes.
+// inStackOrder sorts the placements from the bottom of the stack to
+// the top, the order that the module's order request takes.
 func inStackOrder(placed []placement) []placement {
 	ordered := slices.Clone(placed)
 	slices.SortStableFunc(ordered, func(a, b placement) int {
@@ -553,9 +506,8 @@ func inStackOrder(placed []placement) []placement {
 	return ordered
 }
 
-// surfaceID is the id status reports for one surface: the claim's UID
-// prefix, and the id the module assigned. A surface with no claim
-// reports the word shared in place of the prefix.
+// surfaceID returns the id that status reports for a surface: a
+// prefix of the claim's UID, then the module's id.
 func surfaceID(claimUID string, id int) string {
 	prefix := sharedSurface
 	if claimUID != "" {
@@ -567,13 +519,11 @@ func surfaceID(claimUID string, id int) string {
 	return fmt.Sprintf("%s-%d", prefix, id)
 }
 
-// The rectangle in the output's logical pixels, rounded to whole
-// ones.
-//
-// The logical size is the one the module reports for the output,
-// which is the size the compositor lays out in. A 4K panel at scale 2
-// lays out as 1920 by 1080, where the kernel mode says 3840 by 2160,
-// so a rectangle computed from the mode would be twice the screen.
+// logicalRect converts a region's fractions of the screen to whole
+// pixels of the output's logical size, which the module reports and
+// the compositor lays out in. A 4K panel at scale 2 is 1920 by 1080
+// logical pixels and has a kernel mode of 3840 by 2160, so a rectangle
+// computed from the mode would be twice the size of the screen.
 func logicalRect(fraction LayoutRect, output layoutOutput) rect {
 	return rect{
 		X: int(math.Round(fraction.Left * float64(output.Width))),
@@ -583,15 +533,12 @@ func logicalRect(fraction LayoutRect, output layoutOutput) rect {
 	}
 }
 
-// The transition one placement states to the module, and its
-// duration. A fade enters a surface the screen did not hold, and a
-// move glides one whose rectangle changed, because a fade on a
-// surface that is already visible would blink it.
-//
-// A transition with no duration is none, over no milliseconds. The
-// module refuses a fade or a move over zero milliseconds, and a
-// region that states a kind and no duration means an entrance with no
-// animation.
+// enterTransition returns the transition and duration to send with a
+// placement. When the region's enter is a fade, a surface that is new
+// to the screen fades in, and a surface that is already placed moves
+// to its new rectangle over the same duration, because a fade would
+// make a visible surface blink. Anything else is sent as none, because
+// the module refuses a fade or a move of zero milliseconds.
 func enterTransition(enter LayoutTransitionHalf, placed bool) (string, int) {
 	if enter.Kind != transitionFade || enter.Milliseconds <= 0 {
 		return transitionNone, 0
@@ -602,9 +549,9 @@ func enterTransition(enter LayoutTransitionHalf, placed bool) (string, int) {
 	return transitionFade, enter.Milliseconds
 }
 
-// The transition one hide states to the module. A hide runs no move,
-// because the surface is leaving the screen and there is no rectangle
-// to glide it to, so an exit is a fade or nothing.
+// exitTransition returns the transition and duration to send with a
+// hide. The module refuses a move in a hide, so the exit is a fade or
+// none.
 func exitTransition(exit LayoutTransitionHalf) (string, int) {
 	if exit.Kind != transitionFade || exit.Milliseconds <= 0 {
 		return transitionNone, 0

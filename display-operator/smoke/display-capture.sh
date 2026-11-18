@@ -1,21 +1,17 @@
 #!/usr/bin/env bash
-# Runs the capture sidecar image's encoder once before it ships.
+# Checks the display-capture image before CI publishes it. The capture
+# container runs /usr/bin/ffmpeg by that absolute path, so the check
+# fails when ffmpeg is not there or does not start.
 #
 # Usage: display-capture.sh <image>
 #
-#   <image>  the full reference of the display-capture image, for
-#            example ghcr.io/liken-sh/display-capture:2026.10.02-001.
-#            The image must be in the local Docker daemon.
-#
-# The capture sidecar starts one ffmpeg process per request by absolute
-# path, so a run proves that path is in the image, the way the weston,
-# ffmpeg, and mpv checks prove each of those images.
+#   <image>  the full reference of the display-capture image in the
+#            local Docker daemon, for example
+#            ghcr.io/liken-sh/display-capture:2026.10.02-001
 set -euo pipefail
 
 image=$1
 
-# The image must hold the notices of the third-party software in it,
-# as notices/check.sh describes.
 "$(dirname "$0")/../../notices/check.sh" "$image" \
   usr/share/doc/go/LICENSE
 

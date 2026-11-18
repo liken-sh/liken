@@ -6,19 +6,17 @@ description: "Put programs from several namespaces on one monitor, each in its o
 
 # Put regions on a screen
 
-This guide puts two programs from two namespaces on one monitor, each
-in its own rectangle. A notice board is on the left seven tenths of a
-lobby screen, and a parking-lot camera is in the upper right. You need
-the operator [installed](/docs/guides/install/) and the
-[claim guide](/docs/guides/claim/) read, because each program gets to
-the screen the way that guide shows.
+A `Layout` lets pods from different namespaces share one monitor, each
+drawing in its own rectangle. This guide puts a notice board on the
+left 70% of a lobby screen and a parking-lot camera in the upper
+right. You need the operator [installed](/docs/guides/install/) and
+you should have read the [claim guide](/docs/guides/claim/), because
+each program claims the screen the way that guide shows.
 
 A screen with no `Layout` shows every window fullscreen, with the
-newest on top. A `Layout` divides the screen into regions, and each
-region shows the window of a pod whose labels match the region's
-selector. A pod never receives its position on the screen. The
-`Layout` is the only resource that stores the arrangement, and one
-`Layout` can apply to any number of screens.
+newest on top. A `Layout` divides the screen into regions. Each region
+has a label selector and shows the window of a pod whose labels match
+it. Any number of screens can name the same `Layout`.
 
 ## 1. Write the `Layout`
 
@@ -40,46 +38,48 @@ selector. A pod never receives its position on the screen. The
             enter: {kind: fade, milliseconds: 300}
             exit: {kind: fade, milliseconds: 300}
 
-A `Layout` is cluster-scoped, like a `DeviceClass`, and nothing in it
-names a namespace or a monitor. Each rectangle is four fractions of
-the screen, so the same `Layout` fits a 1080p panel and a 4K one. The
-order of the list is the stacking order: a region written after
-another draws over it where they overlap, which is how a small
-picture appears in the corner of a large one.
+A `Layout` is cluster-scoped, like a `DeviceClass`, and it names no
+namespace and no monitor. Each rectangle is four fractions of the
+screen, so the same `Layout` fits a 1080p panel and a 4K one. The
+order of `regions` is the stacking order. Where two regions overlap,
+the one written later is drawn on top, which is how you put a small
+picture in the corner of a large one.
 
-The selector matches labels the way a `Service` does, and any label
-counts. The candidates are only pods that hold a claim on this
-screen, so a `panel` label on a pod elsewhere in the cluster matches
-nothing here. A region shows one program: the first claim to arrive
-from a matching pod. Every window of that claim is drawn in the
-region, newest on top, which is how a player keeps its overlay over
-its video. A second matching claim stays off the screen and is
-reported, and a region with no matching pod is empty and is reported.
+The selector works like a `Service` selector, and it can match on any
+label. It matches only pods that hold a claim on this screen, so a pod
+elsewhere in the cluster with a `panel` label matches nothing here. A
+region shows the windows of one claim, the earliest claim on the
+screen whose pod matches. All of that claim's windows are drawn in the
+region, newest on top, so a player's overlay stays above its video.
+When a second claim also matches, its windows are not drawn until the
+first claim's windows are gone. A region that no pod matches stays
+empty. Section 4 shows how to find both cases in the status.
 
-A `transition` has two halves, and each is `fade` over the stated
-milliseconds or `none`. The `enter` half runs when a window enters
-its region, and a fade brings the window from transparent to opaque.
-The `exit` half runs when a window that is still drawing stops
-matching the region, which is what a label a controller removes does.
-A fade then brings the window back to transparent while the program
-keeps drawing. A program that exits takes its window with it, and
-nothing fades a window the compositor no longer holds.
+A `transition` has an `enter` half and an `exit` half. Each is a
+`fade` of the given `milliseconds`, or `none`. The `enter` half runs
+when a window arrives in its region, and a fade takes the window from
+transparent to opaque. The `exit` half runs when a window that is
+still drawing stops matching the region, for example because a
+controller removed its label. A fade then takes the window to
+transparent while the program keeps drawing. When a program exits, its
+window disappears at once, with no fade.
 
 ## 2. Name it on the `Display`
 
     kubectl patch display boe-1080-display --type merge \
       -p '{"spec": {"layout": "front-desk"}}'
 
-`spec.layout` is the one field a screen has for this. Change the name
-to change the arrangement, and delete it to return to fullscreen
-windows. A name that matches no `Layout` shows the fullscreen
-arrangement and reports the name under a `LayoutResolved` condition.
+`spec.layout` holds the name of the `Layout`. Change the name to change
+the arrangement, and delete the field to return to fullscreen windows.
+When the name matches no `Layout`, the screen shows fullscreen windows
+and the `LayoutResolved` condition is `False` with the reason
+`LayoutNotFound`.
 
 ## 3. Label the pods
 
-Each program claims the screen from its own namespace, exactly as
-the claim guide shows. The one addition is the label the region's
-selector reads. The camera, in `facilities`:
+Each program claims the screen from its own namespace, as the claim
+guide shows. The only addition is the label that the region's selector
+reads. This is the camera, in the `facilities` namespace:
 
     apiVersion: apps/v1
     kind: Deployment
@@ -110,18 +110,19 @@ selector reads. The camera, in `facilities`:
                 claims:
                   - name: screen
 
-The notice board, in `frontdesk`, is the same shape with its own
-claim on the same connector and the label `panel: notices`. Two
-namespaces each hold a claim on one screen, because the screen's draw
-device allows many claims at once.
+The notice board, in the `frontdesk` namespace, has the same shape. It
+has its own claim on the same connector and the label
+`panel: notices`. Both namespaces can claim the same screen because
+its device accepts more than one claim at a time.
 
-When a window lands in a region, the compositor tells the program the
-region's size. The program redraws at that size, the way it would if
-you dragged a window's edge. A page reflows, and a video player
-letterboxes inside its rectangle. `mpv` needs `--keepaspect-window=no`
-to do that. Its default keeps the window at the film's own aspect, and
-the compositor then scales that smaller buffer up to the region. A
-program that does not redraw at that size is scaled to fit.
+When a window is placed in a region, the compositor tells the program
+the region's size, and the program redraws at that size, as it does
+when you resize a window by its edge. A web page reflows, and a video
+player letterboxes the picture inside the rectangle. `mpv` letterboxes
+only with `--keepaspect-window=no`. By default it keeps the window at
+the video's own aspect ratio, and the compositor scales that smaller
+window up to fit the region. The compositor also scales the window of
+any program that does not redraw at the new size.
 
 ## 4. Read what the screen shows
 
@@ -149,43 +150,39 @@ program that does not redraw at that size is scaled to fit.
           size: {width: 576, height: 648}
           region: lot
 
-Every window the compositor holds is in `surfaces`. Each entry has
-the claim the window arrived through, the pods that hold that claim,
-their labels, the window's current size, and the region it is in. A
-window whose program sets an xdg app_id also carries it as `appID`. A
-window that matches no region is listed with no `region`, which is
-the first thing to read when a program is running and not on the
-screen. A region that shows nothing reads `surface: empty`.
+`surfaces` lists every window the compositor has. Each entry gives the
+claim the window arrived through, the pods that hold that claim, their
+labels, the window's current size, and the region it is in. When the
+program sets an xdg `app_id`, the entry shows it as `appID`. A window
+that matches no region, including a window of a second matching claim,
+has no `region` field. Look for that first when a program is running
+and does not appear on the screen. A region with no window shows
+`surface: empty`.
 
 ## A window for a while
 
-A camera that should show for fifteen seconds is a `Job` whose image
-streams for fifteen seconds, with the claim and the label above. Its
-window appears in its region when the pod starts and leaves when the
-pod ends, and the region reads `empty` again. Nothing in the `Layout`
-reads a clock. The program controls how long its window stays.
+To show a camera for 15 seconds, run a `Job` whose image streams for 15
+seconds, with the claim and the label above. Its window appears in its
+region when the pod starts and goes away when the pod ends, and the
+region shows `empty` again. A `Layout` has no timer, so the window
+shows for as long as the program runs.
 
 ## What a `Layout` does not do
 
-It does not start anything. A region with a selector and no matching
-pod stays empty until something creates a pod with that label and a
-claim on the screen. A `Deployment`, a `Job`, or an operator that
-makes pods fills a screen, and the `Layout` only says where.
+A `Layout` does not start any program. A `Deployment`, a `Job`, or an
+operator that creates pods supplies the programs, and the `Layout`
+only decides where they draw.
 
-It does not fill a region with two windows. A second window from a
-matching pod stays off the screen until the first is gone.
-
-It does not let a program move its region. A program never receives
-its region's place on the screen, and it cannot ask for another one.
-Move the region in the `Layout` and every screen that names it
+A program cannot move its region or learn where it is on the screen.
+To move a region, edit the `Layout`, and every screen that names it
 follows.
 
-It does not arrange the windows inside a region. One client of the
-claim can do that: it becomes the claim's arranger through the
-`liken_arrangement_v1` Wayland protocol, and places the claim's own
-windows inside the region, such as a film that steps back into a
-frame while a panel slides in beside it. The arranger never moves a
-window outside the region. The
+A `Layout` does not arrange the windows inside a region. One client of
+a claim can do that through the `liken_arrangement_v1` Wayland
+protocol. That client is the claim's arranger, and it places the
+claim's windows inside the region, for example a film that shrinks
+into a frame while a panel slides in beside it. The arranger cannot
+move a window outside the region. The
 [arrangement reference](/docs/reference/arrangement/) describes the
-protocol, and `status.arrangers` on the `Display` shows which claim
-has an arranger.
+protocol, and `status.arrangers` on the `Display` lists the claims
+that have an arranger.

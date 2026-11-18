@@ -8,15 +8,13 @@ toc: true
 
 # Routes
 
-The routes below are generated from the OpenAPI document
-`display-api` serves at `/v1/display/openapi.json`. The API renders
-that document from its own router, so this page lists every route the
-program serves.
+These are the routes that `display-api` serves, generated from the
+OpenAPI document that `display-api` builds from its own router and
+serves at `/v1/display/openapi.json`.
 
-[The screen over HTTP](/docs/reference/api/) is the page beside this
-one. It says what the API is for, how it chooses a format, how it
-reads a region and a time span, who may look at a screen, and what
-each error means.
+[The screen over HTTP](/docs/reference/api/) explains what the API is
+for, how it chooses a format, how to ask for a region or a span of
+time, who may look at a screen, and what each error means.
 
 `display-api`, version `dev`, described in OpenAPI 3.1.1.
 
@@ -204,7 +202,7 @@ The screen, in the format chosen by Accept
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
 | 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (away). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar responded with something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
 | 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
 
@@ -212,7 +210,7 @@ The screen, in the format chosen by Accept
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Accept-Ranges` | 200 | none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3). |
 | `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Content-Location` | 200 | The absolute path of the extension form served (RFC 9110 section 8.7). |
@@ -252,7 +250,7 @@ The screen, in the format chosen by Accept
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
 | 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (away). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar responded with something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
 | 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
 
@@ -260,7 +258,7 @@ The screen, in the format chosen by Accept
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Accept-Ranges` | 200 | none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3). |
 | `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Content-Location` | 200 | The absolute path of the extension form served (RFC 9110 section 8.7). |
@@ -324,7 +322,7 @@ One frame of the screen as JPEG
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
 | 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (away). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar responded with something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
 | 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
 
@@ -332,7 +330,7 @@ One frame of the screen as JPEG
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Accept-Ranges` | 200 | none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3). |
 | `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
@@ -367,7 +365,7 @@ One frame of the screen as JPEG
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
 | 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (away). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar responded with something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
 | 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
 
@@ -375,7 +373,7 @@ One frame of the screen as JPEG
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Accept-Ranges` | 200 | none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3). |
 | `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
@@ -438,7 +436,7 @@ A stream of the screen, one JPEG per frame
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
 | 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (away). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar responded with something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
 | 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
 
@@ -446,7 +444,7 @@ A stream of the screen, one JPEG per frame
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Accept-Ranges` | 200 | none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3). |
 | `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
@@ -482,7 +480,7 @@ A stream of the screen, one JPEG per frame
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
 | 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (away). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar responded with something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
 | 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
 
@@ -490,7 +488,7 @@ A stream of the screen, one JPEG per frame
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Accept-Ranges` | 200 | none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3). |
 | `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
@@ -553,7 +551,7 @@ A clip of the screen as H.264 in fragmented MP4
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
 | 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (away). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar responded with something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
 | 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
 
@@ -561,7 +559,7 @@ A clip of the screen as H.264 in fragmented MP4
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Accept-Ranges` | 200 | none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3). |
 | `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
@@ -596,7 +594,7 @@ A clip of the screen as H.264 in fragmented MP4
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
 | 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (away). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar responded with something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
 | 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
 
@@ -604,7 +602,7 @@ A clip of the screen as H.264 in fragmented MP4
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Accept-Ranges` | 200 | none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3). |
 | `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
@@ -665,7 +663,7 @@ One frame of the screen as PNG
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
 | 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (away). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar responded with something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
 | 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
 
@@ -673,7 +671,7 @@ One frame of the screen as PNG
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Accept-Ranges` | 200 | none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3). |
 | `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
@@ -707,7 +705,7 @@ One frame of the screen as PNG
 | 406 | `application/problem+json` | [Problem](#problem) | The Accept field excludes every form this route serves. |
 | 409 | `application/problem+json` | [Problem](#problem) | The screen has no panel on its connector (away). A retry does not help until the monitor is connected. |
 | 500 | `application/problem+json` | [Problem](#problem) | The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed). |
-| 502 | `application/problem+json` | [Problem](#problem) | The sidecar answered something that is not HTTP or not a problem document. |
+| 502 | `application/problem+json` | [Problem](#problem) | The sidecar responded with something that is not HTTP or not a problem document. |
 | 503 | `application/problem+json` | [Problem](#problem) | The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed). |
 | 504 | `application/problem+json` | [Problem](#problem) | The sidecar sent no headers within the header timeout. |
 
@@ -715,7 +713,7 @@ One frame of the screen as PNG
 
 | Header | Status | Description |
 | --- | --- | --- |
-| `Accept-Ranges` | 200 | none. A live capture has no byte identity (RFC 9110 section 14.3). |
+| `Accept-Ranges` | 200 | none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3). |
 | `Cache-Control` | 200 | no-store. A capture is never stored (RFC 9111 section 5.2.2.5). |
 | `Content-Disposition` | 200 | inline, with the file name a browser save gets (RFC 6266 section 4). |
 | `Link` | 200 | The service-desc, service-doc and describedby relations (RFC 8288). |
@@ -841,7 +839,7 @@ Every route requires `mutualTLS`, or `bearer`, unless its own section states oth
 
 ## The document itself
 
-`display-api` serves the document this page is made from at
-`/v1/display/openapi.json`, and this site publishes the same copy at
-[/docs/reference/openapi.json](/docs/reference/openapi.json). A
-client generator reads either one.
+`display-api` serves the OpenAPI document that this page is generated
+from at `/v1/display/openapi.json`. This site publishes a copy at
+[/docs/reference/openapi.json](/docs/reference/openapi.json). You can
+give either one to a client generator.

@@ -1,37 +1,22 @@
 package main
 
-// Running the compositor.
+// This file runs weston, the Wayland compositor, in the operator's pod.
+// It holds two container roles: declare writes weston.ini, and the
+// compositor role runs weston as a child process.
 //
-// Weston is the daemon this operator runs, in the pattern's sense: it
-// holds the hardware that the operator's own claim acquired, and what
-// it holds is what the operator publishes. DRM master is one per card,
-// so exactly one process may set a mode on the card, and the exclusive
-// display claim is what makes weston that process. The operator
-// container opens the same card to read the modes, and the card gate
-// (cardgate.go) keeps those opens from taking master from weston.
+// The operator's exclusive claim gives the pod the graphics card. Only
+// the DRM master of a card can set its modes, and weston becomes master
+// because it opens the card first. The operator container opens the
+// same card to read its modes, and the card gate (cardgate.go) keeps
+// those opens from taking master from weston.
 //
-// ivi-shell is the shell for a screen a controller places surfaces
-// on. The shell itself decides nothing: a surface stays invisible
-// until a controller states a rectangle and a place in the stacking
-// order for it. The controller is this operator's own module,
-// liken-layout.so, which weston.ini names in [core] modules=, and
-// layoutlink.go is the operator's side of the control socket the
-// module listens on.
-//
-// The module opens one Wayland socket for each prepared claim, so the
-// socket a surface arrives on names the claim that drew it. That is
-// an identity nothing in a consumer's container can change, where the
-// app-id is a string the client sets.
-//
-// This file holds two of the pod's three roles: declare, which
-// writes the config, and the compositor role, which runs weston as its
-// child and starts it again after each restart the operator orders.
-//
-// The flags are the ones weston 16.0.2 takes, with
-// LIBSEAT_BACKEND=noop. That backend opens the device path with a
-// plain open(), which is all a container can do, and the kernel hands
-// DRM master to the first process to open the card with no capability
-// check. So the pod needs no root, no capability, and no seat manager.
+// weston runs ivi-shell, which shows a surface only after a controller
+// gives it a rectangle and a stacking position. The controller is the
+// operator's module liken-layout.so, and layoutlink.go is the
+// operator's end of the module's control socket. The module opens one
+// Wayland socket for each prepared claim, so the socket that a surface
+// connects on identifies its claim. A client can set its app-id to any
+// string, so nothing routes by app-id.
 
 import (
 	"context"
@@ -53,73 +38,51 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// hotplugShim is the path of the preload library in the image. The
-// library moves the compositor's hotplug subscription from udevd's
-// netlink group to the kernel's netlink group. The weston base image
-// builds it, and the comment in weston/hotplug/udev-kernel-group.c at
-// the top of the repository explains why.
+// hotplugShim is the preload library that westonEnvironment sets for
+// weston. The weston base image builds it from
+// weston/hotplug/udev-kernel-group.c at the top of the repository.
 const hotplugShim = "/usr/lib/liken/udev-kernel-group.so"
 
-// westonBinary is weston's own path in the image, in full because
-// the compositor role starts it with no PATH lookup.
+// westonBinary is weston's path in the image. compositorProcesses finds
+// weston by comparing each process's exe link with this path.
 const westonBinary = "/usr/bin/weston"
 
-// configWaitTimeout bounds the compositor role's wait for the
-// config the declare container writes. A config that never arrives
-// is a failure to report, and the container's restart is the
-// retry.
+// configWaitTimeout is how long the compositor role waits for the
+// config that declare writes. When it times out, the container exits
+// with an error and the kubelet restarts it.
 const configWaitTimeout = 30 * time.Second
 
-// fileWaitFallback bounds each wait in waitForFile. The file's
-// arrival ends a wait early, so this bounds only the look that no
-// arrival starts, which is every look while the file's directory does
-// not exist yet.
+// fileWaitFallback is the longest that waitForFile waits between two
+// checks for the file. An inotify event for the file ends a wait
+// sooner, but no event can come while the file's directory does not
+// exist.
 const fileWaitFallback = time.Second
 
-// socketDialTimeout is how long a check waits for the compositor to
-// accept the connection. Accepting a client is the first thing an
-// event loop does, so a compositor that cannot answer in half a
-// second is not serving anybody.
+// socketDialTimeout is how long the probe waits for the compositor to
+// accept a connection.
 const socketDialTimeout = 500 * time.Millisecond
 
-// socketWatchInterval is how often the operator probes the
-// compositor's socket. One exchange a second costs the compositor
-// what any Wayland tool costs it, and the watch runs for the life of
-// the pod, so it stays gentle. It is a probe and not a wait for the
-// socket: a compositor can hold its socket and answer nothing, and
-// only an exchange finds that.
+// socketWatchInterval is how often watchSocket probes the compositor's
+// socket, which also sets how soon after compositorHungLimit it kills a
+// hung compositor.
 const socketWatchInterval = 1 * time.Second
 
-// declareMode and compositorMode are the arguments that select the
-// pod's other two roles.
-//
-// One image, three containers: the manifest passes one of these as
-// the argument, and no argument at all runs the operator.
+// declareMode and compositorMode are the arguments that select a
+// container's role. Every container of the pod runs the same image, and
+// a container with no argument runs the operator.
 const (
 	declareMode    = "declare"
 	compositorMode = "weston"
 )
 
-// westonConfig builds the weston.ini for one set of outputs.
+// westonConfig builds weston.ini for the card's outputs. modes maps a
+// connector to the mode that a claim or the monitor's Display set,
+// written as name or name@refresh, because weston's mode= key accepts
+// both. Every other connector gets mode=preferred.
 //
-// Modes is the record of the modes stated for this machine, keyed
-// by connector: a claim's mode, or the resting mode of a monitor's
-// Display. A connector with an entry gets that mode, name or
-// name@refresh exactly as it was spelled, because weston's mode= line
-// reads both forms. Every other connector gets the one its monitor
-// prefers.
-// The config is always built from a fresh connector walk and the
-// record, and never parsed back, so this function is the only thing
-// that knows the file's shape.
-//
-// Every setting here is a requirement of a compositor in a pod on a
-// machine with no keyboard. No setting is a deployment's preference,
-// so the operator writes the file instead of taking one.
-//
-// Every connector gets a section, dark or lit. Weston parses this
-// file once, at startup. It enables only the heads whose connector
-// reports a monitor, so a dark section does nothing at first. When a
-// monitor arrives, that section configures the new output.
+// Every connector gets an [output] section, with or without a monitor.
+// weston reads the file only at startup, so the section must already
+// exist when a monitor is plugged in later.
 func westonConfig(outputs []Output, modes map[string]string) string {
 	var config strings.Builder
 	config.WriteString(`# Written by display.liken.sh at startup. Every edit is lost on the
@@ -163,12 +126,9 @@ idle-time=0
 `)
 	for _, output := range outputs {
 		mode := preferredMode
-		if stated := modes[output.Connector]; stated != "" {
-			mode = stated
+		if set := modes[output.Connector]; set != "" {
+			mode = set
 		}
-		// The section states the name, the mode, and the scale, and no
-		// app-ids= line: ivi-shell reads no such key, because the
-		// controller states which output every surface goes on.
 		fmt.Fprintf(&config, `
 [output]
 name=%s
@@ -181,24 +141,20 @@ mode=%s
 	return config.String()
 }
 
-// scaledWidth is the narrowest mode that gets an output scale of 2.
-// A 4K panel at scale 2 lays out as a 1080p one, which is the size
-// every client draws for. The rule has one threshold, so a person can
-// predict it from the mode alone.
+// scaledWidth is the narrowest mode width that gets an output scale of
+// 2, so a 4K panel lays out at the 1080p size that clients draw for. A
+// single threshold lets a person predict the scale from the mode.
 const scaledWidth = 3840
 
-// outputScale is the integer scale an output section states for this
-// mode: 2 at 4K and wider, and 1 below it. The width is read from
-// the mode the section writes, so the scale always matches the mode
-// weston runs: a claim's own spelling, or the monitor's preferred
-// mode when the section says preferred. A dark connector has no
-// modes and gets 1, like every narrower panel.
+// outputScale returns 2 when the mode that the [output] section writes
+// is at least scaledWidth wide, and 1 otherwise. For mode=preferred it
+// reads the width of the output's first mode, and a connector with no
+// monitor has no modes and gets 1.
 //
-// Weston states the scale to every client on the output. A client
-// that lays out in logical pixels, such as the media browser, draws a
-// 4K panel at the 1080p size and rasters at the panel's resolution.
-// A client that does not is scaled up by the compositor so that it is
-// readable.
+// weston sends the scale to each client on the output. A client that
+// lays out in logical pixels, such as the media browser, draws at the
+// 1080p size and renders at the panel's resolution. weston scales up
+// the picture of a client that ignores the scale.
 func outputScale(output Output, mode string) int {
 	if mode == preferredMode {
 		if len(output.Modes) == 0 {
@@ -212,8 +168,8 @@ func outputScale(output Output, mode string) int {
 	return 1
 }
 
-// modeWidth is the width a mode name states, from 3840x2160 or
-// 3840x2160@60, and 0 for a name in neither form.
+// modeWidth returns the width in a mode name of the form 3840x2160 or
+// 3840x2160@60, and 0 for any other name.
 func modeWidth(mode string) int {
 	width, _, found := strings.Cut(mode, "x")
 	if !found {
@@ -226,17 +182,11 @@ func modeWidth(mode string) int {
 	return n
 }
 
-// writeWestonConfig writes the compositor's config where weston reads
-// it.
-//
-// The file describes the monitors this pod found, so the volume is
-// the pod's own.
-//
-// Two roles write it. The declare container writes it at
-// startup from the record it finds, and the operator container writes
-// it again whenever a claim states a mode. Both build the whole file
-// from a connector walk and the record, so neither has to read what
-// the other wrote.
+// writeWestonConfig writes the config to path, in the pod's own volume,
+// because the file describes the monitors that this pod found. declare
+// writes it at startup, and the operator container writes it again when
+// a claim sets a mode. Each builds the whole file from a walk of the
+// connectors and the mode record, so nothing reads the file back.
 func writeWestonConfig(path string, outputs []Output, modes map[string]string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -244,36 +194,26 @@ func writeWestonConfig(path string, outputs []Output, modes map[string]string) e
 	return os.WriteFile(path, []byte(westonConfig(outputs, modes)), 0o644)
 }
 
-// declaredDisplays reads the Displays the declare container seeds
-// the resting modes from. It is a variable so a test runs declare
-// with no API server.
-var declaredDisplays = restingDisplays
+// declaredDisplays reads the Displays that supply the spec.mode values to
+// declare. It is a variable so a test can run declare without an API
+// server.
+var declaredDisplays = declaredDisplaysFromAPI
 
-// declare enumerates the card's connectors, writes the compositor's
-// config, and ends the process.
-//
-// The enumeration and the write are one init container, so the
-// config is on disk before the compositor's container starts, and
-// the ordering is the kubelet's, not a wait either role holds.
+// declare writes the mode record and weston's config. It runs as an
+// init container, so the kubelet starts the compositor's container only
+// after the config is on disk.
 func declare() {
 	card := claimedCard()
 
-	// The outputs are enumerated once, here, and the config the
-	// compositor reads is written from that enumeration. Every
-	// connector gets an [output] section, dark or lit. The compositor
-	// parses the file once, so the section for a connector must exist
-	// before a monitor arrives on it.
 	outputs := discoverOutputs(sysRoot, card)
 	if len(outputs) == 0 {
 		fatal("%s registers no connectors under %s/class/drm", card, sysRoot)
 	}
 	live := connected(outputs)
 	if len(live) == 0 {
-		// Every connector still gets a config section below, so
-		// weston can light whichever connector a monitor arrives on.
-		// The compositor starts with no output at all, so this line
-		// is a report and not a failure.
-		fmt.Fprintf(os.Stderr, "%s has no monitor on any of its %d connectors\n", card, len(outputs))
+		// weston starts with no output (require-outputs=none), so this
+		// is not a failure.
+		fmt.Fprintf(os.Stderr, "%s has no connected monitor on its %d connectors\n", card, len(outputs))
 	}
 	for _, output := range live {
 		monitor := monitorID(output.Monitor)
@@ -282,18 +222,16 @@ func declare() {
 		}
 		fmt.Printf("%s: %s has %s\n", DriverName, output.Connector, monitor)
 	}
-	// The record states the modes the claims on this machine
-	// asked for. It is empty on a pod that has just started, because
-	// the volume is the pod's own. It carries entries when the kubelet
-	// restarts the pod's containers under claims that are still held.
-	// Each connector the record says nothing about starts at the mode
-	// its monitor's Display rests at, or at the mode the monitor
-	// prefers when the Display states none.
+	// The record has the modes that claims set. It is empty in a new
+	// pod, because it is in the pod's own volume, and it keeps its
+	// entries when the kubelet restarts the pod's containers.
+	// addDisplayModes adds the spec.mode of each connected monitor's
+	// Display for a connector with no entry.
 	record, err := readModeRecord(modeRecordPath)
 	if err != nil {
 		fatal("%v", err)
 	}
-	record = seedModes(record, live, declaredDisplays())
+	record = addDisplayModes(record, live, declaredDisplays())
 	if err := writeModeRecord(modeRecordPath, record); err != nil {
 		fatal("writing %s: %v", modeRecordPath, err)
 	}
@@ -302,15 +240,9 @@ func declare() {
 	}
 }
 
-// CompositorProcesses lists the processes running weston under
-// one /proc.
-//
-// The pod shares one process namespace, so this operator sees
-// the compositor's container and finds its process by the binary it
-// runs. Nothing else in the pod runs weston, and the operator's own
-// binary is a different path, so the exe link is the whole test. The
-// root is a parameter so a test drives the search over a directory it
-// built.
+// compositorProcesses returns the sorted pids of the processes under
+// procRoot whose exe link is westonBinary. The pod shares one process
+// namespace, so the operator container sees weston's process.
 func compositorProcesses(procRoot string) []int {
 	entries, err := os.ReadDir(procRoot)
 	if err != nil {
@@ -318,17 +250,14 @@ func compositorProcesses(procRoot string) []int {
 	}
 	var pids []int
 	for _, entry := range entries {
-		// /proc holds the kernel's own files beside the numbered
-		// directories, and self is a link to the caller's own. A name
-		// that is not a number names no process.
+		// /proc also has entries that are not processes, such as self.
 		pid, err := strconv.Atoi(entry.Name())
 		if err != nil {
 			continue
 		}
-		// The link resolves to the path the process execed, so a
-		// container that does not have weston at that path still reads
-		// the name. A process that exits between the listing and the
-		// read answers an error and counts as gone.
+		// The link reads as weston's path even though this container
+		// has no file there. Readlink fails for a process that exited
+		// after the listing.
 		binary, err := os.Readlink(filepath.Join(procRoot, entry.Name(), "exe"))
 		if err != nil || binary != westonBinary {
 			continue
@@ -339,26 +268,13 @@ func compositorProcesses(procRoot string) []int {
 	return pids
 }
 
-// compose runs the compositor as this process's child.
-//
-// The binary finds the card the claim delivered, which no manifest
-// can name, then runs weston and starts it again after each restart
-// the operator orders (restartorders.go). A weston exit that no order
-// names is this container's exit, and the kubelet acts on it.
-//
-// It starts the compositor whether or not a monitor is on the card.
-// The config's require-outputs=none is what allows that, and it is
-// what makes a machine whose panel shows another input still hold the
-// socket its claims are delivered on. Weston enables the output when
-// the monitor arrives.
+// compose runs weston as a child process, and runs it again after each
+// exit that the operator requested (restartrequests.go). Any other exit of
+// weston ends this container, and the kubelet restarts it.
 func compose() {
 	card := claimedCard()
 	socketDir := envOr("SOCKET_DIR", defaultSocketDir)
 
-	// The declare container has already exited when this one starts,
-	// so the config is normally there on the first look. The bound is
-	// for the file that never arrives, which is a failure to report,
-	// not a wait to hold.
 	if err := waitForFile(context.Background(), westonConfigPath, configWaitTimeout); err != nil {
 		fatal("%v", err)
 	}
@@ -367,48 +283,38 @@ func compose() {
 		fatal("making %s: %v", socketDir, err)
 	}
 
-	orders := restartOrders(restartOrdersPath)
-	if err := orders.clear(); err != nil {
-		fatal("clearing the restart orders in %s: %v", restartOrdersPath, err)
+	requests := restartRequests(restartRequestsPath)
+	if err := requests.clear(); err != nil {
+		fatal("clearing the restart request files in %s: %v", restartRequestsPath, err)
 	}
 
-	// The kubelet stops the container with SIGTERM, and weston takes
-	// the same signal, so it closes the card before the grace period
-	// ends.
+	// supervise passes the kubelet's SIGTERM on to weston, so weston
+	// releases the card before the grace period ends.
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 
-	// libwayland creates the socket with the process umask and never
-	// chmods it. A umask of 022 leaves the socket 0755, and connect()
-	// needs write permission, so a client running under another uid is
-	// refused.
-	//
-	// Each weston inherits the umask, and this process creates nothing
-	// after it but weston, so nothing needs to restore it.
+	// libwayland creates its socket with the process umask and does not
+	// chmod it. connect() needs write permission, so under a umask of
+	// 022 a client with another uid is refused. weston inherits this
+	// umask, and this process creates no other files after this point.
 	unix.Umask(0)
-	fmt.Printf("%s: the compositor takes %s\n", DriverName, card)
+	fmt.Printf("%s: starting the compositor on %s\n", DriverName, card)
 	argv := westonArgv(card, westonConfigPath, socketName, os.Getenv(westonLogScopesVariable))
 	environment := westonEnvironment(os.Environ(), socketDir)
 	status, err := supervise(func() (*exec.Cmd, error) {
 		compositor := &exec.Cmd{Path: westonBinary, Args: argv, Env: environment, Stdout: os.Stdout, Stderr: os.Stderr}
 		return compositor, compositor.Start()
-	}, orders, stop)
+	}, requests, stop)
 	if err != nil {
 		fatal("running %s: %v", westonBinary, err)
 	}
 	os.Exit(status)
 }
 
-// westonArgv builds the compositor's command line.
-//
-// The card is the name the claim delivered, not a path, because
-// weston's --drm-device takes the card's name and looks it up
-// itself. The card and the socket name come from this binary rather
-// than the manifest, because neither is a fact a deployment can
-// know.
-//
-// The log scopes are the value of westonLogScopesVariable, and an
-// empty value adds no flag.
+// westonArgv builds weston's command line. card is a name such as
+// card1, not a path, because weston's --drm-device takes a name. The
+// card comes from the claim, so the manifest cannot set this flag.
+// logScopes is the value of westonLogScopesVariable.
 func westonArgv(card, configPath, socketName, logScopes string) []string {
 	argv := []string{
 		westonBinary,
@@ -423,49 +329,37 @@ func westonArgv(card, configPath, socketName, logScopes string) []string {
 	return argv
 }
 
-// westonLogScopesVariable names the environment variable that lists
-// the weston debug scopes the compositor writes to its standard
-// error, which is this container's log. The value is a
-// comma-separated list, such as drm-backend, and it is empty by
-// default.
+// westonLogScopesVariable is the environment variable that lists, comma
+// separated, the weston debug scopes to write to weston's standard
+// error, which is this container's log. It is empty by default. The
+// drm-backend scope logs, on each repaint, which display plane weston
+// tries for each view and why it rejects it. Nothing else in the pod
+// shows why a view goes to the renderer and not to a plane.
 //
-// A scope reports what one part of weston decides. drm-backend
-// reports, on every repaint, the display plane weston tries for each
-// view and the reason it rejects each plane. That reason is the only
-// report of why a view goes to the renderer instead of a plane, and
-// nothing else in the pod can read it.
+// weston reads scopes only from its command line, so this is an
+// environment variable and not a weston.ini key, and a change takes
+// effect when the compositor starts again. The operator does not pass
+// --debug, because --debug advertises weston_debug_v1 on every socket.
+// A client on any claim's socket could then subscribe to the proto
+// scope and read the protocol traffic of the other claims, and could
+// capture every output. The container log is readable only by someone
+// who can read pod logs in the operator's namespace.
 //
-// The variable is an environment variable and not a weston.ini key,
-// because weston reads scopes only from its command line. So a change
-// takes effect only when the compositor starts again. The scope is on
-// the command line and not behind --debug, because --debug advertises
-// weston_debug_v1 on every socket. With it, every consumer on a claim
-// socket could subscribe to any scope, including proto, which prints
-// the protocol traffic of the other claims. --debug also lets every
-// client capture every output. The container log is readable only by
-// someone who can read the pod logs in the operator's namespace.
-//
-// The cost of a scope is the volume of the log. weston 16 subscribes
-// its flight recorder, a 5 MiB ring buffer in memory, to log alone, so
-// weston formats no drm-backend line until this variable names the
-// scope. Then each atomic test and commit prints every property it
-// sets, so one repaint writes many lines. A film repaints on every
-// frame, so the log grows by many lines each second while a film
-// plays. The DaemonSet sets the variable on every machine at once, so
-// set it while you read the plane decisions, and clear it after.
+// weston's in-memory flight recorder subscribes only to the log scope,
+// so weston formats no drm-backend line until this variable names the
+// scope. Then each repaint writes many lines, and a playing film
+// repaints on every frame. The DaemonSet sets the variable on every
+// machine at once, so clear it when you are done.
 const westonLogScopesVariable = "WESTON_LOG_SCOPES"
 
-// loggerScopes builds the value of weston's --logger-scopes flag from
-// the scopes a person named, or returns an empty string when they
-// named none.
-//
-// The flag replaces weston's default subscription to the log scope,
-// so the list always starts with log. Without it, weston's own lines
-// and the layout module's lines would leave the container log while
-// the scope is on.
-func loggerScopes(named string) string {
+// loggerScopes builds the value of weston's --logger-scopes flag, or
+// returns "" when requested names no scope other than log. The flag
+// replaces weston's default subscription to the log scope, so the list
+// starts with log to keep the messages of weston and the layout module
+// in the container log.
+func loggerScopes(requested string) string {
 	scopes := []string{"log"}
-	for _, scope := range strings.Split(named, ",") {
+	for _, scope := range strings.Split(requested, ",") {
 		scope = strings.TrimSpace(scope)
 		if scope != "" && !slices.Contains(scopes, scope) {
 			scopes = append(scopes, scope)
@@ -477,39 +371,32 @@ func loggerScopes(named string) string {
 	return strings.Join(scopes, ",")
 }
 
-// westonEnvironment builds the compositor's environment from the
-// container's own.
-//
-// The compositor needs three settings the container's environment
-// does not carry: the launcher backend, the hotplug shim, and the
-// socket directory. The comments below say why each exists.
+// westonEnvironment returns the container's environment with the
+// settings that only weston needs.
 func westonEnvironment(environ []string, socketDir string) []string {
 	return append(append([]string{}, environ...),
-		// Weston's only launcher is libseat, and noop is the only
-		// libseat backend that needs neither seatd, nor logind, nor a
-		// VT. It opens the device path with a plain open(), which is
-		// all a container can do, and the kernel hands DRM master to
-		// the first process to open the card with no capability check.
-		// libseat never selects noop on its own, so ask for it by
-		// name.
+		// weston opens devices only through libseat, and the noop
+		// backend needs no seatd, no logind, and no VT. It opens the
+		// card with a plain open(), and the kernel makes the first
+		// process that opens a card its DRM master with no capability
+		// check, so weston runs with no root and no capability. libseat
+		// never selects noop by itself.
 		"LIBSEAT_BACKEND=noop",
-		// Weston subscribes to hotplug events on the netlink group
-		// that only udevd broadcasts on, and liken runs no udevd. The
-		// preloaded shim moves that subscription to the kernel's own
-		// netlink group, which carries the same events. The variable
-		// goes on the compositor alone: the operator's binary is
-		// static and loads no libraries.
+		// weston receives hotplug events on the netlink group that only
+		// udevd sends on, and `liken` runs no udevd. The shim moves the
+		// subscription to the kernel's netlink group, which carries the
+		// same events. The operator's binary is static and cannot load
+		// it.
 		"LD_PRELOAD="+hotplugShim,
-		// Weston creates the socket in XDG_RUNTIME_DIR, and this is
-		// the directory a consumer's container mounts.
+		// weston creates its socket in XDG_RUNTIME_DIR, which client
+		// containers mount.
 		"XDG_RUNTIME_DIR="+socketDir,
 	)
 }
 
-// waitForFile blocks until the file exists, until the context ends, or
-// until the timeout runs out. It looks when the kernel reports that the
-// file arrived (arrivals.go), and the startup ordering makes the first
-// look the usual answer.
+// waitForFile returns when the file exists, and fails when ctx ends or
+// the timeout passes. It checks again on each inotify event for the
+// file (arrivals.go), and at least every fileWaitFallback.
 func waitForFile(ctx context.Context, path string, timeout time.Duration) error {
 	watch := newArrivals(path)
 	defer watch.close()
@@ -525,52 +412,42 @@ func waitForFile(ctx context.Context, path string, timeout time.Duration) error 
 			return err
 		}
 		if bounded.Err() != nil {
-			return fmt.Errorf("nothing created %s within %s", path, timeout)
+			return fmt.Errorf("%s did not appear within %s", path, timeout)
 		}
 	}
 }
 
-// The bound on the compositor's answer to the probe. A running event
-// loop answers a sync in microseconds, so the whole two seconds is
-// margin for a loaded machine.
+// compositorReplyTimeout is how long the probe waits for the reply to
+// wl_display.sync. A running event loop replies at once, so the
+// timeout leaves room for a loaded machine.
 const compositorReplyTimeout = 2 * time.Second
 
-// What one probe found. The reason is the reason the CompositorServing
-// condition carries, and the detail is the socket's own words for a
-// failure.
+// compositorLiveness is the result of one probe. reason is the reason
+// of the CompositorServing condition, and detail is the socket's error
+// text when the probe failed.
 type compositorLiveness struct {
 	serving bool
 	reason  string
 	detail  string
 }
 
-// compositorServing reports whether a compositor serves the socket.
-//
-// The socket is the whole delivery, so what a client would meet is
-// what the operator answers prepare calls and taints the slice by.
-//
-// It is probeCompositor read as one bit, for the two callers that act
-// on serving alone: the socket watch and the pass that publishes the
-// slice.
+// compositorServing reports whether a compositor replies on the socket.
+// The pass that publishes the ResourceSlice calls it to decide the
+// NoExecute taint.
 func compositorServing(socketPath string) bool {
 	return probeCompositor(socketPath).serving
 }
 
-// probeCompositor dials the socket and runs the first exchange of the
-// Wayland protocol on it: it sends wl_display.sync on object 1 and
-// waits for any event. Only a running event loop answers.
+// probeCompositor connects to the socket, sends wl_display.sync, and
+// waits for any event. A connect alone proves nothing, because the
+// kernel accepts connections on a listening socket even when the
+// process behind it is stopped.
 //
-// The connect alone proves nothing. The kernel accepts a connect on a
-// listening socket whether or not the process behind it runs, so a
-// check that only connects and closes reads a weston stopped with
-// SIGSTOP as serving until the listen backlog of 128 fills with the
-// operator's own once-a-second connects. On the testbed that took
-// 124 s, and the screen did not change for any of it.
-//
-// Two failures need two repairs, so the probe reports two reasons.
-// Down is a socket that refuses the connect or ends it under the probe,
-// and a new compositor starts in its place. Hung is a socket that
-// accepts and answers nothing, and that process is still running.
+// The result is CompositorDownReason when the socket refuses the
+// connection or closes it during the exchange, because weston has
+// exited and its container restarts. It is CompositorHungReason when
+// the socket accepts and nothing replies, because the process still
+// runs and only a kill ends it.
 func probeCompositor(socketPath string) compositorLiveness {
 	socket, err := net.DialTimeout("unix", socketPath, socketDialTimeout)
 	if err != nil {
@@ -580,12 +457,10 @@ func probeCompositor(socketPath string) compositorLiveness {
 	return probeConnection(socket)
 }
 
-// probeConnection runs the probe's exchange on a connection that is
-// already open, and bounds the wait for the answer by
-// compositorReplyTimeout. The exchange is apart from the dial because
-// the deadline of a unix socket runs on the real clock. A test runs
-// the exchange on an in-memory connection, whose deadline runs on
-// synctest's fake clock.
+// probeConnection runs the probe's exchange on an open connection. It
+// is separate from the dial because a deadline on a unix socket uses
+// the real clock, so a test runs it on an in-memory connection, whose
+// deadline uses the fake clock of synctest.
 func probeConnection(socket net.Conn) compositorLiveness {
 	if err := socket.SetDeadline(time.Now().Add(compositorReplyTimeout)); err != nil {
 		return compositorLiveness{reason: CompositorDownReason, detail: err.Error()}
@@ -603,9 +478,9 @@ func probeConnection(socket net.Conn) compositorLiveness {
 	return compositorLiveness{serving: true, reason: CompositorServingReason}
 }
 
-// failedProbe names the reason one failed exchange carries. A deadline
-// that ran out is a frozen compositor. Every other failure is the
-// socket ending under the probe, which is a compositor that exited.
+// failedProbe returns CompositorHungReason for an expired deadline, and
+// CompositorDownReason for any other error, which means the socket
+// closed during the exchange.
 func failedProbe(err error) compositorLiveness {
 	reason := CompositorDownReason
 	if errors.Is(err, os.ErrDeadlineExceeded) {
@@ -614,26 +489,23 @@ func failedProbe(err error) compositorLiveness {
 	return compositorLiveness{reason: reason, detail: err.Error()}
 }
 
-// CompositorHungLimit is how long the probe must read Hung before the
-// operator sends SIGKILL to the compositor. A compositor under load
-// answers late and then answers. One that has answered nothing for
-// 10 s is frozen, and nothing else in the pod ends it: the kubelet
-// restarts a process that exits, and a frozen process does not exit.
+// compositorHungLimit is how long the probe must report Hung before
+// the operator sends SIGKILL to the compositor. A compositor under load
+// replies late, so a shorter hang is not killed. The kubelet restarts
+// only a process that exits, so nothing else ends a frozen weston.
 const compositorHungLimit = 10 * time.Second
 
-// HungCompositor is one outage as the socket watch reads it: when the
-// probe first read Hung, and whether the kill for this outage has run.
-// Any reading other than Hung ends the outage.
+// hungCompositor tracks one outage for the socket watch: when the probe
+// first reported Hung, and whether the operator has killed the
+// compositor since then.
 type hungCompositor struct {
 	since  time.Time
 	killed bool
 }
 
-// Due reports whether the probe has read Hung for the whole of
-// compositorHungLimit and no kill has run in this outage. Any other
-// reading ends the outage and resets the clock: a socket that refuses
-// the connect is a compositor that is already gone, and one that
-// answers needs no repair.
+// due reports whether the probe has reported Hung for at least
+// compositorHungLimit with no kill in this outage. Any result other
+// than Hung ends the outage.
 func (h *hungCompositor) due(live compositorLiveness, now time.Time) bool {
 	if live.reason != CompositorHungReason {
 		h.since, h.killed = time.Time{}, false
@@ -645,31 +517,30 @@ func (h *hungCompositor) due(live compositorLiveness, now time.Time) bool {
 	return !h.killed && now.Sub(h.since) >= compositorHungLimit
 }
 
-// Done records that the kill for this outage ran. A second kill in
-// the same outage would end the compositor that starts in its place.
+// done records the kill, so that the watch does not kill the weston
+// that starts in its place while the outage lasts.
 func (h *hungCompositor) done() {
 	h.killed = true
 }
 
-// westonRestarts reads how often the kubelet has started the
-// compositor's container again. The container exits only when weston
-// exits with no restart order, so the count is the count of crashes.
-// It is on this pod's own status, because the compositor is a native
-// sidecar of the pod the operator runs in.
-//
-// A reader with no pod to name is an operator a person runs by hand,
-// and it counts nothing.
+// westonRestarts reads how many times the kubelet has restarted the
+// compositor's container, from the status of the operator's own pod,
+// where the compositor is a native sidecar. The container exits only
+// when weston exits with no restart request file, so each restart is a crash.
+// A nil westonRestarts, for an operator that a person runs outside a
+// pod, always reads zero.
 type westonRestarts struct {
 	client    *apiclient.Client
 	namespace string
 	pod       string
-	// pods is the store of this node's pods, which holds this pod, and
-	// which growth reads in place of the API server (objectcache.go).
+	// pods is the store of this node's pods. growth reads the pod from
+	// it, and calls the API server only when the store does not have
+	// the pod (objectcache.go).
 	pods clusterStores
-	// The count of the last read, and whether there was one. The first
-	// read is the baseline: an operator container that restarted alone
-	// finds a compositor whose count is already above zero, and none
-	// of those restarts happened while this process ran.
+	// seen is the count from the last read, and known is whether there
+	// was one. The first read only sets the baseline, because after a
+	// restart of the operator container alone, the count already has
+	// restarts from before this process started.
 	seen  int
 	known bool
 }
@@ -681,9 +552,10 @@ func newWestonRestarts(client *apiclient.Client, namespace, pod string) *westonR
 	return &westonRestarts{client: client, namespace: namespace, pod: pod}
 }
 
-// growth reports how many times the kubelet started the compositor
-// again since the last read. A count that went backwards is a pod that
-// was replaced, and it reports zero, because a counter never falls.
+// growth returns how many times the kubelet has restarted the
+// compositor since the last read. A count that went down means the pod
+// was replaced, because a restart count never falls, and growth
+// returns zero.
 func (r *westonRestarts) growth() (int, error) {
 	if r == nil {
 		return 0, nil

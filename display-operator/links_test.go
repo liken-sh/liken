@@ -1,16 +1,14 @@
 package main
 
-// These tests cover the one decision the link history makes: which
-// connectors carry the disconnected taint on this pass. They read the
-// answer off the devices the slice publishes, because the taint is what
-// ends a consumer's pod.
+// These tests read the taints from the devices that sliceDevices
+// publishes, because the taint is what ends the pod on a connector.
 
 import (
 	"testing"
 	"time"
 )
 
-// The history under test, with a clock the test moves.
+// linkBench is a linkHistory with a clock that the test advances.
 type linkBench struct {
 	history *linkHistory
 	clock   time.Time
@@ -29,8 +27,8 @@ func (b *linkBench) advance(interval time.Duration) {
 	b.clock = b.clock.Add(interval)
 }
 
-// One pass over the card, and what it publishes: each device name, and
-// whether it carries a taint.
+// pass records the outputs in the history as one pass and returns, for
+// each published device name, whether the device has a taint.
 func (b *linkBench) pass(outputs ...Output) map[string]bool {
 	tainted := map[string]bool{}
 	for _, device := range sliceDevices(withLinks(outputs, b.history)) {
@@ -39,70 +37,66 @@ func (b *linkBench) pass(outputs ...Output) map[string]bool {
 	return tainted
 }
 
-// One connector with a monitor on it, running a mode.
-func linkedPanel(connector string, monitor EDID, mode string) Output {
-	output := litOutput(connector, monitor)
+// connectedPanel is a connector with a monitor on it, running a mode.
+func connectedPanel(connector string, monitor EDID, mode string) Output {
+	output := connectedOutput(connector, monitor)
 	output.CurrentMode = mode
 	return output
 }
 
-// The same connector with nothing the kernel can detect on it.
-func darkConnector(connector string) Output {
+// disconnectedOutput is a connector that reads disconnected, with
+// nothing in its EDID file, as sysfs reports it during a drop.
+func disconnectedOutput(connector string) Output {
 	return Output{Connector: connector}
 }
 
-// The measured case. An A/V receiver switches its input, the HDMI link
-// goes down, and the panel is still on the wire, so the pass that finds
-// the connector dark taints nothing.
-func TestAConnectorThatJustWentDarkCarriesNoTaint(t *testing.T) {
+// An A/V receiver that switches input drops the HDMI link while the
+// monitor stays attached, so the first pass that reads the connector
+// disconnected must not taint it.
+func TestAConnectorThatJustDisconnectedHasNoTaint(t *testing.T) {
 	bench := newLinkBench()
-	bench.pass(linkedPanel("HDMI-A-2", labMonitor(), "3840x1600@60"))
+	bench.pass(connectedPanel("HDMI-A-2", labMonitor(), "3840x1600@60"))
 
 	bench.advance(time.Second)
-	tainted := bench.pass(darkConnector("HDMI-A-2"))
+	tainted := bench.pass(disconnectedOutput("HDMI-A-2"))
 
 	for _, device := range []string{"hdmi-a-2", "hdmi-a-2-draw"} {
 		if tainted[device] {
-			t.Errorf("%s taints on the first pass that found the connector dark", device)
+			t.Errorf("%s taints on the first pass that found the connector disconnected", device)
 		}
 	}
 }
 
-// A monitor showing another input is dark on the wire for as long as
-// the person leaves it there, and the kernel reports that exactly as it
-// reports an unplugged cable. The connector keeps the monitor it left
-// with, so it never taints however long it stays dark, and the pod that
-// draws on it keeps running.
-func TestAConnectorThatStaysDarkKeepsItsMonitorAndNeverTaints(t *testing.T) {
+// A monitor that shows another input reads as disconnected until it
+// switches back, so the connector keeps its last monitor and no taint
+// for as long as it stays disconnected.
+func TestAConnectorThatStaysDisconnectedNeverTaints(t *testing.T) {
 	bench := newLinkBench()
-	bench.pass(linkedPanel("HDMI-A-2", labMonitor(), "3840x1600@60"))
-	bench.pass(darkConnector("HDMI-A-2"))
+	bench.pass(connectedPanel("HDMI-A-2", labMonitor(), "3840x1600@60"))
+	bench.pass(disconnectedOutput("HDMI-A-2"))
 
 	bench.advance(disconnectGrace + time.Hour)
-	tainted := bench.pass(darkConnector("HDMI-A-2"))
+	tainted := bench.pass(disconnectedOutput("HDMI-A-2"))
 
 	for _, device := range []string{"hdmi-a-2", "hdmi-a-2-draw"} {
 		if tainted[device] {
-			t.Errorf("%s taints after %s dark, and its monitor is expected back",
+			t.Errorf("%s taints after %s disconnected, and its monitor is expected back",
 				device, disconnectGrace+time.Hour)
 		}
 	}
 }
 
-// The same monitor back on the connector is the same screen. Nothing
-// the claim asked for changed, so no pass of the relink taints and no
-// client ends.
-func TestAConnectorThatComesBackTheSamePanelNeverTaints(t *testing.T) {
+func TestAConnectorThatReconnectsWithTheSameMonitorNeverTaints(t *testing.T) {
 	bench := newLinkBench()
-	lit := linkedPanel("HDMI-A-2", labMonitor(), "3840x1600@60")
-	bench.pass(lit)
+	panel := connectedPanel("HDMI-A-2", labMonitor(), "3840x1600@60")
+	bench.pass(panel)
 
 	bench.advance(time.Second)
-	bench.pass(darkConnector("HDMI-A-2"))
+	bench.pass(disconnectedOutput("HDMI-A-2"))
 	bench.advance(2 * time.Second)
-	back := bench.pass(lit)
+	back := bench.pass(panel)
 	bench.advance(disconnectGrace + time.Second)
-	after := bench.pass(lit)
+	after := bench.pass(panel)
 
 	for _, device := range []string{"hdmi-a-2", "hdmi-a-2-draw"} {
 		if back[device] {
@@ -114,29 +108,27 @@ func TestAConnectorThatComesBackTheSamePanelNeverTaints(t *testing.T) {
 	}
 }
 
-// A different monitor on the connector is a different screen, and the
-// claim on it asked for the one that left. The taint is what ends the
-// pod that was drawing on it.
-func TestAConnectorThatComesBackAnotherMonitorTaints(t *testing.T) {
+// The claim on the connector asked for the monitor that left, so a
+// different monitor taints the devices, and the taint ends the pod that
+// drew on them.
+func TestAConnectorThatReconnectsWithAnotherMonitorTaints(t *testing.T) {
 	bench := newLinkBench()
-	bench.pass(linkedPanel("HDMI-A-2", labMonitor(), "3840x1600@60"))
+	bench.pass(connectedPanel("HDMI-A-2", labMonitor(), "3840x1600@60"))
 
 	bench.advance(time.Second)
-	bench.pass(darkConnector("HDMI-A-2"))
+	bench.pass(disconnectedOutput("HDMI-A-2"))
 	bench.advance(2 * time.Second)
 	other := EDID{Manufacturer: "BOE", ProductCode: 0x1080, ModelName: "DISPLAY"}
-	swapped := bench.pass(linkedPanel("HDMI-A-2", other, "3840x1600@60"))
+	swapped := bench.pass(connectedPanel("HDMI-A-2", other, "3840x1600@60"))
 
 	for _, device := range []string{"hdmi-a-2", "hdmi-a-2-draw"} {
 		if !swapped[device] {
-			t.Errorf("%s carries no taint with another monitor on the connector", device)
+			t.Errorf("%s has no taint with another monitor on the connector", device)
 		}
 	}
 
-	// The taint stands for the grace, which is the window the eviction
-	// controller needs to act on it.
 	bench.advance(time.Second)
-	standing := bench.pass(linkedPanel("HDMI-A-2", other, "3840x1600@60"))
+	standing := bench.pass(connectedPanel("HDMI-A-2", other, "3840x1600@60"))
 	for _, device := range []string{"hdmi-a-2", "hdmi-a-2-draw"} {
 		if !standing[device] {
 			t.Errorf("%s lost the taint one second into the grace", device)
@@ -144,7 +136,7 @@ func TestAConnectorThatComesBackAnotherMonitorTaints(t *testing.T) {
 	}
 
 	bench.advance(disconnectGrace + time.Second)
-	settled := bench.pass(linkedPanel("HDMI-A-2", other, "3840x1600@60"))
+	settled := bench.pass(connectedPanel("HDMI-A-2", other, "3840x1600@60"))
 	for _, device := range []string{"hdmi-a-2", "hdmi-a-2-draw"} {
 		if settled[device] {
 			t.Errorf("%s still taints once the new monitor has settled", device)
@@ -152,32 +144,32 @@ func TestAConnectorThatComesBackAnotherMonitorTaints(t *testing.T) {
 	}
 }
 
-// A connector that was dark when the operator started earned no grace.
-// Nothing was drawing on it, and a device a claim can take while no
-// monitor answers strands the pod that takes it.
-func TestAConnectorThatWasDarkBeforeTheOperatorStartedTaintsAtOnce(t *testing.T) {
+// A connector that is disconnected on the operator's first pass has no
+// known monitor, and a claim allocated to it would give its pod no
+// screen, so it is tainted at once.
+func TestAConnectorDisconnectedAtStartTaintsAtOnce(t *testing.T) {
 	bench := newLinkBench()
 
-	tainted := bench.pass(darkConnector("DP-1"))
+	tainted := bench.pass(disconnectedOutput("DP-1"))
 
 	for _, device := range []string{"dp-1", "dp-1-draw"} {
 		if !tainted[device] {
-			t.Errorf("%s carries no taint on a connector that has never had a monitor", device)
+			t.Errorf("%s has no taint on a connector that has never had a monitor", device)
 		}
 	}
 }
 
-// The mode is no part of the identity the taint reads. The link often
-// comes back up at another mode, because the card renegotiates one, and
-// it is the same screen the claim asked for.
-func TestAConnectorThatComesBackAtAnotherModeNeverTaints(t *testing.T) {
+// The card can set a different mode when the link comes back, and it is
+// still the monitor the claim asked for, because monitorID leaves out
+// the mode.
+func TestAConnectorThatReconnectsAtAnotherModeNeverTaints(t *testing.T) {
 	bench := newLinkBench()
-	bench.pass(linkedPanel("HDMI-A-2", labMonitor(), "3840x1600@60"))
+	bench.pass(connectedPanel("HDMI-A-2", labMonitor(), "3840x1600@60"))
 
 	bench.advance(time.Second)
-	bench.pass(darkConnector("HDMI-A-2"))
+	bench.pass(disconnectedOutput("HDMI-A-2"))
 	bench.advance(2 * time.Second)
-	tainted := bench.pass(linkedPanel("HDMI-A-2", labMonitor(), "1920x1080@60"))
+	tainted := bench.pass(connectedPanel("HDMI-A-2", labMonitor(), "1920x1080@60"))
 
 	for _, device := range []string{"hdmi-a-2", "hdmi-a-2-draw"} {
 		if tainted[device] {
@@ -186,29 +178,27 @@ func TestAConnectorThatComesBackAtAnotherModeNeverTaints(t *testing.T) {
 	}
 }
 
-// A monitor that answers no EDID decides nothing. A connector that
-// comes back with no monitor id reads as the one that left, because a
-// taint on a guess ends a client for nothing.
-func TestAConnectorThatComesBackWithNoMonitorIDDoesNotTaint(t *testing.T) {
+// A monitor with no readable EDID has no monitorID to compare, and a
+// taint on a guess would end a pod for no reason.
+func TestAConnectorThatReconnectsWithNoMonitorIDNeverTaints(t *testing.T) {
 	bench := newLinkBench()
-	bench.pass(linkedPanel("HDMI-A-2", labMonitor(), "3840x1600@60"))
+	bench.pass(connectedPanel("HDMI-A-2", labMonitor(), "3840x1600@60"))
 
 	bench.advance(time.Second)
-	bench.pass(darkConnector("HDMI-A-2"))
+	bench.pass(disconnectedOutput("HDMI-A-2"))
 	bench.advance(2 * time.Second)
-	tainted := bench.pass(linkedPanel("HDMI-A-2", EDID{}, "3840x1600@60"))
+	tainted := bench.pass(connectedPanel("HDMI-A-2", EDID{}, "3840x1600@60"))
 
 	for _, device := range []string{"hdmi-a-2", "hdmi-a-2-draw"} {
 		if tainted[device] {
-			t.Errorf("%s taints on a connector whose monitor answered no EDID", device)
+			t.Errorf("%s taints on a connector whose monitor returned no EDID", device)
 		}
 	}
 }
 
-// The Display the cluster holds for one screen, as the operator last
-// wrote it. The name is the pairing identity, which is what a claim
-// selects on and what the seed reads the product code back from.
-func screenRecord(node, connector string, monitor EDID) Display {
+// publishedDisplay is the Display that the operator writes for one
+// monitor on one connector.
+func publishedDisplay(node, connector string, monitor EDID) Display {
 	return Display{
 		Metadata: DisplayMeta{Name: monitorID(monitor)},
 		Status: DisplayStatus{
@@ -222,30 +212,29 @@ func screenRecord(node, connector string, monitor EDID) Display {
 }
 
 // A machine that boots with its panel on another input has no EDID in
-// sysfs and no history in this process. The Displays the cluster holds
-// are what say which screen belongs to which connector, so the seeded
-// connector keeps its monitor and never taints.
-func TestASeededConnectorKeepsItsScreenWhileDark(t *testing.T) {
+// sysfs and an empty history. loadFromDisplays loads the monitor from
+// the Display, so the connector has no taint.
+func TestAConnectorLoadedFromADisplayHasNoTaintWhileDisconnected(t *testing.T) {
 	bench := newLinkBench()
-	bench.history.seed([]Display{screenRecord("liken-1", "HDMI-A-2", labMonitor())},
-		"liken-1", []Output{darkConnector("HDMI-A-2")})
+	bench.history.loadFromDisplays([]Display{publishedDisplay("liken-1", "HDMI-A-2", labMonitor())},
+		"liken-1", []Output{disconnectedOutput("HDMI-A-2")})
 
-	tainted := bench.pass(darkConnector("HDMI-A-2"))
+	tainted := bench.pass(disconnectedOutput("HDMI-A-2"))
 
 	for _, device := range []string{"hdmi-a-2", "hdmi-a-2-draw"} {
 		if tainted[device] {
-			t.Errorf("%s taints, and the cluster says which screen it carries", device)
+			t.Errorf("%s taints, and a Display records its monitor", device)
 		}
 	}
 }
 
-// The seed answers which screen a connector carries, so each drill
-// reads the identity the connector publishes afterwards.
-func TestTheSeedRefusesAScreenItMustNotPublish(t *testing.T) {
-	misnamed := screenRecord("liken-1", "HDMI-A-2", labMonitor())
+// Each case checks the monitorID that hdmi-a-2 publishes after
+// loadFromDisplays.
+func TestLoadFromDisplaysSkipsADisplayThatWouldPublishTheWrongMonitor(t *testing.T) {
+	misnamed := publishedDisplay("liken-1", "HDMI-A-2", labMonitor())
 	misnamed.Status.Model = "Some Other Panel"
 
-	for _, drill := range []struct {
+	for _, tc := range []struct {
 		name    string
 		display Display
 		outputs []Output
@@ -254,39 +243,39 @@ func TestTheSeedRefusesAScreenItMustNotPublish(t *testing.T) {
 	}{
 		{
 			name:    "another node's screen",
-			display: screenRecord("stick-1", "HDMI-A-2", labMonitor()),
-			outputs: []Output{darkConnector("HDMI-A-2")},
+			display: publishedDisplay("stick-1", "HDMI-A-2", labMonitor()),
+			outputs: []Output{disconnectedOutput("HDMI-A-2")},
 			want:    "",
 			why:     "the record names another machine",
 		},
 		{
 			name:    "a connector with a monitor on it now",
-			display: screenRecord("liken-1", "HDMI-A-2", labMonitor()),
-			outputs: []Output{linkedPanel("HDMI-A-2", portableMonitor(), "1920x1080@60")},
+			display: publishedDisplay("liken-1", "HDMI-A-2", labMonitor()),
+			outputs: []Output{connectedPanel("HDMI-A-2", portableMonitor(), "1920x1080@60")},
 			want:    monitorID(portableMonitor()),
-			why:     "the wire answers, and it is the better answer",
+			why:     "the connector reads connected, and its reading takes precedence",
 		},
 		{
-			name:    "a screen that is lit on another connector",
-			display: screenRecord("liken-1", "HDMI-A-2", labMonitor()),
-			outputs: []Output{darkConnector("HDMI-A-2"), linkedPanel("HDMI-A-1", labMonitor(), "3840x1600@60")},
+			name:    "a screen that is connected to another connector",
+			display: publishedDisplay("liken-1", "HDMI-A-2", labMonitor()),
+			outputs: []Output{disconnectedOutput("HDMI-A-2"), connectedPanel("HDMI-A-1", labMonitor(), "3840x1600@60")},
 			want:    "",
-			why:     "the monitor moved, and two devices would carry one identity",
+			why:     "the monitor moved, and two devices would publish one monitorID",
 		},
 		{
 			name:    "a record whose facts do not rebuild its name",
 			display: misnamed,
-			outputs: []Output{darkConnector("HDMI-A-2")},
+			outputs: []Output{disconnectedOutput("HDMI-A-2")},
 			want:    "",
 			why:     "the name is what a claim matches",
 		},
 	} {
-		t.Run(drill.name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			bench := newLinkBench()
-			bench.history.seed([]Display{drill.display}, "liken-1", drill.outputs)
+			bench.history.loadFromDisplays([]Display{tc.display}, "liken-1", tc.outputs)
 
 			var got string
-			for _, device := range sliceDevices(withLinks(drill.outputs, bench.history)) {
+			for _, device := range sliceDevices(withLinks(tc.outputs, bench.history)) {
 				if device.Name != "hdmi-a-2" {
 					continue
 				}
@@ -294,23 +283,21 @@ func TestTheSeedRefusesAScreenItMustNotPublish(t *testing.T) {
 					got = *id
 				}
 			}
-			if got != drill.want {
-				t.Errorf("hdmi-a-2 publishes %q, want %q: %s", got, drill.want, drill.why)
+			if got != tc.want {
+				t.Errorf("hdmi-a-2 publishes %q, want %q: %s", got, tc.want, tc.why)
 			}
 		})
 	}
 }
 
-// The seed is read back from the resource's name, so a screen that goes
-// through it comes out under the name a claim already selects on.
-func TestASeededScreenKeepsTheIdentityAClaimSelectsOn(t *testing.T) {
+func TestAConnectorLoadedFromADisplayPublishesTheDisplaysName(t *testing.T) {
 	for _, monitor := range []EDID{labMonitor(), portableMonitor()} {
 		t.Run(monitorID(monitor), func(t *testing.T) {
 			bench := newLinkBench()
-			bench.history.seed([]Display{screenRecord("liken-1", "HDMI-A-2", monitor)},
-				"liken-1", []Output{darkConnector("HDMI-A-2")})
+			bench.history.loadFromDisplays([]Display{publishedDisplay("liken-1", "HDMI-A-2", monitor)},
+				"liken-1", []Output{disconnectedOutput("HDMI-A-2")})
 
-			devices := sliceDevices(withLinks([]Output{darkConnector("HDMI-A-2")}, bench.history))
+			devices := sliceDevices(withLinks([]Output{disconnectedOutput("HDMI-A-2")}, bench.history))
 
 			var got string
 			for _, device := range devices {
@@ -321,7 +308,7 @@ func TestASeededScreenKeepsTheIdentityAClaimSelectsOn(t *testing.T) {
 				}
 			}
 			if want := monitorID(monitor); got != want {
-				t.Errorf("the dark connector publishes %q, want %q", got, want)
+				t.Errorf("the disconnected connector publishes %q, want %q", got, want)
 			}
 		})
 	}

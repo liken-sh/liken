@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the pod client: the read of one holder of a
-// claim, the listing that is held to this node, and the watch that
-// turns a label a person edited into a wake.
-
 import (
 	"context"
 	"fmt"
@@ -11,10 +7,8 @@ import (
 	"testing"
 )
 
-// A pod of the front desk, as the API server serves it. The fixture
-// is JSON rather than a struct, because what these tests prove is
-// that the field names on the wire reach the fields this program
-// reads.
+// noticesPodJSON is JSON, not a struct, so the tests check that the
+// wire field names decode into the fields this program reads.
 const noticesPodJSON = `{
   "apiVersion": "v1",
   "kind": "Pod",
@@ -26,7 +20,7 @@ const noticesPodJSON = `{
   "spec": {"nodeName": "liken-1"}
 }`
 
-func TestGetPodReadsOneHolderOfAClaim(t *testing.T) {
+func TestGetPodReadsOneClaimHolder(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/namespaces/front-desk/pods/notices-7d9f" {
 			t.Errorf("the operator read %s, want the notices pod", r.URL.Path)
@@ -36,19 +30,16 @@ func TestGetPodReadsOneHolderOfAClaim(t *testing.T) {
 
 	pod, err := getPod(client, "front-desk", "notices-7d9f")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the pod front-desk/notices-7d9f: %v", err)
 	}
 	if pod.Metadata.key() != "front-desk/notices-7d9f" {
 		t.Errorf("the pod is %q, want front-desk/notices-7d9f", pod.Metadata.key())
 	}
 	if pod.Metadata.Labels["panel"] != "notices" {
-		t.Errorf("the pod carries %v, want panel=notices", pod.Metadata.Labels)
+		t.Errorf("the pod has %v, want panel=notices", pod.Metadata.Labels)
 	}
 }
 
-// The field selector is the whole of the narrowing. A screen's claim
-// is held by a pod on the screen's own node, so the pods of every
-// other node answer nothing a pass reads.
 func TestListPodsReadsOnlyThisNodesPods(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != PodsPath {
@@ -62,16 +53,15 @@ func TestListPodsReadsOnlyThisNodesPods(t *testing.T) {
 
 	pods, err := listPods(client, "liken-1")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the pods of node liken-1: %v", err)
 	}
 	if len(pods) != 1 || pods[0].Metadata.Name != "notices-7d9f" {
 		t.Errorf("the listing held %+v, want the notices pod", pods)
 	}
 }
 
-// The watch reopens its connection until the context ends, and a
-// context that ended is what stops it. Without that, a shutdown would
-// wait out the retry.
+// The watch reopens its connection after each failure, so a shutdown
+// must end it through the context and not wait for the next retry.
 func TestThePodWatchEndsWithTheContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	watcher := testWatcher(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

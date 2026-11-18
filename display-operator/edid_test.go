@@ -1,18 +1,16 @@
 package main
 
-// The fixtures in testdata are whole EDIDs, read from real monitors
+// The fixtures in testdata are complete EDIDs read from real monitors
 // with `od -An -tx1 /sys/class/drm/<card>-<connector>/edid`:
 //
-//   - lg-hdr-wqhd, the ultrawide on the lab machine's HDMI-A-1. It
-//     has a CTA extension block, and its name and its label serial
-//     are in that block rather than in the base block.
-//   - portable-display, the second monitor on the lab machine's
-//     HDMI-A-2. Its bytes 21 and 22 claim 29 by 27 centimeters, which
-//     no 15.6-inch panel measures, so it is what proves the detailed
-//     timing's millimeters win.
-//   - framework-edp, a laptop's built-in panel. It states no monitor
-//     name and no serial at all, which is ordinary for a panel with no
-//     bezel and no label.
+//   - lg-hdr-wqhd is an ultrawide monitor with a CTA extension block.
+//     Its name is in the base block and its text serial is in the
+//     extension.
+//   - portable-display is a 15.6-inch monitor whose centimeter size in
+//     bytes 21 and 22 is wrong, so the parser must take the
+//     millimeters of the detailed timing.
+//   - framework-edp is a laptop's built-in panel. It has no monitor
+//     name and no serial.
 
 import (
 	"encoding/hex"
@@ -21,16 +19,15 @@ import (
 	"testing"
 )
 
-// loadEDID reads one hex-encoded fixture.
 func loadEDID(t *testing.T, name string) []byte {
 	t.Helper()
 	text, err := os.ReadFile("testdata/" + name + ".edid.hex")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the EDID fixture %s: %v", name, err)
 	}
 	raw, err := hex.DecodeString(strings.TrimSpace(string(text)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the EDID fixture %s: %v", name, err)
 	}
 	return raw
 }
@@ -87,19 +84,18 @@ func TestParseEDIDReadsRealMonitors(t *testing.T) {
 		t.Run(c.fixture, func(t *testing.T) {
 			edid, err := ParseEDID(loadEDID(t, c.fixture))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("ParseEDID(%s) returned an error: %v", c.fixture, err)
 			}
 			if edid != c.want {
-				t.Errorf("got  %+v\nwant %+v", edid, c.want)
+				t.Errorf("ParseEDID(%s) = %+v, want %+v", c.fixture, edid, c.want)
 			}
 		})
 	}
 }
 
 func TestParseEDIDPublishesNoRefreshWithoutARasterTotal(t *testing.T) {
-	// A descriptor can state a clock and no raster. The parser must
-	// answer zero for the refresh, not divide by it, and the rest of
-	// the block must survive.
+	// A zero raster total must give a refresh of zero instead of a
+	// division by zero, and the rest of the block must still parse.
 	cases := []struct {
 		name  string
 		zeros []int
@@ -118,13 +114,13 @@ func TestParseEDIDPublishesNoRefreshWithoutARasterTotal(t *testing.T) {
 
 			edid, err := ParseEDID(raw)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("ParseEDID returned an error: %v", err)
 			}
 			if edid.RefreshMillihertz != 0 {
 				t.Fatalf("RefreshMillihertz = %d, want 0", edid.RefreshMillihertz)
 			}
 			if edid.Manufacturer != "BOE" {
-				t.Errorf("the rest of the block did not survive: %+v", edid)
+				t.Errorf("the manufacturer is %q, want BOE: the rest of the block must survive", edid.Manufacturer)
 			}
 		})
 	}
@@ -143,8 +139,6 @@ func TestParseEDIDRejectsWhatItCannotTrust(t *testing.T) {
 		name string
 		raw  []byte
 	}{
-		// An empty file is what a connector answers while no monitor
-		// is on it, and the read of it succeeds.
 		{name: "no monitor", raw: nil},
 		{name: "a partial block", raw: good[:100]},
 		{name: "a wrong header", raw: badHeader},
@@ -153,42 +147,35 @@ func TestParseEDIDRejectsWhatItCannotTrust(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := ParseEDID(c.raw); err == nil {
-				t.Fatal("the parser accepted it")
+				t.Fatal("ParseEDID returned no error, want one")
 			}
 		})
 	}
 }
 
 func TestParseEDIDIgnoresACorruptExtension(t *testing.T) {
-	// The base block stands on its own checksum. An extension that
-	// fails its own must not take the manufacturer and the mode down
-	// with it.
+	// An extension with a bad checksum must not make the parse fail
+	// or discard the base block's manufacturer and mode.
 	raw := append([]byte(nil), loadEDID(t, "lg-hdr-wqhd")...)
 	raw[200]++
 
 	edid, err := ParseEDID(raw)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ParseEDID returned an error: %v", err)
 	}
 	if edid.Manufacturer != "GSM" || edid.WidthPixels != 3840 || edid.ModelName != "LG HDR WQHD" {
-		t.Fatalf("the base block did not survive: %+v", edid)
+		t.Fatalf("the base block reads as %+v, want manufacturer GSM, width 3840, and model LG HDR WQHD", edid)
 	}
-	// This monitor's label serial lives in the extension alone, so it
-	// leaves with the extension and the base block's own numeric
-	// serial is what publishes.
+	// This monitor's text serial is only in the extension, so the
+	// base block's numeric serial is the one that remains.
 	if edid.Serial != "420070" {
 		t.Fatalf("serial = %q, want the base block's 420070", edid.Serial)
 	}
 }
 
 func TestParseEDIDKeepsANameThatAnExtensionLeavesBlank(t *testing.T) {
-	// A monitor may write the name descriptor twice, once in the base
-	// block and once in a CTA extension, and the second one is
-	// sometimes 13 spaces. An empty name that overwrote the real one
-	// would drop the model attribute and shorten
-	// monitor.liken.sh/id, which the audio operator matches byte for
-	// byte, so the pairing would fail with nothing to read that said
-	// why.
+	// A blank name in an extension must not replace the base block's
+	// name, because monitorID builds monitor.liken.sh/id from it.
 	raw := append([]byte(nil), loadEDID(t, "lg-hdr-wqhd")...)
 	extension := raw[blockSize:]
 	offset := indexOfDescriptor(t, extension, tagSerialNumber)
@@ -200,19 +187,19 @@ func TestParseEDIDKeepsANameThatAnExtensionLeavesBlank(t *testing.T) {
 
 	edid, err := ParseEDID(raw)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ParseEDID returned an error: %v", err)
 	}
 	if edid.ModelName != "LG HDR WQHD" {
 		t.Errorf("model = %q, want the base block's name", edid.ModelName)
 	}
 	if got := monitorID(edid); got != "gsm-7716-lg-hdr-wqhd" {
-		t.Errorf("monitorID = %q", got)
+		t.Errorf("monitorID = %q, want gsm-7716-lg-hdr-wqhd", got)
 	}
 }
 
-// indexOfDescriptor finds one display descriptor in a block by its
-// tag. A display descriptor starts with three zero bytes, then the
-// tag.
+// indexOfDescriptor returns the offset of the display descriptor with
+// the given tag. A display descriptor starts with three zero bytes and
+// then the tag.
 func indexOfDescriptor(t *testing.T, block []byte, tag byte) int {
 	t.Helper()
 	for offset := 0; offset+18 <= blockSize-1; offset++ {
@@ -224,8 +211,8 @@ func indexOfDescriptor(t *testing.T, block []byte, tag byte) int {
 	return 0
 }
 
-// fixChecksum makes an edited block sum to zero again, so the parser
-// reads it instead of rejecting it.
+// fixChecksum recomputes the last byte of an edited block so that it
+// passes the checksum.
 func fixChecksum(block []byte) {
 	var sum byte
 	for _, b := range block[:blockSize-1] {
@@ -242,8 +229,6 @@ func TestManufacturerID(t *testing.T) {
 	}{
 		{name: "LG Electronics", high: 0x1e, low: 0x6d, wantPNPCode: "GSM"},
 		{name: "BOE Technology", high: 0x09, low: 0xe5, wantPNPCode: "BOE"},
-		// Bit 15 is reserved. A monitor that sets it still names a
-		// real manufacturer in the other fifteen bits.
 		{name: "the reserved bit set", high: 0x89, low: 0xe5, wantPNPCode: "BOE"},
 		{name: "no letters at all", high: 0x00, low: 0x00, wantPNPCode: ""},
 	}

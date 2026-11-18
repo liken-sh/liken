@@ -1,10 +1,9 @@
 package main
 
-// This file renders the OpenAPI 3.1 description from the one route
-// table. The document is generated and never authored, so a route
-// the router serves cannot be missing from it and a route it
-// describes cannot be one the router refuses. OpenAPI 3.1 has no
-// {.ext} expansion, so each extension form is its own path item.
+// This file generates the OpenAPI 3.1 document of display-api from
+// apiRoutes, the table the router matches, so the document lists every
+// route the router serves. OpenAPI 3.1 has no {.ext} path expansion,
+// so each extension form is its own path item.
 
 import (
 	"fmt"
@@ -13,23 +12,17 @@ import (
 	"slices"
 )
 
-// The OpenAPI version the document states. It is served as
-// application/openapi+json, a provisional type
-// (draft-ietf-httpapi-rest-api-mediatypes) that is not yet registered.
 const openAPIVersion = "3.1.1"
 
-// The committed copy holds this placeholder server. The copy the API
-// serves replaces it with the configured public base, else the
-// origin the request arrived on, and the equality test ignores it.
+// openAPIPlaceholderServer is the server URL in the copy of the
+// document in the manual. The API serves the document with the URL
+// from requestOrigin instead.
 const openAPIPlaceholderServer = "/"
 
-// The openapi role prints the document, so docs/Makefile can
-// generate the reference page beside the CRD reference.
+// openapiMode is the argument that makes the binary print the document
+// and exit. docs/Makefile runs it to write the copy in the manual.
 const openapiMode = "openapi"
 
-// printOpenAPI prints the document a build would serve, with the
-// placeholder server, so the committed copy is the generator's own
-// output and the test that compares the two needs no server.
 func printOpenAPI() {
 	body, err := renderJSON(openAPIDocument(openAPIPlaceholderServer))
 	if err != nil {
@@ -38,8 +31,6 @@ func printOpenAPI() {
 	_, _ = os.Stdout.Write(body)
 }
 
-// The document is built from apiRoutes, so a route the router serves
-// cannot be missing from the description.
 func openAPIDocument(server string) map[string]any {
 	paths := map[string]any{}
 	for _, route := range apiRoutes {
@@ -55,11 +46,10 @@ func openAPIDocument(server string) map[string]any {
 		},
 		"servers": []any{map[string]any{
 			"url":         server,
-			"description": "The base this API answers on.",
+			"description": "The base URL of this API.",
 		}},
-		// A list of two requirement objects is OpenAPI's OR, so a
-		// route takes the client certificate or the token, in the
-		// order this API reads them.
+		// Either scheme alone authenticates a request. The API checks a
+		// client certificate first and then a token.
 		"security": []any{
 			map[string]any{"mutualTLS": []any{}},
 			map[string]any{"bearer": []any{}},
@@ -85,8 +75,6 @@ func openAPIDocument(server string) map[string]any {
 	}
 }
 
-// Every path item answers GET, HEAD, and OPTIONS. HEAD takes no
-// frame and makes no call to the sidecar.
 func pathItem(route apiRoute) map[string]any {
 	item := map[string]any{
 		"get":     operation(route, http.MethodGet),
@@ -122,8 +110,8 @@ func optionsOperation(route apiRoute) map[string]any {
 	}
 }
 
-// The identifier is the method and the route's own template, so it
-// is stable for as long as the route is.
+// operationID depends only on the method and the route template, so
+// an ID changes only when its route does.
 func operationID(route apiRoute, method string) string {
 	name := ""
 	for _, char := range route.template {
@@ -137,9 +125,6 @@ func operationID(route apiRoute, method string) string {
 	return method + name
 }
 
-// The one path variable, the Display's name, and the six query
-// knobs. t and xywh come from W3C Media Fragments 1.0; width, height,
-// framerate, and quality are this API's own.
 func routeParameters(route apiRoute) []any {
 	parameters := []any{}
 	if route.kind != documentRoute {
@@ -154,7 +139,7 @@ func routeParameters(route apiRoute) []any {
 	if route.kind != captureRoute {
 		return parameters
 	}
-	answered := routeKnobs(route)
+	accepted := routeKnobs(route)
 	for _, knob := range []struct{ name, kind, note string }{
 		{"t", "string", "A W3C Media Fragments 1.0 time range in NPT. Zero is the instant the sidecar accepts the request. t=5,7 discards five seconds and then records two."},
 		{"xywh", "string", "A W3C Media Fragments 1.0 frame region. Use pixel: by default or percent: to express the values as percentages. Pixel values use the frame's physical pixels."},
@@ -163,7 +148,7 @@ func routeParameters(route apiRoute) []any {
 		{"framerate", "integer", "Frames per second of a clip or a stream, 15 by default, at most the output's refresh."},
 		{"quality", "integer", "JPEG quality from 1 to 100, 85 by default."},
 	} {
-		if !slices.Contains(answered, knob.name) {
+		if !slices.Contains(accepted, knob.name) {
 			continue
 		}
 		parameters = append(parameters, map[string]any{
@@ -177,9 +162,9 @@ func routeParameters(route apiRoute) []any {
 	return parameters
 }
 
-// A route describes the knobs it answers and no others. framerate on
-// a still and quality on a PNG or an MP4 are refusals, and a
-// description that offered them would describe a 400.
+// routeKnobs returns the query parameters a capture route accepts. The
+// API rejects framerate on a still image and quality on a PNG or an MP4
+// with a 400.
 func routeKnobs(route apiRoute) []string {
 	knobs := []string{"t", "xywh", "width", "height"}
 	if route.ext == "" || route.ext == "mp4" || route.ext == "mjpeg" {
@@ -191,36 +176,35 @@ func routeKnobs(route apiRoute) []string {
 	return knobs
 }
 
-// Every status code the manual's error table states is described
-// here, so a reader of the document meets the same list a caller
-// meets.
+// responses returns the status codes a route can return. They must
+// match the error table in the manual.
 func responses(route apiRoute) map[string]any {
-	answers := map[string]any{
+	statuses := map[string]any{
 		"200": okResponse(route),
 		"401": problemResponse("No client certificate and no token, or a token the TokenReview refused."),
 		"405": problemResponse("A method other than GET, HEAD and OPTIONS."),
 		"406": problemResponse("The Accept field excludes every form this route serves."),
 	}
 	if route.kind == documentRoute || route.kind == infoRoute {
-		answers["304"] = map[string]any{
+		statuses["304"] = map[string]any{
 			"description": "The document has not changed since the entity tag the client holds.",
 		}
 	}
 	if route.kind == documentRoute {
-		return answers
+		return statuses
 	}
-	answers["403"] = problemResponse("The SubjectAccessReview refused the subject.")
-	answers["404"] = problemResponse("No Display of that name.")
-	answers["503"] = problemResponse("The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed).")
+	statuses["403"] = problemResponse("The SubjectAccessReview refused the subject.")
+	statuses["404"] = problemResponse("No Display of that name.")
+	statuses["503"] = problemResponse("The screen has no node (no-node), the compositor is not serving it (compositor-down), the output is already being captured (capture-busy), or the sidecar is absent, not ready, or refused the connection (upstream-failed).")
 	if route.kind == infoRoute {
-		return answers
+		return statuses
 	}
-	answers["400"] = problemResponse("A query the grammar refuses.")
-	answers["409"] = problemResponse("The screen has no panel on its connector (away). A retry does not help until the monitor is connected.")
-	answers["500"] = problemResponse("The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed).")
-	answers["502"] = problemResponse("The sidecar answered something that is not HTTP or not a problem document.")
-	answers["504"] = problemResponse("The sidecar sent no headers within the header timeout.")
-	return answers
+	statuses["400"] = problemResponse("A query the grammar refuses.")
+	statuses["409"] = problemResponse("The screen has no panel on its connector (away). A retry does not help until the monitor is connected.")
+	statuses["500"] = problemResponse("The compositor denied the capture (capture-denied), or the encoder wrote no picture (encoder-failed).")
+	statuses["502"] = problemResponse("The sidecar responded with something that is not HTTP or not a problem document.")
+	statuses["504"] = problemResponse("The sidecar sent no headers within the header timeout.")
+	return statuses
 }
 
 func okResponse(route apiRoute) map[string]any {
@@ -239,20 +223,13 @@ func okResponse(route apiRoute) map[string]any {
 			content[mediaType] = map[string]any{"schema": map[string]any{"type": "object"}}
 		}
 	}
-	answer := map[string]any{
-		"description": route.answer,
+	return map[string]any{
+		"description": route.responseDescription,
 		"content":     content,
 		"headers":     okHeaders(route),
 	}
-	return answer
 }
 
-// The fields every answer carries: Vary (RFC 9110) and Link (RFC
-// 8288). A capture adds Cache-Control: no-store (RFC 9111),
-// Content-Disposition (RFC 6266), Accept-Ranges, and
-// X-Content-Type-Options: nosniff (the Fetch Standard), and the
-// negotiated route adds Content-Location. A document carries an ETag
-// and Cache-Control: no-cache instead.
 func okHeaders(route apiRoute) map[string]any {
 	headers := map[string]any{
 		"Vary": headerSpec("Accept. The response was subject to negotiation (RFC 9110 section 12.5.5)."),
@@ -261,7 +238,7 @@ func okHeaders(route apiRoute) map[string]any {
 	if route.kind == captureRoute {
 		headers["Cache-Control"] = headerSpec("no-store. A capture is never stored (RFC 9111 section 5.2.2.5).")
 		headers["Content-Disposition"] = headerSpec("inline, with the file name a browser save gets (RFC 6266 section 4).")
-		headers["Accept-Ranges"] = headerSpec("none. A live capture has no byte identity (RFC 9110 section 14.3).")
+		headers["Accept-Ranges"] = headerSpec("none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3).")
 		headers["X-Content-Type-Options"] = headerSpec("nosniff. A browser uses the Content-Type and does not guess a type from the bytes (Fetch Standard section 3.6).")
 		if route.ext == "" {
 			headers["Content-Location"] = headerSpec("The absolute path of the extension form served (RFC 9110 section 8.7).")
@@ -273,13 +250,12 @@ func okHeaders(route apiRoute) map[string]any {
 	return headers
 }
 
-// A list of strings as the document's own JSON holds them.
-func anyOf(values []string) []any {
-	held := make([]any, 0, len(values))
+func toAnySlice(values []string) []any {
+	converted := make([]any, 0, len(values))
 	for _, value := range values {
-		held = append(held, value)
+		converted = append(converted, value)
 	}
-	return held
+	return converted
 }
 
 func headerSpec(note string) map[string]any {
@@ -300,8 +276,8 @@ func problemResponse(note string) map[string]any {
 	}
 }
 
-// The five members RFC 9457 defines, and acceptable, the one
-// extension member a 406 carries.
+// problemSchema describes the RFC 9457 problem document, plus
+// acceptable, an extension member that a 406 response adds.
 func problemSchema() map[string]any {
 	return map[string]any{
 		"type":     "object",
@@ -310,7 +286,7 @@ func problemSchema() map[string]any {
 			"type": map[string]any{
 				"type":   "string",
 				"format": "uri",
-				"enum":   anyOf(problemTypes()),
+				"enum":   toAnySlice(problemTypes()),
 			},
 			"title":    map[string]any{"type": "string"},
 			"status":   map[string]any{"type": "integer"},
@@ -330,9 +306,9 @@ func problemSchema() map[string]any {
 	}
 }
 
-// The base the served copy names: the configured public base, else
-// the origin the request arrived on, so a port-forward reads a
-// document that names localhost.
+// requestOrigin returns the server URL for the served document: the
+// configured public base, or else the scheme and host of the request,
+// so a client on a port-forward sees localhost.
 func requestOrigin(r *http.Request, configured string) string {
 	if configured != "" {
 		return configured

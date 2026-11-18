@@ -1,8 +1,7 @@
 package main
 
-// The two capability strings in testdata are the panels of the lab
-// drill, read over the wire, and the parser is proven against them
-// rather than against a string written to suit it.
+// The capability strings in testdata were read from real panels, so
+// the parser is tested on strings that were not written to fit it.
 
 import (
 	"os"
@@ -13,9 +12,6 @@ import (
 	"time"
 )
 
-// One fragment of a capability reply, built the way a display
-// builds it: the opcode, the offset the fragment starts at, and the
-// bytes of the string.
 func capabilitiesReply(offset uint16, data string) []byte {
 	reply := []byte{
 		ddcReplySource, ddcLengthFlag | byte(3+len(data)), vcpCapabilitiesReply,
@@ -25,9 +21,8 @@ func capabilitiesReply(offset uint16, data string) []byte {
 	return append(reply, ddcChecksum(ddcVirtualHost, reply))
 }
 
-// The whole reply is the length a caller reads, so a short
-// fragment pads. The padding is what a display sends rather than
-// holding the bus.
+// paddedCapabilitiesReply pads a short reply to the full frame length
+// that the host reads, as a display does.
 func paddedCapabilitiesReply(offset uint16, data string) []byte {
 	reply := capabilitiesReply(offset, data)
 	return append(reply, make([]byte, capabilitiesReplyLength-len(reply))...)
@@ -36,59 +31,56 @@ func paddedCapabilitiesReply(offset uint16, data string) []byte {
 func TestCapabilitiesReadsEveryFragment(t *testing.T) {
 	first := strings.Repeat("a", capabilitiesFragmentBytes)
 	fixture := newDDCFixture(t,
-		busAnswer{reply: paddedCapabilitiesReply(0, first)},
-		busAnswer{reply: paddedCapabilitiesReply(uint16(len(first)), "bb")},
-		busAnswer{reply: paddedCapabilitiesReply(uint16(len(first)+2), "")},
+		busReply{reply: paddedCapabilitiesReply(0, first)},
+		busReply{reply: paddedCapabilitiesReply(uint16(len(first)), "bb")},
+		busReply{reply: paddedCapabilitiesReply(uint16(len(first)+2), "")},
 	)
 
 	text, err := fixture.client.Capabilities()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the capability string: %v", err)
 	}
 	if want := first + "bb"; text != want {
 		t.Errorf("capability string = %q, want %q", text, want)
 	}
-	// The offsets the host asked for, which is the whole of
-	// how the fragments join.
 	var offsets []uint16
 	for _, write := range fixture.bus.writes {
 		offsets = append(offsets, uint16(write[3])<<8|uint16(write[4]))
 	}
 	if want := []uint16{0, 32, 34}; !slices.Equal(offsets, want) {
-		t.Errorf("asked for offsets %v, want %v", offsets, want)
+		t.Errorf("the requested offsets are %v, want %v", offsets, want)
 	}
 }
 
-// The capability string is the first thing the probe asks for,
-// so a panel that answers late must get the same growing wait the
-// controls get. The lab's LG is that panel.
+// The probe reads the capability string first, so a panel that
+// replies slowly must get the same doubling wait as the controls.
 func TestCapabilitiesWaitsLongerOnEachAttempt(t *testing.T) {
 	panel := &slowPanel{
-		answers: 2 * ddcReplyDelay,
-		reply:   paddedCapabilitiesReply(0, "(vcp(10))"),
+		replyDelay: 2 * ddcReplyDelay,
+		reply:      paddedCapabilitiesReply(0, "(vcp(10))"),
 	}
 	client := newDDC(panel)
 	client.sleep = func(waited time.Duration) { panel.waited = waited }
 
 	fragment, err := client.capabilitiesFragment(0)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the capability fragment: %v", err)
 	}
 	if string(fragment) != "(vcp(10))" {
-		t.Errorf("fragment = %q, want the panel's own string", fragment)
+		t.Errorf("fragment = %q, want the string the panel sent", fragment)
 	}
 	if panel.reads != 2 {
 		t.Errorf("the panel was read %d times, want 2", panel.reads)
 	}
 }
 
-func TestCapabilitiesRefusesAReplyThatIsNotOne(t *testing.T) {
+func TestCapabilitiesRejectsBytesThatAreNotAReply(t *testing.T) {
 	cases := []struct {
 		name  string
 		reply []byte
 	}{
 		{
-			name:  "a wire nothing drives",
+			name:  "a bus where no device answers, which reads as 0xff",
 			reply: bytesOf(0xff, capabilitiesReplyLength),
 		},
 		{
@@ -100,8 +92,6 @@ func TestCapabilitiesRefusesAReplyThatIsNotOne(t *testing.T) {
 			reply: flipped(paddedCapabilitiesReply(0, "ab"), 6, 'c'),
 		},
 		{
-			// A display that answers an older offset would
-			// otherwise repeat its bytes into the string.
 			name:  "a reply to another offset",
 			reply: paddedCapabilitiesReply(8, "ab"),
 		},
@@ -109,17 +99,17 @@ func TestCapabilitiesRefusesAReplyThatIsNotOne(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			fixture := newDDCFixture(t,
-				busAnswer{reply: c.reply}, busAnswer{reply: c.reply}, busAnswer{reply: c.reply})
+				busReply{reply: c.reply}, busReply{reply: c.reply}, busReply{reply: c.reply})
 
 			if _, err := fixture.client.Capabilities(); err == nil {
-				t.Fatal("the client read a capability string out of bytes that are not a reply")
+				t.Fatal("Capabilities returned no error for bytes that are not a reply, want an error")
 			}
 		})
 	}
 }
 
-// One byte of a reply changed, with the checksum left as the
-// display computed it.
+// flipped returns a copy of reply with one byte changed and the
+// checksum unchanged.
 func flipped(reply []byte, index int, value byte) []byte {
 	broken := slices.Clone(reply)
 	broken[index] = value
@@ -134,32 +124,29 @@ func bytesOf(value byte, length int) []byte {
 	return filled
 }
 
-// The string of each panel in the drill, read from testdata so
-// a replacement string proves the parser again.
 func labCapabilities(t *testing.T, name string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", name+".capabilities"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the capability fixture %s: %v", name, err)
 	}
 	return string(raw)
 }
 
-func TestCoreCapabilitiesOfTheDrillsPanels(t *testing.T) {
+func TestCoreCapabilitiesOfRealPanels(t *testing.T) {
 	cases := []struct {
 		name     string
 		panel    string
-		carries  []string
-		refuses  []string
+		supports []string
+		lacks    []string
 		values   map[string][]string
 		maximums []string
 	}{
 		{
-			// The ultrawide answers audio and no sharpness.
-			name:    "the LG ultrawide",
-			panel:   "lg-hdr-wqhd",
-			carries: []string{"audioMute", "audioVolume", "brightness", "colorPreset", "contrast", "input", "power"},
-			refuses: []string{"sharpness"},
+			name:     "the LG ultrawide",
+			panel:    "lg-hdr-wqhd",
+			supports: []string{"audioMute", "audioVolume", "brightness", "colorPreset", "contrast", "input", "power"},
+			lacks:    []string{"sharpness"},
 			values: map[string][]string{
 				"input":       {"DP-1", "DP-2", "HDMI-1", "HDMI-2"},
 				"power":       {"On", "Off"},
@@ -169,12 +156,10 @@ func TestCoreCapabilitiesOfTheDrillsPanels(t *testing.T) {
 			maximums: []string{"brightness", "contrast", "audioVolume"},
 		},
 		{
-			// The portable panel answers sharpness and seven
-			// inputs, and no audio at all.
-			name:    "the portable panel",
-			panel:   "portable-display",
-			carries: []string{"brightness", "colorPreset", "contrast", "input", "power", "sharpness"},
-			refuses: []string{"audioMute", "audioVolume"},
+			name:     "the portable panel",
+			panel:    "portable-display",
+			supports: []string{"brightness", "colorPreset", "contrast", "input", "power", "sharpness"},
+			lacks:    []string{"audioMute", "audioVolume"},
 			values: map[string][]string{
 				"input": {"VGA-1", "DVI-1", "DVI-2", "DP-1", "DP-2", "HDMI-1", "HDMI-2"},
 				"power": {"On", "Off", "HardOff"},
@@ -184,29 +169,27 @@ func TestCoreCapabilitiesOfTheDrillsPanels(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			// The probe publishes each core control the string declares,
-			// through capabilityOf. The maximum is 0 here, because a
-			// continuous control's maximum comes from the panel's answer
-			// and not from the string.
+			// The maximum is 0, because the probe reads a continuous
+			// control's maximum from the panel and not from the string.
 			codes := capabilityCodes(labCapabilities(t, c.panel))
 			capabilities := map[string]panelCapability{}
 			for _, control := range coreControls {
-				if values, carried := codes[control.Code]; carried {
+				if values, supported := codes[control.Code]; supported {
 					capabilities[control.Name] = capabilityOf(control.Code, values, 0)
 				}
 			}
 
-			var carried []string
+			var supported []string
 			for name := range capabilities {
-				carried = append(carried, name)
+				supported = append(supported, name)
 			}
-			slices.Sort(carried)
-			if !slices.Equal(carried, c.carries) {
-				t.Errorf("the panel carries %q, want %q", carried, c.carries)
+			slices.Sort(supported)
+			if !slices.Equal(supported, c.supports) {
+				t.Errorf("the panel supports %q, want %q", supported, c.supports)
 			}
-			for _, name := range c.refuses {
+			for _, name := range c.lacks {
 				if _, published := capabilities[name]; published {
-					t.Errorf("the panel publishes %s, and its capability string states none", name)
+					t.Errorf("the panel publishes %s, and its capability string lists none", name)
 				}
 			}
 			for name, want := range c.values {
@@ -214,26 +197,22 @@ func TestCoreCapabilitiesOfTheDrillsPanels(t *testing.T) {
 					t.Errorf("%s = %q, want %q", name, got, want)
 				}
 			}
-			// A continuous control states no value list, and
-			// the probe reads its maximum from the panel instead.
 			for _, name := range c.maximums {
 				if values := capabilities[name].Values; values != nil {
-					t.Errorf("%s states the values %q, and a continuous control states none", name, values)
+					t.Errorf("%s lists the values %q, and a continuous control lists none", name, values)
 				}
 			}
 		})
 	}
 }
 
-// Only the common core publishes. A manufacturer's own code is
-// read from no panel and named in no resource.
 func TestCoreCapabilitiesPublishNoOtherCode(t *testing.T) {
 	codes := capabilityCodes(labCapabilities(t, "lg-hdr-wqhd"))
-	if _, carried := codes[0xe0]; !carried {
-		t.Fatal("the fixture's string states no manufacturer code, so this test proves nothing")
+	if _, supported := codes[0xe0]; !supported {
+		t.Fatal("the fixture's capability string has no manufacturer code, so the test cannot check that one is left out")
 	}
 	if capabilityName(0xe0) != "" {
-		t.Errorf("the code %#02x publishes under the name %q", 0xe0, capabilityName(0xe0))
+		t.Errorf("capabilityName(%#02x) = %q, want no name", 0xe0, capabilityName(0xe0))
 	}
 }
 
@@ -250,9 +229,7 @@ func TestCapabilityCodesReadsTheVCPSection(t *testing.T) {
 			want: map[byte][]uint16{0x10: nil, 0x14: {0x05, 0x08}, 0xd6: {0x01, 0x04}},
 		},
 		{
-			// A group inside a value list belongs to a code
-			// this operator does not read, and it must not become a
-			// value of the code that carries it.
+			// The nested group must not become values of DF.
 			name: "a value list with a group inside it",
 			text: "(vcp(60(01 11) DF(01(02 03) 04)))",
 			want: map[byte][]uint16{0x60: {0x01, 0x11}, 0xdf: {0x01, 0x04}},
@@ -263,8 +240,6 @@ func TestCapabilityCodesReadsTheVCPSection(t *testing.T) {
 			absent: []byte{0x10},
 		},
 		{
-			// The section is found by its own name, so a
-			// section whose name ends in vcp is not this one.
 			name: "another section whose name ends in vcp",
 			text: "(mvcp(10 12)vcp(60(11)))",
 			want: map[byte][]uint16{0x60: {0x11}},
@@ -275,8 +250,7 @@ func TestCapabilityCodesReadsTheVCPSection(t *testing.T) {
 			want: map[byte][]uint16{0x10: nil, 0x12: nil, 0x8d: {0x01, 0x02}},
 		},
 		{
-			// A string cut short by a display that stopped
-			// answering still yields the codes that arrived.
+			// A display that stops replying cuts the string short.
 			name: "a string that ends inside the section",
 			text: "(vcp(10 12 14(05",
 			want: map[byte][]uint16{0x10: nil, 0x12: nil, 0x14: {0x05}},
@@ -286,21 +260,19 @@ func TestCapabilityCodesReadsTheVCPSection(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			codes := capabilityCodes(c.text)
 			for code, want := range c.want {
-				if got, carried := codes[code]; !carried || !slices.Equal(got, want) {
-					t.Errorf("code %#02x = %v (carried=%v), want %v", code, got, carried, want)
+				if got, supported := codes[code]; !supported || !slices.Equal(got, want) {
+					t.Errorf("code %#02x = %v (supported=%v), want %v", code, got, supported, want)
 				}
 			}
 			for _, code := range c.absent {
-				if _, carried := codes[code]; carried {
-					t.Errorf("code %#02x is carried, and the string states none", code)
+				if _, supported := codes[code]; supported {
+					t.Errorf("code %#02x is supported, and the string lists none", code)
 				}
 			}
 		})
 	}
 }
 
-// A value the table does not name still publishes, because the
-// panel accepts it and a list that dropped it would be wrong.
 func TestValueNamesCoverWhatTheTableDoesNot(t *testing.T) {
 	cases := []struct {
 		code byte
@@ -326,8 +298,8 @@ func TestValueNamesCoverWhatTheTableDoesNot(t *testing.T) {
 	}
 }
 
-func TestValueRawRefusesAValueNoPanelStates(t *testing.T) {
+func TestValueRawDoesNotKnowAnUnlistedName(t *testing.T) {
 	if raw, known := valueRaw(vcpInput, "SCART"); known {
-		t.Errorf("valueRaw read %d out of a name no panel states", raw)
+		t.Errorf("valueRaw(input, %q) = %d, true, want known false", "SCART", raw)
 	}
 }

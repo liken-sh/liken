@@ -1,33 +1,28 @@
 package main
 
-// The hold on a connector whose hot plug detect drops for a moment.
-//
 // An A/V receiver in standby drops hot plug detect on the machine's
-// HDMI port for a fraction of a second, several times a minute, and
-// the monitor behind it answers again with the same EDID each time.
-// The kernel reports each drop as an unplug and each return as a new
-// monitor. Without the hold, each reader of the card acts on the drop:
-// the Display reports NoPanel and Retained, the placement pass clears
-// the screen's windows from status, the slice drops the monitor's
-// attributes, and media-operator's Player reports PanelAway from the
-// Display. Each of them writes again when the monitor answers, so one
-// drop costs several writes and several Events, and every Player and
-// claim on the screen wakes for nothing.
+// HDMI port for a fraction of a second, several times a minute. The
+// kernel reports each drop as an unplug and each return as a new
+// monitor, though the EDID is the same. Without a hold, each drop sets
+// the Display to NoPanel and Retained, clears the screen's windows
+// from status, removes the monitor's attributes from the slice, and
+// sets media-operator's Player to PanelAway. Each of those is written
+// again when the monitor returns, so one drop costs several writes and
+// Events and wakes every Player and claim on the screen.
 //
-// So each reader sees the card through a hold. A connector that goes
-// dark answers the last reading the operator made while it was lit,
-// until it has stayed dark for hotplugSettle. A connector that answers
-// again inside that time ends the hold, and the readers never see the
-// drop. A connector that is still dark at the end of the hold reads
-// dark, and a timer at that deadline wakes a pass, so a monitor that
-// really left is reported then, and not on the next unrelated event.
-// A drm uevent between two dark reads says the connector may have
-// answered and dropped again with no pass to read it lit, so the hold
-// starts again from the later read.
+// So the operator reads the card through a hold. While a connector
+// reads disconnected, the hold returns its last connected reading,
+// with Held set, until the connector has read disconnected for
+// hotplugSettle. When it reads connected again before then, nothing
+// downstream sees the drop. When it does not, it reads disconnected
+// from then on, and a timer at the deadline wakes a pass, so the
+// operator reports the missing monitor then and not on the next
+// unrelated event. A drm uevent between two disconnected reads means
+// the connector may have come back and dropped again between passes,
+// so the hold starts again from the later read.
 //
-// The held reading carries Held, so a reader that acts on the wire
-// itself, such as the Display controller's DDC/CI reads, leaves the
-// connector alone while it is held.
+// A reader that talks to the panel, such as the Display controller
+// with its DDC/CI reads, skips a connector whose reading has Held set.
 
 import (
 	"context"
@@ -36,62 +31,55 @@ import (
 	"time"
 )
 
-// hotplugSettle is how long a connector must stay dark before the
-// operator reports that its monitor left. It is more than twice the
-// longest drop that plan 32 records from an A/V receiver in standby,
-// and it is the window the canvas heal waits for the compositor's
-// outputs to stop moving (canvasSettleWindow). A cable that somebody
-// pulls out is reported after this time and the settle window of the
-// slice publisher's loop.
+// hotplugSettle is how long a connector must read disconnected before
+// the operator reports that its monitor left. It is longer than the
+// hot plug detect drops of an A/V receiver in standby.
 const hotplugSettle = 5 * time.Second
 
-// hotplugCeiling bounds how long hotplug events keep starting a hold
-// again. A uevent that names no connector can come from a neighbour on
-// the same card, and a neighbour that drops every few seconds would
-// otherwise hide a monitor that left this connector for as long as it
-// drops. Past the ceiling the hold runs out its settle time, so a
-// monitor that left is reported within hotplugCeiling plus
-// hotplugSettle. It covers the bursts plan 32 records, which last up to
-// 7 seconds.
+// hotplugCeiling limits how long after the first disconnected read a
+// uevent can still restart a hold. A uevent that names no connector
+// can come from another connector on the same card, so without a
+// limit, a neighbour that drops every few seconds would hide an unplug
+// here for as long as it keeps dropping. With the limit, an unplug is
+// reported at most hotplugCeiling plus hotplugSettle after it.
 const hotplugCeiling = 3 * hotplugSettle
 
-// hotplugHold follows each connector across the walks of the card. It
-// holds when each connector was first read dark, which every reader
-// shares, so the Display, the windows, and the slice report a monitor
-// that left at one deadline. Each reader reads through a view of its
-// own, because each one composes its own reading from sysfs and the
-// card, and a view returns the reading that reader made.
+// hotplugHold records when each connector started to read
+// disconnected. Every hotplugView of the hold shares that record, so
+// the Display controller and the slice pass report a missing monitor
+// at the same deadline. Each view keeps its own connected readings,
+// because each caller composes its reading of sysfs and the card in
+// its own way.
 type hotplugHold struct {
-	// The Display controller, the placement pass, and the slice
-	// publisher read from three goroutines, so every call takes the
-	// lock.
+	// The views are read from separate goroutines.
 	mu  sync.Mutex
 	now func() time.Time
-	// expired wakes a pass at the end of a hold. A nil expired arms no
-	// timer, for a reader whose own loop reads again.
+	// expired runs when a hold reaches its deadline, to wake a pass. A
+	// nil expired arms no timer.
 	expired func()
-	// hotplugs answers how many drm uevents the operator has read that
-	// may concern the connector with this DRM object id. A nil hotplugs
+	// hotplugs returns the number of drm uevents read so far that may
+	// concern the connector with this DRM object id. A nil hotplugs
 	// counts none.
 	hotplugs func(connectorID string) uint64
-	// dark is when each held connector was first read dark, and the
-	// timer that ends its hold.
-	dark map[string]heldConnector
+	// outages has an entry for each connector that read disconnected
+	// after a connected reading, until a view reads it connected again.
+	outages map[string]outage
 }
 
-type heldConnector struct {
-	// first is the first dark read of this outage, and since the read
-	// the hold runs from. A hotplug event moves since and never first.
+type outage struct {
+	// first is the time of the first disconnected read, and since is
+	// the time the current hold runs from. A uevent restarts the hold
+	// by moving since, and hotplugCeiling is measured from first.
 	first time.Time
 	since time.Time
-	// seen is the hotplug count at the last dark read. A count that
-	// moved since says the connector may have answered and dropped
-	// again between two reads, so the hold starts again.
-	seen  uint64
-	timer *time.Timer
-	// over says the hold ended at the deadline. The connector reads
-	// dark to every view until a view reads it lit.
-	over bool
+	// hotplugsAtRead is the uevent count at the start of the current
+	// hold.
+	hotplugsAtRead uint64
+	timer          *time.Timer
+	// ended is set when the hold reaches its deadline. The connector
+	// then reads disconnected to every view until a view reads it
+	// connected.
+	ended bool
 }
 
 func newHotplugHold(expired func(), hotplugs func(connectorID string) uint64) *hotplugHold {
@@ -99,13 +87,13 @@ func newHotplugHold(expired func(), hotplugs func(connectorID string) uint64) *h
 		now:      time.Now,
 		expired:  expired,
 		hotplugs: hotplugs,
-		dark:     map[string]heldConnector{},
+		outages:  map[string]outage{},
 	}
 }
 
-// newCardHold is the operator's hold. The end of a hold schedules one
-// more pass through the channel a failed write retries on, so a monitor
-// that stayed away is reported at the deadline.
+// newCardHold returns the operator's hold. When a hold ends, it sends
+// on the same channel that retries a failed write, so a monitor that
+// stayed away is reported at the deadline.
 func newCardHold(retries chan<- struct{}, hotplugs func(connectorID string) uint64) *hotplugHold {
 	return newHotplugHold(func() {
 		select {
@@ -115,34 +103,35 @@ func newCardHold(retries chan<- struct{}, hotplugs func(connectorID string) uint
 	}, hotplugs)
 }
 
-// hotplugView is one reader's side of a hold: the last reading that
-// reader made of each connector while a monitor answered.
+// hotplugView keeps the last connected reading of each connector that
+// was read through it.
 type hotplugView struct {
-	hold *hotplugHold
-	lit  map[string]Output
+	hold          *hotplugHold
+	lastConnected map[string]Output
 }
 
 func (h *hotplugHold) view() *hotplugView {
-	return &hotplugView{hold: h, lit: map[string]Output{}}
+	return &hotplugView{hold: h, lastConnected: map[string]Output{}}
 }
 
-// seed gives the view a lit reading for each output, as if it had read
-// it, so the first dark read of that connector starts a hold. A
-// connector the view has read already keeps its own reading.
-func (v *hotplugView) seed(outputs []Output) {
+// assumeConnected stores outputs as connected readings, as if the view
+// had read them, so that the first disconnected read of each one starts a hold.
+// A connector that already has a connected reading keeps it.
+func (v *hotplugView) assumeConnected(outputs []Output) {
 	v.hold.mu.Lock()
 	defer v.hold.mu.Unlock()
 	for _, output := range outputs {
-		if _, read := v.lit[output.Connector]; !read {
-			v.lit[output.Connector] = output
+		if _, read := v.lastConnected[output.Connector]; !read {
+			v.lastConnected[output.Connector] = output
 		}
 	}
 }
 
-// rememberedScreens answers a lit reading for each dark connector whose
-// monitor the link history remembers: the connector and the monitor's
-// identity, which is all a held reading needs, because a reader acts on
-// a held connector's identity alone.
+// rememberedScreens returns a connected reading of each disconnected
+// connector whose monitor the link history remembers, for
+// assumeConnected at startup. The
+// reading has only the connector and the monitor's identity, because
+// a reader acts on a held connector by its identity alone.
 func rememberedScreens(outputs []Output, links *linkHistory) []Output {
 	var remembered []Output
 	for _, output := range outputs {
@@ -160,19 +149,19 @@ func rememberedScreens(outputs []Output, links *linkHistory) []Output {
 	return remembered
 }
 
-// wrap puts the view in front of one walk of the card.
 func (v *hotplugView) wrap(walk func() []Output) func() []Output {
 	return func() []Output { return v.apply(walk()) }
 }
 
-// apply answers the walk with each held connector's lit reading in
-// place of its dark one, and records this walk for the next.
+// apply returns one read of the card with the last connected reading
+// in place of each disconnected output that is held, and records the
+// read for the next call. A nil view returns the outputs unchanged.
 //
-// A connector this process never read lit answers dark at once:
-// there is no reading to hold, and a machine that starts with its
-// panel on another input must report it so. A connector that answers
-// lit is read as it is, so a different monitor that arrives inside a
-// hold is never shown as the one held.
+// A connector with no connected reading in this view, read from the card
+// or stored by assumeConnected, is returned disconnected at once,
+// because there is nothing to hold. A connector that reads connected is
+// returned as read, so a different monitor that arrives during a hold is
+// never shown as the held one.
 func (v *hotplugView) apply(outputs []Output) []Output {
 	if v == nil {
 		return outputs
@@ -181,88 +170,87 @@ func (v *hotplugView) apply(outputs []Output) []Output {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := h.now()
-	held := make([]Output, len(outputs))
+	result := make([]Output, len(outputs))
 	for i, output := range outputs {
-		held[i] = output
+		result[i] = output
 		connector := output.Connector
 		if output.Connected {
-			v.lit[connector] = output
+			v.lastConnected[connector] = output
 			h.release(connector)
 			continue
 		}
-		last, seen := v.lit[connector]
-		if !seen {
+		last, readLit := v.lastConnected[connector]
+		if !readLit {
 			continue
 		}
 		var hotplugs uint64
 		if h.hotplugs != nil {
 			hotplugs = h.hotplugs(output.ConnectorID)
 		}
-		dark, holding := h.dark[connector]
+		current, holding := h.outages[connector]
 		switch {
 		case !holding:
 			h.start(connector, now, now, hotplugs)
-		case !dark.over && dark.seen != hotplugs && now.Sub(dark.first) < hotplugCeiling:
-			h.start(connector, dark.first, now, hotplugs)
+		case !current.ended && current.hotplugsAtRead != hotplugs && now.Sub(current.first) < hotplugCeiling:
+			h.start(connector, current.first, now, hotplugs)
 		}
-		dark = h.dark[connector]
-		if dark.over || now.Sub(dark.since) >= hotplugSettle {
-			dark.over = true
-			h.dark[connector] = dark
-			delete(v.lit, connector)
+		current = h.outages[connector]
+		if current.ended || now.Sub(current.since) >= hotplugSettle {
+			current.ended = true
+			h.outages[connector] = current
+			delete(v.lastConnected, connector)
 			continue
 		}
 		last.Held = true
-		held[i] = last
+		result[i] = last
 	}
-	return held
+	return result
 }
 
-// start begins one connector's hold at this read, and arms the timer
-// that ends it. The caller holds the lock.
+// start begins or restarts a connector's hold and arms the timer for
+// its deadline. The caller holds the lock.
 func (h *hotplugHold) start(connector string, first, now time.Time, hotplugs uint64) {
 	h.release(connector)
-	dark := heldConnector{first: first, since: now, seen: hotplugs}
+	current := outage{first: first, since: now, hotplugsAtRead: hotplugs}
 	if h.expired != nil {
-		dark.timer = time.AfterFunc(hotplugSettle, h.expired)
+		current.timer = time.AfterFunc(hotplugSettle, h.expired)
 	}
-	h.dark[connector] = dark
+	h.outages[connector] = current
 }
 
-// release ends one connector's hold, and stops its timer, because a
-// connector that answered again owes no pass at the deadline. The
+// release ends a connector's hold and stops its timer, because a
+// connector that reads connected needs no pass at the deadline. The
 // caller holds the lock.
 func (h *hotplugHold) release(connector string) {
-	if dark, holding := h.dark[connector]; holding {
-		if dark.timer != nil {
-			dark.timer.Stop()
+	if current, holding := h.outages[connector]; holding {
+		if current.timer != nil {
+			current.timer.Stop()
 		}
-		delete(h.dark, connector)
+		delete(h.outages, connector)
 	}
 }
 
-// hotplugCounts counts the drm uevents the operator has read about its
-// own card: the ones that name no connector, which may concern any
-// connector of the card, and the ones that name one connector by its
-// DRM object id.
+// hotplugCounts counts the drm uevents of the operator's card, by the
+// DRM object id of the connector that each one names. An event that
+// names no connector counts for every connector of the card.
 //
-// The uevent socket carries the events of every card on the machine,
-// and DRM numbers connectors per device, so another card's connector
-// 403 is not this card's. An event of another card counts for nothing.
-// A loss of events names no card, and counts for every connector,
-// because the lost event may have been this card's.
+// The uevent socket receives the events of every card on the machine,
+// and DRM numbers connectors per device, so connector 403 of another
+// card is not connector 403 of this one, and an event of another card
+// is not counted. A report of lost events names no card, so it counts
+// for every connector, because a lost event may have been this card's.
 type hotplugCounts struct {
 	mu       sync.Mutex
 	card     string
-	any      uint64
-	ofObject map[string]uint64
+	unnamed  uint64
+	byObject map[string]uint64
 }
 
 func newHotplugCounts(card string) *hotplugCounts {
-	return &hotplugCounts{card: card, ofObject: map[string]uint64{}}
+	return &hotplugCounts{card: card, byObject: map[string]uint64{}}
 }
 
-// ofCard answers whether a devpath is this card's: the card itself,
+// ofCard reports whether a devpath is the card itself,
 // /devices/.../drm/card1, or a device under it.
 func (c *hotplugCounts) ofCard(devpath string) bool {
 	return strings.HasSuffix(devpath, "/"+c.card) || strings.Contains(devpath, "/"+c.card+"/")
@@ -272,30 +260,27 @@ func (c *hotplugCounts) add(event drmEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if event.Action == lostEventsAction {
-		c.any++
+		c.unnamed++
 		return
 	}
 	if !c.ofCard(event.DevPath) {
 		return
 	}
 	if event.Connector == "" {
-		c.any++
+		c.unnamed++
 		return
 	}
-	c.ofObject[event.Connector]++
+	c.byObject[event.Connector]++
 }
 
-// count answers the events that may concern one connector: every event
-// that names no connector, and every one that names this one.
 func (c *hotplugCounts) count(connectorID string) uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.any + c.ofObject[connectorID]
+	return c.unnamed + c.byObject[connectorID]
 }
 
-// countHotplugs forwards the kernel's drm events and counts each one
-// before the pass it wakes reads the card, so a hold can tell a
-// connector that stayed dark from one that moved between two reads.
+// countHotplugs counts each drm event before it passes the event on,
+// so the pass that the event wakes reads a count that includes it.
 func countHotplugs(ctx context.Context, in <-chan drmEvent, counts *hotplugCounts) <-chan drmEvent {
 	out := make(chan drmEvent, cap(in))
 	go func() {

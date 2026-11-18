@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// The commands are the ones the manual states, so a reader compares
-// them word for word against the page.
+// The expected commands are written out in full, so a change to any
+// ffmpeg option shows in the test diff.
 func TestTheEncoderCommands(t *testing.T) {
 	cases := []struct {
 		name string
@@ -62,8 +62,6 @@ func TestTheEncoderCommands(t *testing.T) {
 	}
 }
 
-// A clip on a 4K screen is scaled to 1080p unless the caller asked
-// for more, which is the rule the memory limit is sized against.
 func TestTheClipScale(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -86,11 +84,6 @@ func TestTheClipScale(t *testing.T) {
 	}
 }
 
-// The fallback converts before it uploads, and runs only where the
-// node's driver refuses the compositor's format. It scales to the
-// same width the graph on the GPU scales to, because the memory
-// limit is sized against that width and the fallback runs on the
-// node that can least afford the whole frame.
 func TestTheSoftwareFallbackConvertsFirst(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -112,10 +105,6 @@ func TestTheSoftwareFallbackConvertsFirst(t *testing.T) {
 	}
 }
 
-// height= is the other axis, and it reaches both graphs. The axis
-// the caller named is stated and the other follows the aspect, so a
-// height decides the size on its own and the 1080p default of a wide
-// clip gives way to it.
 func TestTheHeightKnobScalesTheOtherAxis(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -142,29 +131,24 @@ func TestTheHeightKnobScalesTheOtherAxis(t *testing.T) {
 			command := strings.Join(plan.args(), " ")
 			if row.want == "" {
 				if strings.Contains(command, "scale=h=") {
-					t.Errorf("the command scales: %s", command)
+					t.Errorf("the command is %s, want no scale filter", command)
 				}
 				return
 			}
 			if !strings.Contains(command, row.want) {
-				t.Errorf("the command is\n  %s\nwant it to carry\n  %s", command, row.want)
+				t.Errorf("the command is\n  %s\nwant it to contain\n  %s", command, row.want)
 			}
 		})
 	}
 }
 
-// A still takes its scale in software, because a still runs no
-// VA-API graph.
 func TestAStillScalesInSoftware(t *testing.T) {
 	plan := encodePlan{mediaType: "image/png", width: 1920, height: 1080, pixelFormat: "bgr0", scaleWidth: 640}
 	if !strings.Contains(strings.Join(plan.args(), " "), "-vf scale=w=640:h=-2") {
-		t.Errorf("the command is %v", plan.args())
+		t.Errorf("the command is %v, want it to contain -vf scale=w=640:h=-2", plan.args())
 	}
 }
 
-// This API's quality runs 1 to 100, high being better, and the
-// software encoder's -q:v runs 31 to 2, low being better. The ends
-// of one map to the ends of the other.
 func TestTheJPEGQualityScale(t *testing.T) {
 	cases := []struct {
 		quality int
@@ -182,54 +166,45 @@ func TestTheJPEGQualityScale(t *testing.T) {
 	}
 }
 
-// The device is read from the directory and never named, because
-// the kernel renumbers the nodes across a reboot; the lowest one is
-// taken.
 func TestTheRenderNodeIsRead(t *testing.T) {
 	directory := t.TempDir()
 	for _, name := range []string{"card1", "renderD129", "renderD128"} {
 		if err := os.WriteFile(directory+"/"+name, nil, 0o600); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the device file %s: %v", name, err)
 		}
 	}
 	node, err := renderNode(directory)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("finding the render node: %v", err)
 	}
 	if node != directory+"/renderD128" {
 		t.Errorf("the render node is %q, want the first of the card's nodes", node)
 	}
 }
 
-// A container with no render device says so in words a person can
-// act on: claim one.
 func TestNoRenderNodeIsReported(t *testing.T) {
 	_, err := renderNode(t.TempDir())
-	if err == nil || !strings.Contains(err.Error(), "claim a render device") {
-		t.Errorf("the failure is %v", err)
+	if err == nil || !strings.Contains(err.Error(), "no render node") {
+		t.Errorf("the error is %v, want one that reports no render node", err)
 	}
 }
 
-// An error carries the encoder's own last words, which is the rule
-// every error in this repository follows.
 func TestTheStderrTailKeepsTheLastWords(t *testing.T) {
 	tail := &stderrTail{}
 	if _, err := tail.Write([]byte(strings.Repeat("x", stderrTailSize))); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the first chunk to the tail: %v", err)
 	}
 	if _, err := tail.Write([]byte("\nImpossible to convert between the formats\n")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the second chunk to the tail: %v", err)
 	}
 	if !strings.HasSuffix(tail.text(), "Impossible to convert between the formats") {
-		t.Errorf("the tail ends with %q", tail.text())
+		t.Errorf("the tail ends with %q, want the last line written", tail.text())
 	}
 	if len(tail.text()) > stderrTailSize {
 		t.Errorf("the tail holds %d bytes, want at most %d", len(tail.text()), stderrTailSize)
 	}
 }
 
-// The pixel format comes from the compositor's own fourcc and is
-// never assumed.
 func TestThePixelFormatComesFromTheCompositor(t *testing.T) {
 	plan := encodePlan{mediaType: "image/png", width: 8, height: 8, pixelFormat: "bgra"}
 	args := plan.args()
@@ -240,16 +215,15 @@ func TestThePixelFormatComesFromTheCompositor(t *testing.T) {
 		}
 	}
 	if args[index] != "bgra" {
-		t.Errorf("the command states %q, want the compositor's own format", args[index])
+		t.Errorf("the command passes %q, want the compositor's own format", args[index])
 	}
 	if !reflect.DeepEqual(args[:2], []string{"-hide_banner", "-nostdin"}) {
-		t.Errorf("the command starts %v", args[:2])
+		t.Errorf("the command starts with %v, want -hide_banner -nostdin", args[:2])
 	}
 }
 
-// The lines the drill's log carries from a probe on a chip with no
-// VA-API post-processing, in their own order. The cause is in the
-// middle and the last three lines name none.
+// probeStderr is ffmpeg's stderr from a probe on a GPU with no VA-API
+// post-processing.
 const probeStderr = `Input #0, lavfi, from 'color=size=64x64:duration=0.1:rate=5':
   Duration: N/A, start: 0.000000, bitrate: N/A
   Stream #0:0: Video: wrapped_avframe, yuv420p, 64x64 [SAR 1:1 DAR 1:1], 5 fps, 5 tbr, 5 tbn
@@ -264,10 +238,6 @@ frame=    0 fps=0.0 q=0.0 Lsize=       0KiB time=N/A bitrate=N/A speed=N/A
 Conversion failed!
 `
 
-// An error carries one line of ffmpeg's, and it is a line that says
-// something. ffmpeg ends a failed run with an epilogue that names no
-// cause, so a problem document that carried the true last line would
-// tell a caller only that the conversion failed.
 func TestTheStderrTailSkipsTheEpilogue(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -295,7 +265,7 @@ func TestTheStderrTailSkipsTheEpilogue(t *testing.T) {
 			want:  "Conversion failed!",
 		},
 		{
-			name:  "one line that says something",
+			name:  "one line of text",
 			wrote: "Unrecognized option 'bogus'.\n",
 			want:  "Unrecognized option 'bogus'.",
 		},
@@ -304,7 +274,7 @@ func TestTheStderrTailSkipsTheEpilogue(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			tail := &stderrTail{}
 			if _, err := tail.Write([]byte(row.wrote)); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing to the tail: %v", err)
 			}
 			if got := tail.lastLine(); got != row.want {
 				t.Errorf("the line is\n  %s\nwant\n  %s", got, row.want)
@@ -313,10 +283,8 @@ func TestTheStderrTailSkipsTheEpilogue(t *testing.T) {
 	}
 }
 
-// A clip names its codec in its Content-Type, and the encoder pins
-// the profile and the level that string states. RFC 6381 writes an
-// H.264 codec as avc1 and three bytes: 0x64 High profile, 0x00 for
-// no constraint flags, and the level.
+// RFC 6381 writes an H.264 codec as avc1 followed by three bytes: 0x64
+// for High profile, 0x00 for no constraint flags, and the level.
 func TestTheClipNamesItsCodec(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -351,8 +319,8 @@ func TestTheClipNamesItsCodec(t *testing.T) {
 	}
 }
 
-// The level follows the size and the rate, at the two boundaries
-// RFC 6381 writes as 0x29 and 0x33.
+// Level 4.1 (0x29) covers up to 1920x1080 at 60 frames per second, and
+// anything larger is level 5.1 (0x33).
 func TestTheLevelFollowsTheSizeAndTheRate(t *testing.T) {
 	cases := []struct {
 		width, height, framerate int
@@ -370,8 +338,6 @@ func TestTheLevelFollowsTheSizeAndTheRate(t *testing.T) {
 	}
 }
 
-// Only a clip names a codec. A still and the low-end stream carry
-// the type alone, and the multipart form carries its boundary.
 func TestTheOtherFormsNameNoCodec(t *testing.T) {
 	cases := []struct{ mediaType, want string }{
 		{"image/png", "image/png"},
@@ -385,8 +351,6 @@ func TestTheOtherFormsNameNoCodec(t *testing.T) {
 	}
 }
 
-// A clip of a 4K screen encodes at 1080p, so the level it pins and
-// the string the info document carries are a 1080p clip's.
 func TestAFourKScreenClipsAtTheScaledSize(t *testing.T) {
 	screen := captureScreen{Width: 3840, Height: 2160}
 	if got := clipWidth(screen.Width); got != 1920 {

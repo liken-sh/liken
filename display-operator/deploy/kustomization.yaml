@@ -1,45 +1,27 @@
-# The kustomize base for the display operator.
+# The kustomize base for display-operator. liken does not apply it. You
+# apply it with your own patches, or read it and write your own
+# manifests.
 #
-# This base is for the cluster owner to take. liken does not apply it
-# and does not name it. Take it through your own GitOps with patches
-# of your own, or read it and write your own manifests.
+# The claim template in operator.yaml refers to the `DeviceClass`
+# objects in deviceclasses.yaml by name, so if you rename a class, patch
+# the template too. The class that your workloads claim through is
+# yours to create. The install guide at
+# https://liken.sh/display/docs/guides/install/ has the YAML for
+# `display-output`.
 #
-# The base ships three DeviceClasses, display-gpu, display-render,
-# and display-i2c, because the claim template in operator.yaml names
-# them and the operator's own pod cannot start without them: they
-# are wiring, not policy. The class workloads claim through is the
-# cluster owner's to create, because it is cluster policy, and the
-# install guide at https://liken.sh/display/docs/guides/install/
-# gives the YAML for display-output, the one to start with. An owner
-# who renames a wiring class patches both the class and the template.
+# api.yaml runs display-api once for the cluster. To run no capture
+# API, remove it from the resources below.
 #
-# The base also ships the Display CustomResourceDefinition, because
-# the operator creates a Display for every monitor it probes, and it
-# cannot do that against a cluster the kind is missing from. The
-# Layout CustomResourceDefinition ships with it, because the operator
-# reads a Layout by the name a Display states and watches the kind for
-# changes.
+# kustomize also sets the namespace on the `DeviceClass` objects,
+# because it does not know resource.k8s.io/v1 and treats an unknown kind
+# as namespaced. The API server ignores a namespace on a cluster-scoped
+# object, so this does no harm.
 #
-# The base also ships api.yaml, the display-api Deployment and its
-# Service, the one thing here that runs once per cluster rather than
-# once per node. An owner who wants no capture API removes that one
-# file from the resources below.
-#
-# kustomize stamps the namespace below onto the DeviceClasses too,
-# because resource.k8s.io/v1 is not in its compiled OpenAPI schema
-# and an unknown kind is treated as namespaced. The stamp is
-# harmless: the API server ignores a namespace on a cluster-scoped
-# object, and kubectl routes the request by the scope it reads from
-# discovery, not from the object.
-#
-# The namespace below is set with a transformer rather than with the
-# top-level namespace field, because unsetOnly is what keeps the one
-# object that names its own namespace where it belongs: the RoleBinding
-# in kube-system that lets display-api read the cluster's client
-# certificate authority. The top-level field overwrites a stated
-# namespace, and that binding in any other namespace names a Role that
-# is not there. Every other object here states no namespace, and the
-# transformer sets liken-system on each of them.
+# The namespace comes from a transformer with `unsetOnly`, not from the
+# top-level `namespace` field, so that the `RoleBinding` in
+# `kube-system` in api-authentication.yaml keeps its namespace. That
+# binding lets display-api read the cluster's client certificate
+# authority, and its `Role` exists only in `kube-system`.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -67,9 +49,9 @@ labels:
       app.kubernetes.io/name: display-operator
       app.kubernetes.io/part-of: liken
 
-# The three images carry the same binary and ship under one version,
-# so a roll sets one tag on all three and never leaves a sidecar from
-# an older release beside a newer operator.
+# The images contain the same binary. Set the same tag on all of them,
+# so a capture container never runs beside an operator of another
+# release.
 images:
   - name: ghcr.io/liken-sh/display-operator
     newTag: latest

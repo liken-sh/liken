@@ -1,11 +1,11 @@
 # The Display API. The operator creates one cluster-scoped Display
-# for every monitor it probes, named by the monitor id the slices
-# publish as monitor.liken.sh/id. The operator writes the whole of
-# status: what the panel declares, what it last saw, and what it
-# saved before an override. The resting spec fields are the cluster
-# owner's to write, and spec.override is a temporary layer a machine
-# writer sets and later lifts. The operator restores what it
-# captured when the block is deleted.
+# for each monitor it probes, named by the monitor id that the
+# `ResourceSlice`s publish as the device attribute `monitor.liken.sh/id`.
+# The operator writes all of status: what the panel reports about
+# itself, the values it last read, and the values it saved before an
+# override. A person writes spec. spec.override is a temporary setting
+# that someone adds and later deletes, and when it is deleted the
+# operator restores the values it saved.
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -13,8 +13,8 @@ metadata:
   name: displays.display.liken.sh
 spec:
   group: display.liken.sh
-  # A panel is physical and belongs to no namespace, so the
-  # resource is cluster-scoped, like a Node.
+  # A panel is a physical device, so a Display is cluster-scoped, like
+  # a Node.
   scope: Cluster
   names:
     kind: Display
@@ -26,15 +26,15 @@ spec:
       served: true
       storage: true
       subresources:
-        # status is a subresource so that the operator's writes
-        # of status and a person's writes of spec never overwrite each
-        # other.
+        # The operator's writes of status and a person's writes of spec
+        # go through separate endpoints, so neither overwrites the other.
         status: {}
       # A reader on one machine, such as the CEC workload of
-      # equipment-operator, lists and watches the Displays whose
-      # status.node is that machine. Without the selectable field, a
-      # watch takes every Display in the cluster, and a status write on
-      # one machine wakes the reader on every machine.
+      # equipment-operator, lists and watches only the Displays whose
+      # status.node is that machine. Without this selectable field, the
+      # watch would receive every Display in the cluster, and a status
+      # write for a monitor on one machine would wake the readers on all
+      # machines.
       selectableFields:
         - jsonPath: .status.node
       additionalPrinterColumns:
@@ -65,116 +65,116 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "One monitor, the controls it reports, and the settings the operator maintains."
+          description: "One monitor, the controls it reports, and the settings that the operator keeps applied."
           properties:
             spec:
               type: object
-              description: "The settings the panel should maintain and a temporary override above them. Every field is optional. The operator writes a declared field when the panel diverges from it and does not write a field that spec leaves out."
-              # A writer lifts an override by applying a spec with
+              description: "The settings that the panel should keep, and a temporary override that takes precedence over them. Every field is optional. When the panel's value differs from a field that `spec` sets, the operator writes the field's value to the panel. The operator does not write a control that `spec` leaves out, and it does not write a value that `status.capabilities` does not allow: a number above the control's `max`, or a value missing from its `values`."
+              # A writer removes an override by applying a spec with
               # nothing in it. Server-side apply prunes the empty
-              # object away, and validation would then read spec as
-              # null and refuse the write. The default puts the empty
-              # object back after the pruning.
+              # object, and validation then reads spec as null and
+              # refuses the write. The default restores the empty
+              # object after the pruning.
               default: {}
               properties:
                 brightness:
                   type: integer
                   minimum: 0
                   maximum: 65535
-                  description: "The panel's brightness value. It must not exceed status.capabilities.brightness.max."
+                  description: "The panel's brightness, in the panel's own units, up to `status.capabilities.brightness.max`."
                 contrast:
                   type: integer
                   minimum: 0
                   maximum: 65535
-                  description: "The panel's own contrast number."
+                  description: "The panel's contrast, in the panel's own units."
                 sharpness:
                   type: integer
                   minimum: 0
                   maximum: 65535
-                  description: "The panel's own sharpness number."
+                  description: "The panel's sharpness, in the panel's own units."
                 colorPreset:
                   type: string
-                  description: "One value from status.capabilities.colorPreset.values."
+                  description: "The panel's color preset, one of `status.capabilities.colorPreset.values`."
                 input:
                   type: string
-                  description: "One value from status.capabilities.input.values. This resting declaration forces the panel to show that input. On a shared panel, the operator writes the panel back to this machine within one polling window after each switch away. Declare it only on a panel that should always show this machine."
+                  description: "The input that the panel shows, one of `status.capabilities.input.values`. The operator polls the panel about every 10 seconds, and when it finds the panel on another input, it switches the panel back. It switches back at most three times in one `metadata.generation` and then records the input in `status.unconfirmed`. On a panel that several machines share, set this field only when the panel should always show this machine."
                 audioVolume:
                   type: integer
                   minimum: 0
                   maximum: 65535
-                  description: "The panel's own volume number."
+                  description: "The volume of the panel's own speakers, in the panel's own units."
                 audioMute:
                   type: boolean
                   description: "Whether the panel's own speakers are muted."
                 mode:
                   type: string
-                  description: "The resting screen mode, in the 1920x1080@60 form, and one of status.modes. A claim's mode parameter takes precedence while the claim holds the screen. An edit here waits for the claim to end. Applying the mode restarts the compositor once and ends every Wayland client on this card."
+                  description: "The mode to keep the screen in, such as `1920x1080@60`. It must be one of `status.modes`. The operator does not apply this field while a claim holds the screen, so a change takes effect when the last claim ends. Applying a mode restarts the compositor once, which ends every Wayland client on this card."
                 layout:
                   type: string
-                  description: "The Layout this screen shows, by name. If this field is absent, the screen shows every window fullscreen with the newest on top. If the name matches no Layout, the screen shows that same arrangement and reports the name under the LayoutResolved condition."
+                  description: "The name of the `Layout` that this screen shows. When the field is absent, the screen shows every window fullscreen with the newest on top. When no `Layout` has this name, the screen shows that default arrangement and the `LayoutResolved` condition is False."
                   maxLength: 253
                   pattern: '^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$'
                 override:
                   type: object
-                  description: "A temporary layer above the resting settings. When a writer adds this block, the operator saves the current values and applies the override. When the writer deletes it, the operator restores the declared value or the saved value when spec declares none."
+                  description: "A temporary setting that takes precedence over the other `spec` fields. When you add this block, the operator saves the panel's current values in `status.captured` and applies the override. When you delete the block, the operator restores the value that `spec` sets, or the saved value for a control that `spec` does not set."
                   properties:
                     backlight:
                       type: string
                       enum: ["Off", "off"]
-                      description: "Hold the panel dark at brightness zero. The operator also takes the lowercase off, with the same meaning."
+                      description: "Sets the brightness to 0 and keeps it there. `off` in lowercase has the same meaning."
                     power:
                       type: string
                       enum: ["Off", "off"]
-                      description: "Hold the panel powered down. The operator also takes the lowercase off, with the same meaning. Some panels stop answering DDC/CI from power off; state this only for a panel a drill proved wakes."
+                      description: "Powers the panel down and keeps it down. `off` in lowercase has the same meaning. Some panels stop answering DDC/CI while powered off. Set this only for a panel that you know wakes again."
                   x-kubernetes-validations:
                     - rule: "!(has(self.backlight) && has(self.power))"
-                      message: "An override states backlight or power, and not both."
+                      message: "override must set backlight or power, and not both"
             status:
               type: object
-              description: "What the operator read and what it last wrote. The operator owns every field here."
+              description: "What the operator last read from the panel and last wrote to it. The operator writes every field of `status`."
               properties:
                 node:
                   type: string
-                  description: "The machine whose graphics card drives this panel."
+                  description: "The machine whose graphics card the panel is connected to."
                 connector:
                   type: string
-                  description: "The connector on that card, in the kernel's own spelling."
+                  description: "The connector on that card, spelled as the kernel names it."
                 manufacturer:
                   type: string
-                  description: "The monitor's manufacturer, from its EDID, the same value the device attribute carries."
+                  description: "The monitor's manufacturer, from its EDID. The device attribute of the same name has the same value."
                 model:
                   type: string
                   description: "The monitor's model name, from its EDID."
                 serial:
                   type: string
-                  description: "The monitor's serial, from its EDID, and absent when the monitor states none."
+                  description: "The monitor's serial number, from its EDID. Absent when the EDID has none."
                 widthMillimeters:
                   type: integer
-                  description: "The panel's physical width, as the monitor states it."
+                  description: "The panel's physical width in millimeters, from its EDID."
                 heightMillimeters:
                   type: integer
-                  description: "The panel's physical height, as the monitor states it."
+                  description: "The panel's physical height in millimeters, from its EDID."
                 physicalAddress:
                   type: string
-                  description: "The HDMI-CEC physical address of the port this machine's cable is in, in the dotted form 1.2.0.0, from the HDMI vendor block of the EDID the connector serves. A CEC adapter announces this address when it speaks for this machine. The field keeps the last valid address while the connector serves no EDID for this monitor, while it serves no valid address in it, or while two connectors on this node serve this monitor with different addresses, and the PhysicalAddressCurrent condition says which. The field is absent while the monitor has never served a valid address, for example on a DisplayPort cable. 0.0.0.0, f.f.f.f, and an address with a non-zero digit after a zero are not valid."
+                  description: "The HDMI-CEC physical address of the port that this machine's cable is plugged into, in the dotted form `1.2.0.0`. The operator reads it from the HDMI vendor block of the EDID that the connector serves, and a CEC adapter that sends CEC messages for this machine uses it as its own address. The field keeps the last valid address while the connector serves no EDID for this monitor, while the EDID has no valid address, and while two connectors on this node serve this monitor with different addresses. The `PhysicalAddressCurrent` condition reports which of these applies. The field is absent until the monitor first serves a valid address, so it stays absent for a monitor on a DisplayPort cable. The addresses `0.0.0.0` and `f.f.f.f`, and an address with a non-zero digit after a zero, are not valid."
                 mode:
                   type: object
-                  description: "The mode this output runs, from the two parties that each report one. The kernel syncing a mode on the connector and the compositor serving canvases at that mode are two different facts, and a client draws at the second one, so a gap between the two values is the canvas defect and this object is where it shows."
+                  description: "The mode of this output, as the kernel and the compositor each report it. The two can differ: the connector can run at one mode while the compositor draws at another, and clients draw at the compositor's mode."
                   properties:
                     kernel:
                       type: string
-                      description: "The mode the card reports this connector is synced to, absent while it drives nothing and while the operator holds no connection to a compositor."
+                      description: "The mode that the card reports for the connector. Absent while the connector has no mode set and while the operator has no connection to the compositor."
                     weston:
                       type: string
-                      description: "The mode the compositor reports it serves canvases at, from its own wl_output events, absent while the operator holds no connection to a compositor."
+                      description: "The mode that the compositor reports in its `wl_output` events, which is the mode that clients draw at. Absent while the operator has no connection to the compositor."
                 modes:
                   type: array
                   items:
                     type: string
-                  description: "Every mode the card offers for this connector, whole, where the device attribute of the same name is cut to fit the API's limit on an attribute value. This is the list spec.mode is judged against. It is absent while the operator holds no connection to a compositor."
+                  description: "Every mode that the card offers for this connector. The operator checks `spec.mode` against this list. The device attribute `modes` holds the same list, cut after the last mode that fits in the 64-character limit of a device attribute. Absent while the operator has no connection to the compositor."
                 capabilities:
                   type: object
-                  description: "The controls the panel declares, of the MCCS common core. A control with a value list takes those values, and a control with a maximum takes a number up to it."
+                  description: "The controls that the panel declares, from the MCCS common core. A control with a list of values accepts one of them, and a control with a maximum accepts a number up to it."
                   additionalProperties:
                     type: object
                     properties:
@@ -185,10 +185,10 @@ spec:
                         type: array
                         items:
                           type: string
-                        description: "Every value the panel accepts for a non-continuous control. The power control lists its values under the names status.observed.power uses."
+                        description: "Every value that the panel accepts for a non-continuous control. The power control lists its values by the names that `status.observed.power` uses."
                 observed:
                   type: object
-                  description: "The last value the operator read or wrote for each control. It reads the panel during probing, before an override capture, while it actuates a control, and about every ten seconds when the panel is lit and has no override. The ten-second read finds changes made with the panel's own buttons. The operator never reads a panel in standby or off because a DDC read wakes some panels."
+                  description: "The last value that the operator read from or wrote to each control. The operator reads the panel when it probes it, before it saves values for an override, and when it changes a control. It also reads about every 10 seconds while the panel is lit and has no override, to find changes made with the panel's own buttons. It never reads a panel in standby or off, because a DDC read wakes some panels."
                   properties: &values
                     brightness:
                       type: integer
@@ -206,14 +206,14 @@ spec:
                       type: boolean
                     power:
                       type: string
-                      description: "The panel's power state: On, Standby, Suspend, Off, or HardOff. A value the MCCS table does not name is a hexadecimal number, such as 0x06. The operator reads a power name in any case, so a capture saved in lowercase still restores the panel."
+                      description: "The panel's power state: `On`, `Standby`, `Suspend`, `Off`, or `HardOff`. A state that the MCCS table has no name for is a hexadecimal number, such as `0x06`. The operator reads a power name in any letter case, so values saved in lowercase still restore the panel."
                 captured:
                   type: object
-                  description: "The values the operator saved before it applied an override. The save commits before the panel goes dark, so the restore value survives an operator restart."
+                  description: "The values that the operator saved before it applied an override. The operator writes this record before the panel goes dark, so the values to restore survive an operator restart."
                   properties: *values
                 unconfirmed:
                   type: array
-                  description: "Each write that the device did not confirm, for the current metadata.generation. A panel can read back a value other than the value the operator wrote, a restore can run out of attempts, the compositor can serve a mode other than the mode spec.mode states, and a panel can change a declared value by itself after the operator wrote it back three times. The operator makes such a write once and records it here. It does not make the write again, after a restart too, until spec changes. The record goes when the device holds the value. A restore that stops here keeps status.captured."
+                  description: "Each write that the device did not confirm in the current `metadata.generation`. The operator lists a write here when the panel reads back a different value than the operator wrote, when a restore runs out of attempts, when the compositor restarts for `spec.mode` and still reports another mode, and when the panel changes a value by itself after the operator wrote it back three times. The operator does not repeat a listed write until `spec` changes, even after an operator restart. It removes the entry when the device reports the value. When a restore is listed here, `status.captured` keeps the saved values."
                   x-kubernetes-list-type: atomic
                   items:
                     type: object
@@ -221,26 +221,26 @@ spec:
                     properties:
                       control:
                         type: string
-                        description: "The control, in the spelling of status.capabilities, or mode for spec.mode."
+                        description: "The control, spelled as in `status.capabilities`, or `mode` for `spec.mode`."
                       value:
                         type: string
-                        description: "The value the operator wrote."
+                        description: "The value that the operator wrote."
                       readback:
                         type: string
-                        description: "The value the device held after the write. Absent when the device did not answer."
+                        description: "The value that the device reported after the write. Absent when the device did not respond."
                       generation:
                         type: integer
-                        description: "The metadata.generation the write was made for."
+                        description: "The `metadata.generation` that the write was made for."
                       message:
                         type: string
-                        description: "The failure, in the words of the party that reported it."
+                        description: "The failure, in the text of the device, tool, or compositor that reported it."
                       time:
                         type: string
                         format: date-time
                         description: "When the operator recorded the write."
                 written:
                   type: array
-                  description: "How many times the operator wrote each declared value in the current metadata.generation, with the panel confirming each write. The first write sets the value, and each later write puts it back after the panel moved away from it. The operator writes a value back at most three times in one generation, and then records it in status.unconfirmed."
+                  description: "How many times the operator wrote each value that `spec` sets, in the current `metadata.generation`, counting only writes that the panel confirmed. The first write sets the value, and each later write puts it back after the panel changed it. The operator writes a value back at most three times in one generation, and then records it in `status.unconfirmed`."
                   x-kubernetes-list-type: atomic
                   items:
                     type: object
@@ -248,22 +248,22 @@ spec:
                     properties:
                       control:
                         type: string
-                        description: "The control, in the spelling of status.capabilities."
+                        description: "The control, spelled as in `status.capabilities`."
                       value:
                         type: string
-                        description: "The declared value."
+                        description: "The value that `spec` sets."
                       generation:
                         type: integer
-                        description: "The metadata.generation the writes were made for."
+                        description: "The `metadata.generation` that the writes were made for."
                       count:
                         type: integer
                         description: "The number of confirmed writes."
                 surfaces:
                   type: array
-                  description: "Every window the compositor holds on this screen, in arrival order, whether or not a region shows it. A window with no region is running but is not displayed. Read this field first when a program draws nothing visible. An ID lasts only for the compositor that assigned it. A compositor restart ends every window, and programs reconnect under new IDs."
-                  # The operator writes the whole of this list, and
-                  # the order is the order the surfaces arrived in, so
-                  # the list is one value and not a merged map.
+                  description: "Every window that the compositor has on this screen, in the order the windows arrived, including windows that no region shows. Read this field first when a program draws nothing visible. A window's `id` is valid only for the compositor that assigned it. A compositor restart ends every window, and the programs reconnect with new ids."
+                  # The operator writes the whole list in arrival order, so
+                  # the list is one value, and apply does not merge it as
+                  # a map.
                   x-kubernetes-list-type: atomic
                   items:
                     type: object
@@ -271,24 +271,24 @@ spec:
                     properties:
                       id:
                         type: string
-                        description: "The window's id, which the compositor assigned. status.layout names it beside the region that shows it."
+                        description: "The window id that the compositor assigned. `status.layout` lists it beside the region that shows the window."
                       claim:
                         type: string
-                        description: "The ResourceClaim whose socket the window arrived on, as namespace/name. Empty for a window on the shared socket, which belongs to no claim."
+                        description: "The `ResourceClaim` whose socket the window connected through, as `namespace/name`. Empty for a window on the compositor's own socket, `wayland-0`, which belongs to no claim."
                       pods:
                         type: array
-                        description: "The pods that hold the claim, each as namespace/name."
+                        description: "The pods that hold the claim, each as `namespace/name`."
                         items:
                           type: string
                         x-kubernetes-list-type: atomic
                       labels:
                         type: object
-                        description: "The labels every holder of the claim carries with the same value. These are the labels a region's selector reads. When one pod holds the claim they are that pod's labels."
+                        description: "The labels that every pod holding the claim has, with the same value on each pod. A region's `selector` matches against these labels. When one pod holds the claim, they are that pod's labels."
                         additionalProperties:
                           type: string
                       size:
                         type: object
-                        description: "The size the program last drew, in pixels. A window in a region draws at the region's size, so a size that does not match its region is a program that ignored the compositor's request and is scaled to fit."
+                        description: "The size in pixels that the program last drew. A window in a region draws at the region's size, so a different size means that the program ignored the compositor's request, and the compositor scales the window to fit."
                         properties:
                           width:
                             type: integer
@@ -298,17 +298,17 @@ spec:
                             description: "The height in pixels."
                       region:
                         type: string
-                        description: "The region that shows the window. Empty for a window no region took, which is not on the screen."
+                        description: "The region that shows the window. Empty when no region shows the window, so the window is not on the screen."
                       appID:
                         type: string
-                        description: "The xdg app_id the program set on the window, and empty until it sets one. An arranger names the windows of its claim by app_id."
+                        description: "The xdg `app_id` that the program set on the window. Empty until the program sets one. An arranger refers to the windows of its claim by `app_id`."
                 layout:
                   type: object
-                  description: "The arrangement the screen is drawn to, and what each region shows."
+                  description: "The arrangement that the screen is drawn with, and the window that each region shows."
                   properties:
                     name:
                       type: string
-                      description: "The Layout in force, or default for a screen that names none or names one that does not exist."
+                      description: "The `Layout` in use, or `default` when `spec.layout` is absent or names a `Layout` that does not exist."
                     regions:
                       type: array
                       description: "Each region in stacking order, with the window on top of it."
@@ -319,15 +319,15 @@ spec:
                         properties:
                           name:
                             type: string
-                            description: "The region's name, as the Layout states it."
+                            description: "The region's name, as the `Layout` gives it."
                           surface:
                             type: string
-                            description: "The id of the window on top of the region, the newest of the claim it shows, or the word empty when no window matched it."
+                            description: "The id of the window on top of the region, which is the newest window of the claim that the region shows, or `empty` when no window matched the region."
                 arrangers:
                   type: array
-                  description: "The arranger of each claim on this screen that has one. An arranger is the one client of a claim that the compositor lets place the claim's windows inside the claim's region, through the liken_arrangement_v1 Wayland protocol. The Layout still decides where the region is. A claim with no arranger is not listed, and its windows fill its region. The list changes when a claim gains or loses its arranger and when an arranger commits an arrangement under a new name."
-                  # The operator writes the whole of this list from
-                  # what the compositor reports, ordered by claim.
+                  description: "The arranger of each claim on this screen that has one. An arranger is a Wayland client of the claim that places the claim's windows inside the claim's region, through the `liken_arrangement_v1` protocol. The `Layout` still sets where the region is. A claim with no arranger is not listed, and its windows fill its region."
+                  # The operator writes the whole list from what the
+                  # compositor reports, ordered by claim.
                   x-kubernetes-list-type: atomic
                   items:
                     type: object
@@ -335,31 +335,31 @@ spec:
                     properties:
                       claim:
                         type: string
-                        description: "The ResourceClaim whose socket the arranger connected through, as namespace/name."
+                        description: "The `ResourceClaim` whose socket the arranger connected through, as `namespace/name`."
                       region:
                         type: string
                         description: "The region that shows the claim's windows. Empty while no region shows them."
                       pods:
                         type: array
-                        description: "The pods that hold the claim, each as namespace/name. The arranger is a process in one of them. The compositor cannot name the container, because it reads the client's pid from the socket, and the kernel reports pid 0 for a client in another pod's pid namespace."
+                        description: "The pods that hold the claim, each as `namespace/name`. The arranger is a process in one of them. The compositor cannot tell which container, because it reads the client's pid from the socket, and the kernel reports pid 0 for a client in another pod's pid namespace."
                         items:
                           type: string
                         x-kubernetes-list-type: atomic
                       pid:
                         type: integer
-                        description: "The arranger's pid in the compositor's pid namespace. Absent for a client in another pod, which is every workload."
+                        description: "The arranger's pid in the compositor's pid namespace. Absent for a client in another pod, which includes every workload."
                       arrangement:
                         type: string
-                        description: "The name of the arrangement the arranger committed last. Absent before its first commit. The compositor replaces each character that is not printable with an underscore, and reports an empty name as a hyphen."
+                        description: "The name of the last arrangement that the arranger committed. Absent before its first commit. The compositor replaces each non-printable character with an underscore, and reports an empty name as a hyphen."
                       duplicateAppIDs:
                         type: array
-                        description: "Each app_id that two or more of the claim's windows carry. An arrangement places every window whose app_id an entry names, so these windows always move together."
+                        description: "Each `app_id` that two or more of the claim's windows have. An arrangement places every window with the `app_id` that it names, so these windows always move together."
                         items:
                           type: string
                         x-kubernetes-list-type: atomic
                 conditions:
                   type: array
-                  description: "Connected reports the panel on its connector. It turns False only after the connector has read no panel for 5 seconds, so a drop of hot plug detect shorter than that, such as an A/V receiver in standby makes, changes no field of status and posts no Event. status.surfaces, status.layout, and status.arrangers are empty while it is False, because the compositor shows no window on a connector with no panel. Responsive reports the panel answering DDC/CI, with the reason NoDDCReply when it does not. LayoutResolved is False with the reason LayoutNotFound while spec.layout names a Layout the cluster does not hold, and the screen shows the default arrangement until it does. CompositorServing reports the compositor behind the screen. It is False with the reason Down while the compositor's socket refuses the connect, and with the reason Hung while the socket accepts and the compositor answers nothing; the message is the socket's own words. status.surfaces, status.layout, and status.arrangers are empty for as long as it is False. PhysicalAddressCurrent is True with the reason ReadFromEDID while the connector's current EDID serves status.physicalAddress. It is False with the reason Retained while the connector serves no EDID for this monitor or serves no valid address, and status.physicalAddress then holds the last valid address; the message names the time the connector stopped serving it. It is False with the reason Ambiguous while two connected connectors on this node serve this monitor with different addresses; the message names both connectors and both addresses, and status.physicalAddress keeps the value it held before they disagreed. The condition is absent while the monitor has never served a valid address."
+                  description: "`Connected` is True while a panel is connected to the connector. It turns False only after the connector has had no panel for 5 seconds, so a shorter loss of the hot plug signal, such as an A/V receiver causes when it goes to standby, changes no field of `status` and posts no `Event`. `Responsive` is True while the panel responds to DDC/CI, and False with the reason `NoDDCReply` when it does not. `LayoutResolved` is False with the reason `LayoutNotFound` while `spec.layout` names a `Layout` that does not exist, and the screen shows the default arrangement until the `Layout` exists. `CompositorServing` is False with the reason `Down` while the compositor's socket refuses connections, and with the reason `Hung` while the socket accepts connections and the compositor does not respond. Its message is the error that the connection returned. While `Connected` or `CompositorServing` is False, `status.surfaces`, `status.layout`, and `status.arrangers` are empty, because the compositor shows no window. `PhysicalAddressCurrent` is True with the reason `ReadFromEDID` while the EDID that the connector serves now gives `status.physicalAddress`. It is False with the reason `Retained` while the connector serves no EDID for this monitor or no valid address in it, and `status.physicalAddress` then holds the last valid address. The message gives the time that the connector stopped serving it. It is False with the reason `Ambiguous` while two connected connectors on this node serve this monitor with different addresses. The message names both connectors and both addresses, and `status.physicalAddress` keeps the value it had before they differed. The condition is absent until the monitor first serves a valid address."
                   items:
                     type: object
                     required: [type, status, reason, lastTransitionTime]

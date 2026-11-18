@@ -1,100 +1,94 @@
 package main
 
-// Every reason a Display's conditions and Events carry. A reason is
-// part of the published interface: a person reads it in `kubectl
-// describe display`, and a controller such as media-operator acts on
-// it. So the reasons are in one file, and the troubleshooting guide
-// names each one.
+// The reasons of a Display's conditions and Events. They are part of
+// the published interface: `kubectl describe display` shows them, and
+// media-operator reads them. They are in one file so that the
+// troubleshooting guide can list each one.
 //
-// Each condition transition posts one Event with the condition's own
-// reason and message (displayStore.announce). The Events that mark an
-// action the operator took, and change no condition, have reasons of
-// their own at the end of this file.
+// displayStore.announce posts one Event for each condition transition,
+// with the condition's reason and message. The reasons at the end of
+// this file are for Events of actions that change no condition.
 
 import "github.com/liken-sh/liken/kubernetes/conditions"
 
-// The reasons of the Connected condition. PanelAttached is a panel on
-// the Display's connector. NoPanel is a connector that serves no EDID
-// for this monitor. media-operator reads NoPanel as a screen that is
-// away.
+// Reasons of the Connected condition. NoPanel means the connector
+// serves no EDID of this Display's monitor. media-operator reports it
+// on a Player as PanelAway.
 const (
 	PanelAttachedReason = "PanelAttached"
 	NoPanelReason       = "NoPanel"
 )
 
-// The reasons of the Responsive condition: the panel answers DDC/CI,
-// or it does not. A panel in standby does not answer, so NoDDCReply is
-// often an expected state.
+// Reasons of the Responsive condition, which is True when the panel
+// replies to DDC/CI. A panel in standby does not reply, so NoDDCReply
+// is often expected.
 const (
 	AnswersDDCReason = "AnswersDDC"
 	NoDDCReplyReason = "NoDDCReply"
 )
 
-// The reasons of the CompositorServing condition. Serving is a
-// compositor that answered the probe. Down is a socket that refuses
-// the connect or ends under the probe. Hung is a socket that accepts
-// and answers nothing.
+// Reasons of the CompositorServing condition. Down means the socket
+// refused the probe's connection or closed during the probe. Hung
+// means the socket accepted the connection and the compositor never
+// replied.
 const (
 	CompositorServingReason = "Serving"
 	CompositorDownReason    = "Down"
 	CompositorHungReason    = "Hung"
 )
 
-// The reasons of the PhysicalAddressCurrent condition. ReadFromEDID
-// is an address the connector's current EDID serves. Retained is the
-// last valid address, kept while the connector serves no EDID for
-// this monitor or serves no valid address in it. Ambiguous is a
-// monitor that two connectors on this node both serve, with different
-// addresses.
+// Reasons of the PhysicalAddressCurrent condition. Retained means
+// status.physicalAddress keeps its last valid value, because the
+// connector serves no EDID of this monitor or no valid address in it.
+// Ambiguous means two connectors on this node serve the same monitor
+// with different addresses.
 const (
 	ReadFromEDIDReason = "ReadFromEDID"
 	RetainedReason     = "Retained"
 	AmbiguousReason    = "Ambiguous"
 )
 
-// The reasons of the LayoutResolved condition. LayoutNotFound is a
-// name that resolves to nothing, and the screen shows the default
-// layout in that state, so the condition is the only report of the
-// name that failed. When the condition is met, the screen shows the
-// Layout it names (LayoutFound), or it names none and shows the
-// default (DefaultLayout). They are two states of one condition,
-// because a reader asking why a screen is arranged as it is needs to
-// know which.
+// Reasons of the LayoutResolved condition. It is False with
+// LayoutNotFound when no Layout has the name that the Display gives.
+// The screen then shows the default layout, so this condition is the
+// only report of the wrong name. It is True with LayoutFound when the
+// screen shows the named Layout, and True with DefaultLayout when the
+// Display names no Layout.
 const (
 	LayoutNotFoundReason = "LayoutNotFound"
 	LayoutFoundReason    = "LayoutFound"
 	DefaultLayoutReason  = "DefaultLayout"
 )
 
-// The reasons of the Events that mark an action, not a condition.
+// Reasons of the Events of actions.
 //
-// Captured is a capture of the screen through the API. The Event is
-// the record of who looked at a screen, and when.
+// Captured: someone captured the screen through the API. The Event
+// records who captured it and when.
 //
-// CompositorKilled is a compositor that answered nothing for
-// compositorHungLimit, which the operator ended so its container starts
-// it again. Every screen on the card blanks, so the Event goes on every
-// Display of the node.
+// CompositorKilled: the compositor did not reply for
+// compositorHungLimit, so the operator sent it SIGKILL, and its
+// container starts it again. Every screen on the card goes blank, so
+// the Event is posted on every Display of the node.
 //
-// ModeChanged is a mode write that restarts the compositor. Every
-// screen on the card blanks while the compositor restarts, and the
-// Event names the screen whose mode caused it.
+// ModeChanged: a mode write restarts the compositor, and every screen
+// on the card goes blank. The Event is on the Display whose mode
+// changed.
 //
-// WriteUnconfirmed is a write the device did not confirm, recorded in
-// status.unconfirmed. The operator does not make the write again until
-// spec changes.
+// WriteUnconfirmed: the device did not confirm a write, and
+// status.unconfirmed records it. The operator does not repeat the
+// write until spec changes.
 //
-// PanelStandbyFailed is a panel that did not take the standby that
-// follows the release of its last claim. The operator does not try
-// again, so the panel stays on until a person or a claim turns it off.
+// PanelStandbyFailed: the panel did not go to standby after its last
+// claim was released. The operator does not retry, so the panel stays
+// on until a person or a claim turns it off.
 //
-// ArrangerGranted is a client of a claim that the compositor granted
-// the claim's arranger: from then on it places the claim's surfaces
-// inside the claim's region. ArrangerLost is an arranger whose client
-// disconnected while a pod that holds its claim still runs, which is
-// how a crashed client looks, and the claim's surfaces return to fill
-// the region. ArrangerReleased is an arranger that gave the region up
-// on purpose, or whose client disconnected with its pods.
+// ArrangerGranted: the compositor made a claim's client the arranger
+// of that claim, and the client places the claim's surfaces inside the
+// claim's region. ArrangerLost: the arranger's client disconnected
+// while a pod of the claim still runs, which is how a crashed client
+// looks, and the claim's surfaces fill the region again.
+// ArrangerReleased: the arranger gave up the region, or its client
+// disconnected after the claim's pods stopped.
 const (
 	CapturedReason           = "Captured"
 	CompositorKilledReason   = "CompositorKilled"
@@ -106,13 +100,12 @@ const (
 	ArrangerReleasedReason   = "ArrangerReleased"
 )
 
-// badStatus answers the status of a condition that makes its Event a
-// Warning, or "" when no status of it needs a person. Each condition
-// here is False both in a state a person causes and in a fault, so the
-// reason decides. A missing Layout, a compositor that is down or hung,
-// and two connectors that disagree on an address need a person. A
-// panel unplugged, a panel in standby, and an address kept while a
-// receiver is in standby do not.
+// badStatus returns the status at which the Event of c is a Warning,
+// or "" when its Event is always Normal. A condition can be False because of
+// a fault or because of something a person did, so the reason decides.
+// A missing Layout, a compositor that is down or hung, and two
+// connectors that disagree on an address need a person. An unplugged
+// panel, a panel in standby, and a retained address do not.
 func badStatus(c DisplayCondition) conditions.Status {
 	switch c.Reason {
 	case LayoutNotFoundReason, CompositorDownReason, CompositorHungReason, AmbiguousReason:

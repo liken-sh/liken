@@ -1,11 +1,5 @@
 package main
 
-// The node-wide report of the placement pass: the writes that reach
-// every Display of this node, and not only the Displays of the screens
-// the pass draws. A Display whose monitor is off the wire has no
-// screen, so no screen's report ever writes it, and these writes are
-// what keep its status true.
-
 import (
 	"errors"
 	"fmt"
@@ -14,25 +8,19 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// sweep writes the compositor's answer on every Display of this node.
-// A screen's report covers a Display whose monitor is on the wire, and
-// this covers the rest: a monitor that left is still on this node's
-// card, and the condition reports the compositor that serves that
-// card.
+// sweep writes the CompositorServing condition from the compositor
+// probe on every Display of this node. Each screen's report writes only
+// the Displays of connected monitors, and without the sweep the Display
+// of a disconnected monitor would keep a stale status.
 //
-// A Display whose monitor is off the wire also loses its windows and
-// its arrangement. The compositor destroyed that output, and the
-// module hid each window that was on it, so no window is on that
-// screen and no region is drawn. A Display whose monitor is on the
-// wire keeps both, because its screen's report writes them, and a
-// screen the pass leaves as it is must keep what it shows.
-//
-// The write happens only on a Display whose status differs, so a
-// sweep over current Displays writes nothing.
+// For a disconnected monitor, sweep also clears surfaces, layout, and
+// arrangers, because the compositor destroys the output and the layout
+// module hides each window that was on it. A Display whose status
+// already matches is not written.
 func (p *placementPass) sweep(live compositorLiveness) error {
 	return p.settleEach(func(name string, published DisplayStatus) DisplayStatus {
 		status := published
-		if _, wired := slices.BinarySearch(p.wired, name); !wired {
+		if _, connected := slices.BinarySearch(p.connectedDisplays, name); !connected {
 			status.Surfaces = nil
 			status.Layout = nil
 			status.Arrangers = nil
@@ -42,9 +30,9 @@ func (p *placementPass) sweep(live compositorLiveness) error {
 	})
 }
 
-// wiredDisplays names the Display of each monitor on the wire, sorted,
-// the way the Display controller names it.
-func wiredDisplays(outputs []Output) []string {
+// connectedDisplayNames returns the sorted Display names of the connected
+// monitors.
+func connectedDisplayNames(outputs []Output) []string {
 	var names []string
 	for _, output := range outputs {
 		if output.Connected {
@@ -55,9 +43,10 @@ func wiredDisplays(outputs []Output) []string {
 	return names
 }
 
-// settleEach writes compose's status on every Display of this node.
-// A retry after a conflict composes again from the fresh copy, and
-// leaves a Display that another node took since.
+// settleEach writes the status that compose returns on every Display
+// whose status.node is this node. On a write conflict it calls compose
+// again on the fresh copy, and skips the Display if its status.node has
+// changed to another node.
 func (p *placementPass) settleEach(compose func(name string, published DisplayStatus) DisplayStatus) error {
 	displays, err := p.displays.list()
 	if err != nil {
@@ -73,7 +62,7 @@ func (p *placementPass) settleEach(compose func(name string, published DisplaySt
 			return compose(name, published), published.Node == p.node
 		}
 		if err := p.displays.settleStatus(&display, ours); err != nil && !errors.Is(err, apiclient.ErrNotFound) {
-			failures = append(failures, fmt.Errorf("%s: %w", display.Metadata.Name, err))
+			failures = append(failures, fmt.Errorf("settling the status of Display %s: %w", display.Metadata.Name, err))
 		}
 	}
 	return errors.Join(failures...)

@@ -1,12 +1,5 @@
 package main
 
-// This file is one capture from end to end: the frames out of the
-// compositor, the crop, the encoder, and the body. The first frame is
-// taken before the status line goes out, because the compositor's
-// answer to the first capture request is where a denial arrives, and
-// a denial after a 200 has no status left to carry it. Taking it
-// first turns unauthorized into a 500 the caller can read.
-
 import (
 	"bufio"
 	"context"
@@ -17,29 +10,23 @@ import (
 	"time"
 )
 
-// The buffer between the frame writer and the encoder's pipe. A crop
-// is written one row at a time, and 256 KiB holds many rows of a 4K
-// frame, so one row is never a write of its own.
+// frameWriterBuffer buffers the encoder's stdin pipe, because
+// writeCropped writes one row at a time and a row of a 4K frame is
+// 15 KiB.
 const frameWriterBuffer = 256 << 10
 
-// The order of a capture: the socket is opened, the first frame
-// proves the compositor admits this client, the numbers are read,
-// the knobs are checked against them, the encoder starts, and the
-// status goes out. All of it happens within one frame of the instant
-// the request was accepted, whatever t= asks for, because that
-// instant is the zero every time code in this API is measured from
-// and the response headers are how a caller reads it. media-api
-// composes this stream with sound by comparing the two headers'
-// arrival, so headers that waited out a lead-in would read as a
-// clock difference and pull the composed stream out of sync by the
-// length of the lead-in.
+// stream serves one capture. It takes the first frame before it sends
+// the status line, because the compositor refuses an unauthorized
+// client only when it responds to the first capture request, and a refusal
+// after the 200 can no longer be a problem document.
 //
-// A refusal after a 200 has nowhere to go, which is why the denial
-// check is the first frame and why it comes before the status. An
-// encoder that fails later cannot become a problem document: the
-// response ends without its terminating chunk instead, so a caller
-// reads a truncated transfer rather than a whole picture that is
-// not whole.
+// stream sends the status line as soon as the encoder starts, and
+// does not wait for the t= begin. The request's arrival is the zero of
+// every time code, and media-api takes the moment the headers arrive
+// as that zero when it combines this stream with sound. Headers sent
+// late would shift the picture against the sound by the delay.
+//
+// A failure after the 200 ends the response with endTruncated.
 func (s *captureServer) stream(w http.ResponseWriter, r *http.Request,
 	connector, mediaType string, chosen captureSelection) *fault {
 	origin := s.now()
@@ -53,7 +40,7 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request,
 	if still {
 		session.onRetry(captureReallocates)
 	} else {
-		session.onRetry(captureEndsTheFrame)
+		session.onRetry(captureEndsOnChange)
 	}
 
 	first, err := session.frame()
@@ -67,9 +54,8 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request,
 		return f
 	}
 	crop := chosen.resolve(screen.Width, screen.Height)
-	// width= and height= scale the region down after the crop, so a
-	// value above the region the pipe carries is the same refusal a
-	// value above the screen is.
+	// width= and height= scale the cropped region, and validate
+	// checks them only against the whole screen.
 	switch {
 	case chosen.Width > crop.W:
 		return badRequest(fmt.Sprintf("width=%d over the region's %d", chosen.Width, crop.W))
@@ -91,10 +77,8 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request,
 	plan := s.plan(mediaType, screen, crop, chosen)
 	served := captureContentType(mediaType, plan.encodedWidth(), plan.encodedHeight(), plan.framerate)
 
-	// The feed runs under a context of its own, so a failure that
-	// ends the request can end it too. A still that was asked to wait
-	// out a t= begin is sleeping on that context, and an encoder that
-	// died at once must not wait a minute for the sleeper.
+	// feed waits for the t= begin on its own context, so that stream
+	// can cancel the wait when the encoder exits early.
 	feeding, endFeed := context.WithCancel(r.Context())
 	defer endFeed()
 	frames := make(chan error, 1)
@@ -103,10 +87,6 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request,
 	}()
 
 	written := copyFlushing(w, served, encoder.body)
-	// The encoder's body has ended, so nothing reads the frames any
-	// more. A feed that is waiting out a t= begin is waiting on this
-	// context, and an encoder that died before the beginning must not
-	// hold the request until the sleeper wakes.
 	endFeed()
 	feedErr := <-frames
 	s.readings.wrote(screenAspect, mediaType, written)
@@ -121,10 +101,8 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request,
 		s.endTruncated(w, r, connector, screen, err)
 		return nil
 	}
-	// An encoder that ended cleanly and wrote nothing is the graph
-	// the node's driver cannot build. The status is already on the
-	// wire, so the body ends without its terminating chunk and the
-	// log carries ffmpeg's own last line.
+	// An encoder that exits with status 0 and writes no bytes failed
+	// too, and the log gets ffmpeg's last stderr line.
 	if written == 0 && r.Context().Err() == nil {
 		s.readings.failed(encoderReason)
 		s.endTruncated(w, r, connector, screen, encoder.failure())
@@ -132,12 +110,11 @@ func (s *captureServer) stream(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
-// A response whose status line is already on the wire cannot become a
-// problem document, so the cause goes to the log and the body ends
-// without its terminating chunk. A caller then reads an unexpected
-// end of file, which is the one thing that tells a truncated capture
-// from a complete one. A caller that hung up first gets neither: the
-// connection is already gone.
+// endTruncated ends a response whose status line is already sent. It
+// logs the cause and aborts the handler, so net/http closes the
+// connection without the terminating chunk. The caller reads an
+// unexpected EOF and cannot mistake a damaged capture for a complete
+// one. When the caller has already disconnected, it only logs.
 func (s *captureServer) endTruncated(w http.ResponseWriter, r *http.Request,
 	connector string, screen captureScreen, err error) {
 	if r.Context().Err() != nil {
@@ -149,11 +126,8 @@ func (s *captureServer) endTruncated(w http.ResponseWriter, r *http.Request,
 	panic(http.ErrAbortHandler)
 }
 
-// The plan one request becomes: the cropped frame's own size, the
-// pixel format the compositor reported, the caller's knobs, and the
-// render node and graph this node encodes on. The encoder scales a
-// clip wider than 1080p down unless width= or height= asks for
-// another size.
+// plan sizes the encoder for the crop, not the screen, because the
+// pipe carries only the crop.
 func (s *captureServer) plan(mediaType string, screen captureScreen, crop cropRect, chosen captureSelection) encodePlan {
 	return encodePlan{
 		mediaType:   mediaType,
@@ -169,10 +143,9 @@ func (s *captureServer) plan(mediaType string, screen captureScreen, crop cropRe
 	}
 }
 
-// The graph this node converts frames with, as the info document
-// names it. A reader of that document can tell a node that converts
-// on the GPU from one that pays for it on the CPU, which is the
-// difference between 0.08 and 0.32 cores at 1080p.
+// conversionName returns the conversion graph for the info document,
+// so a reader can tell whether this node converts frames on the GPU or
+// the CPU.
 func (s *captureServer) conversionName() string {
 	if s.usesSoftwareConversion() {
 		return softwareGraph
@@ -186,11 +159,10 @@ func (s *captureServer) usesSoftwareConversion() bool {
 	return s.software
 }
 
-// The frames a request writes. The first one is already in hand from
-// the proof. On a clip, the rest come at the rate the caller asked
-// for, one capture request per tick, and every frame before the t=
-// begin is taken and dropped, so frame zero of the body is origin
-// plus begin.
+// feed writes the request's frames to the encoder, starting with
+// first, which stream already took. A clip takes one frame per tick of
+// the framerate and drops every frame before the t= begin, so frame
+// zero of the body is the frame at origin plus the begin.
 func (s *captureServer) feed(ctx context.Context, session *captureSession, encoder *encoder,
 	first []byte, chosen captureSelection, origin time.Time, still bool, mediaType string) error {
 	defer func() { _ = encoder.frames.Close() }()
@@ -199,10 +171,6 @@ func (s *captureServer) feed(ctx context.Context, session *captureSession, encod
 
 	if still {
 		frame := first
-		// A still with a t= begin waits, then takes its one frame at
-		// that instant. That is the frame a capture that took and
-		// dropped every frame before it would have kept, at the cost
-		// of no repaints in between.
 		if wait := time.Until(begins); wait > 0 {
 			select {
 			case <-ctx.Done():
@@ -216,10 +184,7 @@ func (s *captureServer) feed(ctx context.Context, session *captureSession, encod
 			s.readings.framed(mediaType)
 			frame = taken
 		}
-		// The numbers are read again after the frame, because a still
-		// that met a retry reallocated to a size the crop was never
-		// cut for.
-		stride, crop := cutOf(session, chosen)
+		stride, crop := strideAndCrop(session, chosen)
 		return writeCropped(writer, frame, stride, crop)
 	}
 
@@ -236,8 +201,8 @@ func (s *captureServer) feed(ctx context.Context, session *captureSession, encod
 			return nil
 		}
 		if !now.Before(begins) {
-			stride, cut := cutOf(session, chosen)
-			if err := writeCropped(writer, frame, stride, cut); err != nil {
+			stride, crop := strideAndCrop(session, chosen)
+			if err := writeCropped(writer, frame, stride, crop); err != nil {
 				return nil
 			}
 		}
@@ -260,10 +225,10 @@ func (s *captureServer) feed(ctx context.Context, session *captureSession, encod
 	}
 }
 
-// The stride and the rectangle are the frame's own, read after every
-// frame, because a compositor that asked for a retry answers the
-// next frame at another size.
-func cutOf(session *captureSession, chosen captureSelection) (int, cropRect) {
+// strideAndCrop returns the stride and crop for the frame the session
+// took last. Call it after each frame, because a still's buffer can
+// change size when the compositor sends a retry.
+func strideAndCrop(session *captureSession, chosen captureSelection) (int, cropRect) {
 	screen := session.screen()
 	return screen.Width * capturePixelBytes, chosen.resolve(screen.Width, screen.Height)
 }
@@ -272,9 +237,9 @@ func seconds(value float64) time.Duration {
 	return time.Duration(value * float64(time.Second))
 }
 
-// The pipe carries the region and nothing else. The crop is cut in
-// this write, one row at a time, so it costs one copy the encoder
-// would have made anyway and no crop filter.
+// writeCropped writes only the crop region of the frame to the
+// encoder, one row at a time, so the ffmpeg command needs no crop
+// filter.
 func writeCropped(to *bufio.Writer, frame []byte, stride int, crop cropRect) error {
 	for y := crop.Y; y < crop.Y+crop.H; y++ {
 		start := y*stride + crop.X*capturePixelBytes
@@ -289,13 +254,10 @@ func writeCropped(to *bufio.Writer, frame []byte, stride int, crop cropRect) err
 	return to.Flush()
 }
 
-// copyFlushing sends the status line and the headers at once, then
-// copies the encoder's output. The type is set here, beside the write
-// of the body, and nosniff tells a browser to keep that type: the
-// bytes are an image or a video and never a page to render.
-//
-// The copy flushes after every block, so a still leaves the moment
-// the encoder writes it and a clip arrives as it is made.
+// copyFlushing sends the headers at once, then copies the encoder's
+// output and flushes after each read, so a clip reaches the caller as
+// it is encoded. It returns the number of body bytes written. nosniff
+// keeps a browser from treating the body as a page.
 func copyFlushing(w http.ResponseWriter, served string, body io.Reader) int {
 	w.Header().Set("Content-Type", served)
 	w.Header().Set("X-Content-Type-Options", "nosniff")

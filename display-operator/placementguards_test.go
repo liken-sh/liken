@@ -1,9 +1,5 @@
 package main
 
-// These tests cover what one pass refuses to do: a screen it could
-// not read whole, a record or a claim the pass could not read, and a
-// commit the module refused. Each of them leaves the screen as it is.
-
 import (
 	"fmt"
 	"os"
@@ -13,27 +9,27 @@ import (
 	"time"
 )
 
-// A pass with no module serving does nothing. The module keeps the
-// last layout it committed while nothing is connected to it, and the
-// connection that follows reports every surface again.
-func TestAPassWithNoModuleServingPlacesNothing(t *testing.T) {
+// The module keeps its last committed layout while it is disconnected,
+// and reports every surface again when it connects, so a pass does
+// nothing while no module is connected.
+func TestAPassWithNoModuleConnectedPlacesNothing(t *testing.T) {
 	fixture := newPlacementFixture(t)
 	fixture.screen(labMonitor(), DisplaySpec{})
 	pass := newPlacementPass(fixture.client, "liken-1", servingSocket(t, t.TempDir()),
 		newLayoutLink(t.TempDir()+"/layout.sock"), newClaimIndex(fixture.client), fixture.outputs)
 
 	if err := pass.pass(); err != nil {
-		t.Fatalf("a pass with no module serving failed: %v", err)
+		t.Fatalf("running a pass with no module connected: %v", err)
 	}
 	if status := fixture.status(labMonitor()); status.Conditions != nil {
-		t.Errorf("a pass with no module serving wrote %+v", status.Conditions)
+		t.Errorf("a pass with no module connected wrote the conditions %+v, want none", status.Conditions)
 	}
 }
 
-// A screen keeps the arrangement it holds while the API server cannot
-// answer for its Layout. A pass that read the default there would
-// rearrange every surface because one request failed.
-func TestALayoutTheAPIServerCannotAnswerForChangesNothing(t *testing.T) {
+// A failed read of a screen's Layout leaves the screen as it is. If
+// the pass fell back to the default layout, one failed request would
+// rearrange every surface.
+func TestAFailedLayoutReadChangesNothing(t *testing.T) {
 	fixture := newPlacementFixture(t)
 	fixture.layout("front-desk", LayoutRegion{
 		Name:     "notices",
@@ -41,25 +37,25 @@ func TestALayoutTheAPIServerCannotAnswerForChangesNothing(t *testing.T) {
 		Selector: LabelSelector{},
 	})
 	fixture.screen(labMonitor(), DisplaySpec{Layout: "front-desk"})
-	wall := fixture.hold("notices", "wall", noticesClaimUID, "HDMI-A-1", "wall-0")
-	fixture.pod("notices", "wall-0", map[string]string{"panel": "notices"})
-	fixture.surface(wall, 1920, 1080)
+	board := fixture.prepareClaim("notices", "board", noticesClaimUID, "HDMI-A-1", "board-0")
+	fixture.pod("notices", "board-0", map[string]string{"panel": "notices"})
+	fixture.surface(board, 1920, 1080)
 	fixture.refuse[LayoutsPath+"/front-desk"] = 1
 
 	if err := fixture.pass.pass(); err == nil {
-		t.Fatal("a pass whose Layout read failed reported no error")
+		t.Fatal("a pass whose Layout read was refused returned no error, want one")
 	}
 	if sent := fixture.sent(); len(sent) != 0 {
-		t.Errorf("the pass sent %q, and it read no layout", sent)
+		t.Errorf("the pass sent %q, want nothing because it read no layout", sent)
 	}
 	if fixture.status(labMonitor()).Layout != nil {
-		t.Errorf("the pass reported %+v, and it read no layout", fixture.status(labMonitor()).Layout)
+		t.Errorf("the pass reported the layout %+v, want none because it read no layout", fixture.status(labMonitor()).Layout)
 	}
 }
 
-// A region with no matching surface is empty and is reported, and a
-// screen with nothing to show sends no order: the protocol has no
-// line for an order that names no surface.
+// A region with no matching surface is reported as empty. A screen
+// where no surface is placed gets no order, because the protocol has
+// no order message with an empty list.
 func TestARegionThatMatchesNothingIsReportedEmpty(t *testing.T) {
 	fixture := newPlacementFixture(t)
 	fixture.layout("front-desk", LayoutRegion{
@@ -68,14 +64,14 @@ func TestARegionThatMatchesNothingIsReportedEmpty(t *testing.T) {
 		Selector: LabelSelector{MatchLabels: map[string]string{"panel": "notices"}},
 	})
 	fixture.screen(labMonitor(), DisplaySpec{Layout: "front-desk"})
-	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
-	fixture.pod("living-room", "film-0", map[string]string{"media.liken.sh/focus": "true"})
+	film := fixture.prepareClaim("media", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	fixture.pod("media", "film-0", map[string]string{"media.liken.sh/focus": "true"})
 	fixture.surface(film, 1920, 1080)
 
 	fixture.run()
 
 	if sent := fixture.sent(); len(sent) != 0 {
-		t.Errorf("the pass sent %q, and no region took a surface", sent)
+		t.Errorf("the pass sent %q, want nothing because no region placed a surface", sent)
 	}
 	status := fixture.status(labMonitor())
 	want := []DisplayRegion{{Name: "notices", Surface: emptyRegion}}
@@ -87,27 +83,25 @@ func TestARegionThatMatchesNothingIsReportedEmpty(t *testing.T) {
 	}
 }
 
-// A surface that goes takes its place in the order with it. Nothing
-// is hidden, because the surface the module reported gone is already
-// off the screen.
-func TestASurfaceThatGoesLeavesTheOrderAndTheStatus(t *testing.T) {
+// No hide is sent for a surface that the module reports gone, because
+// it is already off the screen.
+func TestAGoneSurfaceLeavesTheOrderAndTheStatus(t *testing.T) {
 	fixture := newPlacementFixture(t)
 	fixture.screen(labMonitor(), DisplaySpec{})
-	idle := fixture.hold("living-room", "idle", idleClaimUID, "HDMI-A-1", "idle-0")
-	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
-	fixture.pod("living-room", "idle-0", nil)
-	fixture.pod("living-room", "film-0", nil)
+	idle := fixture.prepareClaim("media", "idle", idleClaimUID, "HDMI-A-1", "idle-0")
+	film := fixture.prepareClaim("media", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	fixture.pod("media", "idle-0", nil)
+	fixture.pod("media", "film-0", nil)
 	below := fixture.surface(idle, 1920, 1080)
 	above := fixture.surface(film, 1920, 1080)
 	fixture.run()
 	fixture.sent()
 
-	// The film ended and its pod went, so the client took its surface
-	// with it.
+	// The pod ended and its client removed its surface.
 	fixture.module.send(fmt.Sprintf("surface-gone %d", above))
-	waitUntil(t, "the surface goes", func() bool {
-		_, held := fixture.link.state().Surfaces[above]
-		return !held
+	waitUntil(t, "the surface is gone", func() bool {
+		_, reported := fixture.link.state().Surfaces[above]
+		return !reported
 	})
 
 	fixture.run()
@@ -117,14 +111,15 @@ func TestASurfaceThatGoesLeavesTheOrderAndTheStatus(t *testing.T) {
 		"commit",
 	})
 	if surfaces := fixture.status(labMonitor()).Surfaces; len(surfaces) != 1 {
-		t.Errorf("status holds %+v, want the surface that is left", surfaces)
+		t.Errorf("status lists %+v, want the surface that is left", surfaces)
 	}
 }
 
-// A surface on a socket no prepared claim holds belongs to no claim.
-// The claim was given back while its client kept drawing, and the
-// pass reports the socket rather than dropping the surface: a client
-// that is still connected is still on the screen.
+// A surface on a socket that no prepared claim holds comes from a
+// client that kept drawing after its claim was unprepared. The pass
+// returns an error that names the socket, and places the surface like
+// one on the compositor's own socket, because the client is still on
+// the screen.
 func TestASurfaceOnASocketNoClaimHoldsIsReported(t *testing.T) {
 	fixture := newPlacementFixture(t)
 	fixture.screen(labMonitor(), DisplaySpec{})
@@ -132,10 +127,10 @@ func TestASurfaceOnASocketNoClaimHoldsIsReported(t *testing.T) {
 
 	err := fixture.pass.pass()
 	if err == nil {
-		t.Fatal("a surface on an unknown socket reported no error")
+		t.Fatal("a surface on an unknown socket returned no error, want one")
 	}
 	if !strings.Contains(err.Error(), "claim-that-ended") {
-		t.Errorf("the error is %q, and it does not name the socket", err)
+		t.Errorf("the error is %q, want it to name the socket", err)
 	}
 	assertSent(t, fixture.sent(), []string{
 		fmt.Sprintf("place %d HDMI-A-1 0 0 1920 1080 none 0", surface),
@@ -143,70 +138,70 @@ func TestASurfaceOnASocketNoClaimHoldsIsReported(t *testing.T) {
 		"commit",
 	})
 	if claim := fixture.status(labMonitor()).Surfaces[0].Claim; claim != "" {
-		t.Errorf("the surface holds %q, want no claim", claim)
+		t.Errorf("the surface has the claim %q, want none", claim)
 	}
 }
 
-// A screen is rearranged from a whole reading and no other. A claim
-// the API server cannot answer for would leave its surface with no
-// labels, and one request that failed must not take a program off
-// the screen.
-func TestAClaimTheAPIServerCannotAnswerForChangesNothing(t *testing.T) {
+// A failed read of a claim leaves its screen and the screen's status
+// as they are. The surface would have no labels, match no region, and
+// be hidden, so one failed request would remove a program from the
+// screen.
+func TestAFailedClaimReadChangesNothing(t *testing.T) {
 	fixture := newPlacementFixture(t)
-	fixture.layout("living-room", LayoutRegion{
+	fixture.layout("media", LayoutRegion{
 		Name:     "main",
 		Rect:     LayoutRect{Width: 1, Height: 1},
 		Selector: LabelSelector{MatchLabels: map[string]string{"media.liken.sh/focus": "true"}},
 	})
-	fixture.screen(labMonitor(), DisplaySpec{Layout: "living-room"})
-	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
-	fixture.pod("living-room", "film-0", map[string]string{"media.liken.sh/focus": "true"})
+	fixture.screen(labMonitor(), DisplaySpec{Layout: "media"})
+	film := fixture.prepareClaim("media", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	fixture.pod("media", "film-0", map[string]string{"media.liken.sh/focus": "true"})
 	fixture.surface(film, 1920, 1080)
 	fixture.run()
 	fixture.sent()
 	version := fixture.displays[labDisplayName()].Metadata.ResourceVersion
 
-	fixture.refuse["/apis/resource.k8s.io/v1/namespaces/living-room/resourceclaims/film"] = 1
+	fixture.refuse["/apis/resource.k8s.io/v1/namespaces/media/resourceclaims/film"] = 1
 	if err := fixture.pass.pass(); err == nil {
-		t.Fatal("a claim read that failed reported no error")
+		t.Fatal("a pass whose claim read was refused returned no error, want one")
 	}
 
 	if sent := fixture.sent(); len(sent) != 0 {
-		t.Errorf("the pass sent %q, and it could not read the claim", sent)
+		t.Errorf("the pass sent %q, want nothing because the claim read was refused", sent)
 	}
 	if now := fixture.displays[labDisplayName()].Metadata.ResourceVersion; now != version {
-		t.Errorf("the pass wrote the status (%s became %s), and it could not read the claim", version, now)
+		t.Errorf("the pass wrote the status (%s became %s), want it unchanged because the claim read was refused", version, now)
 	}
 }
 
-// The record of which claim holds which socket is what turns a
-// surface into a claim. A read of it that failed ends the pass, for
-// the reason a claim that cannot be read does.
-func TestARecordThatCannotBeReadEndsThePass(t *testing.T) {
+// The pass finds each surface's claim from the prepared claims' CDI
+// spec files. When one cannot be read, the pass ends before it sends
+// anything, because every surface would match no region and be hidden.
+func TestACDISpecThatCannotBeReadEndsThePass(t *testing.T) {
 	fixture := newPlacementFixture(t)
 	fixture.screen(labMonitor(), DisplaySpec{})
-	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	film := fixture.prepareClaim("media", "film", filmClaimUID, "HDMI-A-1", "film-0")
 	fixture.surface(film, 1920, 1080)
 	if err := os.WriteFile(cdiSpecPath("half-written"), []byte("{"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the CDI spec: %v", err)
 	}
 
 	if err := fixture.pass.pass(); err == nil {
-		t.Fatal("a record that will not parse reported no error")
+		t.Fatal("a CDI spec that does not parse returned no error, want one")
 	}
 	if sent := fixture.sent(); len(sent) != 0 {
-		t.Errorf("the pass sent %q, and it read no record", sent)
+		t.Errorf("the pass sent %q, want nothing because it read no CDI spec", sent)
 	}
 }
 
-// A commit the module refuses leaves nothing on the screen, so the
-// pass forgets what it sent and the next pass states all of it again.
-func TestACommitTheModuleRefusesIsStatedAgain(t *testing.T) {
+// A commit that the module refuses changes nothing on the screen, so
+// the next pass sends everything again.
+func TestACommitTheModuleRefusesIsSentAgain(t *testing.T) {
 	fixture := newPlacementBench(t,
 		map[string]string{"commit": "the compositor is not running its event loop"})
 	fixture.screen(labMonitor(), DisplaySpec{})
-	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
-	fixture.pod("living-room", "film-0", nil)
+	film := fixture.prepareClaim("media", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	fixture.pod("media", "film-0", nil)
 	surface := fixture.surface(film, 1920, 1080)
 
 	batch := []string{
@@ -215,19 +210,19 @@ func TestACommitTheModuleRefusesIsStatedAgain(t *testing.T) {
 		"commit",
 	}
 	if err := fixture.pass.pass(); err == nil {
-		t.Fatal("a refused commit reported no error")
+		t.Fatal("a pass whose commit the module refused returned no error, want one")
 	}
 	assertSent(t, fixture.sent(), batch)
 
 	if err := fixture.pass.pass(); err == nil {
-		t.Fatal("a refused commit reported no error")
+		t.Fatal("a pass whose commit the module refused returned no error, want one")
 	}
 	assertSent(t, fixture.sent(), batch)
 }
 
 func TestTheRectangleIsTheFractionOfTheOutputsLogicalSize(t *testing.T) {
 	output := layoutOutput{Connector: "HDMI-A-1", Width: 1920, Height: 1080, Scale: 2}
-	for _, drill := range []struct {
+	for _, test := range []struct {
 		name     string
 		fraction LayoutRect
 		want     rect
@@ -239,24 +234,24 @@ func TestTheRectangleIsTheFractionOfTheOutputsLogicalSize(t *testing.T) {
 			LayoutRect{Left: 0.7, Width: 0.3, Height: 0.6},
 			rect{X: 1344, W: 576, H: 648},
 		},
-		// A third of 1920 is 640, and a third of 1080 is 360: both
-		// round from a fraction no decimal states exactly.
+		// 1.0/3 is not exact in floating point, so the pixels must
+		// round to 640 and 360.
 		{
 			"a third of each side",
 			LayoutRect{Left: 1.0 / 3, Top: 1.0 / 3, Width: 1.0 / 3, Height: 1.0 / 3},
 			rect{X: 640, Y: 360, W: 640, H: 360},
 		},
 	} {
-		t.Run(drill.name, func(t *testing.T) {
-			if got := logicalRect(drill.fraction, output); got != drill.want {
-				t.Errorf("logicalRect(%+v) = %+v, want %+v", drill.fraction, got, drill.want)
+		t.Run(test.name, func(t *testing.T) {
+			if got := logicalRect(test.fraction, output); got != test.want {
+				t.Errorf("logicalRect(%+v) = %+v, want %+v", test.fraction, got, test.want)
 			}
 		})
 	}
 }
 
-func TestTheTransitionOnePlacementStates(t *testing.T) {
-	for _, drill := range []struct {
+func TestEnterTransition(t *testing.T) {
+	for _, test := range []struct {
 		name         string
 		enter        LayoutTransitionHalf
 		placed       bool
@@ -272,24 +267,23 @@ func TestTheTransitionOnePlacementStates(t *testing.T) {
 			"a fade on a surface that moved",
 			LayoutTransitionHalf{Kind: transitionFade, Milliseconds: 300}, true, transitionMove, 300,
 		},
-		// The module refuses a fade or a move over zero milliseconds,
-		// and a region that states a kind and no duration means an
-		// entrance with no animation.
+		// The module refuses a fade or a move of zero milliseconds, so a
+		// region with a kind and no duration enters with no animation.
 		{"a fade with no duration", LayoutTransitionHalf{Kind: transitionFade}, false, transitionNone, 0},
 		{"a move with no duration", LayoutTransitionHalf{Kind: transitionFade}, true, transitionNone, 0},
 	} {
-		t.Run(drill.name, func(t *testing.T) {
-			got, milliseconds := enterTransition(drill.enter, drill.placed)
-			if got != drill.want || milliseconds != drill.milliseconds {
+		t.Run(test.name, func(t *testing.T) {
+			got, milliseconds := enterTransition(test.enter, test.placed)
+			if got != test.want || milliseconds != test.milliseconds {
 				t.Errorf("enterTransition(%+v, %v) = %q, %d; want %q, %d",
-					drill.enter, drill.placed, got, milliseconds, drill.want, drill.milliseconds)
+					test.enter, test.placed, got, milliseconds, test.want, test.milliseconds)
 			}
 		})
 	}
 }
 
-func TestTheTransitionOneHideStates(t *testing.T) {
-	for _, drill := range []struct {
+func TestExitTransition(t *testing.T) {
+	for _, test := range []struct {
 		name         string
 		exit         LayoutTransitionHalf
 		want         string
@@ -303,18 +297,18 @@ func TestTheTransitionOneHideStates(t *testing.T) {
 		},
 		{"a fade with no duration", LayoutTransitionHalf{Kind: transitionFade}, transitionNone, 0},
 	} {
-		t.Run(drill.name, func(t *testing.T) {
-			got, milliseconds := exitTransition(drill.exit)
-			if got != drill.want || milliseconds != drill.milliseconds {
+		t.Run(test.name, func(t *testing.T) {
+			got, milliseconds := exitTransition(test.exit)
+			if got != test.want || milliseconds != test.milliseconds {
 				t.Errorf("exitTransition(%+v) = %q, %d; want %q, %d",
-					drill.exit, got, milliseconds, drill.want, drill.milliseconds)
+					test.exit, got, milliseconds, test.want, test.milliseconds)
 			}
 		})
 	}
 }
 
-func TestTheSurfaceIDCarriesTheClaimAndTheModulesID(t *testing.T) {
-	for _, drill := range []struct {
+func TestTheSurfaceIDHasTheClaimPrefixAndTheModulesID(t *testing.T) {
+	for _, test := range []struct {
 		claim string
 		id    int
 		want  string
@@ -323,78 +317,75 @@ func TestTheSurfaceIDCarriesTheClaimAndTheModulesID(t *testing.T) {
 		{"short", 7, "short-7"},
 		{"", 7, "shared-7"},
 	} {
-		if got := surfaceID(drill.claim, drill.id); got != drill.want {
-			t.Errorf("surfaceID(%q, %d) = %q, want %q", drill.claim, drill.id, got, drill.want)
+		if got := surfaceID(test.claim, test.id); got != test.want {
+			t.Errorf("surfaceID(%q, %d) = %q, want %q", test.claim, test.id, got, test.want)
 		}
 	}
 }
 
-// A screen whose compositor stopped answering reports no surfaces,
-// because the Display would otherwise name programs that nobody can
-// see.
-func TestAScreenReportsNoSurfacesWhileTheCompositorDoesNotServe(t *testing.T) {
+// While the compositor is down, a Display lists no surfaces, because
+// nobody can see those programs.
+func TestAScreenReportsNoSurfacesWhileTheCompositorIsDown(t *testing.T) {
 	cases := []struct {
 		name   string
 		live   compositorLiveness
 		reason string
 	}{
 		{
-			name:   "a socket nothing answers on",
+			name:   "a socket that refuses connections",
 			live:   compositorLiveness{reason: CompositorDownReason, detail: "connect: connection refused"},
 			reason: CompositorDownReason,
 		},
 		{
-			name:   "a compositor that accepts and never answers",
+			name:   "a compositor that accepts and never responds",
 			live:   compositorLiveness{reason: CompositorHungReason, detail: "i/o timeout"},
 			reason: CompositorHungReason,
 		},
 	}
-	for _, drill := range cases {
-		t.Run(drill.name, func(t *testing.T) {
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
 			fixture := newPlacementFixture(t)
 			fixture.screen(labMonitor(), DisplaySpec{})
-			film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
-			fixture.pod("living-room", "film-0", nil)
+			film := fixture.prepareClaim("media", "film", filmClaimUID, "HDMI-A-1", "film-0")
+			fixture.pod("media", "film-0", nil)
 			fixture.surface(film, 1920, 1080)
 			fixture.run()
 			fixture.sent()
 			if len(fixture.status(labMonitor()).Surfaces) != 1 {
-				t.Fatal("the screen reported no surface while the compositor served")
+				t.Fatal("the screen reports no surface while the compositor is up, want one")
 			}
 
-			fixture.probes(drill.live)
+			fixture.probes(test.live)
 			fixture.run()
 
 			status := fixture.status(labMonitor())
 			if status.Surfaces != nil {
-				t.Errorf("the screen reports %+v under a compositor that serves nobody", status.Surfaces)
+				t.Errorf("the screen reports %+v while the compositor is down", status.Surfaces)
 			}
 			if status.Layout != nil {
-				t.Errorf("the screen reports the layout %+v under a compositor that serves nobody", status.Layout)
+				t.Errorf("the screen reports the layout %+v while the compositor is down", status.Layout)
 			}
 			condition := conditionByType(status, CompositorServingCondition)
-			if condition.Status != conditionFalse || condition.Reason != drill.reason {
+			if condition.Status != conditionFalse || condition.Reason != test.reason {
 				t.Errorf("%s is %s/%s, want %s/%s", CompositorServingCondition,
-					condition.Status, condition.Reason, conditionFalse, drill.reason)
+					condition.Status, condition.Reason, conditionFalse, test.reason)
 			}
-			if !strings.Contains(condition.Message, drill.live.detail) {
-				t.Errorf("the condition says %q, and it drops the socket's own words %q",
-					condition.Message, drill.live.detail)
+			if !strings.Contains(condition.Message, test.live.detail) {
+				t.Errorf("the condition message %q does not contain the probe's error %q",
+					condition.Message, test.live.detail)
 			}
 			if sent := fixture.sent(); len(sent) != 0 {
-				t.Errorf("the pass sent %q to a compositor that serves nobody", sent)
+				t.Errorf("the pass sent %q while the compositor is down", sent)
 			}
 		})
 	}
 }
 
-// The condition reports the compositor of every screen on the node,
-// and its lastTransitionTime moves only when the answer changes.
-func TestTheCompositorConditionMovesItsTimeOnlyOnAChange(t *testing.T) {
+func TestTheCompositorConditionTimeChangesOnlyOnATransition(t *testing.T) {
 	fixture := newPlacementFixture(t)
 	fixture.screen(labMonitor(), DisplaySpec{})
-	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
-	fixture.pod("living-room", "film-0", nil)
+	film := fixture.prepareClaim("media", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	fixture.pod("media", "film-0", nil)
 	fixture.surface(film, 1920, 1080)
 	clock := time.Unix(0, 0).UTC()
 	fixture.pass.now = func() time.Time { return clock }
@@ -403,7 +394,7 @@ func TestTheCompositorConditionMovesItsTimeOnlyOnAChange(t *testing.T) {
 
 	serving := conditionByType(fixture.status(labMonitor()), CompositorServingCondition)
 	if serving.Status != conditionTrue || serving.Reason != CompositorServingReason {
-		t.Fatalf("%s is %s/%s under a compositor that answers",
+		t.Fatalf("%s is %s/%s while the compositor is up",
 			CompositorServingCondition, serving.Status, serving.Reason)
 	}
 
@@ -419,6 +410,6 @@ func TestTheCompositorConditionMovesItsTimeOnlyOnAChange(t *testing.T) {
 
 	down := conditionByType(fixture.status(labMonitor()), CompositorServingCondition)
 	if !down.LastTransitionTime.Equal(clock.UTC().Truncate(time.Second)) {
-		t.Errorf("the condition turned at %s, want %s", down.LastTransitionTime, clock.UTC().Truncate(time.Second))
+		t.Errorf("the condition changed at %s, want %s", down.LastTransitionTime, clock.UTC().Truncate(time.Second))
 	}
 }

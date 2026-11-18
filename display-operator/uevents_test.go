@@ -8,17 +8,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// datagram builds one uevent datagram the way the kernel frames it:
-// "action@devpath", then KEY=VALUE pairs, with a NUL byte after every
-// part.
+// datagram builds a uevent datagram in the kernel's format, with a NUL
+// byte after each part.
 func datagram(header string, pairs ...string) []byte {
 	return []byte(header + "\x00" + strings.Join(pairs, "\x00") + "\x00")
 }
 
-// cardPath is the devpath the kernel attaches a display hotplug to. A
-// monitor plugged into HDMI-A-1 raises the event for the card, not for
-// the connector, which is why the operator re-reads the whole of
-// sysfs.
+// cardPath is a card's devpath. The kernel sends a display hotplug on
+// the card, not on the connector.
 const cardPath = "/devices/pci0000:00/0000:00:02.0/drm/card1"
 
 func TestParseUevent(t *testing.T) {
@@ -33,19 +30,19 @@ func TestParseUevent(t *testing.T) {
 		t.Fatal("the datagram did not parse")
 	}
 	if action != "change" {
-		t.Errorf("action = %q", action)
+		t.Errorf("the action is %q, want \"change\"", action)
 	}
 	if devpath != cardPath {
-		t.Errorf("devpath = %q", devpath)
+		t.Errorf("the devpath is %q, want %q", devpath, cardPath)
 	}
 	if values["SUBSYSTEM"] != "drm" || values["HOTPLUG"] != "1" {
-		t.Errorf("values = %v", values)
+		t.Errorf("the values are %v, want SUBSYSTEM=drm and HOTPLUG=1", values)
 	}
 }
 
-func TestParseUeventRejectsALibudevMessage(t *testing.T) {
-	// libudev's own messages share the socket and start with a magic
-	// prefix instead of "action@devpath".
+func TestParseUeventRejectsLibudevAndEmptyDatagrams(t *testing.T) {
+	// libudev messages arrive on the same socket and start with a magic
+	// prefix, not "action@devpath".
 	if _, _, _, ok := parseUevent([]byte("libudev\x00\xfe\xed\xca\xfe")); ok {
 		t.Fatal("a libudev message parsed as a uevent")
 	}
@@ -76,9 +73,6 @@ func TestDRMEventFrom(t *testing.T) {
 			want:     true,
 		},
 		{
-			// Most of what a running machine puts on this socket is
-			// another subsystem's, and the subsystem test drops all
-			// of it.
 			name:     "another subsystem",
 			datagram: datagram("add@/devices/virtual/input/input5", "SUBSYSTEM=input"),
 			want:     false,
@@ -98,19 +92,16 @@ func TestDRMEventFrom(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			event, ok := drmEventFrom(c.datagram)
 			if ok != c.want {
-				t.Fatalf("drmEventFrom = %+v, %v; want ok = %v", event, ok, c.want)
+				t.Fatalf("drmEventFrom(%q) = %+v, %v, want ok = %v", c.datagram, event, ok, c.want)
 			}
 			if ok && event.DevPath != cardPath {
-				t.Errorf("devpath = %q", event.DevPath)
+				t.Errorf("the devpath is %q, want %q", event.DevPath, cardPath)
 			}
 		})
 	}
 }
 
-// A receive error that left a datagram unread becomes one event, so
-// the loop reads the whole of sysfs at once. EAGAIN and EINTR lose
-// nothing, so they wake nothing.
-func TestAReceiveErrorThatLostADatagramWakesTheLoop(t *testing.T) {
+func TestLostEventsProducesAnEventForErrorsThatDropDatagrams(t *testing.T) {
 	cases := []struct {
 		err   error
 		wakes bool
@@ -128,18 +119,16 @@ func TestAReceiveErrorThatLostADatagramWakesTheLoop(t *testing.T) {
 				t.Fatalf("the error %v woke the loop: %v, want %v", c.err, wakes, c.wakes)
 			}
 			if wakes && !strings.Contains(event.DevPath, c.err.Error()) {
-				t.Errorf("the event says %+v, want it to carry the error %q", event, c.err)
+				t.Errorf("the event is %+v, want it to include the error %q", event, c.err)
 			}
 		})
 	}
 }
 
-// A hotplug event that the kernel attaches to one connector names it
-// by its DRM object id in CONNECTOR, and the event carries that id, so
-// a hold can tell which connector moved.
-func TestAHotplugEventNamesItsConnector(t *testing.T) {
+// A hotplug hold reads Connector to tell which connector changed.
+func TestADrmEventKeepsTheConnectorIdOfAHotplug(t *testing.T) {
 	event, ok := drmEventFrom(datagram("change@"+cardPath, "SUBSYSTEM=drm", "HOTPLUG=1", "CONNECTOR=403"))
 	if !ok || event.Connector != "403" {
-		t.Errorf("drmEventFrom = %+v, %v; want the connector 403", event, ok)
+		t.Errorf("drmEventFrom = %+v, %v, want ok and the connector 403", event, ok)
 	}
 }

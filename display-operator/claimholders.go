@@ -1,24 +1,16 @@
 package main
 
-// The claim behind a surface's socket, and the pods that hold it.
+// This file finds the claim that a surface's socket belongs to, and
+// the pods that hold that claim.
 //
-// A socket is named for its claim's UID and not for its namespace and
-// name, because a claim that is deleted and recreated under the same
-// name is a different grant, and a surface from the old pod must not
-// be read as the new claim's. The API server serves a claim by
-// namespace and name and has no read by UID, so this file keeps the
-// index from UID to both: prepareClaim fills it, because that is the
-// one call that holds all three, and a miss refills it once from the
-// CDI specs on disk and one listing of every claim. In the steady
-// state a pass costs one claim read per claim, and no listing of
-// claims at all. The pods come from the store of this node's pods
-// (objectcache.go).
+// A socket is named for its claim's UID, not for the claim's namespace
+// and name, because a claim that is deleted and created again under
+// the same name is a different allocation. A surface from the old pod
+// must not match the new claim.
 //
-// The labels a region's selector reads are the ones every holder of
-// the claim carries with the same value. Pods that share one claim
-// share one socket, so the compositor cannot tell their surfaces
-// apart, and the labels the pass reports are the ones that are true
-// of every pod that could have drawn it.
+// Several pods can share one claim and one socket, so the compositor
+// cannot tell which pod drew a surface. A region's selector matches
+// only the labels that every pod of the claim has with the same value.
 
 import (
 	"errors"
@@ -30,20 +22,16 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The claim collection across every namespace, which is what the
-// refill below lists. One claim is read from its own namespaced path,
-// in GetResourceClaim.
+// ResourceClaimsPath is the collection of claims in all namespaces.
 const ResourceClaimsPath = "/apis/resource.k8s.io/v1/resourceclaims"
 
-// claimRef is one claim as the API server serves it, by namespace and
-// name.
 type claimRef struct {
 	Namespace string
 	Name      string
 }
 
-// The claim as status.surfaces names it, which is the form a person
-// reads and passes to kubectl.
+// key returns "namespace/name", the form that status.surfaces uses,
+// or an empty string when the claimRef has no name.
 func (r claimRef) key() string {
 	if r.Name == "" {
 		return ""
@@ -51,14 +39,11 @@ func (r claimRef) key() string {
 	return r.Namespace + "/" + r.Name
 }
 
-// claimIndex answers which claim one UID names.
-//
-// The socket a surface arrives on carries the claim's UID, and the
-// API server serves a claim by namespace and name. There is no field
-// selector for a UID, so the operator keeps the pair itself: a
-// prepare records it, and a UID no prepare of this process recorded
-// is filled in by one listing. A pass over the claims this process
-// prepared costs no request at all.
+// claimIndex maps a claim's UID to its namespace and name. The API
+// server reads a claim only by namespace and name, and has no field
+// selector for a UID. So prepareClaim records each claim that this
+// process prepares, and the index lists claims only for a UID that it
+// has no entry for.
 type claimIndex struct {
 	client *apiclient.Client
 
@@ -70,9 +55,8 @@ func newClaimIndex(client *apiclient.Client) *claimIndex {
 	return &claimIndex{client: client, claims: map[string]claimRef{}}
 }
 
-// remember records the pair a prepare call read. A plugin built with
-// no index records nothing, which is every test that drives a prepare
-// with no placement pass behind it.
+// remember does nothing on a nil index, which tests that prepare
+// claims without a placement pass use.
 func (i *claimIndex) remember(uid, namespace, name string) {
 	if i == nil {
 		return
@@ -82,43 +66,38 @@ func (i *claimIndex) remember(uid, namespace, name string) {
 	i.claims[uid] = claimRef{Namespace: namespace, Name: name}
 }
 
-// claim names the claim one UID belongs to, and answers an empty
-// claim for a UID no claim carries.
+// claim returns an empty claimRef for a UID that no claim has.
 func (i *claimIndex) claim(uid string) (claimRef, error) {
 	if i == nil {
 		return claimRef{}, nil
 	}
-	if held, known := i.held(uid); known {
+	if held, known := i.lookup(uid); known {
 		return held, nil
 	}
 	if err := i.refill(uid); err != nil {
 		return claimRef{}, err
 	}
-	held, _ := i.held(uid)
+	held, _ := i.lookup(uid)
 	return held, nil
 }
 
-func (i *claimIndex) held(uid string) (claimRef, bool) {
+func (i *claimIndex) lookup(uid string) (claimRef, bool) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	held, known := i.claims[uid]
 	return held, known
 }
 
-// refill fills the index from the specs this driver wrote and one
-// listing of the claims. It runs when the index does not hold a UID,
-// which is the operator's container restarting under a compositor
-// that kept running: the surfaces are still there, and the prepare
-// that named them ran in the process before this one.
+// refill lists all claims and keeps the ones that have a CDI spec on
+// this node. It runs when the index has no entry for a UID, which
+// happens after the operator container restarts while the compositor
+// keeps running: the surfaces still exist, but their prepare ran in
+// the previous process.
 //
-// The specs are what hold the walk to this node. They name every
-// claim the kubelet prepared here, so the index holds those claims
-// and not the claims of every other node in the cluster.
-//
-// A UID the listing does not carry is remembered as a claim that is
-// gone, because a surface can outlive the claim that opened its
-// socket, and a miss that was not remembered would list the claims
-// again on every pass for as long as the client stayed connected.
+// A UID that is not in the list is stored with an empty claimRef.
+// A surface can outlive its claim, and without that entry every
+// placement pass would list all claims again while the client stays
+// connected.
 func (i *claimIndex) refill(missing string) error {
 	prepared := map[string]bool{}
 	if err := eachPreparedSpec(func(claimUID string, _ cdiSpec) {
@@ -148,9 +127,8 @@ func (i *claimIndex) refill(missing string) error {
 	return nil
 }
 
-// listResourceClaims reads the claims of every namespace. A screen
-// serves whichever namespace claims it, so the listing is not scoped
-// to one.
+// listResourceClaims lists the claims of every namespace, because a
+// claim from any namespace can use a screen on this node.
 func listResourceClaims(c *apiclient.Client) ([]ResourceClaim, error) {
 	list := &ResourceClaimList{}
 	if err := c.RequestJSON(http.MethodGet, ResourceClaimsPath, nil, list); err != nil {
@@ -159,25 +137,22 @@ func listResourceClaims(c *apiclient.Client) ([]ResourceClaim, error) {
 	return list.Items, nil
 }
 
-// claimHolders is what one claim answers about the surface that
-// arrived on its socket: the claim as status names it, the pods that
-// hold it, and the labels a region's selector matches.
+// claimHolders describes the claim behind one surface. pods is
+// sorted, and labels has the labels that all of the pods share.
 type claimHolders struct {
 	key    string
 	pods   []string
 	labels map[string]string
 }
 
-// holderReader answers that for each claim once per pass, and reads
-// this node's pods once. A screen that shows a film over an idle
-// client holds several surfaces of the same two claims, so one pass
-// asks the API server for each claim once.
+// holderReader caches claimHolders and this node's pods for one
+// placement pass. A screen often has several surfaces of the same
+// claim, and the cache reads each claim from the API server once per
+// pass.
 type holderReader struct {
 	client *apiclient.Client
 	node   string
 	claims *claimIndex
-	// stores holds this node's pods, which the reader reads in place of
-	// the API server (objectcache.go).
 	stores clusterStores
 
 	read   map[string]claimHolders
@@ -195,7 +170,6 @@ func newHolderReader(client *apiclient.Client, node string, claims *claimIndex, 
 	}
 }
 
-// holders answers what the claim with this UID is held by.
 func (h *holderReader) holders(uid string) (claimHolders, error) {
 	if held, known := h.read[uid]; known {
 		return held, nil
@@ -208,14 +182,13 @@ func (h *holderReader) holders(uid string) (claimHolders, error) {
 	return held, nil
 }
 
-// resolve walks from the UID to the labels: the index names the
-// claim, the claim's status.reservedFor names the pods, and the pods
-// carry the labels.
+// resolve reads the claim's status.reservedFor for its pods, and the
+// pods for their labels.
 //
-// A claim that is gone answers no claim and no labels. The client
-// that drew on its socket is still connected, and a surface with no
-// claim matches no region's selector, so a screen that names a Layout
-// stops showing it and the default layout still does.
+// When the claim is deleted it returns an empty claimHolders, because
+// a client can stay connected after its claim is deleted. A surface
+// with no claim matches no region's selector, so a Layout does not
+// show it and the default layout still does.
 func (h *holderReader) resolve(uid string) (claimHolders, error) {
 	ref, err := h.claims.claim(uid)
 	if err != nil {
@@ -224,10 +197,9 @@ func (h *holderReader) resolve(uid string) (claimHolders, error) {
 	if ref.Name == "" {
 		return claimHolders{}, nil
 	}
-	// The claim is read from the API server, once per pass. No watch
-	// holds the claims: a claim carries no field that selects this
-	// node, so a watch would send every node's operator every claim in
-	// the cluster, for the few claims on this node's screens.
+	// The claim is read and not watched, because a claim has no field
+	// that selects a node. A watch would send every claim in the
+	// cluster to the operator on every node.
 	claim, err := GetResourceClaim(h.client, ref.Namespace, ref.Name)
 	if errors.Is(err, apiclient.ErrNotFound) {
 		return claimHolders{}, nil
@@ -254,16 +226,15 @@ func (h *holderReader) resolve(uid string) (claimHolders, error) {
 		}
 		held.labels = sharedLabels(held.labels, pod.Metadata.Labels)
 	}
-	// The order the API server lists the holders in is its own, and
-	// status reports one order for the same set of pods.
+	// Sorting keeps the status field the same for the same pods in any
+	// order of status.reservedFor.
 	slices.Sort(held.pods)
 	return held, nil
 }
 
-// pod reads one holder, and answers nothing for a holder that is
-// gone. The node listing answers every holder that runs here, and the
-// read by name is what answers for a pod that arrived after the
-// listing was taken.
+// pod returns nil when the pod is deleted. A pod that is not in this
+// pass's list of the node's pods, such as one that started after the
+// list, is read by name.
 func (h *holderReader) pod(namespace, name string) (*Pod, error) {
 	listed, err := h.onThisNode()
 	if err != nil {
@@ -279,8 +250,7 @@ func (h *holderReader) pod(namespace, name string) (*Pod, error) {
 	return pod, err
 }
 
-// The pods on this node, read once per pass and keyed as status names
-// them.
+// onThisNode returns this node's pods by "namespace/name".
 func (h *holderReader) onThisNode() (map[string]Pod, error) {
 	if h.listed {
 		return h.pods, nil
@@ -297,13 +267,9 @@ func (h *holderReader) onThisNode() (map[string]Pod, error) {
 	return h.pods, nil
 }
 
-// sharedLabels answers the labels two holders carry with the same
-// value.
-//
-// A region shows one claim, and a claim that several pods hold is
-// still one claim, so a label only one holder carries must not
-// place it. The rule also makes the answer the same whichever order
-// the API server listed the holders in.
+// sharedLabels returns the labels that both maps have with the same
+// value. A region shows a claim's surfaces however many pods hold the
+// claim, so a label of only one pod must not decide where they go.
 func sharedLabels(held, also map[string]string) map[string]string {
 	shared := map[string]string{}
 	for key, value := range held {

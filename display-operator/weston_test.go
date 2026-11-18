@@ -17,28 +17,27 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// compositorFixture points the pod's three roles at one machine: the
-// lab's sysfs, a /dev/dri holding one card node, and a weston.ini and
-// a mode record in a directory the test owns. It returns the config
-// path.
+// compositorFixture points declare and the compositor role at the lab's
+// sysfs, a /dev/dri with one card node, and a weston.ini and a mode
+// record in a temporary directory. It returns the config path.
 func compositorFixture(t *testing.T) string {
 	t.Helper()
 	dri := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dri, "card1"), nil, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the card file: %v", err)
 	}
 	config := t.TempDir()
 	swapPath(t, &sysRoot, labSysfs(t))
 	swapPath(t, &driRoot, dri)
 	swapPath(t, &westonConfigPath, filepath.Join(config, "weston", "weston.ini"))
 	swapPath(t, &modeRecordPath, filepath.Join(config, "weston", "modes.json"))
-	// No Display rests at a mode unless the test states one.
+	// No Display sets a declared mode unless the test sets one.
 	swapDisplays(t, nil)
 	return westonConfigPath
 }
 
-// swapDisplays states the Displays the declare container reads, in
-// place of the API server.
+// swapDisplays makes declare read displays and not call the API
+// server.
 func swapDisplays(t *testing.T, displays []Display) {
 	t.Helper()
 	previous := declaredDisplays
@@ -46,8 +45,8 @@ func swapDisplays(t *testing.T, displays []Display) {
 	t.Cleanup(func() { declaredDisplays = previous })
 }
 
-// swapPath points one of the operator's roots at a directory the test
-// controls, and puts the real one back when the test ends.
+// swapPath sets one of the operator's root paths to value and restores
+// the old value when the test ends.
 func swapPath(t *testing.T, target *string, value string) {
 	t.Helper()
 	previous := *target
@@ -55,16 +54,10 @@ func swapPath(t *testing.T, target *string, value string) {
 	t.Cleanup(func() { *target = previous })
 }
 
-func TestWestonConfigNamesTheShellTheModuleAndEachOutput(t *testing.T) {
+func TestWestonConfigHasTheShellTheModuleAndASectionForEachOutput(t *testing.T) {
 	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), nil)
 
-	// ivi-shell places nothing on its own, so the module on the
-	// modules= line is what shows every surface, and the operator is
-	// what tells the module where.
-	//
-	// DP-1 has nothing on it and gets a section like the others.
-	// Weston reads this file once, so the section has to be there
-	// before the monitor is.
+	// DP-1 has no monitor and still gets a section.
 	for _, want := range []string{
 		"shell=ivi-shell.so",
 		"modules=liken-layout.so",
@@ -83,17 +76,16 @@ func TestWestonConfigNamesTheShellTheModuleAndEachOutput(t *testing.T) {
 	if got := strings.Count(config, "[output]"); got != 3 {
 		t.Errorf("got %d output sections, want 3:\n%s", got, config)
 	}
-	// ivi-shell reads no app-ids= key. The socket a surface arrives
-	// on is what names the claim that drew it.
+	// ivi-shell has no app-ids= key. The socket that a surface connects
+	// on identifies its claim.
 	if strings.Contains(config, "app-ids=") {
 		t.Errorf("the config routes by app-id:\n%s", config)
 	}
 }
 
-func TestWestonConfigNamesTheModeTheRecordStates(t *testing.T) {
-	// The record is the operator's own, and the config is derived from
-	// the connector walk plus the record on every write. A connector
-	// with no entry keeps the mode the monitor prefers.
+func TestWestonConfigUsesTheModeInTheRecord(t *testing.T) {
+	// A connector with no entry in the record keeps its monitor's
+	// preferred mode.
 	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), map[string]string{"HDMI-A-2": "1280x720"})
 
 	for _, want := range []string{
@@ -108,10 +100,9 @@ func TestWestonConfigNamesTheModeTheRecordStates(t *testing.T) {
 }
 
 func TestWestonConfigScalesAWideOutputByTwo(t *testing.T) {
-	// HDMI-A-1 carries the lab's 3840x1600 monitor and prefers that
-	// mode, so its section states scale=2. The portable display on
-	// HDMI-A-2 prefers 1920x1080 and states no scale, which is weston's
-	// default of 1. DP-1 is dark, has no modes, and states none either.
+	// HDMI-A-1's monitor prefers 3840x1600, so its section has scale=2.
+	// HDMI-A-2's monitor prefers 1920x1080, and DP-1 has no monitor, so
+	// neither has a scale line, and weston uses its default of 1.
 	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), nil)
 
 	if want := "name=HDMI-A-1\nmode=preferred\nscale=2\n"; !strings.Contains(config, want) {
@@ -122,11 +113,9 @@ func TestWestonConfigScalesAWideOutputByTwo(t *testing.T) {
 	}
 }
 
-func TestWestonConfigScalesByTheModeTheRecordStates(t *testing.T) {
-	// A claim's mode decides the scale, not the monitor's preference: the
-	// wide monitor driven at 1920x1080 gets no scale, and the portable
-	// display asked for a mode 3840 wide, in the claim's own spelling
-	// with a refresh, gets 2.
+func TestWestonConfigScalesByTheModeInTheRecord(t *testing.T) {
+	// The mode in the record decides the scale, not the monitor's
+	// preferred mode.
 	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), map[string]string{
 		"HDMI-A-1": "1920x1080",
 		"HDMI-A-2": "3840x2160@60",
@@ -142,7 +131,7 @@ func TestWestonConfigScalesByTheModeTheRecordStates(t *testing.T) {
 	}
 }
 
-func TestModeWidthReadsBothSpellingsAndRefusesTheRest(t *testing.T) {
+func TestModeWidthReadsBothFormsAndReturnsZeroForOtherNames(t *testing.T) {
 	for mode, want := range map[string]int{
 		"3840x2160":    3840,
 		"3840x2160@60": 3840,
@@ -156,9 +145,9 @@ func TestModeWidthReadsBothSpellingsAndRefusesTheRest(t *testing.T) {
 	}
 }
 
-func TestWestonConfigIgnoresARecordEntryForAConnectorTheCardDoesNotHave(t *testing.T) {
-	// The record outlives a monitor and the walk is the truth about
-	// what the card has, so an entry with no connector adds no section.
+func TestWestonConfigIgnoresARecordEntryForAMissingConnector(t *testing.T) {
+	// The connector walk decides which sections exist, so a record entry
+	// for a connector that the card does not have adds none.
 	config := westonConfig(discoverOutputs(labSysfs(t), "card1"), map[string]string{"HDMI-A-9": "1280x720"})
 
 	if strings.Contains(config, "HDMI-A-9") {
@@ -173,20 +162,20 @@ func TestWriteWestonConfigCreatesTheDirectory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "weston", "weston.ini")
 
 	if err := writeWestonConfig(path, discoverOutputs(labSysfs(t), "card1"), nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the weston config: %v", err)
 	}
 	written, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the weston config: %v", err)
 	}
 	if !strings.Contains(string(written), "name=HDMI-A-1") {
-		t.Fatalf("the file holds:\n%s", written)
+		t.Fatalf("the weston config is:\n%s\nwant an output section for HDMI-A-1", written)
 	}
 }
 
-func TestDeclareWritesTheConfigWhereTheCompositorWaitsForIt(t *testing.T) {
+func TestDeclareWritesTheConfigAtThePathTheCompositorWaitsOn(t *testing.T) {
 	// The declare container writes the file and the compositor
-	// container reads it, so the two roles must name one path.
+	// container reads it, so both roles must use the same path.
 	path := compositorFixture(t)
 
 	declare()
@@ -196,7 +185,7 @@ func TestDeclareWritesTheConfigWhereTheCompositorWaitsForIt(t *testing.T) {
 	}
 	written, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the weston config: %v", err)
 	}
 	if !strings.Contains(string(written), "name=HDMI-A-1") {
 		t.Fatalf("the file holds:\n%s", written)
@@ -207,78 +196,71 @@ func TestDeclareWritesTheConfigWhereTheCompositorWaitsForIt(t *testing.T) {
 }
 
 func TestDeclareWritesAnEmptyModeRecord(t *testing.T) {
-	// The record lives in the pod's own volume beside the config, so a
-	// pod that restarts starts with no mode stated and every screen at
-	// the mode its monitor prefers. The file exists from the start, so
-	// a prepare that reads it before any claim stated a mode reads an
-	// empty record rather than a missing file.
+	// A prepare that reads the record before any claim sets a mode gets
+	// an empty record and not a missing file.
 	compositorFixture(t)
 
 	declare()
 
 	record, err := readModeRecord(modeRecordPath)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the mode record: %v", err)
 	}
 	if len(record) != 0 {
-		t.Fatalf("record = %v", record)
+		t.Fatalf("the mode record is %v, want it empty", record)
 	}
 }
 
-func TestDeclareKeepsAModeRecordThatIsAlreadyThere(t *testing.T) {
-	// The kubelet runs an init container again when it restarts the
-	// pod's containers, and the config it writes must carry whatever
-	// mode a claim already stated.
+func TestDeclareKeepsAnExistingModeRecordAndWritesItsModesToTheConfig(t *testing.T) {
+	// The kubelet runs declare again when it restarts the pod's
+	// containers, and the config must keep the modes that claims set.
 	compositorFixture(t)
 	if err := writeModeRecord(modeRecordPath, map[string]string{"HDMI-A-2": "1280x720"}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the mode record: %v", err)
 	}
 
 	declare()
 
 	record, err := readModeRecord(modeRecordPath)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the mode record: %v", err)
 	}
 	if record["HDMI-A-2"] != "1280x720" {
-		t.Fatalf("record = %v", record)
+		t.Fatalf("the mode record is %v, want HDMI-A-2 set to 1280x720", record)
 	}
 	written, err := os.ReadFile(westonConfigPath)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the weston config: %v", err)
 	}
 	if !strings.Contains(string(written), "name=HDMI-A-2\nmode=1280x720") {
-		t.Fatalf("the file holds:\n%s", written)
+		t.Fatalf("the weston config is:\n%s\nwant HDMI-A-2 with mode 1280x720", written)
 	}
 }
 
-// fakeProc builds the part of /proc that the compositor search reads:
-// one directory per process, with an exe symlink to the binary it
-// runs. The links dangle, which is what a readlink of a real
-// /proc/<pid>/exe answers from a container that does not have the
-// binary at that path.
+// fakeProc builds the part of /proc that compositorProcesses reads: a
+// directory for each pid with an exe symlink to its binary. The links
+// dangle, as /proc/<pid>/exe does for a binary that this container does
+// not have. An empty binary makes a process with no exe link.
 func fakeProc(t *testing.T, processes map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
 	for pid, binary := range processes {
 		dir := filepath.Join(root, pid)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the process directory: %v", err)
 		}
 		if binary == "" {
 			continue
 		}
 		if err := os.Symlink(binary, filepath.Join(dir, "exe")); err != nil {
-			t.Fatal(err)
+			t.Fatalf("linking the exe of the process: %v", err)
 		}
 	}
 	return root
 }
 
 func TestCompositorProcessesFindsTheCompositor(t *testing.T) {
-	// The pod shares one process namespace, so this operator sees the
-	// compositor's own process and finds it by the binary it runs.
-	// Nothing else in the pod runs weston.
+	// The self entry is not a process and must not be listed.
 	proc := fakeProc(t, map[string]string{
 		"1":    "/usr/bin/display-operator",
 		"14":   westonBinary,
@@ -291,7 +273,7 @@ func TestCompositorProcessesFindsTheCompositor(t *testing.T) {
 	}
 }
 
-func TestCompositorProcessesFindsNoneWhileTheContainerRestarts(t *testing.T) {
+func TestCompositorProcessesReturnsNoneWhenNoProcessHasAnExeLink(t *testing.T) {
 	proc := fakeProc(t, map[string]string{
 		"1":  "/usr/bin/display-operator",
 		"30": "",
@@ -302,7 +284,7 @@ func TestCompositorProcessesFindsNoneWhileTheContainerRestarts(t *testing.T) {
 	}
 }
 
-func TestWestonArgvNamesTheCardAndTheConfig(t *testing.T) {
+func TestWestonArgvHasTheCardTheConfigAndTheSocket(t *testing.T) {
 	argv := westonArgv("card1", "/etc/weston/weston.ini", socketName, "")
 
 	want := []string{
@@ -317,9 +299,9 @@ func TestWestonArgvNamesTheCardAndTheConfig(t *testing.T) {
 	}
 }
 
-// The scopes a person names go to the logger after log, so weston's
-// own lines stay in the container log beside them.
-func TestWestonArgvWritesTheNamedLogScopes(t *testing.T) {
+// The requested scopes follow log in the flag, so weston's own lines
+// stay in the container log.
+func TestWestonArgvListsTheRequestedLogScopesAfterLog(t *testing.T) {
 	cases := []struct {
 		name   string
 		scopes string
@@ -328,8 +310,8 @@ func TestWestonArgvWritesTheNamedLogScopes(t *testing.T) {
 		{name: "one scope", scopes: "drm-backend", want: "--logger-scopes=log,drm-backend"},
 		{name: "two scopes", scopes: "drm-backend,timeline", want: "--logger-scopes=log,drm-backend,timeline"},
 		{name: "spaces and empty entries", scopes: " drm-backend, ,timeline ,", want: "--logger-scopes=log,drm-backend,timeline"},
-		{name: "log named again", scopes: "log,drm-backend", want: "--logger-scopes=log,drm-backend"},
-		{name: "a scope named twice", scopes: "drm-backend,drm-backend", want: "--logger-scopes=log,drm-backend"},
+		{name: "log requested again", scopes: "log,drm-backend", want: "--logger-scopes=log,drm-backend"},
+		{name: "a scope requested twice", scopes: "drm-backend,drm-backend", want: "--logger-scopes=log,drm-backend"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -341,9 +323,9 @@ func TestWestonArgvWritesTheNamedLogScopes(t *testing.T) {
 	}
 }
 
-// An empty knob, or one that names only log, leaves weston on its
-// default logger, which writes the log scope alone.
-func TestWestonArgvAddsNoLoggerFlagWithoutAScope(t *testing.T) {
+// An empty value, or one that has only log, leaves weston on its
+// default logger, which already writes the log scope.
+func TestWestonArgvAddsNoLoggerFlagWithoutAnExtraScope(t *testing.T) {
 	cases := []struct {
 		name   string
 		scopes string
@@ -364,16 +346,11 @@ func TestWestonArgvAddsNoLoggerFlagWithoutAScope(t *testing.T) {
 	}
 }
 
-func TestWestonEnvironmentSetsWhatTheCompositorNeeds(t *testing.T) {
+func TestWestonEnvironmentAddsTheSettingsWestonNeeds(t *testing.T) {
 	env := westonEnvironment([]string{"PATH=/usr/bin"}, defaultSocketDir)
 
 	for _, want := range []string{
-		// The inherited environment survives, because the container's
-		// own settings arrive that way.
 		"PATH=/usr/bin",
-		// libseat's noop backend is the one a container can use, the
-		// shim moves the hotplug subscription to the kernel's netlink
-		// group, and weston creates its socket in XDG_RUNTIME_DIR.
 		"LIBSEAT_BACKEND=noop",
 		"LD_PRELOAD=" + hotplugShim,
 		"XDG_RUNTIME_DIR=" + defaultSocketDir,
@@ -384,9 +361,9 @@ func TestWestonEnvironmentSetsWhatTheCompositorNeeds(t *testing.T) {
 	}
 }
 
-// The timeout is shorter than the fallback timer, so only the file's
-// arrival can end the wait in time.
-func TestWaitForFileReturnsWhenItAppears(t *testing.T) {
+// The timeout is shorter than fileWaitFallback, so only the inotify
+// event for the file can end the wait in time.
+func TestWaitForFileReturnsWhenTheFileAppears(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "weston.ini")
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -394,13 +371,13 @@ func TestWaitForFileReturnsWhenItAppears(t *testing.T) {
 	}()
 
 	if err := waitForFile(context.Background(), path, fileWaitFallback/2); err != nil {
-		t.Fatal(err)
+		t.Fatalf("waiting for the file: %v", err)
 	}
 }
 
-// The file's directory is a volume that is not there yet. The wait
-// looks again on its fallback timer and finds the file.
-func TestWaitForFileReturnsWhenItsDirectoryAppearsLater(t *testing.T) {
+// While the file's directory does not exist, no inotify event can come,
+// so the wait finds the file at a check after fileWaitFallback.
+func TestWaitForFileReturnsWhenTheDirectoryAppearsLater(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "weston")
 	path := filepath.Join(dir, "weston.ini")
 	go func() {
@@ -410,28 +387,25 @@ func TestWaitForFileReturnsWhenItsDirectoryAppearsLater(t *testing.T) {
 	}()
 
 	if err := waitForFile(context.Background(), path, 3*fileWaitFallback); err != nil {
-		t.Fatal(err)
+		t.Fatalf("waiting for the file: %v", err)
 	}
 }
 
-func TestWaitForFileGivesUp(t *testing.T) {
+func TestWaitForFileFailsAfterTheTimeoutWhenNoFileAppears(t *testing.T) {
 	err := waitForFile(context.Background(), filepath.Join(t.TempDir(), "weston.ini"), 100*time.Millisecond)
 	if err == nil {
-		t.Fatal("the wait succeeded with no file")
+		t.Fatal("waitForFile returned no error, want an error because no file appeared")
 	}
 }
 
-// listenOnSocket binds the compositor's socket until the test ends.
-// It leaves the file behind when it closes, which is what a compositor
-// killed uncleanly leaves on the host.
-//
-// It accepts nothing on its own, so a fixture that answers a client
-// runs a server over it.
+// listenOnSocket listens on path until the test ends, and leaves the
+// socket file in place when it closes, as a killed compositor does. It
+// accepts no connections.
 func listenOnSocket(t *testing.T, path string) *net.UnixListener {
 	t.Helper()
 	listener, err := net.Listen("unix", path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listening on the socket: %v", err)
 	}
 	unixListener := listener.(*net.UnixListener)
 	unixListener.SetUnlinkOnClose(false)
@@ -439,18 +413,15 @@ func listenOnSocket(t *testing.T, path string) *net.UnixListener {
 	return unixListener
 }
 
-// servingSocket is a runtime directory with a compositor answering in
-// it. It returns the socket's path.
-//
-// The compositor answers the handshake the probe sends, which is what
-// a running compositor's socket does.
+// servingSocket starts a fake compositor in dir that replies to
+// wl_display.sync, and returns the socket's path.
 func servingSocket(t *testing.T, dir string) string {
 	t.Helper()
 	return westonBenchOn(t, filepath.Join(dir, socketName), nil).path
 }
 
-// closingSocket accepts and closes at once, which is what the socket
-// of a compositor that is exiting does.
+// closingSocket accepts each connection and closes it at once, as the
+// socket of an exiting compositor does.
 func closingSocket(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, socketName)
@@ -467,20 +438,20 @@ func closingSocket(t *testing.T, dir string) string {
 	return path
 }
 
-// missingSocket is a runtime directory in which the compositor's
-// container never created its socket.
+// missingSocket returns a socket path in dir where nothing created a
+// socket.
 func missingSocket(t *testing.T, dir string) string {
 	t.Helper()
 	return filepath.Join(dir, socketName)
 }
 
-// staleSocket is the socket file a dead compositor left behind: the
-// path is there and nothing answers on it.
+// staleSocket returns the path of a socket file with no listener, as a
+// dead compositor leaves it.
 func staleSocket(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, socketName)
 	if err := listenOnSocket(t, path).Close(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("closing the listener: %v", err)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("the socket file must outlive the listener: %v", err)
@@ -488,51 +459,44 @@ func staleSocket(t *testing.T, dir string) string {
 	return path
 }
 
-func TestProbeCompositorReadsWhatTheSocketAnswers(t *testing.T) {
-	// The bound is set for the whole test, so the frozen case waits
-	// 200 ms once in place of the 2 s the operator waits.
+func TestProbeCompositorReportsServingOrTheReasonItFailed(t *testing.T) {
 	cases := []struct {
 		name    string
 		socket  func(t *testing.T, dir string) string
 		serving bool
 		reason  string
 	}{
-		{"a compositor that answers", servingSocket, true, CompositorServingReason},
-		// The compositor's container has not created its socket yet.
+		{"a compositor that replies", servingSocket, true, CompositorServingReason},
+		// The compositor's container has not created its socket.
 		{"no socket at all", missingSocket, false, CompositorDownReason},
-		// A compositor that died uncleanly leaves its socket file
-		// behind. A check that read the file's presence would call the
-		// corpse a compositor, and prepare would deliver a path that
-		// refuses every client that connects to it.
-		{"the socket a dead compositor left", staleSocket, false, CompositorDownReason},
+		// A killed compositor leaves its socket file behind. A check
+		// that only looked for the file would report it as serving.
+		{"the socket file a dead compositor left", staleSocket, false, CompositorDownReason},
 		{"a socket that closes on the handshake", closingSocket, false, CompositorDownReason},
 	}
-	for _, drill := range cases {
-		t.Run(drill.name, func(t *testing.T) {
-			path := drill.socket(t, t.TempDir())
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := c.socket(t, t.TempDir())
 
 			probe := probeCompositor(path)
 
-			if probe.serving != drill.serving || probe.reason != drill.reason {
-				t.Errorf("the probe answers serving=%v/%s, want serving=%v/%s",
-					probe.serving, probe.reason, drill.serving, drill.reason)
+			if probe.serving != c.serving || probe.reason != c.reason {
+				t.Errorf("the probe returned serving=%v/%s, want serving=%v/%s",
+					probe.serving, probe.reason, c.serving, c.reason)
 			}
 			if !probe.serving && probe.detail == "" {
-				t.Error("a compositor that serves nobody carries no words of its own")
+				t.Error("a failed probe has an empty detail, want the socket error")
 			}
-			if compositorServing(path) != drill.serving {
-				t.Errorf("compositorServing = %v, want %v", compositorServing(path), drill.serving)
+			if compositorServing(path) != c.serving {
+				t.Errorf("compositorServing = %v, want %v", compositorServing(path), c.serving)
 			}
 		})
 	}
 }
 
-// The case the testbed drill found: the socket accepts, and the
-// process behind it runs no event loop. The compositor's end reads the
-// probe's request and answers nothing, the way a stopped process's
-// kernel buffers the request. The probe waits out
-// compositorReplyTimeout on the fake clock, and reads a freeze.
-func TestTheProbeReadsACompositorThatAcceptsAndNeverAnswersAsHung(t *testing.T) {
+// The fake compositor reads the request and never replies, as a weston
+// stopped with SIGSTOP does.
+func TestProbeReportsHungWhenTheCompositorAcceptsAndNeverAnswers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		probe, compositor := net.Pipe()
 		t.Cleanup(func() {
@@ -545,30 +509,30 @@ func TestTheProbeReadsACompositorThatAcceptsAndNeverAnswersAsHung(t *testing.T) 
 		live := probeConnection(probe)
 
 		if live.serving || live.reason != CompositorHungReason || live.detail == "" {
-			t.Errorf("the probe answers %+v, want not serving, %s, and the socket's words", live, CompositorHungReason)
+			t.Errorf("the probe returned %+v, want not serving, %s, and a detail", live, CompositorHungReason)
 		}
 		if waited := time.Since(start); waited != compositorReplyTimeout {
-			t.Errorf("the probe waited %v for an answer, want %v", waited, compositorReplyTimeout)
+			t.Errorf("the probe waited %v for a reply, want %v", waited, compositorReplyTimeout)
 		}
 	})
 }
 
-// podWithRestarts is the pod this operator runs in, as the API server
-// answers for it, with the compositor's sidecar at the named restart
-// count.
+// podWithRestarts returns a client for a fake API server that serves
+// the operator's pod, with the compositor sidecar's restart count read
+// from *counts on each request.
 func podWithRestarts(t *testing.T, counts *int) *apiclient.Client {
 	t.Helper()
 	return testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/namespaces/liken-system/pods/display-operator-abcde" {
-			t.Errorf("the reader asked for %s", r.URL.Path)
+			t.Errorf("the pod read requested %s, want the operator pod", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		pod := Pod{
 			Metadata: PodMeta{Name: "display-operator-abcde", Namespace: "liken-system"},
 			Status: PodStatus{
-				// The compositor is a native sidecar, so the kubelet
-				// reports it among the init containers.
+				// The kubelet reports a native sidecar with the init
+				// containers.
 				InitContainerStatuses: []ContainerStatus{
 					{Name: "declare", RestartCount: 0},
 					{Name: compositorMode, RestartCount: *counts},
@@ -580,7 +544,7 @@ func podWithRestarts(t *testing.T, counts *int) *apiclient.Client {
 	}))
 }
 
-func TestTheSidecarsRestartCountIsReadAsGrowth(t *testing.T) {
+func TestGrowthIsTheIncreaseInTheSidecarsRestartCount(t *testing.T) {
 	counts := 2
 	restarts := newWestonRestarts(podWithRestarts(t, &counts), "liken-system", "display-operator-abcde")
 
@@ -589,34 +553,33 @@ func TestTheSidecarsRestartCountIsReadAsGrowth(t *testing.T) {
 		count  int
 		growth int
 	}{
-		// The operator's own container restarted under a compositor
-		// the kubelet had already started twice more, and none of
-		// those restarts happened while this process ran.
+		// The compositor had restarted twice before this process
+		// started, so those restarts do not count.
 		{"the first read is the baseline", 2, 0},
 		{"a compositor that did not restart", 2, 0},
 		{"one restart", 3, 1},
 		{"two restarts between two reads", 5, 2},
-		// The pod was replaced, so the kubelet counts from zero again.
+		// The pod was replaced, so the count starts from zero.
 		{"a count that went backwards", 0, 0},
 		{"the first restart of the new pod", 1, 1},
 	}
-	for _, drill := range cases {
-		t.Run(drill.name, func(t *testing.T) {
-			counts = drill.count
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			counts = c.count
 
 			growth, err := restarts.growth()
 
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the restart growth: %v", err)
 			}
-			if growth != drill.growth {
-				t.Errorf("the reader counted %d restarts, want %d", growth, drill.growth)
+			if growth != c.growth {
+				t.Errorf("growth = %d restarts, want %d", growth, c.growth)
 			}
 		})
 	}
 }
 
-func TestAPodTheAPIServerCannotAnswerForCountsNothing(t *testing.T) {
+func TestGrowthReturnsAnErrorAndZeroWhenThePodReadFails(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -625,25 +588,25 @@ func TestAPodTheAPIServerCannotAnswerForCountsNothing(t *testing.T) {
 	growth, err := restarts.growth()
 
 	if err == nil {
-		t.Fatal("a pod read that failed reported no error")
+		t.Fatal("growth returned no error, want an error because the pod read failed")
 	}
 	if growth != 0 {
-		t.Errorf("a pod read that failed counted %d restarts", growth)
+		t.Errorf("growth = %d after a failed pod read, want 0", growth)
 	}
 }
 
-// An operator run by hand has no pod of its own to read.
-func TestAnOperatorWithNoPodOfItsOwnCountsNothing(t *testing.T) {
+// An operator that a person runs by hand has no pod to read.
+func TestGrowthIsZeroWhenThereIsNoPodToRead(t *testing.T) {
 	restarts := newWestonRestarts(nil, "", "")
 
 	growth, err := restarts.growth()
 
 	if err != nil || growth != 0 {
-		t.Errorf("a reader with no pod answered %d/%v", growth, err)
+		t.Errorf("growth = %d, err = %v, want 0 and no error", growth, err)
 	}
 }
 
-func TestTheHungRepairWaitsForTheBoundAndRunsOnce(t *testing.T) {
+func TestHungRepairIsDueAfterTheLimitAndOnlyOncePerOutage(t *testing.T) {
 	start := time.Unix(0, 0).UTC()
 
 	steps := []struct {
@@ -653,20 +616,20 @@ func TestTheHungRepairWaitsForTheBoundAndRunsOnce(t *testing.T) {
 		due     bool
 		killed  bool
 	}{
-		{name: "the first reading of the freeze", live: probeHung, seconds: 0},
-		// A freeze shorter than the bound is a compositor under load,
-		// and the operator ends nothing.
-		{name: "inside the bound", live: probeHung, seconds: 9},
-		{name: "the compositor answered again", live: probeServing, seconds: 10},
-		{name: "a second freeze starts its own clock", live: probeHung, seconds: 11},
-		{name: "inside the second bound", live: probeHung, seconds: 20},
-		{name: "the bound runs out", live: probeHung, seconds: 21, due: true, killed: true},
-		// The kill ran, so the rest of this outage orders no second
-		// kill.
-		{name: "still frozen after the kill", live: probeHung, seconds: 22},
+		{name: "the first Hung result", live: probeHung, seconds: 0},
+		// A hang shorter than the limit is a compositor under load, and
+		// the operator does not kill it.
+		{name: "before the limit", live: probeHung, seconds: 9},
+		{name: "the compositor replies again", live: probeServing, seconds: 10},
+		{name: "a second hang starts a new count", live: probeHung, seconds: 11},
+		{name: "before the second limit", live: probeHung, seconds: 20},
+		{name: "the limit passes", live: probeHung, seconds: 21, due: true, killed: true},
+		// The compositor was killed, so the rest of this outage has no
+		// second kill.
+		{name: "still Hung after the kill", live: probeHung, seconds: 22},
 		{name: "the process died and the socket refuses", live: probeDown, seconds: 23},
-		{name: "a freeze in a later outage", live: probeHung, seconds: 24},
-		{name: "that outage reaches the bound", live: probeHung, seconds: 34, due: true, killed: true},
+		{name: "a hang in a later outage", live: probeHung, seconds: 24},
+		{name: "that outage reaches the limit", live: probeHung, seconds: 34, due: true, killed: true},
 	}
 	repair := &hungCompositor{}
 	for _, step := range steps {
@@ -674,7 +637,7 @@ func TestTheHungRepairWaitsForTheBoundAndRunsOnce(t *testing.T) {
 			due := repair.due(step.live, start.Add(time.Duration(step.seconds)*time.Second))
 
 			if due != step.due {
-				t.Errorf("the repair is due=%v, want %v", due, step.due)
+				t.Errorf("due = %v, want %v", due, step.due)
 			}
 			if step.killed {
 				repair.done()
@@ -683,10 +646,7 @@ func TestTheHungRepairWaitsForTheBoundAndRunsOnce(t *testing.T) {
 	}
 }
 
-// The watch ends a compositor that has answered nothing for
-// compositorHungLimit at the first tick that reaches the bound, and one
-// outage costs one kill.
-func TestTheWatchEndsACompositorThatAnswersNothing(t *testing.T) {
+func TestWatchKillsAHungCompositorOncePerOutage(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
 		var kills []time.Duration
@@ -696,12 +656,11 @@ func TestTheWatchEndsACompositorThatAnswersNothing(t *testing.T) {
 			return nil
 		})
 
-		// The compositor stays frozen long past the bound.
 		time.Sleep(3 * compositorHungLimit)
 		synctest.Wait()
 
 		if len(kills) != 1 || kills[0] != compositorHungLimit {
-			t.Errorf("the watch ended the compositor at %v, want once at %v", kills, compositorHungLimit)
+			t.Errorf("the watch killed the compositor at %v, want once at %v", kills, compositorHungLimit)
 		}
 	})
 }

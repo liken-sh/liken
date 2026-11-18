@@ -1,11 +1,8 @@
 package main
 
-// The two lab panels serve the physical address of the port this
-// machine's cable is in: the ultrawide serves 2.0.0.0 and the portable
-// serves 1.0.0.0, and TestParseEDIDReadsRealMonitors reads both from
-// their own bytes. The tests here build the vendor block by hand, so
-// each one states the bytes a sink could serve and reads what the
-// operator makes of them.
+// TestParseEDIDReadsRealMonitors in edid_test.go reads addresses from
+// recorded EDIDs. The tests here build the vendor block by hand, so
+// each one can choose the address bytes.
 
 import (
 	"strings"
@@ -15,8 +12,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// An extension block built by hand, so a test can state its data
-// blocks and read what the walk makes of them.
+// ceaExtension builds a CTA-861 extension with a correct data block
+// offset and checksum.
 func ceaExtension(blocks ...[]byte) []byte {
 	extension := []byte{0x02, 0x03, 0x00, 0x00}
 	for _, block := range blocks {
@@ -32,20 +29,16 @@ func ceaExtension(blocks ...[]byte) []byte {
 	return extension
 }
 
-// One data block: the tag in the top three bits, the payload
-// length in the low five.
 func ceaBlock(tag int, payload ...byte) []byte {
 	return append([]byte{byte(tag<<5 | len(payload))}, payload...)
 }
 
-// The HDMI vendor block with one address, as a sink serves it: the
-// OUI least significant byte first, then the address's two bytes.
 func hdmiVendorBlock(high, low byte) []byte {
 	return ceaBlock(3, 0x03, 0x0c, 0x00, high, low)
 }
 
-// One fixture's first block, the part that carries the identity,
-// with whatever extension a test wants behind it.
+// baseBlockOf returns the base block of a recorded EDID, so a test can
+// append an extension of its own.
 func baseBlockOf(t *testing.T, fixture string) []byte {
 	t.Helper()
 	return loadEDID(t, fixture)[:blockSize]
@@ -63,8 +56,6 @@ func TestParseEDIDReadsThePhysicalAddress(t *testing.T) {
 			want:   "2.0.0.0",
 		},
 		{
-			// The bytes the 2026-09-26 drill read on the connector that
-			// carries the picture to a receiver.
 			name:   "a machine behind a receiver",
 			blocks: [][]byte{hdmiVendorBlock(0x12, 0x00)},
 			want:   "1.2.0.0",
@@ -85,8 +76,6 @@ func TestParseEDIDReadsThePhysicalAddress(t *testing.T) {
 			want:   "a.b.c.0",
 		},
 		{
-			// A video block and an audio block before the vendor block,
-			// so the walk has to step over blocks it does not read.
 			name: "a vendor block after other data blocks",
 			blocks: [][]byte{
 				ceaBlock(2, 0x90, 0x04, 0x03),
@@ -96,13 +85,11 @@ func TestParseEDIDReadsThePhysicalAddress(t *testing.T) {
 			want: "1.1.0.0",
 		},
 		{
-			// The TV's own address, and the one a sink serves when it
-			// states none.
 			name:   "the root address",
 			blocks: [][]byte{hdmiVendorBlock(0x00, 0x00)},
 		},
 		{
-			name:   "the invalid address",
+			name:   "f.f.f.f",
 			blocks: [][]byte{hdmiVendorBlock(0xff, 0xff)},
 		},
 		{
@@ -118,8 +105,8 @@ func TestParseEDIDReadsThePhysicalAddress(t *testing.T) {
 			blocks: [][]byte{ceaBlock(3, 0x03, 0x0c, 0x00, 0x12)},
 		},
 		{
-			// The header states five bytes of payload, and the data
-			// block collection ends after three of them.
+			// The header says the payload is five bytes, but the data
+			// blocks end after three of them.
 			name:   "a vendor block that runs past the data blocks",
 			blocks: [][]byte{{3<<5 | 5, 0x03, 0x0c, 0x00}},
 		},
@@ -142,7 +129,7 @@ func TestParseEDIDReadsThePhysicalAddress(t *testing.T) {
 
 			edid, err := ParseEDID(raw)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the EDID: %v", err)
 			}
 			if edid.PhysicalAddress != c.want {
 				t.Errorf("PhysicalAddress = %q, want %q", edid.PhysicalAddress, c.want)
@@ -151,29 +138,28 @@ func TestParseEDIDReadsThePhysicalAddress(t *testing.T) {
 	}
 }
 
-// A monitor that serves one block and no extension states no address.
-// The base block's own extension count says one follows, so the parse
-// must stop at the bytes it holds.
-func TestAnEDIDWithNoExtensionStatesNoPhysicalAddress(t *testing.T) {
+// The base block's extension count says that an extension follows, so
+// the parse must stop at the bytes it has.
+func TestAnEDIDWithNoExtensionHasNoPhysicalAddress(t *testing.T) {
 	edid, err := ParseEDID(baseBlockOf(t, "lg-hdr-wqhd"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the EDID: %v", err)
 	}
 	if edid.PhysicalAddress != "" {
-		t.Errorf("PhysicalAddress = %q, want none", edid.PhysicalAddress)
+		t.Errorf("PhysicalAddress = %q, want empty", edid.PhysicalAddress)
 	}
 }
 
-// What one connector serves on one pass of the bench: an address, no
-// valid address, or no EDID at all.
+// edidStep is what the connector serves on one pass. An empty address
+// is an EDID with no valid address, and disconnected is no EDID.
 type edidStep struct {
 	address      string
 	disconnected bool
 }
 
-// The clock of the bench starts at the epoch, and each step of these
-// tests runs one minute after the last, so the message's time is the
-// step where the connector stopped serving the address.
+// The fixture's clock starts at the Unix epoch and each step runs one
+// minute after the last, so the time in a message identifies the step
+// where the connector stopped serving the address.
 func TestTheDisplayReportsThePhysicalAddress(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -189,35 +175,33 @@ func TestTheDisplayReportsThePhysicalAddress(t *testing.T) {
 			address: "1.2.0.0",
 			status:  conditionTrue,
 			reason:  ReadFromEDIDReason,
-			message: "HDMI-A-1 serves 1.2.0.0 in its EDID",
+			message: "The EDID on HDMI-A-1 has the physical address 1.2.0.0",
 		},
 		{
-			// A receiver in standby stops serving its EDID, and the
-			// machine's port has not moved.
+			// A receiver in standby stops serving its EDID, but the
+			// machine is still on the same input.
 			name:    "a connector that stops serving the EDID",
 			steps:   []edidStep{{address: "1.2.0.0"}, {disconnected: true}},
 			address: "1.2.0.0",
 			status:  conditionFalse,
 			reason:  RetainedReason,
-			message: "HDMI-A-1 no longer serves this monitor's EDID; this is the address it served until 1970-01-01T00:01:00Z",
+			message: "HDMI-A-1 no longer reports this monitor's EDID. status.physicalAddress keeps the address that the EDID had until 1970-01-01T00:01:00Z",
 		},
 		{
-			name:    "an EDID that stops stating an address",
+			name:    "an EDID that stops serving an address",
 			steps:   []edidStep{{address: "1.2.0.0"}, {address: ""}},
 			address: "1.2.0.0",
 			status:  conditionFalse,
 			reason:  RetainedReason,
-			message: "HDMI-A-1 serves no valid physical address in its EDID; this is the address it served until 1970-01-01T00:01:00Z",
+			message: "The EDID on HDMI-A-1 has no valid physical address. status.physicalAddress keeps the address that the EDID had until 1970-01-01T00:01:00Z",
 		},
 		{
-			// The time stays the step where the address stopped, however
-			// long the receiver sleeps.
 			name:    "a retained address across passes",
 			steps:   []edidStep{{address: "1.2.0.0"}, {disconnected: true}, {disconnected: true}, {disconnected: true}},
 			address: "1.2.0.0",
 			status:  conditionFalse,
 			reason:  RetainedReason,
-			message: "HDMI-A-1 no longer serves this monitor's EDID; this is the address it served until 1970-01-01T00:01:00Z",
+			message: "HDMI-A-1 no longer reports this monitor's EDID. status.physicalAddress keeps the address that the EDID had until 1970-01-01T00:01:00Z",
 		},
 		{
 			name:    "a connector that serves the address again",
@@ -225,7 +209,7 @@ func TestTheDisplayReportsThePhysicalAddress(t *testing.T) {
 			address: "1.2.0.0",
 			status:  conditionTrue,
 			reason:  ReadFromEDIDReason,
-			message: "HDMI-A-1 serves 1.2.0.0 in its EDID",
+			message: "The EDID on HDMI-A-1 has the physical address 1.2.0.0",
 		},
 		{
 			// A cable moved to another input of the receiver.
@@ -234,7 +218,7 @@ func TestTheDisplayReportsThePhysicalAddress(t *testing.T) {
 			address: "1.3.0.0",
 			status:  conditionTrue,
 			reason:  ReadFromEDIDReason,
-			message: "HDMI-A-1 serves 1.3.0.0 in its EDID",
+			message: "The EDID on HDMI-A-1 has the physical address 1.3.0.0",
 		},
 		{
 			// A DisplayPort monitor serves no HDMI vendor block.
@@ -244,11 +228,11 @@ func TestTheDisplayReportsThePhysicalAddress(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+			f := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
 			for _, step := range c.steps {
 				f.serve(step)
 				if err := f.pass(); err != nil {
-					t.Fatal(err)
+					t.Fatalf("running a pass: %v", err)
 				}
 				f.advance(time.Minute)
 			}
@@ -257,8 +241,8 @@ func TestTheDisplayReportsThePhysicalAddress(t *testing.T) {
 			if display.Status.PhysicalAddress != c.address {
 				t.Errorf("physicalAddress = %q, want %q", display.Status.PhysicalAddress, c.address)
 			}
-			// A case that states no condition wants none at all, and the
-			// lookup answers the zero condition for one that is absent.
+			// condition returns the zero condition when there is none,
+			// so a case with no status expects no condition.
 			got := condition(display, PhysicalAddressCurrentCondition)
 			if got.Status != c.status || got.Reason != c.reason || got.Message != c.message {
 				t.Errorf("condition = %q %q %q, want %q %q %q",
@@ -268,44 +252,36 @@ func TestTheDisplayReportsThePhysicalAddress(t *testing.T) {
 	}
 }
 
-// A pass over a retained address writes nothing. The message states a
-// time, and a time read from the clock on every pass would make every
-// pass a status write.
 func TestARetainedAddressWritesNothingOnTheNextPass(t *testing.T) {
-	f := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	f := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
 	for _, step := range []edidStep{{address: "1.2.0.0"}, {address: ""}} {
 		f.serve(step)
 		if err := f.pass(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("running a pass: %v", err)
 		}
 		f.advance(time.Minute)
 	}
 	before := len(f.lines())
 
 	if err := f.pass(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running a pass: %v", err)
 	}
 
 	for _, line := range f.lines()[before:] {
 		if strings.HasPrefix(line, "status ") {
-			t.Errorf("a steady retained address wrote %q", line)
+			t.Errorf("a pass with an unchanged retained address wrote %q, want no status write", line)
 		}
 	}
 }
 
-// The bench's one connector serves what a step states.
 func (f *displayFixture) serve(step edidStep) {
 	f.present[f.wired[0].Connector] = !step.disconnected
 	f.wired[0].Monitor.PhysicalAddress = step.address
 }
 
-// Pulse-Eight's two-cable setup: one cable carries the picture into a
-// receiver input, and a second, through a CEC adapter, into another
-// input of the same receiver. Both connectors answer to the
-// receiver's own EDID for the panel, so they share one monitor
-// identity and each serves the address of the input it is plugged
-// into.
-func TestTheDisplayRefusesAnAmbiguousAddress(t *testing.T) {
+// The cases follow Pulse-Eight's two-cable setup, which
+// ambiguousAddresses in physicaladdress.go describes.
+func TestTheDisplayDoesNotPublishAnAmbiguousAddress(t *testing.T) {
 	cases := []struct {
 		name    string
 		wired   []wiredPanel
@@ -322,12 +298,10 @@ func TestTheDisplayRefusesAnAmbiguousAddress(t *testing.T) {
 			},
 			status: conditionFalse,
 			reason: AmbiguousReason,
-			message: "HDMI-A-1 serves 1.2.0.0 and HDMI-A-2 serves 1.1.0.0 for this monitor; " +
-				"the address is not published while more than one connector serves it",
+			message: "HDMI-A-1 reports 1.2.0.0 and HDMI-A-2 reports 1.1.0.0 for this monitor. " +
+				"status.physicalAddress is not updated while the connectors report different addresses",
 		},
 		{
-			// The message names the connectors in the same order
-			// whichever one this card happened to enumerate first.
 			name: "the same two connectors, found in the other order",
 			wired: []wiredPanel{
 				address(t, "HDMI-A-2", "1.1.0.0"),
@@ -335,13 +309,12 @@ func TestTheDisplayRefusesAnAmbiguousAddress(t *testing.T) {
 			},
 			status: conditionFalse,
 			reason: AmbiguousReason,
-			message: "HDMI-A-1 serves 1.2.0.0 and HDMI-A-2 serves 1.1.0.0 for this monitor; " +
-				"the address is not published while more than one connector serves it",
+			message: "HDMI-A-1 reports 1.2.0.0 and HDMI-A-2 reports 1.1.0.0 for this monitor. " +
+				"status.physicalAddress is not updated while the connectors report different addresses",
 		},
 		{
-			// The same address on both connectors is not a
-			// disagreement, so the merge's own choice of connector
-			// reports it as it would for one connector alone.
+			// The Display reads the connector that is last in the
+			// card's list.
 			name: "two connectors serving the same address",
 			wired: []wiredPanel{
 				address(t, "HDMI-A-1", "1.2.0.0"),
@@ -350,13 +323,10 @@ func TestTheDisplayRefusesAnAmbiguousAddress(t *testing.T) {
 			address: "1.2.0.0",
 			status:  conditionTrue,
 			reason:  ReadFromEDIDReason,
-			message: "HDMI-A-2 serves 1.2.0.0 in its EDID",
+			message: "The EDID on HDMI-A-2 has the physical address 1.2.0.0",
 		},
 		{
-			// A connector with no valid address takes no side, so a
-			// monitor lit on one connector and dark on the other is
-			// not ambiguous either.
-			name: "one connector dark",
+			name: "one connector with no valid address",
 			wired: []wiredPanel{
 				address(t, "HDMI-A-1", ""),
 				address(t, "HDMI-A-2", "1.2.0.0"),
@@ -364,7 +334,7 @@ func TestTheDisplayRefusesAnAmbiguousAddress(t *testing.T) {
 			address: "1.2.0.0",
 			status:  conditionTrue,
 			reason:  ReadFromEDIDReason,
-			message: "HDMI-A-2 serves 1.2.0.0 in its EDID",
+			message: "The EDID on HDMI-A-2 has the physical address 1.2.0.0",
 		},
 	}
 	for _, c := range cases {
@@ -372,7 +342,7 @@ func TestTheDisplayRefusesAnAmbiguousAddress(t *testing.T) {
 			fixture := newDisplayBench(t, c.wired...)
 
 			if err := fixture.pass(); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running a pass: %v", err)
 			}
 
 			display := fixture.display()
@@ -388,40 +358,32 @@ func TestTheDisplayRefusesAnAmbiguousAddress(t *testing.T) {
 	}
 }
 
-// One connector of the bench, serving the lab monitor's identity
-// at the given physical address.
+// address returns a connector that serves labMonitor's EDID with the
+// given physical address.
 func address(t *testing.T, connector, physicalAddress string) wiredPanel {
 	t.Helper()
 	monitor := labMonitor()
 	monitor.PhysicalAddress = physicalAddress
-	return wiredPanel{Connector: connector, Monitor: monitor, Panel: drillPanel(t, "lg-hdr-wqhd")}
+	return wiredPanel{Connector: connector, Monitor: monitor, Panel: recordedPanel(t, "lg-hdr-wqhd")}
 }
 
-// An ambiguous pass never overwrites a physical address a CEC
-// consumer may already be relying on: the field keeps the last one
-// this Display served while its connectors disagree, the same way it
-// keeps the last one while a connector goes dark.
 func TestAnAmbiguousAddressKeepsTheLastKnownGoodAddress(t *testing.T) {
 	fixture := newDisplayBench(t,
 		address(t, "HDMI-A-1", "1.2.0.0"),
 		address(t, "HDMI-A-2", "1.1.0.0"),
 	)
-	// The second connector's picture is not there yet on the first
-	// pass, so the first cable is the only one the monitor answers.
 	fixture.present["HDMI-A-2"] = false
 
 	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running a pass: %v", err)
 	}
 	if got := fixture.display().Status.PhysicalAddress; got != "1.2.0.0" {
 		t.Fatalf("physicalAddress = %q, want 1.2.0.0 before the second cable arrives", got)
 	}
 
-	// The second cable arrives serving a different input, so the
-	// two connectors now disagree.
 	fixture.present["HDMI-A-2"] = true
 	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running a pass: %v", err)
 	}
 
 	display := fixture.display()

@@ -1,10 +1,9 @@
 package main
 
-// This file holds the series display-api serves: requests, time to
-// headers, streams in flight, and the certificate's expiry. The
-// capture counters, bytes, seconds, frames, and failures, are the
-// sidecar's alone, so nothing here double counts what the node
-// already counted.
+// This file defines the metrics of display-api. display-api forwards
+// each capture to the capture sidecar on the Display's node, and only
+// the sidecar counts the bytes, seconds, frames, and failures of a
+// capture, so a capture is not counted twice.
 
 import (
 	"net/http"
@@ -15,9 +14,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// The API's four series. The route label is the RFC 6570 template
-// and never the path a caller sent, so the label set is bounded by
-// the route table and not by the names in the cluster.
+// apiMetrics holds the metrics of display-api. The route label is the
+// route's template, such as /v1/display/displays/{name}/screen.png,
+// and never the request path, so the number of series does not grow
+// with the number of Displays.
 type apiMetrics struct {
 	registry *prometheus.Registry
 	requests *prometheus.CounterVec
@@ -32,11 +32,11 @@ func newAPIMetrics(component, version string) *apiMetrics {
 		registry: registry,
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "display_api_requests_total",
-			Help: "Requests this API answered, by route template, method and status.",
+			Help: "Requests this API responded to, by route template, method, and status.",
 		}, []string{"route", "method", "status"}),
 		latency: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: "display_api_request_seconds",
-			Help: "How long one request took to its response headers.",
+			Help: "Seconds from the start of a request to its response headers.",
 		}, []string{"route"}),
 		streams: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "display_api_streams_active",
@@ -48,16 +48,16 @@ func newAPIMetrics(component, version string) *apiMetrics {
 		}),
 	}
 	registry.MustRegister(m.requests, m.latency, m.streams, m.expiry)
-	// The one aspect this API streams starts at zero, so a panel
-	// reads a screen nobody is watching rather than no series.
+	// Setting the gauge creates the series before the first stream, so
+	// a dashboard shows 0 instead of no data.
 	m.streams.WithLabelValues(screenAspect).Set(0)
 	return m
 }
 
-// Every recording method is safe with no registry behind it, the way
-// this repository's other metrics are, so a test drives a request
-// with no listener.
-func (m *apiMetrics) answered(route, method string, status int, headerTime time.Duration) {
+// recordRequest records one finished request. Every recording method does
+// nothing on a nil *apiMetrics, so a test can serve a request without
+// metrics.
+func (m *apiMetrics) recordRequest(route, method string, status int, headerTime time.Duration) {
 	if m == nil {
 		return
 	}
@@ -79,15 +79,13 @@ func (m *apiMetrics) certificateExpires(at time.Time) {
 	m.expiry.Set(float64(at.Unix()))
 }
 
-// The status label is the code itself, a set of bounded size, and
-// never the status phrase.
 func statusLabel(status int) string {
 	return strconv.Itoa(status)
 }
 
-// The three paths every liken process serves beside its own work:
-// /metrics, /healthz, and /readyz. None of them takes a token, so
-// the kubelet and the scrape need none.
+// processHandler serves /metrics, /healthz, and /readyz. None of them
+// requires a token, because the kubelet's probes and the Prometheus
+// scrape send none. /readyz returns 503 while ready returns false.
 func processHandler(registry *prometheus.Registry, ready func() bool) *http.ServeMux {
 	served := http.NewServeMux()
 	served.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))

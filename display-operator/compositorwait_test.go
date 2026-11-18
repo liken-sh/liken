@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-// compositorGone takes the compositor away from a lab plugin: its
-// socket file is left behind with nothing answering on it, and the
-// layout module it ran has no connection. A restart of the
-// compositor's container looks like this until the new one listens.
+// compositorGone makes the compositor look as it does while its
+// container restarts: the Wayland socket file exists with nothing
+// listening on it, and the plugin has no connection to the layout
+// module.
 func compositorGone(t *testing.T, plugin *draPlugin) {
 	t.Helper()
 	plugin.socketDir = t.TempDir()
@@ -22,10 +22,10 @@ func joined(parts ...[]AllocatedDevice) []AllocatedDevice {
 	return slices.Concat(parts...)
 }
 
-// A control device delivers an i2c node, and the i2c bus reaches the
-// panel whether or not a compositor draws on it. Every result that
-// delivers a Wayland socket still waits for the compositor, so a claim
-// that holds one waits whole.
+// A control device gives the pod an i2c node, which reaches the panel
+// whether or not a compositor is running. A claim with an output or
+// draw device needs the Wayland socket, so prepare refuses the whole
+// claim, control device included, while the compositor is down.
 func TestPrepareWaitsForTheCompositorOnlyForAWaylandResult(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -71,9 +71,9 @@ func TestPrepareWaitsForTheCompositorOnlyForAWaylandResult(t *testing.T) {
 	}
 }
 
-// A control-only claim receives no Wayland socket, so its delivery
-// names no socket, mounts no runtime directory, and asks the layout
-// module for nothing, with or without a compositor.
+// A claim with only a control device gets no Wayland socket, so its
+// prepared spec sets no socket and mounts no runtime directory, even
+// with the compositor down.
 func TestAControlClaimDeliversNoSocketWithTheCompositorDown(t *testing.T) {
 	plugin, _ := labPluginWithClaim(t, controlRequest(), "", claimedPanel(newFakeMonitor()))
 	compositorGone(t, plugin)
@@ -84,25 +84,25 @@ func TestAControlClaimDeliversNoSocketWithTheCompositorDown(t *testing.T) {
 
 	edits := preparedSpec(t).Devices[0].ContainerEdits
 	if socket := waylandSocket(edits); socket != "" {
-		t.Errorf("the control device delivers the socket %s", socket)
+		t.Errorf("the control device mounts the socket %s, want none", socket)
 	}
 	if len(edits.Mounts) != 0 {
-		t.Errorf("mounts = %+v", edits.Mounts)
+		t.Errorf("mounts are %+v, want none", edits.Mounts)
 	}
 }
 
-// replacedPanel is a controlled panel whose connector came back
-// carrying a different monitor, so its output serves nobody.
+// replacedPanel returns a panel with DDC controls whose connector now
+// has a different monitor (Output.Replaced).
 func replacedPanel() Output {
 	output := controlledPanel(supportedControls{Brightness: true})
 	output.Replaced = true
 	return output
 }
 
-// The taint the compositor's absence adds is for the clients whose
-// Wayland connections died with it. A control device's holder has no
-// such connection, so the control device keeps its own taints: those
-// of a screen that serves nobody, and nothing more.
+// compositorDown taints the output and draw devices, because their
+// pods lose their Wayland connections when the compositor stops. A
+// control device has no Wayland connection, so compositorDown adds no
+// taint to it, and it keeps only the taint of a replaced monitor.
 func TestCompositorDownTaintsOnlyTheDevicesThatNeedIt(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -135,16 +135,16 @@ func TestCompositorDownTaintsOnlyTheDevicesThatNeedIt(t *testing.T) {
 			if !c.tainted && len(taints) != 0 {
 				t.Fatalf("taints = %+v, want none", taints)
 			}
-			if c.tainted && !slices.Equal(taints, unservableTaints()) {
-				t.Fatalf("taints = %+v, want %+v", taints, unservableTaints())
+			if c.tainted && !slices.Equal(taints, disconnectedTaints()) {
+				t.Fatalf("taints = %+v, want %+v", taints, disconnectedTaints())
 			}
 		})
 	}
 }
 
-// A mixed claim that waits for the compositor writes nothing to the
-// panel on that pass, even when its screen request states a
-// brightness, because the check runs before any result acts.
+// A claim with a control request and a screen request, refused because
+// the compositor is down, also writes no brightness to the panel,
+// because prepare checks the compositor before it acts on any result.
 func TestAWaitingMixedClaimWritesNothingToThePanel(t *testing.T) {
 	panel := newFakeMonitor()
 	plugin, _ := labPluginWithClaim(t, joined(controlRequest(), screenRequest()),
@@ -159,11 +159,12 @@ func TestAWaitingMixedClaimWritesNothingToThePanel(t *testing.T) {
 	}
 }
 
-// A claim whose prepare restarted the compositor is waiting for it,
-// and its pod has started nothing that could have lost a connection.
-// Its output keeps no taint, so the taint does not evict the pod that
-// asked for the restart. The draw device beside it is shared with
-// clients that did lose their connection, so it is tainted.
+// While prepare waits for a compositor restart that it caused, the
+// claim's pod has not started and has no connection to lose.
+// compositorDown leaves that output untainted, so the taint does not
+// evict the pod that requested the restart. The draw device of the
+// same output is shared with clients that did lose their connections,
+// so it is tainted.
 func TestCompositorDownSparesTheOutputAPrepareWaitsOn(t *testing.T) {
 	devices := compositorDown(sliceDevices([]Output{controlledPanel(supportedControls{Brightness: true})}),
 		map[string]bool{"hdmi-a-1": true})

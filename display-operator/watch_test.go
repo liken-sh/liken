@@ -1,18 +1,17 @@
 package main
 
-// These tests run the handlers of each watch through client-go's real
+// These tests run each watch's handler through client-go's real
 // reflector, against the scripted API server in watchserver_test.go.
-// The reflector's own loop is upstream's to test, and the shared
-// informer package tests the copy it keeps and the decode of each
-// object. What these tests prove is that each change the API server
-// sends reaches this program's handlers, and that each watch asks for
-// the objects it must.
+// They check that each change the server sends reaches this program's
+// handlers, and that each watch requests the objects it needs. The
+// reflector's loop and the informer's copy of the collection are
+// tested upstream and in the informer package.
 //
-// Each test that runs a watch runs in a synctest bubble. synctest.Wait
-// returns once the reflector has done all it can do at the present
-// moment, so a test reads a wake that did not come as one that never
-// comes, and a time.Sleep waits out the reflector's backoff on the fake
-// clock.
+// Each test that runs a watch runs in a synctest bubble.
+// synctest.Wait returns when the reflector has nothing left to do at
+// the current fake time, so a wake that has not arrived by then is one
+// that will not arrive. time.Sleep waits out the reflector's backoff on
+// the fake clock.
 
 import (
 	"context"
@@ -30,9 +29,10 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-// The two watches that wake a pass on every change, each with the
-// collection it watches and the objects it reads there. The Display
-// watch wakes on an edit alone, and its tests follow these.
+// The Layout and Pod watches, each with its collection and the field
+// selector it should send. The shared test changes only names and
+// labels, which wake both. The Display watch ignores a label change, so
+// it has its own tests below.
 var wakeWatches = []struct {
 	kind       string
 	collection string
@@ -44,17 +44,18 @@ var wakeWatches = []struct {
 	{"Pod", PodsPath, "v1", "spec.nodeName=node-1", podsOnNode1},
 }
 
-// openWatch starts one wake watch, the way openDisplays and
-// openLayouts do.
+// openWatch is the signature shared by openDisplays, openLayouts, and
+// podsOnNode1.
 type openWatch func(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) *informer.Collection
 
-// podsOnNode1 starts the pod watch of the node the tests name.
+// podsOnNode1 starts the pod watch for node-1.
 func podsOnNode1(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) *informer.Collection {
 	return openPods(ctx, client, "node-1", wake, readings)
 }
 
-// runWakeWatch starts one wake watch against the store, and answers the
-// channel it wakes. The watch ends with the test.
+// runWakeWatch starts a watch against the store and returns a channel
+// that receives a value for each wake. The watch stops when the test
+// ends.
 func runWakeWatch(t *testing.T, store *objectStore, start openWatch, readings *metrics) <-chan struct{} {
 	t.Helper()
 	wakes := make(chan struct{}, 1)
@@ -72,8 +73,8 @@ func runWakeWatch(t *testing.T, store *objectStore, start openWatch, readings *m
 	return wakes
 }
 
-// woke answers whether the watch woke a pass, once the watch has done
-// all it can do.
+// woke reports whether the watch called wake, after letting the
+// reflector finish its pending work.
 func woke(wakes <-chan struct{}) bool {
 	synctest.Wait()
 	select {
@@ -87,14 +88,14 @@ func woke(wakes <-chan struct{}) bool {
 func awaitWake(t *testing.T, wakes <-chan struct{}, what string) {
 	t.Helper()
 	if !woke(wakes) {
-		t.Fatalf("%s woke no pass", what)
+		t.Fatalf("%s did not wake a pass, want one", what)
 	}
 }
 
 func awaitNoWake(t *testing.T, wakes <-chan struct{}, what string) {
 	t.Helper()
 	if woke(wakes) {
-		t.Fatalf("%s woke a pass", what)
+		t.Fatalf("%s woke a pass, want none", what)
 	}
 }
 
@@ -102,10 +103,10 @@ func objectOf(kind, name string) map[string]any {
 	return map[string]any{"metadata": map[string]any{"name": name, "namespace": "default"}, "kind": kind}
 }
 
-// The first read wakes the pass, even a read that finds nothing, and so
-// does each change after it: a new object, an edit, and a removal. The
-// watch asks for the objects this node's pass reads, and no others.
-func TestAWakeWatchWakesOnItsFirstReadAndOnEveryChange(t *testing.T) {
+// The first list calls wake even when it finds no objects, and so does
+// each later add, edit, and removal. Every request carries the field
+// selector the pass needs.
+func TestAWatchWakesOnTheFirstListAndOnEveryChange(t *testing.T) {
 	for _, watch := range wakeWatches {
 		t.Run(watch.kind, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -135,8 +136,7 @@ func TestAWakeWatchWakesOnItsFirstReadAndOnEveryChange(t *testing.T) {
 	}
 }
 
-// podAt is a pod with one label and one address, the way the kubelet
-// reports it.
+// podAt builds a pod with one label and a pod IP.
 func podAt(uid, region, address string) map[string]any {
 	return map[string]any{
 		"kind":     "Pod",
@@ -145,10 +145,10 @@ func podAt(uid, region, address string) map[string]any {
 	}
 }
 
-// Through the reflector: the pod watch wakes the placement pass on its
-// first read, a new pod, a change to a pod's labels, a pod deleted and
-// created again, and a removal. The pass reads a pod's name,
-// namespace, and labels, so the kubelet's status writes wake nothing.
+// The pod watch wakes on the first list, a new pod, a label change, a
+// pod deleted and recreated, and a removal. The placement pass reads
+// only a pod's name, namespace, and labels, so a status write such as a
+// new pod IP wakes nothing.
 func TestThePodWatchWakesOnALabelChangeAndNotOnAStatusWrite(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := newObjectStore(t, PodsPath, "v1", "Pod")
@@ -168,8 +168,8 @@ func TestThePodWatchWakesOnALabelChangeAndNotOnAStatusWrite(t *testing.T) {
 	})
 }
 
-// displayAt is a Display at one generation, with a status that names
-// the node it is on and the connector it is on.
+// displayAt builds a Display at the given generation, with status.node
+// and status.connector set.
 func displayAt(generation int64, node, connector string) map[string]any {
 	return map[string]any{
 		"metadata": map[string]any{"name": "gsm-7716-lg-hdr-wqhd", "generation": generation, "uid": "uid-1"},
@@ -177,10 +177,9 @@ func displayAt(generation int64, node, connector string) map[string]any {
 	}
 }
 
-// Through the reflector: the Display watch wakes the passes on its
-// first read, a new Display, a spec edit, a Display another node's
-// controller adopted, and a removal. Any other status write wakes
-// nothing.
+// The Display watch wakes on the first list, a new Display, a spec
+// edit, a Display that another node's controller adopted, and a
+// removal. It does not wake on any other status write.
 func TestTheDisplayWatchWakesOnAnEditAndNotOnAStatusWrite(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := newObjectStore(t, DisplaysPath, DisplayAPIVersion, "Display")
@@ -200,11 +199,11 @@ func TestTheDisplayWatchWakesOnAnEditAndNotOnAStatusWrite(t *testing.T) {
 	})
 }
 
-// The mark the Display watch compares. A change to the generation, the
-// deletion mark, the UID, or status.node is an edit, and so is
-// anything that is not an object, because nothing says what it
+// The Display watch treats a change to the generation, the deletion
+// timestamp, the UID, or status.node as an edit. It also treats a
+// value that is not an object as an edit, because it cannot tell what
 // changed.
-func TestADisplayEditIsAChangeToItsMark(t *testing.T) {
+func TestDisplayEditsWakeOnGenerationDeletionUIDAndNodeChanges(t *testing.T) {
 	adopted := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"node": "node-2"}}}
 	adopted.SetGeneration(1)
 	adopted.SetUID("uid-1")
@@ -241,9 +240,9 @@ func TestADisplayEditIsAChangeToItsMark(t *testing.T) {
 	}
 }
 
-// Each watch the reflector opens after its first counts one restart,
-// so display_watch_restarts_total still shows a watch that the API
-// server or the network keeps ending.
+// Each watch the reflector opens after the first increments
+// display_watch_restarts_total, so the metric shows a watch that the
+// API server or the network keeps closing.
 func TestAReopenedWakeWatchCountsARestart(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := newObjectStore(t, DisplaysPath, DisplayAPIVersion, "Display")
@@ -268,8 +267,8 @@ func TestAReopenedWakeWatchCountsARestart(t *testing.T) {
 	})
 }
 
-// A watch that the API server refuses is a retry, not a restart, so a
-// server that is down does not raise the count.
+// A watch request that the API server refuses is a retry and not a
+// restart, so an API server that is down does not raise the count.
 func TestARefusedWatchCountsNoRestart(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		readings := newMetrics(componentName, "dev")

@@ -518,7 +518,7 @@
             "description": "The screen in the type Accept selected, image/png by default.",
             "headers": {
               "Accept-Ranges": {
-                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "description": "none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3).",
                 "schema": {
                   "type": "string"
                 }
@@ -649,7 +649,7 @@
                 }
               }
             },
-            "description": "The sidecar answered something that is not HTTP or not a problem document."
+            "description": "The sidecar responded with something that is not HTTP or not a problem document."
           },
           "503": {
             "content": {
@@ -707,7 +707,7 @@
             "description": "The screen in the type Accept selected, image/png by default.",
             "headers": {
               "Accept-Ranges": {
-                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "description": "none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3).",
                 "schema": {
                   "type": "string"
                 }
@@ -838,7 +838,7 @@
                 }
               }
             },
-            "description": "The sidecar answered something that is not HTTP or not a problem document."
+            "description": "The sidecar responded with something that is not HTTP or not a problem document."
           },
           "503": {
             "content": {
@@ -962,7 +962,7 @@
             "description": "One frame of the screen, encoded as JPEG.",
             "headers": {
               "Accept-Ranges": {
-                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "description": "none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3).",
                 "schema": {
                   "type": "string"
                 }
@@ -1087,7 +1087,7 @@
                 }
               }
             },
-            "description": "The sidecar answered something that is not HTTP or not a problem document."
+            "description": "The sidecar responded with something that is not HTTP or not a problem document."
           },
           "503": {
             "content": {
@@ -1127,7 +1127,7 @@
             "description": "One frame of the screen, encoded as JPEG.",
             "headers": {
               "Accept-Ranges": {
-                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "description": "none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3).",
                 "schema": {
                   "type": "string"
                 }
@@ -1252,7 +1252,7 @@
                 }
               }
             },
-            "description": "The sidecar answered something that is not HTTP or not a problem document."
+            "description": "The sidecar responded with something that is not HTTP or not a problem document."
           },
           "503": {
             "content": {
@@ -1367,7 +1367,7 @@
             "description": "A stream of the screen with one image/jpeg part per frame. The stream ends at the t= end or when the client closes the connection.",
             "headers": {
               "Accept-Ranges": {
-                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "description": "none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3).",
                 "schema": {
                   "type": "string"
                 }
@@ -1492,7 +1492,7 @@
                 }
               }
             },
-            "description": "The sidecar answered something that is not HTTP or not a problem document."
+            "description": "The sidecar responded with something that is not HTTP or not a problem document."
           },
           "503": {
             "content": {
@@ -1532,7 +1532,7 @@
             "description": "A stream of the screen with one image/jpeg part per frame. The stream ends at the t= end or when the client closes the connection.",
             "headers": {
               "Accept-Ranges": {
-                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "description": "none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3).",
                 "schema": {
                   "type": "string"
                 }
@@ -1657,7 +1657,7 @@
                 }
               }
             },
-            "description": "The sidecar answered something that is not HTTP or not a problem document."
+            "description": "The sidecar responded with something that is not HTTP or not a problem document."
           },
           "503": {
             "content": {
@@ -1781,7 +1781,7 @@
             "description": "A clip of the screen in H.264 fragmented MP4. The clip ends at the t= end or when the client closes the connection. The Content-Type carries the RFC 6381 codecs parameter: avc1.640029 for High profile level 4.1 up to 1920x1080 at 60 fps, and avc1.640033 for level 5.1 above that.",
             "headers": {
               "Accept-Ranges": {
-                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "description": "none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3).",
                 "schema": {
                   "type": "string"
                 }
@@ -1906,7 +1906,7 @@
                 }
               }
             },
-            "description": "The sidecar answered something that is not HTTP or not a problem document."
+            "description": "The sidecar responded with something that is not HTTP or not a problem document."
           },
           "503": {
             "content": {
@@ -1946,7 +1946,7 @@
             "description": "A clip of the screen in H.264 fragmented MP4. The clip ends at the t= end or when the client closes the connection. The Content-Type carries the RFC 6381 codecs parameter: avc1.640029 for High profile level 4.1 up to 1920x1080 at 60 fps, and avc1.640033 for level 5.1 above that.",
             "headers": {
               "Accept-Ranges": {
-                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "description": "none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3).",
                 "schema": {
                   "type": "string"
                 }
@@ -2071,7 +2071,7 @@
                 }
               }
             },
-            "description": "The sidecar answered something that is not HTTP or not a problem document."
+            "description": "The sidecar responded with something that is not HTTP or not a problem document."
           },
           "503": {
             "content": {
@@ -2186,7 +2186,7 @@
             "description": "One frame of the screen, encoded as PNG.",
             "headers": {
               "Accept-Ranges": {
-                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "description": "none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3).",
                 "schema": {
                   "type": "string"
                 }
@@ -2311,7 +2311,7 @@
                 }
               }
             },
-            "description": "The sidecar answered something that is not HTTP or not a problem document."
+            "description": "The sidecar responded with something that is not HTTP or not a problem document."
           },
           "503": {
             "content": {
@@ -2351,7 +2351,7 @@
             "description": "One frame of the screen, encoded as PNG.",
             "headers": {
               "Accept-Ranges": {
-                "description": "none. A live capture has no byte identity (RFC 9110 section 14.3).",
+                "description": "none. The bytes of a capture differ on each request, so a byte range has no meaning (RFC 9110 section 14.3).",
                 "schema": {
                   "type": "string"
                 }
@@ -2476,7 +2476,7 @@
                 }
               }
             },
-            "description": "The sidecar answered something that is not HTTP or not a problem document."
+            "description": "The sidecar responded with something that is not HTTP or not a problem document."
           },
           "503": {
             "content": {
@@ -2746,7 +2746,7 @@
   ],
   "servers": [
     {
-      "description": "The base this API answers on.",
+      "description": "The base URL of this API.",
       "url": "/"
     }
   ]

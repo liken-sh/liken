@@ -14,10 +14,9 @@ import (
 	"time"
 )
 
-// The opcodes are spelled again here, from the protocol
-// definition, rather than read from the operator's own constants. A
-// number that is wrong in one place has to be wrong in both before a
-// test passes.
+// The tests copy the opcodes from the protocol definition instead of
+// using the operator's constants, so a wrong number in the operator
+// fails them.
 const (
 	wlDisplaySync          uint16 = 0
 	wlDisplayGetRegistry   uint16 = 1
@@ -34,16 +33,16 @@ const (
 	wlOutputDescription    uint16 = 5
 )
 
-// A compositor on a socket, serving the wire protocol the
-// operator reads from weston. It answers get_registry, sync, and
-// bind, and the test drives the globals: what the connection starts
-// with, what leaves, what arrives, and when the compositor ends.
+// westonBench is a fake compositor on a Unix socket. It handles
+// get_registry, sync, and bind, and a test chooses which outputs exist
+// when a connection starts, which are added and removed later, and
+// when the connection ends.
 type westonBench struct {
 	t       *testing.T
 	path    string
 	version uint32
-	// The listener, so a test can end the compositor and leave its
-	// socket file behind.
+	// listener lets a test stop the compositor and leave its socket
+	// file behind.
 	listener *net.UnixListener
 
 	mu      sync.Mutex
@@ -51,11 +50,9 @@ type westonBench struct {
 	arrived chan *compositorSession
 }
 
-// One output of the fake compositor: the connector it names, the
-// monitor its geometry event states, and the modes it states, each one
-// flags, width, height, and a refresh in millihertz. The mode whose
-// flags carry 1 is the mode it serves. An output whose monitor a test
-// does not state carries the lab monitor.
+// Each mode is flags, width, height, and a refresh in millihertz. Flag
+// 1 marks the current mode and flag 2 the monitor's preferred mode. An
+// output with no make and model gets the default test monitor.
 type westonOutput struct {
 	connector string
 	vendor    string
@@ -63,8 +60,8 @@ type westonOutput struct {
 	modes     [][]uint32
 }
 
-// What a served output states: the mode it runs, which its
-// monitor also prefers, then a mode it offers and does not run.
+// labWestonModes returns a current and preferred mode, and a second
+// mode that the output offers but does not run.
 func labWestonModes() [][]uint32 {
 	return [][]uint32{{3, 3840, 1600, 59997}, {0, 1920, 1080, 60000}}
 }
@@ -74,9 +71,8 @@ func newWestonBench(t *testing.T, connectors map[uint32]string) *westonBench {
 	return westonBenchOn(t, filepath.Join(t.TempDir(), socketName), connectors)
 }
 
-// westonBenchOn is the same compositor on a path the caller names,
-// which is how a test puts one in a runtime directory it already
-// holds.
+// westonBenchOn starts the compositor on a socket path that the caller
+// chooses.
 func westonBenchOn(t *testing.T, path string, connectors map[uint32]string) *westonBench {
 	t.Helper()
 	outputs := map[uint32]westonOutput{}
@@ -99,30 +95,23 @@ func westonBenchOn(t *testing.T, path string, connectors map[uint32]string) *wes
 				return
 			}
 			session := &compositorSession{server: server, wire: newWaylandClient(connection)}
-			go session.serve()
+			go session.serveLoop()
 		}
 	}()
 	return server
 }
 
-// The connection this compositor serves now, once it has answered the
-// client's first sync. A test waits for one before it moves any output,
-// and waits again after a restart.
-//
-// The watch treats every output that arrives or leaves before the
-// answer to its first sync as part of the baseline, and the baseline
-// owes no heal. The test moves outputs from its own goroutine, and the
-// session writes the answer from another. The socket delivers messages
-// in the order they are written. The session writes the answer before
-// the test receives the session, so every output the test moves reaches
-// the watch after the baseline.
+// client returns the next connection once the compositor has sent
+// the done event of that connection's first sync. The socket delivers
+// messages in order, so an output that the test adds or removes after
+// client returns reaches the watch after its baseline.
 func (f *westonBench) client() *compositorSession {
 	f.t.Helper()
 	select {
 	case session := <-f.arrived:
 		return session
 	case <-time.After(5 * time.Second):
-		f.t.Fatal("no client connected to the compositor")
+		f.t.Fatal("no client connected to the compositor within 5 seconds")
 		return nil
 	}
 }
@@ -139,20 +128,19 @@ func (f *westonBench) snapshot() map[uint32]westonOutput {
 	return maps.Clone(f.outputs)
 }
 
-// An output arrives on the live connection.
-func (f *westonBench) add(session *compositorSession, global uint32, connector string) {
-	f.serve(session, global, westonOutput{connector: connector, modes: labWestonModes()})
+// addLabOutput adds an output with labWestonModes.
+func (f *westonBench) addLabOutput(session *compositorSession, global uint32, connector string) {
+	f.addOutput(session, global, westonOutput{connector: connector, modes: labWestonModes()})
 }
 
-func (f *westonBench) serve(session *compositorSession, global uint32, output westonOutput) {
+func (f *westonBench) addOutput(session *compositorSession, global uint32, output westonOutput) {
 	f.mu.Lock()
 	f.outputs[global] = output
 	f.mu.Unlock()
-	session.announce(global, output.connector)
+	session.sendGlobal(global)
 }
 
-// An output leaves the live connection.
-func (f *westonBench) remove(session *compositorSession, global uint32) {
+func (f *westonBench) removeOutput(session *compositorSession, global uint32) {
 	f.mu.Lock()
 	delete(f.outputs, global)
 	f.mu.Unlock()
@@ -161,30 +149,29 @@ func (f *westonBench) remove(session *compositorSession, global uint32) {
 	session.send(session.registryID(), wlRegistryGlobalRemove, words)
 }
 
-// An output that is already bound states a new set of modes,
-// in a batch of its own, the way weston does when a monitor's mode
-// changes under an output that survives.
-func (f *westonBench) restate(session *compositorSession, global uint32, modes [][]uint32) {
+// changeModes sends a new batch of modes for an output that the client
+// has bound, as weston does when the mode changes and the output
+// stays.
+func (f *westonBench) changeModes(session *compositorSession, global uint32, modes [][]uint32) {
 	f.mu.Lock()
 	output := f.outputs[global]
 	output.modes = modes
 	f.outputs[global] = output
 	f.mu.Unlock()
-	session.states(global, modes)
+	session.sendBatch(global, modes)
 }
 
-// The compositor ends, which is what every restart looks like
-// from the operator's end of the socket.
+// end closes the connection, as a compositor restart does.
 func (f *westonBench) end(session *compositorSession) {
 	_ = session.wire.socket.Close()
 }
 
-// stop ends the compositor's whole process, and the socket file it
-// created stays on the host.
+// stop closes the listener, as when the compositor process exits. The
+// socket file stays on disk.
 func (f *westonBench) stop() {
 	f.t.Helper()
 	if err := f.listener.Close(); err != nil {
-		f.t.Fatal(err)
+		f.t.Fatalf("closing the compositor socket: %v", err)
 	}
 }
 
@@ -194,8 +181,7 @@ type compositorSession struct {
 
 	mu       sync.Mutex
 	registry uint32
-	// The object the client bound each global to, which is
-	// where the events about that output go.
+	// bound maps each global to the object id the client bound it to.
 	bound map[uint32]uint32
 }
 
@@ -205,16 +191,15 @@ func (s *compositorSession) registryID() uint32 {
 	return s.registry
 }
 
-// One message out. The test's goroutine and the serving
-// goroutine both write, and the lock keeps two messages from
-// interleaving.
+// send holds the lock so that messages from the test goroutine and the
+// serving goroutine do not interleave.
 func (s *compositorSession) send(object uint32, opcode uint16, words waylandWords) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_ = s.wire.request(object, opcode, words)
 }
 
-func (s *compositorSession) announce(global uint32, connector string) {
+func (s *compositorSession) sendGlobal(global uint32) {
 	var words waylandWords
 	words.putUint(global)
 	words.putText(outputInterface)
@@ -222,8 +207,8 @@ func (s *compositorSession) announce(global uint32, connector string) {
 	s.send(s.registryID(), wlRegistryGlobal, words)
 }
 
-func (s *compositorSession) serve() {
-	answered := false
+func (s *compositorSession) serveLoop() {
+	replied := false
 	for {
 		message, err := s.wire.event()
 		if err != nil {
@@ -235,8 +220,8 @@ func (s *compositorSession) serve() {
 			s.mu.Lock()
 			s.registry = registry
 			s.mu.Unlock()
-			for global, output := range s.server.snapshot() {
-				s.announce(global, output.connector)
+			for global := range s.server.snapshot() {
+				s.sendGlobal(global)
 			}
 		case message.object == displayObject && message.opcode == wlDisplaySync:
 			callback := message.fields.uint()
@@ -246,8 +231,8 @@ func (s *compositorSession) serve() {
 			var deleted waylandWords
 			deleted.putUint(callback)
 			s.send(displayObject, wlDisplayDeleteID, deleted)
-			if !answered {
-				answered = true
+			if !replied {
+				replied = true
 				s.server.arrived <- s
 			}
 		case message.object == s.registryID() && message.opcode == wlRegistryBind:
@@ -261,18 +246,15 @@ func (s *compositorSession) serve() {
 			}
 			s.bound[global] = id
 			s.mu.Unlock()
-			s.burst(id, global, version)
+			s.sendBindEvents(id, global, version)
 		}
 	}
 }
 
-// Everything a compositor states about an output when a
-// client binds it, in the order weston's bind_output sends it:
-// geometry, scale, one mode for every mode the head offers, name,
-// description, done. The name sits in the middle of that burst, so a
-// client that reads it has to skip the events on both sides of it by
-// their own sizes.
-func (s *compositorSession) burst(id, global, version uint32) {
+// sendBindEvents sends the events of a bind in the order of weston's
+// bind_output: geometry, scale, the modes, name, description, and
+// done. The client must skip scale and description by their sizes.
+func (s *compositorSession) sendBindEvents(id, global, version uint32) {
 	output := s.server.output(global)
 
 	vendor, model := output.vendor, output.model
@@ -293,7 +275,7 @@ func (s *compositorSession) burst(id, global, version uint32) {
 		scale.putUint(1)
 		s.send(id, wlOutputScale, scale)
 	}
-	s.modes(id, output.modes)
+	s.sendModes(id, output.modes)
 	if version >= 4 {
 		var name waylandWords
 		name.putText(output.connector)
@@ -307,10 +289,7 @@ func (s *compositorSession) burst(id, global, version uint32) {
 	}
 }
 
-// The mode flags are the protocol's own bitfield: 1 is the
-// mode the output runs and 2 is the one the monitor prefers, and the
-// refresh is in millihertz.
-func (s *compositorSession) modes(id uint32, modes [][]uint32) {
+func (s *compositorSession) sendModes(id uint32, modes [][]uint32) {
 	for _, mode := range modes {
 		var words waylandWords
 		for _, value := range mode {
@@ -320,18 +299,16 @@ func (s *compositorSession) modes(id uint32, modes [][]uint32) {
 	}
 }
 
-// A batch of its own for an output the client already bound,
-// closed by the done event that makes it the output's answer.
-func (s *compositorSession) states(global uint32, modes [][]uint32) {
+func (s *compositorSession) sendBatch(global uint32, modes [][]uint32) {
 	s.mu.Lock()
 	id := s.bound[global]
 	s.mu.Unlock()
-	s.modes(id, modes)
+	s.sendModes(id, modes)
 	s.send(id, wlOutputDone, waylandWords{})
 }
 
-// The watch under test, with the reports it makes on a
-// channel.
+// watchBench runs an outputWatch and sends each outputsChanged call to
+// reports.
 type watchBench struct {
 	t       *testing.T
 	watch   *outputWatch
@@ -349,20 +326,17 @@ func newWatchBench(t *testing.T, server *westonBench) *watchBench {
 	return bench
 }
 
-// The next report the watch makes, and a failure when it
-// makes none.
 func (b *watchBench) report() bool {
 	b.t.Helper()
 	select {
 	case recreated := <-b.reports:
 		return recreated
 	case <-time.After(5 * time.Second):
-		b.t.Fatal("the watch reported nothing about the compositor's outputs")
+		b.t.Fatal("the watch reported no output change within 5 seconds")
 		return false
 	}
 }
 
-// The reports of one burst, in order.
 func (b *watchBench) reported(count int) []bool {
 	b.t.Helper()
 	var reports []bool
@@ -372,19 +346,18 @@ func (b *watchBench) reported(count int) []bool {
 	return reports
 }
 
-func (b *watchBench) quiet() {
+func (b *watchBench) expectNoReport() {
 	b.t.Helper()
 	select {
 	case recreated := <-b.reports:
-		b.t.Fatalf("the watch reported recreated=%v with nothing moving", recreated)
+		b.t.Fatalf("the watch reported recreated=%v when no output changed, want no report", recreated)
 	case <-time.After(100 * time.Millisecond):
 	}
 }
 
-// What the watch has recorded for each connector, once it
-// settles on what the test expects. An output's own events arrive
-// after the global that raised the report, and the wait covers that
-// gap.
+// awaitServed waits until the watch's modes equal want. The watch
+// reports a baseline output at its bind, before the output's mode
+// events, so a test has to wait for them.
 func (b *watchBench) awaitServed(want map[string]string) {
 	b.t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -399,211 +372,195 @@ func (b *watchBench) awaitServed(want map[string]string) {
 	b.t.Errorf("the compositor serves %v, want %v", have, want)
 }
 
-// A compositor that just started has laid every canvas out at
-// its own output's size, so the outputs it announces on a fresh
-// connection owe nothing.
-func TestTheOutputsOfAFreshConnectionOweNoHeal(t *testing.T) {
+// A compositor that has just started sized every canvas for its
+// outputs, so they need no restart.
+func TestTheOutputsOfAFreshConnectionAreNotReportedAsRecreated(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1", 2: "DP-1"})
 	bench := newWatchBench(t, server)
 	server.client()
 
 	for _, recreated := range bench.reported(2) {
 		if recreated {
-			t.Error("the outputs a connection starts with owe a heal")
+			t.Error("the baseline outputs of a new connection were reported as recreated, want recreated=false")
 		}
 	}
-	bench.quiet()
+	bench.expectNoReport()
 }
 
-// The monitor sleeps and wakes, the kernel mode on its connector
-// changes, and weston destroys and re-creates the output for it. The
-// clients on the surviving screens hold a canvas sized for the output
-// that went, so this re-creation owes a heal.
-func TestAnOutputThatComesBackAtAnotherModeOwesAHeal(t *testing.T) {
+// When a monitor wakes at another mode, weston re-creates its output,
+// and the canvases are sized for the old mode, so the compositor needs
+// a restart.
+func TestAnOutputThatComesBackAtAnotherModeIsReportedAsRecreated(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1", 2: "DP-1"})
 	bench := newWatchBench(t, server)
 	session := server.client()
 	bench.reported(2)
-	// The identity an output leaves with is the one its last closed batch
-	// stated, so the test waits for that batch before it moves the output.
+	// The watch compares the panel from the output's last done event,
+	// so the test waits for it before it removes the output.
 	bench.awaitServed(map[string]string{"HDMI-A-1": "3840x1600@60", "DP-1": "3840x1600@60"})
 
-	server.remove(session, 1)
+	server.removeOutput(session, 1)
 	if bench.report() {
-		t.Error("a removal with no output back yet owes a heal")
+		t.Error("a removal with no added output was reported as recreated, want recreated=false")
 	}
-	server.serve(session, 3, westonOutput{
+	server.addOutput(session, 3, westonOutput{
 		connector: "HDMI-A-1",
 		modes:     [][]uint32{{3, 1920, 1080, 60000}},
 	})
 	if !bench.report() {
-		t.Error("an output that came back at another mode owes no heal")
+		t.Error("an output back at another mode was reported as recreated=false, want true")
 	}
-	bench.quiet()
+	bench.expectNoReport()
 }
 
-// The measured case. An A/V receiver switches its input, the HDMI link
-// renegotiates, and weston destroys and re-creates the output. The
-// panel that comes back is the same one at the same mode, so every
-// canvas is already the size it should be, and a restart would end
-// every client for nothing.
-func TestAnOutputThatComesBackTheSamePanelOwesNoHeal(t *testing.T) {
+// When an A/V receiver switches its input, the HDMI link renegotiates
+// and weston re-creates the output with the same panel and mode. The
+// canvases already have the right size, so no restart is needed.
+func TestAnOutputThatComesBackAsTheSamePanelIsNotReportedAsRecreated(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1", 2: "DP-1"})
 	bench := newWatchBench(t, server)
 	session := server.client()
 	bench.reported(2)
 	bench.awaitServed(map[string]string{"HDMI-A-1": "3840x1600@60", "DP-1": "3840x1600@60"})
 
-	server.remove(session, 1)
+	server.removeOutput(session, 1)
 	if bench.report() {
-		t.Error("a removal with no output back yet owes a heal")
+		t.Error("a removal with no added output was reported as recreated, want recreated=false")
 	}
-	server.add(session, 3, "HDMI-A-1")
+	server.addLabOutput(session, 3, "HDMI-A-1")
 	if bench.report() {
-		t.Error("the same panel back at the same mode owes a heal")
+		t.Error("the same panel back at the same mode was reported as recreated, want recreated=false")
 	}
-	bench.quiet()
+	bench.expectNoReport()
 }
 
-// A different monitor on the connector is a different screen, whatever
-// mode it runs, so every canvas is laid out again.
-func TestAnOutputThatComesBackAsAnotherMonitorOwesAHeal(t *testing.T) {
+// A different monitor on the connector needs a restart even at the
+// same mode.
+func TestAnOutputThatComesBackAsAnotherMonitorIsReportedAsRecreated(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	bench := newWatchBench(t, server)
 	session := server.client()
 	bench.reported(1)
 	bench.awaitMode("HDMI-A-1", "3840x1600@60")
 
-	server.remove(session, 1)
+	server.removeOutput(session, 1)
 	bench.report()
-	server.serve(session, 2, westonOutput{
+	server.addOutput(session, 2, westonOutput{
 		connector: "HDMI-A-1",
 		vendor:    "DEN",
 		model:     "DENON AVR",
 		modes:     labWestonModes(),
 	})
 	if !bench.report() {
-		t.Error("another monitor on the connector owes no heal")
+		t.Error("another monitor on the connector was reported as recreated=false, want true")
 	}
-	bench.quiet()
+	bench.expectNoReport()
 }
 
-// An output that arrives before the one it replaces leaves is the same
-// re-creation, because weston defers a destruction across a pending
-// flip. The two halves are paired on the connector they share, in
-// either order.
-func TestAnOutputThatArrivesBeforeTheOldOneLeavesOwesAHeal(t *testing.T) {
+// Weston can add the new output before it removes the old one, while
+// a page flip is pending. The watch matches the two by connector.
+func TestAnOutputThatArrivesBeforeTheOldOneLeavesIsReportedAsRecreated(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	bench := newWatchBench(t, server)
 	session := server.client()
 	bench.reported(1)
 	bench.awaitMode("HDMI-A-1", "3840x1600@60")
 
-	server.serve(session, 2, westonOutput{
+	server.addOutput(session, 2, westonOutput{
 		connector: "HDMI-A-1",
 		modes:     [][]uint32{{3, 1920, 1080, 60000}},
 	})
 	if bench.report() {
-		t.Error("an output that arrived alone owes a heal")
+		t.Error("an output added before the old one left was reported as recreated, want recreated=false until the removal")
 	}
 	bench.awaitMode("HDMI-A-1", "1920x1080@60")
-	server.remove(session, 1)
+	server.removeOutput(session, 1)
 	if !bench.report() {
-		t.Error("the removal that completes the re-creation owes no heal")
+		t.Error("the removal that completes the re-creation was reported as recreated=false, want true")
 	}
 }
 
-// A compositor older than the done event closes no batch, so its
-// outputs never state which connector they drive or what mode they run.
-// A creation on one has only the moment it binds to report in, and it
-// pairs with a removal the way a re-creation paired before an output
-// could name itself.
-func TestAnOutputThatStatesNoDoneEventReportsWhenItBinds(t *testing.T) {
+// An output bound at version 1 sends no done event and no name. The
+// watch reports it at the bind, and reports a removal and an addition
+// as a re-creation without comparing panels.
+func TestAnOutputWithNoDoneEventIsReportedWhenBound(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	server.version = 1
 	bench := newWatchBench(t, server)
 	session := server.client()
 	bench.reported(1)
 
-	server.remove(session, 1)
+	server.removeOutput(session, 1)
 	if bench.report() {
-		t.Error("a removal with no output back yet owes a heal")
+		t.Error("a removal with no added output was reported as recreated, want recreated=false")
 	}
-	server.add(session, 2, "HDMI-A-1")
+	server.addLabOutput(session, 2, "HDMI-A-1")
 	if !bench.report() {
-		t.Error("an output that left and came back owes no heal on a compositor that states no done event")
+		t.Error("an output that left and came back was reported as recreated=false on a version 1 output, want true")
 	}
 }
 
-// The operator restarts the compositor itself, for a mode and
-// for a heal. Every restart ends the connection, and the connection
-// that follows starts from a compositor whose canvases are right, so
-// the operator's own restarts report nothing.
+// A restart ends the connection, and the next connection starts a new
+// baseline, so a removal before the restart and an addition after it
+// are not a re-creation.
 func TestACompositorThatRestartsStartsANewBaseline(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1", 2: "DP-1"})
 	bench := newWatchBench(t, server)
 	session := server.client()
 	bench.reported(2)
 
-	server.remove(session, 1)
+	server.removeOutput(session, 1)
 	if bench.report() {
-		t.Error("a removal with no output back yet owes a heal")
+		t.Error("a removal with no added output was reported as recreated, want recreated=false")
 	}
 	server.end(session)
 
 	next := server.client()
 	if bench.report() {
-		t.Error("the output a new connection starts with owes a heal")
+		t.Error("the baseline output of a new connection was reported as recreated, want recreated=false")
 	}
-	server.add(next, 3, "HDMI-A-1")
+	server.addLabOutput(next, 3, "HDMI-A-1")
 	if bench.report() {
-		t.Error("an output that arrived after a restart pairs with a removal the restart ended")
+		t.Error("an output added after a restart was reported as recreated, want recreated=false because the restart ended the earlier removal")
 	}
 }
 
-// The name event carries the connector's own name, which keys
-// everything the watch records about that output. An output that
-// leaves takes its connector's answer with it.
-func TestTheWatchNamesEachOutputsConnector(t *testing.T) {
+func TestTheWatchRecordsModesByConnectorAndDropsThemWithTheOutput(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1", 2: "DP-1"})
 	bench := newWatchBench(t, server)
 	session := server.client()
 	bench.reported(2)
 	bench.awaitServed(map[string]string{"HDMI-A-1": "3840x1600@60", "DP-1": "3840x1600@60"})
 
-	server.remove(session, 1)
+	server.removeOutput(session, 1)
 	bench.report()
 	bench.awaitServed(map[string]string{"DP-1": "3840x1600@60"})
 }
 
-// A compositor older than the name event is bound at what it
-// offers, and its outputs are tracked with no name. The heal
-// decision reads no name, so a re-creation still owes a restart.
-// Nothing keys a mode to a connector, so such a compositor answers
-// no mode readback.
-func TestAnOlderCompositorsOutputsAreTrackedWithNoName(t *testing.T) {
+// An output bound at version 3 sends no name event. The watch still
+// reports a re-creation, and it records no modes, because modes are
+// keyed by connector.
+func TestAnOutputOfACompositorOlderThanTheNameEventHasNoConnectorName(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	server.version = 3
 	bench := newWatchBench(t, server)
 	session := server.client()
 	bench.reported(1)
 
-	server.remove(session, 1)
+	server.removeOutput(session, 1)
 	bench.report()
-	server.add(session, 2, "HDMI-A-1")
+	server.addLabOutput(session, 2, "HDMI-A-1")
 	if !bench.report() {
-		t.Error("an output that left and came back owes no heal on an older compositor")
+		t.Error("an output that left and came back was reported as recreated=false on a version 3 output, want true")
 	}
 	if served := bench.watch.served().modes; len(served) != 0 {
-		t.Errorf("the watch records %v on a compositor that sends no name event", served)
+		t.Errorf("the watch records modes %v for a version 3 output that sends no name event, want none", served)
 	}
 }
 
-// The plugin's mode readback, reading the compositor this
-// bench serves. The budget is short so a test that must reach the
-// timeout reaches it at once, the way the plugin's other tests
-// shorten it. The fallback timer is longer than any test, so a
-// readback that ends in time ended on the watch's report.
+// readbackPlugin returns a plugin whose mode readback reads this
+// watch. The fallback timer is an hour, so a readback that ends within
+// the test ended on the watch's change signal.
 func readbackPlugin(watch *outputWatch) *draPlugin {
 	return &draPlugin{
 		served:         watch.served,
@@ -612,12 +569,12 @@ func readbackPlugin(watch *outputWatch) *draPlugin {
 	}
 }
 
-// timedReadback runs the readback against what the watch reports now,
-// at the operator's own bounds, in a synctest bubble. It answers the
-// readback's error and how long the readback waited on the fake clock.
-// The watch reads a real socket outside the bubble, so the readback
-// reads a copy of its report, with a change channel the bubble owns.
-// A test calls it once nothing changes the report any more.
+// timedReadback runs the readback with the operator's timeouts in a
+// synctest bubble, and returns its error and how long it waited on the
+// fake clock. The watch reads a real socket, which cannot run in a
+// bubble, so the readback reads a snapshot of the watch with a change
+// channel made inside the bubble. Call it only when the modes will not
+// change.
 func timedReadback(t *testing.T, watch *outputWatch, connector, mode string, before uint64) (err error, waited time.Duration) {
 	t.Helper()
 	served := watch.served()
@@ -635,8 +592,6 @@ func timedReadback(t *testing.T, watch *outputWatch, connector, mode string, bef
 	return err, waited
 }
 
-// The mode the watch has recorded for one connector, once it
-// settles on what the test expects.
 func (b *watchBench) awaitMode(connector, want string) {
 	b.t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -651,21 +606,17 @@ func (b *watchBench) awaitMode(connector, want string) {
 	b.t.Fatalf("the compositor serves %q on %s, want %q", have, connector, want)
 }
 
-// The readback ends when the compositor that started after
-// the restart reports the mode the claim stated.
-func TestTheReadbackTakesTheModeTheCompositorServes(t *testing.T) {
+func TestTheReadbackAcceptsTheModeTheCompositorServes(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	bench := newWatchBench(t, server)
 	server.client()
 
 	if err := readbackPlugin(bench.watch).awaitMode(t.Context(), "HDMI-A-1", "3840x1600@60", 0); err != nil {
-		t.Errorf("the readback refused the mode the compositor serves: %v", err)
+		t.Errorf("awaitMode(3840x1600@60) = %v, want nil because the compositor serves that mode", err)
 	}
 }
 
-// A mode the compositor never takes fails the prepare, and
-// the failure names the mode it serves instead.
-func TestTheReadbackFailsWithTheModeTheCompositorServesInstead(t *testing.T) {
+func TestTheReadbackFailsAndNamesTheModeTheCompositorServes(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	bench := newWatchBench(t, server)
 	server.client()
@@ -673,36 +624,34 @@ func TestTheReadbackFailsWithTheModeTheCompositorServesInstead(t *testing.T) {
 
 	err, waited := timedReadback(t, bench.watch, "HDMI-A-1", "1920x1080@60", 0)
 	if err == nil {
-		t.Fatal("the readback took a mode the compositor does not serve")
+		t.Fatal("awaitMode(1920x1080@60) returned nil, want an error because the compositor serves 3840x1600@60")
 	}
 	if waited != modeSwitchTimeout {
-		t.Errorf("the readback gave up after %v, want %v", waited, modeSwitchTimeout)
+		t.Errorf("awaitMode gave up after %v, want %v", waited, modeSwitchTimeout)
 	}
 	for _, want := range []string{"HDMI-A-1", "1920x1080@60", "3840x1600@60"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the failure %q does not name %q", err, want)
+			t.Errorf("the error is %q, want it to contain %q", err, want)
 		}
 	}
 }
 
-// A monitor answers slowly, so weston states the mode it
-// settles on in a later batch. The readback takes the last batch,
-// not the first.
-func TestTheReadbackTakesAModeStatedInALaterBatch(t *testing.T) {
+// Weston can report the final mode in a later batch, while the
+// monitor settles.
+func TestTheReadbackAcceptsAModeFromALaterBatch(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	bench := newWatchBench(t, server)
 	session := server.client()
 	bench.awaitMode("HDMI-A-1", "3840x1600@60")
 
-	server.restate(session, 1, [][]uint32{{1, 1920, 1080, 60000}, {2, 3840, 1600, 59997}})
+	server.changeModes(session, 1, [][]uint32{{1, 1920, 1080, 60000}, {2, 3840, 1600, 59997}})
 	if err := readbackPlugin(bench.watch).awaitMode(t.Context(), "HDMI-A-1", "1920x1080@60", 0); err != nil {
-		t.Errorf("the readback refused the mode a later batch stated: %v", err)
+		t.Errorf("awaitMode(1920x1080@60) = %v, want nil because a later batch of modes lists it", err)
 	}
 }
 
-// The readback is waiting when the compositor states the mode, and
-// the watch's report ends the wait. Neither the budget nor the
-// fallback timer could end it inside the test's bound.
+// The timeout and the fallback timer are an hour, so only the watch's
+// change signal can end the wait.
 func TestTheReadbackEndsOnTheWatchsReport(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	bench := newWatchBench(t, server)
@@ -710,27 +659,27 @@ func TestTheReadbackEndsOnTheWatchsReport(t *testing.T) {
 	bench.awaitMode("HDMI-A-1", "3840x1600@60")
 	plugin := readbackPlugin(bench.watch)
 	plugin.switchTimeout = time.Hour
-	answer := make(chan error, 1)
-	go func() { answer <- plugin.awaitMode(t.Context(), "HDMI-A-1", "1920x1080@60", 0) }()
+	result := make(chan error, 1)
+	go func() { result <- plugin.awaitMode(t.Context(), "HDMI-A-1", "1920x1080@60", 0) }()
 	time.Sleep(50 * time.Millisecond)
 
-	server.restate(session, 1, [][]uint32{{1, 1920, 1080, 60000}, {2, 3840, 1600, 59997}})
+	server.changeModes(session, 1, [][]uint32{{1, 1920, 1080, 60000}, {2, 3840, 1600, 59997}})
 
 	select {
-	case err := <-answer:
+	case err := <-result:
 		if err != nil {
-			t.Errorf("the readback refused the mode the report stated: %v", err)
+			t.Errorf("awaitMode(1920x1080@60) = %v, want nil because the watch reported that mode", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Error("the readback did not end on the watch's report")
+		t.Error("awaitMode did not return within 5 seconds of the watch's report")
 	}
 }
 
-// The compositor a switch ended still serves the mode the
-// claim replaced, and its answer is not the readback. The wait is
-// for the connection that follows the restart, and a compositor that
-// never answers has declined nothing.
-func TestTheReadbackTakesNoAnswerFromTheCompositorItEnded(t *testing.T) {
+// The modes of the compositor that the switch restarted do not count,
+// so the readback waits for the next connection. When none comes, the
+// error is not errModeDeclined, because no compositor refused the
+// mode.
+func TestTheReadbackIgnoresTheModesOfTheCompositorItRestarted(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	bench := newWatchBench(t, server)
 	server.client()
@@ -739,21 +688,17 @@ func TestTheReadbackTakesNoAnswerFromTheCompositorItEnded(t *testing.T) {
 	standing := bench.watch.served().session
 	err, waited := timedReadback(t, bench.watch, "HDMI-A-1", "3840x1600@60", standing)
 	if err == nil {
-		t.Fatal("the readback took the answer of the compositor the switch ended")
+		t.Fatal("awaitMode returned nil, want an error because only the ended compositor served the mode")
 	}
 	if errors.Is(err, errModeDeclined) {
-		t.Errorf("the readback answered %v, want no decline", err)
+		t.Errorf("awaitMode returned %v, want an error other than errModeDeclined", err)
 	}
 	if waited != compositorReturnLimit {
-		t.Errorf("the readback gave up after %v, want %v", waited, compositorReturnLimit)
+		t.Errorf("awaitMode gave up after %v, want %v", waited, compositorReturnLimit)
 	}
 }
 
-// A dead compositor serves nothing: its answers empty when
-// the connection ends, not when the next one opens, so the window
-// between two compositors reports no mode instead of the last
-// answer of the one that died.
-func TestTheModesOfACompositorDieWithIt(t *testing.T) {
+func TestTheModesAreClearedWhenTheConnectionEnds(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	bench := newWatchBench(t, server)
 	session := server.client()
@@ -764,9 +709,7 @@ func TestTheModesOfACompositorDieWithIt(t *testing.T) {
 	bench.awaitMode("HDMI-A-1", "")
 }
 
-// Weston states a refresh in millihertz, and everything else
-// here states it in whole hertz.
-func TestAWestonModeReadsAsTheModeAClaimStates(t *testing.T) {
+func TestWestonModeRoundsTheRefreshToWholeHertz(t *testing.T) {
 	for _, one := range []struct {
 		width, height, refresh uint32
 		want                   string
@@ -783,9 +726,6 @@ func TestAWestonModeReadsAsTheModeAClaimStates(t *testing.T) {
 	}
 }
 
-// A string on the wire is a length that counts the null
-// terminator, then the bytes, then the padding to a whole number of
-// words.
 func TestAWaylandStringIsPaddedToAWholeNumberOfWords(t *testing.T) {
 	var words waylandWords
 	words.putUint(7)
@@ -810,8 +750,8 @@ func TestAWaylandStringIsPaddedToAWholeNumberOfWords(t *testing.T) {
 	}
 }
 
-// A message that states a size no message can have is a
-// connection to end, not a read to make.
+// A header with a size above maxWaylandMessage fails the read instead
+// of making the client read that many bytes.
 func TestAMessageWithAnImpossibleSizeEndsTheRead(t *testing.T) {
 	ours, theirs := net.Pipe()
 	t.Cleanup(func() { _ = ours.Close() })
@@ -821,15 +761,11 @@ func TestAMessageWithAnImpossibleSizeEndsTheRead(t *testing.T) {
 	}()
 
 	if _, err := newWaylandClient(ours).event(); err == nil {
-		t.Error("a message of 65535 bytes was read as a message")
+		t.Error("event() accepted a header of 65535 bytes, want an error")
 	}
 }
 
-// The card gate reads the watch's live bit. A connection makes it
-// live and wakes the passes, so the fields a card read fills come back
-// as soon as a compositor serves, and the end of the connection closes
-// the gate again.
-func TestAConnectionOpensTheCardGateAndWakesThePasses(t *testing.T) {
+func TestAConnectionOpensTheCardGateAndRunsTheConnectedHook(t *testing.T) {
 	server := newWestonBench(t, map[uint32]string{1: "HDMI-A-1"})
 	watch := newOutputWatch(server.path, func(bool) {})
 	watch.retry = 10 * time.Millisecond
@@ -838,7 +774,7 @@ func TestAConnectionOpensTheCardGateAndWakesThePasses(t *testing.T) {
 	ctx, stop := context.WithCancel(context.Background())
 	t.Cleanup(stop)
 	if watch.serving() {
-		t.Fatal("the watch serves before it has dialed")
+		t.Fatal("watch.serving() is true before the first dial, want false")
 	}
 	go watch.run(ctx)
 	session := server.client()
@@ -846,10 +782,10 @@ func TestAConnectionOpensTheCardGateAndWakesThePasses(t *testing.T) {
 	select {
 	case serving := <-woken:
 		if !serving {
-			t.Error("the passes woke before the gate opened")
+			t.Error("watch.serving() is false when the connected hook runs, want true")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("the connection woke no pass")
+		t.Fatal("the connected hook did not run within 5 seconds")
 	}
 
 	_ = os.Remove(watch.socketPath)
@@ -859,6 +795,6 @@ func TestAConnectionOpensTheCardGateAndWakesThePasses(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	if watch.serving() {
-		t.Error("the gate stays open after the compositor ended")
+		t.Error("watch.serving() is still true 5 seconds after the compositor ended, want false")
 	}
 }

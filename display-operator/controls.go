@@ -1,27 +1,16 @@
 package main
 
-// This file translates a claim's brightness and power parameters into
-// DDC/CI exchanges with the monitor.
+// This file applies a claim's brightness and power parameters to a
+// monitor, and reports which of those controls the monitor supports.
 //
-// Brightness and power belong to the panel, not to the graphics card.
-// The card can blank its signal, but only the panel can dim its
-// backlight or power itself down. DDC/CI on the connector's I2C wire
-// is the host's channel to those settings (ddc.go speaks the protocol).
-// The operator probes each panel, publishes its supported controls as
-// device attributes, and applies each claimed value with a readback.
-//
-// The probe is cached because discoverOutputs runs on every prepare
-// and every slice publish, and a panel that carries no DDC/CI costs
-// three 40ms attempts per code before it answers nothing. The cache
-// key is the connector plus the monitor's own EDID, so a different
-// monitor on the same wire is probed again and the same monitor never
-// is.
-//
-// Capability is per panel, and the lab measured it: of the two
-// monitors on the same card, one answers these codes and the other
-// refuses the protocol outright. Every path here treats a refusal as
-// a fact to publish, and a panel that answers nothing gets no
-// attribute, no parameter, and no traffic.
+// Only the panel can dim its backlight or power itself down, so the
+// operator sends these settings to the panel over DDC/CI on the
+// connector's I2C bus (ddc.go), not to the graphics card. Panels on one
+// card can differ: one supports these codes and another refuses DDC/CI.
+// The operator publishes each panel's supported controls as device
+// attributes, and a claim that sets a control the panel does not
+// support fails at prepare. panels.go caches the probe results by
+// connector and monitor.
 
 import (
 	"encoding/json"
@@ -36,23 +25,17 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// The two VCP codes this operator reads and writes. The MCCS
-// specification calls 0x10 Luminance and 0xD6 Power mode; ddcutil and
-// every monitor's menu call the first one brightness, and so does the
-// claim parameter.
+// The VCP codes for brightness and power mode. The MCCS specification
+// names 0x10 Luminance. ddcutil, monitor menus, and the claim parameter
+// call it brightness.
 const (
 	vcpBrightness = 0x10
 	vcpPowerMode  = 0xd6
 )
 
-// The power mode's values are the DPM and DPMS states written as one
-// byte: 0x01 on, 0x02 standby, 0x03 suspend, 0x04 off, and 0x05 a
-// write-only off (VESA MCCS 2.2a, table 8-9). Each display supports a
-// subset of this non-continuous code. Real panels differ: the lab's
-// BOE panel lists 01, 04, and 05, and refuses standby. A power-down
-// therefore writes standby first, reads the mode, and writes off if
-// the panel remains on. Standby is preferred because it is gentler;
-// off covers panels that support the common fallback value.
+// The values of the MCCS power mode code 0xD6 (VESA MCCS 2.2a, table
+// 8-9). A panel supports only some of these values. 0x05 is an off
+// value that a panel accepts only as a write.
 const (
 	powerModeOn      = 0x01
 	powerModeStandby = 0x02
@@ -61,32 +44,26 @@ const (
 	powerModeHardOff = 0x05
 )
 
-// The two keys this driver reads beside mode. A brightness is a
-// percentage of the panel's own maximum, because the raw scale is the
-// panel's and differs between models. A power states what the claim
-// asks of the panel's power, in the vocabulary below.
+// The claim parameter keys that this file reads, besides modeParameter.
+// A brightness is a percentage of the panel's own maximum, because the
+// raw scale differs between models.
 const (
 	brightnessParameter = "brightness"
 	powerParameter      = "power"
 )
 
-// The two values the power parameter takes. Both power the panel on
-// at prepare. Only onWhileClaimed powers it back down when the claim
-// ends, after powerReleaseGrace, and a prepare on the same connector
-// inside that period cancels the power-down. The two exist apart
-// because a claim with on is for a workload that never wants the
-// panel turned off, and the grace period covers only a replacement
-// pod that prepares inside it. A claim that states neither leaves the
-// panel's power alone in both directions.
+// The values of the power parameter. Both power the panel on at
+// prepare. onWhileClaimed also puts the panel in standby
+// powerReleaseGrace after the claim ends. A claim with no power value
+// does not change the panel's power.
 const (
 	powerOn             = "on"
 	powerOnWhileClaimed = "onWhileClaimed"
 )
 
-// Each power value has two spellings, the lowercase word and its
-// PascalCase form. A claim can hold either one, depending on the build
-// of the writer that made it, so the parse maps both to the lowercase
-// word, and the code after it and the power record file see one value.
+// A claim can spell each power value in lowercase or in PascalCase. The
+// parser maps both to the lowercase value, so the rest of the code and
+// the power record compare one value.
 var powerSpellings = map[string]string{
 	powerOn:             powerOn,
 	"On":                powerOn,
@@ -94,138 +71,130 @@ var powerSpellings = map[string]string{
 	"OnWhileClaimed":    powerOnWhileClaimed,
 }
 
-// The power record's value for a panel whose onWhileClaimed claim
-// ended and whose standby waits out the grace period. It is a value
-// of the record file only, and no claim states it.
+// The power record's value for a panel whose onWhileClaimed claim has
+// ended and whose standby waits for powerReleaseGrace. No claim uses
+// this value.
 const powerReleased = "released"
 
 // How long a panel stays on after its onWhileClaimed claim ends. A
-// Deployment that replaces its pod ends one claim and prepares the
-// next one on the same connector a few seconds later, and a standby
-// between the two would blink the panel. A prepare on the connector
-// inside this period cancels the standby.
+// Deployment that replaces its pod ends one claim and prepares the next
+// one on the same connector a few seconds later, and an immediate
+// standby would make the screen blink in between. A prepare on the
+// connector within this time cancels the standby.
 const powerReleaseGrace = 30 * time.Second
 
-// Every parameter this driver reads. Two parsers walk the same opaque
-// block, each taking the keys it acts on and skipping the others, so
-// this list is what both use to tell a typo from a key the other
-// parser reads. A key outside the list fails the claim from either
-// side.
+// Every parameter key that this driver accepts. The mode parser
+// (modes.go) and controlParameters read different keys from the same
+// opaque block, so each needs the whole list to tell a typo from a key
+// that the other parser reads.
 var claimParameterNames = []string{modeParameter, brightnessParameter, powerParameter}
 
-// This file records panels that a claim must put back into standby. It
-// shares the mode record's volume so the record survives an operator
-// container restart. The file belongs to the pod and disappears with
-// it, so a new pod that prepared no such claim has no recorded panel
-// to power down.
+// The file that records which panels go to standby when their claim
+// ends. It is in the pod's emptyDir volume with the mode record, so it
+// survives a restart of the operator container. A new pod starts with
+// an empty record, so it never powers down a panel for a claim that it
+// did not prepare.
 var powerRecordPath = "/etc/weston/power.json"
 
-// The failure both parsers report for a key this driver does not
-// read. An unknown key fails the claim rather than being skipped,
-// because a skipped typo would prepare the claim with the parameter
-// silently unapplied, and the person who wrote it would learn nothing
-// until the screen looked wrong.
+// unknownParameter is the error that both parsers return for a key
+// outside claimParameterNames. If a parser skipped a typo, the claim
+// would prepare without that setting, and its author would find out
+// only when the screen looked wrong.
 func unknownParameter(key string) error {
-	return fmt.Errorf("the claim's %s parameters name %q, and this driver reads %s",
+	return fmt.Errorf("the claim's %s parameters have the key %q, and this driver reads only %s",
 		DriverName, key, strings.Join(claimParameterNames, ", "))
 }
 
-// One config entry's statement of a parameter, and where it came
-// from. This is modeChoice's shape over any value type, because the
-// precedence rule is the same for every parameter and only the
-// value's type changes.
+// choice is one config entry's value for a parameter, and whether the
+// entry came from the claim or from the class. It is a generic
+// modeChoice, because every parameter follows the same precedence.
 type choice[T comparable] struct {
 	Value     T
 	FromClaim bool
 }
 
-// One parameter's resolved statements across a claim: what each block
-// that names its requests stated, and what a block with no requests
-// stated, which applies to every request in the claim. A value's zero
-// is how this type says "nothing was stated", which is why brightness
-// wraps its number in a struct with a flag.
+// selection holds one parameter's values across a claim's config: a
+// value for each request that a block names, and the value of a block
+// that names no request, which applies to every request. The zero value
+// of T means that no value was set, which is why brightness is a struct
+// with a Set flag.
 type selection[T comparable] struct {
 	requests map[string]choice[T]
 	every    choice[T]
 }
 
-// State records one block's statement under modeSelection.state's
-// rule: a later entry of the same source overwrites an earlier one,
-// and an entry from the class never overwrites one from the claim,
-// whatever order the resolved list carries them in.
-func (s *selection[T]) state(request string, stated choice[T]) {
-	var unstated T
+// set records one block's value for one request, or for every request
+// when request is empty. A later entry from the same source overwrites
+// an earlier one, and an entry from the class never overwrites one from
+// the claim, whatever the order of the config list.
+func (s *selection[T]) set(request string, value choice[T]) {
+	var unset T
 	current := s.every
 	if request != "" {
 		current = s.requests[request]
 	}
-	if current.Value != unstated && current.FromClaim && !stated.FromClaim {
+	if current.Value != unset && current.FromClaim && !value.FromClaim {
 		return
 	}
 	if request == "" {
-		s.every = stated
+		s.every = value
 		return
 	}
 	if s.requests == nil {
 		s.requests = map[string]choice[T]{}
 	}
-	s.requests[request] = stated
+	s.requests[request] = value
 }
 
-// StateAll records one block under every request it names. A block
-// that names none applies to every request in the claim, which is
-// what the empty request string stands for in the map.
-func (s *selection[T]) stateAll(requests []string, stated choice[T]) {
+// setAll records one block's value under each request it names, or
+// for every request when the block names none.
+func (s *selection[T]) setAll(requests []string, value choice[T]) {
 	if len(requests) == 0 {
-		s.state("", stated)
+		s.set("", value)
 		return
 	}
 	for _, request := range requests {
-		s.state(request, stated)
+		s.set(request, value)
 	}
 }
 
-// ForRequest resolves what one request gets, by two rules in order:
-// the claim's own choice beats the class's, and within one source a
-// block that names the request beats a block that names none.
+// forRequest returns the value for one request. A value from the claim
+// beats one from the class, and within one source a block that names
+// the request beats a block that names none.
 func (s selection[T]) forRequest(request string) T {
-	var unstated T
+	var unset T
 	named := s.requests[request]
-	if named.Value == unstated {
+	if named.Value == unset {
 		return s.every.Value
 	}
-	if s.every.Value != unstated && s.every.FromClaim && !named.FromClaim {
+	if s.every.Value != unset && s.every.FromClaim && !named.FromClaim {
 		return s.every.Value
 	}
 	return named.Value
 }
 
-// A brightness carries a flag beside its number because zero percent
-// is a brightness a claim can ask for, so the number alone cannot say
-// whether the claim stated one.
+// brightness has a Set flag because 0 percent is a valid brightness,
+// so the number alone cannot tell whether the claim set one.
 type brightness struct {
 	Percent int
-	Stated  bool
+	Set     bool
 }
 
-// RequestedControls is what one request asks of the panel itself. The
-// mode is the request's ask of the card and the compositor, and it
-// resolves separately in modes.go.
+// requestedControls is the brightness and power that one request sets
+// on its panel. modes.go resolves the request's display mode.
 type requestedControls struct {
 	Brightness brightness
 	Power      string
 }
 
-// Each parameter resolves on its own, because a claim can state a
-// brightness for one request and a power for all of them, and the two
-// must not shadow each other.
+// Brightness and power resolve separately, so a claim can set a
+// brightness for one request and a power for all requests without
+// either overriding the other.
 type controlSelection struct {
 	brightness selection[brightness]
 	power      selection[string]
 }
 
-// ForRequest answers one allocation result with both controls
-// resolved.
 func (s controlSelection) forRequest(request string) requestedControls {
 	return requestedControls{
 		Brightness: s.brightness.forRequest(request),
@@ -233,9 +202,9 @@ func (s controlSelection) forRequest(request string) requestedControls {
 	}
 }
 
-// ClaimControls reads the same resolved config claimModes reads and
-// takes the control parameters out of it. Another driver's block is
-// not this driver's to judge, so it is skipped, keys and all.
+// claimControls returns the brightness and power parameters of the
+// resolved config that claimModes also reads. It skips other drivers'
+// blocks without checking their keys.
 func claimControls(config []AllocatedConfig) (controlSelection, error) {
 	controls := controlSelection{}
 	for _, entry := range config {
@@ -247,13 +216,13 @@ func claimControls(config []AllocatedConfig) (controlSelection, error) {
 			return controlSelection{}, err
 		}
 		fromClaim := entry.Source == configFromClaim
-		if stated.Brightness.Stated {
-			controls.brightness.stateAll(entry.Requests, choice[brightness]{
+		if stated.Brightness.Set {
+			controls.brightness.setAll(entry.Requests, choice[brightness]{
 				Value: stated.Brightness, FromClaim: fromClaim,
 			})
 		}
 		if stated.Power != "" {
-			controls.power.stateAll(entry.Requests, choice[string]{
+			controls.power.setAll(entry.Requests, choice[string]{
 				Value: stated.Power, FromClaim: fromClaim,
 			})
 		}
@@ -261,12 +230,11 @@ func claimControls(config []AllocatedConfig) (controlSelection, error) {
 	return controls, nil
 }
 
-// ControlParameters reads one opaque block and refuses what no panel
-// can take: a brightness outside 0 to 100 or not a whole number, and
-// a power outside the two-word vocabulary. The refusal is here rather
-// than at the wire because the scheduler copies an opaque block
-// through unread, so this parse is the first and only code that
-// judges it.
+// controlParameters parses one opaque block. It rejects a key outside
+// claimParameterNames, a brightness that is not a whole number from 0
+// to 100, and a power value outside powerSpellings. The check is here
+// and not at the I2C write because the scheduler copies an opaque block
+// without reading it, so this parse is the only validation.
 func controlParameters(raw json.RawMessage) (requestedControls, error) {
 	stated := requestedControls{}
 	if len(raw) == 0 {
@@ -289,10 +257,10 @@ func controlParameters(raw json.RawMessage) (requestedControls, error) {
 			}
 			if percent < 0 || percent > 100 {
 				return requestedControls{}, fmt.Errorf(
-					"the claim's %s parameter is %d, and a brightness is a percentage from 0 to 100",
+					"the claim's %s parameter is %d, and it must be a percentage from 0 to 100",
 					brightnessParameter, percent)
 			}
-			stated.Brightness = brightness{Percent: percent, Stated: true}
+			stated.Brightness = brightness{Percent: percent, Set: true}
 		case powerParameter:
 			power := ""
 			if err := json.Unmarshal(value, &power); err != nil {
@@ -302,7 +270,7 @@ func controlParameters(raw json.RawMessage) (requestedControls, error) {
 			value, known := powerSpellings[power]
 			if !known {
 				return requestedControls{}, fmt.Errorf(
-					"the claim's %s parameter is %q, and this driver takes %q or %q, or the same word in lowercase",
+					"the claim's %s parameter is %q, and it must be %q or %q, in capitals as written or in lowercase",
 					powerParameter, power, "On", "OnWhileClaimed")
 			}
 			stated.Power = value
@@ -311,32 +279,28 @@ func controlParameters(raw json.RawMessage) (requestedControls, error) {
 	return stated, nil
 }
 
-// SupportedControls is the probe's answer: whether the panel on this
-// connector carries each control. A panel that answered nothing and a
-// panel that named the code unsupported both read false, because
-// neither one can be set.
+// supportedControls reports whether the panel on a connector supports
+// each control. A control is false both when the panel does not respond
+// to DDC/CI and when it reports the code as unsupported, because the
+// operator can set neither.
 type supportedControls struct {
 	Brightness bool
 	Power      bool
 }
 
-// A controlBus is one i2c-dev node, opened around a single exchange
-// and closed after it. The nodes arrive in the operator's own pod
-// with its claim on the card's i2c companion device, the wires
-// request in the claim template. liken publishes those wires apart
-// from the card node, exclusively, because raw wire access has one
-// writer, and this operator is that writer.
+// controlBus is one open i2c-dev node, closed after each use. The
+// operator's pod gets the card's i2c-dev nodes from the wires request
+// of its claim template, which claims a display-i2c device, because
+// liken publishes the buses as a device separate from the card.
 type controlBus interface {
 	i2cBus
 	Close() error
 }
 
-// A panelControls answers for one card's panels: the sysfs tree that
-// maps a connector to its bus, the seam that opens the bus, and the
-// probe cache. One instance serves the slice publisher and the
-// prepare path, which is what makes the cache one cache. The sleep is
-// a field for the same reason DDC's is: a test runs the protocol
-// without waiting out its timing.
+// panelControls probes and sets the controls of one card's panels. The
+// slice publisher and the prepare path share one instance, so they
+// share the probe cache. open, sleep, and now are fields so that a test
+// can replace the bus, the protocol's delays, and the clock.
 type panelControls struct {
 	mu      sync.Mutex
 	sysRoot string
@@ -344,19 +308,16 @@ type panelControls struct {
 	open    func(path string) (controlBus, error)
 	sleep   func(time.Duration)
 	probed  map[string]probedPanel
-	// The probe of each connector that is running now. A pass that
-	// misses the cache while another pass probes waits for that probe
-	// and reads its answer, so two passes read the panel once.
+	// The probes that are running, by connector. A caller that misses
+	// the cache while another caller probes the same connector waits
+	// for that probe and uses its result, so the panel is probed once.
 	probing map[string]chan struct{}
-	// The turn on each bus, by the path of its node (busturn.go).
+	// The access lock of each bus, by node path (busturn.go).
 	turnsMu sync.Mutex
 	turns   map[string]*busTurn
-	// The clock the retry window is measured on, a field for
-	// the reason sleep is one.
-	now func() time.Time
+	now     func() time.Time
 }
 
-// The clock a cache with no clock wired reads.
 func (c *panelControls) clock() time.Time {
 	if c.now == nil {
 		return time.Now()
@@ -364,29 +325,24 @@ func (c *panelControls) clock() time.Time {
 	return c.now()
 }
 
-// One cache entry holds the answer and the monitor it answered for.
-// A connector whose EDID reads differently now carries a different
-// panel, and this answer is not that panel's.
+// probedPanel is one cache entry: the probe result and the EDID of the
+// monitor it was read from. A different EDID on the connector means a
+// different monitor, and the result does not apply to it.
 //
-// The entry holds a pointer because the operator's later reads
-// and writes of the panel record their values in it, and the entry is
-// what the Display's observed values are built from.
+// facts is a pointer because later reads and writes of the panel record
+// their values in it, and the Display's observed values come from it.
 type probedPanel struct {
 	monitor EDID
 	facts   *panelFacts
-	// When the probe ran, which is what the retry window of a
-	// refusal is measured from.
-	asked time.Time
-	// when the operator last read the carried controls of a
-	// panel that answers. It is its own timestamp because it measures
-	// its own window: the refusal is asked again to find a panel that
-	// started answering, and this one finds a value a person changed
-	// at the panel.
+	// When the probe ran. probeAgain retries a refused probe
+	// probeRetryInterval after it.
+	probed time.Time
+	// When pollControls last read the panel's values, to find a value
+	// that a person changed with the panel's buttons. It is separate
+	// from probed because it runs on the shorter pollInterval.
 	polled time.Time
 }
 
-// NewPanelControls wires the real i2c-dev nodes. A test supplies its
-// own open function instead.
 func newPanelControls(sysRoot, card string) *panelControls {
 	return &panelControls{
 		sysRoot: sysRoot,
@@ -396,19 +352,16 @@ func newPanelControls(sysRoot, card string) *panelControls {
 	}
 }
 
-// Of answers the two booleans the slice publishes, out of the
-// panel facts the probe read. The facts carry the whole capability
-// list, and the slice publishes the two controls a claim parameter
-// states.
+// of returns the controls that the slice publishes for an output:
+// brightness and power, the controls that a claim parameter can set.
 func (c *panelControls) of(output Output) supportedControls {
 	return c.factsFor(output).controls()
 }
 
-// WithControls puts each panel's answer beside what sysfs said, the
-// way withCurrentModes puts the card's readback there. The two reads
-// answer different questions and fail apart: a card that cannot
-// answer the mode ioctl still has panels that answer DDC/CI, and the
-// other way around.
+// withControls adds each panel's supported controls to the outputs read
+// from sysfs. It is separate from withCurrentModes because the two
+// reads fail independently: a card whose mode ioctl fails can still
+// have panels that respond to DDC/CI, and the reverse.
 func withControls(outputs []Output, controls *panelControls) []Output {
 	out := make([]Output, len(outputs))
 	for i, output := range outputs {
@@ -418,13 +371,13 @@ func withControls(outputs []Output, controls *panelControls) []Output {
 	return out
 }
 
-// BusFor opens the connector's channel. No channel is a failure to a
-// caller that must set a control, and no failure at all to the probe,
-// which reports it and publishes nothing.
+// busFor waits until no other caller has the connector's I2C bus open
+// (busturn.go), then opens it. Closing the returned bus releases it to
+// the next caller.
 func (c *panelControls) busFor(connector string) (controlBus, error) {
 	path := connectorBus(c.sysRoot, c.card, connector)
 	if path == "" {
-		return nil, fmt.Errorf("%s has no DDC/CI channel", connector)
+		return nil, fmt.Errorf("%s has no DDC/CI bus", connector)
 	}
 	turn := c.turn(path)
 	turn.take(c.clock, c.pause)
@@ -436,8 +389,6 @@ func (c *panelControls) busFor(connector string) (controlBus, error) {
 	return &turnBus{controlBus: bus, turn: turn, clock: c.clock}, nil
 }
 
-// Client builds the protocol speaker for one open bus. The sleep the
-// tests replace is the protocol's own timing and nothing else.
 func (c *panelControls) client(bus controlBus) *DDC {
 	ddc := newDDC(bus)
 	if c.sleep != nil {
@@ -446,11 +397,12 @@ func (c *panelControls) client(bus controlBus) *DDC {
 	return ddc
 }
 
-// Set applies what one request stated, both controls on one open bus.
-// Power goes first, because a panel in standby must be awake before a
-// brightness can land on it. Each control is read before it is
-// written, and a panel that already holds the value takes no write, so
-// a new claim on a lit panel changes nothing a person sees.
+// set applies one request's brightness and power. It powers the panel
+// on first, because a panel in standby must be awake before it accepts
+// a brightness. Each control is read before it is written, and set
+// writes nothing when the panel already has the value, so a new claim
+// on a panel that is already on and at that brightness changes nothing
+// on screen.
 func (c *panelControls) set(connector string, want requestedControls) error {
 	bus, err := c.busFor(connector)
 	if err != nil {
@@ -464,7 +416,7 @@ func (c *panelControls) set(connector string, want requestedControls) error {
 			return err
 		}
 	}
-	if want.Brightness.Stated {
+	if want.Brightness.Set {
 		if err := setBrightness(ddc, connector, want.Brightness.Percent); err != nil {
 			return err
 		}
@@ -472,25 +424,19 @@ func (c *panelControls) set(connector string, want requestedControls) error {
 	return nil
 }
 
-// SetBrightness turns the claim's percentage into the panel's own
-// scale and writes it. The claim states a percentage because the raw
-// scale is the panel's: one panel counts to 100, another to 255, and
-// a Set above the maximum is refused or clamped, so the maximum has
-// to be read first.
-//
-// The readback is what proves the control moved. A display
-// acknowledges the write on the wire whether it takes the value or
-// not, so a Set with no Get after it proves nothing.
-//
-// The read of the range also reads the value the panel holds, and a
-// panel that already holds the value takes no write.
+// setBrightness converts the claim's percentage to the panel's scale
+// and writes it. It reads the panel's maximum first, because the scale
+// differs between panels, for example 100 or 255. The same read returns
+// the current value, so a panel that already has the value gets no
+// write. After the write it reads the value back, because a display
+// acknowledges a write whether or not it accepts the value.
 func setBrightness(ddc *DDC, connector string, percent int) error {
 	held, max, err := ddc.GetVCP(vcpBrightness)
 	if err != nil {
 		return fmt.Errorf("reading the brightness range of %s: %w", connector, err)
 	}
 	if max == 0 {
-		return fmt.Errorf("%s reports a brightness range of zero, so %d%% names no value", connector, percent)
+		return fmt.Errorf("%s reports a maximum brightness of 0, so %d%% has no value on its scale", connector, percent)
 	}
 	value := brightnessValue(percent, max)
 	if held == value {
@@ -505,30 +451,27 @@ func setBrightness(ddc *DDC, connector string, percent int) error {
 		return fmt.Errorf("reading back the brightness of %s: %w", connector, err)
 	}
 	if current != value {
-		return fmt.Errorf("%s holds a brightness of %d after the claim set %d, which is %d%% of %d",
+		return fmt.Errorf("%s reports a brightness of %d after the write of %d, which is %d%% of %d",
 			connector, current, value, percent, max)
 	}
 	return nil
 }
 
-// BrightnessValue rounds the percentage to the nearest step of the
-// panel's own scale. A panel whose maximum is under a hundred steps
-// lands on the closest step rather than truncating toward zero, so 35
-// percent of a ten-step scale is 4, not 3.
+// brightnessValue rounds to the nearest step of the panel's scale, so
+// 35 percent of a maximum of 10 is 4, not 3.
 func brightnessValue(percent int, max uint16) uint16 {
 	return uint16((percent*int(max) + 50) / 100)
 }
 
-// SetPower reads the power mode, writes the one the claim states when
-// the panel holds another, and reads it back, like the brightness. A
-// readback that disagrees means the panel carries the code and refuses
-// this value, which the standard allows: a display implements the
-// subset of a non-continuous code that it chooses.
+// setPower writes the mode when the panel is in another mode, and reads
+// it back, as setBrightness does. A readback that differs means that
+// the panel supports the power code but not this value, which MCCS
+// allows.
 //
-// A panel that does not answer the first read gets no write. A panel
-// in standby still answers DDC/CI, and a write to a panel that answers
-// nothing proves nothing, so the prepare fails with the read's error
-// and the kubelet's retry reads again.
+// When the first read fails, setPower writes nothing, because the
+// operator writes only to a panel that responds, and a panel in standby
+// still responds to DDC/CI. The prepare fails with the read's error, and
+// the kubelet's retry of the prepare reads again.
 func setPower(ddc *DDC, connector string, mode uint16) error {
 	held, _, err := ddc.GetVCP(vcpPowerMode)
 	if err != nil {
@@ -546,26 +489,20 @@ func setPower(ddc *DDC, connector string, mode uint16) error {
 		return fmt.Errorf("reading back the power mode of %s: %w", connector, err)
 	}
 	if current != mode {
-		return fmt.Errorf("%s holds the power mode %#02x after the claim set %#02x", connector, current, mode)
+		return fmt.Errorf("%s reports the power mode %#02x after the write of %#02x", connector, current, mode)
 	}
 	return nil
 }
 
-// standby powers a panel down at the end of a claim. The operator
-// reads the power mode first, and a panel that is already down takes
-// no write. A panel that does not answer the read takes no write
-// either, because the operator writes nothing it has not read.
+// standby powers a panel down when its claim ends. It writes nothing
+// when the panel is not on, and returns the error when the first read
+// fails.
 //
-// Panels differ in which values they accept for the power code, so the
-// operator then writes standby and reads the result. A panel that
-// stops answering may have gone dark. A panel that reports standby
-// accepted the value. Any other reported value means the panel refused
-// standby, which is what a panel whose 0xD6 subset omits standby does.
-// The operator writes off for that last case. It does not read after
-// the off write because the panel may stop answering as it powers
-// down. A failed read after the standby write is treated as success
-// for this same reason. Reporting it as a failure would call a
-// successful power-down an error.
+// It writes standby first, because standby is the shallower power-down
+// state, and reads the mode back. Some panels do not support standby
+// and stay on, and then it writes off. It does not read after the off
+// write, and it treats a failed read after the standby write as
+// success, because a panel can stop responding as it powers down.
 func (c *panelControls) standby(connector string) error {
 	bus, err := c.busFor(connector)
 	if err != nil {
@@ -593,33 +530,29 @@ func (c *panelControls) standby(connector string) error {
 	return ddc.SetVCP(vcpPowerMode, powerModeOff)
 }
 
-// ApplyControls is the backstop for a claim that names a control the
-// panel does not carry. The scheduler never reads an opaque block, so
-// no selector can keep such a claim off this device on its own; the
-// manual tells a person to select on the attribute the probe
-// publishes, and this failure is what catches the claim that did not.
-//
-// A claim that states neither control returns before any of that, so
-// a prepare on a panel that speaks no DDC/CI opens no bus and costs
-// nothing.
+// applyControls sets the claim's controls on the panel at prepare. It
+// fails a claim that sets a control the panel does not support. The
+// scheduler does not read opaque parameters, so only a selector on the
+// published attribute keeps such a claim off the device, and the manual
+// tells a person to write one. A claim that sets neither control opens
+// no bus.
 func (p *draPlugin) applyControls(output Output, want requestedControls) error {
-	// A prepare on this connector keeps the panel for the new claim,
-	// so a standby that waits for the end of an earlier claim is
-	// cancelled, whatever this claim states.
+	// The new claim keeps the panel on, so cancel any standby that is
+	// waiting for the end of an earlier claim, whatever this claim sets.
 	if err := p.cancelRelease(output.Connector); err != nil {
 		return err
 	}
-	if want.Power == "" && !want.Brightness.Stated {
+	if want.Power == "" && !want.Brightness.Set {
 		return nil
 	}
 	carried := p.controls.of(output)
-	if want.Brightness.Stated && !carried.Brightness {
-		return fmt.Errorf("the claim states a brightness, and %s answers no brightness control over DDC/CI,"+
-			" so the device publishes no controlsBrightness attribute", output.Connector)
+	if want.Brightness.Set && !carried.Brightness {
+		return fmt.Errorf("the claim sets a brightness, and %s does not support the brightness control over DDC/CI,"+
+			" so its device has no controlsBrightness attribute", output.Connector)
 	}
 	if want.Power != "" && !carried.Power {
-		return fmt.Errorf("the claim states power %q, and %s answers no power control over DDC/CI,"+
-			" so the device publishes no controlsPower attribute", want.Power, output.Connector)
+		return fmt.Errorf("the claim sets power %q, and %s does not support the power control over DDC/CI,"+
+			" so its device has no controlsPower attribute", want.Power, output.Connector)
 	}
 	if err := p.controls.set(output.Connector, want); err != nil {
 		return err
@@ -627,14 +560,10 @@ func (p *draPlugin) applyControls(output Output, want requestedControls) error {
 	return p.recordPower(output.Connector, want.Power)
 }
 
-// RecordPower records which panels need a power-down when their claim
-// ends. An operator container restart removes the process memory of
-// prepared claims, but the claim still needs release handling. The
-// file preserves that release record across the restart.
-//
-// The write happens on divergence only. Every prepare of every claim
-// passes through here, most state nothing about power, and a record
-// that never changes is not worth rewriting.
+// recordPower records a connector whose claim set onWhileClaimed, and
+// removes the connector when the new claim did not. It writes the file
+// only when the record changes, because every prepare calls it and
+// most claims set no power.
 func (p *draPlugin) recordPower(connector, power string) error {
 	p.powerRecords.Lock()
 	defer p.powerRecords.Unlock()
@@ -654,16 +583,15 @@ func (p *draPlugin) recordPower(connector, power string) error {
 	return writePowerRecord(p.powerPath, record)
 }
 
-// ReleasePower marks the panels recorded for this claim as released,
-// and each one goes to standby when the grace period ends with no new
-// prepare on its connector. The mark is in the record file, so an
-// operator container that restarts inside the period finds it and
-// starts the period again.
+// releasePower runs at unprepare. It marks each of these devices that
+// the record lists as onWhileClaimed as released, and schedules its
+// standby after powerReleaseGrace. The mark is in the file, so an
+// operator container that restarts during the grace period starts it
+// again (resumeReleases).
 //
-// A failure goes to stderr and does not fail the unprepare. Returning
-// the error would prevent the kubelet from completing the unprepare,
-// so a panel that cannot power down could keep the claim open
-// indefinitely.
+// A failure goes to stderr and does not fail the unprepare, because the
+// kubelet repeats a failed unprepare, and a panel that cannot be
+// written would keep the claim from finishing.
 func (p *draPlugin) releasePower(devices []string) {
 	p.powerRecords.Lock()
 	defer p.powerRecords.Unlock()
@@ -693,10 +621,9 @@ func (p *draPlugin) releasePower(devices []string) {
 	}
 }
 
-// ResumeReleases starts the grace period again for every panel the
-// record marks as released. A released mark in the record at startup
-// is a standby that an earlier operator container scheduled and did
-// not live to run.
+// resumeReleases runs at startup and schedules the standby again for
+// each panel that the record marks as released, because the previous
+// operator container exited before that standby ran.
 func (p *draPlugin) resumeReleases() {
 	p.powerRecords.Lock()
 	defer p.powerRecords.Unlock()
@@ -713,10 +640,10 @@ func (p *draPlugin) resumeReleases() {
 	}
 }
 
-// ScheduleStandby runs the standby of one released panel after the
-// grace period. The timer does not own the decision: when it fires,
-// the record is read again, and only a mark that still stands puts the
-// panel down.
+// scheduleStandby runs standbyReleased for one connector after the
+// grace period. A prepare during that period cancels the standby by
+// removing the mark from the record, so the timer itself is never
+// stopped.
 func (p *draPlugin) scheduleStandby(connector string) {
 	grace := p.releaseGrace
 	after := p.afterGrace
@@ -726,10 +653,10 @@ func (p *draPlugin) scheduleStandby(connector string) {
 	after(grace, func() { p.standbyReleased(connector) })
 }
 
-// StandbyReleased puts one panel down if its released mark still
-// stands. The entry leaves the record before the attempt, and it does
-// not come back when the attempt fails, so a panel that cannot power
-// down is tried once and not on every restart.
+// standbyReleased puts a panel in standby if its released mark is still
+// in the record. It removes the mark before it tries, so a panel that
+// cannot power down is tried once and not again at every restart. A
+// failure posts a warning Event.
 func (p *draPlugin) standbyReleased(connector string) {
 	p.powerRecords.Lock()
 	defer p.powerRecords.Unlock()
@@ -750,13 +677,12 @@ func (p *draPlugin) standbyReleased(connector string) {
 	if err := p.controls.standby(connector); err != nil {
 		fmt.Fprintf(os.Stderr, "putting %s to standby: %v\n", connector, err)
 		p.notices.post(connector, events.TypeWarning, PanelStandbyFailedReason,
-			fmt.Sprintf("the panel on %s did not take the standby after its last claim ended, and stays on: %v", connector, err))
+			fmt.Sprintf("The panel on %s stays on, because it did not enter standby after its last claim ended: %v", connector, err))
 	}
 }
 
-// CancelRelease removes the released mark of one connector, which is
-// what a new prepare on it does inside the grace period. The timer
-// still fires, reads no mark, and writes nothing.
+// cancelRelease removes a connector's released mark, so the pending
+// standbyReleased finds no mark and writes nothing.
 func (p *draPlugin) cancelRelease(connector string) error {
 	p.powerRecords.Lock()
 	defer p.powerRecords.Unlock()
@@ -772,10 +698,10 @@ func (p *draPlugin) cancelRelease(connector string) error {
 	return writePowerRecord(p.powerPath, record)
 }
 
-// ReadPowerRecord treats a missing file as an empty record. A pod that
-// prepared no recorded claim has no panel to release. A file that
-// cannot be parsed is an error because this operator is its only
-// writer, so invalid JSON means the record is damaged.
+// readPowerRecord returns an empty record when the file does not exist,
+// because the pod has then recorded no panel. Invalid JSON is an error,
+// because only this operator writes the file and a parse failure means
+// that the file is damaged.
 func readPowerRecord(path string) (map[string]string, error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -786,14 +712,14 @@ func readPowerRecord(path string) (map[string]string, error) {
 	}
 	record := map[string]string{}
 	if err := json.Unmarshal(raw, &record); err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
+		return nil, fmt.Errorf("parsing the power record %s: %w", path, err)
 	}
 	return record, nil
 }
 
-// WritePowerRecord replaces the file atomically. The operator's
-// container can end between a truncate and a write. An unprepare after
-// that restart reads only the file that remains.
+// writePowerRecord writes a temporary file and renames it over the
+// record, so a container that exits mid-write leaves the old record
+// whole for the next container to read.
 func writePowerRecord(path string, record map[string]string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

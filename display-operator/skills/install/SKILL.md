@@ -20,8 +20,8 @@ You need:
   those.
 * A machine in that cluster with a graphics card, with a monitor on
   a connector.
-* `kubectl` with cluster-admin access, because the install touches
-  cluster scope: the
+* `kubectl` with cluster-admin access, because the install creates
+  cluster-scoped objects: the
   [`DeviceClasses`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
   you create in step 2, a `ClusterRole`, and the `Display`
   `CustomResourceDefinition`.
@@ -34,33 +34,28 @@ device. Look for a `displayNode` attribute in that node's
 
     kubectl get resourceslice <node>-liken.sh -o yaml
 
-If no device has `displayNode`, the operator's own claim will
-park and its pod will stay `Pending`.
+If no device has `displayNode`, the operator's own claim cannot be
+allocated and its pod stays `Pending`.
 [Claiming hardware](https://liken.sh/docs/concepts/claiming-hardware/)
 explains why: `liken` publishes the whole card, and this operator
 claims it and publishes each of its outputs.
 
 ## 2. The device classes
 
-A `DeviceClass` is cluster-scoped policy. You name and curate the
-classes, using the same convention as a `StorageClass`. The classes
-split by owner:
+A `DeviceClass` is cluster-scoped, and you choose its name and
+selectors, as you do for a `StorageClass`.
 
-* `display-gpu`, `display-render`, and `display-i2c` are wiring,
-  and the base ships them, served at
-  [`deviceclasses.yaml`](https://liken.sh/display/deploy/deviceclasses.yaml). The
-  operator's own pod claims the graphics card's card node, its
-  render node, and its monitor-control wires through them, from the
-  devices `liken` publishes. The `ResourceClaimTemplate` in
-  [`operator.yaml`](https://liken.sh/display/deploy/operator.yaml) names them literally, so
-  the operator cannot start without them. Do not delete them. The
-  classes select on the `displayNode` and `renderNode` attributes
-  and on the i2c companion's `subsystem`. They do not select on a
-  vendor and a product id, so they stay correct across a fleet of
-  different machines.
-* The class your workloads claim through is yours to create,
-  because it is your cluster's vocabulary, and the base ships no
-  policy. `display-output` is the one to start with:
+* The base provides `display-gpu`, `display-render`, and
+  `display-i2c` in [`deviceclasses.yaml`](https://liken.sh/display/deploy/deviceclasses.yaml).
+  The operator's pod claims the graphics card's card node, its render
+  node, and its i2c buses through them. The `ResourceClaimTemplate` in
+  [`operator.yaml`](https://liken.sh/display/deploy/operator.yaml) refers to them by name, so
+  the operator can't start without them. Don't delete them. They
+  select on device attributes and not on a vendor or product id, so
+  they work on a fleet of different machines.
+* You create the class that your workloads claim through, because its
+  name and selector are a choice for your cluster. Start with
+  `display-output`:
 
         apiVersion: resource.k8s.io/v1
         kind: DeviceClass
@@ -73,22 +68,20 @@ split by owner:
                   device.driver == "display.liken.sh" &&
                   has(device.attributes["display.liken.sh"].appId)
 
-  The `appId` guard keeps the class on outputs. The driver also
-  publishes each panel's
+  The `appId` check limits the class to monitor outputs. The driver
+  also publishes each panel's
   [control device](https://liken.sh/display/docs/reference/devices/#the-control-device),
-  which has no `appId`, and a class that matched the whole driver
-  would allocate either one.
+  which has no `appId`, and a class without the check could allocate
+  either one.
 
 ### Generic or specific
 
-A class is the cluster's vocabulary for a kind of device, and you
-choose its grain. `display-output` above is generic: it matches
-every monitor output, keeps the class list short, and leaves the
-choice of screen to each claim's selector, written in
+A class can match every monitor output or only some of them.
+`display-output` above is generic, so each claim chooses its screen
+with its own selector in
 [Common Expression Language (CEL)](https://kubernetes.io/docs/reference/using-api/cel/).
-A specific class holds the selector itself. A claim then names the
-class and writes no CEL, and you make the choice once, in cluster
-policy you control:
+A specific class contains the selector, so a claim names the class
+and writes no CEL:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -102,24 +95,24 @@ policy you control:
               has(device.attributes["display.liken.sh"].appId) &&
               device.attributes["display.liken.sh"].connector == "HDMI-A-1"
 
-Start with a generic class. When several workloads repeat the same
-selector, or when cluster policy should choose the screen instead of
-each workload manifest, create a specific class.
+Start with a generic class. Create a specific class when several
+workloads repeat the same selector, or when the cluster, and not each
+workload manifest, should choose the screen.
 
-The example selects by `connector`, an attribute every output
-always publishes. The `appId` guard is there because the panel's
-control device publishes `connector` too. A specific class that
-selects by a monitor attribute, such as `model`, must guard the read
-with `has()`, the way [Put a window on a screen](https://liken.sh/display/docs/guides/claim/)
-shows. Those attributes are absent on a dark connector, and a
-selector that reads a missing attribute fails the whole allocation.
+The example selects by `connector`, which every output publishes. It
+keeps the `appId` check because the control device has a `connector`
+attribute too. A class that selects by a monitor attribute, such as
+`model`, must check the attribute with `has()` first, as
+[Put a window on a screen](https://liken.sh/display/docs/guides/claim/) shows, because a
+connector with no signal doesn't publish monitor attributes, and a
+selector that reads a missing attribute makes the whole allocation
+fail.
 
 ## 3. Apply the manifests
 
 This site serves the repository's [`deploy/`](https://liken.sh/display/deploy/kustomization.yaml)
-directory as raw YAML, so the install needs no clone. Seven files
-are the rest of the install, and `api.yaml` is the one that runs
-once per cluster rather than once per node:
+directory as raw YAML, so the install needs no clone. Apply every
+file except `api-authentication.yaml` into `liken-system`:
 
     kubectl apply -n liken-system \
       -f https://liken.sh/display/deploy/displays.yaml \
@@ -129,34 +122,36 @@ once per cluster rather than once per node:
       -f https://liken.sh/display/deploy/operator.yaml \
       -f https://liken.sh/display/deploy/api.yaml
 
-`api.yaml` binds one `Role` in `kube-system`, which `-n` would
-refuse, so that binding is in a file of its own. Apply it with no
-`-n`:
+Then apply `api-authentication.yaml` with no `-n`. It binds a `Role`
+in `kube-system`, and `kubectl` refuses an object in another
+namespace than the one `-n` gives:
 
     kubectl apply -f https://liken.sh/display/deploy/api-authentication.yaml
 
-`api.yaml` holds the `display-api` `Deployment`, its `Service`, and
-its RBAC. It answers the routes the [API reference](https://liken.sh/display/docs/reference/api/)
-describes, and an owner who wants no capture API leaves it out.
+`api.yaml` contains the `display-api` `Deployment`, its `Service`, and
+its RBAC. `display-api` runs once for the cluster and serves the
+routes in the [API reference](https://liken.sh/display/docs/reference/api/). Leave `api.yaml`
+and `api-authentication.yaml` out when you want no capture API.
 
 `displays.yaml` is the `Display` `CustomResourceDefinition`. The
 operator creates a [`Display`](https://liken.sh/display/docs/reference/displays/) for every
-monitor it probes, and it cannot do that on a cluster where the kind
-is missing.
+monitor it probes, and it cannot do that on a cluster that does not
+have the kind.
 
 `layouts.yaml` is the `Layout` `CustomResourceDefinition`. A
 [`Layout`](https://liken.sh/display/docs/reference/layouts/) divides a screen into regions,
-as the [layout guide](https://liken.sh/display/docs/guides/layout/) shows. The operator reads
-it by the name a `Display` states and watches the kind for changes.
+as the [layout guide](https://liken.sh/display/docs/guides/layout/) shows. The operator
+reads the `Layout` that a `Display` names in `spec.layout`, and
+watches `Layout` objects for changes.
 
-The `-n` flag places the `ServiceAccount` and the `DaemonSet` in
-`liken-system`, the namespace every `liken` cluster has. The
-`ClusterRoleBinding`'s subject names that namespace, so the binding
-only works there. `DeviceClass` and the `CustomResourceDefinitions`
-are cluster-scoped, so the flag leaves them alone.
+The `-n` flag puts the `ServiceAccount` and the `DaemonSet` in
+`liken-system`, which every `liken` cluster has. The subject of the
+`ClusterRoleBinding` is a `ServiceAccount` in that namespace, so the
+operator works only there. The `-n` flag doesn't affect the
+cluster-scoped `DeviceClass` and `CustomResourceDefinition` objects.
 
-For GitOps, point a `Kustomization` at your specific classes and the
-same URLs. `kustomize` takes a raw YAML URL as a resource:
+For GitOps, point a `Kustomization` at your own classes and at the
+same URLs. `kustomize` accepts a raw YAML URL as a resource:
 
     apiVersion: kustomize.config.k8s.io/v1beta1
     kind: Kustomization
@@ -178,10 +173,11 @@ same URLs. `kustomize` takes a raw YAML URL as a resource:
       - https://liken.sh/display/deploy/api.yaml
       - https://liken.sh/display/deploy/api-authentication.yaml
 
-The transformer sets `liken-system` only on the objects that state no
-namespace, so the binding in `api-authentication.yaml` stays in
-`kube-system`. A top-level `namespace:` field would move it, and the
-API couldn't read the client certificate authority.
+The transformer sets `liken-system` only on objects that have no
+namespace, so the `RoleBinding` in `api-authentication.yaml` stays in
+`kube-system`. A top-level `namespace:` field would move it, and
+`display-api` could not read the cluster's client certificate
+authority.
 
 A clone works too: `kubectl apply -k display-operator/deploy/` from the
 repository applies the same base through
@@ -189,38 +185,36 @@ repository applies the same base through
 
 ## 4. Watch the operator find the screens
 
-The operator runs as a `DaemonSet`, so a pod lands on every node and
-no manifest names the machine with the monitors. Each pod claims the
-card on its own node. On a node with no graphics card, the claim
-finds no device and the pod parks `Pending`, which costs nothing. A
-node labeled `display.liken.sh/display: none` gets no pod, as
-[Keep the pods off nodes with no graphics card](#keep-the-pods-off-nodes-with-no-graphics-card)
-describes.
+The operator runs as a `DaemonSet`, so you don't name the machine
+with the monitors. Each pod claims the graphics card on its own node.
+On a node with no graphics card, the claim finds no device and the pod
+stays `Pending`, which uses no resources. To start no pod there, see
+[Keep the pods off nodes with no graphics card](#keep-the-pods-off-nodes-with-no-graphics-card).
 
     kubectl -n liken-system get pods -o wide
 
-On the machine with the card, the pod's log names each monitor it
+On the machine with the card, the pod's log lists each monitor it
 found:
 
     kubectl -n liken-system logs ds/display-operator
-    display.liken.sh: operating the monitors on kitchen
+    display.liken.sh: operating the monitors on node-1
     display.liken.sh: HDMI-A-1 has gsm-7716-lg-hdr-wqhd
 
 ## 5. See the devices
 
-The operator publishes one device for each connector on the card,
-into a `ResourceSlice` named `<node>-display.liken.sh`:
+The operator publishes a device for each connector on the card, in
+a `ResourceSlice` named `<node>-display.liken.sh`:
 
     kubectl get resourceslice <node>-display.liken.sh -o yaml
 
-A connector with a monitor has the monitor's attributes. An
-empty connector publishes too, with a `disconnected` taint, so a
-claim on it parks until a monitor arrives.
+A connector with a monitor has the monitor's attributes. A
+connector with no monitor is published too, with a `disconnected`
+taint, so a claim on it is not allocated until a monitor connects.
 [Devices](https://liken.sh/display/docs/reference/devices/) describes every attribute.
 
-The operator also creates one `Display` per monitor, the
-cluster-scoped resource that reports the panel's controls and takes
-declarations:
+The operator also creates a `Display` for each monitor. A `Display`
+is cluster-scoped. It reports the panel's controls, and you declare
+values such as its brightness, input, and mode in its `spec`:
 
     kubectl get displays
 
@@ -230,12 +224,9 @@ Now [put a window on a screen](https://liken.sh/display/docs/guides/claim/).
 
 ## Keep the pods off nodes with no graphics card
 
-The `DaemonSet` makes a pod on every node. On a node with no
-graphics card, the claim matches no device, and the pod stays `Pending`. To make no
-pod on such a node, label the node `display.liken.sh/display: none`.
-
-The `DaemonSet` in the base carries this node affinity, so no patch is
-needed:
+To start no operator pod on a node with no graphics card, label the
+node `display.liken.sh/display: none`. The `DaemonSet` in the base
+already has this node affinity, so you need no patch:
 
 ```yaml
 affinity:
@@ -248,61 +239,59 @@ affinity:
               values: ["none"]
 ```
 
-`NotIn` matches a node whose label has a different value, and also a
-node that has no such label. The Kubernetes page on
+`NotIn` also matches a node that has no such label, as the
+Kubernetes page on
 [set-based requirements](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/#set-based-requirement)
-gives this rule. So with no label the `DaemonSet` makes a pod on every
-node, and a node labeled `none` gets no pod. When a label changes, the
+describes, so every node without the label gets a pod. When a label
+changes, the
 [`DaemonSet`](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/)
 controller deletes the pod from a node that no longer matches, and
-adds one to a node that matches again.
+starts one on a node that matches again.
 
-Declare the label in the node's `Machine`, so the label is part of
-the record of the machine:
+Declare the label in the node's `Machine`, with the rest of the
+machine's declaration:
 
     spec:
       nodeLabels:
         display.liken.sh/display: none
 
 A `Machine` accepts a key in a `liken.sh` subdomain from `liken`
-2026.09.28-002 on, and an older release refuses it, so on an older
-release use the `kubectl label` way below.
+2026.09.28-002 on. An older release refuses the key, so on an older
+release label the node with `kubectl`, as shown below.
 
-The `liken` machine operator applies the label to the running node. A
-machine that is demoted or installed again registers a new Node, and
-the Node has the label from registration. To run the pod on that
-node again, remove the key from `spec.nodeLabels`, and `liken`
-removes the label from the node. `liken` also removes a label that
-you set with `kubectl` before the `Machine` declared it, when the key
-leaves the spec.
+The `liken` machine operator applies the label to the running node,
+and a machine that is demoted or installed again registers a new
+`Node` that has the label from the start. To run the pod on that node
+again, remove the key from `spec.nodeLabels`, and `liken` removes the
+label from the node, even when you first set it with `kubectl`.
 
 You can also label the node with `kubectl`:
 
     kubectl label node node-1 display.liken.sh/display=none
 
-The label stays on the node across reboots. `liken` leaves it in
-place, because `liken` removes only the labels that a `Machine`
-declared. The label goes with the Node object: a machine that is
-demoted or installed again registers a new Node, and you label it
-again. To run the pod on that node again, remove the label:
+A label set this way stays on the node after a reboot, because
+`liken` removes only labels that a `Machine` declared. But a machine
+that is demoted or installed again registers a new `Node`, and you
+must label it again. To run the pod on the node again, remove the
+label:
 
     kubectl label node node-1 display.liken.sh/display-
 
 A patch of your own that sets a node affinity on this `DaemonSet`
-replaces the list of terms in the base, and the `none` term with it.
+replaces the list of terms in the base, including the `none` term.
 Copy the `none` requirement into each term of your patch.
 
 ## Running a development build
 
 A push to `main` that changes the operator publishes a development
-build of it. Its version is the most recent release tag plus a suffix:
-`2026.09.03-007-dev-003-abcdef01` is three commits past release
-`2026.09.03-007`, at commit `abcdef01`. Every image of the operator
-has the same version, and `:latest` still names the most recent
+build of it. Its version is the most recent release tag with a suffix.
+For example, `2026.09.03-007-dev-003-abcdef01` is three commits after
+release `2026.09.03-007`, at commit `abcdef01`. Every image of the
+operator has the same version, and `:latest` is still the most recent
 release.
 
-A development build has no git tag, so the manifests pin to the
-commit's full sha, and the image pins to the version:
+A development build has no git tag. Pin the manifests to the full
+commit sha, and pin each image to the version:
 
 ```yaml
 resources:
@@ -317,25 +306,24 @@ images:
 ```
 
 The operator `DaemonSet` runs `display-operator` and `display-capture`,
-and the `display-api` `Deployment` runs `display-api`. Pin all three
-images to the same version. A pin on one image leaves the others on
+and the `display-api` `Deployment` runs `display-api`. Pin each of
+them to the same version, because an image that you don't pin stays on
 `:latest`.
 
-A git fetch by sha needs all forty characters; the eight in the
-version are not enough. The summary of the CI run for that commit
-gives the version.
+A git fetch by sha needs all 40 characters, not the 8 in the version.
+The summary of the CI run for that commit shows the full sha and the
+version.
 
 The same build publishes the manifests as the OCI artifact
 `oci://ghcr.io/liken-sh/display-operator-deploy:<version>`, with each
 image of the operator set to that version. A Flux `OCIRepository`
-can pull that artifact by the version, with no sha.
+can pull that artifact by version, with no sha.
 
 A Flux `Kustomization` that applies the base must not set
-`targetNamespace`. Flux sets that namespace on every object, the way a
-top-level `namespace:` field does, and the `RoleBinding` in
+`targetNamespace`, because Flux sets that namespace on every object,
+as a top-level `namespace:` field does. The `RoleBinding` in
 `api-authentication.yaml` must stay in `kube-system`, where the
-built-in `Role` it binds lives. Moved out of it, the binding names no
-`Role`, and the API can't read the client certificate authority.
+built-in `Role` that it binds is.
 
 ## Remove the operator
 
@@ -349,23 +337,23 @@ published one:
     kubectl delete -f https://liken.sh/display/deploy/api-authentication.yaml
     kubectl delete resourceslice <node>-display.liken.sh
 
-The API's own `Secret`s and `ConfigMap` outlive the `Deployment`.
-Delete `display-api-tls`, `display-capture-server`, and
+The API's `Secret`s and `ConfigMap` stay after you delete the
+`Deployment`. Delete `display-api-tls`, `display-capture-server`, and
 `display-api-ca` in `liken-system` by hand.
 
-The slice step is yours because the operator never deletes its
-slice. A device that leaves the inventory while a claim still names
-it strands the kubelet's prepare call. So the operator taints
-devices instead of removing them, and the slice outlives every pod.
-The device classes are yours too. When nothing else claims through
-them, delete them.
+The operator never deletes its slice, because when a device leaves
+the slice while a claim still refers to it, the kubelet can't finish
+the prepare call for that claim. So the operator taints a device that
+is gone and keeps it in the slice, and the slice stays after every pod
+is gone. Delete the device classes yourself too, once nothing claims
+through them.
 
-**Deleting the `Display` CRD deletes every `Display` with it**,
-including the brightness a standing override captured. A panel an
-override darkened then has nothing left to restore it. Lift every
-override, and confirm every panel shows what you expect, before you
+**Deleting the `Display` CRD deletes every `Display`**, including the
+brightness that an active override captured, so a panel that the
+override turned dark has no saved value to restore. Remove every
+override, and check that each panel shows what you expect, before you
 delete `displays.yaml`.
 
-Deleting `layouts.yaml` deletes every `Layout` with it, and the
-arrangements they hold. Delete it after the last screen that names a
-`Layout` no longer needs one.
+Deleting `layouts.yaml` deletes every `Layout` and the arrangements
+in them. Delete it after the last screen that uses a `Layout` no
+longer needs one.

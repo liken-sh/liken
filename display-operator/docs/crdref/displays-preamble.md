@@ -1,15 +1,19 @@
-A `Display` is one monitor as a Kubernetes resource. The operator
-creates one for every monitor it probes, cluster-scoped like a
-`Node`, named by the same monitor id the devices publish as
-`monitor.liken.sh/id`. You never create or delete one. The operator
-writes the whole of `status`: the controls the panel declares, the
-values it last saw, and the values it saved before an override. You
-write the resting fields of `spec`, and a machine writer, such as a
-media layer that darkens idle screens, sets and lifts
-`spec.override`.
+A `Display` is one monitor, as a Kubernetes resource. You use it to
+read the panel's controls, to set its brightness, input, and other
+controls, and to turn the panel off for a while, all without a claim. The operator creates a `Display` for each monitor it
+finds. A `Display` is cluster-scoped, like a `Node`, and its name is
+the monitor id that the devices publish as `monitor.liken.sh/id`. You
+never create or delete one.
 
-The API server selects Displays by `status.node`, so a list or a
-watch can take the monitors of one machine:
+The operator writes all of `status`: the controls the panel reports,
+the values it last read from the panel, and the values it saved
+before an override. You write the settings you want the panel to keep
+in `spec`. A program that changes settings for a while, such as one
+that darkens idle screens, adds `spec.override` and removes it when
+it is done.
+
+A list or a watch can select the monitors of one machine with
+`status.node`, which the API server accepts as a field selector:
 
 ```sh
 kubectl get displays --field-selector status.node=node-1
@@ -45,8 +49,10 @@ status:
       reason: Serving
 ```
 
-The [devices reference](/docs/reference/devices/) describes the
-other paths to a panel: the claim parameters a `Play`-style workload
-states once at prepare, and the control device a standing pod claims
-for the raw wire. The `Display` is the declarative path: state what
-the panel should hold, and the operator keeps it there.
+The [devices reference](/docs/reference/devices/) describes two other
+ways to control a panel. A claim can carry parameters that the
+operator applies once, when it prepares the claim. A long-running pod
+can claim the control device, which gives it the panel's DDC/CI
+connection directly. On a `Display`, you write
+the settings the panel should have, and the operator writes them
+again whenever the panel reports a different value.

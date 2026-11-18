@@ -12,12 +12,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// The settle tests run in synctest bubbles at the operator's own
-// window and limit, so each one checks the moment the wake arrives to
-// the nanosecond, and takes no real time.
+// The settle tests run in synctest bubbles with the operator's real
+// window and limit, so each test checks the exact instant at which the
+// wake arrives and takes no real time.
 
-// emitted answers whether settle has emitted a wake, once every
-// goroutine in the bubble has done all it can do.
+// emitted reports whether settle has sent a wake, after every goroutine
+// in the bubble has run until it blocks.
 func emitted(t *testing.T, out <-chan struct{}) bool {
 	t.Helper()
 	synctest.Wait()
@@ -37,15 +37,12 @@ func TestSettleCollapsesABurst(t *testing.T) {
 		in := make(chan struct{}, 16)
 		out := settle(t.Context(), in, settleWindow, settleLimit)
 
-		// A monitor plugged in produces a burst of uevents, and one
-		// write must cover the whole burst. Every ResourceSlice write
-		// wakes every DRA-pending pod in the cluster.
 		for range 8 {
 			in <- struct{}{}
 			time.Sleep(settleWindow / 4)
 		}
-		// The last event came a quarter window ago, so the wake comes
-		// one window after it.
+		// The last event came a quarter window ago, so the wake is due
+		// three quarters of a window from now.
 		time.Sleep(settleWindow*3/4 - 1)
 		if emitted(t, out) {
 			t.Fatal("settle emitted before the burst was quiet for a window")
@@ -83,8 +80,8 @@ func TestSettleEmitsUnderAConstantFlap(t *testing.T) {
 		in := make(chan struct{})
 		out := settle(t.Context(), in, settleWindow, settleLimit)
 
-		// A cable that flaps faster than the quiet window would restart
-		// the wait forever. The limit keeps the loop publishing.
+		// A cable that flaps faster than the quiet window restarts the
+		// wait on every event. The limit makes the loop publish anyway.
 		go func() {
 			tick := time.NewTicker(settleWindow / 2)
 			defer tick.Stop()
@@ -102,8 +99,8 @@ func TestSettleEmitsUnderAConstantFlap(t *testing.T) {
 			}
 		}()
 
-		// The first event arrives half a window in, and the limit runs
-		// from it.
+		// The first event arrives half a window in, and the limit is
+		// counted from that event.
 		time.Sleep(settleWindow/2 + settleLimit - 1)
 		if emitted(t, out) {
 			t.Fatal("settle emitted under the flap before the limit")
@@ -134,7 +131,7 @@ func TestSettleStopsWithItsContext(t *testing.T) {
 	})
 }
 
-func TestWakesCarriesAnEventThrough(t *testing.T) {
+func TestWakesForwardsADRMEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -145,20 +142,20 @@ func TestWakesCarriesAnEventThrough(t *testing.T) {
 	waitForWake(t, out, time.Second)
 }
 
-func TestWakesCarriesTheCompositorsSocketThrough(t *testing.T) {
+func TestWakesForwardsACompositorSocketChange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	sockets := make(chan struct{}, 1)
 	out := wakes(ctx, nil, nil, sockets, nil, nil, nil)
 
-	// A compositor that comes back is a pass of its own, because the
-	// pass is what removes the taint and re-reads the connectors.
+	// A compositor that returns needs a pass, because the pass removes
+	// the taint and reads the connectors again.
 	sockets <- struct{}{}
 	waitForWake(t, out, time.Second)
 }
 
-func TestWakesCarriesTheCompositorsConnectionThrough(t *testing.T) {
+func TestWakesForwardsAnOutputWatchConnection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -166,39 +163,40 @@ func TestWakesCarriesTheCompositorsConnectionThrough(t *testing.T) {
 	out := wakes(ctx, nil, nil, nil, connections, nil, nil)
 
 	// The card gate opens when the output watch connects, and the pass
-	// that follows reads the fields the closed gate cost.
+	// that follows reads the fields that the closed gate left out.
 	connections <- struct{}{}
 	waitForWake(t, out, time.Second)
 }
 
-func TestWakesCarriesARetryThrough(t *testing.T) {
+func TestWakesForwardsARetry(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	retries := make(chan struct{}, 1)
 	out := wakes(ctx, nil, retries, nil, nil, nil, nil)
 
-	// A write that failed schedules one more pass through the same
-	// channel every other source uses, so the retry never blocks the
-	// loop that watches the compositor.
+	// A failed write requests another pass through the same channel
+	// as every other source, so the retry does not block the loop that
+	// watches the compositor.
 	retries <- struct{}{}
 	waitForWake(t, out, time.Second)
 }
 
-func TestWakesCarriesTheLayoutModulesReportsThrough(t *testing.T) {
+func TestWakesForwardsALayoutModuleReport(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	reports := make(chan struct{}, 1)
 	out := wakes(ctx, nil, nil, nil, nil, reports, nil)
 
-	// A surface that arrives, changes size, or goes is a pass of its
-	// own, because the pass is what places what the module reports.
+	// A surface that appears, changes size, or goes away needs a
+	// placement pass, because the pass places the surfaces that the
+	// module reports.
 	reports <- struct{}{}
 	waitForWake(t, out, time.Second)
 }
 
-func TestWakesCarriesTheResourceWatchesThrough(t *testing.T) {
+func TestWakesForwardsAResourceWatchEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -206,31 +204,30 @@ func TestWakesCarriesTheResourceWatchesThrough(t *testing.T) {
 	out := wakes(ctx, nil, nil, nil, nil, nil, resources)
 
 	// A pod that gained a label, an edited Layout, and a Display that
-	// names another one all reach the loop here, because each of them
-	// changes where a surface is drawn.
+	// names another Layout all arrive on this channel, because each of
+	// them changes where a surface is drawn.
 	resources <- struct{}{}
 	waitForWake(t, out, time.Second)
 }
 
 func TestEventsEnded(t *testing.T) {
-	// A closed wake channel means nothing while the process is
-	// stopping, which is how every shutdown ends.
+	// A closed wake channel is not an error while the process is
+	// stopping, because every shutdown closes it.
 	stopping, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := eventsEnded(stopping); err != nil {
 		t.Errorf("a shutdown reported an error: %v", err)
 	}
-	// Any other time the kernel's uevent socket closed under a running
-	// operator, and an operator that kept going would publish only on
-	// the backstop tick, minutes after a monitor moved.
+	// At any other time the kernel's uevent socket closed under a
+	// running operator, which would publish only on the backstop tick.
 	if err := eventsEnded(context.Background()); err == nil {
 		t.Error("the event stream ended under a running operator with no error")
 	}
 }
 
-// scriptedProbe answers the compositor's state that the test sets, in
+// scriptedProbe returns the compositor state that the test sets, in
 // place of a probe of a real socket, so the socket watch's ticker runs
-// on the bubble's fake clock. probeCompositor's own tests read real
+// on the bubble's fake clock. The tests of probeCompositor read real
 // sockets.
 type scriptedProbe struct {
 	mu    sync.Mutex
@@ -251,14 +248,13 @@ func (p *scriptedProbe) probe(socketPath string) compositorLiveness {
 	return p.live
 }
 
-// The three readings a probe answers.
 var (
 	probeServing = compositorLiveness{serving: true, reason: CompositorServingReason}
 	probeDown    = compositorLiveness{reason: CompositorDownReason, detail: "connection refused"}
 	probeHung    = compositorLiveness{reason: CompositorHungReason, detail: "i/o timeout"}
 )
 
-// Each change of the probe's reading wakes the loop at the first tick
+// Each change in the probe's result wakes the loop at the first tick
 // that reads it, and a tick that reads no change wakes nothing.
 func TestWatchSocketWakesWhenTheCompositorComesAndGoes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -270,9 +266,9 @@ func TestWatchSocketWakesWhenTheCompositorComesAndGoes(t *testing.T) {
 			what string
 			live compositorLiveness
 		}{
-			// The compositor's container started and the socket answers.
+			// The compositor's container started, and the socket replies.
 			{"the compositor started", probeServing},
-			// The compositor died and left its socket file behind.
+			// The compositor died and left its socket file.
 			{"the compositor died", probeDown},
 			// The kubelet restarted the container.
 			{"the compositor started again", probeServing},
@@ -299,20 +295,20 @@ func TestWatchSocketWakesWhenTheCompositorComesAndGoes(t *testing.T) {
 }
 
 func TestReconcileTaintsEveryOutputWhileNoCompositorServes(t *testing.T) {
-	// The kubelet restarts the compositor's container alone, and this
-	// write is what says the screens serve nobody while it is down.
+	// The kubelet restarts the compositor's container without replacing
+	// the pod, and while the compositor is down every screen is tainted.
 	compositorFixture(t)
 	fixture := &slicePublishFixture{}
 	client := testClient(t, fixture.handler(t))
 
-	// The socket file is there and nothing answers on it, which is what
-	// a compositor killed uncleanly leaves.
+	// The socket file exists and nothing replies on it, as after a
+	// compositor that was killed without cleanup.
 	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()), noCurrentModes, noPanelControls, newLinkHistory(), nil, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the ResourceSlice: %v", err)
 	}
 	if fixture.created == nil {
-		t.Fatal("nothing published, so no slice says the screens are dark")
+		t.Fatal("nothing published, so no slice reports the screens as disconnected")
 	}
 	for _, device := range fixture.created.Spec.Devices {
 		if len(device.Taints) != 1 || device.Taints[0].Key != disconnectedTaint {
@@ -321,10 +317,9 @@ func TestReconcileTaintsEveryOutputWhileNoCompositorServes(t *testing.T) {
 	}
 }
 
-// The pass that writes the slice is the same pass this operator's own
-// hardware-triple and observation gauges read, so a reconcile with a
-// real registry behind it proves the wiring, not only the recorder.
-func TestReconcileRecordsTheHardwareTripleAndTheObservations(t *testing.T) {
+// The pass that writes the slice also records the connected, claimed,
+// and observation gauges.
+func TestReconcileRecordsTheOutputGaugesAndTheObservations(t *testing.T) {
 	compositorFixture(t)
 	fixture := &slicePublishFixture{}
 	client := testClient(t, fixture.handler(t))
@@ -333,7 +328,7 @@ func TestReconcileRecordsTheHardwareTripleAndTheObservations(t *testing.T) {
 	err := reconcile(client, "liken-1", testOwner(), "card1", staleSocket(t, t.TempDir()),
 		noCurrentModes, noPanelControls, newLinkHistory(), nil, readings)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the ResourceSlice: %v", err)
 	}
 
 	connected := map[string]float64{"DP-1": 0, "HDMI-A-1": 1, "HDMI-A-2": 1}
@@ -354,8 +349,8 @@ func TestReconcileRecordsTheHardwareTripleAndTheObservations(t *testing.T) {
 }
 
 func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
-	// The pass that follows the compositor's return re-reads the
-	// connectors, so the slice carries whatever the kernel says now.
+	// The pass after the compositor returns reads the connectors
+	// again, so the slice has what the kernel reports now.
 	compositorFixture(t)
 	socket := servingSocket(t, t.TempDir())
 	fixture := &slicePublishFixture{existing: &ResourceSlice{
@@ -370,10 +365,10 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 	client := testClient(t, fixture.handler(t))
 
 	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, newLinkHistory(), nil, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the ResourceSlice: %v", err)
 	}
 	if fixture.updated == nil {
-		t.Fatal("the slice was not replaced, so a stale one says every screen is dark")
+		t.Fatal("the slice was not replaced, so a stale one reports every screen as disconnected")
 	}
 	wantTaints := map[string]int{
 		"dp-1": 1, "dp-1-draw": 1,
@@ -388,12 +383,13 @@ func TestReconcileFreesTheScreensWhenTheSocketReturns(t *testing.T) {
 	}
 }
 
-// The link on a monitor's connector goes down, because the panel shows
-// another input or the receiver is renegotiating. The connector keeps
-// the monitor it left with: no pass taints it, however long it stays
-// dark, and every pass keeps publishing the monitor's identity, so the
-// claim on that screen still allocates and the pod on it keeps drawing.
-func TestAMonitorThatGoesDarkKeepsItsScreenPublished(t *testing.T) {
+// The link on a monitor's connector goes down because the panel shows
+// another input or the receiver is negotiating again. The connector
+// keeps the monitor that it left with. No pass taints it, however long
+// it stays down, and every pass publishes the monitor's identity, so
+// the claim on that screen still allocates and the pod on it keeps
+// drawing.
+func TestAConnectorWhoseLinkDropsKeepsItsMonitorPublished(t *testing.T) {
 	compositorFixture(t)
 	socket := servingSocket(t, t.TempDir())
 	fixture := &slicePublishFixture{}
@@ -406,7 +402,7 @@ func TestAMonitorThatGoesDarkKeepsItsScreenPublished(t *testing.T) {
 		t.Helper()
 		fixture.created = nil
 		if err := reconcile(client, "liken-1", testOwner(), "card1", socket, noCurrentModes, noPanelControls, links, nil, nil); err != nil {
-			t.Fatal(err)
+			t.Fatalf("reconciling the ResourceSlice: %v", err)
 		}
 		if fixture.created == nil {
 			t.Fatal("nothing published")
@@ -420,38 +416,37 @@ func TestAMonitorThatGoesDarkKeepsItsScreenPublished(t *testing.T) {
 		return SliceDevice{}
 	}
 
-	lit := pass()
-	screen := lit.Attributes[pairingAttribute].String
+	beforeDrop := pass()
+	screen := beforeDrop.Attributes[pairingAttribute].String
 	if screen == nil || *screen == "" {
-		t.Fatalf("the lit connector published no %s", pairingAttribute)
+		t.Fatalf("the connected connector published no %s", pairingAttribute)
 	}
 
 	writeConnector(t, sysRoot, "card1", "HDMI-A-1", "")
 	clock = clock.Add(disconnectGrace + time.Hour)
-	dark := pass()
+	afterDrop := pass()
 
-	if len(dark.Taints) != 0 {
-		t.Errorf("the dark connector taints, and its monitor is expected back: %+v", dark.Taints)
+	if len(afterDrop.Taints) != 0 {
+		t.Errorf("the disconnected connector has taints, and its monitor is expected back: %+v", afterDrop.Taints)
 	}
-	got := dark.Attributes[pairingAttribute].String
+	got := afterDrop.Attributes[pairingAttribute].String
 	if got == nil || *got != *screen {
-		t.Errorf("the dark connector publishes %v for %s, want %q", got, pairingAttribute, *screen)
+		t.Errorf("the disconnected connector publishes %v for %s, want %q", got, pairingAttribute, *screen)
 	}
 }
 
-// noPanelControls is a pass with no probe wired: it publishes no
-// control attribute and puts nothing on any i2c wire, which is what
-// every pass in this file runs.
+// noPanelControls is nil, so a pass probes no panel, publishes no
+// control attribute, and sends nothing on any i2c bus.
 var noPanelControls *panelControls
 
-// noCurrentModes is the readback of a card that reports no mode on any
-// connector, which is what a machine whose compositor is down answers.
+// noCurrentModes reads no mode for any connector, as a machine whose
+// compositor is down does.
 func noCurrentModes() (map[string]string, error) {
 	return nil, nil
 }
 
-// publishedModes runs one pass and answers what currentMode each
-// device carries, with the devices that publish none left out.
+// publishedModes runs one pass and returns the currentMode attribute of
+// each device, and leaves out the devices that have none.
 func publishedModes(t *testing.T, current func() (map[string]string, error)) map[string]string {
 	t.Helper()
 	compositorFixture(t)
@@ -460,15 +455,15 @@ func publishedModes(t *testing.T, current func() (map[string]string, error)) map
 
 	socket := servingSocket(t, t.TempDir())
 	if err := reconcile(client, "liken-1", testOwner(), "card1", socket, current, noPanelControls, newLinkHistory(), nil, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the ResourceSlice: %v", err)
 	}
 	if fixture.created == nil {
 		t.Fatal("nothing published")
 	}
 	published := map[string]string{}
 	for _, device := range fixture.created.Spec.Devices {
-		attribute, stated := device.Attributes["currentMode"]
-		if !stated {
+		attribute, present := device.Attributes["currentMode"]
+		if !present {
 			continue
 		}
 		published[device.Name] = *attribute.String
@@ -477,10 +472,8 @@ func publishedModes(t *testing.T, current func() (map[string]string, error)) map
 }
 
 func TestReconcilePublishesTheModeEachScreenRunsNow(t *testing.T) {
-	// The slice says what each output runs right now, which is what
-	// makes a mode a claim left behind visible instead of hidden.
-	// DP-1 has no monitor, so a mode read for it publishes nothing, and
-	// HDMI-A-2 answered no mode at all.
+	// DP-1 has no monitor, so the mode read for it publishes nothing,
+	// and the read returns no mode for HDMI-A-2.
 	published := publishedModes(t, func() (map[string]string, error) {
 		return map[string]string{"HDMI-A-1": "3840x1600", "DP-1": "1920x1080"}, nil
 	})
@@ -488,17 +481,17 @@ func TestReconcilePublishesTheModeEachScreenRunsNow(t *testing.T) {
 	if published["hdmi-a-1"] != "3840x1600" {
 		t.Errorf("currentMode = %v, want hdmi-a-1 at 3840x1600", published)
 	}
-	if _, dark := published["dp-1"]; dark {
+	if _, present := published["dp-1"]; present {
 		t.Errorf("a connector with no monitor published a currentMode: %v", published)
 	}
-	if _, stated := published["hdmi-a-2"]; stated {
+	if _, present := published["hdmi-a-2"]; present {
 		t.Errorf("a connector the readback skipped published a currentMode: %v", published)
 	}
 }
 
 func TestReconcilePublishesNoCurrentModeWhenTheCardCannotAnswer(t *testing.T) {
-	// The attribute is absent rather than wrong when the read fails,
-	// and the pass still publishes everything else the slice carries.
+	// When the read fails, the attribute is absent and not wrong, and
+	// the pass still publishes the rest of the slice.
 	published := publishedModes(t, func() (map[string]string, error) {
 		return nil, errors.New("the card node is not there")
 	})
@@ -508,9 +501,10 @@ func TestReconcilePublishesNoCurrentModeWhenTheCardCannotAnswer(t *testing.T) {
 	}
 }
 
-// A compositor that restarts is not a broken card. The card
-// observation keeps what the last read measured while the gate is
-// closed, and a read that fails for any other reason marks it stale.
+// A compositor that restarts is not a broken card. While the card gate
+// is closed, the card observation keeps the value of the last read, and
+// a read that fails for any other reason marks the observation
+// invalid.
 func TestAnAbsentCompositorIsNoFailedCardObservation(t *testing.T) {
 	cases := []struct {
 		name string
@@ -518,7 +512,7 @@ func TestAnAbsentCompositorIsNoFailedCardObservation(t *testing.T) {
 		want float64
 	}{
 		{"the compositor is absent", errCompositorAbsent, 1},
-		{"the card cannot answer", errors.New("the card node is not there"), 0},
+		{"the card cannot be read", errors.New("the card node is not there"), 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -531,7 +525,7 @@ func TestAnAbsentCompositorIsNoFailedCardObservation(t *testing.T) {
 				t.Helper()
 				if err := reconcile(client, "liken-1", testOwner(), "card1", socket,
 					current, noPanelControls, newLinkHistory(), nil, readings); err != nil {
-					t.Fatal(err)
+					t.Fatalf("reconciling the ResourceSlice: %v", err)
 				}
 			}
 
@@ -547,11 +541,11 @@ func TestAnAbsentCompositorIsNoFailedCardObservation(t *testing.T) {
 
 func TestEnvOr(t *testing.T) {
 	if got := envOr("DISPLAY_OPERATOR_UNSET_IN_TESTS", "fallback"); got != "fallback" {
-		t.Fatalf("envOr = %q", got)
+		t.Fatalf("envOr = %q, want \"fallback\"", got)
 	}
 	t.Setenv("DISPLAY_OPERATOR_SET_IN_TESTS", "value")
 	if got := envOr("DISPLAY_OPERATOR_SET_IN_TESTS", "fallback"); got != "value" {
-		t.Fatalf("envOr = %q", got)
+		t.Fatalf("envOr = %q, want \"value\"", got)
 	}
 }
 

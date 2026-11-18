@@ -1,23 +1,13 @@
 package main
 
-// Publishing the card's outputs as this operator's own ResourceSlice.
+// This file publishes the card's connectors as a ResourceSlice named
+// <node>-display.liken.sh. The name cannot collide with the
+// <node>-liken.sh slice that `liken` publishes for the same node. The
+// structs below have only the fields of the ResourceSlice API that this
+// operator writes.
 //
-// A device operator publishes under its own driver name, in its own
-// slices, beside whatever liken publishes on the same node. The two
-// cannot collide: a device's identity is the triple
-// <driver>/<pool>/<device>, and the slice name ends with the driver
-// name, so this node's two slices are <node>-liken.sh and
-// <node>-display.liken.sh.
-//
-// Like liken's own client, these structs hold only the part of the
-// upstream API that this program writes. The full ResourceSlice can
-// describe partitionable devices, shared counters, and per-device node
-// selection, and none of that changes what a monitor output needs: a
-// name, the EDID facts, and taints when the output can serve nobody.
-//
-// One slice holds the whole inventory, so the pool protocol reduces to
-// a version counter: bump the generation on every change, and one
-// slice is always a consistent snapshot.
+// The pool of each node is one slice with every device in it, so each
+// write is a complete snapshot and increases the pool generation.
 
 import (
 	"encoding/json"
@@ -31,34 +21,25 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// DriverName identifies this operator as a DRA driver. A driver name
-// is a DNS name so that drivers cannot collide, and a device
-// operator's name is <domain>.liken.sh. The name states the contract
-// the operator implements rather than the repository that builds it.
+// DriverName is the DRA driver name of this operator. It is named for
+// the devices it publishes, not for the operator's directory.
 const DriverName = "display.liken.sh"
 
-// ResourceSlicesPath names the URL of the DRA inventory. Slices
-// are cluster-scoped, like Nodes, because hardware inventory belongs
-// to the machine and not to any tenant.
+// ResourceSlices are cluster-scoped, so the path has no namespace.
 const ResourceSlicesPath = "/apis/resource.k8s.io/v1/resourceslices"
 
-// maxSliceDevices is the API's limit on devices in one slice. The
-// limit is 128 for a slice with no taints and 64 for a slice that
-// taints any device, and this operator taints every dark output, so 64
-// is the number that applies. A graphics card registers far fewer
-// connectors than that.
-//
-// A connector publishes an output device and a draw device, and a
-// panel that answers DDC/CI adds a control device, so the number to
-// compare against 64 is three times the connector count at most, and
-// still far under the limit.
+// maxSliceDevices is the API's limit on devices in one slice. The API
+// allows 128 devices in a slice with no taints and 64 in a slice where
+// any device has a taint. This operator taints devices, so it uses 64.
+// A connector publishes at most three devices, so one slice fits 21
+// connectors, more than a graphics card has.
 const maxSliceDevices = 64
 
-// disconnectedTaint is the one a consumer tolerates. Its NoExecute
-// effect makes the taint-eviction controller end the pod that holds
-// the claim, and the claim's own tolerationSeconds says how long a
-// monitor may be dark first. A five second unplug should not end a
-// video.
+// disconnectedTaint marks the devices of an output that cannot serve a
+// client. Its NoExecute effect makes the taint-eviction controller
+// delete the pods of claims that hold the device. A claim can tolerate
+// the taint with tolerationSeconds, so a short unplug does not delete
+// the pod.
 const disconnectedTaint = DriverName + "/disconnected"
 
 type ResourceSlice struct {
@@ -74,10 +55,10 @@ type ResourceSliceMeta struct {
 	OwnerReferences []OwnerReference `json:"ownerReferences,omitempty"`
 }
 
-// OwnerReference ties one object's lifetime to another's. The UID
-// matters: a reference names one instance of the owner, so a Node that
-// is deleted and registered again under the same name does not inherit
-// the old node's slices.
+// OwnerReference makes Kubernetes delete the owned object when its
+// owner is deleted. The UID identifies one instance of the owner, so a
+// Node that is deleted and registered again under the same name does
+// not keep the old Node's slices.
 type OwnerReference struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`
@@ -98,26 +79,24 @@ type ResourcePool struct {
 	ResourceSliceCount int64  `json:"resourceSliceCount"`
 }
 
-// SliceDevice is one claimable output. The name must be a DNS label,
-// unique within the pool. An attribute name left unqualified belongs
-// to the publishing driver's domain, so a selector reads these as
-// device.attributes["display.liken.sh"].model. The one exception is
-// the pairing identity, which has its own domain.
+// SliceDevice is one device that a claim can request. An attribute name
+// with no domain belongs to the driver's domain, so a selector reads the
+// model as device.attributes["display.liken.sh"].model.
+// pairingAttribute has a domain of its own.
 type SliceDevice struct {
 	Name string `json:"name"`
-	// AllowMultipleAllocations lets many claims hold one device at
-	// once. The scheduler leaves it off for an exclusive device, which
-	// is the default a nil pointer publishes. The draw device sets it
-	// so many clients can draw on one output through the shared
-	// compositor socket.
+	// AllowMultipleAllocations lets several claims hold the device at
+	// the same time. Only the draw device sets it. When it is nil, the
+	// field is left out of the JSON and one claim at a time can hold the
+	// device.
 	AllowMultipleAllocations *bool                      `json:"allowMultipleAllocations,omitempty"`
 	Attributes               map[string]DeviceAttribute `json:"attributes,omitempty"`
 	Taints                   []DeviceTaint              `json:"taints,omitempty"`
 }
 
-// DeviceAttribute holds exactly one of four typed values. The API
-// keeps the types apart so that a selector compares a number as a
-// number, instead of against the string "1920".
+// DeviceAttribute must have exactly one field set. The API keeps the
+// types separate, so a selector compares a width with a number and not
+// with the string "1920".
 type DeviceAttribute struct {
 	Bool    *bool   `json:"bool,omitempty"`
 	Int     *int64  `json:"int,omitempty"`
@@ -125,12 +104,13 @@ type DeviceAttribute struct {
 	Version *string `json:"version,omitempty"`
 }
 
-// DeviceTaint keeps a claim off a device, and evicts the pods of the
-// claims that already hold it when the effect is NoExecute.
+// The scheduler allocates a tainted device only to a claim that
+// tolerates the taint. With the effect NoExecute, the taint-eviction
+// controller also deletes the pods of claims that already hold the
+// device.
 //
-// TimeAdded is a field the API server fills in on write. This operator
-// never sets it, and reads it back only so that the change detection
-// can ignore it (see sameDevices).
+// The API server sets TimeAdded when it stores the taint. This operator
+// never sets it, and sameDevices ignores it.
 type DeviceTaint struct {
 	Key       string `json:"key"`
 	Value     string `json:"value,omitempty"`
@@ -138,43 +118,30 @@ type DeviceTaint struct {
 	TimeAdded string `json:"timeAdded,omitempty"`
 }
 
-// AttrString builds a string-typed attribute value without repeating
-// pointer syntax at every call site.
 func AttrString(s string) DeviceAttribute { return DeviceAttribute{String: &s} }
 
-// AttrInt builds an integer attribute value.
 func AttrInt(i int) DeviceAttribute { v := int64(i); return DeviceAttribute{Int: &v} }
 
-// AttrBool builds a boolean attribute value, so a selector can ask
-// with has() and with a plain comparison.
 func AttrBool(b bool) DeviceAttribute { return DeviceAttribute{Bool: &b} }
 
-// sliceDevices turns the card's connectors into the devices the slice
-// publishes. Every connector publishes an output device and a draw
-// device, and a connector whose panel answers DDC/CI adds a control
-// device.
+// sliceDevices returns the devices of the slice, sorted by name. Each
+// connector publishes an output device and a draw device, and also a
+// control device when its panel responds to DDC/CI.
 //
-// Membership is every connector, and it never depends on what is
-// plugged in. A dark output is still a device a person can claim, and
-// the pod parks until a monitor arrives. A monitor that leaves takes
-// its EDID attributes with it and leaves the device in place with its
-// taint on it, because deleting a device that a claim holds strands
-// the next consumer.
+// Every connector publishes its devices whether or not a monitor is
+// connected, so a claim on an empty connector waits until a monitor
+// arrives. The compositor configuration has an [output] section for
+// every connector, so a newly connected monitor can show a client with
+// no restart and needs no taint. getsDisconnectedTaint decides which
+// outputs get the taint.
 //
-// The attributes are the monitor's own facts, so a claim can name one
-// screen by model or by serial, or select any output that fits and
-// take whichever one is free.
-//
-// The compositor's config has an [output] section for every connector,
-// so a monitor that arrives on any connector can serve a client as soon
-// as the compositor enables its head. What taints a device is a
-// connector that no monitor can be reached on, which unservable holds,
-// and the link history is what decides when a dark connector has been
-// dark long enough to count.
+// The attributes describe the monitor, so a claim can select one screen
+// by model or serial, or any output that fits.
 func sliceDevices(outputs []Output) []SliceDevice {
-	// A monitor two connectors both serve, with different physical
-	// addresses, so neither connector's device states one: a claim
-	// that read either address would hand a CEC consumer a guess.
+	// When two connectors report the same monitor with different CEC
+	// physical addresses, neither device publishes an address, because
+	// a CEC client that read one of them could switch the receiver to
+	// the wrong input.
 	ambiguous := ambiguousAddresses(outputs)
 	devices := make([]SliceDevice, 0, len(outputs))
 	for _, output := range outputs {
@@ -186,12 +153,11 @@ func sliceDevices(outputs []Output) []SliceDevice {
 				"appId":     AttrString(appID(output.Connector)),
 			},
 		}
-		// The identity is published whether the monitor answers now or
-		// is only remembered, because a claim names the screen it wants
-		// and that screen has not moved. Everything below the identity
-		// is read from the wire, so a dark connector states none of it:
-		// the operator cannot promise a mode or a size for a monitor it
-		// cannot ask.
+		// While a connector is disconnected, output.monitor() returns the
+		// monitor it remembers, so a claim that selects this screen by
+		// model still matches it. The attributes inside the Connected
+		// branch come from the EDID on the wire, so a disconnected
+		// connector publishes none of them.
 		monitor := output.monitor()
 		addAttribute(device.Attributes, "manufacturer", monitor.Manufacturer)
 		addAttribute(device.Attributes, "model", monitor.ModelName)
@@ -200,53 +166,41 @@ func sliceDevices(outputs []Output) []SliceDevice {
 		if output.Connected {
 			addSize(device.Attributes, "widthPixels", monitor.WidthPixels)
 			addSize(device.Attributes, "heightPixels", monitor.HeightPixels)
-			// The refresh is in millihertz. A selector that wants 60 Hz
-			// exactly must ask for 60000, and a real monitor may answer
-			// 59999.
+			// 60 Hz is 60000, and a monitor can report 59999 for it.
 			addSize(device.Attributes, "refreshMillihertz", monitor.RefreshMillihertz)
 			addSize(device.Attributes, "widthMillimeters", monitor.WidthMillimeters)
 			addSize(device.Attributes, "heightMillimeters", monitor.HeightMillimeters)
-			// The modes list shows the alternatives to the preferred
-			// mode, and a claim's mode parameter selects one of them.
-			// The list is cut to fit the API's limit on a string
-			// attribute, so it advertises and the connector's own sysfs
-			// list is what a claim is validated against.
+			// The mode names that a claim's mode parameter can select. The
+			// list is cut to maxAttributeLength, so applyMode validates a
+			// claim's mode against the mode list that the card returns,
+			// not against this attribute.
 			addAttribute(device.Attributes, "modes", attributeList(output.Modes))
-			// The mode this output runs right now, with its refresh,
-			// 3840x1600@24, read from the card and not from sysfs.
-			// The modes list above stays name-only. It follows a
-			// claim's mode, and it is what makes a mode a released
-			// claim left behind visible instead of hidden. It is
-			// absent while the output drives nothing, when the card
-			// could not answer, and while the operator holds no
-			// connection to a compositor.
+			// The mode that the output runs now, such as 3840x1600@24. It
+			// is absent when the output drives no mode, when the card
+			// cannot be read, and while the operator has no connection to
+			// a compositor.
 			addAttribute(device.Attributes, "currentMode", output.CurrentMode)
-			// The CEC physical address of the port this cable is in,
-			// 1.2.0.0, from the EDID on the wire now. A dark connector
-			// publishes none, because a device the scheduler allocates
-			// describes the hardware as it is now. The Display's status
-			// keeps the last address while the connector is dark. An
-			// ambiguous monitor publishes none either, because the two
-			// connectors serving it disagree about which one it is.
+			// The CEC physical address of the input that the cable is
+			// plugged into, such as 1.2.0.0. A disconnected connector
+			// publishes none, because the scheduler allocates against the
+			// hardware as it is now. The Display's status keeps the last
+			// address.
 			address := output.Monitor.PhysicalAddress
-			if _, unclear := ambiguous[monitorID(monitor)]; unclear {
+			if _, isAmbiguous := ambiguous[monitorID(monitor)]; isAmbiguous {
 				address = ""
 			}
 			addAttribute(device.Attributes, "physicalAddress", address)
-			// Each control attribute promises one thing: the panel
-			// answered the VCP code behind it when the operator asked.
-			// A claim that states the matching parameter has something
-			// to set. The scheduler reads no opaque parameter, so a
-			// selector on this attribute is how a workload that needs
-			// the control lands on a screen that carries it.
+			// The scheduler does not read a claim's opaque parameters, so
+			// a workload that needs a panel control selects on these
+			// attributes to get a panel that supports it.
 			addControl(device.Attributes, "controlsBrightness", output.Controls.Brightness)
 			addControl(device.Attributes, "controlsPower", output.Controls.Power)
 		}
-		if unservable(output) {
-			device.Taints = unservableTaints()
+		if getsDisconnectedTaint(output) {
+			device.Taints = disconnectedTaints()
 		}
 		devices = append(devices, device)
-		if control, carried := controlDevice(output, device.Taints); carried {
+		if control, ok := controlDevice(output, device.Taints); ok {
 			devices = append(devices, control)
 		}
 		devices = append(devices, drawDevice(output, device.Taints))
@@ -257,42 +211,34 @@ func sliceDevices(outputs []Output) []SliceDevice {
 	return devices
 }
 
-// ControlDevice is the connector's second device: the panel's own
-// control channel, for a pod that drives the controls while it runs
-// rather than stating them at prepare. Its claim delivers the
-// connector's i2c node itself, so the pod can run its own ddcutil,
-// change the brightness live, or switch the panel's input, and it
-// needs no Wayland connection to do any of it.
+// controlDevice returns the connector's control device and whether the
+// connector has one. The control device is for a pod that changes the
+// panel's brightness, power, or input while it runs. Its claim gives the
+// pod the connector's i2c device node, so the pod runs its own ddcutil
+// and needs no Wayland connection.
 //
-// Two facts decide that the device exists: a monitor on the
-// connector, and a probe that answered at least one control. A panel
-// that refuses DDC/CI publishes no control device, so a claim on the
-// class waits unallocated instead of receiving a node that answers
-// nothing.
+// The device exists only while a monitor is connected and its DDC/CI
+// probe read at least one control. A claim on a panel without
+// DDC/CI stays unallocated, and its pod does not get an i2c node that
+// no panel responds on.
 //
-// The attributes are the connector, the monitor identity, and the
-// same two control booleans the output publishes. The identity is on
-// both devices because one claim asks for a screen and its controls
-// with a matchAttribute constraint on monitor.liken.sh/id, and the
-// constraint compares an attribute both devices publish.
+// The output, control, and draw devices all publish the monitor
+// identity, so one claim can request a screen and its controls with a
+// matchAttribute constraint on monitor.liken.sh/id.
 //
-// The taints are the ones sliceDevices gives the output for its
-// monitor: a control device exists only while a monitor is connected,
-// so it is tainted when a different monitor replaced the one the
-// connector carried, and never claimable while the screen beside it
-// serves nobody for that reason. compositorDown adds no taint to it,
-// because the i2c bus reaches the panel with no compositor running.
+// The control device has the output device's taints. Because it exists
+// only while a monitor is connected, that taint is set only when a
+// different monitor replaced the remembered one. compositorDown leaves
+// the control device's taints unchanged.
 func controlDevice(output Output, taints []DeviceTaint) (SliceDevice, bool) {
 	if !output.Connected || (!output.Controls.Brightness && !output.Controls.Power) {
 		return SliceDevice{}, false
 	}
 	attributes := map[string]DeviceAttribute{
 		"connector": AttrString(output.Connector),
-		// The marker a class selects on. Without it, the only way to
-		// tell a control device from its output is the absence of
-		// appId, and a class written around an absence breaks the day
-		// the output gains an attribute. Present and true, like the
-		// control booleans.
+		// A DeviceClass selects control devices on this attribute. The
+		// absence of appId cannot select them, because the draw device
+		// has no appId either.
 		"control": AttrBool(true),
 	}
 	addAttribute(attributes, pairingAttribute, monitorID(output.Monitor))
@@ -305,33 +251,18 @@ func controlDevice(output Output, taints []DeviceTaint) (SliceDevice, bool) {
 	}, true
 }
 
-// DrawDevice is the connector's shared device: a Wayland connection
-// on one output that many claims hold at once. The compositor draws
-// as many surfaces on an output as the layout module places there, so
-// a second client can draw between the films a single output claim
-// runs. The output device stays exclusive because one panel runs one
-// mode, and the mode is the output device's to set.
+// drawDevice returns the connector's draw device. Many claims can hold
+// it at the same time, and each gets its own Wayland socket to the
+// compositor on this output, so other clients can draw on a screen that
+// an output claim drives. The output device allows one claim, because
+// that claim sets the panel's mode.
 //
-// The device exists for every connector, connected or not, the same as
-// the output device beside it, so a claim on the draw class parks until
-// a monitor arrives rather than failing to schedule.
+// Like the output device, the draw device exists for every connector
+// and has the output device's taints.
 //
-// The attributes are the connector, a draw marker, and the monitor
-// identity. The marker is what a device class selects on, present and
-// true like the control marker. The identity is on both the output and
-// the draw device, so one claim holds a screen and a shared surface on
-// it through a matchAttribute constraint on monitor.liken.sh/id.
-//
-// The draw device publishes no appId. The output class selects on
-// has(appId), so an appId here would make the draw device match that
-// class. The app-id still reaches the client at prepare, built from
-// the connector, not read from an attribute, and it routes nothing:
-// the socket the claim receives is what names the claim a surface
-// came from.
-//
-// The taints are the output device's own, whatever they are, so a
-// draw device is never claimable while the screen beside it can serve
-// nobody.
+// It publishes no appId, because the output DeviceClass selects on
+// has(appId). The client still receives an app-id at prepare, built
+// from the connector.
 func drawDevice(output Output, taints []DeviceTaint) SliceDevice {
 	shared := true
 	attributes := map[string]DeviceAttribute{
@@ -351,72 +282,56 @@ func drawDevice(output Output, taints []DeviceTaint) SliceDevice {
 	}
 }
 
-// unservable answers whether the output can serve nobody now. A
-// connector with no screen behind it serves nobody: nothing is in it,
-// or this operator has never seen a monitor on it. A connector that
-// came back carrying a different monitor serves nobody the claim on it
-// asked for, so it taints while a monitor is on the wire.
-//
-// A connector that is dark but still carries the monitor it left with
-// is not one of them. That monitor is expected back, because the
-// commonest reason for a dark connector here is a panel showing another
-// input, and a taint would end the pod that draws on it.
-func unservable(output Output) bool {
+// getsDisconnectedTaint reports whether the output's devices get the
+// disconnected taint. That is true for a connector that never had a
+// monitor, and for a connector that reconnected with a different
+// monitor. A disconnected connector that remembers its monitor is not
+// tainted, because the monitor is usually still there, showing another
+// input, and a taint would delete the pod that draws on it.
+func getsDisconnectedTaint(output Output) bool {
 	if output.Replaced {
 		return true
 	}
-	// A monitor on the wire can serve, whatever its EDID says. One that
-	// answers no readable EDID still lights, and the claim on it was
-	// allocated against whatever the last pass published.
+	// A connected monitor whose EDID cannot be read has no monitorID,
+	// but it can still show a client.
 	if output.Connected {
 		return false
 	}
 	return monitorID(output.Remembered) == ""
 }
 
-// unservableTaints is the taint set of an output that can serve
-// nobody: the NoExecute taint that ends the pod holding it.
-func unservableTaints() []DeviceTaint {
+func disconnectedTaints() []DeviceTaint {
 	return []DeviceTaint{
 		{Key: disconnectedTaint, Effect: "NoExecute"},
 	}
 }
 
-// compositorDown taints every output device and every draw device,
-// whatever is plugged in, and leaves each control device with the
-// taints it already carries.
+// compositorDown returns the devices with the disconnected taint on
+// every output and draw device, whether or not a monitor is connected.
+// The operator publishes this on every pass that finds no compositor on
+// its socket: before the compositor container starts, and while it
+// restarts. No output can show a Wayland client then, so new claims
+// wait until the first pass after the socket appears removes the taint.
 //
-// The operator publishes this form on every pass that finds no
-// compositor answering on the socket, which covers the start before
-// the compositor's container creates it and every restart of that
-// container after.
+// The taint also makes the taint-eviction controller delete the pods
+// that were drawing, because they lost their Wayland connections when
+// the compositor exited. The restarted compositor serves the same
+// devices, so without this write the slice would not change and
+// nothing would delete those pods.
 //
-// No compositor holds the screens, so no output can serve a Wayland
-// client. The first reconcile after the socket appears removes the
-// taint from every screen that has a monitor. If the compositor never
-// starts, the taint stays, and a claim parks instead of taking a
-// screen that no compositor drives.
+// Control devices keep their own taints. A control pod uses the i2c
+// bus, which works without a compositor, so a taint would delete it on
+// every compositor restart, and would keep a control claim unallocated
+// on a machine where no compositor runs.
 //
-// This write is also what ends the clients that were drawing. Each
-// one already lost its Wayland connection when the compositor died,
-// and the restarted compositor serves the same devices again, so a
-// slice that never changed would raise no event and nothing else
-// would ever evict them.
-//
-// A control device's holder has no Wayland connection to lose. It
-// drives the panel on the connector's i2c bus, and that bus reaches
-// the panel whether or not a compositor runs. A taint here would end
-// that pod on every compositor restart for no reason, and would keep a
-// control-only claim unallocated on a machine where no compositor
-// starts.
-//
-// An output in preparing is not tainted either. A claim's prepare that
-// switches the mode restarts the compositor and waits for it, and the
-// claim's pod starts nothing until the prepare returns, so it has no
-// connection to lose. A taint would evict the pod that asked for the
-// restart. The screen would then read as free, the Display pass would
-// put the resting mode back with another restart, and the pod's
-// replacement would switch the mode again (screenholds.go).
+// An output device whose claim is still preparing gets no taint. A
+// prepare that changes the mode restarts the compositor and waits for
+// it, and the claim's pod does not start until prepare returns. A taint
+// would delete that pod. The Display pass would then find the screen
+// free and restore its declared mode with another restart, and the
+// replacement pod would change the mode again (screenholds.go). The
+// draw device of that output still gets the taint, because preparing
+// has only output device names.
 func compositorDown(devices []SliceDevice, preparing map[string]bool) []SliceDevice {
 	out := make([]SliceDevice, len(devices))
 	for i, device := range devices {
@@ -427,16 +342,15 @@ func compositorDown(devices []SliceDevice, preparing map[string]bool) []SliceDev
 		if preparing[device.Name] {
 			continue
 		}
-		out[i].Taints = unservableTaints()
+		out[i].Taints = disconnectedTaints()
 	}
 	return out
 }
 
-// addAttribute publishes a string value, and publishes nothing when
-// the monitor stated nothing. An absent attribute and an empty one
-// read the same to a person and not to a selector: has() answers false
-// for the absent one, and a selector that compares an empty string
-// matches every monitor that stated nothing.
+// addAttribute sets a string attribute unless the value is empty. An
+// absent attribute and an empty one differ for a selector: has() is
+// false for the absent one, and a comparison with an empty string
+// matches every monitor that reported nothing.
 func addAttribute(attributes map[string]DeviceAttribute, name, value string) {
 	if value == "" {
 		return
@@ -444,21 +358,18 @@ func addAttribute(attributes map[string]DeviceAttribute, name, value string) {
 	attributes[name] = AttrString(attributeString(value))
 }
 
-// AddControl publishes a control only when the panel answered its
-// code. The attribute is present and true or absent, never present
-// and false: a false would read as a fact about a panel that was
-// never asked, and a selector for the control would have to test
-// presence and value both.
-func addControl(attributes map[string]DeviceAttribute, name string, carried bool) {
-	if !carried {
+// addControl sets a control attribute to true when the panel responded to
+// that control's DDC/CI code. It never writes false, so a selector
+// tests only whether the attribute is present.
+func addControl(attributes map[string]DeviceAttribute, name string, supported bool) {
+	if !supported {
 		return
 	}
 	attributes[name] = AttrBool(true)
 }
 
-// addSize publishes a measurement, and publishes nothing when the
-// monitor stated zero. Zero pixels and zero millimeters are both the
-// absence of an answer, never a size.
+// addSize sets an integer attribute unless the value is zero or less,
+// which means the monitor reported nothing.
 func addSize(attributes map[string]DeviceAttribute, name string, value int) {
 	if value <= 0 {
 		return
@@ -467,14 +378,13 @@ func addSize(attributes map[string]DeviceAttribute, name string, value int) {
 }
 
 // maxAttributeLength is the API's limit on the length of a string
-// attribute's value. A write that exceeds it fails the whole slice,
-// so every string this operator publishes is cut to fit first.
+// attribute value. A longer value makes the API reject the whole
+// slice.
 const maxAttributeLength = 64
 
-// attributeString limits a free-text value to the API's limit on
-// attribute strings. A monitor writes at most 13 characters into a
-// descriptor, so nothing from an EDID reaches the limit, and the limit
-// is what keeps a malformed answer from failing the whole write.
+// attributeString cuts a value to maxAttributeLength. An EDID text
+// descriptor holds at most 13 characters, so only a malformed EDID
+// reaches the limit.
 func attributeString(s string) string {
 	if len(s) <= maxAttributeLength {
 		return s
@@ -482,20 +392,15 @@ func attributeString(s string) string {
 	return s[:maxAttributeLength]
 }
 
-// attributeList joins a list of values into the one string that
-// carries it, and ends the string on the last whole value that fits
-// under the API's limit.
+// attributeList joins values with spaces and stops before the first
+// value that would take the string past maxAttributeLength. A device
+// attribute has no list type, so a selector tests the string with
+// .contains(), as with audio-operator's lpcmBitDepths.
 //
-// A list is a string because the attribute language has no array
-// type: a device attribute holds one bool, int, string, or version.
-// So a list publishes space joined and a selector asks with
-// .contains(), the same convention the audio operator's
-// lpcmBitDepths follows.
-//
-// The cut keeps whole values only. Half a mode name names a mode no
-// monitor accepts, and .contains() on the fragment would match the
-// wrong modes. The caller passes values best first, so the cut drops
-// the tail nobody selects on.
+// The cut falls between values, because half of a mode name could match
+// a different mode in .contains(). The caller passes the best value
+// first, so the cut drops the values that a claim is least likely to
+// select.
 func attributeList(values []string) string {
 	var joined string
 	for _, value := range values {
@@ -511,22 +416,18 @@ func attributeList(values []string) string {
 	return joined
 }
 
-// sameDevices reports whether the published devices already say what
-// this pass would say.
-//
-// The comparison ignores TimeAdded, which the API server fills in on
-// every taint it stores. A plain comparison would compare the stored
-// timestamp against an empty one, call every pass a change, and write
-// the slice on every pass. Each ResourceSlice write wakes every
-// DRA-pending pod in the cluster, so a needless write is a
-// cluster-wide cost.
+// sameDevices reports whether the published devices equal the current
+// ones, ignoring TimeAdded. The API server sets TimeAdded on every
+// taint it stores, so a plain comparison would find a difference on
+// every pass and write the slice each time. Each ResourceSlice write
+// makes the scheduler retry every pod in the cluster that waits on a
+// claim.
 func sameDevices(published, current []SliceDevice) bool {
 	return reflect.DeepEqual(withoutTimeAdded(published), withoutTimeAdded(current))
 }
 
-// withoutTimeAdded copies the devices with every taint's timestamp
-// cleared. The copy is deep enough to leave the caller's own taints
-// untouched.
+// withoutTimeAdded returns a copy of the devices with TimeAdded cleared
+// on every taint, and an empty taint list as nil.
 func withoutTimeAdded(devices []SliceDevice) []SliceDevice {
 	out := make([]SliceDevice, len(devices))
 	for i, device := range devices {
@@ -543,43 +444,40 @@ func withoutTimeAdded(devices []SliceDevice) []SliceDevice {
 	return out
 }
 
-// ErrNoDevices refuses a write that would publish nothing.
-//
-// An empty inventory is never a real state of the card. The card
-// registers its connectors when the driver binds and keeps them until
-// the card leaves, so a pass that finds none read a card that is going
-// away, or read the wrong path. Writing that would replace a slice
-// that consumers hold with an empty one, and an empty slice is a
-// delete of every device in it.
+// ErrNoDevices is the error for a pass that found no connectors. A card
+// registers its connectors when its driver binds and keeps them until
+// the card is removed, so an empty list means the card is going away or
+// the operator read the wrong path. Publishing an empty slice would
+// delete every device that claims hold.
 var ErrNoDevices = errors.New("the card reports no connectors")
 
-// EnsureResourceSlice makes this operator's published slice match the
-// card's outputs. It creates the slice on the first pass, replaces the
-// slice when anything changed, and writes nothing when nothing moved.
+// EnsureResourceSlice makes the node's ResourceSlice match the devices.
+// It creates the slice when it does not exist, replaces it with a
+// higher pool generation when the devices changed, and writes nothing
+// when they did not.
 //
-// It never deletes. A monitor that leaves is a taint, the operator's
-// own shutdown retracts nothing, and a slice outlives every restart of
-// the pod. The Node owns the slice, so a node that leaves the cluster
-// takes the slice with it, and that is the only automatic removal.
+// It never deletes the slice, so the devices stay through an operator
+// restart. The Node owns the slice, so Kubernetes deletes it with the
+// Node.
 //
-// The write includes the resourceVersion from the read, so a
-// conflicting writer gets apiclient.ErrConflict instead of losing its change.
-// The next pass reads again and writes again.
+// The PUT sends the resourceVersion that the GET returned, so a
+// concurrent write makes it fail with apiclient.ErrConflict, and the
+// next pass tries again.
 func EnsureResourceSlice(c *apiclient.Client, nodeName string, owner OwnerReference, devices []SliceDevice) error {
 	if len(devices) == 0 {
 		return ErrNoDevices
 	}
 	if len(devices) > maxSliceDevices {
-		return fmt.Errorf("%d outputs exceed one slice's capacity of %d", len(devices), maxSliceDevices)
+		return fmt.Errorf("%d devices exceed the %d that one ResourceSlice holds", len(devices), maxSliceDevices)
 	}
 	name := sliceName(nodeName)
 	path := ResourceSlicesPath + "/" + name
 
-	// The slice is read from the API server on every pass that
-	// publishes, and no watch holds it. A watch of one slice needs list
-	// and watch on every ResourceSlice in the cluster, because RBAC
-	// cannot name the slice of one node, and the grant (deploy/rbac.yaml)
-	// keeps every other driver's inventory out of this operator's reach.
+	// The operator reads its slice on each publishing pass and does not
+	// watch it. One ClusterRole for every node cannot name each node's
+	// slice, so a watch would need list and watch on every ResourceSlice
+	// in the cluster. deploy/rbac.yaml grants only get, create, and
+	// update, so this operator cannot list other drivers' slices.
 	current, err := apiclient.Get[ResourceSlice](c, path)
 	if err == apiclient.ErrNotFound {
 		slice := &ResourceSlice{
@@ -614,8 +512,7 @@ func EnsureResourceSlice(c *apiclient.Client, nodeName string, owner OwnerRefere
 		return nil
 	}
 
-	// The published devices are read before the assignment overwrites
-	// them, because they are one half of what the line says changed.
+	// The log line compares the published devices with the new ones.
 	published := current.Spec.Devices
 	generation := current.Spec.Pool.Generation + 1
 
@@ -642,8 +539,8 @@ func sliceName(nodeName string) string {
 	return nodeName + "-" + DriverName
 }
 
-// nodeObject holds the one thing this operator reads from its Node:
-// the UID that the slice's owner reference needs.
+// nodeObject is the part of a Node that the slice's owner reference
+// needs.
 type nodeObject struct {
 	Metadata struct {
 		Name string `json:"name"`
@@ -651,8 +548,8 @@ type nodeObject struct {
 	} `json:"metadata"`
 }
 
-// NodeOwner reads this operator's node and builds the owner reference
-// for its slice.
+// NodeOwner returns an owner reference to the Node that this operator
+// runs on.
 func NodeOwner(c *apiclient.Client, nodeName string) (OwnerReference, error) {
 	node, err := apiclient.Get[nodeObject](c, "/api/v1/nodes/"+nodeName)
 	if err != nil {

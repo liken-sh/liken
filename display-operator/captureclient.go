@@ -1,19 +1,15 @@
 package main
 
-// This file is the client that takes frames off the capture socket.
-// It is a connection of its own, beside the standing watch in
-// wayland.go, because it opens on a different socket, the one the
-// layout module admits captures from, and lives for one request
-// rather than for the compositor's life. It shares the wire code in
-// wayland.go and adds the requests the watch never sends: wl_shm's
-// pool and buffer, and weston_capture_v1's create and capture.
+// This file is a Wayland client that captures frames from weston
+// through weston_capture_v1, the protocol in weston's
+// weston-output-capture.xml. It connects to the capture socket, not to
+// the socket of the output watch in wayland.go, and each HTTP request
+// opens its own connection. It reuses the wire code in wayland.go.
 //
-// The protocol is weston-output-capture.xml from the weston 16.0.2 tag.
-// weston 16.0.2 serves both of its interfaces at version 2, and this
-// client binds version 1. Version 2 lets a source send several format
-// events and closes them with formats_done. To a version 1 client,
-// weston sends one format event and one size event, which is what
-// this client reads.
+// weston serves the protocol at version 2, and this client binds
+// version 1. At version 2 a source can send several format events and
+// then formats_done. At version 1 it sends one format event and one
+// size event, so the client reads no formats_done.
 
 import (
 	"errors"
@@ -24,9 +20,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The two interfaces this client binds beside wl_output: wl_shm for
-// the buffer the compositor writes into, and weston_capture_v1 for
-// the source that fills it. Both are bound at version 1.
 const (
 	shmInterface     = "wl_shm"
 	shmVersion       = 1
@@ -34,9 +27,9 @@ const (
 	captureVersion   = 1
 )
 
-// The request opcodes. An opcode is the position of the request in
-// its interface's protocol definition, and the wire carries no
-// names, so these numbers are the contract.
+// Each request opcode is the request's position in its interface in
+// the protocol XML. The wire carries no names, so a wrong number sends
+// a different request.
 const (
 	shmCreatePool        uint16 = 0
 	shmPoolCreateBuffer  uint16 = 0
@@ -48,11 +41,9 @@ const (
 	captureSourceCapture uint16 = 1
 )
 
-// The capture source's five events. format and size describe the
-// buffer the client has to offer, and arrive after create and again
-// before a retry. complete, retry, and failed each end one capture,
-// and the client waits for one of the three before it sends the next
-// capture request.
+// The capture source's events. format and size give the buffer that
+// the compositor needs, and the source sends them after create and
+// again before each retry.
 const (
 	captureFormatEvent   uint16 = 0
 	captureSizeEvent     uint16 = 1
@@ -61,37 +52,28 @@ const (
 	captureFailedEvent   uint16 = 4
 )
 
-// The wl_output scale event. The watch in wayland.go skips it; this
-// client reads it because the info document reports the scale, so a
-// client in logical pixels can convert to the frame's own.
+// The wl_output scale event, which the watch in wayland.go does not
+// read. The info route reports the scale, so a caller that works in
+// logical pixels can convert to frame pixels.
 const outputScaleEvent uint16 = 3
 
-// The framebuffer source "copies the contents of the final
-// framebuffer", "temporarily disables all use of hardware planes",
-// and "is always available", so a film on an overlay plane is
-// composited into the frame. writeback is "often not available", and
-// blending exists only when color management is active on the output.
+// The client captures from the framebuffer source because weston
+// offers it on every output. The writeback source is often not
+// available, and the blending source exists only when color management
+// is active on the output.
 //
-// Disabling the planes makes the DRM backend build a renderer-only
-// state while a capture is pending: output-capture.c calls
-// weston_output_disable_planes_incr(), and the backend draws every view
-// into the primary plane (backend-drm/state-propose.c). No solid view
-// then covers the output from a plane of its own, so weston writes its
-// default CRTC BACKGROUND_COLOR, which is opaque black from weston
-// 16.0.1. i915 refuses every atomic commit that writes 0 there, which
-// is the value earlier releases wrote, and root plan 85 holds that
-// evidence. The weston image builds from a release with the opaque
-// default for that reason.
-//
-// The captured frames come from the renderer, which composes them
-// before the commit. The one avoidance a client holds is to take the
-// next capture only after the previous one retired, which the protocol
-// already requires and this client already does.
+// weston disables hardware planes while a framebuffer capture is
+// pending, so the DRM backend composites every view into the primary
+// plane, including a video that was on an overlay plane. No view then covers
+// the output from a plane of its own, and weston writes the CRTC's
+// BACKGROUND_COLOR. i915 refuses every atomic commit that writes 0
+// there. weston 16.0.1 and later write opaque black, and the weston
+// image builds from such a release.
 const captureSourceFramebuffer uint32 = 1
 
-// The four DRM fourccs weston's GL renderer reports, as the format
-// event carries them: the four characters of the name, least
-// significant byte first.
+// The DRM fourcc codes that weston's GL renderer reports in the format
+// event. Each is the four characters of its name as a little-endian
+// number.
 const (
 	formatAR24 uint32 = 0x34325241
 	formatXR24 uint32 = 0x34325258
@@ -99,29 +81,28 @@ const (
 	formatAB24 uint32 = 0x34324241
 )
 
-// wl_shm numbers two formats itself, ARGB8888 as 0 and XRGB8888 as 1,
-// and every other format in its enum is the DRM fourcc unchanged.
+// wl_shm gives ARGB8888 the value 0 and XRGB8888 the value 1. Every
+// other format in its enum is the DRM fourcc.
 const (
 	shmFormatARGB8888 uint32 = 0
 	shmFormatXRGB8888 uint32 = 1
 )
 
-// Every format the compositor reports is four bytes a pixel, and the
-// stride is exactly width times four: weston's PBO read path assumes
-// a packed buffer.
+// Each format in capturePixelFormats has four bytes per pixel. The
+// stride must be exactly width times four, because weston's PBO read
+// path assumes a packed buffer.
 const capturePixelBytes = 4
 
-// A retry means the size or format changed and the client
-// reallocated. An output that changes on every capture would loop
-// forever, so one frame allows this many retries before it fails.
+// The most capture requests that one call to frame sends. An output
+// whose size or format changes on every capture would otherwise retry
+// forever.
 const captureRetryLimit = 4
 
-// The memfd's name. It appears in /proc and nowhere else.
 const captureBufferName = "liken-capture"
 
-// The ffmpeg -pixel_format name for each fourcc weston reports. The
-// GL renderer's read format is not fixed, so the sidecar derives the
-// name from the format event rather than stating bgr0.
+// The ffmpeg -pixel_format name for each fourcc. The GL renderer's
+// read format varies, so the name comes from the format event and is
+// not fixed to bgr0.
 var capturePixelFormats = map[uint32]string{
 	formatXR24: "bgr0",
 	formatAR24: "bgra",
@@ -129,24 +110,22 @@ var capturePixelFormats = map[uint32]string{
 	formatAB24: "rgba",
 }
 
-// The error names the fourcc as characters and as hex, because a
-// person reads the characters and drm_fourcc.h lists the hex.
+// The error gives the fourcc as characters, as drm_fourcc.h writes
+// it, and as hex, as the wl_shm enum writes it.
 func capturePixelFormat(format uint32) (string, error) {
 	name, mapped := capturePixelFormats[format]
 	if !mapped {
-		return "", fmt.Errorf("the compositor captures in %s (0x%08x), which no ffmpeg pixel format carries", fourccName(format), format)
+		return "", fmt.Errorf("no ffmpeg pixel format matches the compositor's capture format %s (0x%08x)", fourccName(format), format)
 	}
 	return name, nil
 }
 
-// A fourcc spells itself: its four bytes are the four characters of
-// its name, least significant byte first.
+// fourccName returns the four characters of a fourcc, which are its
+// bytes from least significant to most.
 func fourccName(format uint32) string {
 	return string([]byte{byte(format), byte(format >> 8), byte(format >> 16), byte(format >> 24)})
 }
 
-// The fourcc to wl_shm enum map: the two formats wl_shm renumbers,
-// and every other one unchanged.
 func shmFormat(format uint32) uint32 {
 	switch format {
 	case formatAR24:
@@ -157,9 +136,9 @@ func shmFormat(format uint32) uint32 {
 	return format
 }
 
-// What the HTTP layer states about a screen and hands to ffmpeg: the
-// size and format of the frame, and the scale and refresh the info
-// document reports.
+// captureScreen is what the HTTP layer reads about one output: the
+// frame's size and format, which ffmpeg needs, and the scale and
+// refresh rate, which the info route reports.
 type captureScreen struct {
 	Connector   string
 	Width       int
@@ -170,9 +149,9 @@ type captureScreen struct {
 	PixelFormat string
 }
 
-// A failed event is its own error type, because the HTTP layer turns
-// it into a 500 capture-denied with weston's own word as the detail,
-// and every other error into a 503.
+// captureFailure is a failed event from the compositor, with weston's
+// message. compositorFault in capture.go returns a 500 for it, because
+// a retry gets the same refusal, and a 503 for every other error.
 type captureFailure struct {
 	Message string
 }
@@ -181,8 +160,8 @@ func (f *captureFailure) Error() string {
 	return "the compositor refused the capture: " + f.Message
 }
 
-// A size change carries both sizes, because the clip that ends on it
-// logs the old and the new.
+// captureSizeChange ends a clip when the output's size or format
+// changes. It has both sizes for the error that the clip returns.
 type captureSizeChange struct {
 	OldWidth  int
 	OldHeight int
@@ -194,29 +173,28 @@ func (c *captureSizeChange) Error() string {
 	return fmt.Sprintf("the capture changed size from %dx%d to %dx%d", c.OldWidth, c.OldHeight, c.Width, c.Height)
 }
 
-// The two answers to a retry. A still reallocates the buffer at the
-// new size and captures again. A clip ends on the change, because
-// ffmpeg's -video_size and -pixel_format are stated once when it
-// starts and cannot follow one.
+// captureRetryBehavior sets what the session does when the compositor
+// sends a retry with a new size or format. A still allocates a new
+// buffer and captures again. A clip ends, because ffmpeg reads
+// -video_size and -pixel_format once at start and would read every
+// later frame with the old values.
 type captureRetryBehavior int
 
 const (
 	captureReallocates captureRetryBehavior = iota
-	captureEndsTheFrame
+	captureEndsOnChange
 )
 
-// What one output states that this client reads: its connector name,
-// its scale, and the refresh of its current mode.
 type captureOutput struct {
 	connector string
 	scale     int
 	refresh   int
 }
 
-// One session holds one connection, one output, one capture source
-// on it, and one buffer the compositor writes every frame into. The
-// buffer is a memfd, 33 MB at 4K, mapped for the session's life and
-// unmapped when the request ends.
+// captureSession is one connection to the capture socket, bound to one
+// output with one capture source. The compositor writes each frame
+// into a memfd that the session maps, and the session allocates a new
+// one after each retry event.
 type captureSession struct {
 	socket   *net.UnixConn
 	wire     *waylandClient
@@ -236,13 +214,12 @@ type captureSession struct {
 	info   captureScreen
 }
 
-// openCapture dials the capture socket, binds the output the
-// connector names and a capture source on it, and reads the format
-// and size events that describe the buffer to allocate.
+// openCapture connects to the capture socket, binds the output with
+// the given connector name, and allocates a buffer for its frames.
 func openCapture(socketPath, connector string, timeout time.Duration) (*captureSession, error) {
 	socket, err := net.DialTimeout("unix", socketPath, timeout)
 	if err != nil {
-		return nil, fmt.Errorf("the capture socket %s: %w", socketPath, err)
+		return nil, fmt.Errorf("connecting to the capture socket: %w", err)
 	}
 	unixSocket, isUnix := socket.(*net.UnixConn)
 	if !isUnix {
@@ -266,16 +243,15 @@ func (s *captureSession) screen() captureScreen {
 	return s.info
 }
 
-// The retry behavior is set after open, because open itself always
-// reallocates: no frame has been promised to an encoder yet. The
-// caller sets it once the form is chosen, a still or a clip.
+// onRetry sets what frame does on a retry event. Until a caller sets
+// it, the session reallocates.
 func (s *captureSession) onRetry(behavior captureRetryBehavior) {
 	s.behavior = behavior
 }
 
-// frame takes exactly one frame and answers the mapped pixels of the
-// whole frame. The slice is the buffer itself, so it is valid until
-// the next call to frame or to close.
+// frame captures one frame and returns its pixels. The slice is the
+// mapped buffer itself, so it is valid only until the next call to
+// frame or close.
 func (s *captureSession) frame() ([]byte, error) {
 	for range captureRetryLimit {
 		if err := s.wire.request(s.source, captureSourceCapture, oneObject(s.buffer)); err != nil {
@@ -289,7 +265,7 @@ func (s *captureSession) frame() ([]byte, error) {
 			return s.pixels, nil
 		}
 	}
-	return nil, fmt.Errorf("the compositor asked to retry %d captures in a row", captureRetryLimit)
+	return nil, fmt.Errorf("the compositor replied with retry to %d capture requests in a row", captureRetryLimit)
 }
 
 func (s *captureSession) close() error {
@@ -301,9 +277,9 @@ func (s *captureSession) close() error {
 	)
 }
 
-// Two roundtrips. The first reads the registry and binds every
-// output in it; an output's own name, scale, and mode events follow
-// its bind, so the second roundtrip is what reads them.
+// bind needs two roundtrips. The first reads the registry and binds
+// every wl_output. An output sends its name, scale, and mode only after
+// it is bound, so the second roundtrip reads them.
 func (s *captureSession) bind(connector string) error {
 	s.registry = s.wire.newID()
 	if err := s.wire.request(displayObject, displayGetRegistry, oneObject(s.registry)); err != nil {
@@ -330,13 +306,14 @@ func (s *captureSession) bind(connector string) error {
 		s.info.Connector, s.info.Scale, s.info.Refresh = output.connector, output.scale, output.refresh
 	}
 	if s.output == 0 {
-		return fmt.Errorf("the compositor serves no output named %s", connector)
+		return fmt.Errorf("the compositor has no output named %s", connector)
 	}
 	return s.createSource()
 }
 
-// A roundtrip is a sync whose done callback marks the end of what
-// the compositor had to say in answer to every request before it.
+// roundtrip sends a wl_display sync and passes each event to handle
+// until the callback's done event arrives. By then the compositor has
+// handled every earlier request and sent its events.
 func (s *captureSession) roundtrip(handle func(waylandEvent) error) error {
 	callback := s.wire.newID()
 	if err := s.wire.request(displayObject, displaySync, oneObject(callback)); err != nil {
@@ -356,11 +333,10 @@ func (s *captureSession) roundtrip(handle func(waylandEvent) error) error {
 	}
 }
 
-// Every read carries the session's deadline, so a compositor that
-// stops answering ends the request rather than holding it. A
-// wl_display error event is a protocol error, and the compositor
-// closes the connection after it, so it ends the session here with
-// the compositor's own message.
+// event reads one event with the session's timeout, so a compositor
+// that stops responding fails the request instead of blocking it. The
+// compositor closes the connection after a wl_display error event, so
+// event returns that event as an error.
 func (s *captureSession) event() (waylandEvent, error) {
 	if err := s.socket.SetReadDeadline(time.Now().Add(s.timeout)); err != nil {
 		return waylandEvent{}, err
@@ -372,7 +348,7 @@ func (s *captureSession) event() (waylandEvent, error) {
 	if event.object == displayObject && event.opcode == displayErrorEvent {
 		object := event.fields.uint()
 		code := event.fields.uint()
-		return waylandEvent{}, fmt.Errorf("the compositor refused object %d with code %d: %s", object, code, event.fields.text())
+		return waylandEvent{}, fmt.Errorf("the compositor sent a protocol error for object %d, code %d: %s", object, code, event.fields.text())
 	}
 	return event, nil
 }
@@ -414,10 +390,9 @@ func (s *captureSession) bindGlobal(global uint32, name string, version uint32) 
 	return id, s.wire.request(s.registry, registryBind, words)
 }
 
-// The mode event states the refresh in millihertz. The info document
-// states it in whole hertz, rounded the way the kernel rounds its own
-// vrefresh, so the number a caller reads here is the number the
-// Display's status reports.
+// outputEvent records a bound output's name, scale, and refresh rate.
+// It rounds the mode's millihertz with westonRefresh, as the Display's
+// status does, so both report the same number.
 func outputEvent(event waylandEvent, outputs map[uint32]*captureOutput) error {
 	output, ours := outputs[event.object]
 	if !ours {
@@ -439,9 +414,6 @@ func outputEvent(event waylandEvent, outputs map[uint32]*captureOutput) error {
 	return event.fields.err
 }
 
-// create makes the source. The source states its format and size
-// before any capture, and those two events are what the buffer is
-// allocated from.
 func (s *captureSession) createSource() error {
 	s.source = s.wire.newID()
 	var words waylandWords
@@ -484,9 +456,9 @@ func (s *captureSession) describe() error {
 	return nil
 }
 
-// One allocation makes three things: a memfd of the frame's size,
-// mapped into this process, a wl_shm pool over that descriptor, and
-// a wl_buffer of the whole pool in the compositor's own format.
+// allocate releases the previous buffer, then shares a new memfd of
+// the frame's size with the compositor as one wl_buffer in the
+// compositor's format.
 func (s *captureSession) allocate() error {
 	pixelFormat, err := capturePixelFormat(s.info.Format)
 	if err != nil {
@@ -499,11 +471,11 @@ func (s *captureSession) allocate() error {
 	stride := s.info.Width * capturePixelBytes
 	size := stride * s.info.Height
 	if size <= 0 {
-		return fmt.Errorf("the compositor states a capture size of %dx%d", s.info.Width, s.info.Height)
+		return fmt.Errorf("the compositor reports a capture size of %dx%d, which has no pixels", s.info.Width, s.info.Height)
 	}
 	file, err := unix.MemfdCreate(captureBufferName, unix.MFD_CLOEXEC)
 	if err != nil {
-		return fmt.Errorf("a memfd for the capture buffer: %w", err)
+		return fmt.Errorf("creating a memfd for the capture buffer: %w", err)
 	}
 	s.memory = file
 	if err := unix.Ftruncate(file, int64(size)); err != nil {
@@ -511,7 +483,7 @@ func (s *captureSession) allocate() error {
 	}
 	pixels, err := unix.Mmap(file, 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 	if err != nil {
-		return fmt.Errorf("mapping the %d bytes of the capture buffer: %w", size, err)
+		return fmt.Errorf("mapping the capture buffer of %d bytes: %w", size, err)
 	}
 	s.pixels = pixels
 
@@ -530,18 +502,18 @@ func (s *captureSession) allocate() error {
 	return s.wire.request(s.pool, shmPoolCreateBuffer, words)
 }
 
-// A Wayland fd argument takes no word in the message body. The
-// descriptor travels beside the bytes as SCM_RIGHTS ancillary data,
-// and the compositor reads it from the same sendmsg.
+// sendWithFile sends a request that has a file descriptor argument.
+// Wayland does not put the descriptor in the message body. It goes
+// with the message in the same sendmsg as SCM_RIGHTS ancillary data.
 func (s *captureSession) sendWithFile(object uint32, opcode uint16, words waylandWords, file int) error {
 	_, _, err := s.socket.WriteMsgUnix(waylandMessage(object, opcode, words), unix.UnixRights(file), nil)
 	return err
 }
 
-// await reads until complete, retry, or failed. A second capture
-// request while one is in flight is the sequence protocol error,
-// which kills the connection, so the client sends the next capture
-// only after one of the three has arrived.
+// await reads events until complete, retry, or failed, and returns
+// true when the frame is in the buffer. A second capture request while
+// one is pending is a protocol error that closes the connection, so
+// frame calls await before it sends the next request.
 func (s *captureSession) await() (bool, error) {
 	width, height, format := s.info.Width, s.info.Height, s.info.Format
 	for {
@@ -571,25 +543,20 @@ func (s *captureSession) await() (bool, error) {
 	}
 }
 
-// A retry means the compositor could not use the buffer it was
-// given, and the format and size events before it say what it needs
-// now. A retry with nothing changed reallocates and captures again.
-// A retry that changed the size or the format is the one case the
-// caller decides: a still reallocates, and a clip ends. A clip ends
-// on a format change as well as on a size change, because
-// -pixel_format is stated once when ffmpeg starts, and every frame
-// after the change would be read under the old one.
+// retry handles a retry event, which means the compositor could not
+// use the buffer. The format and size events before it give the buffer
+// that it needs now. retry allocates that buffer, except for a clip
+// whose size or format changed, which ends with captureSizeChange.
 func (s *captureSession) retry(width, height int, format uint32) error {
 	changed := s.info.Width != width || s.info.Height != height || s.info.Format != format
-	if s.behavior == captureEndsTheFrame && changed {
+	if s.behavior == captureEndsOnChange && changed {
 		return &captureSizeChange{OldWidth: width, OldHeight: height, Width: s.info.Width, Height: s.info.Height}
 	}
 	return s.allocate()
 }
 
-// release gives back the buffer, the pool, the mapping, and the
-// memfd, on a reallocation and on close alike, so a session never
-// holds two frames of memory.
+// allocate and close both call release, so a session never holds two
+// frames of memory.
 func (s *captureSession) release() error {
 	failures := []error{s.destroy(&s.buffer, bufferDestroy), s.destroy(&s.pool, shmPoolDestroy)}
 	if s.pixels != nil {
@@ -603,8 +570,8 @@ func (s *captureSession) release() error {
 	return errors.Join(failures...)
 }
 
-// An object this session never made has id zero and is nothing to
-// destroy, so close is safe at every stage of a failed open.
+// destroy skips an object that was never created, which has id zero,
+// so close works after an open that failed at any step.
 func (s *captureSession) destroy(object *uint32, opcode uint16) error {
 	if *object == 0 {
 		return nil
@@ -614,8 +581,6 @@ func (s *captureSession) destroy(object *uint32, opcode uint16) error {
 	return failure
 }
 
-// Most requests in this file carry one object id and nothing else,
-// so that argument list has a spelling of its own.
 func oneObject(object uint32) waylandWords {
 	var words waylandWords
 	words.putUint(object)

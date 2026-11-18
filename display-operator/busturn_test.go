@@ -1,10 +1,5 @@
 package main
 
-// These tests cover the turns on a panel's DDC/CI bus. A panel holds
-// one reply at a time, so two exchanges that overlap read each other's
-// replies, and the claim's prepare, the Display pass, and the probe
-// all reach the same panel from goroutines of their own.
-
 import (
 	"sync"
 	"testing"
@@ -12,20 +7,17 @@ import (
 	"time"
 )
 
-// The bus of the lab's LG on HDMI-A-1, with the protocol's own delays
-// running on the bubble's clock.
+// turnBench returns the controls and the fake panel on HDMI-A-1, with
+// the DDC delays on the synctest bubble's clock.
 func turnBench(t *testing.T) (*panelControls, *fakeMonitor) {
 	t.Helper()
-	panel := drillPanel(t, "lg-hdr-wqhd")
+	panel := recordedPanel(t, "lg-hdr-wqhd")
 	controls, _ := benchPanels(t, t.TempDir(), "card1", map[string]*fakeMonitor{"HDMI-A-1": panel})
 	controls.sleep = time.Sleep
 	return controls, panel
 }
 
-// Two callers that read the same panel at once each get the reply to
-// their own request, because each waits for the other's exchange to
-// end, and the panel gets its gap between the two.
-func TestTwoReadersTakeThePanelsBusInTurn(t *testing.T) {
+func TestTwoReadersGetTheirOwnRepliesFromOnePanel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		controls, panel := turnBench(t)
 		panel.values[vcpBrightness], panel.values[vcpContrast] = 70, 30
@@ -59,14 +51,13 @@ func TestTwoReadersTakeThePanelsBusInTurn(t *testing.T) {
 	})
 }
 
-// A probe that finds no answer in the cache reads the panel while the
-// poll reads it too. The probe does not hold the cache while it waits
-// for the bus, because the poll records each answer in the cache while
-// it holds the bus.
-func TestTheProbeAndThePollShareThePanelWithoutDeadlock(t *testing.T) {
+// The probe must not hold the cache lock while it waits for the bus,
+// because the poll takes that lock to record each value while it has
+// the bus open.
+func TestTheProbeAndThePollReadOnePanelWithoutDeadlock(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		controls, panel := turnBench(t)
-		output := litOutput("HDMI-A-1", labMonitor())
+		output := connectedOutput("HDMI-A-1", labMonitor())
 		controls.factsFor(output)
 		controls.probed["HDMI-A-1"] = probedPanel{monitor: EDID{}, facts: controls.probed["HDMI-A-1"].facts}
 		var wg sync.WaitGroup
@@ -81,25 +72,23 @@ func TestTheProbeAndThePollShareThePanelWithoutDeadlock(t *testing.T) {
 	})
 }
 
-// Two passes that miss the cache at once probe the panel once, and both
-// read the one answer.
-func TestTwoPassesThatMissTheCacheProbeOnce(t *testing.T) {
+func TestTwoPassesThatMissTheCacheProbeThePanelOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		controls, panel := turnBench(t)
-		output := litOutput("HDMI-A-1", labMonitor())
+		output := connectedOutput("HDMI-A-1", labMonitor())
 		var wg sync.WaitGroup
-		answers := make([]supportedControls, 2)
+		results := make([]supportedControls, 2)
 
-		for i := range answers {
-			wg.Go(func() { answers[i] = controls.of(output) })
+		for i := range results {
+			wg.Go(func() { results[i] = controls.of(output) })
 		}
 		wg.Wait()
 
 		if panel.opens != 1 {
 			t.Errorf("the panel was opened %d times, want one probe", panel.opens)
 		}
-		if answers[0] != answers[1] || !answers[0].Brightness {
-			t.Errorf("the passes read %+v and %+v, want the same probe's answer", answers[0], answers[1])
+		if results[0] != results[1] || !results[0].Brightness {
+			t.Errorf("the passes read %+v and %+v, want the result of the same probe", results[0], results[1])
 		}
 	})
 }

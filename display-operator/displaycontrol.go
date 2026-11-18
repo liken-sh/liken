@@ -1,28 +1,29 @@
 package main
 
-// The controller behind the Display resource. It creates one
-// resource per probed monitor, writes the whole of status,
-// reconciles the resting spec on divergence, and obeys an override
-// only after the capture is durable in status. A pass writes no byte
-// on the wire to a panel that already holds its declaration.
+// The controller behind the Display resource. For each monitor the
+// operator probes, it creates a Display, writes its status, and writes
+// the declared values to the panel where the panel differs from them.
+// Before it applies an override, it saves the panel's current value in
+// status.captured, so the value survives an operator restart. In this
+// file, "capture" means that saved panel value. It is not a screenshot,
+// which is what "capture" means in the capture API.
 //
-// A DDC read wakes some panels, so every read has a cause. The poll is
-// the one read with no cause of its own. It reads a responsive panel
-// once per poll window, and never a panel whose last power value is
-// anything but on: standby, suspend, off, or hard off. A panel with no
-// power value, which is every panel that carries no power control,
-// counts as lit, so the poll reads it every window even while it is
-// dark. Every other read follows a cause:
+// A DDC read can wake a panel from standby, so the operator reads a
+// panel only when it has a reason to:
 //
-//   - the probe of a monitor the operator has not seen on its
-//     connector, in any power state (panels.go);
-//   - the probe again, once per backstop window, of a panel that
-//     refused the last probe, because a person can turn DDC/CI on at
-//     the panel's menu with no event (the open problem "A refused
-//     probe reads a dark panel every minute");
-//   - the capture, which reads the value an override replaces;
-//   - the readback after each write, and the read of the range and the
-//     held value before a claim's brightness or power write
+//   - the poll, once per poll window, finds a value that a person
+//     changed at the panel's buttons, because DDC/CI sends no event.
+//     It skips a panel whose last power reading is anything but on. A
+//     panel with no power control counts as on, so the poll reads it
+//     even when it is dark.
+//   - the probe reads a monitor that is new on its connector, in any
+//     power state (panels.go).
+//   - the probe runs again once per backstop interval for a panel that
+//     refused the last probe, because a person can turn DDC/CI on in
+//     the panel's menu and that raises no event.
+//   - the capture reads the value that an override replaces.
+//   - each write reads back its value, and a claim's brightness or
+//     power write reads the range and the current value first
 //     (controls.go).
 
 import (
@@ -41,92 +42,81 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// The restore's backoff. A panel that is waking answers slowly,
-// so the first retry is soon and the interval doubles to this ceiling.
-// The attempts are capped, because a person sees each write on the
-// panel. Eight writes with this backoff span about 90 seconds, and the
-// operator treats a panel that has not taken the value by then as a
-// panel that does not take it.
-// The restore that gives up is recorded in status.unconfirmed, and an
-// edit to spec starts a new restore.
+// A restore writes a value and reads it back, and retries with a delay
+// that doubles from restoreFirstDelay up to restoreMaxDelay, because a
+// panel that is waking responds late. Each write can show on the
+// screen, so the attempts are capped: the waits between them are 1, 2,
+// 4, 8, 16, 30, and 30 seconds. A restore that gives up is recorded in
+// status.unconfirmed, and the next edit to spec starts a new restore.
 const (
 	restoreFirstDelay = 1 * time.Second
 	restoreMaxDelay   = 30 * time.Second
 	restoreAttempts   = 8
 )
 
-// The controller's own state. The outputs seam is the same
-// sysfs walk the slice publisher makes, and the clock and the wait are
-// fields for the reason the DDC client's sleep is one.
+// displayControl reconciles the Displays of this node. Tests replace
+// the function fields.
 type displayControl struct {
 	client *apiclient.Client
-	// displays reads and writes the Displays, from the watch's store
-	// where it can (objectcache.go).
+	// displays reads Displays from the watch's store where it can
+	// (objectcache.go).
 	displays *displayStore
 	node     string
 	controls *panelControls
-	outputs  func() []Output
-	now      func() time.Time
-	wait     func(ctx context.Context, delay time.Duration) error
-	wakes    chan struct{}
-	// The connectors whose restore is running now, one restore
-	// at a time each. A restore waits on a panel that may take
-	// minutes to answer, so it runs apart from the pass, and this is
-	// what keeps a second pass from starting a second one.
+	// outputs is the same sysfs walk that the slice publisher makes.
+	outputs func() []Output
+	now     func() time.Time
+	wait    func(ctx context.Context, delay time.Duration) error
+	wakes   chan struct{}
+	// restoring is the set of connectors that have a restore running.
+	// A restore can wait minutes for a panel to respond, so it runs in
+	// its own goroutine, and this set keeps a later pass from starting
+	// a second restore on the same connector.
 	mu        sync.Mutex
 	restoring map[string]bool
-	// The restores that ran out of attempts, by connector, until the
-	// pass records them in status. The restore writes no status of
-	// its own, so this is how its result reaches the pass.
+	// abandoned lists, by connector, the restores that ran out of
+	// attempts. Only the pass writes status, so a restore leaves its
+	// result here for the next pass to record.
 	abandoned map[string][]abandonedRestore
-	// The fault each connector's last poll printed, until a poll
-	// reads it cleanly, so a panel that stays quiet prints one line
-	// and not one each window.
+	// pollFaults is the fault that each connector's last poll logged,
+	// kept until a poll reads that connector cleanly, so a panel that
+	// stays quiet logs one line and not one per window.
 	pollFaults map[string]string
-	// Where that line goes: stderr on the machine, and a buffer in
-	// the tests that count the lines.
-	faults io.Writer
-	// How often the loop looks, and it is the poll's window: a
-	// window that comes due needs a pass to act on it. A field for the
-	// reason the clock is one.
+	faults     io.Writer
+	// The loop ticks at the poll interval, because a poll runs only
+	// inside a pass.
 	tick time.Duration
-	// The panels of the last sweep and when it ran, which is
-	// what holds the listing to the slower cadence.
+	// swept and sweptAt are the panels and the time of the last listing
+	// of every Display (sweepDue).
 	swept   []string
 	sweptAt time.Time
-	// The output devices a claim holds. A claim's own mode wins
-	// for its lifetime, and a compositor restart would end the
-	// workload drawing on the screen, so both wait on these. Prepared
-	// reads the specs on disk, and allocated asks the API server, which
-	// also knows a claim whose prepare has not finished
-	// (screenholds.go).
+	// prepared and allocated return the output devices that claims
+	// hold. prepared reads the claim specs on disk. allocated asks the
+	// API server, which also reports a claim whose prepare has not
+	// finished (screenholds.go).
 	prepared  func() (map[string]bool, error)
 	allocated func() (map[string]bool, error)
-	// The mode machinery of the prepare path, reused whole:
-	// setMode writes the record, rewrites the config, restarts the
-	// compositor, and reads the mode back; restart is the same restart
-	// with no config change. Both are nil until the operator wires
-	// them, and a nil seam does nothing.
+	// setMode is the prepare path's mode switch: it writes the mode
+	// record, rewrites the compositor's config, restarts the
+	// compositor, and reads the mode back. restart restarts the
+	// compositor with no config change. Each does nothing while nil.
 	setMode func(ctx context.Context, output Output, mode string) error
 	restart func() error
-	// What the compositor reports it serves on each connector,
-	// which is the mode status reports beside the kernel's. It is nil
-	// until the operator wires the standing Wayland connection, and a
-	// nil seam reports no mode at all.
+	// served returns the mode the compositor reports on each connector.
+	// It is nil until the operator opens its Wayland connection.
 	served func() servedOutputs
-	// What the compositor's own output events left behind: when
-	// the last one arrived, and whether an output was re-created. The
-	// debt stands until the restart that pays it. The Wayland watch
-	// reports from its own goroutine, so both fields take the lock
-	// above.
-	settled time.Time
-	owed    bool
-	// Whether the standing debt has printed its line already.
-	// The pass is the only reader and writer, so it takes no lock.
-	deferred bool
-	// Metrics is the registry this pass reports the panel's own
-	// readings on. It is nil in every test that drives a pass with no
-	// listener behind it, and a nil metrics records nothing.
+	// lastOutputChange is when the compositor last reported an output
+	// arriving or leaving. restartNeeded stays true from a report of a
+	// re-created output until the compositor restarts. The Wayland
+	// watch writes both from its own goroutine, so both are guarded by
+	// mu.
+	lastOutputChange time.Time
+	restartNeeded    bool
+	// waitLogged is true once the log has said why a restart waits.
+	// Only the pass uses it, so it needs no lock.
+	waitLogged bool
+	// metrics is nil in tests with no listener, and a nil metrics
+	// records nothing.
 	metrics *metrics
 }
 
@@ -152,7 +142,6 @@ func newDisplayControl(client *apiclient.Client, node string, controls *panelCon
 	}
 }
 
-// A wait that ends when the operator stops.
 func waitFor(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -164,8 +153,8 @@ func waitFor(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-// One wake, dropped when a wake is already waiting. Each wake
-// means look again, and one pass covers every reason it was woken.
+// wake asks the loop to run another pass. It drops the request when one
+// is already pending, because the next pass handles every reason.
 func (d *displayControl) wake() {
 	select {
 	case d.wakes <- struct{}{}:
@@ -173,18 +162,15 @@ func (d *displayControl) wake() {
 	}
 }
 
-// The loop. The Display watch wakes it on an edit to a Display, and
-// not on a status write (displays.go). The slice publisher wakes it on
-// hardware that moved, a restore wakes it when it ends, and a status
-// write that another writer raced wakes it once.
+// run runs a pass at start, on each wake, and on each tick. The Display
+// watch wakes it when a Display is created or deleted or its spec
+// changes, but not on a status write that leaves status.node alone
+// (displays.go). The slice publisher wakes it when the hardware
+// changes, a restore wakes it when it ends, and a status write that
+// fails with a conflict wakes it once.
 //
-// The tick has two jobs. It is the clock of the poll window, which is
-// how a value a person changed at a lit panel's own buttons is found,
-// because DDC/CI sends the host no event. It is also the only retry of
-// a pass that failed, for example on a failed read of a Display or a
-// failed status write. A tick reads each present Display from the
-// watch's store (objectcache.go), and it reads a panel only through
-// the poll's guards.
+// The tick starts the passes that run the poll. It is also the only
+// retry of a pass that failed, for example on a failed status write.
 func (d *displayControl) run(ctx context.Context) {
 	tick := time.NewTicker(d.tick)
 	defer tick.Stop()
@@ -202,10 +188,10 @@ func (d *displayControl) run(ctx context.Context) {
 	}
 }
 
-// One pass over every panel on this node, and then over every
-// resource this node owns whose panel is gone. A resource is never
-// deleted: it holds the captured state, and Connected is what reports
-// the absence.
+// pass reconciles every panel connected to this node, and then every
+// Display of this node whose panel is gone. It never deletes a Display,
+// because the Display keeps the captured values that restore the panel
+// when it returns. The Connected condition reports that it is gone.
 func (d *displayControl) pass(ctx context.Context) error {
 	outputs := d.outputs()
 	present := map[string]Output{}
@@ -217,14 +203,11 @@ func (d *displayControl) pass(ctx context.Context) error {
 			present[name] = output
 		}
 	}
-	// A monitor two connectors both serve, with different physical
-	// addresses, so the Display for it publishes no current address.
 	ambiguous := ambiguousAddresses(outputs)
-	// The sweep for panels that left is the only work in a pass
-	// that reads every resource, and nothing about it follows the
-	// poll's cadence: a panel that leaves raises a uevent, and the
-	// uevent wakes this loop. So the listing keeps the slower cadence
-	// and runs at once when the panels on this node change.
+	// A panel that leaves raises a uevent that wakes this loop, so the
+	// list of every Display, which finds the Displays of panels that
+	// left, runs when the set of panels changes and otherwise only once
+	// per backstop interval.
 	sweep := d.sweepDue(present)
 	var published []Display
 	if sweep {
@@ -234,23 +217,20 @@ func (d *displayControl) pass(ctx context.Context) error {
 		}
 		published = listed
 	}
-	// One read of what the claims hold answers every panel of
-	// the pass, and the compositor heal below reads the same answer.
 	var failures []error
 	held, err := d.claimed()
 	if err != nil {
 		failures = append(failures, err)
 	}
 	for name, output := range present {
-		// A connector in a short hotplug drop counts as present, so the
-		// sweep below leaves its Display alone. Its panel is not on the
-		// wire, so the pass reads and writes nothing for it, and its
-		// Display keeps what the last lit pass wrote (hotplughold.go).
+		// A connector in a short hotplug drop counts as present, so its
+		// Display is not marked absent. The panel cannot respond during
+		// the drop, so the pass skips it (hotplughold.go).
 		if output.Held {
 			continue
 		}
 		if err := d.reconcile(ctx, name, output, held, ambiguous[name]); err != nil {
-			failures = append(failures, fmt.Errorf("%s: %w", name, err))
+			failures = append(failures, fmt.Errorf("reconciling the Display of %s: %w", name, err))
 		}
 	}
 	for _, display := range published {
@@ -261,106 +241,97 @@ func (d *displayControl) pass(ctx context.Context) error {
 			continue
 		}
 		if err := d.absent(&display); err != nil {
-			failures = append(failures, fmt.Errorf("%s: %w", display.Metadata.Name, err))
+			failures = append(failures, fmt.Errorf("marking the Display %s absent: %w", display.Metadata.Name, err))
 		}
 	}
-	// The canvas heal runs last, after every panel is reconciled
-	// and its status written. A compositor restart ends the Wayland
-	// clients and touches no DDC wire, so it can follow the panels'
-	// own work without disturbing it.
-	d.healCanvas(held)
+	// The restart runs after every panel's status write. It ends the
+	// Wayland clients but sends nothing over DDC, so it does not
+	// interfere with the panel writes above.
+	d.restartCompositorIfStale(held)
 	return errors.Join(failures...)
 }
 
-// How long the outputs must hold still before the compositor
-// restarts. Weston defers an output's destruction across a pending
-// flip, and a restart inside that window can hit the crash the open
-// problem records, so the heal waits for the flap to end.
-const canvasSettleWindow = 5 * time.Second
+// outputSettleWindow is how long the outputs must stay unchanged before
+// the compositor restarts. Weston defers an output's destruction while
+// a flip is pending, and a restart inside that window can hit a crash
+// in Weston, so the operator waits for the output changes to stop.
+const outputSettleWindow = 5 * time.Second
 
-// The canvas heal. The compositor's own registry reports when an output
-// was destroyed and re-created, and weston never gives the clients on
-// the surviving screens a corrected size. A fresh compositor places
-// every surface at its own output's size, so the restart is the repair.
-// The watch decides before it reports: an output that comes back on its
-// connector carrying the same monitor at the same mode owes nothing,
-// because every canvas is already the size it should be.
+// restartCompositorIfStale restarts the compositor after it reported an
+// output destroyed and re-created with another monitor or another mode.
+// Weston does not send the clients on the other screens a corrected
+// size, and a new compositor sizes every surface to its own output.
 //
-// It waits on three things: an output set that is still moving, a
-// panel whose restore is still writing, and a claim that holds any
-// screen on this card. The first is the hazard window upstream
-// documents, the second is a panel on its way back that has enough to
-// do, and the third is the workload's screen.
-func (d *displayControl) healCanvas(held *screenHolds) {
-	owed, settled := d.canvasDebt()
-	if !owed || d.restart == nil {
+// The restart waits until the outputs have stopped changing for
+// outputSettleWindow, until no panel restore is running, and until no
+// claim holds a screen on this card, because a restart ends the
+// workload that draws on a claimed screen. Waiting for a restore costs
+// little, because the panel is still waking from an override.
+func (d *displayControl) restartCompositorIfStale(held *screenHolds) {
+	restartNeeded, lastChange := d.restartState()
+	if !restartNeeded || d.restart == nil {
 		return
 	}
-	if d.now().Before(settled.Add(canvasSettleWindow)) {
-		d.deferHeal("the outputs are still settling")
+	if d.now().Before(lastChange.Add(outputSettleWindow)) {
+		d.logRestartWait("the outputs are still settling")
 		return
 	}
 	if d.restoresRunning() {
-		d.deferHeal("a panel is still being restored")
+		d.logRestartWait("a panel is still being restored")
 		return
 	}
-	// The claims are read last, because the answer can cost a listing
-	// of every claim in the cluster, and only a restart needs it.
+	// The claims are read last, because the read can list every claim
+	// in the cluster and only a restart needs it.
 	claimed, err := held.any()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "the compositor restart waits, because reading which claims hold a screen failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "not restarting the compositor yet: reading the claims that hold a screen: %v\n", err)
 		return
 	}
 	if claimed {
-		d.deferHeal("a claim holds a screen on this card")
+		d.logRestartWait("a claim holds a screen on this card")
 		return
 	}
 	if err := d.restart(); err != nil {
-		fmt.Fprintf(os.Stderr, "restarting the compositor to heal the canvas: %v\n", err)
+		fmt.Fprintf(os.Stderr, "restarting the compositor to lay out the canvas again: %v\n", err)
 		return
 	}
-	d.canvasHealed()
-	d.deferred = false
-	// The line a person reads in the operator's log. It stands for a re-
-	// creation that changed the screen, so it names the change.
-	fmt.Printf("an output was re-created: the compositor restarts and every canvas is laid out again\n")
+	d.restartDone()
+	d.waitLogged = false
+	fmt.Printf("restarted the compositor after an output was created again, so every canvas is laid out again\n")
 }
 
-// What the compositor reported. Every output global that arrives or
-// leaves starts the settling window again, and a re-creation that
-// changed the screen owes the restart. Recreated means an output that
-// came back carrying another monitor or another mode. The operator's
-// own restarts end the watch's connection and start a new baseline, so
-// they report nothing here.
-func (d *displayControl) outputsMoved(recreated bool) {
+// outputsChanged receives the compositor's report that an output global
+// arrived or left, and starts outputSettleWindow again. recreated is
+// true when the output came back with another monitor or another mode.
+// A restart by the operator ends the Wayland connection and the watch
+// starts from a new baseline, so that restart does not report here.
+func (d *displayControl) outputsChanged(recreated bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.settled = d.now()
-	d.owed = d.owed || recreated
+	d.lastOutputChange = d.now()
+	d.restartNeeded = d.restartNeeded || recreated
 }
 
-// The debt and the settling window, read together under one
-// lock so the heal decides on one consistent pair.
-func (d *displayControl) canvasDebt() (bool, time.Time) {
+func (d *displayControl) restartState() (bool, time.Time) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.owed, d.settled
+	return d.restartNeeded, d.lastOutputChange
 }
 
-func (d *displayControl) canvasHealed() {
+func (d *displayControl) restartDone() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.owed = false
+	d.restartNeeded = false
 }
 
-// One line per debt, whatever holds it up. A line on every pass
-// would print six times a minute for as long as a film runs.
-func (d *displayControl) deferHeal(reason string) {
-	if d.deferred {
+// logRestartWait logs why the restart waits, once until the restart
+// happens, so a long claim does not log a line on every tick.
+func (d *displayControl) logRestartWait(reason string) {
+	if d.waitLogged {
 		return
 	}
-	d.deferred = true
-	fmt.Printf("an output was re-created: the compositor restart waits because %s\n", reason)
+	d.waitLogged = true
+	fmt.Printf("not restarting the compositor after an output was created again, because %s\n", reason)
 }
 
 func (d *displayControl) restoresRunning() bool {
@@ -369,9 +340,10 @@ func (d *displayControl) restoresRunning() bool {
 	return len(d.restoring) > 0
 }
 
-// What the claims hold, for one pass. The specs on disk are read now,
-// and the API server only when a restart asks. A failure to read the
-// specs is reported and leaves the API server to answer alone.
+// claimed returns which output devices the claims hold, for one pass.
+// It reads the claim specs on disk now, and asks the API server only
+// when a decision needs it. When the specs cannot be read, it returns
+// the error and a result that asks only the API server.
 func (d *displayControl) claimed() (*screenHolds, error) {
 	held := &screenHolds{allocated: d.allocated}
 	if d.prepared == nil {
@@ -385,15 +357,16 @@ func (d *displayControl) claimed() (*screenHolds, error) {
 	return held, nil
 }
 
-// One panel. A status write that another writer raced, such as the
-// placement pass writing the same Display, is refused with a conflict,
-// and the pass wakes the next pass, which reads the card and the
-// Display again. A status write wakes no pass, so without the wake the
-// next pass would wait for the poll's tick. The next pass reads a
-// status that lacks the records this pass failed to write, such as a
-// mode the compositor declined, so it can actuate again what this pass
-// did. The prepare path's own budget of compositor restarts bounds a
-// mode switch that repeats.
+// reconcile runs reconcileOnce for one panel, and wakes another pass
+// when the status write fails with a conflict, for example because the
+// placement pass wrote the same Display. A status write wakes no pass,
+// so without the wake the retry would wait for the tick.
+//
+// The retry reads the status that the API server has, which lacks the
+// records that the failed write held. When one of them recorded a mode
+// that the compositor declined, the retry calls setMode for that mode
+// again. applyMode then returns errModeDeclined with no restart,
+// because it already restarted the compositor once for that mode.
 func (d *displayControl) reconcile(ctx context.Context, name string, output Output, held *screenHolds, ambiguous string) error {
 	err := d.reconcileOnce(ctx, name, output, held, ambiguous)
 	if errors.Is(err, apiclient.ErrConflict) {
@@ -402,9 +375,8 @@ func (d *displayControl) reconcile(ctx context.Context, name string, output Outp
 	return err
 }
 
-// One run over one panel. The resource is created empty when it is
-// absent, the panel is actuated, and the status is written last, so it
-// reports what the actuation left behind.
+// reconcileOnce writes status after the panel and mode writes, so
+// status reports their result.
 func (d *displayControl) reconcileOnce(ctx context.Context, name string, output Output, held *screenHolds, ambiguous string) error {
 	display, err := d.displays.get(name)
 	if errors.Is(err, apiclient.ErrNotFound) {
@@ -414,51 +386,48 @@ func (d *displayControl) reconcileOnce(ctx context.Context, name string, output 
 		return err
 	}
 	facts := d.controls.factsFor(output)
-	ledger := ledgerOf(display)
-	actuated := d.actuate(ctx, display, output, facts, ledger)
-	// The mode is the screen's, not the panel's: it lands
-	// through the compositor and not on the DDC wire, so it runs
-	// beside the controls rather than among them.
-	rested := d.restMode(ctx, display, output, held, ledger)
+	records := writeRecordsOf(display)
+	actuated := d.actuate(ctx, display, output, facts, records)
+	modeResult := d.applyDeclaredMode(ctx, display, output, held, records)
 	status := d.statusOf(display, output, d.controls.factsFor(output), ambiguous)
-	status.Unconfirmed = ledger.published()
-	status.Written = ledger.writtenPublished()
+	status.Unconfirmed = records.publishedUnconfirmed()
+	status.Written = records.publishedWrites()
 	published := d.publish(display, status)
-	return errors.Join(actuated, rested, published)
+	return errors.Join(actuated, modeResult, published)
 }
 
-// The resting mode. A claim's own mode wins while the claim
-// holds the screen, so a declaration edited during a claim waits for
-// the claim to end, and the pass that finds the screen free applies
-// it. The apply is the prepare path's own, so it restarts the
-// compositor once and reads the mode back. A mode the compositor
-// declined is recorded in the ledger, and the operator does not
-// restart the compositor for it again until spec changes.
-func (d *displayControl) restMode(ctx context.Context, display *Display, output Output, held *screenHolds, ledger *unconfirmedLedger) error {
+// applyDeclaredMode switches the screen to spec.mode through the
+// prepare path's mode switch. A claim's mode wins while the claim
+// holds the screen, so the switch waits for the first pass that finds
+// the screen free. When the compositor declines the mode, the decline
+// is recorded in status.unconfirmed, and the operator does not restart
+// the compositor for that mode again until spec changes.
+func (d *displayControl) applyDeclaredMode(ctx context.Context, display *Display, output Output, held *screenHolds, records *writeRecords) error {
 	if display.Spec.Mode == nil {
 		return nil
 	}
-	// A pass that read no mode list from the card cannot judge the
-	// mode, and the pass after the next read of the card applies it.
+	// Without a mode list from the card, the mode cannot be checked, so
+	// a later pass applies it.
 	if !output.ModesRead {
 		return nil
 	}
 	want := *display.Spec.Mode
 	if !slices.Contains(output.OfferedModes, want) {
-		return fmt.Errorf("the spec states the mode %s, and %s offers %s",
+		return fmt.Errorf("spec.mode is %s, and %s offers only %s",
 			want, output.Connector, strings.Join(output.OfferedModes, " "))
 	}
 	if d.setMode == nil {
 		return nil
 	}
 	if modeMatches(want, output.CurrentMode) {
-		ledger.clear(modeControl)
+		records.clear(modeControl)
 		return nil
 	}
-	if ledger.declined(modeControl, want) {
+	if records.isUnconfirmed(modeControl, want) {
 		return nil
 	}
-	// The claims are read last, because only a restart needs them.
+	// The claims are read last, because the read can ask the API
+	// server and only a mode switch needs it.
 	claimed, err := held.holds(deviceName(output.Connector))
 	if err != nil {
 		return fmt.Errorf("reading which claims hold %s: %w", output.Connector, err)
@@ -468,13 +437,13 @@ func (d *displayControl) restMode(ctx context.Context, display *Display, output 
 	}
 	err = d.setMode(ctx, output, want)
 	if errors.Is(err, errModeDeclined) {
-		ledger.record(modeControl, want, d.modeNow(output), err, d.now())
+		records.record(modeControl, want, d.modeNow(output), err, d.now())
 	}
 	return err
 }
 
-// The mode the screen runs after a switch: what the compositor
-// serves, or the card's own readback while no compositor answers.
+// modeNow returns the mode the compositor reports, or the card's mode
+// while the operator has no compositor connection.
 func (d *displayControl) modeNow(output Output) string {
 	if served := d.servedMode(output.Connector); served != "" {
 		return served
@@ -482,77 +451,69 @@ func (d *displayControl) modeNow(output Output) string {
 	return output.CurrentMode
 }
 
-// What one pass writes to the panel. The override wins over the
-// resting layer, a capture that stands with no override is restored,
-// and an empty spec falls through all of it and writes nothing.
-func (d *displayControl) actuate(ctx context.Context, display *Display, output Output, facts panelFacts, ledger *unconfirmedLedger) error {
-	// A connector whose restore is running is left to that
-	// restore. One writer at a time reaches one panel's wire, and the
-	// restore is the writer while it runs.
+// actuate writes to the panel for one pass. An override wins over the
+// declared values, and a saved capture with no override is restored
+// before the declared values are written.
+func (d *displayControl) actuate(ctx context.Context, display *Display, output Output, facts panelFacts, records *writeRecords) error {
+	// Only one writer at a time uses a panel's DDC bus, so the pass
+	// skips a panel while its restore runs.
 	if d.restoringNow(output.Connector) {
 		return nil
 	}
-	if held, standing := display.Spec.override(); standing {
+	if control, active := display.Spec.override(); active {
 		if !facts.Responsive {
 			return nil
 		}
-		if held == powerControl {
-			return d.holdPower(display, output, facts)
+		if control == powerControl {
+			return d.applyPowerOverride(display, output, facts)
 		}
-		if _, carried := facts.Capabilities[brightnessControl]; !carried {
-			return fmt.Errorf("%s answers no brightness control, and the override states backlight off",
+		if _, supported := facts.Capabilities[brightnessControl]; !supported {
+			return fmt.Errorf("spec.override turns the backlight off, and %s has no brightness control",
 				output.Connector)
 		}
-		return d.hold(display, output, vcpBrightness, 0)
+		return d.applyOverride(display, output, vcpBrightness, 0)
 	}
-	// A capture that stands is restored even against a panel
-	// that answers nothing now, because a panel the operator powered
-	// down answers nothing until the restore wakes it. This is the
-	// state an operator that restarted while an override stood comes
-	// back to.
+	// A saved capture is restored even when the panel does not respond,
+	// because a panel that the override powered down does not respond
+	// until the restore wakes it.
 	if !display.Status.Captured.empty() {
-		return d.restore(ctx, display, output, ledger)
+		return d.restore(ctx, display, output, records)
 	}
 	if !facts.Responsive {
 		return nil
 	}
-	// The read of what the panel holds now runs before the
-	// resting layer, so one pass finds a value a person changed at the
-	// panel's own buttons and writes the declaration back over it.
+	// The poll runs first, so the pass that finds a value changed at
+	// the panel's buttons also writes the declared value back.
 	d.poll(output, facts)
-	return d.rest(display, output, d.controls.factsFor(output), ledger)
+	return d.writeDeclared(display, output, d.controls.factsFor(output), records)
 }
 
-// The guarded read. A DDC read is a wake stimulus on some
-// panels, so it happens only against a panel that answers, that no
-// override holds, that no restore is writing, and whose last power
-// value reads on. A panel last seen in standby or off is never
-// touched.
+// poll reads the panel's control values when its last power reading is
+// on and its poll window has passed, because a DDC read wakes some
+// panels. The caller has checked that the panel responds and that no
+// override or restore is in progress.
 func (d *displayControl) poll(output Output, facts panelFacts) {
-	if !lit(facts) || !d.controls.pollDue(output.Connector) {
+	if !powerIsOn(facts) || !d.controls.pollDue(output.Connector) {
 		return
 	}
 	quiet, err := d.controls.pollControls(output.Connector)
 	d.reportPoll(output, quiet, err)
 }
 
-// Whether the last power value the operator read says the
-// panel is lit. A panel with no power value counts as lit, which is
-// every panel that carries no power control.
-func lit(facts panelFacts) bool {
+// powerIsOn counts a panel with no power reading as on, which includes
+// every panel with no power control.
+func powerIsOn(facts panelFacts) bool {
 	power, known := facts.Observed[vcpPowerMode]
 	return !known || power == powerModeOn
 }
 
-// A poll that failed says the panel, or some of its controls, went
-// quiet between the probe and this read. It fails no pass and moves no
-// condition: Responsive reports what the probe found, and the next
-// window reads again. The message prints once for each fault, and a
-// clean read ends it. A fault is the monitor and the controls that
-// failed, or the error's text when the bus did not open. The text of a
-// read's error does not decide it: a sleeping panel can answer each
-// read with different noise, and a line per new text is a line per
-// window for as long as it sleeps.
+// reportPoll logs a failed poll once per fault, until a clean read
+// clears it. A failed poll fails no pass and changes no condition,
+// because Responsive reports what the probe found and the next window
+// reads again. A fault is the monitor and the names of the controls
+// that failed, or the error text when the bus did not open. The error
+// text of a read is left out, because a sleeping panel can return
+// different noise on each read, which would log a line every window.
 func (d *displayControl) reportPoll(output Output, quiet []string, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -568,31 +529,31 @@ func (d *displayControl) reportPoll(output Output, quiet []string, err error) {
 		return
 	}
 	d.pollFaults[output.Connector] = fault
-	fmt.Fprintf(d.faults, "reading what %s holds: %v\n", output.Connector, err)
+	fmt.Fprintf(d.faults, "polling the controls of %s: %v\n", output.Connector, err)
 }
 
-// The capture commits before the wire write. A status write that
-// failed leaves the panel lit, because the value that brings it back is
-// the whole reason this resource exists.
-func (d *displayControl) hold(display *Display, output Output, code byte, held uint16) error {
+// applyOverride saves the panel's current value in status before it
+// writes the override's value. When the save fails, it writes nothing,
+// because only the saved value can bring the panel back.
+func (d *displayControl) applyOverride(display *Display, output Output, code byte, value uint16) error {
 	if _, captured := capturedRaw(display.Status.Captured, code); !captured {
 		if err := d.capture(display, output, code); err != nil {
 			return err
 		}
 	}
-	if current, known := d.controls.factsFor(output).Observed[code]; known && current == held {
+	if current, known := d.controls.factsFor(output).Observed[code]; known && current == value {
 		return nil
 	}
-	return d.controls.writeControl(output.Connector, code, held)
+	return d.controls.writeControl(output.Connector, code, value)
 }
 
-// The power override. The write is blind, because a panel that
-// obeyed stops answering, and a panel already down with nothing
-// captured is left as it is rather than reported as a failure.
-func (d *displayControl) holdPower(display *Display, output Output, facts panelFacts) error {
-	off, carried := powerOffValue(facts)
-	if !carried {
-		return fmt.Errorf("%s answers no power control, and the override states power off", output.Connector)
+// applyPowerOverride writes power off without a readback, because a
+// panel that powers off stops responding. When the capture read fails
+// and the last reading was already off, it returns no error.
+func (d *displayControl) applyPowerOverride(display *Display, output Output, facts panelFacts) error {
+	off, supported := powerOffValue(facts)
+	if !supported {
+		return fmt.Errorf("spec.override turns the power off, and %s has no power control", output.Connector)
 	}
 	if _, captured := capturedRaw(display.Status.Captured, vcpPowerMode); !captured {
 		if err := d.capture(display, output, vcpPowerMode); err != nil {
@@ -608,9 +569,9 @@ func (d *displayControl) holdPower(display *Display, output Output, facts panelF
 	return d.controls.writeControlBlind(output.Connector, vcpPowerMode, off)
 }
 
-// The read the capture makes is a read of the panel and not of
-// the last observed value, because a person at the panel's own menu
-// moved the control since the operator last looked.
+// capture saves the panel's value in status. It reads the panel and not
+// the last observed value, because a person may have changed the
+// control in the panel's menu since the operator last read it.
 func (d *displayControl) capture(display *Display, output Output, code byte) error {
 	current, _, err := d.controls.readControl(output.Connector, code)
 	if err != nil {
@@ -631,36 +592,36 @@ func (d *displayControl) capture(display *Display, output Output, code byte) err
 	return nil
 }
 
-// The restore, once the override is lifted. The pass never
-// waits on it: a panel that answers slowly, or never, would otherwise
-// hold up every other panel's reconcile. The pass starts the restore
-// and moves on, and the restore's own wake brings the pass back to
-// clear the capture once the panel holds the values again.
+// restore brings the panel back to its values after an override ends.
+// It starts a restore goroutine and returns without waiting, because a
+// panel that responds slowly or never would otherwise delay every other
+// panel. A later pass clears the capture once the panel reads back
+// every value.
 //
-// A control whose restore ran out of attempts in this generation is
-// not written again. The capture stands, so the value is not lost, and
-// status.unconfirmed says which control did not come back.
-func (d *displayControl) restore(ctx context.Context, display *Display, output Output, ledger *unconfirmedLedger) error {
+// A control whose restore gave up in this spec generation is not
+// written again. Its capture stays in status, and status.unconfirmed
+// names the control.
+func (d *displayControl) restore(ctx context.Context, display *Display, output Output, records *writeRecords) error {
 	targets := restoreTargets(display.Spec, *display.Status.Captured)
 	facts := d.controls.factsFor(output)
-	for _, gaveUp := range d.takeAbandoned(output.Connector, ledger.generation) {
+	for _, gaveUp := range d.takeAbandoned(output.Connector, records.generation) {
 		name := capabilityName(gaveUp.target.Code)
-		ledger.record(name, spokenValue(gaveUp.target.Code, gaveUp.target.Want),
+		records.record(name, statusValue(gaveUp.target.Code, gaveUp.target.Want),
 			readbackOf(facts, gaveUp.target.Code), gaveUp.failure, d.now())
 	}
 	var pending []controlTarget
 	for _, target := range targets {
 		name := capabilityName(target.Code)
 		if current, known := facts.Observed[target.Code]; known && current == target.Want {
-			ledger.clear(name)
+			records.clear(name)
 			continue
 		}
-		if !ledger.declined(name, spokenValue(target.Code, target.Want)) {
+		if !records.isUnconfirmed(name, statusValue(target.Code, target.Want)) {
 			pending = append(pending, target)
 		}
 	}
 	if len(pending) > 0 {
-		d.startRestore(ctx, output.Connector, ledger.generation, pending)
+		d.startRestore(ctx, output.Connector, records.generation, pending)
 		return nil
 	}
 	if !restored(targets, facts) {
@@ -672,14 +633,11 @@ func (d *displayControl) restore(ctx context.Context, display *Display, output O
 	return d.publish(display, status)
 }
 
-// One control and the value it goes back to.
 type controlTarget struct {
 	Code byte
 	Want uint16
 }
 
-// Every control the capture holds, with the value each one goes
-// back to.
 func restoreTargets(spec DisplaySpec, captured DisplayValues) []controlTarget {
 	var targets []controlTarget
 	for _, control := range coreControls {
@@ -690,9 +648,8 @@ func restoreTargets(spec DisplaySpec, captured DisplayValues) []controlTarget {
 	return targets
 }
 
-// Whether the panel holds every restored value now. This is
-// what the pass reads to know a restore landed, and it reads the
-// values the restore recorded rather than the panel itself.
+// restored checks the cached readings, which the restore's readbacks
+// updated, so the pass does not read the panel again.
 func restored(targets []controlTarget, facts panelFacts) bool {
 	for _, target := range targets {
 		if current, known := facts.Observed[target.Code]; !known || current != target.Want {
@@ -702,8 +659,6 @@ func restored(targets []controlTarget, facts panelFacts) bool {
 	return true
 }
 
-// One restore per connector at a time. A pass that finds one
-// running leaves it alone, so two passes never write one panel twice.
 func (d *displayControl) startRestore(ctx context.Context, connector string, generation int64, targets []controlTarget) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -714,8 +669,6 @@ func (d *displayControl) startRestore(ctx context.Context, connector string, gen
 	go d.runRestore(ctx, connector, generation, targets)
 }
 
-// One control whose restore ran out of attempts, the spec generation
-// the restore ran for, and the last failure the panel answered.
 type abandonedRestore struct {
 	target     controlTarget
 	generation int64
@@ -728,9 +681,9 @@ func (d *displayControl) abandon(connector string, gaveUp abandonedRestore) {
 	d.abandoned[connector] = append(d.abandoned[connector], gaveUp)
 }
 
-// The restores of one connector that gave up, taken once. A restore
-// that ran for an earlier generation ran against a spec that no longer
-// stands, so it records nothing.
+// takeAbandoned returns and clears the abandoned restores of one
+// connector. It drops a restore of an earlier generation, because that
+// restore ran for a spec that has since changed.
 func (d *displayControl) takeAbandoned(connector string, generation int64) []abandonedRestore {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -744,19 +697,18 @@ func (d *displayControl) takeAbandoned(connector string, generation int64) []aba
 	return current
 }
 
-// What the panel held after the last write, as status spells it,
-// and nothing when the operator never read it.
+// readbackOf returns the last reading of a control as status spells
+// it, or an empty string when the control was never read.
 func readbackOf(facts panelFacts, code byte) string {
 	current, known := facts.Observed[code]
 	if !known {
 		return ""
 	}
-	return spokenValue(code, current)
+	return statusValue(code, current)
 }
 
-// Whether this pass lists the resources. It does when the
-// panels on this node are not the panels of the last sweep, so a panel
-// that arrives or leaves is answered on the pass that finds it, and
+// sweepDue reports whether this pass lists every Display: when the
+// panels on this node differ from those of the last listing, and
 // otherwise once per backstop interval.
 func (d *displayControl) sweepDue(present map[string]Output) bool {
 	panels := make([]string, 0, len(present))
@@ -775,11 +727,10 @@ func (d *displayControl) sweepDue(present map[string]Output) bool {
 	return true
 }
 
-// The restore itself, on its own goroutine. It writes the wire
-// and records what the panel took, and it writes no status: the wake
-// it ends with brings the pass back, and the pass is the one writer of
-// status. A control that ran out of attempts goes to the abandoned
-// list, and the pass records it in status.unconfirmed.
+// runRestore restores each target in turn and stops at the first that
+// runs out of attempts. It writes no status, because only the pass
+// writes status, so it records the failure in abandoned and wakes the
+// pass when it ends.
 func (d *displayControl) runRestore(ctx context.Context, connector string, generation int64, targets []controlTarget) {
 	defer func() {
 		d.mu.Lock()
@@ -792,9 +743,8 @@ func (d *displayControl) runRestore(ctx context.Context, connector string, gener
 		if err == nil {
 			continue
 		}
-		// A restore the operator's shutdown ended did not run out of
-		// attempts, so it records nothing, and the next operator
-		// starts it again.
+		// A restore that the operator's shutdown ended records nothing,
+		// so the next operator starts it again.
 		if ctx.Err() == nil {
 			d.abandon(connector, abandonedRestore{target: target, generation: generation, failure: err})
 		}
@@ -808,21 +758,23 @@ func (d *displayControl) restoringNow(connector string) bool {
 	return d.restoring[connector]
 }
 
-// Which value one control goes back to.
+// restoreTarget returns the value that one captured control goes back
+// to: the value in spec if spec has one, and otherwise the captured
+// value. It returns false when nothing was captured for the control.
 func restoreTarget(spec DisplaySpec, captured DisplayValues, code byte) (uint16, bool) {
-	if _, held := captured.raw(code); !held {
+	if _, saved := captured.raw(code); !saved {
 		return 0, false
 	}
-	if declared, stated := spec.raw(code); stated {
+	if declared, isSet := spec.raw(code); isSet {
 		return declared, true
 	}
 	return captured.raw(code)
 }
 
-// The write repeats until the readback matches, up to
-// restoreAttempts writes. A panel that is waking answers late, refuses
-// a write, or answers a value it has not applied yet. The last failure
-// is the one the restore reports.
+// restoreOne writes the value until the readback matches, up to
+// restoreAttempts writes, because a panel that is waking can respond
+// late, refuse a write, or read back a value it has not applied yet.
+// It returns the last failure.
 func (d *displayControl) restoreOne(ctx context.Context, connector string, code byte, want uint16) error {
 	delay := restoreFirstDelay
 	var err error
@@ -842,21 +794,21 @@ func (d *displayControl) restoreOne(ctx context.Context, connector string, code 
 	return err
 }
 
-// The resting layer, written only where the panel diverges from
-// the declaration. A value the capability list refuses is reported and
-// never written. A write the panel did not confirm is recorded in the
-// ledger and not repeated in this generation, because a panel that
-// reads an input back under another code would otherwise take the
-// write, and show its input banner, on every poll. A confirmed write
-// is counted, and a value the panel moves away from again is written
-// back at most writeBackLimit times in one generation. After that the
-// value is recorded as unconfirmed, because a panel that changes it by
-// itself would otherwise take a write every poll.
-func (d *displayControl) rest(display *Display, output Output, facts panelFacts, ledger *unconfirmedLedger) error {
+// writeDeclared writes each declared value that the panel differs
+// from. A value that the panel's capability list does not allow is
+// reported and not written.
+//
+// A write that the panel does not confirm is recorded in
+// status.unconfirmed and not repeated in this spec generation. Without
+// that, a panel that reads an input back under another code would
+// take the write, and show its input banner, on every poll. A panel
+// that keeps changing a value by itself is written back at most
+// writeBackLimit times per generation and then recorded the same way.
+func (d *displayControl) writeDeclared(display *Display, output Output, facts panelFacts, records *writeRecords) error {
 	var failures []error
 	for _, control := range coreControls {
-		want, stated := display.Spec.raw(control.Code)
-		if !stated {
+		want, isSet := display.Spec.raw(control.Code)
+		if !isSet {
 			continue
 		}
 		if err := declarable(control.Code, want, facts); err != nil {
@@ -864,59 +816,57 @@ func (d *displayControl) rest(display *Display, output Output, facts panelFacts,
 			continue
 		}
 		if current, known := facts.Observed[control.Code]; known && current == want {
-			ledger.clear(control.Name)
+			records.clear(control.Name)
 			continue
 		}
-		value := spokenValue(control.Code, want)
-		if ledger.declined(control.Name, value) {
+		value := statusValue(control.Code, want)
+		if records.isUnconfirmed(control.Name, value) {
 			continue
 		}
-		if ledger.writes(control.Name, value) > writeBackLimit {
-			stopped := fmt.Errorf("the panel keeps changing the %s by itself: the operator wrote %s back %d times"+
-				" in this generation, and writes it again after an edit to spec", control.Name, value, writeBackLimit)
-			ledger.record(control.Name, value, readbackOf(facts, control.Code), stopped, d.now())
+		if records.confirmedWrites(control.Name, value) > writeBackLimit {
+			stopped := fmt.Errorf("the panel changes the %s by itself: the operator wrote %s back %d times"+
+				" in this spec generation, and writes it again after the spec changes", control.Name, value, writeBackLimit)
+			records.record(control.Name, value, readbackOf(facts, control.Code), stopped, d.now())
 			fmt.Fprintf(os.Stderr, "%s: %v\n", output.Connector, stopped)
 			continue
 		}
 		if err := d.controls.writeControl(output.Connector, control.Code, want); err != nil {
 			after, _ := d.controls.cached(output.Connector)
-			ledger.record(control.Name, value, readbackOf(after, control.Code), err, d.now())
+			records.record(control.Name, value, readbackOf(after, control.Code), err, d.now())
 			failures = append(failures, err)
 			continue
 		}
-		ledger.wrote(control.Name, value)
+		records.countWrite(control.Name, value)
 	}
 	return errors.Join(failures...)
 }
 
-// Whether the panel takes the declared value, judged against
-// the capability list it published.
 func declarable(code byte, want uint16, facts panelFacts) error {
 	name := capabilityName(code)
-	capability, carried := facts.Capabilities[name]
-	if !carried {
-		return fmt.Errorf("the spec states a %s, and the panel carries no %s control", name, name)
+	capability, supported := facts.Capabilities[name]
+	if !supported {
+		return fmt.Errorf("the spec sets a %s, and the panel has no %s control", name, name)
 	}
 	if len(capability.Values) == 0 {
 		if int(want) > capability.Max {
-			return fmt.Errorf("the spec states a %s of %d, and the panel accepts up to %d",
+			return fmt.Errorf("the spec sets a %s of %d, and the panel accepts up to %d",
 				name, want, capability.Max)
 		}
 		return nil
 	}
 	if !slices.Contains(capability.Values, valueName(code, want)) {
-		return fmt.Errorf("the spec states a %s of %s, and the panel accepts %v",
+		return fmt.Errorf("the spec sets a %s of %s, and the panel accepts %v",
 			name, valueName(code, want), capability.Values)
 	}
 	return nil
 }
 
-// The value a power-down writes. A panel implements the subset
-// of the power code that it chooses, so the write is the first of
-// these the panel declared.
+// powerOffValue returns the first of off, hard off, and standby that
+// the panel's capability list allows, because a panel implements only
+// some of the power values. A panel that lists no values gets off.
 func powerOffValue(facts panelFacts) (uint16, bool) {
-	capability, carried := facts.Capabilities[powerControl]
-	if !carried {
+	capability, supported := facts.Capabilities[powerControl]
+	if !supported {
 		return 0, false
 	}
 	if len(capability.Values) == 0 {
@@ -937,16 +887,15 @@ func capturedRaw(captured *DisplayValues, code byte) (uint16, bool) {
 	return captured.raw(code)
 }
 
-// The status of a panel that is on its connector now. Ambiguous
-// names another connector on this node serving the same monitor a
-// different physical address, or is empty when this is the only one.
+// statusOf builds the status of a connected panel. ambiguous is another
+// connector on this node that serves the same monitor at a different
+// physical address, or empty when there is none.
 func (d *displayControl) statusOf(display *Display, output Output, facts panelFacts, ambiguous string) DisplayStatus {
 	status := display.Status
 	status.Node = d.node
 	status.Connector = output.Connector
-	// The identity, the size, and the modes come from the walk
-	// this pass already made, so the resource and the slice report one
-	// set of reads and cannot drift.
+	// The identity, size, and modes come from the same sysfs walk as
+	// the slice's, so the Display and the slice agree.
 	status.Manufacturer = output.Monitor.Manufacturer
 	status.Model = output.Monitor.ModelName
 	status.Serial = output.Monitor.Serial
@@ -958,18 +907,15 @@ func (d *displayControl) statusOf(display *Display, output Output, facts panelFa
 	if observed := observedValues(facts.Observed); observed != nil {
 		status.Observed = observed
 	}
-	// The same DDC/CI readings that just filled status.observed, on
-	// the gauges the idle screen's drive shows up on.
 	d.metrics.recordPanel(output.Connector, facts)
 	status.Conditions = setCondition(status.Conditions, d.condition(ConnectedCondition, true,
-		PanelAttachedReason, output.Connector+" carries this panel"))
+		PanelAttachedReason, "The panel is connected to "+output.Connector))
 	status.Conditions = setCondition(status.Conditions, d.responsive(facts))
 	return d.withPhysicalAddress(status, output, ambiguous)
 }
 
-// The mode block of one output, and nothing at all when
-// neither side names a mode: a connector that drives nothing, with
-// no compositor serving it.
+// displayMode returns nil when neither the kernel nor the compositor
+// reports a mode, which is a connector that drives nothing.
 func displayMode(kernel, weston string) *DisplayMode {
 	if kernel == "" && weston == "" {
 		return nil
@@ -977,11 +923,11 @@ func displayMode(kernel, weston string) *DisplayMode {
 	return &DisplayMode{Kernel: kernel, Weston: weston}
 }
 
-// What the compositor reports it serves on one connector, and
-// nothing at all while this operator holds no connection to one. A
-// restart clears every answer, so the field goes absent until the
-// compositor that comes back states its outputs again. An absent
-// value is honest where a carried-over one would be a guess.
+// servedMode returns the mode that the compositor reports on one
+// connector, or an empty string while the operator has no connection
+// to the compositor. A compositor restart clears every report, so
+// status shows no compositor mode until the new compositor reports,
+// rather than a mode from before the restart that may be wrong.
 func (d *displayControl) servedMode(connector string) string {
 	if d.served == nil {
 		return ""
@@ -989,34 +935,32 @@ func (d *displayControl) servedMode(connector string) string {
 	return d.served().modes[connector]
 }
 
-// The panel's answer to the protocol itself. The message names
-// the two causes a person can check: a panel in standby does not
-// answer DDC/CI until it wakes, and some panels have a menu setting that
-// turns DDC/CI off.
+// responsive returns the Responsive condition, which reports whether
+// the panel responds to DDC/CI at all. When it is false, the message
+// names the causes a person can check: standby, and a menu setting
+// that turns DDC/CI off.
 func (d *displayControl) responsive(facts panelFacts) DisplayCondition {
 	if facts.Responsive {
-		return d.condition(ResponsiveCondition, true, AnswersDDCReason, "the panel answers DDC/CI")
+		return d.condition(ResponsiveCondition, true, AnswersDDCReason, "The panel responds to DDC/CI")
 	}
 	return d.condition(ResponsiveCondition, false, NoDDCReplyReason,
-		"the panel answers no DDC/CI; a panel in standby does not answer it, and some panels turn DDC/CI off in their own menu")
+		"The panel does not respond to DDC/CI. A panel in standby does not respond, and some panels turn DDC/CI off in their own menu")
 }
 
-// The panel is gone from this node, and the resource stays with
-// what it held.
-//
-// A retry after a conflict composes again from the fresh copy, and
-// leaves a Display whose status now names another node, because its
-// monitor moved there since the copy.
+// absent sets Connected false on the Display of a panel that left this
+// node, and keeps its other status. When a retry after a conflict finds
+// that status.node is another node, because the monitor moved there,
+// it leaves the Display alone.
 func (d *displayControl) absent(display *Display) error {
 	absent := func(published DisplayStatus) (DisplayStatus, bool) {
 		status := published
 		status.Conditions = setCondition(status.Conditions, d.condition(ConnectedCondition, false,
-			NoPanelReason, "no panel on "+status.Connector))
+			NoPanelReason, "No panel is connected to "+status.Connector))
 		// The connector serves no EDID, or the EDID of another monitor,
-		// such as the TV's EDID that a receiver in standby can pass
-		// through. Either way the port this machine's cable is in has
-		// not moved, so the address stays.
-		status = d.retainAddress(status, status.Connector+" no longer serves this monitor's EDID")
+		// such as a TV's EDID that a receiver in standby passes
+		// through. The cable is still in the same port, so the
+		// physical address stays.
+		status = d.retainAddress(status, status.Connector+" no longer reports this monitor's EDID")
 		return status, published.Node == d.node
 	}
 	err := d.displays.settleStatus(display, absent)
@@ -1040,8 +984,6 @@ func (d *displayControl) condition(kind string, met bool, reason, message string
 	}
 }
 
-// The status write happens only where the published status and
-// this pass's status differ, so a steady-state pass writes nothing.
 func (d *displayControl) publish(display *Display, status DisplayStatus) error {
 	if reflect.DeepEqual(display.Status, status) {
 		return nil

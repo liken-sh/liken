@@ -1,45 +1,37 @@
 package main
 
-// The gate on every read of the card node, and the check for DRM
-// master that each read makes.
+// Every read of the card goes through cardGate, so that the operator's
+// file never keeps DRM master from the compositor.
 //
-// The compositor must hold DRM master on the card to show a frame.
-// The kernel makes a file master when it opens a primary card node
-// and no master exists. The compositor runs with no capability, so it
-// can take master only at its own open. If the operator's file holds
-// master when the compositor opens the card, the compositor never gets
-// master, and every atomic commit it makes fails with EACCES. The
-// kernel's console then takes the screen.
+// The compositor needs DRM master on the card to show a frame. The
+// kernel makes a file master when it opens a primary card node that has
+// no master. A file that was never master can take it later only with
+// SET_MASTER, which needs CAP_SYS_ADMIN, and the weston container drops
+// every capability. So if the operator opens the card before the
+// compositor does, the compositor never gets master, each of its atomic
+// commits fails with EACCES, and the kernel console takes over the
+// screen.
 //
-// So each read has three guards:
+// The gate guards against that:
 //
-//  1. The card opens only while the output watch holds a connection
-//     to a compositor. Weston opens the card before it listens on its
-//     socket, so a compositor that accepts a connection has already
-//     opened the card, and an open after that cannot take master from
-//     it.
-//  2. Each open drops master before any other ioctl, so a file that
-//     became master gives it back at once. A master that sends
-//     GETCONNECTOR with a mode count of zero makes the kernel probe the
-//     connector again, and the operator must never do that.
-//  3. A drop that succeeds means that no other file held master, so
-//     the compositor that serves holds none. The gate reports the
-//     compositor's pid, and the operator restarts that compositor.
+//  1. It opens the card only while the output watch has a connection to
+//     the compositor. Weston opens the card before it listens on its
+//     socket, so by then the compositor is already master.
+//  2. Each open sends DROP_MASTER before any other ioctl, so a file that
+//     became master gives it up at once. GETCONNECTOR with a mode count
+//     of zero makes the kernel probe the connector again when the
+//     caller is master, and the operator must never cause a probe.
+//  3. When DROP_MASTER succeeds, the operator's file was master, so the
+//     running compositor is not master. The gate reports the
+//     compositor's pid, and restartMasterless restarts it.
 //
-// The gate runs no timer. The watch opens it, and every pass that
-// reads the card runs the check.
-//
-// One window stays open. Weston 16.0.2 closes the card before it
-// closes its client connections on its way out
-// (weston_compositor_destroy runs before wl_display_destroy in
-// frontend/main.c), so the watch stays live for a short time after
-// the card has no master. A read in that time takes master, and the
-// drop gives it back before a new compositor can open the card,
-// because the new compositor's container starts only after the old
-// one exits. The drop also reports the exiting compositor's pid. That
-// report restarts nothing: the operator ended that compositor itself,
-// so its pid is in the record that restartMasterless skips, and a pid
-// that has exited answers os.ErrProcessDone.
+// Weston 16.0.2 closes the card before it closes its client connections
+// on exit (weston_compositor_destroy runs before wl_display_destroy in
+// frontend/main.c). A read in that window becomes master and gives it
+// up on the same open, before the next compositor starts. It also
+// reports the exiting compositor, and restartMasterless skips it
+// because the operator already requested that restart or the process has
+// exited.
 
 import (
 	"context"
@@ -54,35 +46,29 @@ import (
 )
 
 // DRM_IOCTL_DROP_MASTER, _IO('d', 0x1f) in <drm/drm.h>. The request
-// carries no argument, so its number carries no size.
+// takes no argument, so its number encodes no size.
 const drmDropMaster = 0x641f
 
-// errCompositorAbsent is the answer of a read while the operator
-// holds no connection to a compositor. Each caller treats it as a
-// failed read, which costs the fields that the read fills, and nothing
-// opened the card.
-var errCompositorAbsent = errors.New("the operator holds no connection to a compositor")
+// errCompositorAbsent means the gate did not open the card, because the
+// operator has no connection to the compositor.
+var errCompositorAbsent = errors.New("the operator has no connection to a compositor")
 
-// cardGate opens the card for the two reads in currentmode.go.
 type cardGate struct {
 	path     string
 	procRoot string
-	// Live answers whether the output watch holds a connection to a
-	// compositor. It is nil until the operator wires the watch, and a
-	// nil seam answers no, so the gate opens nothing before then.
+	// live reports whether the output watch has a connection to the
+	// compositor. While it is nil the gate opens nothing.
 	live func() bool
-	// DropMaster sends DROP_MASTER on one open file. It is a field so a
-	// test can make an open report that it was master. Only a card
-	// node with no master gives that answer.
+	// dropMaster is a field so that a test can simulate a file that
+	// was master.
 	dropMaster func(fd int) error
-	// Masterless carries the pid of a compositor that serves with no
-	// DRM master to the one goroutine that restarts it. One slot is
-	// enough: a second report about the same compositor asks for
-	// nothing more.
+	// masterless sends restartMasterless the pid of a compositor that
+	// has no DRM master. It buffers one pid, and a report that finds
+	// the buffer full is dropped, because a second report about the
+	// same compositor needs no second restart.
 	masterless chan int
-	// Absent is set while reads find no connection to a compositor,
-	// so the gate logs the start of that time once and not on every
-	// pass.
+	// absent makes the gate log only the first read that finds no
+	// connection, not every pass.
 	absent atomic.Bool
 }
 
@@ -115,23 +101,19 @@ func (g *cardGate) connectorModes() (map[string][]drmMode, error) {
 	return readConnectorModes(fd)
 }
 
-// Open answers a file on the card that holds no DRM master.
+// open returns a file descriptor for the card that is not DRM master.
+// DROP_MASTER returns EACCES for a file that was never master, which is
+// the normal case. After any error other than EACCES the file may still
+// be master, so open closes it and fails.
 //
-// The kernel answers DROP_MASTER in one of three ways. Success means
-// the file was master and is not now, so the read goes on and reports
-// the compositor. EACCES means the file was never master, which is
-// the normal answer. Any other error leaves the file possibly master,
-// so the read closes it and reads nothing. The gate never sends
-// SET_MASTER.
-//
-// The EACCES answer depends on the operator container having no
-// CAP_SYS_ADMIN. With that capability, the kernel skips the
-// permission check, and DROP_MASTER on a file that was never master
-// answers EINVAL, so every read fails.
+// EACCES depends on the operator container not having CAP_SYS_ADMIN.
+// With that capability the kernel skips its permission check and
+// returns EINVAL for a file that was never master, so every read would
+// fail.
 func (g *cardGate) open() (int, error) {
 	if g.live == nil || !g.live() {
 		if !g.absent.Swap(true) {
-			fmt.Printf("%s: the operator holds no connection to a compositor, so it reads nothing from the card until it connects\n", g.path)
+			fmt.Printf("%s: the operator has no connection to a compositor, so it reads nothing from the card until it connects\n", g.path)
 		}
 		return -1, errCompositorAbsent
 	}
@@ -151,11 +133,10 @@ func (g *cardGate) open() (int, error) {
 	return fd, nil
 }
 
-// ReportMasterless sends the compositor's pid to the restart. The
-// send never waits, because applyMode reads the card while it holds
-// the lock that the restart takes. A pod with no compositor process
-// has nothing to restart, and the next compositor's open takes the
-// master that this read gave back.
+// reportMasterless does not block, because applyMode reads the card
+// while it holds modeSwitches, and the restart waits for modeSwitches.
+// When the pod has no compositor process, nothing is reported, and the
+// next compositor to open the card becomes master.
 func (g *cardGate) reportMasterless() {
 	pids := compositorProcesses(g.procRoot)
 	if len(pids) == 0 {
@@ -167,29 +148,14 @@ func (g *cardGate) reportMasterless() {
 	}
 }
 
-// errNothingToRestart is the answer of a masterless restart that
-// finds no process to end. It counts nothing and logs nothing.
+// errNothingToRestart makes restart count no restart, and
+// restartMasterless logs nothing for it.
 var errNothingToRestart = errors.New("the reported compositor needs no restart")
 
-// restartMasterless restarts each compositor that the card gate
-// reports with no DRM master, through the lock that every restart
-// holds.
-//
-// It ends only the pid in the report, and only while that pid runs
-// and this operator has not ended it before, for any reason. Weston
-// 16.0.2 closes the card before it closes its client connections
-// (weston_compositor_destroy runs before wl_display_destroy in
-// frontend/main.c), so a compositor on its way out still holds a
-// live connection after the card has no master. A read in that time
-// reports the exiting compositor. The operator ended that compositor
-// itself, for a heal, a hung compositor, a mode, or an earlier
-// masterless report, so its restart order is still in place, and the
-// restart skips it. Ending only the reported pid, and never every
-// compositor process, keeps a report from reaching the compositor
-// that starts next.
-//
-// The check and the signal both run under the lock, so no other
-// restart runs between them.
+// restartMasterless restarts each compositor that the gate reports,
+// until ctx is done or the channel closes. It signals only the
+// reported pid, so a late report cannot end a compositor that started
+// after the report was sent.
 func (p *draPlugin) restartMasterless(ctx context.Context, masterless <-chan int) {
 	for {
 		select {
@@ -211,10 +177,11 @@ func (p *draPlugin) restartMasterless(ctx context.Context, masterless <-chan int
 	}
 }
 
-// EndMasterless ends one reported compositor. The caller holds
-// modeSwitches.
+// endMasterless skips a pid that has already exited or that the
+// operator has already requested to restart. It runs under modeSwitches,
+// so no other restart runs between the check and the signal.
 func (p *draPlugin) endMasterless(pid int) error {
-	if p.orders.placed(pid) || !slices.Contains(p.compositors(), pid) {
+	if p.restartRequests.exists(pid) || !slices.Contains(p.compositors(), pid) {
 		return errNothingToRestart
 	}
 	err := p.endCompositor(pid, syscall.SIGTERM)

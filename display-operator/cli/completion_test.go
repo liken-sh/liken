@@ -17,8 +17,8 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
-// stubLister records the parse it is asked with and returns a fixed set
-// of names, so a test drives completeArgs without a cluster.
+// stubLister returns an outputLister that returns names, and a pointer
+// to the completionParse of its last call.
 func stubLister(names ...string) (outputLister, *completionParse) {
 	var seen completionParse
 	return func(parse completionParse) []string {
@@ -157,26 +157,26 @@ func TestLookupCompletionFlag(t *testing.T) {
 func TestRunCompleteWritesTheProtocol(t *testing.T) {
 	var stdout strings.Builder
 	if err := runComplete(context.Background(), []string{""}, &stdout); err != nil {
-		t.Fatalf("runComplete: %v", err)
+		t.Fatalf("running __complete: %v", err)
 	}
 	got := stdout.String()
 	if !strings.Contains(got, "capture\n") {
-		t.Fatalf("output %q does not offer the verb", got)
+		t.Fatalf("the output is %q, want it to offer the capture verb", got)
 	}
 	if !strings.HasSuffix(got, ":4\n") {
-		t.Fatalf("output %q does not end with the directive line", got)
+		t.Fatalf("the output is %q, want it to end with the directive line :4", got)
 	}
 }
 
 func TestCompletionScript(t *testing.T) {
 	var stdout strings.Builder
 	if err := completionScript("bash", &stdout); err != nil {
-		t.Fatalf("completionScript(bash): %v", err)
+		t.Fatalf("writing the bash script: %v", err)
 	}
 	got := stdout.String()
 	for _, want := range []string{"__complete", "complete -o default", "kubectl-liken-display"} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("the script does not contain %q", want)
+			t.Fatalf("the script is missing %q", want)
 		}
 	}
 }
@@ -184,12 +184,12 @@ func TestCompletionScript(t *testing.T) {
 func TestCompletionScriptRejectsAnOtherShell(t *testing.T) {
 	var stdout strings.Builder
 	if err := completionScript("zsh", &stdout); err == nil {
-		t.Fatal("completionScript(zsh) returned no error")
+		t.Fatal("completionScript(zsh) returned no error, want one")
 	}
 }
 
 // display builds an unstructured Display for the dynamic fake. A Display
-// is cluster-scoped, so it carries no namespace.
+// is cluster-scoped, so it has no namespace.
 func display(name string) *unstructured.Unstructured {
 	object := &unstructured.Unstructured{}
 	object.SetGroupVersionKind(schema.GroupVersionKind{
@@ -199,11 +199,11 @@ func display(name string) *unstructured.Unstructured {
 	return object
 }
 
-// newDisplayClient seeds a dynamic fake with cluster-scoped Display
-// objects. The fake guesses a resource name from a kind and turns
-// "Display" into "displaies", so the objects go in through Create on the
-// real GVR rather than at construction, where the guess would file them
-// under a name the list never reads.
+// newDisplayClient returns a dynamic fake that holds these Displays.
+// The fake guesses the resource of an object passed to its constructor
+// from the kind, as "displaies", where a list of displaysGVR does not
+// find it. Create on displaysGVR stores each object under the real
+// resource.
 func newDisplayClient(objects ...*unstructured.Unstructured) *dynamicfake.FakeDynamicClient {
 	scheme := runtime.NewScheme()
 	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
@@ -223,7 +223,7 @@ func TestListDisplays(t *testing.T) {
 	)
 	got, err := listDisplays(context.Background(), client)
 	if err != nil {
-		t.Fatalf("listDisplays: %v", err)
+		t.Fatalf("listing the Displays: %v", err)
 	}
 	want := []string{"boe-1080-display", "gsm-7716-lg-hdr-wqhd"}
 	if !reflect.DeepEqual(got, want) {
@@ -235,7 +235,7 @@ func TestListDisplaysEmptyCluster(t *testing.T) {
 	client := newDisplayClient()
 	got, err := listDisplays(context.Background(), client)
 	if err != nil {
-		t.Fatalf("listDisplays: %v", err)
+		t.Fatalf("listing the Displays: %v", err)
 	}
 	if len(got) != 0 {
 		t.Fatalf("listDisplays with no Display = %v, want none", got)
@@ -272,6 +272,6 @@ func TestKubeClientFactoryReportsAnUnreachableConfig(t *testing.T) {
 		t.Fatalf("writing the kubeconfig: %v", err)
 	}
 	if _, err := kubeClientFactory(completionParse{kubeconfig: file}); err == nil {
-		t.Fatal("kubeClientFactory returned no error for a config with no cluster")
+		t.Fatal("kubeClientFactory returned no error for a kubeconfig with no cluster, want one")
 	}
 }

@@ -1,10 +1,11 @@
 package main
 
-// How the CLI reaches the in-cluster API. The API server's
-// services/proxy door strips the caller's identity, so the CLI
-// forwards a local port to a Ready API pod, the same reach kubectl
-// port-forward makes, and dials the forwarded port over the
-// operator's own TLS.
+// The CLI reaches the operator's API through a port forward to a Ready
+// API pod, as kubectl port-forward does, and opens TLS to the pod
+// itself. The API authenticates the caller by the client certificate or
+// bearer token of their kubeconfig. The API server's services/proxy
+// would pass neither to the pod, because it ends the caller's TLS
+// connection and removes the Authorization header.
 
 import (
 	"fmt"
@@ -18,8 +19,9 @@ import (
 	"k8s.io/client-go/transport/spdy"
 )
 
-// portForward opens a forwarded port to one API pod
-// and returns the local port and a function that closes the forward.
+// portForward forwards a local port to the API container port of one
+// pod. It returns the local port and a function that closes the
+// forward.
 func portForward(config *rest.Config, pod string) (int, func(), error) {
 	roundTripper, upgrader, err := spdy.RoundTripperFor(config)
 	if err != nil {

@@ -7,15 +7,16 @@ This skill is the guide at https://liken.sh/display/docs/guides/claim/, emitted 
 
 # Put a window on a screen
 
-This guide runs one fullscreen program on one monitor, from a
-`Deployment`: a kiosk. It works the same for a dashboard or a video
-player. You need the operator
+This guide runs a fullscreen browser kiosk on one monitor from a
+`Deployment`. The same steps work for a dashboard or a video player.
+You need the operator
 [installed](https://liken.sh/display/docs/guides/install/) on your
 [`liken`](https://liken.sh/docs/) cluster.
 
-The claim names the screen. The scheduler places the pod, and the
-container receives a Wayland socket that the compositor opened for
-that claim. A window on that socket is a window on that screen.
+The claim selects the screen. The scheduler places the pod on the node
+that has it, and the container receives a Wayland socket that the
+compositor opened for that claim. A window that a program opens on that
+socket appears on that screen.
 
 ## 1. Pick the screen
 
@@ -28,10 +29,10 @@ List what a node offers:
 
     kubectl get resourceslice <node>-display.liken.sh -o yaml
 
-Each device is one connector, with the attached monitor's facts as
-attributes. Write a selector against them in
+Each device is one connector, and its attributes describe the
+monitor on it. Write a selector against them in
 [Common Expression Language (CEL)](https://kubernetes.io/docs/reference/using-api/cel/).
-Three useful forms:
+For example:
 
     # by connector
     device.attributes["display.liken.sh"].connector == "HDMI-A-1"
@@ -44,10 +45,10 @@ Three useful forms:
     has(device.attributes["display.liken.sh"].widthPixels) &&
     device.attributes["display.liken.sh"].widthPixels >= 1920
 
-Guard `model` and `widthPixels` with `has()`, as above. They come
-from the monitor and are absent on an empty connector, and a
-selector that reads a missing attribute fails the whole allocation.
-`connector` needs no guard, because every device publishes it.
+Guard `model` and `widthPixels` with `has()`, as above. A connector
+with no monitor does not have them, and a selector that reads a
+missing attribute makes the whole allocation fail. Every device has
+`connector`, so it needs no guard.
 [Devices](https://liken.sh/display/docs/reference/devices/) lists every attribute.
 
 ## 2. Write the claim
@@ -55,8 +56,8 @@ selector that reads a missing attribute fails the whole allocation.
     apiVersion: resource.k8s.io/v1
     kind: ResourceClaim
     metadata:
-      name: kitchen-screen
-      namespace: house
+      name: menu-screen
+      namespace: signage
     spec:
       devices:
         requests:
@@ -73,38 +74,41 @@ selector that reads a missing attribute fails the whole allocation.
                   effect: NoExecute
                   tolerationSeconds: 30
 
-Tolerate `display.liken.sh/disconnected`. Its effect is `NoExecute`,
-and `tolerationSeconds` says how long your pod may hold a tainted
-screen before the eviction controller ends it. A monitor that goes
-dark does not taint its connector, so this is not what carries you
-through an input change. Thirty seconds keeps the pod through a
-restart of the compositor's container, which is a restart of every
-screen on that machine. A claim on a
-connector with no monitor parks the pod `Pending`, visibly, and the
-pod starts on its own when a monitor is plugged in.
+The operator puts the `display.liken.sh/disconnected` taint on a
+connector that never had a monitor, on a connector that was just
+plugged into a different monitor, and on every screen of the machine
+while its compositor restarts. The toleration keeps your pod running
+for `tolerationSeconds` after the taint appears, and then the taint
+eviction controller deletes the pod. So with 30 seconds, a short
+compositor restart does not delete your pod. The operator does not
+taint a connector whose monitor only went dark, such as a monitor that
+shows another input.
+
+Without the toleration, a claim on a connector with no monitor does
+not allocate. The pod stays `Pending` until a monitor is plugged in.
 
 ## 3. Reference the claim from a `Deployment`
 
     apiVersion: apps/v1
     kind: Deployment
     metadata:
-      name: kitchen-kiosk
-      namespace: house
+      name: menu-kiosk
+      namespace: signage
     spec:
       replicas: 1
       strategy:
         type: Recreate
       selector:
         matchLabels:
-          app: kitchen-kiosk
+          app: menu-kiosk
       template:
         metadata:
           labels:
-            app: kitchen-kiosk
+            app: menu-kiosk
         spec:
           resourceClaims:
             - name: screen
-              resourceClaimName: kitchen-screen
+              resourceClaimName: menu-screen
           containers:
             - name: browser
               image: <your chromium image>
@@ -115,71 +119,65 @@ pod starts on its own when a monitor is plugged in.
                 claims:
                   - name: screen
 
-One line makes this work. `resources.claims` gives the container the
-claim. That is what places the pod, and it is what delivers the
-socket. The program needs no flag and no app-id. The compositor reads
-which screen a window belongs on from the socket it arrived on.
+The `resources.claims` entry gives the container the claim, so the
+scheduler places the pod on the claim's node and the operator gives the
+container the Wayland socket. The compositor puts every window that
+connects on that socket on the claimed screen, so the program needs no
+flag or app-id. Use any image with a Wayland client.
 
-The image is yours. Any Wayland client works; the operator delivers
-only the socket.
-
-`strategy: Recreate` matters. Pods that share one `ResourceClaim`
-share its screen, and the compositor refuses nothing. During a
-rolling update the old pod and the new pod would both hold a window
-on the screen, the newer one on top and the older one still drawing
-under it until it ends. `Recreate` ends the old pod first.
+Set `strategy: Recreate`. Pods that share one `ResourceClaim` share
+its screen, so in a rolling update the old pod keeps drawing under the
+new pod's window until the old pod ends. `Recreate` ends the old pod
+first.
 
 ## 4. What the container receives
 
-A mount and three environment variables. No device node: a Wayland
-client draws through the compositor, which holds the card.
+The container gets one mount and three environment variables. It
+gets no device node, because a Wayland client draws through the
+compositor, and the compositor opens the graphics card.
 
 | What | Value |
 |---|---|
 | mount | `/var/run/display.liken.sh`, the compositor's runtime directory |
 | `XDG_RUNTIME_DIR` | `/var/run/display.liken.sh` |
 | `WAYLAND_DISPLAY` | `wayland-<the claim's UID>`, a socket the compositor opened for this claim |
-| `DISPLAY_APP_ID` | the allocated output's name, such as `hdmi-a-1`; nothing reads it, and a later release stops delivering it |
+| `DISPLAY_APP_ID` | the name of the allocated output, such as `hdmi-a-1`. The compositor does not read it. It is set for images that pass it to their toolkit |
 
-The socket identifies the claim. The compositor opened it for this
-claim and no other, so every window that arrives on it belongs to this
-claim. The [`Display`](https://liken.sh/display/docs/reference/displays/) reports the window
-under the claim's name in `status.surfaces`. Allocation keeps two
-workloads off one screen: the second pod cannot claim an output the
-first holds, so it remains pending until the first releases it. Use a
+The [`Display`](https://liken.sh/display/docs/reference/displays/) lists each window under
+its claim's name in `status.surfaces`. Only one claim can hold an
+output. A second claim for the same output cannot allocate, so its pod
+stays `Pending` until the first claim is released. Use a
 [`Layout`](https://liken.sh/display/docs/guides/layout/) when two workloads must share one
 screen.
 
-A client that hands the compositor YUV video frames can state each
-frame's color encoding and range through
-`wp_color_representation_manager_v1`. The compositor applies the
-stated values when a display plane shows the frame and when the GL
-renderer draws it. A frame with no stated values converts as BT.709
-at limited range.
+A client that sends YUV video frames can set each frame's color
+encoding and range through `wp_color_representation_manager_v1`. The
+compositor converts a frame with no values set as BT.709 at limited
+range.
 
 ## Ask for a mode
 
-A claim can state the resolution its screen runs. The operator
-writes it into the compositor's config, restarts the compositor,
-and delivers the screen only after the card reports the mode. The
-name is one of the values in the `modes` attribute, spelled as the
-kernel spells it, and it can include a refresh. `3840x1600@24` runs
-a 24 fps film without the 3:2 cadence a 60 Hz mode forces on it.
-The refresh is a whole number of hertz.
+A claim can set the resolution of its screen with the `mode`
+parameter. The value is one of the entries of the device's `modes`
+attribute, spelled as the kernel spells it, and it can end with a
+refresh rate in whole hertz. For example, `3840x1600@24` plays a 24 fps
+film without the uneven frame timing of a 60 Hz mode. The operator
+writes the mode into the compositor's configuration, restarts the
+compositor, and starts the container only after the graphics card
+reports that the screen runs the mode.
 
-A mode 3840 pixels wide or wider runs at an output scale of 2, and
-a narrower one at 1. The compositor states the scale to every
-client on the output. A client that lays out in logical pixels
-draws a 4K panel at the 1080p size and rasters at the panel's full
-resolution. A client that does not is scaled up so that it is
-readable. The rule reads the mode the output runs, whether the
-claim stated it or the monitor preferred it.
+An output whose mode is 3840 pixels wide or wider has an output scale
+of 2, and a narrower one has a scale of 1, whether a claim set the
+mode or the monitor's preferred mode is used. A client that supports
+the scale lays out a 4K panel at 1080p size and renders at the panel's
+full resolution. The compositor scales up a client that does not, so
+that its text stays readable.
 
     apiVersion: resource.k8s.io/v1
     kind: ResourceClaim
     metadata:
-      name: kitchen-screen
-      namespace: house
+      name: menu-screen
+      namespace: signage
     spec:
       devices:
         requests:
@@ -201,40 +199,39 @@ claim stated it or the monitor preferred it.
               parameters:
                 mode: "1280x720"
 
-Do not state a mode casually. One compositor drives every output
-of the card, and it reads its config once at startup. So a mode on
-one connector restarts it and ends every Wayland client on every
-screen of that machine. The lab measured about 1.3 seconds of
-dark, plus whatever each client takes to come back.
+Set a mode only when you need it. One compositor drives every output
+of the card, and it reads its configuration only when it starts. So a
+mode on one connector restarts the compositor, which disconnects every
+Wayland client on every screen of that machine. The screens are dark
+until the compositor is back and each client has reconnected.
 
-The compositor's container starts weston again at once after each
-restart the operator orders, so a second mode switch is as quick as
-the first. A weston that crashes instead ends its container, and the
-kubelet holds the next start in its crash backoff, which starts at
-10 seconds and doubles up to 5 minutes. The screens stay dark for
-that wait. The operator waits up to six minutes for the compositor
-to start, and then gives it 10 seconds to serve the mode. A compositor that serves another mode
-fails the prepare, and the kubelet's retries of that prepare fail
-without another restart.
+A restart that the operator orders starts weston again at once. If
+weston crashes instead, the kubelet's crash backoff delays the next
+start by up to 5 minutes, and the screens stay dark for that time. The
+operator waits up to 6 minutes for the compositor to accept a
+connection, and then 10 seconds for the screen to run the mode. If the
+screen runs a different mode after that, the prepare fails. The
+kubelet retries the prepare, and each retry fails without another
+restart.
 
-Run every display consumer under a controller. A bare `Pod` whose
-compositor restarted ends `Completed` and never starts again. A
-`Deployment` brings it back, and the `tolerationSeconds` above
-keeps the pod scheduled through the restart.
+Run every program that uses a display under a controller. A bare `Pod` ends
+as `Completed` when the compositor restarts, and does not start
+again. A `Deployment` creates the pod again, and the toleration in the
+claim above keeps the pod running during the restart.
 
-A claim that asks for the mode the screen already runs delivers at
-once, with no restart. A claim that states no refresh matches
-whatever rate the screen runs under that name. Releasing the claim
-restarts nothing either. The screen keeps the mode until the next
-compositor start, and the slice's `currentMode` says what it runs,
-refresh included.
+A claim for the mode that the screen already runs is prepared at once,
+with no restart. A mode with no refresh rate matches the screen at
+whatever rate it runs that resolution. Releasing the claim does not
+restart anything either. The screen keeps the mode until the
+compositor next starts. The `currentMode` attribute in the
+`ResourceSlice` shows the mode and refresh rate that the output runs.
 
 ## Set the panel's brightness and power
 
-A claim can state the panel's own brightness and power the way it
-states a mode, with two more parameters in the same opaque block.
-The parameters follow the claim's lifetime. For a setting the panel
-should hold with no claim attached, declare it on the panel's
+A claim can set the panel's brightness and power with two more
+parameters in the same opaque block. They apply while the claim
+exists. To keep a setting on the panel when no claim is attached, set
+it on the panel's
 [`Display`](https://liken.sh/display/docs/reference/displays/) instead.
 
     config:
@@ -244,25 +241,24 @@ should hold with no claim attached, declare it on the panel's
             brightness: 87
             power: OnWhileClaimed
 
-`brightness` is a percentage from 0 to 100 of the panel's own
-maximum. `power: On` powers the panel on at prepare. `power:
-OnWhileClaimed` also powers it back down 30 seconds after the claim
-ends, so a movie pod that ends leaves a dark screen. A new claim that
-prepares on the same connector inside the 30 seconds cancels the
-power-down, so a `Deployment` rollout does not blink the screen. Use
-`On` for a workload whose screen must stay on when its pod stops for
-longer than that. The parameter also takes the lowercase `on` and
-`onWhileClaimed`, with the same meaning.
+`brightness` is a percentage from 0 to 100 of the panel's own maximum
+brightness. `power: On` powers the panel on when the claim is
+prepared. `power: OnWhileClaimed` also puts the panel in standby 30
+seconds after the claim ends, so a screen goes dark when a movie pod
+ends. A new claim that is prepared on the same connector within those
+30 seconds cancels the standby, so a `Deployment` rollout does not make
+the screen blink. Use `On` for a workload whose screen must stay on
+when its pod is gone for longer than that. The parameter also accepts
+the lowercase forms `on` and `onWhileClaimed`, with the same meaning.
 
-The operator reads each control before it writes it, and a panel
-that already holds the value takes no write. So a prepare on a panel
-that is already on at the stated brightness changes nothing a person
-sees.
+The operator reads each control before it writes it, and writes
+nothing when the panel already has the value, so the screen does not
+flicker.
 
-Not every panel takes these. The operator asks each panel which
-controls it has and publishes the answers as the `controlsBrightness`
-and `controlsPower` attributes, so add the matching attribute to your
-selector:
+Not every panel supports these controls. The operator asks each panel
+over DDC/CI which controls it has and publishes the results as the
+`controlsBrightness` and `controlsPower` attributes, so add the
+matching attribute to your selector:
 
     selectors:
       - cel:
@@ -270,24 +266,26 @@ selector:
             device.attributes["display.liken.sh"].connector == "HDMI-A-1" &&
             has(device.attributes["display.liken.sh"].controlsBrightness)
 
-Without the selector, the scheduler can place the claim on a panel
-that refuses the protocol, and the prepare fails with the missing
-capability named. Some panels also ship with DDC/CI switched off in
-their on-screen menu. Turn it on there, and the attributes appear.
+Without that condition, the scheduler can allocate the claim on a
+panel that does not support the control, and the prepare fails with an
+error that names the missing control. Some panels ship with DDC/CI
+turned off in their on-screen menu. Turn it on in the menu, and the
+attributes appear.
 
-Neither parameter restarts the compositor. A claim that states only
-these delivers without the dark second a mode costs.
+Neither parameter restarts the compositor, so the screen does not go
+dark.
 
 ## Hold the panel's control channel
 
-The parameters above are set once, at prepare. A pod that speaks the
-panel's protocol itself while it runs claims the connector's control
-device instead, and receives the raw i2c node. Most pods never need
-it. Setting or temporarily overriding the panel goes through the
-[`Display`](https://liken.sh/display/docs/reference/displays/), and the operator writes the
-bus. One claim can take a screen and its control channel
-together, with a `matchAttribute` constraint tying the two requests
-to one monitor:
+The operator applies the parameters above once, when it prepares the
+claim. A pod that must send DDC/CI commands to the panel while it runs
+claims the connector's control device instead, and the container
+receives the raw i2c device node. Most pods do not need this: to set
+the panel or override a setting for a while, edit the
+[`Display`](https://liken.sh/display/docs/reference/displays/), and the operator writes to the
+bus. One claim can request a screen and its control device together,
+with a `matchAttribute` constraint that ties both requests to the same
+monitor:
 
     apiVersion: resource.k8s.io/v1
     kind: ResourceClaim
@@ -311,13 +309,12 @@ to one monitor:
           - requests: ["screen", "control"]
             matchAttribute: monitor.liken.sh/id
 
-The `display-control` class is yours to create, like
-`display-output`;
-[Devices](https://liken.sh/display/docs/reference/devices/#the-control-device) gives its
-YAML. The container that names the `control` request receives
-`/dev/i2c-N` and `DISPLAY_CONTROL_BUS` holding that path. An init
-container that sets the brightness to 87 before the player starts,
-using the `ddcutil` in the operator image:
+You create the `display-control` class yourself, like
+`display-output`. [Devices](https://liken.sh/display/docs/reference/devices/#the-control-device)
+has its YAML. A container that lists the `control` request in its
+`resources.claims` receives `/dev/i2c-N`, and `DISPLAY_CONTROL_BUS`
+holds that path. This init container sets the brightness to 87 before
+the player starts, using the `ddcutil` in the operator image:
 
     initContainers:
       - name: brightness
@@ -328,59 +325,56 @@ using the `ddcutil` in the operator image:
           claims:
             - name: control
 
-`ddcutil` finds the bus itself from the one `/dev/i2c-*` node the
-claim delivered, so the command needs no bus number. A config block
-that states `mode`, `brightness`, or `power` must name the `screen`
-request when the claim also holds a control request. Those
-parameters act on outputs, and a control request takes none.
+The container has only one `/dev/i2c-*` node, so `ddcutil` finds the
+bus without a bus number. When the claim
+also has a control request, a `config` block that sets `mode`,
+`brightness`, or `power` must list the `screen` request in `requests`.
+Those parameters apply to outputs, and a control request is not an
+output.
 
 Do not write to any i2c address other than `0x37`. The
-[reference](https://liken.sh/display/docs/reference/devices/#the-control-device) explains
-what is at `0x50` and why a write there follows the monitor to
-every machine it ever plugs into.
+[reference](https://liken.sh/display/docs/reference/devices/#the-control-device) explains what
+is at `0x50` and why a write there stays on the monitor when you plug
+it into another machine.
 
 ## Unplugged monitors, moved monitors, and second screens
 
-**A monitor dark.** The device keeps its place in the slice and keeps
-publishing the monitor's identity, so your claim still allocates and
-your pod keeps running. Nothing is evicted. The client's Wayland
-connection never breaks, and its picture returns with the output.
+**A monitor goes dark.** The device stays in the `ResourceSlice` with
+the monitor's attributes, so your claim still allocates and your pod
+keeps running. The client's Wayland connection stays open, and its
+picture comes back when the output does.
 
-This covers every way a monitor goes dark: a cable reseated, an A/V
-receiver renegotiating its link on an input change, and a panel
-showing another source. A monitor that shows another input drops hot
-plug detect, and the kernel reports that exactly as it reports an
-unplugged cable, so the operator treats them the same and keeps the
-screen.
+A monitor goes dark when a cable is reseated, when an A/V receiver
+renegotiates the link after an input change, and when the panel shows
+another input. A monitor that shows another input stops asserting hot
+plug detect, and the kernel reports that the same way as an unplugged
+cable. The operator cannot tell them apart, so it treats an unplugged
+monitor the same way: its devices stay allocatable, and your pod keeps
+drawing to a screen that is not there. The `Connected` condition on
+the `Display` shows what the connector reports.
 
-A monitor somebody really unplugged therefore keeps its devices
-claimable, and your pod keeps drawing into nothing. Read the
-`Connected` condition on the `Display` to see what the wire says.
+The operator reports a monitor as gone only after its connector has
+read no monitor for 5 seconds. An A/V receiver in standby can drop hot
+plug detect for a moment, again and again. A drop shorter than 5
+seconds changes nothing in the `ResourceSlice` or on the `Display`,
+although the compositor turns the output off for the length of the
+drop. While another connector on the same card keeps dropping, the
+operator can take up to 20 seconds to report that a monitor left.
 
-The operator reports a monitor dark only after its connector has read
-no monitor for 5 seconds. An A/V receiver in standby can drop hot plug
-detect for a fraction of a second several times a minute, and the
-monitor answers again with the same EDID each time. A drop that short
-changes nothing in the slice or on the `Display`: its windows,
-conditions, and `Event`s stay as they were. The compositor still
-disables the output for the length of each drop. While another
-connector of the same card keeps dropping, the report of a monitor
-that left can take up to 20 seconds.
+**A monitor moved to another connector.** The connector that the
+monitor left keeps publishing it, the same as for a monitor that went
+dark, and the operator does not taint it. So the pod on the old
+connector keeps running. A claim that selects by `model` or `serial`
+instead of `connector` matches the monitor on its new connector too.
 
-**A monitor moved to another connector.** A claim that selects by
-`model` or by `serial` instead of by `connector` follows the
-monitor. The eviction controller ends the old pod on the dark
-connector, and its replacement allocates the output the monitor is
-on now.
+**Two screens from one pod.** A container has one `WAYLAND_DISPLAY`,
+so it draws on one screen. A pod that draws on two screens runs two
+containers, and each container lists its own request in
+`resources.claims`.
 
-**Two screens from one pod.** One container drives one screen,
-because a container has one `WAYLAND_DISPLAY`. A pod that drives two
-screens runs two containers, each naming its own request in the
-claim.
-
-**A screen and its speakers.** A monitor's HDMI speakers belong to
-the [audio operator](https://liken.sh/audio/). Both operators publish
-`monitor.liken.sh/id`, the same identity read from the same monitor.
-So one claim can request a screen from this driver and the matching
-audio output from that one. A `matchAttribute` constraint on
-`monitor.liken.sh/id` holds the two requests together.
+**A screen and its speakers.** The
+[audio operator](https://liken.sh/audio/) publishes the monitor's HDMI
+speakers. Both operators publish `monitor.liken.sh/id` with the same
+value for the same monitor, so one claim can request a screen and the
+monitor's speakers with a `matchAttribute` constraint on
+`monitor.liken.sh/id`.

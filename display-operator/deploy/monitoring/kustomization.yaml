@@ -1,7 +1,6 @@
-# The monitoring component, liken's shared contract for connecting a
-# Prometheus to a process, milestone 65. The base in deploy/ applies on
-# a cluster with no monitoring at all. A cluster owner who runs the
-# prometheus-operator adds this component beside the base:
+# This component adds the PodMonitors and the Grafana dashboard for a
+# cluster that runs prometheus-operator. The base in deploy/ needs no
+# monitoring, so you add this component beside it:
 #
 # resources:
 #   - https://github.com/liken-sh/liken//display-operator/deploy?ref=<tag>
@@ -13,10 +12,8 @@ kind: Component
 resources:
   - podmonitor.yaml
 
-# The dashboard ConfigMap carries no namespace of its own, so it lands
-# in monitoring, beside the Prometheus that runs the sidecar. The
-# sidecar finds it there by the grafana_dashboard label, the same way
-# it finds every other operator's dashboard.
+# Grafana's sidecar loads each ConfigMap in the `monitoring` namespace
+# that has the `grafana_dashboard` label.
 configMapGenerator:
   - name: display-operator-dashboard
     namespace: monitoring

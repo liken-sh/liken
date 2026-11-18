@@ -1,12 +1,10 @@
 package main
 
-// This file holds display-api's memory of the capture sidecars: one
-// pod per node, found by label. The API keeps one watch on those pods
-// instead of asking the API server on every request, so a capture
-// costs one call to the node and nothing else, and the API answers
-// "no ready sidecar on that node" from memory. A sidecar is ready when
-// the kubelet's own Ready condition on its pod is True, which covers
-// every container of the pod, the compositor included.
+// display-api watches the capture sidecar pods and caches them, so a
+// capture request finds its node's sidecar without listing pods from
+// the API server. A sidecar is ready when its pod's Ready condition is
+// True, which covers every container of the pod, including the
+// compositor.
 
 import (
 	"context"
@@ -20,15 +18,15 @@ import (
 )
 
 // The pods the API watches: the display-operator DaemonSet's pods in
-// liken-system, one per node, and the node each one runs on is the
-// key a Display's status.node is looked up by.
+// liken-system. Each runs on one node, and a Display's status.node
+// selects the pod to use.
 const (
 	sidecarNamespace = "liken-system"
 	sidecarSelector  = "app=display-operator"
 )
 
-// What the API holds about one node's sidecar: where to reach it and
-// whether the kubelet calls its pod ready.
+// sidecarPod is one node's sidecar: where to reach it and whether its
+// pod is ready.
 type sidecarPod struct {
 	Namespace string
 	Name      string
@@ -37,10 +35,10 @@ type sidecarPod struct {
 	Ready     bool
 }
 
-// The index holds every sidecar pod by name, and answers per node. A
-// rollout runs two pods on one node for a while, and their events
-// arrive interleaved, so a map keyed by node would let the old pod's
-// late events take the node from the new one.
+// sidecarIndex stores every sidecar pod by name and looks them up by
+// node. During a rollout two pods run on one node, and their events
+// can arrive interleaved. A map keyed by node would let a late event
+// from the old pod overwrite the new pod's entry.
 type sidecarIndex struct {
 	mu     sync.RWMutex
 	byName map[string]Pod
@@ -50,16 +48,13 @@ func newSidecarIndex() *sidecarIndex {
 	return &sidecarIndex{byName: map[string]Pod{}}
 }
 
-// A request reads this map and never the API server, so a capture
-// costs one call to the node and nothing else.
-//
-// The answer is the node's Ready pod, even one being deleted: it still
-// serves captures through its grace period, and a DaemonSet rollout
-// with no surge starts the new pod only after the old one begins to
-// leave, so preferring the new pod would refuse captures until it is
-// Ready. Among pods of equal readiness, one not being deleted answers
-// first, and pods of equal rank answer by name, so every request gets
-// the same one.
+// on returns the sidecar to use for a node. It prefers a Ready pod,
+// even one that is being deleted. That pod still serves captures
+// during its grace period, and a DaemonSet rollout without surge
+// starts the new pod only after the old one begins to terminate, so
+// preferring the new pod would refuse captures until it is Ready.
+// Among equally ready pods it prefers one that is not being deleted,
+// then the lowest name, so every request gets the same pod.
 func (i *sidecarIndex) on(node string) (sidecarPod, bool) {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -86,8 +81,8 @@ func (i *sidecarIndex) on(node string) (sidecarPod, bool) {
 	}, true
 }
 
-// How strongly a pod answers for its node: Ready counts before not
-// being deleted.
+// sidecarRank orders the pods of one node. Ready outranks not being
+// deleted.
 func sidecarRank(pod Pod) int {
 	rank := 0
 	if pod.Status.ready() {
@@ -99,7 +94,7 @@ func sidecarRank(pod Pod) int {
 	return rank
 }
 
-func (i *sidecarIndex) hold(pod Pod) {
+func (i *sidecarIndex) add(pod Pod) {
 	if pod.Spec.NodeName == "" {
 		return
 	}
@@ -108,16 +103,17 @@ func (i *sidecarIndex) hold(pod Pod) {
 	i.byName[pod.Metadata.Name] = pod
 }
 
-func (i *sidecarIndex) drop(pod Pod) {
+func (i *sidecarIndex) remove(pod Pod) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	delete(i.byName, pod.Metadata.Name)
 }
 
-// forget drops a deleted pod that the index cannot read, such as one
-// whose tombstone holds no copy. The key is namespace/name, and the
-// index holds pods of one namespace by name.
-func (i *sidecarIndex) forget(key string) {
+// removeKey removes a deleted pod by its namespace/name key, for a
+// deleted object that does not convert to a Pod, such as a tombstone
+// with no copy of the object. The index holds pods of one namespace, so
+// it uses only the name.
+func (i *sidecarIndex) removeKey(key string) {
 	_, name, found := strings.Cut(key, "/")
 	if !found {
 		name = key
@@ -127,19 +123,17 @@ func (i *sidecarIndex) forget(key string) {
 	delete(i.byName, name)
 }
 
-// The watch keeps the index current for as long as the API runs.
+// run watches the sidecar pods and keeps the index current until ctx
+// ends.
 func (i *sidecarIndex) run(ctx context.Context, client dynamic.Interface, namespace string) {
 	source := informer.Source{Resource: podResource, Namespace: namespace, LabelSelector: sidecarSelector}
 	<-informer.Start(ctx, client, source, informer.Options{Handler: i.handler("the capture sidecars in " + namespace)}).Done()
 }
 
-// handler moves the index with each change the informer reports. The
-// informer's first read adds every sidecar pod, and each change after
-// it moves one pod. A watch that resumes after a gap receives each
-// change made during it. When the watch cannot resume, after a 410
-// Gone, the informer reads the pods again and reports each difference
-// from what it held, so a pod that left during the gap is dropped and
-// no pod that stayed leaves the index on the way.
+// handler applies each change the informer reports to the index. After
+// a 410 Gone the informer lists the pods again and reports a deletion
+// for each pod that left during the gap and an update for each pod
+// that stayed, so the index needs no reset.
 func (i *sidecarIndex) handler(what string) cache.ResourceEventHandler {
 	take := func(object any) {
 		pod, err := informer.Convert[Pod](object)
@@ -147,7 +141,7 @@ func (i *sidecarIndex) handler(what string) cache.ResourceEventHandler {
 			informer.Report(what, err)
 			return
 		}
-		i.hold(pod)
+		i.add(pod)
 	}
 	return cache.ResourceEventHandlerFuncs{
 		AddFunc:    take,
@@ -155,15 +149,14 @@ func (i *sidecarIndex) handler(what string) cache.ResourceEventHandler {
 		DeleteFunc: func(object any) {
 			pod, err := informer.Convert[Pod](object)
 			if err == nil {
-				i.drop(pod)
+				i.remove(pod)
 				return
 			}
-			// A pod that does not convert still left, so the index
-			// drops it by its key, which needs none of the fields that
-			// failed.
+			// The key does not depend on the fields that failed to
+			// convert.
 			informer.Report(what, err)
 			if key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(object); err == nil {
-				i.forget(key)
+				i.removeKey(key)
 			}
 		},
 	}

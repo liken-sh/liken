@@ -1,24 +1,24 @@
 package main
 
-// The link on each connector, followed across passes. It answers one
-// question, which output can serve nobody now, and the disconnected
-// taint is what that answer writes.
+// The link history records the last monitor read on each connector,
+// so the operator can tell a monitor that shows another input from a
+// monitor that was unplugged. sliceDevices decides from it which
+// connectors get the disconnected taint.
 //
-// A dark connector is not the same as an empty one. Two monitors
-// measured here drop hot plug detect while they show another input: an
-// A/V receiver renegotiates its HDMI link for about 80 seconds on every
-// input change, and an LG ultrawide shares one HDMI receiver between
-// its two HDMI inputs, so the input it is not showing looks unplugged
-// for as long as the person leaves it that way. The kernel reports both
-// exactly as it reports a cable somebody pulled out, and it clears the
-// connector's EDID with them, so nothing in sysfs tells the two apart.
+// Some monitors drop hot plug detect while they show another input. An
+// A/V receiver drops it while it renegotiates its HDMI link after each
+// input change. An LG ultrawide shares one HDMI receiver between its
+// two HDMI inputs, so the input it is not showing reads as unplugged
+// until someone switches back to it. The kernel reports each of these
+// as a pulled cable and clears the connector's EDID, so nothing in
+// sysfs tells them apart.
 //
-// So this history remembers. A connector that carried a monitor keeps
-// carrying it while it is dark, and the slice keeps publishing that
-// monitor's identity, so the claim on the screen still allocates and
-// the pod on it keeps running. The cost is that a monitor somebody
-// really unplugged keeps its devices claimable. The Connected condition
-// on the Display is what still reports the wire.
+// So while a connector reads disconnected, the history keeps the
+// monitor it last had. The slice keeps publishing that monitor, a claim
+// on it still allocates, and the pod on it keeps running. The cost is
+// that a monitor that was really unplugged keeps its devices claimable.
+// The Connected condition on the Display still reports what the kernel
+// reads.
 
 import (
 	"strconv"
@@ -27,34 +27,33 @@ import (
 	"time"
 )
 
-// How long a connector that came back carrying a different monitor
-// keeps its taint. The claim on it asked for the monitor that left, so
-// the taint has to stand long enough for the eviction controller to
-// read it. It is a package-level var so the tests set their own.
+// disconnectGrace is how long a connector keeps the taint after it
+// reconnects with a different monitor. The claim on the connector asked
+// for the monitor that left, so the taint must last until the eviction
+// controller reads it and evicts the pod.
 var disconnectGrace = 90 * time.Second
 
-// One connector's link, as the last pass left it.
+// link is the history of one connector.
 type link struct {
-	// The monitor the connector carries, and while it is dark, the one
-	// it left with. The mode is no part of it: the same panel back at
-	// another mode is the same screen, and the claim on it asked for the
-	// monitor.
+	// monitor is the last monitor read on the connector. It stays set
+	// while the connector is disconnected.
 	monitor EDID
-	// When a different monitor arrived on the connector. It is the zero
-	// time until one does.
+	// since is when the connector reconnected with a different monitor.
+	// It is zero while replaced is false.
 	since time.Time
-	lit   bool
-	// The connector came back carrying a different monitor, and the taint
-	// that says so still stands.
+	// connected is Output.Connected from the last pass.
+	connected bool
+	// replaced is true for disconnectGrace after the connector
+	// reconnected with a different monitor.
 	replaced bool
 }
 
-// Every connector's link, keyed by the kernel's own connector name. One
-// pass writes it once, and the operator holds one of these for as long
-// as it runs.
+// linkHistory holds each connector's link, keyed by the kernel's
+// connector name. It is in memory only, so a restarted operator starts
+// with an empty history.
 type linkHistory struct {
-	// The reconcile pass writes this history and the DRA plugin reads
-	// it, on two goroutines, so every reader and writer takes the lock.
+	// The reconcile pass writes the history and the DRA plugin reads it
+	// from another goroutine.
 	mu    sync.Mutex
 	now   func() time.Time
 	links map[string]link
@@ -64,9 +63,8 @@ func newLinkHistory() *linkHistory {
 	return &linkHistory{now: time.Now, links: map[string]link{}}
 }
 
-// withLinks puts each connector's history beside what sysfs said, the
-// way withCurrentModes puts the card's readback there. It records this
-// pass as it goes, so one pass calls it once.
+// withLinks returns the outputs with Remembered and Replaced set from
+// the link history, and records each output in the history.
 func withLinks(outputs []Output, history *linkHistory) []Output {
 	out := make([]Output, len(outputs))
 	for i, output := range outputs {
@@ -76,21 +74,20 @@ func withLinks(outputs []Output, history *linkHistory) []Output {
 	return out
 }
 
-// follow records what this pass sees on one connector and answers the
-// two facts sliceDevices taints on: the monitor the connector still
-// carries while it is dark, and whether it came back carrying a
-// different one.
+// follow records what this pass read on one connector. It returns the
+// monitor to publish for a disconnected connector, and whether the
+// connector is replaced, which means that it reconnected with a
+// different monitor less than disconnectGrace ago.
 //
-// A dark connector answers the monitor it left with, for as long as it
-// stays dark. A connector this operator has never seen a monitor on
-// answers none, which is what taints it: there is no screen to keep and
-// no claim that ever named one. That covers a connector with nothing in
-// it, and a machine that started with its panel on another input and
-// has not seen it since.
+// A disconnected connector returns the last monitor it had, for as long
+// as it stays disconnected. A connector with no known monitor returns
+// none, so sliceDevices taints it. That is an empty connector, or a
+// connector that has been disconnected since the operator started and
+// that loadFromDisplays found no Display for.
 //
-// A connector that came back carrying a different monitor is replaced,
-// and taints for one grace after the return, so the eviction controller
-// sees it. The claim on it asked for the monitor that left.
+// Monitors are compared by monitorID, which leaves out the mode and the
+// serial. A monitor with no readable EDID has an empty monitorID, and
+// it never makes a connector replaced.
 func (h *linkHistory) follow(output Output) (remembered EDID, replaced bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -99,7 +96,7 @@ func (h *linkHistory) follow(output Output) (remembered EDID, replaced bool) {
 	if !output.Connected {
 		if !seen {
 			h.links[output.Connector] = link{}
-		} else if was.lit {
+		} else if was.connected {
 			h.links[output.Connector] = link{monitor: was.monitor}
 		}
 		return h.links[output.Connector].monitor, false
@@ -107,26 +104,25 @@ func (h *linkHistory) follow(output Output) (remembered EDID, replaced bool) {
 	monitor := monitorID(output.Monitor)
 	previous := monitorID(was.monitor)
 	switch {
-	case seen && !was.lit && previous != "" && monitor != "" && previous != monitor:
-		h.links[output.Connector] = link{monitor: output.Monitor, since: now, lit: true, replaced: true}
+	case seen && !was.connected && previous != "" && monitor != "" && previous != monitor:
+		h.links[output.Connector] = link{monitor: output.Monitor, since: now, connected: true, replaced: true}
 		return EDID{}, true
 	case was.replaced && now.Sub(was.since) <= disconnectGrace:
-		h.links[output.Connector] = link{monitor: output.Monitor, since: was.since, lit: true, replaced: true}
+		h.links[output.Connector] = link{monitor: output.Monitor, since: was.since, connected: true, replaced: true}
 		return EDID{}, true
 	default:
-		h.links[output.Connector] = link{monitor: output.Monitor, lit: true}
+		h.links[output.Connector] = link{monitor: output.Monitor, connected: true}
 		return EDID{}, false
 	}
 }
 
-// remembered answers the monitor a connector still carries while it is
-// dark, as the last pass left it. It answers the zero value for a lit
-// connector, and for one this operator has never seen a monitor on.
+// remembered returns the last monitor of a disconnected connector. It
+// returns the zero EDID for a connected connector and for one with no
+// known monitor.
 //
-// The prepare path reads it. A claim allocated against a screen that
-// went dark between the allocation and the prepare must still be
-// delivered, because the screen has not moved and the pod on it is the
-// one that draws when the monitor comes back.
+// The DRA prepare reads it, so a claim allocated to a screen that
+// disconnected before the prepare still succeeds. The pod draws again
+// when the monitor reconnects.
 func (h *linkHistory) remembered(connector string) EDID {
 	if h == nil {
 		return EDID{}
@@ -134,36 +130,32 @@ func (h *linkHistory) remembered(connector string) EDID {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	was := h.links[connector]
-	if was.lit {
+	if was.connected {
 		return EDID{}
 	}
 	return was.monitor
 }
 
-// seed puts the screens the cluster already knows about into a history
-// that has none.
+// loadFromDisplays loads the monitors that this node's Display
+// resources record into the history, for each connector that the
+// history has no entry for.
 //
-// The history is this process's own, so a restarted operator starts
-// with nothing and every dark connector reads as an empty one. That is
-// the whole of the cold case: a machine that boots with its panel on
-// another input has no EDID in sysfs, nothing on the machine says which
-// screen belongs to which connector, and the claim on that screen
-// cannot allocate.
+// A machine that boots with its panel on another input has no EDID in
+// sysfs, so after a restart nothing on the machine records which
+// monitor belongs to that connector, and a claim on the screen cannot
+// allocate. Each Display records the node and connector it was last
+// published on, and its name is the monitorID that claims select on.
 //
-// The Display resources are what remember. Each one names the node and
-// the connector it was last served on, and the resource's own name is
-// the monitor identity every claim selects on. So the cluster carries a
-// machine's screens across a reboot, and this reads them back.
-//
-// A connector with a monitor on it now is left alone, because the wire
-// is a better answer than the record. A screen that is lit on some
-// other connector is left alone too: it moved, and publishing it on
-// both would give a claim two devices to match.
-func (h *linkHistory) seed(displays []Display, node string, outputs []Output) {
-	lit := map[string]bool{}
+// loadFromDisplays skips a connector that is connected now, because
+// the kernel's reading is newer than the Display. It also skips a
+// monitor that is connected on another connector. That monitor moved,
+// and publishing it on both connectors would give a claim two matching
+// devices.
+func (h *linkHistory) loadFromDisplays(displays []Display, node string, outputs []Output) {
+	connectedNow := map[string]bool{}
 	elsewhere := map[string]bool{}
 	for _, output := range connected(outputs) {
-		lit[output.Connector] = true
+		connectedNow[output.Connector] = true
 		if id := monitorID(output.Monitor); id != "" {
 			elsewhere[id] = true
 		}
@@ -175,10 +167,10 @@ func (h *linkHistory) seed(displays []Display, node string, outputs []Output) {
 		if display.Status.Node != node || connector == "" {
 			continue
 		}
-		if lit[connector] || elsewhere[display.Metadata.Name] {
+		if connectedNow[connector] || elsewhere[display.Metadata.Name] {
 			continue
 		}
-		if _, held := h.links[connector]; held {
+		if _, known := h.links[connector]; known {
 			continue
 		}
 		monitor, rebuilt := rememberedMonitor(display)
@@ -189,17 +181,12 @@ func (h *linkHistory) seed(displays []Display, node string, outputs []Output) {
 	}
 }
 
-// rememberedMonitor rebuilds the monitor a Display was published for.
-//
-// The product code is in the resource's name and in no status field,
-// because the name is the pairing identity and monitorID is what built
-// it. So the name is read back for that one number, and the rest comes
-// from the status beside it.
-//
-// A Display whose facts do not rebuild its own name is refused. The
-// name is what a claim matches, and a screen published under a name
-// this operator cannot derive would answer a claim that asked for
-// another monitor.
+// rememberedMonitor rebuilds the monitor that a Display was published
+// for. The product code is in the Display's name and in no status
+// field, so it parses the code from the name and takes the other fields
+// from the status. It returns false when the monitorID of the result is
+// not the Display's name, because then the result is not the monitor
+// that claims on that name selected.
 func rememberedMonitor(display Display) (EDID, bool) {
 	name := display.Metadata.Name
 	parts := strings.SplitN(name, "-", 3)

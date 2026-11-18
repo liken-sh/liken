@@ -1,28 +1,27 @@
 package main
 
-// Which screens a claim holds, read from the API server.
+// This file reads from the API server which output devices a claim
+// holds.
 //
-// The Display pass restarts the compositor for two reasons: to put a
-// screen back at its resting mode, and to heal a canvas. Either
-// restart takes the screen away from the claim that holds it, so both
-// wait while a claim holds a screen. The CDI specs on disk name the
-// claims the kubelet prepared, and a claim whose prepare has not
-// succeeded yet has no spec. That claim still holds its screen: the
-// kubelet retries the prepare until the pod starts or goes away, and
-// each prepare switches the screen to the claim's mode. A pass that
-// read only the specs found the screen free and switched it back, and
-// the next retry switched it again. Each switch restarted the
-// compositor, and each restart waited longer in the kubelet's crash
-// backoff.
+// The Display pass restarts the compositor to return a screen to its
+// declared mode or to repair a canvas. A restart takes the screen away
+// from the claim that uses it, so both wait while a claim holds the
+// screen. The CDI specs on disk cover only the claims that the kubelet
+// has prepared. A claim whose prepare has not succeeded has no spec,
+// but the kubelet retries the prepare until the pod starts or is
+// deleted, and each attempt switches the screen to the claim's mode.
+// A pass that read only the specs would switch the screen back between
+// retries, and each switch restarts the compositor and lengthens the
+// kubelet's crash backoff.
 //
-// So a claim holds a screen when its allocation names the screen's
-// output device in this node's pool, and a pod that the API server is
-// not deleting holds the claim. The claims carry no field that selects
-// a node, so the answer costs one listing of every claim in the
-// cluster. The Display pass reads it only when a restart would follow,
-// and at most once per pass. The slice pass reads it only while no
-// compositor serves, to leave the taint off an output whose claim is
-// still preparing (compositorDown in slices.go).
+// So a claim holds an output when its allocation includes the output
+// in this node's pool and it is reserved for a pod that is not being
+// deleted. ResourceClaims have no field selector for the node, so the
+// check lists every claim in the cluster. The Display pass lists them
+// only when a restart would follow, at most once per pass. The slice
+// pass lists them only while no compositor serves, so that it does not
+// taint an output whose claim is still preparing (compositorDown in
+// slices.go).
 
 import (
 	"errors"
@@ -30,9 +29,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// allocatedOutputs names the output devices of this node that a live
-// claim holds. A draw or a control device is not in the answer, for
-// the reason preparedOutputs leaves them out: neither owns the mode.
+// allocatedOutputs returns the output devices of this node that a claim
+// holds through a live pod. It leaves out draw and control devices, as
+// preparedOutputs does, because neither owns the mode.
 func allocatedOutputs(client *apiclient.Client, node string, stores clusterStores) (map[string]bool, error) {
 	claims, err := listResourceClaims(client)
 	if err != nil {
@@ -58,8 +57,8 @@ func allocatedOutputs(client *apiclient.Client, node string, stores clusterStore
 	return held, nil
 }
 
-// claimOutputs names the output devices one claim was allocated from
-// this driver's pool on this node.
+// claimOutputs returns the output devices that one claim has allocated
+// from this driver's pool on this node.
 func claimOutputs(claim ResourceClaim, node string) []string {
 	if claim.Status.Allocation == nil {
 		return nil
@@ -80,10 +79,10 @@ func claimOutputs(claim ResourceClaim, node string) []string {
 	return outputs
 }
 
-// heldByLivePod reports whether a pod that the API server is not
-// deleting holds the claim. The kubelet stops its prepare retries when
-// the pod goes, and the claim's reservation can outlast the pod by a
-// few seconds, so the pod is what says the claim is still wanted.
+// heldByLivePod reports whether the claim is reserved for a pod that
+// exists and is not being deleted. It reads the pod and does not trust
+// status.reservedFor alone, because a reservation can outlast its pod,
+// and the kubelet stops retrying the prepare once the pod is gone.
 func heldByLivePod(client *apiclient.Client, stores clusterStores, claim ResourceClaim) (bool, error) {
 	for _, consumer := range claim.Status.ReservedFor {
 		if consumer.Resource != podsResource {
@@ -103,9 +102,8 @@ func heldByLivePod(client *apiclient.Client, stores clusterStores, claim Resourc
 	return false, nil
 }
 
-// preparingOutputs names the output devices whose claim is still
-// preparing: a live claim holds the output, and no spec on disk names
-// it yet.
+// preparingOutputs returns the output devices that a claim holds and
+// that no CDI spec on disk lists yet.
 func preparingOutputs(allocated, prepared map[string]bool) map[string]bool {
 	preparing := map[string]bool{}
 	for output := range allocated {
@@ -116,10 +114,9 @@ func preparingOutputs(allocated, prepared map[string]bool) map[string]bool {
 	return preparing
 }
 
-// screenHolds answers, for one pass, which output devices a claim
-// holds. The specs on disk answer first, because reading them costs no
-// request. The API server answers the rest, once, and only for a pass
-// that asks.
+// screenHolds reports, for one pass, which output devices a claim
+// holds. It checks the prepared specs first, which need no request, and
+// calls allocated, at most once, only when the specs show no claim.
 type screenHolds struct {
 	prepared  map[string]bool
 	allocated func() (map[string]bool, error)
@@ -138,7 +135,7 @@ func (h *screenHolds) holds(device string) (bool, error) {
 	return claimed[device], err
 }
 
-// any reports whether a claim holds any output device on this card.
+// any reports whether a claim holds any output device of this card.
 func (h *screenHolds) any() (bool, error) {
 	if len(h.prepared) > 0 {
 		return true, nil

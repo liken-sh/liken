@@ -1,6 +1,5 @@
 package main
 
-// The hold on a connector whose hot plug detect drops for a moment.
 // Each test runs in a synctest bubble, so the settle time passes on the
 // bubble's clock and the deadline timer fires on it.
 
@@ -11,18 +10,10 @@ import (
 	"time"
 )
 
-// darkOutput is a connector that reads disconnected, with nothing in
-// its EDID file, the way sysfs answers during a drop.
-func darkOutput(connector string) Output {
-	return Output{Connector: connector}
-}
-
-// A connector that goes dark answers its last lit reading until it has
-// stayed dark for the settle time, and answers dark from then on. A
-// connector that this process never saw lit answers dark at once,
-// because there is no reading to hold.
-func TestAConnectorThatGoesDarkIsHeldForTheSettleTime(t *testing.T) {
-	lit := litOutput("HDMI-A-1", labMonitor())
+// A connector with no connected reading is returned disconnected at
+// once, because there is nothing to hold.
+func TestADisconnectedConnectorIsHeldForTheSettleTime(t *testing.T) {
+	lit := connectedOutput("HDMI-A-1", labMonitor())
 	lit.CurrentMode = "1920x1080@60"
 	cases := []struct {
 		name      string
@@ -32,7 +23,7 @@ func TestAConnectorThatGoesDarkIsHeldForTheSettleTime(t *testing.T) {
 	}{
 		{"a drop shorter than the settle time", []Output{lit}, hotplugSettle - time.Millisecond, true},
 		{"a drop as long as the settle time", []Output{lit}, hotplugSettle, false},
-		{"a connector never seen lit", nil, 0, false},
+		{"a connector never seen connected", nil, 0, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -41,47 +32,45 @@ func TestAConnectorThatGoesDarkIsHeldForTheSettleTime(t *testing.T) {
 				for _, output := range c.before {
 					view.apply([]Output{output})
 				}
-				view.apply([]Output{darkOutput("HDMI-A-1")})
+				view.apply([]Output{disconnectedOutput("HDMI-A-1")})
 				time.Sleep(c.dark)
 
-				got := view.apply([]Output{darkOutput("HDMI-A-1")})[0]
+				got := view.apply([]Output{disconnectedOutput("HDMI-A-1")})[0]
 
 				if got.Connected != c.connected || got.Held != c.connected {
 					t.Fatalf("the connector reads connected=%v held=%v, want %v", got.Connected, got.Held, c.connected)
 				}
 				if c.connected && (got.Monitor != lit.Monitor || got.CurrentMode != lit.CurrentMode) {
-					t.Errorf("the held connector answers %+v, want the lit reading %+v", got, lit)
+					t.Errorf("the held connector reads %+v, want the connected reading %+v", got, lit)
 				}
 			})
 		})
 	}
 }
 
-// A connector that comes back inside the settle time ends the hold, so
-// the next drop is held for a whole settle time of its own.
+// A connector that comes back before the deadline ends the hold, so
+// the next drop gets a whole settle time of its own.
 func TestEachDropIsHeldForItsOwnSettleTime(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		view := newHotplugHold(nil, nil).view()
-		lit := litOutput("HDMI-A-1", labMonitor())
+		lit := connectedOutput("HDMI-A-1", labMonitor())
 		view.apply([]Output{lit})
-		view.apply([]Output{darkOutput("HDMI-A-1")})
+		view.apply([]Output{disconnectedOutput("HDMI-A-1")})
 		time.Sleep(hotplugSettle - time.Second)
 		view.apply([]Output{lit})
-		view.apply([]Output{darkOutput("HDMI-A-1")})
+		view.apply([]Output{disconnectedOutput("HDMI-A-1")})
 		time.Sleep(hotplugSettle - time.Second)
 
-		if got := view.apply([]Output{darkOutput("HDMI-A-1")})[0]; !got.Held {
+		if got := view.apply([]Output{disconnectedOutput("HDMI-A-1")})[0]; !got.Held {
 			t.Error("the second drop was not held, though it is shorter than the settle time")
 		}
 	})
 }
 
-// A burst of drops that no pass reads lit between is still a burst of
-// short drops. A hotplug event between two dark reads means the
-// connector may have moved since the last one, so the hold starts
-// again from the later read. An event that names another connector
-// says nothing about this one, and neither does no event at all.
-func TestAHotplugEventBetweenDarkReadsStartsTheHoldAgain(t *testing.T) {
+// When no pass reads the connector connected between drops, a burst of
+// short drops looks like one long outage, so a uevent that may concern
+// the connector restarts the hold from the later read.
+func TestAHotplugEventBetweenDisconnectedReadsRestartsTheHold(t *testing.T) {
 	cases := []struct {
 		name   string
 		events []drmEvent
@@ -90,10 +79,8 @@ func TestAHotplugEventBetweenDarkReadsStartsTheHoldAgain(t *testing.T) {
 		{"an event that names no connector", []drmEvent{{Action: "change", DevPath: cardPath}}, true},
 		{"an event that names this connector", []drmEvent{{Action: "change", DevPath: cardPath, Connector: "403"}}, true},
 		{"an event that names another connector", []drmEvent{{Action: "change", DevPath: cardPath, Connector: "409"}}, false},
-		// DRM numbers connectors per device, so another card's 403 is
-		// another connector.
 		{"an event of another card", []drmEvent{{Action: "change", DevPath: otherCardPath, Connector: "403"}}, false},
-		{"an event the socket lost", []drmEvent{{Action: "lost events", DevPath: "the uevent socket answered ENOBUFS"}}, true},
+		{"an event the socket lost", []drmEvent{{Action: "lost events", DevPath: "the uevent socket reported ENOBUFS"}}, true},
 		{"no event between the reads", nil, false},
 	}
 	for _, c := range cases {
@@ -101,16 +88,16 @@ func TestAHotplugEventBetweenDarkReadsStartsTheHoldAgain(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				counts := newHotplugCounts("card1")
 				view := newHotplugHold(nil, counts.count).view()
-				view.apply([]Output{numbered(litOutput("HDMI-A-1", labMonitor()))})
-				view.apply([]Output{numbered(darkOutput("HDMI-A-1"))})
+				view.apply([]Output{numbered(connectedOutput("HDMI-A-1", labMonitor()))})
+				view.apply([]Output{numbered(disconnectedOutput("HDMI-A-1"))})
 				time.Sleep(hotplugSettle - time.Second)
 				for _, event := range c.events {
 					counts.add(event)
 				}
-				view.apply([]Output{numbered(darkOutput("HDMI-A-1"))})
+				view.apply([]Output{numbered(disconnectedOutput("HDMI-A-1"))})
 				time.Sleep(2 * time.Second)
 
-				if got := view.apply([]Output{numbered(darkOutput("HDMI-A-1"))})[0]; got.Held != c.held {
+				if got := view.apply([]Output{numbered(disconnectedOutput("HDMI-A-1"))})[0]; got.Held != c.held {
 					t.Errorf("the connector reads held=%v, want %v", got.Held, c.held)
 				}
 			})
@@ -118,27 +105,26 @@ func TestAHotplugEventBetweenDarkReadsStartsTheHoldAgain(t *testing.T) {
 	}
 }
 
-// otherCardPath is a second GPU's card on the same machine, whose
-// events the uevent socket carries too.
+// otherCardPath is a second GPU on the same machine, whose events the
+// uevent socket also receives.
 const otherCardPath = "/devices/pci0000:00/0000:03:00.0/drm/card0"
 
-// numbered gives a reading the DRM object id the kernel gave
-// HDMI-A-1, which a hotplug event names it by.
+// numbered sets the DRM object id that the uevents in these tests use
+// for HDMI-A-1.
 func numbered(output Output) Output {
 	output.ConnectorID = "403"
 	return output
 }
 
-// Events that name no connector start the hold again only until the
-// connector has been dark for hotplugCeiling. A neighbour on the same
-// card that drops every 3 seconds therefore delays the report of a
-// monitor that really left by at most the ceiling, and never hides it.
+// A neighbour on the same card that drops every 3 seconds sends uevents
+// that name no connector. They delay the report of an unplug here to
+// at most hotplugCeiling plus hotplugSettle, and never hide it.
 func TestAFlappingNeighbourDelaysAnUnplugOnlyToTheCeiling(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		counts := newHotplugCounts("card1")
 		view := newHotplugHold(nil, counts.count).view()
-		view.apply([]Output{litOutput("HDMI-A-1", labMonitor())})
-		dark := []Output{darkOutput("HDMI-A-1")}
+		view.apply([]Output{connectedOutput("HDMI-A-1", labMonitor())})
+		dark := []Output{disconnectedOutput("HDMI-A-1")}
 		view.apply(dark)
 		reported := time.Duration(0)
 		for elapsed := 3 * time.Second; elapsed <= hotplugCeiling+2*hotplugSettle; elapsed += 3 * time.Second {
@@ -155,47 +141,41 @@ func TestAFlappingNeighbourDelaysAnUnplugOnlyToTheCeiling(t *testing.T) {
 	})
 }
 
-// The readers of one hold share each connector's dark time, so the
-// Display, the windows, and the slice report a monitor that left at
-// the same deadline, whichever reader saw the drop first.
-func TestEveryViewOfAHoldEndsItAtOneDeadline(t *testing.T) {
+// The deadline runs from the first view that read the drop.
+func TestEveryViewOfAHoldEndsItAtTheSameDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		hold := newHotplugHold(nil, nil)
 		screens, slice := hold.view(), hold.view()
-		lit := litOutput("HDMI-A-1", labMonitor())
+		lit := connectedOutput("HDMI-A-1", labMonitor())
 		screens.apply([]Output{lit})
 		slice.apply([]Output{lit})
-		screens.apply([]Output{darkOutput("HDMI-A-1")})
+		screens.apply([]Output{disconnectedOutput("HDMI-A-1")})
 		time.Sleep(hotplugSettle - time.Second)
-		slice.apply([]Output{darkOutput("HDMI-A-1")})
+		slice.apply([]Output{disconnectedOutput("HDMI-A-1")})
 		time.Sleep(time.Second)
 
-		if got := slice.apply([]Output{darkOutput("HDMI-A-1")})[0]; got.Held {
-			t.Error("the slice still holds a connector the other view read dark a settle time ago")
+		if got := slice.apply([]Output{disconnectedOutput("HDMI-A-1")})[0]; got.Held {
+			t.Error("the slice still holds a connector the other view read disconnected a settle time ago")
 		}
 	})
 }
 
-// A monitor that answers on the connector is never shown as the one
-// held: a different monitor that arrives inside the settle time is read
-// as it is.
+// A different monitor that arrives during a hold is returned as read.
 func TestADifferentMonitorEndsTheHold(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		view := newHotplugHold(nil, nil).view()
-		view.apply([]Output{litOutput("HDMI-A-1", labMonitor())})
-		view.apply([]Output{darkOutput("HDMI-A-1")})
+		view.apply([]Output{connectedOutput("HDMI-A-1", labMonitor())})
+		view.apply([]Output{disconnectedOutput("HDMI-A-1")})
 
-		got := view.apply([]Output{litOutput("HDMI-A-1", portableMonitor())})[0]
+		got := view.apply([]Output{connectedOutput("HDMI-A-1", portableMonitor())})[0]
 
 		if got.Held || got.Monitor != portableMonitor() {
-			t.Errorf("the connector answers %+v, want the monitor on the wire", got)
+			t.Errorf("the connector reads %+v, want the connected monitor", got)
 		}
 	})
 }
 
-// The end of a hold wakes a pass once, so a monitor that really left
-// is reported at the deadline and not on the next unrelated event. A
-// drop that ends inside the settle time wakes nothing extra.
+// A drop that ends before the deadline wakes no pass.
 func TestTheEndOfAHoldWakesOnePass(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -210,10 +190,10 @@ func TestTheEndOfAHoldWakesOnePass(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				var wakes atomic.Int64
 				view := newHotplugHold(func() { wakes.Add(1) }, nil).view()
-				lit := litOutput("HDMI-A-1", labMonitor())
+				lit := connectedOutput("HDMI-A-1", labMonitor())
 				view.apply([]Output{lit})
-				view.apply([]Output{darkOutput("HDMI-A-1")})
-				view.apply([]Output{darkOutput("HDMI-A-1")})
+				view.apply([]Output{disconnectedOutput("HDMI-A-1")})
+				view.apply([]Output{disconnectedOutput("HDMI-A-1")})
 				if c.back {
 					view.apply([]Output{lit})
 				}
@@ -229,17 +209,16 @@ func TestTheEndOfAHoldWakesOnePass(t *testing.T) {
 	}
 }
 
-// The operator's own wiring: the end of a hold schedules one more pass
-// through the channel a failed write retries on, and the loop's wakes
-// carry it to the settled pass.
-func TestTheEndOfAHoldReachesTheLoop(t *testing.T) {
+// The card's hold sends on the retries channel at its deadline, and
+// wakes turns that send into a pass of the loop.
+func TestTheEndOfACardHoldWakesTheLoop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		retries := make(chan struct{}, 1)
 		hold := newCardHold(retries, nil)
 		out := wakes(t.Context(), nil, retries, nil, nil, nil, nil)
 		view := hold.view()
-		view.apply([]Output{litOutput("HDMI-A-1", labMonitor())})
-		view.apply([]Output{darkOutput("HDMI-A-1")})
+		view.apply([]Output{connectedOutput("HDMI-A-1", labMonitor())})
+		view.apply([]Output{disconnectedOutput("HDMI-A-1")})
 
 		time.Sleep(hotplugSettle)
 		synctest.Wait()
@@ -267,11 +246,9 @@ func TestEachDRMEventIsCountedBeforeItWakesThePass(t *testing.T) {
 	})
 }
 
-// A nil view answers the walk as it is, which is what a caller that
-// holds nothing passes.
-func TestANilViewAnswersTheWalk(t *testing.T) {
+func TestANilViewReturnsTheReadUnchanged(t *testing.T) {
 	var view *hotplugView
-	if got := view.apply([]Output{darkOutput("HDMI-A-1")}); got[0].Connected {
-		t.Errorf("a nil view answered %+v", got[0])
+	if got := view.apply([]Output{disconnectedOutput("HDMI-A-1")}); got[0].Connected {
+		t.Errorf("a nil view returns the connector as %+v, want it unchanged and disconnected", got[0])
 	}
 }

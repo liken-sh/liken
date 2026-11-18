@@ -26,12 +26,12 @@ func TestTargetFromOptions(t *testing.T) {
 			target, err := targetFromOptions(tc.opts)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("targetFromOptions(%+v) returned no error", tc.opts)
+					t.Fatalf("targetFromOptions(%+v) returned no error, want one", tc.opts)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("targetFromOptions(%+v): %v", tc.opts, err)
+				t.Fatalf("targetFromOptions(%+v) returned %v, want no error", tc.opts, err)
 			}
 			if target.Format != tc.format {
 				t.Fatalf("format = %q, want %q", target.Format, tc.format)
@@ -53,7 +53,7 @@ func TestCaptureRoute(t *testing.T) {
 		t.Run(tc.format, func(t *testing.T) {
 			path, accept, err := captureRoute(captureTarget{Name: "HDMI-A-1", Format: tc.format})
 			if err != nil {
-				t.Fatalf("captureRoute: %v", err)
+				t.Fatalf("captureRoute returned %v, want no error", err)
 			}
 			if path != tc.path || accept != tc.accept {
 				t.Fatalf("captureRoute = (%q, %q), want (%q, %q)", path, accept, tc.path, tc.accept)
@@ -72,13 +72,13 @@ func TestStreamCaptureWritesOnlyMediaBytes(t *testing.T) {
 	const media = "\x00\x00\x00\x18ftypmp42"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/display/displays/HDMI-A-1/screen.mp4" {
-			t.Errorf("path = %q", r.URL.Path)
+			t.Errorf("request path is %q, want /v1/display/displays/HDMI-A-1/screen.mp4", r.URL.Path)
 		}
 		if r.Header.Get("Accept") != "video/mp4" {
-			t.Errorf("Accept = %q", r.Header.Get("Accept"))
+			t.Errorf("Accept is %q, want video/mp4", r.Header.Get("Accept"))
 		}
 		if r.Header.Get("Authorization") != "Bearer secret" {
-			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+			t.Errorf("Authorization is %q, want Bearer secret", r.Header.Get("Authorization"))
 		}
 		io.WriteString(w, media)
 	}))
@@ -88,14 +88,14 @@ func TestStreamCaptureWritesOnlyMediaBytes(t *testing.T) {
 	err := streamCapture(context.Background(), server.Client(), server.URL, "secret",
 		captureTarget{Name: "HDMI-A-1", Format: "mp4"}, &out)
 	if err != nil {
-		t.Fatalf("streamCapture: %v", err)
+		t.Fatalf("streamCapture returned %v, want no error", err)
 	}
 	if out.String() != media {
-		t.Fatalf("out = %q, want %q", out.String(), media)
+		t.Fatalf("output is %q, want %q", out.String(), media)
 	}
 }
 
-func TestStreamCaptureCarriesTheServerWords(t *testing.T) {
+func TestStreamCaptureErrorIncludesTheResponseBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		io.WriteString(w, "you may not look at this screen")
@@ -106,13 +106,13 @@ func TestStreamCaptureCarriesTheServerWords(t *testing.T) {
 	err := streamCapture(context.Background(), server.Client(), server.URL, "",
 		captureTarget{Name: "HDMI-A-1", Format: "mp4"}, &out)
 	if err == nil {
-		t.Fatal("streamCapture returned no error for a 403")
+		t.Fatal("streamCapture returned no error for a 403, want one")
 	}
 	if !strings.Contains(err.Error(), "you may not look at this screen") {
-		t.Fatalf("error %q does not carry the server's words", err)
+		t.Fatalf("error is %q, want it to include the response body", err)
 	}
 	if out.Len() != 0 {
-		t.Fatalf("out carried %q on an error", out.String())
+		t.Fatalf("output is %q after a 403, want empty", out.String())
 	}
 }
 
@@ -120,15 +120,15 @@ func TestRunCaptureRejectsBadOptionsBeforeTheCluster(t *testing.T) {
 	err := runCapture(context.Background(), nil,
 		captureOptions{Name: "HDMI-A-1", Format: "gif"}, io.Discard, io.Discard)
 	if err == nil {
-		t.Fatal("runCapture reached the cluster with an unknown format")
+		t.Fatal("runCapture returned no error for the format gif, want one before it reaches the cluster")
 	}
 }
 
-func TestCaptureClientNamesTheServiceDNS(t *testing.T) {
+func TestCaptureClientSetsTheServerNameToTheServiceDNS(t *testing.T) {
 	client := captureClient(nil, nil)
 	transport, ok := client.Transport.(*http.Transport)
 	if !ok {
-		t.Fatalf("transport is %T", client.Transport)
+		t.Fatalf("client.Transport is %T, want *http.Transport", client.Transport)
 	}
 	if transport.TLSClientConfig.ServerName != apiServiceDNS {
 		t.Fatalf("ServerName = %q, want %q", transport.TLSClientConfig.ServerName, apiServiceDNS)

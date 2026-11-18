@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-func TestRecordOutputsStatesConnectedAndClaimed(t *testing.T) {
+func TestRecordOutputsSetsConnectedAndClaimed(t *testing.T) {
 	readings := newMetrics("display-operator", "dev")
 	outputs := []Output{
 		{Connector: "HDMI-A-1", Connected: true},
@@ -31,17 +31,17 @@ func TestRecordOutputsStatesConnectedAndClaimed(t *testing.T) {
 	}
 }
 
-func TestRecordOutputsForgetsAConnectorTheCardStoppedReporting(t *testing.T) {
+func TestRecordOutputsDropsAConnectorTheCardStoppedReporting(t *testing.T) {
 	readings := newMetrics("display-operator", "dev")
 	readings.recordOutputs([]Output{{Connector: "HDMI-A-1", Connected: true}}, nil)
 	readings.recordOutputs([]Output{{Connector: "DP-1", Connected: true}}, nil)
 
 	if count := testutil.CollectAndCount(readings.outputConnected); count != 1 {
-		t.Errorf("display_output_connected carries %d series, want 1", count)
+		t.Errorf("display_output_connected has %d series, want 1", count)
 	}
 }
 
-func TestRecordModeStatesTheActuatedModeAndRefresh(t *testing.T) {
+func TestRecordModeSetsTheCurrentModeAndRefresh(t *testing.T) {
 	readings := newMetrics("display-operator", "dev")
 	readings.recordOutputs([]Output{{Connector: "HDMI-A-1", Connected: true, CurrentMode: "3840x1600@24"}}, nil)
 
@@ -51,16 +51,16 @@ func TestRecordModeStatesTheActuatedModeAndRefresh(t *testing.T) {
 	}
 }
 
-func TestRecordModeStatesNothingForAnOutputDrivingNothing(t *testing.T) {
+func TestRecordModeSetsNothingForAnOutputDrivingNothing(t *testing.T) {
 	readings := newMetrics("display-operator", "dev")
 	readings.recordOutputs([]Output{{Connector: "HDMI-A-1", Connected: false, CurrentMode: ""}}, nil)
 
 	if count := testutil.CollectAndCount(readings.outputMode); count != 0 {
-		t.Errorf("display_output_mode_info carries %d series, want none", count)
+		t.Errorf("display_output_mode_info has %d series, want none", count)
 	}
 }
 
-func TestRecordObservationStatesValidityAndTheSuccessTimestamp(t *testing.T) {
+func TestRecordObservationSetsValidityAndTheSuccessTimestamp(t *testing.T) {
 	readings := newMetrics("display-operator", "dev")
 	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
 
@@ -115,7 +115,7 @@ func TestARepeatedScrapeLeavesTheRestartCounterUnchanged(t *testing.T) {
 	}
 }
 
-func TestRecordSurfacesStatesTheCountPerOutput(t *testing.T) {
+func TestRecordSurfacesSetsTheCountPerOutput(t *testing.T) {
 	readings := newMetrics("display-operator", "dev")
 	readings.recordSurfaces("HDMI-A-1", 3)
 	readings.recordSurfaces("DP-1", 0)
@@ -128,7 +128,7 @@ func TestRecordSurfacesStatesTheCountPerOutput(t *testing.T) {
 	}
 }
 
-func TestRecordPanelStatesPowerAndBrightnessWhenKnown(t *testing.T) {
+func TestRecordPanelSetsPowerAndBrightnessWhenKnown(t *testing.T) {
 	readings := newMetrics("display-operator", "dev")
 	facts := panelFacts{Observed: map[byte]uint16{vcpPowerMode: powerModeOn, vcpBrightness: 80}}
 	readings.recordPanel("HDMI-A-1", facts)
@@ -141,22 +141,21 @@ func TestRecordPanelStatesPowerAndBrightnessWhenKnown(t *testing.T) {
 	}
 }
 
-func TestRecordPanelStatesNothingForAControlNeverRead(t *testing.T) {
+func TestRecordPanelSetsNothingForAControlNeverRead(t *testing.T) {
 	readings := newMetrics("display-operator", "dev")
 	readings.recordPanel("HDMI-A-1", panelFacts{})
 
 	if count := testutil.CollectAndCount(readings.panelPower); count != 0 {
-		t.Errorf("display_panel_power carries %d series, want none", count)
+		t.Errorf("display_panel_power has %d series, want none", count)
 	}
 	if count := testutil.CollectAndCount(readings.panelBrightness); count != 0 {
-		t.Errorf("display_panel_brightness carries %d series, want none", count)
+		t.Errorf("display_panel_brightness has %d series, want none", count)
 	}
 }
 
 func TestEveryDisplayMetricRecorderIsNilSafe(t *testing.T) {
-	// Every test in this repository that drives a pass with no
-	// listener behind it drives one with a nil metrics too, so a
-	// pass must record nothing rather than panic.
+	// Tests that run a pass without a metrics server pass a nil
+	// *metrics, so each recorder must do nothing instead of panic.
 	var readings *metrics
 	readings.recordOutputs([]Output{{Connector: "HDMI-A-1", Connected: true}}, nil)
 	readings.recordObservation("card", true, time.Now())
@@ -171,23 +170,23 @@ func TestTheCompositorServingGaugeFollowsTheProbe(t *testing.T) {
 		serving bool
 		want    float64
 	}{
-		{"a compositor that answers", true, 1},
+		{"a compositor that replies", true, 1},
 		{"a compositor that serves nobody", false, 0},
 	}
-	for _, drill := range cases {
-		t.Run(drill.name, func(t *testing.T) {
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
 			readings := newMetrics("display-operator", "dev")
 
-			readings.recordCompositorServing(drill.serving)
+			readings.recordCompositorServing(c.serving)
 
-			if got := testutil.ToFloat64(readings.compositorServing); got != drill.want {
-				t.Errorf("display_compositor_serving = %v, want %v", got, drill.want)
+			if got := testutil.ToFloat64(readings.compositorServing); got != c.want {
+				t.Errorf("display_compositor_serving = %v, want %v", got, c.want)
 			}
 		})
 	}
 }
 
-func TestTheContainerRestartCounterTakesTheGrowth(t *testing.T) {
+func TestTheContainerRestartCounterAddsTheGrowth(t *testing.T) {
 	readings := newMetrics("display-operator", "dev")
 
 	readings.recordCompositorRestarts(2)

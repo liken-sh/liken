@@ -15,21 +15,21 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// This fixture is an API server that answers the two review paths
-// with real JSON and keeps every body it read, so a drill reads what
-// the API sent rather than how it sent it.
+// reviewAPI is a fake API server for TokenReview and
+// SubjectAccessReview. It returns the configured JSON for each path
+// and records each request body.
 type reviewAPI struct {
-	mu      sync.Mutex
-	answers map[string]string
-	status  map[string]int
-	bodies  map[string][]map[string]any
+	mu        sync.Mutex
+	responses map[string]string
+	status    map[string]int
+	bodies    map[string][]map[string]any
 }
 
 func newReviewAPI() *reviewAPI {
 	return &reviewAPI{
-		answers: map[string]string{},
-		status:  map[string]int{},
-		bodies:  map[string][]map[string]any{},
+		responses: map[string]string{},
+		status:    map[string]int{},
+		bodies:    map[string][]map[string]any{},
 	}
 }
 
@@ -40,7 +40,7 @@ func (a *reviewAPI) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	a.mu.Lock()
 	a.bodies[req.URL.Path] = append(a.bodies[req.URL.Path], body)
-	answer, status := a.answers[req.URL.Path], a.status[req.URL.Path]
+	response, status := a.responses[req.URL.Path], a.status[req.URL.Path]
 	a.mu.Unlock()
 
 	if status == 0 {
@@ -48,7 +48,7 @@ func (a *reviewAPI) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_, _ = io.WriteString(w, answer)
+	_, _ = io.WriteString(w, response)
 }
 
 func (a *reviewAPI) sent(t *testing.T, path string) []map[string]any {
@@ -58,8 +58,8 @@ func (a *reviewAPI) sent(t *testing.T, path string) []map[string]any {
 	return a.bodies[path]
 }
 
-// An empty credentials directory is a client that reads no token
-// file, so a drill needs none on disk.
+// reviewClient returns a client with no credentials directory, so a
+// test needs no token file on disk.
 func reviewClient(t *testing.T, api *reviewAPI) *apiclient.Client {
 	t.Helper()
 	server := httptest.NewServer(api)
@@ -67,8 +67,7 @@ func reviewClient(t *testing.T, api *reviewAPI) *apiclient.Client {
 	return apiclient.New(server.URL, server.Client(), "")
 }
 
-// fieldAt reads one field out of a decoded JSON body by its path,
-// the way the review drills read the bodies the API sent.
+// fieldAt returns the value at a path of keys in a decoded JSON body.
 func fieldAt(t *testing.T, body map[string]any, path ...string) any {
 	t.Helper()
 	var current any = body
@@ -85,7 +84,7 @@ func fieldAt(t *testing.T, body map[string]any, path ...string) any {
 	return current
 }
 
-const authenticatedAnswer = `{
+const authenticatedResponse = `{
 	"apiVersion": "authentication.k8s.io/v1",
 	"kind": "TokenReview",
 	"status": {
@@ -100,13 +99,13 @@ const authenticatedAnswer = `{
 	}
 }`
 
-func TestTokenReviewCarriesTheAudience(t *testing.T) {
+func TestTokenReviewSendsTheAudience(t *testing.T) {
 	api := newReviewAPI()
-	api.answers[tokenReviewsPath] = authenticatedAnswer
+	api.responses[tokenReviewsPath] = authenticatedResponse
 
 	who, f := reviewToken(reviewClient(t, api), "a.b.c", apiAudience)
 	if f != nil {
-		t.Fatalf("review refused the token: %v", f)
+		t.Fatalf("reviewing the token: %v", f)
 	}
 
 	sent := api.sent(t, tokenReviewsPath)
@@ -126,77 +125,77 @@ func TestTokenReviewCarriesTheAudience(t *testing.T) {
 		t.Errorf("spec.audiences is %v, want [%s]", got, apiAudience)
 	}
 	if who.Username != "system:serviceaccount:liken-system:display-viewer" {
-		t.Errorf("username is %q", who.Username)
+		t.Errorf("username is %q, want the display-viewer service account", who.Username)
 	}
 	if who.UID != "6b3f0e1a-9c2d-4f11-8a77-1c4e5d2b3a90" {
-		t.Errorf("uid is %q", who.UID)
+		t.Errorf("uid is %q, want the one the review returned", who.UID)
 	}
 	if !reflect.DeepEqual(who.Groups, []string{"system:serviceaccounts", "system:authenticated"}) {
-		t.Errorf("groups are %v", who.Groups)
+		t.Errorf("groups are %v, want the two the review returned", who.Groups)
 	}
 	if !reflect.DeepEqual(who.Extra, map[string][]string{"authentication.kubernetes.io/pod-name": {"viewer-7c9d"}}) {
-		t.Errorf("extra is %v", who.Extra)
+		t.Errorf("extra is %v, want the pod-name entry the review returned", who.Extra)
 	}
 }
 
 func TestTokenReviewRefusals(t *testing.T) {
 	const jose = "[invalid bearer token, square/go-jose/jwt: validation failed, token is expired (exp)]"
 	cases := []struct {
-		name   string
-		answer string
-		detail string
+		name     string
+		response string
+		detail   string
 	}{
 		{
-			name:   "the wrong audience",
-			answer: `{"status": {"authenticated": true, "audiences": ["https://kubernetes.default.svc"]}}`,
-			detail: apiAudience,
+			name:     "the wrong audience",
+			response: `{"status": {"authenticated": true, "audiences": ["https://kubernetes.default.svc"]}}`,
+			detail:   apiAudience,
 		},
 		{
-			name:   "unauthenticated with the review's own words",
-			answer: `{"status": {"authenticated": false, "error": "` + jose + `"}}`,
-			detail: jose,
+			name:     "unauthenticated with the review's error",
+			response: `{"status": {"authenticated": false, "error": "` + jose + `"}}`,
+			detail:   jose,
 		},
 		{
-			name:   "authenticated for nothing at all",
-			answer: `{"status": {"authenticated": false}}`,
-			detail: apiAudience,
+			name:     "unauthenticated with no error",
+			response: `{"status": {"authenticated": false}}`,
+			detail:   apiAudience,
 		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			api := newReviewAPI()
-			api.answers[tokenReviewsPath] = test.answer
+			api.responses[tokenReviewsPath] = test.response
 
 			who, f := reviewToken(reviewClient(t, api), "a.b.c", apiAudience)
 			if who != nil {
-				t.Fatalf("review admitted %v", who)
+				t.Fatalf("the token was accepted as %v, want it refused", who)
 			}
 			if f.status != http.StatusUnauthorized {
 				t.Errorf("status is %d, want 401", f.status)
 			}
 			if !strings.Contains(f.detail, test.detail) {
-				t.Errorf("detail is %q, want it to carry %q", f.detail, test.detail)
+				t.Errorf("detail is %q, want it to contain %q", f.detail, test.detail)
 			}
 		})
 	}
 }
 
-func TestTokenReviewRefusalCarriesTheReviewsWordsVerbatim(t *testing.T) {
-	const words = "invalid bearer token, service account token has been invalidated"
+func TestTokenReviewRefusalReturnsTheReviewErrorUnchanged(t *testing.T) {
+	const reviewError = "invalid bearer token, service account token has been invalidated"
 	api := newReviewAPI()
-	api.answers[tokenReviewsPath] = `{"status": {"authenticated": false, "error": "` + words + `"}}`
+	api.responses[tokenReviewsPath] = `{"status": {"authenticated": false, "error": "` + reviewError + `"}}`
 
 	_, f := reviewToken(reviewClient(t, api), "a.b.c", apiAudience)
-	if f.detail != words {
-		t.Errorf("detail is %q, want %q", f.detail, words)
+	if f.detail != reviewError {
+		t.Errorf("detail is %q, want %q", f.detail, reviewError)
 	}
 }
 
-func TestTokenReviewCarriesTheAPIServersFailure(t *testing.T) {
+func TestTokenReviewReturnsTheAPIServersFailure(t *testing.T) {
 	const message = "tokenreviews.authentication.k8s.io is forbidden: User cannot create resource"
 	api := newReviewAPI()
 	api.status[tokenReviewsPath] = http.StatusForbidden
-	api.answers[tokenReviewsPath] = `{"message": "` + message + `"}`
+	api.responses[tokenReviewsPath] = `{"message": "` + message + `"}`
 
 	_, f := reviewToken(reviewClient(t, api), "a.b.c", apiAudience)
 	if f.status != http.StatusServiceUnavailable {
@@ -206,12 +205,10 @@ func TestTokenReviewCarriesTheAPIServersFailure(t *testing.T) {
 		t.Errorf("kind is %q, want %q", f.kind, problemUpstreamFailed)
 	}
 	if !strings.Contains(f.detail, message) {
-		t.Errorf("detail is %q, want it to carry the API server's message", f.detail)
+		t.Errorf("detail is %q, want it to include the API server's message", f.detail)
 	}
 }
 
-// A token's payload segment is read for exp alone, and a payload
-// that does not decode leaves the expiry zero.
 func TestTokenExpiryReadsTheExpClaim(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -238,11 +235,9 @@ func signedToken(payload string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256"}`)) + "." + segment + ".signature"
 }
 
-// The review carries the four subject fields from the TokenReview
-// and the empty namespace a cluster-scoped Display has.
-func TestSubjectAccessReviewCarriesTheSubject(t *testing.T) {
+func TestSubjectAccessReviewSendsTheSubject(t *testing.T) {
 	api := newReviewAPI()
-	api.answers[accessReviewsPath] = `{"status": {"allowed": true, "reason": "RBAC: allowed by ClusterRoleBinding \"viewers\""}}`
+	api.responses[accessReviewsPath] = `{"status": {"allowed": true, "reason": "RBAC: allowed by ClusterRoleBinding \"viewers\""}}`
 
 	who := &caller{
 		Username: "system:serviceaccount:liken-system:display-viewer",
@@ -253,13 +248,13 @@ func TestSubjectAccessReviewCarriesTheSubject(t *testing.T) {
 	allowed, reason, f := authorizeSubject(reviewClient(t, api), who,
 		"get", DisplayGroup, displaysPlural, screenAspect, "", "HDMI-A-1")
 	if f != nil {
-		t.Fatalf("review failed: %v", f)
+		t.Fatalf("reviewing the access: %v", f)
 	}
 	if !allowed {
-		t.Error("the review said no")
+		t.Error("the access was denied, want it allowed")
 	}
 	if reason != `RBAC: allowed by ClusterRoleBinding "viewers"` {
-		t.Errorf("reason is %q", reason)
+		t.Errorf("reason is %q, want the RBAC reason for the viewers binding", reason)
 	}
 
 	sent := api.sent(t, accessReviewsPath)
@@ -293,32 +288,32 @@ func TestSubjectAccessReviewCarriesTheSubject(t *testing.T) {
 	}
 }
 
-func TestSubjectAccessReviewVerdicts(t *testing.T) {
+func TestSubjectAccessReviewResults(t *testing.T) {
 	cases := []struct {
-		name    string
-		answer  string
-		allowed bool
-		reason  string
+		name     string
+		response string
+		allowed  bool
+		reason   string
 	}{
 		{
-			name:    "allowed",
-			answer:  `{"status": {"allowed": true, "reason": "RBAC: allowed by ClusterRole \"display-capture-viewer\""}}`,
-			allowed: true,
-			reason:  `RBAC: allowed by ClusterRole "display-capture-viewer"`,
+			name:     "allowed",
+			response: `{"status": {"allowed": true, "reason": "RBAC: allowed by ClusterRole \"display-capture-viewer\""}}`,
+			allowed:  true,
+			reason:   `RBAC: allowed by ClusterRole "display-capture-viewer"`,
 		},
 		{
-			name:   "denied with the API server's words",
-			answer: `{"status": {"allowed": false, "reason": "no RBAC policy matched"}}`,
-			reason: "no RBAC policy matched",
+			name:     "denied with the API server's reason",
+			response: `{"status": {"allowed": false, "reason": "no RBAC policy matched"}}`,
+			reason:   "no RBAC policy matched",
 		},
 		{
-			name:   "an evaluation error",
-			answer: `{"status": {"allowed": false, "evaluationError": "clusterrole.rbac.authorization.k8s.io \"gone\" not found"}}`,
-			reason: `clusterrole.rbac.authorization.k8s.io "gone" not found`,
+			name:     "an evaluation error",
+			response: `{"status": {"allowed": false, "evaluationError": "clusterrole.rbac.authorization.k8s.io \"gone\" not found"}}`,
+			reason:   `clusterrole.rbac.authorization.k8s.io "gone" not found`,
 		},
 		{
 			name: "a reason and an evaluation error",
-			answer: `{"status": {"allowed": false, "reason": "no RBAC policy matched",
+			response: `{"status": {"allowed": false, "reason": "no RBAC policy matched",
 				"evaluationError": "clusterrole.rbac.authorization.k8s.io \"gone\" not found"}}`,
 			reason: `no RBAC policy matched; clusterrole.rbac.authorization.k8s.io "gone" not found`,
 		},
@@ -326,12 +321,12 @@ func TestSubjectAccessReviewVerdicts(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			api := newReviewAPI()
-			api.answers[accessReviewsPath] = test.answer
+			api.responses[accessReviewsPath] = test.response
 
 			allowed, reason, f := authorizeSubject(reviewClient(t, api), &caller{Username: "viewer"},
 				"get", DisplayGroup, displaysPlural, screenAspect, "", "HDMI-A-1")
 			if f != nil {
-				t.Fatalf("review failed: %v", f)
+				t.Fatalf("reviewing the access: %v", f)
 			}
 			if allowed != test.allowed {
 				t.Errorf("allowed is %v, want %v", allowed, test.allowed)
@@ -343,11 +338,11 @@ func TestSubjectAccessReviewVerdicts(t *testing.T) {
 	}
 }
 
-func TestSubjectAccessReviewCarriesTheAPIServersFailure(t *testing.T) {
+func TestSubjectAccessReviewReturnsTheAPIServersFailure(t *testing.T) {
 	const message = "the server could not find the requested resource"
 	api := newReviewAPI()
 	api.status[accessReviewsPath] = http.StatusInternalServerError
-	api.answers[accessReviewsPath] = `{"message": "` + message + `"}`
+	api.responses[accessReviewsPath] = `{"message": "` + message + `"}`
 
 	_, _, f := authorizeSubject(reviewClient(t, api), &caller{Username: "viewer"},
 		"get", DisplayGroup, displaysPlural, screenAspect, "", "HDMI-A-1")
@@ -355,16 +350,15 @@ func TestSubjectAccessReviewCarriesTheAPIServersFailure(t *testing.T) {
 		t.Fatalf("status is %d, want 503", f.status)
 	}
 	if !strings.Contains(f.detail, message) {
-		t.Errorf("detail is %q, want it to carry the API server's message", f.detail)
+		t.Errorf("detail is %q, want it to include the API server's message", f.detail)
 	}
 }
 
-// The review a cache drill holds answers a fixed verdict and counts
-// how often it was asked, which is what a cache hit and a cache miss
-// look like from outside.
+// countingReview returns a fixed result and counts its calls, so a
+// test can tell a cache hit from a miss.
 type countingReview struct {
 	mu    sync.Mutex
-	asked int
+	calls int
 	who   *caller
 	deny  *fault
 }
@@ -372,29 +366,29 @@ type countingReview struct {
 func (r *countingReview) review(token string) (*caller, *fault) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.asked++
+	r.calls++
 	return r.who, r.deny
 }
 
 func (r *countingReview) count() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.asked
+	return r.calls
 }
 
-func TestTokenCacheAnswersFromMemory(t *testing.T) {
+func TestTokenCacheReturnsTheCachedCaller(t *testing.T) {
 	reviews := &countingReview{who: &caller{Username: "viewer"}}
 	cache := newTokenCache(reviews.review)
 	clock := time.Date(2026, 9, 16, 21, 0, 0, 0, time.UTC)
 	cache.now = func() time.Time { return clock }
 
-	first, _ := cache.verdict("a.b.c")
-	second, _ := cache.verdict("a.b.c")
+	first, _ := cache.lookup("a.b.c")
+	second, _ := cache.lookup("a.b.c")
 	if first != second {
-		t.Errorf("the cache answered two different verdicts")
+		t.Errorf("the cache returned two different callers, want the same caller")
 	}
 	if reviews.count() != 1 {
-		t.Errorf("asked the API server %d times, want 1", reviews.count())
+		t.Errorf("sent %d reviews, want 1", reviews.count())
 	}
 }
 
@@ -403,7 +397,7 @@ func TestTokenCacheExpiresOnTheClock(t *testing.T) {
 		name    string
 		expires time.Duration
 		elapsed time.Duration
-		asked   int
+		reviews int
 	}{
 		{"inside the minute", 0, 59 * time.Second, 1},
 		{"past the minute", 0, 61 * time.Second, 2},
@@ -422,25 +416,25 @@ func TestTokenCacheExpiresOnTheClock(t *testing.T) {
 			clock := start
 			cache.now = func() time.Time { return clock }
 
-			cache.verdict("a.b.c")
+			cache.lookup("a.b.c")
 			clock = start.Add(test.elapsed)
-			cache.verdict("a.b.c")
+			cache.lookup("a.b.c")
 
-			if reviews.count() != test.asked {
-				t.Errorf("asked the API server %d times, want %d", reviews.count(), test.asked)
+			if reviews.count() != test.reviews {
+				t.Errorf("sent %d reviews, want %d", reviews.count(), test.reviews)
 			}
 		})
 	}
 }
 
-func TestTokenCacheNeverHoldsADenial(t *testing.T) {
+func TestTokenCacheDoesNotCacheARefusal(t *testing.T) {
 	reviews := &countingReview{deny: unauthenticated("invalid bearer token")}
 	cache := newTokenCache(reviews.review)
 
-	cache.verdict("a.b.c")
-	cache.verdict("a.b.c")
+	cache.lookup("a.b.c")
+	cache.lookup("a.b.c")
 	if reviews.count() != 2 {
-		t.Errorf("asked the API server %d times, want 2", reviews.count())
+		t.Errorf("sent %d reviews, want 2", reviews.count())
 	}
 }
 
@@ -453,17 +447,17 @@ func TestTokenCacheIsSafeForConcurrentUse(t *testing.T) {
 		callers.Add(1)
 		go func() {
 			defer callers.Done()
-			cache.verdict("a.b.c")
+			cache.lookup("a.b.c")
 		}()
 	}
 	callers.Wait()
 
-	if _, f := cache.verdict("a.b.c"); f != nil {
-		t.Errorf("the cache refused a token it holds: %v", f)
+	if _, f := cache.lookup("a.b.c"); f != nil {
+		t.Errorf("the cache refused a token it had cached: %v", f)
 	}
 }
 
-func TestReviewedUsernameServesAccount(t *testing.T) {
+func TestServesAccount(t *testing.T) {
 	cases := []struct {
 		name     string
 		username string
@@ -472,13 +466,13 @@ func TestReviewedUsernameServesAccount(t *testing.T) {
 		{"the API's own account", "system:serviceaccount:liken-system:display-api", true},
 		{"another namespace", "system:serviceaccount:default:display-api", false},
 		{"another account", "system:serviceaccount:liken-system:display-viewer", false},
-		{"a person", "chris@liken.sh", false},
-		{"a group that reads like one", "system:serviceaccounts:liken-system", false},
+		{"a person", "viewer@example.com", false},
+		{"a group name", "system:serviceaccounts:liken-system", false},
 		{"nothing at all", "", false},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			if got := servesAccount(test.username, "liken-system", "display-api"); got != test.serves {
+			if got := isServiceAccount(test.username, "liken-system", "display-api"); got != test.serves {
 				t.Errorf("servesAccount(%q) is %v, want %v", test.username, got, test.serves)
 			}
 		})

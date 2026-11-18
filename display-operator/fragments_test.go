@@ -152,9 +152,9 @@ func TestSelectionDefaultsPerRepresentation(t *testing.T) {
 		{"a JPEG still", "", "image/jpeg", 0, 85},
 		{"a clip", "", "video/mp4", 15, 0},
 		{"a stream", "", "multipart/x-mixed-replace", 15, 85},
-		{"a stated framerate", "framerate=30", "video/mp4", 30, 0},
-		{"a stated quality", "quality=50", "image/jpeg", 0, 50},
-		{"both stated on a stream", "framerate=5&quality=100", "multipart/x-mixed-replace", 5, 100},
+		{"an explicit framerate", "framerate=30", "video/mp4", 30, 0},
+		{"an explicit quality", "quality=50", "image/jpeg", 0, 50},
+		{"both explicit on a stream", "framerate=5&quality=100", "multipart/x-mixed-replace", 5, 100},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -168,8 +168,6 @@ func TestSelectionDefaultsPerRepresentation(t *testing.T) {
 	}
 }
 
-// regionSelection builds the selection a query would parse into, so
-// a resolve row states its rectangle and nothing else.
 func regionSelection(box region) captureSelection {
 	return captureSelection{Region: &box}
 }
@@ -216,7 +214,7 @@ func TestSelectionValidatesAgainstTheScreen(t *testing.T) {
 		refresh int
 		detail  string
 	}{
-		{"nothing stated", captureSelection{}, 60, ""},
+		{"nothing explicit", captureSelection{}, 60, ""},
 		{"a width the screen has", captureSelection{Width: 1920}, 60, ""},
 		{"a width under the screen's", captureSelection{Width: 640}, 60, ""},
 		{"a width over the screen's", captureSelection{Width: 3840}, 60, "width=3840"},
@@ -236,8 +234,8 @@ func TestSelectionValidatesAgainstTheScreen(t *testing.T) {
 	}
 }
 
-// An empty detail is a row that passes. Any other is a 400 whose
-// words carry the offending value.
+// refusalMatches treats an empty detail as "no refusal", and any other
+// detail as a 400 whose message contains it.
 func refusalMatches(refusal *fault, detail string) bool {
 	if detail == "" {
 		return refusal == nil
@@ -247,9 +245,9 @@ func refusalMatches(refusal *fault, detail string) bool {
 		strings.Contains(refusal.detail, detail)
 }
 
-// expandTemplate is RFC 6570's form-style, label, and simple
-// expansion, the three operators screenTemplate uses, so the drill
-// expands the published template the way a client library would.
+// expandTemplate expands a URI template the way a client library
+// would, with the RFC 6570 operators that screenTemplate uses: simple
+// expansion, label ("."), and form-style query ("?").
 func expandTemplate(template string, values map[string]string) string {
 	expanded := template
 	for {
@@ -269,8 +267,8 @@ func expandExpression(expression string, values map[string]string) string {
 	}
 	parts := []string{}
 	for _, name := range strings.Split(expression, ",") {
-		value, stated := values[name]
-		if !stated {
+		value, present := values[name]
+		if !present {
 			continue
 		}
 		if operator == "?" {
@@ -288,8 +286,8 @@ func expandExpression(expression string, values map[string]string) string {
 	return operator + strings.Join(parts, ",")
 }
 
-// RFC 6570 leaves the unreserved characters of RFC 3986 alone and
-// percent-encodes every other octet, commas and colons included.
+// RFC 6570 leaves the unreserved characters of RFC 3986 as they are and
+// percent-encodes every other octet, including commas and colons.
 func encodeTemplateValue(value string) string {
 	const unreserved = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
 	encoded := &strings.Builder{}
@@ -330,15 +328,12 @@ func TestFragmentsRoundTripThroughTheTemplate(t *testing.T) {
 		t.Fatalf("parseSelection(%q) = %+v, %v, want %+v", query, got, refusal, want)
 	}
 
-	// The expansion is then called, because the proof is that a
-	// client which expands the published template reaches the
-	// representation it named.
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 	resp := call(t, server, http.MethodGet, expanded, nil)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("the expanded template answered %d: %s", resp.StatusCode, body(t, resp))
+		t.Fatalf("GET of the expanded template returned status %d, want 200: %s", resp.StatusCode, body(t, resp))
 	}
 	if got := resp.Header.Get("Content-Type"); got != clipContentType {
-		t.Errorf("the expanded template was served %q, want %q", got, clipContentType)
+		t.Errorf("the expanded template response has content type %q, want %q", got, clipContentType)
 	}
 }

@@ -19,10 +19,10 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
-// The cluster a test API reads is an HTTP server answering the real
-// JSON, so the reviews, the reads, and the Event writes are the ones a
-// cluster would answer. It answers over the in-memory connections of
-// apiservertest, so a test of the API can run in a synctest bubble.
+// testCluster is a fake Kubernetes API server for TokenReviews,
+// SubjectAccessReviews, Display reads, and Event writes. It runs on
+// the in-memory connections of apiservertest, so a test of the API can
+// run in a synctest bubble.
 type testCluster struct {
 	server *apiservertest.Server
 
@@ -32,8 +32,7 @@ type testCluster struct {
 	reason        string
 	screens       map[string]Display
 	reviews       []accessReview
-	// events holds the Events the API's recorder writes, and serves
-	// them in front of answer.
+	// events receives the Event writes before respond sees a request.
 	events *eventstest.Events
 }
 
@@ -56,8 +55,7 @@ func newTestCluster(t *testing.T) *testCluster {
 				Metadata: DisplayMeta{Name: "HDMI-A-2"},
 				Status:   DisplayStatus{},
 			},
-			// A screen on a node whose compositor is not serving it,
-			// which is a different wait from a screen with no node.
+			// A Display whose compositor is not serving.
 			"HDMI-A-3": {
 				Metadata: DisplayMeta{Name: "HDMI-A-3"},
 				Status: DisplayStatus{
@@ -72,9 +70,8 @@ func newTestCluster(t *testing.T) *testCluster {
 					}},
 				},
 			},
-			// A screen whose monitor left its connector. It still
-			// carries the compositor condition a stopped compositor
-			// wrote, and the missing panel is the answer that stands.
+			// A Display whose monitor was unplugged. It keeps the
+			// CompositorServing condition of the stopped compositor.
 			"HDMI-A-4": {
 				Metadata: DisplayMeta{Name: "HDMI-A-4"},
 				Status: DisplayStatus{
@@ -86,7 +83,7 @@ func newTestCluster(t *testing.T) *testCluster {
 							Type:    ConnectedCondition,
 							Status:  conditionFalse,
 							Reason:  "NoPanel",
-							Message: "no panel on HDMI-A-4",
+							Message: "No panel is connected to HDMI-A-4",
 						},
 						{
 							Type:    CompositorServingCondition,
@@ -100,18 +97,18 @@ func newTestCluster(t *testing.T) *testCluster {
 		},
 	}
 	cluster.events = &eventstest.Events{}
-	cluster.server = apiservertest.Start(t, cluster.events.Around(http.HandlerFunc(cluster.answer)))
+	cluster.server = apiservertest.Start(t, cluster.events.Around(http.HandlerFunc(cluster.respond)))
 	return cluster
 }
 
-func (c *testCluster) answer(w http.ResponseWriter, r *http.Request) {
+func (c *testCluster) respond(w http.ResponseWriter, r *http.Request) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	switch {
 	case r.URL.Path == tokenReviewsPath:
 		fmt.Fprintf(w, `{"status":{"authenticated":%t,"audiences":["%s"],"error":"%s","user":{"username":"system:serviceaccount:liken-system:viewer","uid":"u-1","groups":["system:authenticated"],"extra":{"scopes":["all"]}}}}`,
-			c.authenticated, apiAudience, refusalWords(c.authenticated))
+			c.authenticated, apiAudience, tokenReviewError(c.authenticated))
 	case r.URL.Path == accessReviewsPath:
 		var review accessReview
 		_ = json.NewDecoder(r.Body).Decode(&review)
@@ -131,17 +128,17 @@ func (c *testCluster) answer(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// A refused review carries the API server's own words, which is what
-// the 401 has to repeat.
-func refusalWords(authenticated bool) string {
+// tokenReviewError returns status.error of the fake TokenReview, which
+// the API's 401 repeats.
+func tokenReviewError(authenticated bool) string {
 	if authenticated {
 		return ""
 	}
 	return "[invalid bearer token, token expired]"
 }
 
-// The part of a SubjectAccessReview a drill reads back: which rule
-// the API asked RBAC to match.
+// accessReview is the part of a SubjectAccessReview that a test reads
+// back.
 type accessReview struct {
 	Spec struct {
 		ResourceAttributes struct {
@@ -162,49 +159,47 @@ func (c *testCluster) reviewed() []accessReview {
 	return append([]accessReview(nil), c.reviews...)
 }
 
-// recorded answers the Events the API wrote. The recorder writes on
-// its own goroutine, so a test reads this after synctest.Wait.
+// recorded returns the Events that the API wrote. The recorder writes
+// on its own goroutine, so a test calls this after synctest.Wait.
 func (c *testCluster) recorded() []events.Event {
 	return c.events.List()
 }
 
-// The sidecar in a test is a real HTTPS server on the private leg,
-// so the API's own client makes a real handshake and carries a real
-// token to it. The client reaches it at the pod address and port the
-// sidecar index holds.
+// sidecarFixture is a fake capture sidecar on a real HTTPS server, so
+// the API's client does a TLS handshake and sends its token. The
+// sidecar index in newTestAPI points at its host and port.
 type sidecarFixture struct {
 	client *http.Client
 	host   string
 	port   int
 
-	mu     sync.Mutex
-	calls  int
-	answer func(w http.ResponseWriter, r *http.Request)
+	mu      sync.Mutex
+	calls   int
+	respond func(w http.ResponseWriter, r *http.Request)
 }
 
 func newSidecarFixture(t *testing.T) *sidecarFixture {
 	t.Helper()
-	sidecar := &sidecarFixture{answer: servePNG}
+	sidecar := &sidecarFixture{respond: servePNG}
 	server := httptest.NewTLSServer(sidecar)
 	t.Cleanup(server.Close)
 	address, err := url.Parse(server.URL)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the address of the sidecar server: %v", err)
 	}
 	if _, err := fmt.Sscanf(address.Port(), "%d", &sidecar.port); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the port of the sidecar server: %v", err)
 	}
 	sidecar.client, sidecar.host = server.Client(), address.Hostname()
 	return sidecar
 }
 
-// newPipedSidecar is the same sidecar over the in-memory connections
-// of apiservertest, with no TLS, for a test that runs in a synctest
-// bubble to measure the API's waits on the fake clock. The handshake
-// is the TLS fixture's to prove.
+// newPipedSidecar serves the fake sidecar over the in-memory
+// connections of apiservertest, without TLS, so a test in a synctest
+// bubble can check the API's timeouts against the fake clock.
 func newPipedSidecar(t *testing.T) *sidecarFixture {
 	t.Helper()
-	sidecar := &sidecarFixture{answer: servePNG, host: "10.42.0.9", port: sidecarPort}
+	sidecar := &sidecarFixture{respond: servePNG, host: "10.42.0.9", port: sidecarPort}
 	sidecar.client = apiservertest.Start(t, sidecar).Client()
 	return sidecar
 }
@@ -212,9 +207,9 @@ func newPipedSidecar(t *testing.T) *sidecarFixture {
 func (s *sidecarFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.calls++
-	answer := s.answer
+	handler := s.respond
 	s.mu.Unlock()
-	answer(w, r)
+	handler(w, r)
 }
 
 func servePNG(w http.ResponseWriter, r *http.Request) {
@@ -233,10 +228,10 @@ func (s *sidecarFixture) called() int {
 	return s.calls
 }
 
-func (s *sidecarFixture) answers(answer func(w http.ResponseWriter, r *http.Request)) {
+func (s *sidecarFixture) respondWith(handler func(w http.ResponseWriter, r *http.Request)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.answer = answer
+	s.respond = handler
 }
 
 func newTestAPI(t *testing.T, cluster *testCluster, sidecar *sidecarFixture) *apiServer {
@@ -244,11 +239,11 @@ func newTestAPI(t *testing.T, cluster *testCluster, sidecar *sidecarFixture) *ap
 	client := apiclient.New(apiservertest.Host, cluster.server.Client(), "")
 	tokenFile := t.TempDir() + "/token"
 	if err := os.WriteFile(tokenFile, []byte("the-api-token"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the token file: %v", err)
 	}
 	recorder := events.New(t.Context(), client, apiComponent, events.Options{Instance: "display-api-test", Log: io.Discard})
 	index := newSidecarIndex()
-	index.hold(Pod{
+	index.add(Pod{
 		Metadata: PodMeta{Namespace: sidecarNamespace, Name: "display-operator-abc"},
 		Spec:     PodSpec{NodeName: "node-1"},
 		Status: PodStatus{
@@ -270,8 +265,7 @@ func newTestAPI(t *testing.T, cluster *testCluster, sidecar *sidecarFixture) *ap
 	}
 }
 
-// One call is one request through the whole server, headers and
-// body, the way a caller meets it.
+// call sends a request through ServeHTTP.
 func call(t *testing.T, server *apiServer, method, target string, header http.Header) *http.Response {
 	t.Helper()
 	request := httptest.NewRequest(method, target, nil)
@@ -279,9 +273,8 @@ func call(t *testing.T, server *apiServer, method, target string, header http.He
 	if request.Header == nil {
 		request.Header = http.Header{}
 	}
-	// A test that states no Authorization gets the ordinary caller's
-	// token. A test that states an empty one is the caller who sent
-	// none.
+	// With no Authorization key, call sends a default token. An empty
+	// value sends none.
 	if _, given := request.Header["Authorization"]; !given {
 		request.Header.Set("Authorization", "Bearer a-caller-token")
 	}
@@ -290,9 +283,8 @@ func call(t *testing.T, server *apiServer, method, target string, header http.He
 	return recorder.Result()
 }
 
-// A clip of the fixture's 1080p screen, as its Content-Type reads:
-// the type and the codec RFC 6381 writes for High profile at level
-// 4.1, which is what the encoder pins for this size.
+// clipContentType is the Content-Type that captureContentType returns
+// for a clip of the 1920x1080 test Display.
 const clipContentType = `video/mp4; codecs="avc1.640029"`
 
 func bearer(token string) http.Header {
@@ -310,14 +302,14 @@ func body(t *testing.T, resp *http.Response) string {
 	t.Helper()
 	held, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the response body: %v", err)
 	}
 	return string(held)
 }
 
-// Every row of the manual's route table is answered here, in the
-// method, status, and type it states.
-func TestTheRouteTableAnswersEveryRow(t *testing.T) {
+// Each row of the route table in the manual has the method, status,
+// and type that the table lists.
+func TestEachRowOfTheRouteTableReturnsItsStatusAndType(t *testing.T) {
 	cases := []struct {
 		name        string
 		method      string
@@ -341,26 +333,25 @@ func TestTheRouteTableAnswersEveryRow(t *testing.T) {
 			server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 			resp := call(t, server, row.method, row.target, nil)
 			if resp.StatusCode != row.status {
-				t.Errorf("%s %s answered %d, want %d", row.method, row.target, resp.StatusCode, row.status)
+				t.Errorf("%s %s responded with %d, want %d", row.method, row.target, resp.StatusCode, row.status)
 			}
 			if got := resp.Header.Get("Content-Type"); got != row.contentType {
-				t.Errorf("%s %s answered %q, want %q", row.method, row.target, got, row.contentType)
+				t.Errorf("%s %s responded with %q, want %q", row.method, row.target, got, row.contentType)
 			}
 			if got := resp.Header.Get("Vary"); got != "Accept" {
-				t.Errorf("%s %s answered Vary %q, want Accept", row.method, row.target, got)
+				t.Errorf("%s %s responded with Vary %q, want Accept", row.method, row.target, got)
 			}
 			if links := resp.Header.Values("Link"); len(links) < 2 {
-				t.Errorf("%s %s carries %v, want the service-desc and service-doc relations", row.method, row.target, links)
+				t.Errorf("%s %s has %v, want the service-desc and service-doc relations", row.method, row.target, links)
 			}
 		})
 	}
 }
 
-// A capture answer carries no-store, Accept-Ranges: none, a file
-// name with no colon, no Content-Length, and, on the negotiated
-// route, Content-Location and the alternate links. A document
-// carries none of these.
-func TestACaptureCarriesItsOwnConduct(t *testing.T) {
+// A capture response has no-store, Accept-Ranges: none, a file name
+// with no colon, and no Content-Length. On the negotiated route it
+// also has Content-Location and the alternate links.
+func TestACaptureSetsItsOwnHeaders(t *testing.T) {
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen", nil)
 
@@ -374,11 +365,11 @@ func TestACaptureCarriesItsOwnConduct(t *testing.T) {
 		t.Errorf("Content-Location is %q, want the extension form served", got)
 	}
 	if got := resp.Header.Get("Content-Length"); got != "" {
-		t.Errorf("a stream carries Content-Length %q, want none", got)
+		t.Errorf("a stream has Content-Length %q, want none", got)
 	}
 	disposition := resp.Header.Get("Content-Disposition")
 	if !strings.HasPrefix(disposition, `inline; filename="HDMI-A-1-`) || !strings.HasSuffix(disposition, `.png"`) {
-		t.Errorf("Content-Disposition is %q", disposition)
+		t.Errorf("Content-Disposition is %q, want inline with a file name that starts HDMI-A-1- and ends .png", disposition)
 	}
 	if strings.Contains(disposition, ":") {
 		t.Errorf("Content-Disposition %q holds a colon, which a file name may not", disposition)
@@ -390,12 +381,12 @@ func TestACaptureCarriesItsOwnConduct(t *testing.T) {
 		}
 	}
 	if alternates != len(screenForms) {
-		t.Errorf("the negotiated route carries %d alternate links, want %d", alternates, len(screenForms))
+		t.Errorf("the negotiated route has %d alternate links, want %d", alternates, len(screenForms))
 	}
 }
 
-// A capture answer is typed by the route that serves it, and a
-// browser that opens one must not sniff the bytes into another type.
+// X-Content-Type-Options: nosniff stops a browser from guessing a type
+// other than the Content-Type from the bytes.
 func TestACaptureForbidsSniffing(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -412,31 +403,31 @@ func TestACaptureForbidsSniffing(t *testing.T) {
 			server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 			resp := call(t, server, row.method, apiRoot+"/displays/HDMI-A-1"+row.target, nil)
 			if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
-				t.Errorf("%s %s answered X-Content-Type-Options %q, want nosniff", row.method, row.target, got)
+				t.Errorf("%s %s responded with X-Content-Type-Options %q, want nosniff", row.method, row.target, got)
 			}
 		})
 	}
 }
 
-// An extension route names one representation, so it carries no
+// An extension route has one fixed type, so its response has no
 // Content-Location and no alternate links.
-func TestAnExtensionRouteNamesOneRepresentation(t *testing.T) {
+func TestAnExtensionRouteSetsNoContentLocation(t *testing.T) {
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
 
 	if got := resp.Header.Get("Content-Location"); got != "" {
-		t.Errorf("an extension route carries Content-Location %q, want none", got)
+		t.Errorf("an extension route has Content-Location %q, want none", got)
 	}
 	for _, link := range resp.Header.Values("Link") {
 		if strings.Contains(link, `rel="alternate"`) {
-			t.Errorf("an extension route carries %q", link)
+			t.Errorf("an extension route has the link %q, want no alternate link", link)
 		}
 	}
 }
 
-// Every row of the manual's negotiation table is answered here by
-// the whole router, not by the Accept parser alone.
-func TestNegotiationAnswersEveryRow(t *testing.T) {
+// Each row of the negotiation table in the manual goes through
+// ServeHTTP, not only the Accept parser.
+func TestEachRowOfTheNegotiationTableServesItsType(t *testing.T) {
 	cases := []struct {
 		name   string
 		target string
@@ -458,7 +449,7 @@ func TestNegotiationAnswersEveryRow(t *testing.T) {
 			server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 			resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1"+row.target, accepting(row.accept))
 			if resp.StatusCode != row.status {
-				t.Fatalf("Accept %q answered %d, want %d", row.accept, resp.StatusCode, row.status)
+				t.Fatalf("Accept %q responded with %d, want %d", row.accept, resp.StatusCode, row.status)
 			}
 			if got := resp.Header.Get("Content-Type"); got != row.served {
 				t.Errorf("Accept %q was served %q, want %q", row.accept, got, row.served)
@@ -468,7 +459,7 @@ func TestNegotiationAnswersEveryRow(t *testing.T) {
 			}
 			var document problemDocument
 			if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
-				t.Fatal(err)
+				t.Fatalf("decoding the 406 problem document: %v", err)
 			}
 			if len(document.Acceptable) != len(screenForms) {
 				t.Errorf("the 406 lists %v, want every form of the aspect", document.Acceptable)
@@ -482,68 +473,63 @@ func TestNegotiationAnswersEveryRow(t *testing.T) {
 	}
 }
 
-// A HEAD takes no frame, which the sidecar never being called
-// proves.
-func TestHeadTakesNoFrame(t *testing.T) {
+func TestHeadDoesNotCallTheSidecar(t *testing.T) {
 	sidecar := newSidecarFixture(t)
 	server := newTestAPI(t, newTestCluster(t), sidecar)
 
 	resp := call(t, server, http.MethodHead, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("HEAD answered %d, want 200", resp.StatusCode)
+		t.Fatalf("HEAD responded with %d, want 200", resp.StatusCode)
 	}
 	if got := resp.Header.Get("Content-Type"); got != "image/png" {
-		t.Errorf("HEAD answered %q, want image/png", got)
+		t.Errorf("HEAD responded with %q, want image/png", got)
 	}
 	if held := body(t, resp); held != "" {
-		t.Errorf("HEAD answered a body of %d bytes, want none", len(held))
+		t.Errorf("HEAD responded with a body of %d bytes, want none", len(held))
 	}
 	if sidecar.called() != 0 {
 		t.Errorf("HEAD called the sidecar %d times, want none", sidecar.called())
 	}
 }
 
-// An error answered to a HEAD carries the status and the fields and
-// no document (RFC 9110 section 15.5).
-func TestHeadOnAnErrorCarriesNoBody(t *testing.T) {
+// An error response to a HEAD request has the status and headers but
+// no problem document (RFC 9110 section 15.5).
+func TestAnErrorResponseToHeadHasNoBody(t *testing.T) {
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 
 	resp := call(t, server, http.MethodHead, apiRoot+"/displays/NOPE/screen.png", nil)
 
 	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("HEAD on an absent Display answered %d, want 404", resp.StatusCode)
+		t.Fatalf("HEAD on an absent Display responded with %d, want 404", resp.StatusCode)
 	}
 	if got := resp.Header.Get("Content-Type"); got != problemMediaType {
 		t.Errorf("the refusal is typed %q, want %q", got, problemMediaType)
 	}
 	if held := body(t, resp); held != "" {
-		t.Errorf("HEAD on an error answered %q, want no body", held)
+		t.Errorf("HEAD on an error responded with %q, want no body", held)
 	}
 }
 
-// OPTIONS answers the methods in Allow and nothing else.
-func TestOptionsAnswersTheMethods(t *testing.T) {
+func TestOptionsReturnsTheAllowedMethods(t *testing.T) {
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 	resp := call(t, server, http.MethodOptions, apiRoot+"/displays/HDMI-A-1/screen", nil)
 
 	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("OPTIONS answered %d, want 204", resp.StatusCode)
+		t.Fatalf("OPTIONS responded with %d, want 204", resp.StatusCode)
 	}
 	if got := resp.Header.Get("Allow"); got != allowedMethods {
-		t.Errorf("OPTIONS answered Allow %q, want %q", got, allowedMethods)
+		t.Errorf("OPTIONS responded with Allow %q, want %q", got, allowedMethods)
 	}
 	if held := body(t, resp); held != "" {
-		t.Errorf("OPTIONS answered %q, want no body", held)
+		t.Errorf("OPTIONS responded with %q, want no body", held)
 	}
 }
 
-// The two rules the owner-facing ClusterRole carries, from the
-// router's side. A capture asks RBAC to match displays/screen, and
-// the info route beside it asks for displays, so a caller bound to
-// display-capture-viewer alone can run the manual's recipe from end
-// to end.
-func TestEachRouteAsksForTheGrantItNeeds(t *testing.T) {
+// A capture checks get on displays/screen, and the info route checks
+// get on displays. The display-capture-viewer ClusterRole grants both,
+// so a caller bound to that role alone can follow the manual's example.
+func TestEachRouteChecksItsRBACRule(t *testing.T) {
 	cases := []struct {
 		name        string
 		target      string
@@ -575,9 +561,9 @@ func TestEachRouteAsksForTheGrantItNeeds(t *testing.T) {
 	}
 }
 
-// The two documents need authentication and no authorization, so
-// neither one costs an access review.
-func TestTheDocumentsAskForNoGrant(t *testing.T) {
+// The discovery and OpenAPI documents need an authenticated caller but
+// no SubjectAccessReview.
+func TestTheDocumentsMakeNoAccessReview(t *testing.T) {
 	for _, target := range []string{apiRoot, apiRoot + "/openapi.json"} {
 		t.Run(target, func(t *testing.T) {
 			cluster := newTestCluster(t)

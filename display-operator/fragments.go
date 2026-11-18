@@ -1,22 +1,22 @@
 package main
 
-// This file holds the query a capture request carries: t= and xywh=
-// from W3C Media Fragments 1.0 (Recommendation, 25 September 2012),
-// sections 4.2.1 and 4.2.2, and this API's own width, height,
-// framerate, and quality.
+// This file parses the query string of a capture request: t= and xywh=
+// as W3C Media Fragments 1.0 (Recommendation, 25 September 2012)
+// defines them in sections 4.2.1 and 4.2.2, and this API's own width,
+// height, framerate, and quality.
 //
-// The dimensions go in the query and not in the fragment. Section
-// 3.1 says "a URI query produces a new resource, while a URI fragment
-// provides a secondary resource", and section 7.4 says that with the
-// query form "media type changes are possible", which is
-// screen.png?t=5&xywh=... in one sentence.
+// The values go in the query and not in the URL fragment, because
+// section 3.1 says that a query produces a new resource and section 7.4
+// allows a query to change the media type. So in
+// screen.png?t=5&xywh=..., the extension chooses the media type and
+// the query chooses the time and the region.
 //
-// Media Fragments tells a user agent to ignore an invalid, unknown,
-// or non-existent dimension (sections 6.2, 6.2.1, 6.3.1). This API
-// answers 400 instead, because a query produces a new resource and a
-// client that asked for a region must not silently get the whole
-// screen. An out-of-range xywh is clipped per section 6.1.2, not
-// refused, because the client still gets the pixels it named.
+// Media Fragments tells a user agent to ignore an invalid, unknown, or
+// non-existent dimension (sections 6.2, 6.2.1, 6.3.1). This API
+// responds 400 instead, so a client that asked for a region never gets
+// the whole screen by mistake. A region that runs past the edge of the
+// screen is clipped as section 6.1.2 says, because the client still
+// gets every pixel it asked for that exists.
 
 import (
 	"fmt"
@@ -26,32 +26,31 @@ import (
 	"strings"
 )
 
-// The most seconds a t= begin may name, the same number in all three
-// of liken's capture APIs. The sidecar starts its pipeline at once
-// and discards frames until this many seconds have passed on its own
-// clock, so a begin is a bound on how long a request holds an output
-// before it produces a byte.
+// captureBeginMax is the largest t= begin in seconds, the same limit
+// as the media and audio capture APIs. The sidecar starts capturing
+// when the request arrives and waits for the begin, so the limit bounds
+// how long a request keeps a capture open before its first frame.
 const captureBeginMax = 60.0
 
-// The half-open interval of Media Fragments section 4.2.1. Either
-// side may be absent: t=5 begins at five and runs until hang-up, and
-// t=,10 begins now and ends at ten.
+// timeRange is the half-open interval of section 4.2.1, with either
+// end optional. t=5 begins at 5 seconds and runs until the client
+// disconnects, and t=,10 begins now and ends at 10 seconds.
 type timeRange struct {
 	Begin, End       float64 // seconds
 	HasBegin, HasEnd bool
 }
 
-// A region in one of the two units of section 4.2.2. pixel: counts
-// the frame's own pixels, the physical pixels weston_capture_source_v1
-// reports, not the logical pixels a client draws at under scale=2.
-// percent: is a share of the frame, the unit a Layout region maps to.
+// region is an xywh= rectangle. In pixel units it counts the physical
+// pixels of the captured frame, not the logical pixels of a scaled
+// output. In percent units it is a share of the frame, the unit that a
+// Layout region uses.
 type region struct {
 	Percent    bool
 	X, Y, W, H float64
 }
 
-// One capture request's whole query, parsed and defaulted for the
-// representation it is served as.
+// captureSelection is a capture request's parsed query, with the
+// defaults of the requested media type.
 type captureSelection struct {
 	Time          timeRange
 	Region        *region
@@ -60,22 +59,18 @@ type captureSelection struct {
 	Quality       int
 }
 
-// The rectangle the sidecar cuts out of a frame, in whole pixels of
-// that frame.
 type cropRect struct{ X, Y, W, H int }
 
-// parseSelection parses one capture request's query for the
-// representation it will be served as, since the knobs a form takes
-// depend on the form.
+// parseSelection parses a capture request's query. The media type
+// decides which parameters are valid and what their defaults are.
 func parseSelection(rawQuery, mediaType string) (captureSelection, *fault) {
 	chosen := captureSelection{
 		Framerate: defaultFramerate(mediaType),
 		Quality:   defaultQuality(mediaType),
 	}
-	// Section 5.1.1's order: split on & and on the first =, then
-	// percent-decode. An encoded comma or colon is then part of one
-	// value and never a separator, so t=10%2C20 and t=npt%3a10 parse
-	// as their literal forms.
+	// Section 5.1.1 splits on & and on the first = before it
+	// percent-decodes, so t=10%2C20 and t=npt%3a10 parse the same as
+	// t=10,20 and t=npt:10.
 	given := map[string]string{}
 	for _, pair := range strings.Split(rawQuery, "&") {
 		if pair == "" {
@@ -101,9 +96,6 @@ func parseSelection(rawQuery, mediaType string) (captureSelection, *fault) {
 	return chosen, nil
 }
 
-// An unknown key and a value that does not parse are both 400 here,
-// where Media Fragments sections 6.2 and 6.2.1 tell a user agent to
-// ignore them.
 func (s *captureSelection) take(key, value string) *fault {
 	switch key {
 	case "t":
@@ -139,11 +131,9 @@ func (s *captureSelection) take(key, value string) *fault {
 	return nil
 }
 
-// The checks one representation can answer on its own, before the
-// screen's own numbers are known. Every one of them is a 400: width
-// with height, a t= end or a framerate on a still, a begin past
-// captureBeginMax, a quality on a form that has none, and a value
-// outside its range.
+// check rejects the combinations that are invalid for the media type
+// alone. validate checks the rest once the screen's size and refresh
+// rate are known.
 func (s captureSelection) check(mediaType string, given map[string]string) *fault {
 	still := stillForm(mediaType)
 	_, hasWidth := given["width"]
@@ -152,33 +142,30 @@ func (s captureSelection) check(mediaType string, given map[string]string) *faul
 	_, hasQuality := given["quality"]
 	switch {
 	case hasWidth && hasHeight:
-		return badRequest("width=" + given["width"] + " with height=" + given["height"])
+		return badRequest("width=" + given["width"] + " and height=" + given["height"] + " are both set, and a request may set only one of them")
 	case hasWidth && s.Width == 0:
 		return badRequest("width=" + given["width"] + " is not a size")
 	case hasHeight && s.Height == 0:
 		return badRequest("height=" + given["height"] + " is not a size")
 	case still && s.Time.HasEnd:
-		return badRequest("t=" + given["t"] + " names an end, and " + mediaType + " is one frame")
+		return badRequest("t=" + given["t"] + " sets an end time, and " + mediaType + " is a single frame")
 	case s.Time.HasBegin && s.Time.Begin > captureBeginMax:
 		return badRequest("t=" + given["t"] + " begins after " +
 			strconv.FormatFloat(captureBeginMax, 'f', -1, 64) + " seconds")
 	case still && hasFramerate:
-		return badRequest("framerate=" + given["framerate"] + " on " + mediaType + ", which is one frame")
+		return badRequest("framerate=" + given["framerate"] + " does not apply to " + mediaType + ", which is a single frame")
 	case hasFramerate && s.Framerate == 0:
 		return badRequest("framerate=" + given["framerate"] + " is not a rate")
 	case hasQuality && (mediaType == "image/png" || mediaType == "video/mp4"):
-		return badRequest("quality=" + given["quality"] + " on " + mediaType)
+		return badRequest("quality=" + given["quality"] + " does not apply to " + mediaType)
 	case hasQuality && (s.Quality < 1 || s.Quality > 100):
-		return badRequest("quality=" + given["quality"] + " outside 1 to 100")
+		return badRequest("quality=" + given["quality"] + " is outside 1 to 100")
 	}
 	return nil
 }
 
-// The two defaults. A clip or stream runs at 15 frames per second,
-// because every frame costs the sidecar a copy of the whole frame,
-// and 15 halves the encode cost of the common request against 30.
-// A JPEG is quality 85, at which a 1080p MJPEG frame is about
-// 100 KB, 12 Mbit/s at 15 fps.
+// defaultFramerate is 15 for a clip or a stream, because the sidecar
+// copies and encodes every whole frame, and 15 halves the work of 30.
 func defaultFramerate(mediaType string) int {
 	if mediaType == "video/mp4" || mediaType == "multipart/x-mixed-replace" {
 		return 15
@@ -193,9 +180,8 @@ func defaultQuality(mediaType string) int {
 	return 0
 }
 
-// The npttimedef production of section 4.2.1: an optional npt:
-// prefix, then a begin, an end, or both. The end is the first instant
-// outside the interval.
+// parseNPT parses the npttimedef production of section 4.2.1: an
+// optional npt: prefix, then a begin, an end, or both.
 func parseNPT(value string) (timeRange, bool) {
 	value = strings.TrimPrefix(value, "npt:")
 	begin, end, split := strings.Cut(value, ",")
@@ -217,17 +203,17 @@ func parseNPT(value string) (timeRange, bool) {
 		}
 		span.End, span.HasEnd = seconds, true
 	}
-	// An interval that ends where it begins, or before it, selects
-	// nothing (section 6.2.2).
+	// Section 6.2.2 makes an interval that ends at or before its begin
+	// an error.
 	if span.HasBegin && span.HasEnd && span.Begin >= span.End {
 		return timeRange{}, false
 	}
 	return span, true
 }
 
-// The three npttime forms of section 4.2.1: seconds alone,
-// minutes:seconds, and hours:minutes:seconds. Minutes are exactly two
-// digits under 60, and seconds are under 60 when minutes are given.
+// parseNPTTime parses the npttime forms of section 4.2.1: seconds,
+// mm:ss, and h:mm:ss. Minutes are exactly two digits and under 60, and
+// seconds are under 60 when minutes are present.
 func parseNPTTime(value string) (float64, bool) {
 	fields := strings.Split(value, ":")
 	seconds, ok := parseSeconds(fields[len(fields)-1])
@@ -248,10 +234,8 @@ func parseNPTTime(value string) (float64, bool) {
 	return 0, false
 }
 
-// The npt-sec production: whole digits, then an optional point and a
-// fraction of any number of digits, the empty fraction of "10."
-// included. Go's ParseFloat refuses a trailing point, so the point
-// comes off before the parse.
+// parseSeconds parses the npt-sec production, which allows a point
+// with no fraction, as in "10.".
 func parseSeconds(value string) (float64, bool) {
 	whole, fraction, _ := strings.Cut(value, ".")
 	if !allDigits(whole) || (fraction != "" && !allDigits(fraction)) {
@@ -283,9 +267,8 @@ func allDigits(value string) bool {
 	}) < 0
 }
 
-// The xywhparam production of section 4.2.2: an optional pixel: or
-// percent: prefix, then four numbers. A value with no prefix is in
-// pixels.
+// parseRegion parses the xywhparam production of section 4.2.2. With
+// no pixel: or percent: prefix, the numbers are pixels.
 func parseRegion(value string) (region, bool) {
 	box := region{}
 	switch {
@@ -309,9 +292,7 @@ func parseRegion(value string) (region, bool) {
 		numbers[i] = number
 	}
 	box.X, box.Y, box.W, box.H = numbers[0], numbers[1], numbers[2], numbers[3]
-	// A region of no width or no height selects nothing (section
-	// 6.2.3). A percent is a share of the frame, so no number in it
-	// passes 100.
+	// Section 6.2.3 makes a zero width or height an error.
 	if box.W == 0 || box.H == 0 {
 		return region{}, false
 	}
@@ -321,8 +302,8 @@ func parseRegion(value string) (region, bool) {
 	return box, true
 }
 
-// pixel: counts whole pixels, and percent: takes a decimal, so the
-// fraction a Layout region states maps to it without rounding.
+// parseRegionNumber accepts a decimal part only for percent, so a
+// fraction from a Layout region converts without rounding.
 func parseRegionNumber(field string, percent bool) (float64, bool) {
 	if !percent {
 		return parseDigits(field)
@@ -335,8 +316,6 @@ func parseRegionNumber(field string, percent bool) (float64, bool) {
 	return number, err == nil
 }
 
-// This API's own four knobs are unsigned whole numbers and nothing
-// else: no sign, no point, no unit.
 func parseCount(value string) (int, bool) {
 	if !allDigits(value) {
 		return 0, false
@@ -345,8 +324,9 @@ func parseCount(value string) (int, bool) {
 	return count, err == nil
 }
 
-// resolve turns the selection's region into whole pixels of a frame
-// of this size. No region is the whole frame.
+// resolve converts the selection's region to whole pixels of a frame
+// of the given size, or returns the whole frame when there is no
+// region.
 func (s captureSelection) resolve(frameWidth, frameHeight int) cropRect {
 	if s.Region == nil {
 		return cropRect{W: frameWidth, H: frameHeight}
@@ -354,9 +334,10 @@ func (s captureSelection) resolve(frameWidth, frameHeight int) cropRect {
 	box := *s.Region
 	x, y := int(box.X), int(box.Y)
 	w, h := int(box.W), int(box.H)
-	// Section 6.1.2's percent case, whose published formula transposes
-	// the operands: the origin rounds down and the size rounds up, so
-	// the region never loses a pixel the client asked for.
+	// Section 6.1.2's formula divides by the frame size where it means
+	// to multiply, so this follows its intent. The origin rounds down
+	// and the size rounds up, so the region never loses a pixel the
+	// client asked for.
 	if box.Percent {
 		x = int(math.Floor(box.X / 100 * float64(frameWidth)))
 		y = int(math.Floor(box.Y / 100 * float64(frameHeight)))
@@ -368,12 +349,10 @@ func (s captureSelection) resolve(frameWidth, frameHeight int) cropRect {
 	return cropRect{X: x, Y: y, W: w, H: h}
 }
 
-// Section 6.1.2's clipping shortens a region that runs off an edge
-// and never refuses it. The even rule is the one place this API adds
-// a rule Media Fragments does not state: the encoder takes no odd
-// dimension, so the size rounds up to even, an origin that no longer
-// fits moves back, and a frame whose own size is odd rounds down
-// instead.
+// fitAxis clips a region to the frame along one axis, as section 6.1.2
+// says. The encoder rejects odd dimensions, so the size also rounds up
+// to an even number, and the origin moves back when that no longer
+// fits. On a frame of odd size, the size rounds down to even.
 func fitAxis(origin, size, frame int) (int, int) {
 	if origin > frame-2 {
 		origin = frame - 2
@@ -394,30 +373,25 @@ func fitAxis(origin, size, frame int) (int, int) {
 	return origin, size
 }
 
-// validate checks the knobs only the screen's own mode can answer:
-// the scale against the size, and the framerate against the refresh.
+// validate checks the parameters that depend on the screen's current
+// mode. width= and height= only scale down, so a size over the
+// screen's is a 400. When the screen reports no size or no refresh
+// rate, the matching parameter is accepted.
 func (s captureSelection) validate(frameWidth, frameHeight, refresh int) *fault {
-	// width= and height= scale down only, so a request for more
-	// pixels than the screen has is a 400 and never an upscale. A
-	// screen that reported no size and no refresh refuses no knob,
-	// because the ceiling each one is measured against is not known.
 	switch {
 	case frameWidth > 0 && s.Width > frameWidth:
-		return badRequest("width=" + strconv.Itoa(s.Width) + " over the screen's " + strconv.Itoa(frameWidth))
+		return badRequest("width=" + strconv.Itoa(s.Width) + " is larger than the screen's width of " + strconv.Itoa(frameWidth))
 	case frameHeight > 0 && s.Height > frameHeight:
-		return badRequest("height=" + strconv.Itoa(s.Height) + " over the screen's " + strconv.Itoa(frameHeight))
+		return badRequest("height=" + strconv.Itoa(s.Height) + " is larger than the screen's height of " + strconv.Itoa(frameHeight))
 	case refresh > 0 && s.Framerate > refresh:
-		return badRequest("framerate=" + strconv.Itoa(s.Framerate) + " over the screen's refresh of " + strconv.Itoa(refresh))
+		return badRequest("framerate=" + strconv.Itoa(s.Framerate) + " is above the screen's refresh rate of " + strconv.Itoa(refresh))
 	}
 	return s.regionFits(frameWidth, frameHeight)
 }
 
-// The one region section 6.1.2 clips to nothing: a rectangle whose
-// origin is at or past an edge of the screen intersects no pixel.
-// This API answers 400 rather than serve the strip of edge that
-// clipping to a legal size would leave, for the reason every other
-// refusal in this parser has: the client asked for a region, and
-// must not silently get a different one.
+// regionFits rejects a region whose origin is at or past the edge of
+// the screen. The region holds no pixel of the screen, and fitAxis
+// would return a strip along the edge in its place.
 func (s captureSelection) regionFits(frameWidth, frameHeight int) *fault {
 	if s.Region == nil || frameWidth <= 0 || frameHeight <= 0 {
 		return nil

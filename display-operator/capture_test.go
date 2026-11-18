@@ -11,9 +11,8 @@ import (
 	"time"
 )
 
-// The sidecar in a test holds no compositor and no encoder, because
-// the door is what these drills read: the token, the grammar, the
-// one-per-output rule, and the refusals.
+// newCaptureFixture returns a sidecar with no compositor and no
+// encoder.
 func newCaptureFixture(t *testing.T) *captureServer {
 	t.Helper()
 	readings := newCaptureMetrics(captureComponent, version)
@@ -47,23 +46,19 @@ func askSidecar(t *testing.T, server *captureServer, method, target, token strin
 	return recorder.Result()
 }
 
-// The three process paths take no token, because a scrape and a
-// probe carry none.
-func TestTheProcessPathsTakeNoToken(t *testing.T) {
+func TestTheMetricsAndProbePathsNeedNoToken(t *testing.T) {
 	server := newCaptureFixture(t)
 	for _, path := range []string{"/metrics", "/healthz", "/readyz"} {
 		t.Run(path, func(t *testing.T) {
 			resp := askSidecar(t, server, http.MethodGet, path, "")
 			if resp.StatusCode != http.StatusOK {
-				t.Errorf("%s answered %d with no token, want 200", path, resp.StatusCode)
+				t.Errorf("%s responded with %d with no token, want 200", path, resp.StatusCode)
 			}
 		})
 	}
 }
 
-// A scrape of the sidecar finds its own six series and the
-// liken_build_info gauge every liken process states.
-func TestTheSidecarServesItsOwnSeries(t *testing.T) {
+func TestTheSidecarServesItsOwnMetrics(t *testing.T) {
 	server := newCaptureFixture(t)
 	resp := askSidecar(t, server, http.MethodGet, "/metrics", "")
 	served := body(t, resp)
@@ -77,15 +72,12 @@ func TestTheSidecarServesItsOwnSeries(t *testing.T) {
 		"liken_build_info",
 	} {
 		if !strings.Contains(served, series) {
-			t.Errorf("the scrape does not carry %s", series)
+			t.Errorf("the scrape has no %s, want it", series)
 		}
 	}
 }
 
-// The sidecar answers display-api and nobody else. A token the
-// review refuses is a 401, and a token of another account, which the
-// review accepts, is a 403.
-func TestTheSidecarAnswersTheAPIAlone(t *testing.T) {
+func TestTheSidecarServesOnlyDisplayAPI(t *testing.T) {
 	cases := []struct {
 		name   string
 		token  string
@@ -101,57 +93,53 @@ func TestTheSidecarAnswersTheAPIAlone(t *testing.T) {
 			resp := askSidecar(t, server, http.MethodGet,
 				apiRoot+"/displays/HDMI-A-1/screen.png", row.token)
 			if resp.StatusCode != row.status {
-				t.Errorf("the sidecar answered %d, want %d", resp.StatusCode, row.status)
+				t.Errorf("the sidecar responded with %d, want %d", resp.StatusCode, row.status)
 			}
 			if got := resp.Header.Get("Content-Type"); got != problemMediaType {
-				t.Errorf("the refusal is typed %q", got)
+				t.Errorf("the refusal Content-Type is %q, want %q", got, problemMediaType)
 			}
 		})
 	}
 }
 
-// A HEAD takes no frame on the sidecar either, which a 200 with no
-// compositor behind the socket proves.
-func TestTheSidecarHeadTakesNoFrame(t *testing.T) {
+// A HEAD request reads no frame, so it returns 200 with no compositor
+// on the socket.
+func TestAHeadRequestReadsNoFrame(t *testing.T) {
 	server := newCaptureFixture(t)
 	resp := askSidecar(t, server, http.MethodHead,
 		apiRoot+"/displays/HDMI-A-1/screen.png", "the-api-token")
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("a HEAD answered %d with no compositor, want 200", resp.StatusCode)
+		t.Fatalf("a HEAD responded with %d with no compositor, want 200", resp.StatusCode)
 	}
 	if got := resp.Header.Get("Content-Type"); got != "image/png" {
-		t.Errorf("the HEAD answered %q", got)
+		t.Errorf("the HEAD Content-Type is %q, want image/png", got)
 	}
 	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
-		t.Errorf("the HEAD answered X-Content-Type-Options %q, want nosniff", got)
+		t.Errorf("the HEAD X-Content-Type-Options is %q, want nosniff", got)
 	}
 }
 
-// A compositor that does not answer is a 503 with Retry-After,
-// carrying the socket's own words.
-func TestACompositorThatDoesNotAnswer(t *testing.T) {
+func TestACompositorThatDoesNotAnswerGivesA503(t *testing.T) {
 	server := newCaptureFixture(t)
 	resp := askSidecar(t, server, http.MethodGet,
 		apiRoot+"/displays/HDMI-A-1/screen.png", "the-api-token")
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("a dead compositor answered %d, want 503", resp.StatusCode)
+		t.Fatalf("a dead compositor responded with %d, want 503", resp.StatusCode)
 	}
 	if got := resp.Header.Get("Retry-After"); got != retryAfterSeconds {
-		t.Errorf("Retry-After is %q", got)
+		t.Errorf("Retry-After is %q, want %q", got, retryAfterSeconds)
 	}
 	var document problemDocument
 	if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the problem document: %v", err)
 	}
 	if !strings.Contains(document.Detail, "no such file or directory") {
-		t.Errorf("the detail is %q, want the socket's own words", document.Detail)
+		t.Errorf("the detail is %q, want it to contain the socket error \"no such file or directory\"", document.Detail)
 	}
 }
 
-// One capture holds an output. A second request on it is a 503 that
-// says when the first one ends, and a second output is free.
 func TestOneCapturePerOutput(t *testing.T) {
 	server := newCaptureFixture(t)
 	release, f := server.take("HDMI-A-1", time.Time{})
@@ -162,11 +150,11 @@ func TestOneCapturePerOutput(t *testing.T) {
 	resp := askSidecar(t, server, http.MethodGet,
 		apiRoot+"/displays/HDMI-A-1/screen.mp4", "the-api-token")
 	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("a second capture answered %d, want 503", resp.StatusCode)
+		t.Fatalf("a second capture responded with %d, want 503", resp.StatusCode)
 	}
 	var document problemDocument
 	if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the problem document: %v", err)
 	}
 	if document.Type != problemCaptureBusy {
 		t.Errorf("the problem type is %q, want %q", document.Type, problemCaptureBusy)
@@ -177,29 +165,25 @@ func TestOneCapturePerOutput(t *testing.T) {
 
 	release()
 	if _, f := server.take("HDMI-A-1", time.Time{}); f != nil {
-		t.Errorf("the output stayed busy after the capture ended: %v", f)
+		t.Errorf("after the first capture ended, a second capture of the same output was refused: %v", f)
 	}
 	if _, f := server.take("HDMI-A-2", time.Time{}); f != nil {
-		t.Errorf("a second output was refused: %v", f)
+		t.Errorf("a capture of a second output was refused: %v", f)
 	}
 }
 
-// The sidecar is a door of its own, so it refuses a query the API
-// would have refused first.
-func TestTheSidecarRefusesTheQueryToo(t *testing.T) {
+// display-api would also refuse this query.
+func TestTheSidecarValidatesTheQueryItself(t *testing.T) {
 	server := newCaptureFixture(t)
 	resp := askSidecar(t, server, http.MethodGet,
 		apiRoot+"/displays/HDMI-A-1/screen.png?framerate=30", "the-api-token")
 
 	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("a framerate on a still answered %d, want 400", resp.StatusCode)
+		t.Fatalf("a framerate on a still responded with %d, want 400", resp.StatusCode)
 	}
 }
 
-// The sidecar serves the info and capture routes and nothing else,
-// so a path outside them, the discovery document included, is a 404
-// and a method outside GET and HEAD is a 405.
-func TestTheSidecarServesOneGrammar(t *testing.T) {
+func TestTheSidecarServesOnlyTheInfoAndCaptureRoutes(t *testing.T) {
 	cases := []struct {
 		name   string
 		method string
@@ -208,23 +192,20 @@ func TestTheSidecarServesOneGrammar(t *testing.T) {
 	}{
 		{"a path outside the grammar", http.MethodGet, "/capture/HDMI-A-1", http.StatusNotFound},
 		{"the discovery document", http.MethodGet, apiRoot, http.StatusNotFound},
-		{"a method it does not answer", http.MethodPost, apiRoot + "/displays/HDMI-A-1/screen.png", http.StatusMethodNotAllowed},
+		{"a method it does not accept", http.MethodPost, apiRoot + "/displays/HDMI-A-1/screen.png", http.StatusMethodNotAllowed},
 	}
 	for _, row := range cases {
 		t.Run(row.name, func(t *testing.T) {
 			server := newCaptureFixture(t)
 			resp := askSidecar(t, server, row.method, row.target, "the-api-token")
 			if resp.StatusCode != row.status {
-				t.Errorf("%s %s answered %d, want %d", row.method, row.target, resp.StatusCode, row.status)
+				t.Errorf("%s %s responded with %d, want %d", row.method, row.target, resp.StatusCode, row.status)
 			}
 		})
 	}
 }
 
-// The knob that says how many captures one output carries is read
-// from the environment, as every concurrency knob in the three
-// capture APIs is, and a value that is not a count is one.
-func TestThePerOutputKnob(t *testing.T) {
+func TestCapturesPerOutputComeFromTheEnvironment(t *testing.T) {
 	cases := []struct {
 		value string
 		want  int
@@ -244,10 +225,7 @@ func TestThePerOutputKnob(t *testing.T) {
 	}
 }
 
-// The graph a node converts with is decided once at startup. A node
-// that was told which graph to run is believed in either direction,
-// and a node that was told nothing is asked.
-func TestTheConversionGraphIsChosenOnce(t *testing.T) {
+func TestTheConversionGraphComesFromTheKnobOrTheProbe(t *testing.T) {
 	cases := []struct {
 		name         string
 		knob         string
@@ -263,7 +241,7 @@ func TestTheConversionGraphIsChosenOnce(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			path := t.TempDir() + "/ffmpeg"
 			if err := os.WriteFile(path, []byte(row.program), 0o755); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing the fake ffmpeg: %v", err)
 			}
 			held := ffmpegProgram
 			ffmpegProgram = path
@@ -271,23 +249,22 @@ func TestTheConversionGraphIsChosenOnce(t *testing.T) {
 			t.Setenv(captureConversion, row.knob)
 
 			if got := chooseConversion(context.Background(), "/dev/dri/renderD128"); got != row.wantSoftware {
-				t.Errorf("the node chose software=%t, want %t", got, row.wantSoftware)
+				t.Errorf("chooseConversion returned software=%t, want %t", got, row.wantSoftware)
 			}
 		})
 	}
 }
 
-// A node with no render device converts on the CPU, because there is
-// no device for hwupload to open.
+// With no render node, hwupload has no device to open.
 func TestANodeWithNoRenderDeviceConvertsOnTheCPU(t *testing.T) {
 	t.Setenv(captureConversion, "")
 	if !chooseConversion(context.Background(), "") {
-		t.Error("a node with no render device chose the GPU graph")
+		t.Error("a node with no render device chose the GPU graph, want the software graph")
 	}
 }
 
-// The scrape names the graph the node runs and the one it does not,
-// so a fleet panel counts the nodes that fell back with no log.
+// A dashboard counts the nodes that convert on the CPU from this
+// gauge, with no need to read logs.
 func TestTheConversionGaugeNamesTheGraph(t *testing.T) {
 	readings := newCaptureMetrics(captureComponent, version)
 	readings.converting(true)
@@ -298,13 +275,11 @@ func TestTheConversionGaugeNamesTheGraph(t *testing.T) {
 		`display_capture_conversion{graph="vaapi"} 0`,
 	} {
 		if !strings.Contains(served, line) {
-			t.Errorf("the scrape does not carry %s", line)
+			t.Errorf("the scrape has no %s, want it", line)
 		}
 	}
 }
 
-// The info document names the graph beside the screen's own numbers,
-// so a caller reads what a clip from this node costs.
 func TestTheInfoDocumentNamesTheConversion(t *testing.T) {
 	weston := startCaptureWeston(t, formatXR24,
 		[]captureWestonOutput{{connector: "HDMI-A-1", scale: 1, width: 8, height: 4, refresh: 60000}})
@@ -316,17 +291,14 @@ func TestTheInfoDocumentNamesTheConversion(t *testing.T) {
 
 	var info screenInfo
 	if err := json.Unmarshal([]byte(body(t, resp)), &info); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the info document: %v", err)
 	}
 	if info.Conversion != softwareGraph {
-		t.Errorf("the info document names %q, want %q", info.Conversion, softwareGraph)
+		t.Errorf("the info document conversion is %q, want %q", info.Conversion, softwareGraph)
 	}
 }
 
-// The capture port's own challenge names the capture port. A 401
-// from it is not a 401 from the API, and a person reading a log or a
-// header should not have to work out which door refused.
-func TestTheCapturePortNamesItselfInItsChallenge(t *testing.T) {
+func TestTheCapturePortChallengeNamesDisplayCapture(t *testing.T) {
 	held := authenticateRealm
 	authenticateRealm = `Bearer realm="display-capture"`
 	defer func() { authenticateRealm = held }()
@@ -335,20 +307,19 @@ func TestTheCapturePortNamesItselfInItsChallenge(t *testing.T) {
 	resp := askSidecar(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", "")
 
 	if got := resp.Header.Get("WWW-Authenticate"); got != `Bearer realm="display-capture"` {
-		t.Errorf("the challenge is %q, want the capture port's own realm", got)
+		t.Errorf("the WWW-Authenticate header is %q, want the display-capture realm", got)
 	}
 	var document problemDocument
 	if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the problem document: %v", err)
 	}
 	if document.Detail != noTokenDetail {
-		t.Errorf("the 401 carries %q, want a detail naming the field", document.Detail)
+		t.Errorf("the 401 detail is %q, want %q", document.Detail, noTokenDetail)
 	}
 }
 
-// The info document names the codecs parameter a clip of this screen
-// will carry, so a client can choose a decoder before it asks for
-// one frame.
+// A client chooses a decoder from the codecs parameter before it
+// requests a clip.
 func TestTheInfoDocumentNamesTheClipCodec(t *testing.T) {
 	weston := startCaptureWeston(t, formatXR24,
 		[]captureWestonOutput{{connector: "HDMI-A-1", scale: 1, width: 8, height: 4, refresh: 60000}})
@@ -359,9 +330,9 @@ func TestTheInfoDocumentNamesTheClipCodec(t *testing.T) {
 
 	var info screenInfo
 	if err := json.Unmarshal([]byte(body(t, resp)), &info); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the info document: %v", err)
 	}
 	if info.Codecs != "avc1.640029" {
-		t.Errorf("the info document names %q, want the codec a clip of this screen carries", info.Codecs)
+		t.Errorf("the info document codecs are %q, want avc1.640029", info.Codecs)
 	}
 }

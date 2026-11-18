@@ -1,13 +1,13 @@
 package main
 
-// displaymetrics.go holds this operator's own signals, the table plan
-// 14 states. Every recording method is nil-safe, because most of the
-// tests in this repository drive a pass or a prepare with no listener
-// behind it, the way they drive one with no compositor behind it.
+// This file defines the display-specific metrics and the methods that
+// record them. Every recording method does nothing on a nil *metrics,
+// because most tests drive a pass or a prepare with no metrics behind
+// it.
 //
-// Every method here reads a fact a pass already computed for a
-// Display's status, a ResourceSlice's taint, or the layout module's
-// report. None of them opens a card, a socket, or a wire of its own.
+// Each method records a value that a pass already computed for a
+// Display's status, a ResourceSlice taint, or the layout module's
+// report. None of them reads the card, a socket, or a monitor.
 
 import (
 	"strconv"
@@ -16,13 +16,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// newDisplayMetrics declares this operator's own series. newMetrics
-// calls it once, on the same registry the runtime and the reconcile
-// loop's own series share, so one scrape answers for all three layers.
+// newDisplayMetrics creates the display series. newMetrics registers
+// them on the same registry as the process and reconcile-loop series.
 func (m *metrics) newDisplayMetrics() {
 	m.outputConnected = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "display_output_connected",
-		Help: "1 while a monitor is on the connector's wire, 0 while none is.",
+		Help: "1 while a monitor is connected to the output, 0 while none is.",
 	}, []string{"output"})
 	m.outputClaimed = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "display_output_claimed",
@@ -30,23 +29,23 @@ func (m *metrics) newDisplayMetrics() {
 	}, []string{"output"})
 	m.observationValid = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "display_observation_valid",
-		Help: "1 while the source last answered, 0 while it did not.",
+		Help: "1 while the last read of the source succeeded, 0 while it failed.",
 	}, []string{"source"})
 	m.observationSuccess = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "display_observation_last_success_timestamp_seconds",
-		Help: "When the source last answered, in seconds since the epoch.",
+		Help: "When the last read of the source succeeded, in seconds since the epoch.",
 	}, []string{"source"})
 	m.outputMode = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "display_output_mode_info",
-		Help: "Always 1. The mode and refresh label the mode actuated on the output.",
+		Help: "Always 1. The mode and refresh labels give the mode that the operator set on the output.",
 	}, []string{"output", "mode", "refresh"})
 	m.compositorRestarts = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "display_compositor_restarts_total",
-		Help: "Times this operator ended the compositor, by why.",
+		Help: "Times this operator ended the compositor, by reason.",
 	}, []string{"reason"})
 	m.compositorServing = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "display_compositor_serving",
-		Help: "1 while the compositor answers the handshake on its socket, 0 while it refuses or answers nothing.",
+		Help: "1 while the compositor replies on its Wayland socket, 0 while the socket refuses the connection or the compositor does not reply.",
 	})
 	m.compositorContainerRestarts = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "display_compositor_container_restarts_total",
@@ -54,7 +53,7 @@ func (m *metrics) newDisplayMetrics() {
 	})
 	m.surfaces = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "display_surfaces",
-		Help: "Surfaces the compositor holds on the output.",
+		Help: "Surfaces the compositor has on the output.",
 	}, []string{"output"})
 	m.panelPower = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "display_panel_power",
@@ -62,23 +61,16 @@ func (m *metrics) newDisplayMetrics() {
 	}, []string{"output"})
 	m.panelBrightness = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "display_panel_brightness",
-		Help: "The panel's last DDC/CI brightness reading, in the panel's own units.",
+		Help: "The panel's last DDC/CI brightness reading, in the units that the panel reports.",
 	}, []string{"output"})
 }
 
-// recordOutputs states the hardware triple's first two facts for
-// every connector the card has: whether a monitor is on the wire, and
-// whether a prepared claim holds the device. held carries the same
-// answer preparedOutputs gives the Display controller's canvas heal,
-// keyed by the device name a claim allocates, so a claim that holds no
-// output known to sysfs answers false rather than nothing.
-//
-// The gauges are reset first, so an output the card stopped reporting
-// leaves both series rather than reporting a fact from a walk that is
-// no longer true. The card registers a connector for as long as the
-// driver binds it, so the reset only ever drops a card that left with
-// the node.
-func (m *metrics) recordOutputs(outputs []Output, held map[string]bool) {
+// recordOutputs sets the connected, claimed, and mode series for every
+// connector on the card. prepared holds the output devices from
+// preparedOutputs, keyed by device name. It resets the series first,
+// so a connector that the card no longer reports does not keep its
+// last value.
+func (m *metrics) recordOutputs(outputs []Output, prepared map[string]bool) {
 	if m == nil {
 		return
 	}
@@ -87,14 +79,13 @@ func (m *metrics) recordOutputs(outputs []Output, held map[string]bool) {
 	m.outputMode.Reset()
 	for _, output := range outputs {
 		m.outputConnected.WithLabelValues(output.Connector).Set(boolValue(output.Connected))
-		m.outputClaimed.WithLabelValues(output.Connector).Set(boolValue(held[deviceName(output.Connector)]))
+		m.outputClaimed.WithLabelValues(output.Connector).Set(boolValue(prepared[deviceName(output.Connector)]))
 		m.recordMode(output.Connector, output.CurrentMode)
 	}
 }
 
-// recordMode states the mode actuated on one output. A blank mode,
-// which is an output driving nothing, states nothing: an info gauge
-// with no known value is an absent series, not a zero one.
+// recordMode sets the mode series for one output. An output with no
+// current mode, or one that does not parse, gets no series.
 func (m *metrics) recordMode(output, current string) {
 	if current == "" {
 		return
@@ -106,9 +97,8 @@ func (m *metrics) recordMode(output, current string) {
 	m.outputMode.WithLabelValues(output, parsed.Name, refreshLabel(parsed.Refresh)).Set(1)
 }
 
-// refreshLabel renders a mode's refresh the way every other label in
-// this file renders a number: as a plain decimal, with no unit and no
-// hertz suffix a dashboard would have to strip again.
+// refreshLabel formats a refresh rate in hertz with no unit, or returns
+// "" when the mode has none.
 func refreshLabel(hertz int) string {
 	if hertz == 0 {
 		return ""
@@ -116,10 +106,10 @@ func refreshLabel(hertz int) string {
 	return strconv.Itoa(hertz)
 }
 
-// recordObservation states whether one source answered on this pass,
-// and the wall-clock time it last did. A source that fails keeps the
-// gauges it already reported: display_observation_valid says the
-// reading is stale, and the timestamp says how stale.
+// recordObservation records whether a reading of one source succeeded
+// on this pass. A failure sets display_observation_valid to 0 and
+// leaves the success timestamp alone, so the timestamp shows the age
+// of the last good reading.
 func (m *metrics) recordObservation(source string, ok bool, now time.Time) {
 	if m == nil {
 		return
@@ -130,15 +120,19 @@ func (m *metrics) recordObservation(source string, ok bool, now time.Time) {
 	}
 }
 
-// compositorRestarted counts one restart this operator ordered. mode
-// is a claim's prepare changing the resolution. heal is the canvas
-// repair after the compositor re-creates an output. hung is the kill
-// the socket watch orders after the probe has read Hung for
-// compositorHungLimit. masterless is the restart of a compositor that
-// holds no DRM master, which the card gate reports. A compositor that
-// exited on its own is none of them: its container exits with it, and
-// display_compositor_container_restarts_total counts that one, from
-// the kubelet's own restart count.
+// compositorRestarted counts one compositor restart that this operator
+// ordered, by reason:
+//   - mode: a claim's prepare changed the resolution.
+//   - heal: the canvas was repaired after the compositor recreated an
+//     output.
+//   - hung: the socket watch killed a compositor whose probe read Hung
+//     for compositorHungLimit.
+//   - masterless: the card gate reported a compositor with no DRM
+//     master.
+//
+// A compositor that exits on its own is counted by
+// display_compositor_container_restarts_total instead, from the
+// kubelet's restart count.
 func (m *metrics) compositorRestarted(reason string) {
 	if m == nil {
 		return
@@ -146,9 +140,8 @@ func (m *metrics) compositorRestarted(reason string) {
 	m.compositorRestarts.WithLabelValues(reason).Inc()
 }
 
-// recordSurfaces states how many surfaces the compositor holds on one
-// output, from the same module report the placement pass just placed
-// them from.
+// recordSurfaces sets the number of surfaces on one output, taken from
+// the layout module report that the placement pass just used.
 func (m *metrics) recordSurfaces(output string, count int) {
 	if m == nil {
 		return
@@ -156,9 +149,9 @@ func (m *metrics) recordSurfaces(output string, count int) {
 	m.surfaces.WithLabelValues(output).Set(float64(count))
 }
 
-// forgetSurfaces drops the count of every output. A compositor that
-// serves nobody holds no surface, and the last count it reported is a
-// fact about a compositor that is gone.
+// forgetSurfaces removes the surface count of every output. When no
+// compositor serves, the last counts describe a compositor that is
+// gone.
 func (m *metrics) forgetSurfaces() {
 	if m == nil {
 		return
@@ -166,9 +159,9 @@ func (m *metrics) forgetSurfaces() {
 	m.surfaces.Reset()
 }
 
-// recordCompositorServing states what the probe found on the
-// compositor's socket, which is the same answer that taints every
-// output in the slice.
+// recordCompositorServing records the result of the compositor socket
+// probe, the same result that sets the taint on the ResourceSlice's
+// outputs.
 func (m *metrics) recordCompositorServing(serving bool) {
 	if m == nil {
 		return
@@ -176,9 +169,9 @@ func (m *metrics) recordCompositorServing(serving bool) {
 	m.compositorServing.Set(boolValue(serving))
 }
 
-// recordCompositorRestarts counts the restarts the kubelet made since
-// the last read. It takes the growth since that read, because the
-// total on a pod's status starts from zero with a new pod.
+// recordCompositorRestarts adds the container restarts since the last
+// reading. The caller passes the growth, not the pod's total, because
+// a new pod's restart count starts at zero.
 func (m *metrics) recordCompositorRestarts(growth int) {
 	if m == nil || growth <= 0 {
 		return
@@ -186,10 +179,10 @@ func (m *metrics) recordCompositorRestarts(growth int) {
 	m.compositorContainerRestarts.Add(float64(growth))
 }
 
-// recordPanel states the panel's last DDC/CI reading for power and
-// brightness, from the same facts a pass just wrote into the Display's
-// status.observed. A control the panel never answered leaves its gauge
-// unset, because a reading this operator never took is not a zero.
+// recordPanel sets the panel power and brightness series from the same
+// values the pass wrote to the Display's status.observed. A control the
+// panel never reported leaves its series unset, because no reading is
+// not a reading of zero.
 func (m *metrics) recordPanel(output string, facts panelFacts) {
 	if m == nil {
 		return
@@ -202,8 +195,7 @@ func (m *metrics) recordPanel(output string, facts panelFacts) {
 	}
 }
 
-// boolValue renders a state as the 1-or-0 milestone 65 states for
-// every gauge in the hardware triple.
+// boolValue returns the gauge value of a boolean.
 func boolValue(state bool) float64 {
 	if state {
 		return 1

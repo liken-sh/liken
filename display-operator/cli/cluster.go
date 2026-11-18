@@ -1,11 +1,9 @@
 package main
 
-// What the CLI reads from the cluster before it streams: the
-// operator's version from its Deployment image tag, the trust anchor
-// the operator publishes, a Ready pod behind the API Service, and the
-// caller's own credential, a bearer token or a client certificate. The
-// label selector and the names here are the contract the sibling CLIs
-// copy.
+// This file reads what the CLI needs from the cluster before it
+// connects to the capture API: the operator's version, the operator's
+// CA certificate, a Ready pod of the display-api Deployment, and the
+// caller's bearer token or client certificate.
 
 import (
 	"context"
@@ -24,46 +22,40 @@ import (
 )
 
 const (
-	// Where liken installs the operator and its API.
+	// The namespace of the operator and its API.
 	operatorNamespace = "liken-system"
 
-	// The label the base binary selects on to find an
-	// operator's workload, and this operator's value for it.
+	// The label that the `liken` CLI selects on to find an operator's
+	// workload, and this operator's value for it.
 	pluginLabel  = "cli.liken.sh/plugin"
 	pluginDomain = "display"
 
-	// The Service and Deployment that serve the capture
-	// API, and the DNS name its leaf certificate carries.
+	// The name of the Service and the Deployment of the capture API,
+	// and the DNS name in its serving certificate.
 	apiServiceName = "display-api"
 	apiServiceDNS  = "display-api.liken-system.svc"
 
-	// The port the API container serves HTTPS on.
 	apiContainerPort = 8443
 
-	// The ConfigMap the operator publishes its CA in,
-	// and the key that holds the PEM.
+	// The ConfigMap where the operator publishes its CA certificate,
+	// and the key of the PEM in it.
 	trustConfigMap = "display-api-ca"
 	trustKey       = "ca.crt"
 )
 
-// The label selector for the operator DaemonSet.
 var pluginSelector = pluginLabel + "=" + pluginDomain
 
-// The Display resource the capture positional names, as the
-// group, version, and resource a dynamic client lists. A Display is
-// cluster-scoped, so the list carries no namespace, and its name is the
-// output the capture route addresses. Completion reads these with no
-// typed client and no generated code, so the sibling CLIs change only
-// the three strings for their own object.
+// The capture command completes its argument from the names of the
+// Displays, because a Display's name is the output that the capture
+// route addresses. Displays are cluster-scoped.
 var displaysGVR = schema.GroupVersionResource{
 	Group:    "display.liken.sh",
 	Version:  "v1alpha1",
 	Resource: displaysResource,
 }
 
-// listDisplays lists the Display names through a dynamic client.
-// Completion filters the names it returns against the word under the
-// cursor.
+// listDisplays returns the names of all Displays. Shell completion
+// filters them against the word being typed.
 func listDisplays(ctx context.Context, client dynamic.Interface) ([]string, error) {
 	list, err := client.Resource(displaysGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -76,11 +68,10 @@ func listDisplays(ctx context.Context, client dynamic.Interface) ([]string, erro
 	return names, nil
 }
 
-// operatorVersion reads the version tag off the
-// operator DaemonSet's image, the one source every CLI can read with
-// no new API. The operator runs one pod per node from a DaemonSet, and
-// the label is on that DaemonSet, not on the display-api Deployment,
-// because the display-api image has no -cli image beside it.
+// operatorVersion returns the image tag of the first container of the
+// DaemonSet with the plugin label. The label is on the operator's
+// DaemonSet and not on the display-api Deployment, because only the
+// operator's image has a -cli image at the same tag.
 func operatorVersion(ctx context.Context, clientset kubernetes.Interface) (string, error) {
 	daemonSets, err := clientset.AppsV1().DaemonSets("").List(ctx, metav1.ListOptions{
 		LabelSelector: pluginSelector,
@@ -89,17 +80,17 @@ func operatorVersion(ctx context.Context, clientset kubernetes.Interface) (strin
 		return "", err
 	}
 	if len(daemonSets.Items) == 0 {
-		return "", fmt.Errorf("no DaemonSet carries the label %s", pluginSelector)
+		return "", fmt.Errorf("no DaemonSet has the label %s", pluginSelector)
 	}
 	containers := daemonSets.Items[0].Spec.Template.Spec.Containers
 	if len(containers) == 0 {
-		return "", fmt.Errorf("the operator DaemonSet declares no container")
+		return "", fmt.Errorf("the operator DaemonSet has no container")
 	}
 	return imageTag(containers[0].Image), nil
 }
 
-// imageTag reads the tag off an image reference, and
-// reports an empty tag for a bare name or a digest reference.
+// imageTag returns the tag of an image reference, or an empty string
+// for a reference with no tag or with a digest.
 func imageTag(image string) string {
 	if at := strings.LastIndex(image, "@"); at >= 0 {
 		image = image[:at]
@@ -111,8 +102,8 @@ func imageTag(image string) string {
 	return image[colon+1:]
 }
 
-// trustAnchor reads the CA the operator publishes and
-// builds the pool the capture client trusts.
+// trustAnchor returns a pool with the operator's CA certificate, which
+// the capture client verifies the server against.
 func trustAnchor(ctx context.Context, clientset kubernetes.Interface) (*x509.CertPool, error) {
 	configmap, err := clientset.CoreV1().ConfigMaps(operatorNamespace).Get(ctx, trustConfigMap, metav1.GetOptions{})
 	if err != nil {
@@ -120,17 +111,17 @@ func trustAnchor(ctx context.Context, clientset kubernetes.Interface) (*x509.Cer
 	}
 	anchor := configmap.Data[trustKey]
 	if anchor == "" {
-		return nil, fmt.Errorf("the ConfigMap %s holds no %s", trustConfigMap, trustKey)
+		return nil, fmt.Errorf("the ConfigMap %s has no key %s", trustConfigMap, trustKey)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM([]byte(anchor)) {
-		return nil, fmt.Errorf("the ConfigMap %s holds no certificate in %s", trustConfigMap, trustKey)
+		return nil, fmt.Errorf("the ConfigMap %s has no PEM certificate in key %s", trustConfigMap, trustKey)
 	}
 	return pool, nil
 }
 
-// pickReadyPod finds one Ready pod behind the API
-// Service, which is the pod the port-forward targets.
+// pickReadyPod returns the name of a Ready display-api pod for the
+// port-forward to connect to.
 func pickReadyPod(ctx context.Context, clientset kubernetes.Interface) (string, error) {
 	pods, err := clientset.CoreV1().Pods(operatorNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "app=" + apiServiceName,
@@ -146,8 +137,6 @@ func pickReadyPod(ctx context.Context, clientset kubernetes.Interface) (string, 
 	return "", fmt.Errorf("no Ready %s pod runs in %s", apiServiceName, operatorNamespace)
 }
 
-// podReady is true when the pod's Ready condition is
-// true.
 func podReady(pod corev1.Pod) bool {
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodReady {
@@ -157,10 +146,9 @@ func podReady(pod corev1.Pod) bool {
 	return false
 }
 
-// bearerToken reads the caller's own token from the REST config, and
-// reports an empty token when the context carries none. A context that
-// authenticates with a client certificate names no token, and the
-// capture client presents that certificate instead.
+// bearerToken returns the caller's token from the REST config, or an
+// empty string when there is none, as in a kubeconfig context that
+// uses a client certificate.
 func bearerToken(config *rest.Config) (string, error) {
 	if config.BearerToken != "" {
 		return config.BearerToken, nil
@@ -175,11 +163,11 @@ func bearerToken(config *rest.Config) (string, error) {
 	return "", nil
 }
 
-// clientCertificate reads the caller's client certificate from the
-// REST config. The capture API verifies it against the cluster's own
-// client authority and reads the caller's identity from it, so a
-// person captures with the kubeconfig they already hold. It reports a
-// nil accessor when the context authenticates some other way.
+// clientCertificate returns a function that supplies the caller's
+// client certificate from the REST config, or nil when the context has
+// none. The capture API verifies the certificate against the cluster's
+// client CA and reads the caller from it, so a person can capture with
+// the kubeconfig they already use.
 func clientCertificate(config *rest.Config) (func(*tls.CertificateRequestInfo) (*tls.Certificate, error), error) {
 	kube, err := rest.TLSConfigFor(config)
 	if err != nil {

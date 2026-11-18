@@ -43,10 +43,10 @@ func TestDecideVersionAction(t *testing.T) {
 	}{
 		{"same version runs", "2026.09.03-007", "2026.09.03-007", "", actionRun},
 		{"unknown operator runs", "2026.09.03-007", "", "", actionRun},
-		{"drift warns", "2026.09.03-006", "2026.09.03-007", "", actionWarn},
-		{"below the floor refuses", "2026.09.03-006", "2026.09.03-007", "2026.09.03-007", actionRefuse},
-		{"at the floor runs", "2026.09.03-007", "2026.09.03-007", "2026.09.03-007", actionRun},
-		{"a dev build ignores the floor", "dev", "2026.09.03-007", "2026.09.03-007", actionWarn},
+		{"different versions warn", "2026.09.03-006", "2026.09.03-007", "", actionWarn},
+		{"older than the minimum refuses", "2026.09.03-006", "2026.09.03-007", "2026.09.03-007", actionRefuse},
+		{"at the minimum runs", "2026.09.03-007", "2026.09.03-007", "2026.09.03-007", actionRun},
+		{"a dev build ignores the minimum", "dev", "2026.09.03-007", "2026.09.03-007", actionWarn},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,7 +55,7 @@ func TestDecideVersionAction(t *testing.T) {
 				t.Fatalf("decideVersionAction(%q, %q, %q) = %d, want %d", tc.cli, tc.operator, tc.minimumCLI, got, tc.want)
 			}
 			if (got == actionRun) != (message == "") {
-				t.Fatalf("a run carries no message and a warn or refuse carries one; got action %d with message %q", got, message)
+				t.Fatalf("decideVersionAction returned action %d with message %q, want a message only for a warn or a refuse", got, message)
 			}
 		})
 	}

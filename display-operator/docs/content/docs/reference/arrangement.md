@@ -7,133 +7,142 @@ toc: true
 # The arrangement protocol
 
 `liken_arrangement_v1` is a Wayland protocol that lets one client of a
-claim place the claim's own windows inside the claim's region. A
-video player uses it to step its film back into a frame at the
-credits while a panel slides in beside it, all in one region. The
-compositor runs every move on each repaint of the output, so a move
-lands on the panel's refresh and a request moves the windows in the
-next frame. The [layout guide](/docs/guides/layout/) shows how a
-`Layout` gives each claim its region.
+claim place the claim's own windows inside the claim's region. For
+example, a video player can shrink its film into a frame when the
+credits start and slide a panel in beside it, all inside one region.
 
-A screen has two owners. The `Layout` that a `Display` names owns the
-screen: the operator gives each claim a region, and no workload can
-move a region. Inside its region, a claim's windows belong to one
-arranger, the first client of the claim that asks for the protocol.
-An arrangement never moves a window outside the region and never
-scales one above the region's size. A claim with no arranger shows
-every window filling its region, as it did before the protocol.
+The `Layout` that a `Display` names sets each claim's region, and no
+workload can move a region. The [layout guide](/docs/guides/layout/)
+shows how. Inside the region, the claim's arranger places the windows.
+The arranger is the first client of the claim that asks for the
+protocol. An arrangement never moves a window outside the region and
+never scales one above the region's size. When a claim has no
+arranger, each of its windows fills the region.
 
-The protocol's XML is
-[`weston/layout/liken-arrangement-v1.xml`](https://github.com/liken-sh/liken/blob/main/weston/layout/liken-arrangement-v1.xml)
-in the repository. Generate your client's bindings from it.
+The protocol's XML is in the repository at
+[`weston/layout/liken-arrangement-v1.xml`](https://github.com/liken-sh/liken/blob/main/weston/layout/liken-arrangement-v1.xml).
+Generate your client's bindings from it.
 
 ## Binding the protocol
 
 The compositor module, `liken-layout.so`, advertises the global
 `liken_arranger_manager_v1` on every socket. Bind it on a connection
-to the socket the claim gave your container, which is the one
+to the socket the claim gave your container, which is the socket that
 `WAYLAND_DISPLAY` names, and call `get_arranger`. The compositor
-answers with one event:
+replies with one event:
 
 - `granted` when the claim has no arranger. A `region` event follows
-  with the region's size in logical pixels, and then one `surfaces`
-  event for each app_id the claim's windows carry, with how many
-  windows carry it.
-- `refused` with `busy` when another client arranges the claim, and
-  with `not_a_claim` when the connection did not arrive on a claim's
-  socket.
+  with the region's size in logical pixels. Then the compositor sends
+  one `surfaces` event for each app_id among the claim's windows, with
+  the number of windows that have it.
+- `refused` with the reason `busy` when another client already
+  arranges the claim, or with the reason `not_a_claim` when the
+  connection did not arrive on a claim's socket.
 
-The compositor tells a claim's clients apart by the socket they
-arrived on, so any connection to the claim's socket can arrange. The
-simplest is the connection your program's own window uses. A toolkit
-that owns its connection, such as winit under iced, hands out the
-`wl_display` through `HasDisplayHandle`, and `wayland-backend`'s
-`Backend::from_foreign_display` binds the global on it with an event
-queue of your own, while the toolkit keeps drawing.
+The compositor identifies a claim's clients by the socket they
+connected to, so any connection to the claim's socket can arrange. The
+simplest choice is the connection that your program's own window uses.
+When a toolkit owns that connection, as winit does under iced, you can
+get the `wl_display` through `HasDisplayHandle`. Then
+`Backend::from_foreign_display` in `wayland-backend` binds the global
+on that connection with an event queue of your own, and the toolkit
+keeps drawing.
 
-The compositor sends `region` again whenever the operator places the
-region at another size, and `surfaces` again whenever a count
-changes. A count of zero means the last window with that app_id is
-gone.
+The compositor sends `region` again when the operator places the
+region at another size, and `surfaces` again when a count changes. A
+count of zero means that the last window with that app_id is gone.
 
 ## Naming windows by app_id
 
-An arrangement names windows by their xdg app_id, the string a client
-sets with `xdg_toplevel.set_app_id`. Set a distinct app_id on each
-window you want to place. mpv takes one with `--wayland-app-id`. A
-subsurface has no app_id of its own and moves with the window it
-belongs to, so a player's subtitles move with its film.
+An arrangement selects windows by their xdg app_id, the string that a
+client sets with `xdg_toplevel.set_app_id`. Set a different app_id on
+each window that you want to place separately. mpv sets one with
+`--wayland-app-id`. A subsurface has no app_id of its own and moves
+with the window it belongs to, so a player's subtitles move with its
+film.
 
-An entry moves every window of the claim whose app_id it names, so two
-windows with one app_id always move together. `status.arrangers` on
-the `Display` lists each app_id that two or more of the claim's
-windows carry, under `duplicateAppIDs`.
+An entry moves every window of the claim that has its app_id, so two
+windows with the same app_id always move together. `status.arrangers`
+on the `Display` lists each app_id that two or more of the claim's
+windows have, under `duplicateAppIDs`.
 
-A window that no entry names keeps the default: it fills the region,
-shows fully opaque, and stacks below every named window in the order
-the windows arrived.
+A window that no entry selects keeps the default placement. It fills
+the region, is fully opaque, and is stacked below every selected
+window, in the order the windows arrived.
 
 ## An arrangement
 
-An arrangement is a list of entries, sent with `entry` and applied
-with `commit`. Each entry states:
+An arrangement is a list of entries. You send each one with `entry`
+and apply the list with `commit`. An entry has these arguments:
 
 | Argument | Meaning |
 | --- | --- |
-| `app_id` | The windows this entry places. |
+| `app_id` | The app_id of the windows that this entry places. |
 | `x`, `y`, `width`, `height` | The rectangle, in logical pixels of the region, with the region's top-left corner at 0,0. |
-| `opacity` | From 0 to 1. |
+| `opacity` | From 0, transparent, to 1, opaque. |
 | `fit` | `scale` or `resize`, below. |
-| `delay_ms` | How long after the commit this entry's move starts, so an arrangement can stagger its entries. |
+| `delay_ms` | How many milliseconds after the commit this entry's move starts, so an arrangement can stagger its entries. |
 
-The order of the entries is the stacking order, first at the bottom.
-`commit` takes a `serial` that comes back in `landed`, a `name` that
-the operator shows in the `Display`'s status, a `duration_ms`, and a
-`curve`: `smoothstep`, `ease_out` for arrivals, `ease_in` for exits,
-or `linear`. Each window moves from where it shows now, including a
-window partway through an earlier move, to where the new arrangement
-puts it. A duration of zero moves the windows at once. The compositor
+The order of the entries is the stacking order, with the first entry at
+the bottom. `commit` takes these arguments:
+
+- `serial`, which the compositor returns in the `landed` event.
+- `name`, which the operator shows in `status.arrangers[].arrangement`
+  on the `Display`.
+- `duration_ms`, the length of the move in milliseconds.
+- `curve`, one of `smoothstep`, `ease_out` (for arrivals), `ease_in`
+  (for exits), or `linear`.
+
+Each window moves from where it is now to where the new arrangement
+puts it. That includes a window that is partway through an earlier
+move. A duration of zero moves the windows at once. The compositor
 sends `landed` with the serial in the frame where every entry has
-finished. A commit that a later commit replaced sends no `landed`.
+finished. When a later commit replaces a commit, the replaced commit
+sends no `landed`.
 
-The compositor ends the client's connection with a protocol error for
-a rectangle that is empty or reaches outside the region, an opacity
-outside 0 to 1, a duration or delay above 10000 milliseconds, two
-entries of one arrangement with the same app_id, a fit or curve the
-enum does not name, and an entry or commit before `granted`.
+The compositor ends the client's connection with a protocol error in
+these cases:
 
-## The two fits
+- An entry's rectangle is empty or reaches outside the region.
+- An opacity is outside 0 to 1.
+- A duration or a delay is above 10000 milliseconds.
+- Two entries of one arrangement have the same app_id.
+- A fit or a curve is a value that the protocol does not define.
+- The client sends an entry or a commit before `granted`.
 
-`scale` scales the window's content into the rectangle and never
-sends its client a configure. Use it for video: the client keeps its
-buffers and never reallocates while it plays.
+## Fits
 
-`resize` scales the window during the move, then sends its client one
-configure at the rectangle's size when the entry lands, and stops
-scaling when the client commits a buffer of that size. Use it for a
-panel of text, which redraws at its new size to stay sharp.
+`scale` scales the window's content into the rectangle and never sends
+a configure to the window's client. Use it for video, because the
+client keeps its buffers and does not allocate new ones while it plays.
 
-A window whose own content is a single solid color and that has
-subsurfaces is a backdrop, such as the black window mpv draws its
+`resize` scales the window during the move. When the entry finishes,
+the compositor sends the client one configure with the rectangle's
+size, and it stops scaling when the client commits a buffer of that
+size. Use it for a panel of text, which redraws at the new size to
+stay sharp.
+
+A backdrop is a window whose own content is a single solid color and
+that has subsurfaces, such as the black window that mpv draws its
 video over. Under `scale`, a backdrop keeps filling the region at its
-stacking position, and the rectangle applies to its subsurfaces. So
-the area around a film that steps back keeps the backdrop's color,
-and the compositor keeps a solid surface under the whole output,
-which the display hardware can show as the background with no
-composition.
+place in the stack, and the entry's rectangle applies to its
+subsurfaces. So when a film shrinks, the area around it keeps the
+backdrop's color.
 
-## When the arranger goes
+## When a claim loses its arranger
 
-When the arranger is destroyed, or its client disconnects, every
-window of the claim moves back to the default over 400 milliseconds.
-The claim then has no arranger until a client asks again, and the
-next client to call `get_arranger` gets `granted`. A program that
-restarts after a crash binds again and states its arrangement again.
+When the arranger is destroyed or its client disconnects, every window
+of the claim moves back to the default placement over 400
+milliseconds. The claim then has no arranger until a client asks for
+one, and the next client to call `get_arranger` gets `granted`. A
+program that restarts after a crash must bind again and send its
+arrangement again.
 
 The operator posts an `Event` on the `Display` when a claim gains or
-loses its arranger. A client that disconnects while a pod that holds
-the claim still runs posts the Warning `ArrangerLost`, which is how a
-crashed client looks. Destroy the arranger before your program exits
-on purpose: a destroyed arranger posts the Normal `ArrangerReleased`.
-A commit posts no `Event`. The [`Display` reference](/docs/reference/displays/#arrangers)
-gives the fields of `status.arrangers` and every reason.
+loses its arranger. When a client disconnects while a pod that holds
+the claim is still running, the operator posts the Warning
+`ArrangerLost`, because that looks like a crashed client. When your
+program exits on purpose, destroy the arranger first, so that the
+operator posts the Normal `ArrangerReleased` instead. A commit posts
+no `Event`. The [`Display` reference](/docs/reference/displays/#arrangers)
+lists the fields of `status.arrangers` and every reason.

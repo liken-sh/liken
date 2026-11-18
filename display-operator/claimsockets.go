@@ -1,14 +1,14 @@
 package main
 
-// The Wayland socket a claim holds: what it is named, how it comes
-// back after a compositor restart, and how it goes when the claim
-// does.
+// The layout module opens a Wayland socket for each prepared claim.
+// When a surface appears, the module reports the socket its client
+// connected on, and the operator finds the claim from that socket.
 //
-// The layout module opens one socket for each prepared claim, and the
-// socket a surface arrives on is the claim that drew it. Nothing in a
-// consumer's container can change it: the CDI spec names the claim's
-// own socket, and the module reports the socket it accepted the
-// client on.
+// The CDI spec sets WAYLAND_DISPLAY to the claim's own socket, but it
+// mounts the whole socket directory. So a client that sets another
+// name can connect to another claim's socket. The socket name tells a
+// well-behaved client where to connect, and it does not restrict
+// access.
 
 import (
 	"errors"
@@ -18,37 +18,23 @@ import (
 	"strings"
 )
 
-// waylandDisplayVariable names the socket a Wayland client connects
-// to. The operator writes it into every Wayland delivery and reads it
-// back out of the spec, so the socket a claim holds is stated in one
-// place.
+// waylandDisplayVariable is set in each claim's CDI spec, and
+// waylandSocket reads it back to find the claim's socket.
 const waylandDisplayVariable = "WAYLAND_DISPLAY"
 
-// waylandSocketPrefix starts the name of every socket the module
-// opens for a claim. libwayland builds a client's path from
-// XDG_RUNTIME_DIR and the socket's name, and the name says nothing
-// about who may connect: the CDI spec is what tells one claim's pods
-// which name is theirs.
 const waylandSocketPrefix = "wayland-"
 
-// claimSocketNames names the Wayland socket every result in one
-// claim delivers, keyed by the output device the result names.
+// claimSocketNames returns the Wayland socket name for each output
+// device in the claim's allocation results, keyed by output device.
+// An output and its draw device share one socket, and a control
+// device gets none.
 //
-// One claim gets one socket, `wayland-<claim UID>`, because the
-// socket is the claim's identity: the module reports which socket a
-// surface arrived on, and the claim's status.reservedFor names the
-// pods that hold it. A claim's output result and its draw result on
-// the same connector deliver that one name.
-//
-// A claim that allocated two connectors is the exception. A socket
-// belongs to one output, because the module remembers which output
-// the surfaces on a socket go on, so the second connector and every
-// one after it gets `wayland-<claim UID>-<output device>`. The
-// results are walked in the order the scheduler wrote them, so the
-// names are the same on every prepare of the same claim.
-//
-// A control result gets no socket. Its whole delivery is the i2c
-// node, and it draws nothing.
+// The module places every surface of a socket on one output, so a
+// claim on several outputs needs a socket for each. The first output
+// gets wayland-<claim UID>, and each later one gets
+// wayland-<claim UID>-<output device>. The results keep the order the
+// scheduler wrote, so a repeated prepare of the claim returns the same
+// names.
 func claimSocketNames(claimUID string, results []AllocatedDevice) map[string]string {
 	sockets := map[string]string{}
 	for _, result := range results {
@@ -74,21 +60,19 @@ func claimSocketNames(claimUID string, results []AllocatedDevice) map[string]str
 	return sockets
 }
 
-// replaySockets re-opens the Wayland socket every prepared claim
-// holds. It runs on every new connection to the module, because the
-// compositor's restart took every socket the module had opened, and
-// the clients reconnect to the names their environment already
-// carries.
+// replaySockets opens the Wayland socket of every prepared claim
+// again. The layout link calls it on each new connection to the
+// module, because a compositor restart closes every socket the module
+// opened, and running pods reconnect by the names in their
+// environment.
 //
-// The specs on disk are what says which claims hold a socket, so a
-// restart of the operator's container replays the same set. The
-// connector comes from a fresh walk of the card, because the spec
-// names the published device and the module names the kernel's
-// connector.
+// It reads the claims from the CDI specs on disk, so it also works
+// after the operator's container restarts. The spec has the published
+// device name, and the module needs the kernel's connector name, so it
+// scans the card to map one to the other.
 //
-// A socket whose output the card does not carry is reported and
-// skipped, and so is one the module refuses, because one claim must
-// not cost every other claim its socket.
+// A socket whose output is gone from the card, or that the module
+// refuses, does not stop the others. It returns the errors joined.
 func (p *draPlugin) replaySockets() error {
 	sockets, err := preparedSocketOutputs()
 	if err != nil {
@@ -103,7 +87,7 @@ func (p *draPlugin) replaySockets() error {
 		connector, carried := connectors[device]
 		if !carried {
 			failures = append(failures,
-				fmt.Errorf("%s was opened for output %s, which %s does not carry", socket, device, p.card))
+				fmt.Errorf("socket %s is for output %s, and card %s has no such output", socket, device, p.card))
 			continue
 		}
 		if err := p.layout.Listen(socket, connector); err != nil {
@@ -113,8 +97,8 @@ func (p *draPlugin) replaySockets() error {
 	return errors.Join(failures...)
 }
 
-// waylandSocket names the socket one device's edits deliver. It is
-// empty for a control device, whose whole delivery is an i2c node.
+// waylandSocket returns the WAYLAND_DISPLAY value in a device's CDI
+// edits, or an empty string for a control device, which sets none.
 func waylandSocket(edits cdiEdits) string {
 	for _, entry := range edits.Env {
 		if name, set := strings.CutPrefix(entry, waylandDisplayVariable+"="); set {
@@ -124,14 +108,13 @@ func waylandSocket(edits cdiEdits) string {
 	return ""
 }
 
-// preparedSockets names the Wayland sockets one claim holds, which is
-// what an unprepare gives back to the layout module. A claim that
-// allocated two connectors holds one socket for each of them.
+// preparedSockets returns the Wayland sockets that one claim's CDI
+// spec sets, for unprepare to close.
 //
-// The compositor's own socket is not in the answer. weston opens
-// wayland-0 itself, and a pod prepared before the per-claim sockets
-// existed still holds it in its environment, so this operator never
-// asks the module to close it.
+// It leaves out socketName, the compositor's own socket. Weston opens
+// that socket itself, so the module must never be asked to close it.
+// Prepare does not write it into a spec, but a spec that an earlier
+// version of the operator wrote can still set it.
 func preparedSockets(claimUID string) ([]string, error) {
 	spec, err := readCDISpec(claimUID)
 	if err != nil {
@@ -148,22 +131,20 @@ func preparedSockets(claimUID string) ([]string, error) {
 	return sockets, nil
 }
 
-// preparedSocket is one socket a prepared claim holds: the claim that
-// holds it, and the output device the module opened it for.
+// preparedSocket is the claim UID and the output device of one
+// prepared claim's socket.
 type preparedSocket struct {
 	claim  string
 	device string
 }
 
-// preparedSocketClaims names every socket the prepared claims hold,
-// keyed by socket name. The placement pass reads it to learn which
-// claim drew a surface, because the module reports the socket a
-// surface arrived on and nothing else about who owns it.
+// preparedSocketClaims returns the socket of every prepared claim,
+// keyed by socket name. The placement pass uses it to find the claim
+// that drew a surface, because the module reports only the socket.
 //
-// The name is not parsed for the claim's UID. A UID carries dashes of
-// its own, so wayland-<claim UID>-<output device> cannot be split on
-// one, and the spec file that named the socket already states which
-// claim it was written for.
+// It reads the claim UID from the spec file and not from the socket
+// name, because a UID contains dashes, and so does the
+// wayland-<claim UID>-<output device> form.
 func preparedSocketClaims() (map[string]preparedSocket, error) {
 	sockets := map[string]preparedSocket{}
 	err := eachPreparedSpec(func(claimUID string, spec cdiSpec) {
@@ -185,14 +166,9 @@ func preparedSocketClaims() (map[string]preparedSocket, error) {
 	return sockets, err
 }
 
-// preparedSocketOutputs names the socket every prepared claim holds
-// and the output device it was opened for, keyed by socket name. The
-// replay reads it after every new connection to the layout module,
-// and resolves each output device to its connector against a fresh
-// connector walk.
-//
-// A draw device's socket is the socket of the output it draws on, so
-// its name resolves to the same connector as the output device's.
+// preparedSocketOutputs returns the output device of each prepared
+// socket, keyed by socket name. A draw device maps to the output it
+// draws on.
 func preparedSocketOutputs() (map[string]string, error) {
 	sockets, err := preparedSocketClaims()
 	if err != nil {
@@ -205,17 +181,18 @@ func preparedSocketOutputs() (map[string]string, error) {
 	return outputs, nil
 }
 
-// releaseSockets asks the module to close the sockets one claim
-// held, before the spec that names them goes.
+// releaseSockets asks the layout module to close the sockets of one
+// claim. It reads the socket names from the claim's CDI spec, so it
+// must run before the spec is deleted.
 //
-// A failure here fails no unprepare. The sockets exist only in the
-// running compositor, so a module that is not serving lost them
-// already, and an unprepare that failed on one would hold the
-// kubelet for a socket that is gone.
+// It only logs errors, so unprepare does not fail on them. The sockets
+// exist only in the running compositor. A module that is not serving
+// has already lost them, and a failed unprepare would make the kubelet
+// retry for a socket that no longer exists.
 func (p *draPlugin) releaseSockets(claimUID string) {
 	sockets, err := preparedSockets(claimUID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "reading the sockets claim %s holds: %v\n", claimUID, err)
+		fmt.Fprintf(os.Stderr, "reading the sockets of claim %s: %v\n", claimUID, err)
 		return
 	}
 	for _, socket := range sockets {

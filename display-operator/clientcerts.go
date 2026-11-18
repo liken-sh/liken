@@ -1,13 +1,12 @@
 package main
 
-// This file holds the second way a caller names itself: a client
-// certificate the cluster's own authority signed. The API server
-// publishes that authority in a ConfigMap, this API verifies a
-// caller's certificate against it, and the leaf's subject is the
-// caller. A person with a kubeconfig then reads a screen with the
-// credentials they already hold, and the ClusterRole an owner bound
-// to them matches, because the user and the groups are spelled the
-// way kube-apiserver spells them.
+// A caller can authenticate with a client certificate that the
+// cluster's client CA signed, in place of a Bearer token. This API
+// verifies the certificate against the CA that the API server publishes
+// in a ConfigMap, and reads the user and groups from the certificate's
+// subject, as kube-apiserver does. So a person can read a screen with
+// the credentials in their kubeconfig, under the RBAC rules bound to
+// them.
 
 import (
 	"context"
@@ -23,20 +22,17 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// The ConfigMap the API server publishes the cluster's client
-// certificate authority in, and the key that holds its PEM. The API
-// server writes this object at start and rewrites it when the
-// authority changes, so it is the one anchor every client certificate
-// the cluster issues verifies against.
+// The API server writes the client CA's PEM bundle to this ConfigMap
+// key when it starts and again whenever the CA changes.
 const (
 	clientCANamespace = "kube-system"
 	clientCAConfigMap = "extension-apiserver-authentication"
 	clientCAKey       = "client-ca-file"
 )
 
-// The anchors a handshake verifies a client certificate against. The
-// pool is replaced and never written to, because a handshake reads it
-// while a load runs.
+// clientAnchors is the CA pool that TLS handshakes verify client
+// certificates against. An update replaces the pool and never changes
+// it in place, because a handshake can be reading the old pool.
 type clientAnchors struct {
 	mu   sync.RWMutex
 	pool *x509.CertPool
@@ -48,11 +44,11 @@ func (a *clientAnchors) set(pool *x509.CertPool) {
 	a.pool = pool
 }
 
-// held answers an empty pool before the first load, so a handshake
-// that arrives early verifies no certificate. A nil ClientCAs would
-// mean the machine's own root store, which holds no authority this
-// cluster issued.
-func (a *clientAnchors) held() *x509.CertPool {
+// current returns an empty pool before the first load, so an early
+// handshake verifies no certificate. A nil ClientCAs would make Go
+// fall back to the system root store, which holds none of this
+// cluster's CAs.
+func (a *clientAnchors) current() *x509.CertPool {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	if a.pool == nil {
@@ -61,23 +57,24 @@ func (a *clientAnchors) held() *x509.CertPool {
 	return a.pool
 }
 
-// load reads the ConfigMap and replaces the pool with what it holds.
-// The key carries one PEM block when no rotation is in progress and
-// more than one during a rotation, and a pool takes all of them.
+// load reads the ConfigMap and replaces the pool with its CAs. During a
+// CA rotation the key has more than one certificate, and the pool
+// trusts all of them.
 func (a *clientAnchors) load(c *apiclient.Client) error {
-	held, err := apiclient.Get[ConfigMap](c, configMapsPath(clientCANamespace)+"/"+clientCAConfigMap)
+	configMap, err := apiclient.Get[ConfigMap](c, configMapsPath(clientCANamespace)+"/"+clientCAConfigMap)
 	if err != nil {
 		return fmt.Errorf("reading the ConfigMap %s: %w", clientCAConfigMap, err)
 	}
-	return a.take(held)
+	return a.setFromConfigMap(configMap)
 }
 
-// take replaces the pool with the anchors one copy of the ConfigMap
-// holds.
-func (a *clientAnchors) take(held *ConfigMap) error {
-	anchorPEM := held.Data[clientCAKey]
+// setFromConfigMap replaces the pool with the CAs in the ConfigMap. It
+// returns an error and leaves the pool unchanged when the ConfigMap has
+// no certificate.
+func (a *clientAnchors) setFromConfigMap(configMap *ConfigMap) error {
+	anchorPEM := configMap.Data[clientCAKey]
 	if anchorPEM == "" {
-		return fmt.Errorf("the ConfigMap %s carries no %s", clientCAConfigMap, clientCAKey)
+		return fmt.Errorf("the ConfigMap %s has no %s", clientCAConfigMap, clientCAKey)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM([]byte(anchorPEM)) {
@@ -87,37 +84,35 @@ func (a *clientAnchors) take(held *ConfigMap) error {
 	return nil
 }
 
-// The API watches the ConfigMap, so a rotated authority opens the door
-// as soon as the API server publishes it, with no restart. A copy that
-// holds no authority is reported, and so is a ConfigMap that is gone.
-// Either way the API keeps the pool it holds, because the certificates
-// that pool holds are still the ones the cluster issued.
+// keepClientAnchors watches the ConfigMap and updates anchors on every
+// change, so a rotated CA takes effect without a restart. When the
+// ConfigMap is deleted or has no certificate, it logs the problem and
+// keeps the current pool, because that pool still verifies the
+// certificates the cluster has issued.
 func keepClientAnchors(ctx context.Context, watcher dynamic.Interface, anchors *clientAnchors) {
 	authority := informer.One{Resource: configMapResource, Namespace: clientCANamespace, Name: clientCAConfigMap,
 		What: "the ConfigMap " + clientCAConfigMap}
-	<-informer.WatchOne(ctx, watcher, authority, func(held *ConfigMap) {
-		if held == nil {
-			fmt.Fprintf(os.Stderr, "the ConfigMap %s is gone, and the API keeps the client authority it holds\n", clientCAConfigMap)
+	<-informer.WatchOne(ctx, watcher, authority, func(configMap *ConfigMap) {
+		if configMap == nil {
+			fmt.Fprintf(os.Stderr, "the ConfigMap %s was deleted, so the API server keeps the client authority it has\n", clientCAConfigMap)
 			return
 		}
-		if err := anchors.take(held); err != nil {
-			fmt.Fprintf(os.Stderr, "reading the cluster's client authority: %v\n", err)
+		if err := anchors.setFromConfigMap(configMap); err != nil {
+			fmt.Fprintf(os.Stderr, "keeping the client authority the API server has: %v\n", err)
 		}
 	}, nil).Done()
 }
 
-// The configuration the API listens with. The certificate and the
-// anchors are both read on every handshake, through this function,
-// so a re-minted leaf and a rotated client authority each reach the
-// next connection with no restart. A whole configuration is returned
-// rather than one field written in place, because a tls.Config a
-// handshake is reading must not be written to.
+// apiTLSConfig returns the TLS configuration the API listens with.
+// GetConfigForClient builds a new tls.Config for each handshake with
+// the current client CA pool, so a rotated CA applies to the next
+// connection without a restart.
 //
-// VerifyClientCertIfGiven is the policy: a caller that offers no
-// certificate still reaches the Bearer token path, and a caller that
-// offers one has it verified before any route runs. NextProtos names
-// the two protocols net/http would have negotiated, because a
-// configuration returned here replaces the one the server built.
+// VerifyClientCertIfGiven lets a caller with no certificate go on to
+// Bearer token authentication, and fails the handshake for a
+// certificate that does not verify. The returned configuration replaces
+// the one that net/http built, so it must list in NextProtos the
+// protocols that net/http would have offered.
 func apiTLSConfig(holder *certificateHolder, anchors *clientAnchors) *tls.Config {
 	return &tls.Config{
 		GetCertificate: holder.get,
@@ -128,26 +123,22 @@ func apiTLSConfig(holder *certificateHolder, anchors *clientAnchors) *tls.Config
 				MinVersion:     tls.VersionTLS12,
 				NextProtos:     []string{"h2", "http/1.1"},
 				ClientAuth:     tls.VerifyClientCertIfGiven,
-				ClientCAs:      anchors.held(),
+				ClientCAs:      anchors.current(),
 			}, nil
 		},
 	}
 }
 
-// certificateCaller reads the caller out of a connection that carries
-// a verified client certificate.
+// certificateCaller returns the caller that a verified client
+// certificate identifies, and false when there is none. As in
+// kube-apiserver, the user is the certificate's subject common name and
+// the groups are its subject organization values, and there is no uid
+// or extra.
 //
-// The user is the leaf's subject common name and the groups are its
-// subject organization values. That is how kube-apiserver reads a
-// client certificate, so a ClusterRole an owner bound to a person
-// matches here with no second spelling of who they are. The
-// certificate carries no uid and no extra attributes, so the caller
-// has none.
-//
-// Only a chain the listener verified names a caller. A certificate a
-// client merely offered is no identity, and a leaf with no common
-// name names no user: both fall to the Bearer token, which ends in
-// the ordinary 401 when the request carries none.
+// It reads only VerifiedChains, because a certificate that the listener
+// did not verify identifies no one. A certificate with an empty common
+// name identifies no one either. In both cases authenticate tries the
+// Bearer token next.
 func certificateCaller(state *tls.ConnectionState) (*caller, bool) {
 	if state == nil || len(state.VerifiedChains) == 0 || len(state.VerifiedChains[0]) == 0 {
 		return nil, false

@@ -1,13 +1,10 @@
 package main
 
-// This file builds the one ffmpeg command every capture runs
-// through. Every format takes the same road, one ffmpeg process per
-// request that reads raw frames on its stdin and writes the body on
-// its stdout, so there is one code path to read, one set of options
-// to compare with the plan, and one failure shape. A clip's color
-// conversion runs on the node's GPU in scale_vaapi, because the
-// software conversion costs about four times the CPU at 1080p and
-// a stick-class node cannot run it at 4K at all.
+// Each capture request runs one ffmpeg process, which reads raw frames
+// on stdin and writes the encoded body on stdout. A clip converts its
+// pixel format on the GPU with scale_vaapi when the node's driver
+// supports it, because the same conversion on the CPU takes more CPU
+// time than a small node has to spare.
 
 import (
 	"context"
@@ -21,28 +18,27 @@ import (
 	"sync"
 )
 
-// The ffmpeg the display-capture image carries, started once per
-// request. It is a variable so a drill can put a program of its own
-// in its place.
+// ffmpegProgram is the ffmpeg binary in the display-capture image.
+// It is a variable so that a test can start a different program.
 var ffmpegProgram = "/usr/bin/ffmpeg"
 
-// threadQueueSize bounds the frames ffmpeg queues from the pipe, so
-// a slow encoder cannot grow the process. clipWidthLimit is the width
-// a clip on a screen wider than 1080p is scaled to unless the caller
-// asks for more, because the container's memory limit is sized for a
-// 1080p encode.
+// threadQueueSize is the number of frames ffmpeg queues from the
+// pipe, so a slow encoder cannot make the process grow without limit.
+// clipWidthLimit is the width that a clip wider than 1920 pixels is
+// scaled to, unless the caller asks for another size, because the
+// container's memory limit is sized for a 1080p encode.
 const (
 	threadQueueSize = 8
 	clipWidthLimit  = 1920
 )
 
-// How much of ffmpeg's stderr an error carries. The tail is the part
-// that says what went wrong: ffmpeg prints its banner and its graph
-// first, and the failure last.
+// stderrTailSize is how many bytes of the end of ffmpeg's stderr an
+// error can quote. ffmpeg prints its banner and filter graph first
+// and the failure last.
 const stderrTailSize = 4 << 10
 
-// One encode: the frame the pipe carries, the form it is asked for,
-// the caller's knobs, and the device it runs on.
+// encodePlan is the settings of one ffmpeg run. width, height, and
+// pixelFormat describe the raw frames on stdin.
 type encodePlan struct {
 	mediaType   string
 	width       int
@@ -50,20 +46,18 @@ type encodePlan struct {
 	pixelFormat string
 	framerate   int
 	quality     int
-	// The caller asked for one axis or neither: width= and height=
-	// together are a 400, and the axis that is not given follows the
-	// aspect.
+	// At most one of these is set, because a request with both width=
+	// and height= gets a 400. The other axis keeps the aspect ratio.
 	scaleWidth  int
 	scaleHeight int
 	device      string
-	// The fallback graph converts on the CPU and uploads nv12. It
-	// is used only where the node's driver refuses to upload the
-	// compositor's own pixel format.
+	// software selects the fallback graph, which converts to nv12 on
+	// the CPU and then uploads, for a node whose driver cannot run
+	// scale_vaapi.
 	software bool
 }
 
-// The commands below are the plan's own, and a reader compares them
-// with the plan line for line.
+// args returns the ffmpeg arguments for the plan's media type.
 func (p encodePlan) args() []string {
 	args := []string{
 		"-hide_banner", "-nostdin",
@@ -72,16 +66,10 @@ func (p encodePlan) args() []string {
 		"-video_size", fmt.Sprintf("%dx%d", p.width, p.height),
 	}
 	if p.framerate > 0 {
-		// -framerate is the nominal rate, and the wall clock is what
-		// each frame is actually stamped with. A node that cannot
-		// hold the cadence writes fewer frames than it promised, and
-		// without the wall clock ffmpeg stamps them as though it had
-		// held it, so every event in the clip drifts earlier: at 30
-		// fps on stick-1, marks two seconds apart in the source
-		// landed 1.7 seconds apart in the body. The media plan set
-		// this flag aside for its own mux, where it would fight
-		// -itsoffset on an already-stamped stream; here it is the
-		// only clock the input has.
+		// Without -use_wallclock_as_timestamps, ffmpeg stamps each frame
+		// as if it arrived on the -framerate schedule. A node that falls
+		// behind sends fewer frames, so the clip would play faster than
+		// real time.
 		args = append(args, "-framerate", strconv.Itoa(p.framerate),
 			"-use_wallclock_as_timestamps", "1",
 			"-thread_queue_size", strconv.Itoa(threadQueueSize))
@@ -116,9 +104,8 @@ func (p encodePlan) args() []string {
 	}
 }
 
-// The device is the render node the pod's render request delivers.
-// -init_hw_device opens it under the name gpu, and -filter_hw_device
-// hands that device to the filter graph, where hwupload needs it.
+// hardware returns the arguments that open the render node and pass
+// it to the filter graph, where hwupload needs it.
 func (p encodePlan) hardware() []string {
 	return []string{
 		"-init_hw_device", "vaapi=gpu:" + p.device,
@@ -127,14 +114,12 @@ func (p encodePlan) hardware() []string {
 	}
 }
 
-// The graph uploads first, so the conversion to nv12 runs on the
-// GPU in scale_vaapi. h264_vaapi takes only vaapi frames (ffmpeg
-// 8.0.1), so hwupload is in every clip's graph. The fallback
-// converts on the CPU first and uploads nv12, for a node whose
-// driver refuses a bgr0 upload. Both graphs scale to the same size,
-// because the 1080p rule is what the container's memory limit is
-// sized against, and the fallback runs on the node that can least
-// afford 4K.
+// graph returns the filter graph of a clip. Every graph ends on the
+// GPU, because h264_vaapi and mjpeg_vaapi accept only VA-API frames.
+// The default graph uploads first and converts to nv12 in scale_vaapi.
+// The fallback graph converts and scales on the CPU, then uploads. Both
+// graphs scale to the same size, because the memory limit is sized for
+// that size and the fallback runs on the nodes with the least memory.
 func (p encodePlan) graph() string {
 	size := p.encodeSize()
 	if p.software {
@@ -149,12 +134,11 @@ func (p encodePlan) graph() string {
 	return "hwupload,scale_vaapi=" + size + ":format=nv12"
 }
 
-// The size the filter scales the region to, in the option form both
-// scale filters take, and the empty string for no scale at all. The
-// axis the caller named is stated and the other is -2, which is the
-// aspect rounded to an even number of pixels, because nv12 takes no
-// odd dimension. height= decides the size on its own when it is
-// given, so the 1080p default applies only where neither knob is.
+// encodeSize returns the size to scale to, in the syntax of both scale
+// filters, or "" for no scale. The other axis is -2, which keeps the
+// aspect ratio and rounds to an even number, because nv12 does not
+// allow an odd dimension. A height overrides the 1920-pixel default
+// width.
 func (p encodePlan) encodeSize() string {
 	if height := p.encodeHeight(); height > 0 {
 		return fmt.Sprintf("h=%d:w=-2", height)
@@ -165,10 +149,9 @@ func (p encodePlan) encodeSize() string {
 	return ""
 }
 
-// The size a clip of the whole screen encodes at, which is what the
-// info document states its codecs parameter from. A screen wider
-// than 1080p is scaled to 1080p, so a 4K screen answers the level a
-// 1080p clip carries.
+// clipWidth and clipHeight return the size of a default clip of the
+// whole screen, which the info document's codecs parameter is derived
+// from. A 4K screen reports the codec string of a 1080p clip.
 func clipWidth(width int) int {
 	if width > clipWidthLimit {
 		return clipWidthLimit
@@ -183,10 +166,10 @@ func clipHeight(screen captureScreen) int {
 	return screen.Height * clipWidthLimit / screen.Width
 }
 
-// The size the body carries, which is the region the pipe carries
-// scaled by whichever knob was given. The codecs parameter and the
-// level are stated from it, so a caller is told the string before
-// the encoder has written a byte.
+// encodedWidth and encodedHeight return the size of the video after
+// the scale. The Content-Type's codecs parameter and the H.264 level
+// come from this size, so the headers can be sent before ffmpeg
+// writes a byte.
 func (p encodePlan) encodedWidth() int {
 	if width := p.encodeWidth(); width > 0 {
 		return width
@@ -207,8 +190,8 @@ func (p encodePlan) encodedHeight() int {
 	return p.height
 }
 
-// height= scales down only, so a height that is not smaller than the
-// region is no scale at all.
+// encodeHeight returns the height to scale to, or 0 for no scale. A
+// height that is not smaller than the frame's is ignored.
 func (p encodePlan) encodeHeight() int {
 	if p.scaleHeight <= 0 || p.scaleHeight >= p.height {
 		return 0
@@ -216,11 +199,10 @@ func (p encodePlan) encodeHeight() int {
 	return p.scaleHeight
 }
 
-// A still runs no VA-API graph, one frame being cheaper to encode on
-// the CPU than a device is to open, so its width= or height= is a
-// software scale. A still takes no 1080p default: the caller asked
-// for one frame, and one frame of a 4K screen costs 33 MB either
-// way.
+// softwareScale returns the scale filter of a still. A still is
+// encoded on the CPU, because one frame costs less than opening the
+// render node. It has no 1920-pixel default, because one 4K frame at
+// 4 bytes per pixel is about 33 MB, which fits the memory limit.
 func (p encodePlan) softwareScale() []string {
 	switch {
 	case p.encodeHeight() > 0:
@@ -231,9 +213,10 @@ func (p encodePlan) softwareScale() []string {
 	return nil
 }
 
-// A clip wider than 1080p is scaled to 1080p unless the caller asked
-// for another size with width= or height=. A scale that is not
-// smaller than the frame is no scale at all.
+// encodeWidth returns the width to scale a clip to, or 0 for no
+// scale. A width that is not smaller than the frame's is ignored.
+// With no width= and no height=, a clip wider than clipWidthLimit is
+// scaled to it.
 func (p encodePlan) encodeWidth() int {
 	if p.scaleWidth > 0 {
 		if p.scaleWidth >= p.width {
@@ -247,10 +230,10 @@ func (p encodePlan) encodeWidth() int {
 	return 0
 }
 
-// This API's quality runs 1 to 100, high being better. The software
-// JPEG encoder's -q:v runs 2 to 31, low being better, so a still's
-// quality maps onto that scale. mjpeg_vaapi takes the 1 to 100 scale
-// as -global_quality and needs no map.
+// jpegScale converts the API's quality, 1 to 100 where higher is
+// better, to the software JPEG encoder's -q:v, 2 to 31 where lower is
+// better. A quality of 0 means the default of 85. mjpeg_vaapi takes
+// the API's scale directly as -global_quality.
 func jpegScale(quality int) int {
 	if quality <= 0 {
 		quality = 85
@@ -259,9 +242,9 @@ func jpegScale(quality int) int {
 	return min(max(value, 2), 31)
 }
 
-// The render node the pod's claim delivers. The name is read from
-// the directory rather than stated, because the kernel renumbers
-// render nodes across a reboot.
+// renderNode returns the path of the lowest-numbered render node in
+// driRoot. It reads the directory because the kernel can number the
+// render nodes differently after a reboot.
 func renderNode(driRoot string) (string, error) {
 	entries, err := os.ReadDir(driRoot)
 	if err != nil {
@@ -275,13 +258,12 @@ func renderNode(driRoot string) (string, error) {
 	}
 	slices.Sort(nodes)
 	if len(nodes) == 0 {
-		return "", fmt.Errorf("no render node in %s; does this container claim a render device?", driRoot)
+		return "", fmt.Errorf("no render node in %s, so the container has no render device claimed", driRoot)
 	}
 	return driRoot + "/" + nodes[0], nil
 }
 
-// An encode is one process, with a pipe that carries the frames in
-// and a pipe that carries the body out.
+// encoder is one running ffmpeg process.
 type encoder struct {
 	cmd    *exec.Cmd
 	frames io.WriteCloser
@@ -289,10 +271,9 @@ type encoder struct {
 	stderr *stderrTail
 }
 
-// ffmpeg's own stderr reaches this process's log, because the graph
-// it chose is what a drill reads to tell the GPU conversion from the
-// fallback. The tail is kept beside it so a failure carries ffmpeg's
-// own words.
+// startEncoder starts ffmpeg for the plan. ffmpeg's stderr goes to
+// the log, and its end is also kept so that an error can quote
+// ffmpeg's own message.
 func startEncoder(ctx context.Context, plan encodePlan) (*encoder, error) {
 	cmd := exec.CommandContext(ctx, ffmpegProgram, plan.args()...)
 	frames, err := cmd.StdinPipe()
@@ -306,24 +287,23 @@ func startEncoder(ctx context.Context, plan encodePlan) (*encoder, error) {
 	tail := &stderrTail{}
 	cmd.Stderr = io.MultiWriter(tail, prefixed(os.Stderr, "ffmpeg: "))
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("%s: %w", strings.Join(cmd.Args, " "), err)
+		return nil, fmt.Errorf("starting %s: %w", strings.Join(cmd.Args, " "), err)
 	}
 	return &encoder{cmd: cmd, frames: frames, body: body, stderr: tail}, nil
 }
 
-// The words an encoder that wrote no byte failed with. ffmpeg exits
-// nonzero when its graph cannot be built, and it can exit zero when
-// it simply had nothing to write, so both answers end here and both
-// carry the tail.
+// failure returns the error for an encoder that wrote no bytes. ffmpeg
+// can exit zero when it had nothing to write, so a zero exit is an
+// error here too.
 func (e *encoder) failure() error {
 	if err := e.wait(); err != nil {
 		return err
 	}
-	return fmt.Errorf("%s wrote no bytes: %s", ffmpegProgram, e.stderr.lastLine())
+	return fmt.Errorf("%s exited with no error and wrote no bytes: %s", ffmpegProgram, e.stderr.lastLine())
 }
 
-// An encode that failed carries ffmpeg's last words, which is what
-// the log line and a problem document's detail report.
+// wait waits for ffmpeg to exit. A nonzero exit returns an error that
+// quotes lastLine.
 func (e *encoder) wait() error {
 	err := e.cmd.Wait()
 	if err == nil {
@@ -341,19 +321,19 @@ func (e *encoder) end() {
 	_ = e.cmd.Wait()
 }
 
-// The last bytes of ffmpeg's stderr, kept in a bounded tail because
-// a stream may run for hours and its stderr with it.
+// stderrTail keeps the last stderrTailSize bytes of ffmpeg's stderr.
+// It has a size limit because a stream can run for hours.
 type stderrTail struct {
 	mu   sync.Mutex
-	held []byte
+	data []byte
 }
 
 func (t *stderrTail) Write(p []byte) (int, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.held = append(t.held, p...)
-	if len(t.held) > stderrTailSize {
-		t.held = t.held[len(t.held)-stderrTailSize:]
+	t.data = append(t.data, p...)
+	if len(t.data) > stderrTailSize {
+		t.data = t.data[len(t.data)-stderrTailSize:]
 	}
 	return len(p), nil
 }
@@ -361,18 +341,13 @@ func (t *stderrTail) Write(p []byte) (int, error) {
 func (t *stderrTail) text() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return strings.TrimSpace(string(t.held))
+	return strings.TrimSpace(string(t.data))
 }
 
-// The last line ffmpeg wrote that says something, which is what a
-// problem document and a startup line carry. The whole tail reaches
-// this process's log beside it, so the one line is the answer and
-// the log is the working.
-//
-// A failed run ends in an epilogue that names no cause: the progress
-// counter, the muxer's note that it wrote nothing, and "Conversion
-// failed!". Those are skipped. A tail that is nothing but epilogue
-// answers its own last line rather than nothing at all.
+// lastLine returns the last line of the tail that states a cause. A
+// failed run ends with lines that state none: the progress counter, the
+// muxer's note that it wrote nothing, and "Conversion failed!".
+// lastLine skips them, unless the tail has no other line.
 func (t *stderrTail) lastLine() string {
 	lines := strings.Split(t.text(), "\n")
 	last := ""
@@ -391,9 +366,9 @@ func (t *stderrTail) lastLine() string {
 	return last
 }
 
-// Whether a line of ffmpeg's is part of that epilogue. The component
-// tag comes off first, because ffmpeg 8 writes the muxer's note as
-// "[out#0/mp4] Nothing was written into output file, ...".
+// ffmpegEpilogue reports whether lastLine skips a line. It strips a
+// leading component tag first, because ffmpeg writes the muxer's note
+// as "[out#0/mp4] Nothing was written into output file, ...".
 func ffmpegEpilogue(line string) bool {
 	if strings.HasPrefix(line, "[") {
 		if _, rest, tagged := strings.Cut(line, "] "); tagged {
@@ -405,8 +380,9 @@ func ffmpegEpilogue(line string) bool {
 		strings.HasPrefix(line, "frame=")
 }
 
-// The sidecar's log carries its own lines and ffmpeg's together, so
-// each line from the encoder carries a prefix that names it.
+// prefixed returns a writer that starts each non-blank line with
+// prefix, so ffmpeg's lines and the sidecar's own lines can be told
+// apart in the log.
 func prefixed(to io.Writer, prefix string) io.Writer {
 	return &prefixWriter{to: to, prefix: prefix}
 }
@@ -426,13 +402,11 @@ func (w *prefixWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// The VA-API graph is not available on every node. Apollo Lake's iHD
-// driver encodes H.264 and MJPEG but carries no post-processing, so
-// scale_vaapi fails to configure and the encode writes nothing at
-// all. The failure is in the graph and not in the frames, so one
-// synthetic frame through the whole graph answers it, and the answer
-// holds for the life of the process: a driver does not gain a
-// pipeline while a pod runs.
+// probeConversion checks that this node's driver can run scale_vaapi,
+// with one synthetic frame through the default graph. Some drivers
+// cannot: the iHD driver on Apollo Lake encodes H.264 and MJPEG but
+// has no VA-API post-processing, so scale_vaapi fails to configure and
+// the encode writes nothing.
 func probeConversion(ctx context.Context, device string) error {
 	probe := exec.CommandContext(ctx, ffmpegProgram,
 		"-hide_banner", "-nostdin",
@@ -444,12 +418,11 @@ func probeConversion(ctx context.Context, device string) error {
 		"-f", "null", "-")
 	tail := &stderrTail{}
 	probe.Stderr = tail
-	// One line, not the fourteen a probe run writes. A node that
-	// takes the software conversion is reporting a normal outcome,
-	// and a startup log that carries a whole ffmpeg run for it reads
-	// like a failure.
+	// The stderr goes to no log, because the fallback to the CPU is a
+	// normal outcome and a full ffmpeg log at startup looks like a
+	// failure.
 	if err := probe.Run(); err != nil {
-		return fmt.Errorf("%w: %s", err, tail.lastLine())
+		return fmt.Errorf("probing scale_vaapi on %s: %w: %s", device, err, tail.lastLine())
 	}
 	return nil
 }

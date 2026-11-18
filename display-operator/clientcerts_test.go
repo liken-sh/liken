@@ -24,10 +24,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// A certificate authority in the shape the API server publishes in
-// extension-apiserver-authentication, with the client leaves it
-// signs. Every test below that offers a client certificate mints one
-// of these.
+// clientAuthority is a test client CA, like the one the API server
+// publishes in extension-apiserver-authentication.
 type clientAuthority struct {
 	certPEM     []byte
 	certificate *x509.Certificate
@@ -38,7 +36,7 @@ func newClientAuthority(t *testing.T) *clientAuthority {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the authority key: %v", err)
 	}
 	now := time.Now()
 	template := &x509.Certificate{
@@ -52,11 +50,11 @@ func newClientAuthority(t *testing.T) *clientAuthority {
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the authority certificate: %v", err)
 	}
 	certificate, err := x509.ParseCertificate(der)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the authority certificate: %v", err)
 	}
 	return &clientAuthority{
 		certPEM:     pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
@@ -69,18 +67,18 @@ func randomTestSerial(t *testing.T) *big.Int {
 	t.Helper()
 	serial, err := randomSerial()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("drawing a certificate serial: %v", err)
 	}
 	return serial
 }
 
-// A leaf in the shape a kubeconfig carries: the user in the subject's
-// common name and the groups in its organization.
+// leaf signs a client certificate like a kubeconfig's: the user in the
+// subject common name and the groups in the organization.
 func (a *clientAuthority) leaf(t *testing.T, user string, groups []string) tls.Certificate {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the leaf key: %v", err)
 	}
 	now := time.Now()
 	template := &x509.Certificate{
@@ -93,17 +91,17 @@ func (a *clientAuthority) leaf(t *testing.T, user string, groups []string) tls.C
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, a.certificate, key.Public(), a.key)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the leaf certificate: %v", err)
 	}
 	certificate, err := x509.ParseCertificate(der)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the leaf certificate: %v", err)
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: certificate}
 }
 
-// The state a TLS listener hands the handler once it has verified the
-// leaf against the cluster's client CA.
+// verified returns the connection state that a TLS listener passes to
+// the handler after it verifies a leaf signed by this CA.
 func (a *clientAuthority) verified(t *testing.T, user string, groups []string) *tls.ConnectionState {
 	t.Helper()
 	leaf := a.leaf(t, user, groups)
@@ -113,8 +111,9 @@ func (a *clientAuthority) verified(t *testing.T, user string, groups []string) *
 	}
 }
 
-// One request over a connection that carries the given TLS state,
-// with no Authorization field unless the header states one.
+// callOver sends one request as if it arrived on a connection with the
+// given TLS state. It has no Authorization header unless header sets
+// one.
 func callOver(t *testing.T, server *apiServer, target string,
 	state *tls.ConnectionState, header http.Header) *http.Response {
 	t.Helper()
@@ -128,9 +127,9 @@ func callOver(t *testing.T, server *apiServer, target string,
 	return recorder.Result()
 }
 
-// The user is the leaf's common name and the groups are its
-// organization values, which is what the SubjectAccessReview has to
-// carry for a rule written for that person to answer.
+// The SubjectAccessReview sends the leaf's common name as the user and
+// its organization values as the groups, so RBAC rules bound to that
+// user or group apply.
 func TestAVerifiedClientCertificateIsTheCaller(t *testing.T) {
 	authority := newClientAuthority(t)
 	cluster := newTestCluster(t)
@@ -140,7 +139,7 @@ func TestAVerifiedClientCertificateIsTheCaller(t *testing.T) {
 		authority.verified(t, "admin", []string{"system:masters"}), nil)
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("the certificate answered %d, want 200: %s", resp.StatusCode, body(t, resp))
+		t.Fatalf("the certificate responded with %d, want 200: %s", resp.StatusCode, body(t, resp))
 	}
 	reviewed := cluster.reviewed()
 	if len(reviewed) != 1 {
@@ -154,8 +153,6 @@ func TestAVerifiedClientCertificateIsTheCaller(t *testing.T) {
 	}
 }
 
-// kubectl describe display answers with the Event, so the Event
-// names the certificate's user.
 func TestTheCapturedEventNamesTheCertificateUser(t *testing.T) {
 	authority := newClientAuthority(t)
 	synctest.Test(t, func(t *testing.T) {
@@ -165,21 +162,20 @@ func TestTheCapturedEventNamesTheCertificateUser(t *testing.T) {
 		resp := callOver(t, server, apiRoot+"/displays/HDMI-A-1/screen.png",
 			authority.verified(t, "admin", []string{"system:masters"}), nil)
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("the certificate answered %d, want 200: %s", resp.StatusCode, body(t, resp))
+			t.Fatalf("the certificate responded with %d, want 200: %s", resp.StatusCode, body(t, resp))
 		}
 		synctest.Wait()
 
-		want := []string{"Normal Captured admin took the screen of HDMI-A-1 as image/png"}
+		want := []string{"Normal Captured admin captured the screen of HDMI-A-1 as image/png"}
 		if got := eventLines(cluster.events.About("Display", "HDMI-A-1")); !slices.Equal(got, want) {
 			t.Errorf("the Events are %q, want %q", got, want)
 		}
 	})
 }
 
-// A certificate that named a caller is the caller, and the Bearer
-// token beside it is never reviewed. This is the API server's own
-// order.
-func TestTheCertificateComesBeforeTheToken(t *testing.T) {
+// When a certificate identifies a caller, the Bearer token sent with
+// it is ignored and never reviewed, as in kube-apiserver.
+func TestAVerifiedCertificateTakesPrecedenceOverABearerToken(t *testing.T) {
 	authority := newClientAuthority(t)
 	cluster := newTestCluster(t)
 	server := newTestAPI(t, cluster, newSidecarFixture(t))
@@ -189,17 +185,16 @@ func TestTheCertificateComesBeforeTheToken(t *testing.T) {
 		bearer("Bearer a-caller-token"))
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("the request answered %d, want 200: %s", resp.StatusCode, body(t, resp))
+		t.Fatalf("the request responded with %d, want 200: %s", resp.StatusCode, body(t, resp))
 	}
 	if user := cluster.reviewed()[0].Spec.User; user != "admin" {
 		t.Errorf("the review named the user %q, want admin", user)
 	}
 }
 
-// Only a chain the listener verified names a caller. A certificate
-// the client merely offered is no identity, and the request falls to
-// the Bearer token beside it.
-func TestAnUnverifiedCertificateNamesNobody(t *testing.T) {
+// A certificate that the client sent but the listener did not verify
+// identifies no one, and the request falls through to the Bearer token.
+func TestAnUnverifiedCertificateIsNotACaller(t *testing.T) {
 	authority := newClientAuthority(t)
 	cluster := newTestCluster(t)
 	server := newTestAPI(t, cluster, newSidecarFixture(t))
@@ -211,16 +206,16 @@ func TestAnUnverifiedCertificateNamesNobody(t *testing.T) {
 		offered, bearer("Bearer a-caller-token"))
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("the request answered %d, want 200: %s", resp.StatusCode, body(t, resp))
+		t.Fatalf("the request responded with %d, want 200: %s", resp.StatusCode, body(t, resp))
 	}
 	if user := cluster.reviewed()[0].Spec.User; user != "system:serviceaccount:liken-system:viewer" {
 		t.Errorf("the review named the user %q, want the token's subject", user)
 	}
 }
 
-// A leaf with no common name names no user, so the request falls to
-// the Bearer token and ends in the ordinary 401 when it carries none.
-func TestACertificateWithNoCommonNameNamesNobody(t *testing.T) {
+// A leaf with an empty common name identifies no user, so the request
+// falls through to the Bearer token and gets a 401 when it has none.
+func TestACertificateWithNoCommonNameIsNotACaller(t *testing.T) {
 	authority := newClientAuthority(t)
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 
@@ -228,14 +223,15 @@ func TestACertificateWithNoCommonNameNamesNobody(t *testing.T) {
 		authority.verified(t, "", []string{"system:masters"}), http.Header{})
 
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("the nameless certificate answered %d, want 401", resp.StatusCode)
+		t.Fatalf("the nameless certificate responded with %d, want 401", resp.StatusCode)
 	}
 	if got := resp.Header.Get("WWW-Authenticate"); got != authenticateRealm {
 		t.Errorf("the refusal challenged with %q, want %q", got, authenticateRealm)
 	}
 }
 
-// Neither credential is the bare challenge, RFC 6750 section 3.
+// A request with no credential gets a bare challenge with no error
+// code, as RFC 6750 section 3 specifies.
 func TestNoCertificateAndNoTokenIsRefused(t *testing.T) {
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 
@@ -243,14 +239,15 @@ func TestNoCertificateAndNoTokenIsRefused(t *testing.T) {
 		&tls.ConnectionState{}, http.Header{})
 
 	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("a request with no credential answered %d, want 401", resp.StatusCode)
+		t.Fatalf("a request with no credential responded with %d, want 401", resp.StatusCode)
 	}
 	if got := resp.Header.Get("WWW-Authenticate"); got != authenticateRealm {
 		t.Errorf("the refusal challenged with %q, want %q", got, authenticateRealm)
 	}
 }
 
-// The API server's own ConfigMap, served the way it answers a get.
+// authenticationConfigMap serves the extension-apiserver-authentication
+// ConfigMap over HTTP, the way the API server responds to a get.
 type authenticationConfigMap struct {
 	*httptest.Server
 
@@ -280,15 +277,14 @@ func newAuthenticationConfigMap(t *testing.T, caPEM string) *authenticationConfi
 	return held
 }
 
-func (m *authenticationConfigMap) holds(caPEM string) {
+func (m *authenticationConfigMap) setCA(caPEM string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.caPEM = caPEM
 }
 
-// The pool comes from the ConfigMap, and a read of the ConfigMap
-// after the cluster's CA changed replaces it, so a rotated CA takes
-// effect with no restart.
+// The pool is built from the ConfigMap, and loading it again after the
+// CA changes replaces the pool.
 func TestTheClientAnchorsFollowTheConfigMap(t *testing.T) {
 	first, second := newClientAuthority(t), newClientAuthority(t)
 	published := newAuthenticationConfigMap(t, string(first.certPEM))
@@ -296,18 +292,18 @@ func TestTheClientAnchorsFollowTheConfigMap(t *testing.T) {
 	anchors := &clientAnchors{}
 
 	if err := anchors.load(client); err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the first authority from the ConfigMap: %v", err)
 	}
 	if !verifies(t, anchors, first) {
 		t.Error("the first authority's leaf does not verify against the pool")
 	}
 	if verifies(t, anchors, second) {
-		t.Error("an authority the ConfigMap never carried verifies against the pool")
+		t.Error("an authority the ConfigMap never contained verifies against the pool")
 	}
 
-	published.holds(string(second.certPEM))
+	published.setCA(string(second.certPEM))
 	if err := anchors.load(client); err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the rotated authority from the ConfigMap: %v", err)
 	}
 	if !verifies(t, anchors, second) {
 		t.Error("the rotated authority's leaf does not verify against the pool")
@@ -318,14 +314,14 @@ func verifies(t *testing.T, anchors *clientAnchors, authority *clientAuthority) 
 	t.Helper()
 	leaf := authority.leaf(t, "admin", []string{"system:masters"})
 	_, err := leaf.Leaf.Verify(x509.VerifyOptions{
-		Roots:     anchors.held(),
+		Roots:     anchors.current(),
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	})
 	return err == nil
 }
 
-// A ConfigMap the API cannot read answers an error and leaves the
-// pool empty, because the API still answers every token caller.
+// When the API cannot read the ConfigMap, load returns an error and
+// the pool stays empty.
 func TestAnAbsentConfigMapLeavesNoAnchors(t *testing.T) {
 	published := newAuthenticationConfigMap(t, "")
 	published.absent = true
@@ -334,16 +330,14 @@ func TestAnAbsentConfigMapLeavesNoAnchors(t *testing.T) {
 	err := anchors.load(apiclient.New(published.URL, published.Client(), ""))
 
 	if err == nil {
-		t.Fatal("an absent ConfigMap answered no error")
+		t.Fatal("loading an absent ConfigMap returned no error")
 	}
-	if anchors.held() == nil {
-		t.Error("the pool is nil, so a handshake would refuse every certificate with no pool to check")
+	if anchors.current() == nil {
+		t.Error("the pool is nil, want an empty pool, because a nil ClientCAs makes Go verify against the system root store")
 	}
 }
 
-// The loop watches the ConfigMap, so a CA that changed reaches the
-// listener with no restart and no clock.
-func TestTheWatchTakesUpANewAuthority(t *testing.T) {
+func TestTheWatchReplacesTheAnchorsWhenTheAuthorityChanges(t *testing.T) {
 	first, second := newClientAuthority(t), newClientAuthority(t)
 	published := newConfigMapStore(t, clientCANamespace)
 	published.put(authenticationConfigMapHolding(string(first.certPEM)))
@@ -356,8 +350,8 @@ func TestTheWatchTakesUpANewAuthority(t *testing.T) {
 	eventually(t, "the second authority", func() bool { return verifies(t, anchors, second) })
 }
 
-// A ConfigMap that goes away leaves the pool as it was, because the
-// certificates it holds are still the ones the cluster issued.
+// When the ConfigMap is deleted, the pool keeps the CA it had, because
+// that CA still verifies the certificates the cluster has issued.
 func TestTheWatchKeepsTheAnchorsWhenTheConfigMapGoes(t *testing.T) {
 	first := newClientAuthority(t)
 	published := newConfigMapStore(t, clientCANamespace)
@@ -381,25 +375,25 @@ func authenticationConfigMapHolding(caPEM string) ConfigMap {
 	}
 }
 
-// The listener the API serves with, so a test meets the same TLS
-// policy a caller does.
+// listenOver starts a TLS listener with apiTLSConfig. It returns the
+// listener's base URL and a pool that trusts its server certificate.
 func listenOver(t *testing.T, server *apiServer, anchors *clientAnchors) (base string, anchor *x509.CertPool) {
 	t.Helper()
 	ca, err := mintAuthority(time.Now())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the test authority: %v", err)
 	}
 	certPEM, keyPEM, err := ca.mintLeaf("localhost", []string{"localhost"}, time.Now())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the server leaf: %v", err)
 	}
 	holder := &certificateHolder{}
 	if err := holder.set(certPEM, keyPEM, false); err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting the server certificate: %v", err)
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listening on a local port: %v", err)
 	}
 	serving := &http.Server{
 		Handler:           server,
@@ -416,10 +410,11 @@ func listenOver(t *testing.T, server *apiServer, anchors *clientAnchors) (base s
 	return "https://" + listener.Addr().String(), anchor
 }
 
-// The whole policy on a real connection: a leaf the cluster's CA
-// signed is the caller, a leaf from any other CA never reaches a
-// route, and a Bearer token answers from the same pod either way.
-func TestTheListenerTakesTheClusterAuthorityAlone(t *testing.T) {
+// The whole policy on a real connection: a leaf signed by the
+// cluster's CA identifies the caller, a leaf from any other CA is
+// rejected before any route runs, and a Bearer token works on the same
+// listener.
+func TestTheListenerTrustsOnlyTheClusterAuthority(t *testing.T) {
 	authority, foreign := newClientAuthority(t), newClientAuthority(t)
 	cluster := newTestCluster(t)
 	anchors := &clientAnchors{}
@@ -433,12 +428,10 @@ func TestTheListenerTakesTheClusterAuthorityAlone(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Errorf("the cluster's own certificate answered %d, want 200", resp.StatusCode)
+		t.Errorf("the cluster's own certificate responded with %d, want 200", resp.StatusCode)
 	}
-	// The listener answers its own TLS configuration on every
-	// handshake, and that configuration names the protocols. A
-	// configuration that named none would drop every caller to
-	// HTTP/1.1 and nothing else would say so.
+	// Without NextProtos in the configuration that GetConfigForClient
+	// returns, every connection would fall back to HTTP/1.1.
 	if resp.Proto != "HTTP/2.0" {
 		t.Errorf("the connection negotiated %s, want HTTP/2.0", resp.Proto)
 	}
@@ -452,7 +445,7 @@ func TestTheListenerTakesTheClusterAuthorityAlone(t *testing.T) {
 
 	request, err := http.NewRequest(http.MethodGet, target, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the request: %v", err)
 	}
 	request.Header.Set("Authorization", "Bearer a-caller-token")
 	tokenResp, err := callerWith(anchor).Do(request)
@@ -461,7 +454,7 @@ func TestTheListenerTakesTheClusterAuthorityAlone(t *testing.T) {
 	}
 	_ = tokenResp.Body.Close()
 	if tokenResp.StatusCode != http.StatusOK {
-		t.Errorf("the Bearer token answered %d, want 200", tokenResp.StatusCode)
+		t.Errorf("the Bearer token responded with %d, want 200", tokenResp.StatusCode)
 	}
 }
 
@@ -481,9 +474,8 @@ func callerWith(anchor *x509.CertPool, offered ...tls.Certificate) *http.Client 
 			ForceAttemptHTTP2: true,
 			TLSClientConfig: &tls.Config{
 				RootCAs: anchor, Certificates: offered,
-				// The listener is on a loopback address and its leaf
-				// carries the Service's names, so the client states
-				// the name it is verifying.
+				// The client dials 127.0.0.1 and the server
+				// certificate names localhost.
 				ServerName: "localhost",
 				MinVersion: tls.VersionTLS12,
 			},

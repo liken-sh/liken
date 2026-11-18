@@ -17,8 +17,8 @@ shows for the devices that `liken` publishes, through a device class
 such as `display-output`.
 
 This site also serves the manifests that the guides apply, as raw
-YAML under [`/deploy/`](/deploy/kustomization.yaml). They're the
-repository's own files.
+YAML under [`/deploy/`](/deploy/kustomization.yaml). They are the
+same files as the `deploy/` directory of the repository.
 
 The manual covers how to run the operator. The
 [source](https://github.com/liken-sh/liken/tree/main/display-operator)

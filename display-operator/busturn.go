@@ -1,36 +1,33 @@
 package main
 
-// One caller at a time on a panel's DDC/CI bus.
+// A panel handles one DDC/CI exchange at a time. An exchange writes a
+// request, waits, and reads the reply, so two exchanges that overlap on
+// one bus read each other's replies. A claim's prepare, the Display
+// pass's poll, the probe, and the standby after a release each open the
+// panel's bus from their own goroutine. So each opens it through
+// busFor, which waits until no other caller has the bus open, and then
+// waits until ddcBusGap has passed since the last caller closed it.
 //
-// A panel holds one reply at a time. An exchange writes a request,
-// waits, and reads the reply, so two exchanges that overlap on one bus
-// read each other's replies: the drill on stick-1 saw a brightness read
-// get the contrast reply while the Display pass read the contrast. The
-// claim's prepare, the Display pass, the probe, and a restore each
-// reach the panel from goroutines of their own, so every one of them
-// opens the bus through busFor, and busFor hands each bus to one caller
-// at a time. The next caller also waits out ddcBusGap after the last
-// one closed the bus, because the panel needs that gap before the next
-// message whoever sends it.
-//
-// The turn is a channel and not a mutex, because a caller that waits
-// for its turn is blocked the way a caller that waits on the wire is,
-// and the tests run both on a fake clock that moves only while every
-// goroutine waits on a channel or a timer.
+// The lock is a buffered channel and not a sync.Mutex, because
+// testing/synctest treats a goroutine that waits on a channel as
+// durably blocked, and one that waits on a mutex as not. The fake
+// clock advances only while every goroutine of the bubble is durably
+// blocked, so callers that waited on a mutex would stop it.
 
 import (
 	"sync"
 	"time"
 )
 
-// busTurn is the turn on one bus: a token that one caller holds, and
-// when the last holder gave it back.
+// busTurn is the lock on one bus. token holds a value while a caller
+// has the bus open, and returned is when the last caller closed it.
 type busTurn struct {
 	token    chan struct{}
 	returned time.Time
 }
 
-// turn answers the turn on one bus, made on first use.
+// turn returns the busTurn for the bus at path, and creates it on
+// first use.
 func (c *panelControls) turn(path string) *busTurn {
 	c.turnsMu.Lock()
 	defer c.turnsMu.Unlock()
@@ -45,8 +42,8 @@ func (c *panelControls) turn(path string) *busTurn {
 	return turn
 }
 
-// take waits for the bus, then for the gap since the last holder gave
-// it back.
+// take waits until the bus is free, then until ddcBusGap has passed
+// since the last caller released it.
 func (t *busTurn) take(now func() time.Time, pause func(time.Duration)) {
 	t.token <- struct{}{}
 	if wait := t.returned.Add(ddcBusGap).Sub(now()); wait > 0 {
@@ -54,13 +51,13 @@ func (t *busTurn) take(now func() time.Time, pause func(time.Duration)) {
 	}
 }
 
-// give hands the bus to the next caller.
+// give releases the bus. The next take waits ddcBusGap from at.
 func (t *busTurn) give(at time.Time) {
 	t.returned = at
 	<-t.token
 }
 
-// pause waits on the protocol's clock, which a test replaces.
+// pause sleeps for wait, through c.sleep when a test sets it.
 func (c *panelControls) pause(wait time.Duration) {
 	if c.sleep == nil {
 		time.Sleep(wait)
@@ -69,8 +66,8 @@ func (c *panelControls) pause(wait time.Duration) {
 	c.sleep(wait)
 }
 
-// turnBus is an open bus that gives its turn back when it closes. A
-// caller that closes twice gives the turn back once.
+// turnBus is an open bus that releases its busTurn on the first
+// Close.
 type turnBus struct {
 	controlBus
 	turn  *busTurn

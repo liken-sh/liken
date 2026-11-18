@@ -17,9 +17,8 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// Every row of the manual's error table is answered here, in the
-// status, the problem type, and the extra field it names.
-func TestTheErrorTableAnswersEveryRow(t *testing.T) {
+// Each case is a row of the error table in the manual.
+func TestTheErrorTable(t *testing.T) {
 	cases := []struct {
 		name   string
 		set    func(cluster *testCluster, sidecar *sidecarFixture)
@@ -80,7 +79,7 @@ func TestTheErrorTableAnswersEveryRow(t *testing.T) {
 			kind:   problemBlank,
 		},
 		{
-			name:   "a method this API does not answer",
+			name:   "a method this API does not accept",
 			method: http.MethodPost,
 			target: apiRoot + "/displays/HDMI-A-1/screen.png",
 			status: http.StatusMethodNotAllowed,
@@ -90,7 +89,7 @@ func TestTheErrorTableAnswersEveryRow(t *testing.T) {
 		{
 			name: "the compositor denied the capture",
 			set: func(_ *testCluster, sidecar *sidecarFixture) {
-				sidecar.answers(answerProblem(http.StatusInternalServerError, problemCaptureDenied, "unauthorized", ""))
+				sidecar.respondWith(sidecarProblem(http.StatusInternalServerError, problemCaptureDenied, "unauthorized", ""))
 			},
 			method: http.MethodGet,
 			target: apiRoot + "/displays/HDMI-A-1/screen.png",
@@ -99,9 +98,9 @@ func TestTheErrorTableAnswersEveryRow(t *testing.T) {
 			detail: "unauthorized",
 		},
 		{
-			name: "an answer that is not a problem document",
+			name: "a response that is not a problem document",
 			set: func(_ *testCluster, sidecar *sidecarFixture) {
-				sidecar.answers(func(w http.ResponseWriter, _ *http.Request) {
+				sidecar.respondWith(func(w http.ResponseWriter, _ *http.Request) {
 					w.Header().Set("Content-Type", "text/plain")
 					w.WriteHeader(http.StatusInternalServerError)
 					fmt.Fprint(w, "panic: runtime error")
@@ -136,12 +135,12 @@ func TestTheErrorTableAnswersEveryRow(t *testing.T) {
 			target: apiRoot + "/displays/HDMI-A-4/screen.png",
 			status: http.StatusConflict,
 			kind:   problemAway,
-			detail: "no panel on HDMI-A-4",
+			detail: "No panel is connected to HDMI-A-4",
 		},
 		{
 			name: "the output is being captured",
 			set: func(_ *testCluster, sidecar *sidecarFixture) {
-				sidecar.answers(answerProblem(http.StatusServiceUnavailable, problemCaptureBusy,
+				sidecar.respondWith(sidecarProblem(http.StatusServiceUnavailable, problemCaptureBusy,
 					"HDMI-A-1 is being captured until its client closes", retryAfterSeconds))
 			},
 			method: http.MethodGet,
@@ -162,19 +161,19 @@ func TestTheErrorTableAnswersEveryRow(t *testing.T) {
 			resp := call(t, server, row.method, row.target, row.header)
 
 			if resp.StatusCode != row.status {
-				t.Fatalf("%s %s answered %d, want %d", row.method, row.target, resp.StatusCode, row.status)
+				t.Fatalf("%s %s responded with %d, want %d", row.method, row.target, resp.StatusCode, row.status)
 			}
 			if got := resp.Header.Get("Content-Type"); got != problemMediaType {
 				t.Errorf("the refusal is typed %q, want %q", got, problemMediaType)
 			}
-			// A refusal carries the fields every answer of this API
-			// carries, because the client that met one is the client
-			// that most needs the description and the manual.
+			// A refusal has the Vary and Link headers of every other
+			// response, because a client that was refused needs the
+			// links to the description and the manual most.
 			if got := resp.Header.Get("Vary"); got != "Accept" {
-				t.Errorf("the refusal carries Vary %q, want Accept", got)
+				t.Errorf("the refusal has Vary %q, want Accept", got)
 			}
 			if links := resp.Header.Values("Link"); len(links) < 2 {
-				t.Errorf("the refusal carries %v, want the service-desc and service-doc relations", links)
+				t.Errorf("the refusal has %v, want the service-desc and service-doc relations", links)
 			}
 			if row.field[0] != "" {
 				if got := resp.Header.Get(row.field[0]); got != row.field[1] {
@@ -183,27 +182,28 @@ func TestTheErrorTableAnswersEveryRow(t *testing.T) {
 			}
 			var document problemDocument
 			if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
-				t.Fatal(err)
+				t.Fatalf("decoding the problem document: %v", err)
 			}
 			if document.Type != row.kind {
 				t.Errorf("the problem type is %q, want %q", document.Type, row.kind)
 			}
 			if document.Status != row.status {
-				t.Errorf("the problem states status %d, want %d", document.Status, row.status)
+				t.Errorf("the problem document has status %d, want %d", document.Status, row.status)
 			}
 			if !strings.Contains(document.Instance, "#") || !strings.HasPrefix(document.Instance, strings.Split(row.target, "?")[0]) {
 				t.Errorf("the instance is %q, want the request path and the request id", document.Instance)
 			}
 			if row.detail != "" && !strings.Contains(document.Detail, row.detail) {
-				t.Errorf("the detail is %q, want it to carry %q", document.Detail, row.detail)
+				t.Errorf("the detail is %q, want it to include %q", document.Detail, row.detail)
 			}
 		})
 	}
 }
 
-// The sidecar's refusals are real problem documents, because that is
-// what the API relays whole.
-func answerProblem(status int, kind, detail, retry string) func(http.ResponseWriter, *http.Request) {
+// sidecarProblem returns a handler that refuses with a problem
+// document, because the API relays a sidecar's problem document to
+// the caller unchanged.
+func sidecarProblem(status int, kind, detail, retry string) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		if retry != "" {
 			w.Header().Set("Retry-After", retry)
@@ -211,17 +211,15 @@ func answerProblem(status int, kind, detail, retry string) func(http.ResponseWri
 		w.Header().Set("Content-Type", problemMediaType)
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(problemDocument{
-			Type: kind, Title: "a problem the sidecar answered with", Status: status, Detail: detail, Instance: "/x#1",
+			Type: kind, Title: "a problem the sidecar responded with", Status: status, Detail: detail, Instance: "/x#1",
 		})
 	}
 }
 
-// A sidecar that sends no headers in time is a 504 and never a
-// capture that hangs. The API gives up at headerDeadline exactly.
 func TestASlowSidecarIsAGatewayTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sidecar := newPipedSidecar(t)
-		sidecar.answers(func(w http.ResponseWriter, r *http.Request) {
+		sidecar.respondWith(func(w http.ResponseWriter, r *http.Request) {
 			select {
 			case <-time.After(2 * headerDeadline):
 			case <-r.Context().Done():
@@ -235,7 +233,7 @@ func TestASlowSidecarIsAGatewayTimeout(t *testing.T) {
 		resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
 
 		if resp.StatusCode != http.StatusGatewayTimeout {
-			t.Fatalf("a sidecar that sent no headers answered %d, want 504", resp.StatusCode)
+			t.Fatalf("a sidecar that sent no headers responded with %d, want 504", resp.StatusCode)
 		}
 		if waited := time.Since(start); waited != headerDeadline {
 			t.Errorf("the API waited %v for the headers, want %v", waited, headerDeadline)
@@ -243,8 +241,6 @@ func TestASlowSidecarIsAGatewayTimeout(t *testing.T) {
 	})
 }
 
-// A node whose sidecar the API does not remember is a 503 with
-// Retry-After and never a wait.
 func TestAnAbsentSidecarIsUnavailable(t *testing.T) {
 	cluster := newTestCluster(t)
 	server := newTestAPI(t, cluster, newSidecarFixture(t))
@@ -253,17 +249,16 @@ func TestAnAbsentSidecarIsUnavailable(t *testing.T) {
 	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("a screen with no sidecar answered %d, want 503", resp.StatusCode)
+		t.Fatalf("a screen with no sidecar responded with %d, want 503", resp.StatusCode)
 	}
 	if got := resp.Header.Get("Retry-After"); got != retryAfterSeconds {
 		t.Errorf("Retry-After is %q, want %q", got, retryAfterSeconds)
 	}
 }
 
-// A route authorizes before it reads, so a refused subject cannot
-// learn whether a name exists: an absent name and a present one get
-// the same 403.
-func TestAuthorizingBeforeReading(t *testing.T) {
+// A route authorizes the caller before it looks up the Display, so a
+// refused caller cannot tell whether a name exists.
+func TestARefusedCallerCannotTellWhetherANameExists(t *testing.T) {
 	cluster := newTestCluster(t)
 	cluster.allowed = false
 	server := newTestAPI(t, cluster, newSidecarFixture(t))
@@ -272,30 +267,28 @@ func TestAuthorizingBeforeReading(t *testing.T) {
 	present := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
 
 	if absent.StatusCode != present.StatusCode {
-		t.Errorf("an absent name answered %d and a present one %d, want the same refusal",
+		t.Errorf("an absent name responded with %d and a present one %d, want the same refusal",
 			absent.StatusCode, present.StatusCode)
 	}
 	if present.StatusCode != http.StatusForbidden {
-		t.Errorf("a refused subject answered %d, want 403", present.StatusCode)
+		t.Errorf("a refused subject responded with %d, want 403", present.StatusCode)
 	}
 }
 
-// A request that produced bytes writes the Captured Event a person
-// reads with kubectl describe display. The Event names the Display by
-// uid as well as by name and kind, because kubectl describe searches a
-// resource's Events by uid and finds none written without one.
+// The Event names the Display's uid, because kubectl describe finds
+// Events by uid and does not show an Event without one.
 func TestACaptureWritesItsEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newTestCluster(t)
 		server := newTestAPI(t, cluster, newPipedSidecar(t))
 
 		resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
-		if held := body(t, resp); held == "" {
-			t.Fatal("the capture answered no bytes")
+		if got := body(t, resp); got == "" {
+			t.Fatal("the capture responded with no bytes")
 		}
 		synctest.Wait()
 
-		want := []string{"Normal Captured system:serviceaccount:liken-system:viewer took the screen of HDMI-A-1 as image/png"}
+		want := []string{"Normal Captured system:serviceaccount:liken-system:viewer captured the screen of HDMI-A-1 as image/png"}
 		if got := eventLines(cluster.events.About("Display", "HDMI-A-1")); !slices.Equal(got, want) {
 			t.Errorf("the Events are %q, want %q", got, want)
 		}
@@ -307,7 +300,6 @@ func TestACaptureWritesItsEvent(t *testing.T) {
 	})
 }
 
-// A HEAD writes no Event, because it produced no bytes.
 func TestHeadWritesNoEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cluster := newTestCluster(t)
@@ -322,9 +314,9 @@ func TestHeadWritesNoEvent(t *testing.T) {
 	})
 }
 
-// A document answers a client that holds its tag with 304 and the
-// fields RFC 9110 section 15.4.5 requires.
-func TestADocumentAnswersIfNoneMatch(t *testing.T) {
+// RFC 9110 section 15.4.5 requires a 304 to have the Vary and
+// Cache-Control fields that a 200 would have.
+func TestADocumentReturns304ForAMatchingETag(t *testing.T) {
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 
 	first := call(t, server, http.MethodGet, apiRoot, nil)
@@ -338,35 +330,33 @@ func TestADocumentAnswersIfNoneMatch(t *testing.T) {
 		"If-None-Match": []string{tag},
 	})
 	if again.StatusCode != http.StatusNotModified {
-		t.Fatalf("a client holding the tag answered %d, want 304", again.StatusCode)
+		t.Fatalf("a client holding the tag responded with %d, want 304", again.StatusCode)
 	}
 	if got := again.Header.Get("Vary"); got != "Accept" {
-		t.Errorf("the 304 carries Vary %q, want Accept", got)
+		t.Errorf("the 304 has Vary %q, want Accept", got)
 	}
 	if got := again.Header.Get("Cache-Control"); got != "no-cache" {
-		t.Errorf("the 304 carries Cache-Control %q, want no-cache", got)
+		t.Errorf("the 304 has Cache-Control %q, want no-cache", got)
 	}
 }
 
-// A path outside the table is a 404 and never a 405, because the
-// table is matched on the path alone.
+// A path outside the route table returns 404 and not 405, because the
+// API matches the path before it checks the method.
 func TestAPathOutsideTheTableIsNotFound(t *testing.T) {
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 	resp := call(t, server, http.MethodGet, "/v1/display/screens/HDMI-A-1", nil)
 	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("an unknown path answered %d, want 404", resp.StatusCode)
+		t.Fatalf("an unknown path responded with %d, want 404", resp.StatusCode)
 	}
 }
 
-// The info document carries the screen's own numbers and the related
-// links to the routes that capture it.
 func TestTheInfoDocumentNamesTheScreen(t *testing.T) {
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1", nil)
 
 	var info screenInfo
 	if err := json.Unmarshal([]byte(body(t, resp)), &info); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the info document: %v", err)
 	}
 	if info.Name != "HDMI-A-1" || info.Node != "node-1" {
 		t.Errorf("the document names %s on %s, want HDMI-A-1 on node-1", info.Name, info.Node)
@@ -381,15 +371,13 @@ func TestTheInfoDocumentNamesTheScreen(t *testing.T) {
 		}
 	}
 	if related != len(screenForms) {
-		t.Errorf("the info document carries %d related links, want %d", related, len(screenForms))
+		t.Errorf("the info document has %d related links, want %d", related, len(screenForms))
 	}
 }
 
-// The whole body reaches the caller, which is the one thing the API
-// does with a frame.
 func TestTheCaptureStreamsWhatTheSidecarSent(t *testing.T) {
 	sidecar := newSidecarFixture(t)
-	sidecar.answers(func(w http.ResponseWriter, _ *http.Request) {
+	sidecar.respondWith(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		for range 4 {
 			_, _ = w.Write([]byte("fragment"))
@@ -398,19 +386,17 @@ func TestTheCaptureStreamsWhatTheSidecarSent(t *testing.T) {
 	server := newTestAPI(t, newTestCluster(t), sidecar)
 
 	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.mp4?t=,10", nil)
-	if held := body(t, resp); held != "fragmentfragmentfragmentfragment" {
-		t.Errorf("the API answered %q, want every fragment the sidecar sent", held)
+	if got := body(t, resp); got != "fragmentfragmentfragmentfragment" {
+		t.Errorf("the API responded with %q, want every fragment the sidecar sent", got)
 	}
 }
 
-// The caller's subject travels with the request, so the record and
-// the one line a request logs name who asked for the screen.
-func TestTheSubjectRidesTheRequest(t *testing.T) {
+func TestTheRecordAndLogLineNameTheCaller(t *testing.T) {
 	cluster := newTestCluster(t)
 	server := newTestAPI(t, cluster, newSidecarFixture(t))
 	server.record = func(screen *Display, subject, aspect, form string) {
 		if subject != "system:serviceaccount:liken-system:viewer" {
-			t.Errorf("the record names %q, want the subject the review answered with", subject)
+			t.Errorf("the record names %q, want the subject that the review returned", subject)
 		}
 	}
 
@@ -420,39 +406,38 @@ func TestTheSubjectRidesTheRequest(t *testing.T) {
 	server.ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("the capture answered %d", recorder.Code)
+		t.Fatalf("the capture responded with %d", recorder.Code)
 	}
 }
 
-// A refusal names the description and the manual by the two
-// relations RFC 8631 defines, whatever the status was.
+// Every refusal links to the description and the manual with the
+// service-desc and service-doc relations of RFC 8631.
 func TestARefusalNamesTheDescriptionAndTheManual(t *testing.T) {
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 	resp := call(t, server, http.MethodGet, "/v1/display/nothing", nil)
 
 	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("an unknown path answered %d, want 404", resp.StatusCode)
+		t.Fatalf("an unknown path responded with %d, want 404", resp.StatusCode)
 	}
 	links := strings.Join(resp.Header.Values("Link"), " ")
 	for _, relation := range []string{`rel="service-desc"`, `rel="service-doc"`} {
 		if !strings.Contains(links, relation) {
-			t.Errorf("the 404 carries %q, want %s", links, relation)
+			t.Errorf("the 404 has %q, want %s", links, relation)
 		}
 	}
 	if got := resp.Header.Get("Vary"); got != "Accept" {
-		t.Errorf("the 404 carries Vary %q, want Accept", got)
+		t.Errorf("the 404 has Vary %q, want Accept", got)
 	}
 }
 
-// A capture with a t= begin counts its idle time from that begin,
-// so a legal t=45,50 is not cut off before its first byte. The
-// sidecar's first byte comes half an idle bound after the begin, which
-// is longer than the idle bound itself.
-func TestTheIdleTimerCountsFromTheBeginning(t *testing.T) {
+// The idle timeout of a capture starts at its t= begin, so t=45,50 is
+// not cut off before its first byte. The sidecar here sends its first
+// byte more than idleDeadline after the request.
+func TestTheIdleTimeoutStartsAtTheBegin(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const begin = 45 * time.Second
 		sidecar := newPipedSidecar(t)
-		sidecar.answers(func(w http.ResponseWriter, r *http.Request) {
+		sidecar.respondWith(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "video/mp4")
 			w.WriteHeader(http.StatusOK)
 			_ = http.NewResponseController(w).Flush()
@@ -467,21 +452,19 @@ func TestTheIdleTimerCountsFromTheBeginning(t *testing.T) {
 
 		resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.mp4?t=45,50", nil)
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("the clip answered %d", resp.StatusCode)
+			t.Fatalf("the clip responded with %d", resp.StatusCode)
 		}
 		if got := body(t, resp); got != "fragment" {
-			t.Errorf("the body carried %q, want the fragment that arrived after the beginning", got)
+			t.Errorf("the body has %q, want the fragment that arrived after the beginning", got)
 		}
 	})
 }
 
-// A caller that hung up gets no problem document, because there is
-// nobody to answer. The request ends on its log line, and the record
-// carries 499 rather than a 503 that never reached anyone.
-func TestACallerThatHungUpIsAnsweredWithNothing(t *testing.T) {
+// When the caller disconnects, the API writes no problem document.
+func TestACallerThatHungUpGetsNoProblemDocument(t *testing.T) {
 	reached := make(chan struct{})
 	sidecar := newSidecarFixture(t)
-	sidecar.answers(func(w http.ResponseWriter, r *http.Request) {
+	sidecar.respondWith(func(w http.ResponseWriter, r *http.Request) {
 		close(reached)
 		<-r.Context().Done()
 	})
@@ -507,39 +490,35 @@ func TestACallerThatHungUpIsAnsweredWithNothing(t *testing.T) {
 	}
 }
 
-// A sidecar serving a certificate this API cannot verify is a 503
-// with Retry-After, not a 502: it is serving one of its own making
-// because the Secret has not reached it, and the API puts that
-// Secret back within the minute.
+// A sidecar certificate that this API cannot verify is a 503 with
+// Retry-After, not a 502. While its Secret volume is empty, the
+// sidecar serves a self-signed certificate, and the API creates the
+// Secret, so a retry can succeed.
 func TestASidecarWithAnUnknownCertificateIsUnavailable(t *testing.T) {
 	sidecar := newSidecarFixture(t)
 	server := newTestAPI(t, newTestCluster(t), sidecar)
-	// A client that trusts nothing is what a sidecar serving its own
-	// leaf looks like from here.
+	// A client with no trust anchors fails the handshake the same way
+	// a self-signed certificate does.
 	server.sidecar.http = &http.Client{}
 
 	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("a sidecar with an unknown certificate answered %d, want 503", resp.StatusCode)
+		t.Fatalf("a sidecar with an unknown certificate responded with %d, want 503", resp.StatusCode)
 	}
 	if got := resp.Header.Get("Retry-After"); got != retryAfterSeconds {
 		t.Errorf("Retry-After is %q, want %q", got, retryAfterSeconds)
 	}
 	var document problemDocument
 	if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the problem document: %v", err)
 	}
 	if !strings.Contains(document.Detail, "certificate") {
 		t.Errorf("the detail is %q, want the handshake's own words", document.Detail)
 	}
 }
 
-// Every refusal carries a detail, the two that used to answer with
-// none included: a request with no token names the field it wants,
-// and a subject RBAC matched no rule for is told which rule was
-// asked for.
-func TestEveryRefusalCarriesADetail(t *testing.T) {
+func TestEveryRefusalHasADetail(t *testing.T) {
 	cases := []struct {
 		name   string
 		set    func(cluster *testCluster)
@@ -578,49 +557,48 @@ func TestEveryRefusalCarriesADetail(t *testing.T) {
 
 			var document problemDocument
 			if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
-				t.Fatal(err)
+				t.Fatalf("decoding the problem document: %v", err)
 			}
 			if document.Detail != row.want {
-				t.Errorf("the refusal carries %q, want %q", document.Detail, row.want)
+				t.Errorf("the refusal has %q, want %q", document.Detail, row.want)
 			}
 		})
 	}
 }
 
-// A caller asking what a screen is must not need the screen to be
-// up. A screen whose compositor is not serving answers 200 with what
-// the Display object states, and says what is wrong; the members
-// that come from the node are left out rather than guessed.
-func TestTheInfoRouteAnswersAScreenThatIsDown(t *testing.T) {
+// When the compositor is down, the info route returns 200 with what
+// the Display records and a detail, and omits the fields that only the
+// node can report.
+func TestTheInfoRouteServesAScreenThatIsDown(t *testing.T) {
 	sidecar := newSidecarFixture(t)
 	server := newTestAPI(t, newTestCluster(t), sidecar)
 
 	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-3", nil)
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("a screen whose compositor is down answered %d, want 200", resp.StatusCode)
+		t.Fatalf("a screen whose compositor is down responded with %d, want 200", resp.StatusCode)
 	}
-	held := body(t, resp)
+	document := body(t, resp)
 	var info screenInfo
-	if err := json.Unmarshal([]byte(held), &info); err != nil {
-		t.Fatal(err)
+	if err := json.Unmarshal([]byte(document), &info); err != nil {
+		t.Fatalf("decoding the info document: %v", err)
 	}
 	if info.Name != "HDMI-A-3" || info.Node != "node-1" {
 		t.Errorf("the document names %s on %s", info.Name, info.Node)
 	}
 	if info.Width != 1280 || info.Height != 720 || info.Refresh != 60 {
-		t.Errorf("the document reports %dx%d at %d, want the mode the Display states",
+		t.Errorf("the document reports %dx%d at %d, want the mode in the Display's spec",
 			info.Width, info.Height, info.Refresh)
 	}
 	if info.Compositor != "down" {
-		t.Errorf("the document says compositor %q, want down", info.Compositor)
+		t.Errorf("the document reports compositor %q, want down", info.Compositor)
 	}
 	if !strings.Contains(info.Detail, "no such file or directory") {
 		t.Errorf("the document's detail is %q, want the condition's own words", info.Detail)
 	}
 	for _, absent := range []string{`"scale"`, `"formats"`, `"conversion"`} {
-		if strings.Contains(held, absent) {
-			t.Errorf("the document carries %s, which only the node can answer", absent)
+		if strings.Contains(document, absent) {
+			t.Errorf("the document has %s, which only the node can supply", absent)
 		}
 	}
 	if sidecar.called() != 0 {
@@ -628,36 +606,33 @@ func TestTheInfoRouteAnswersAScreenThatIsDown(t *testing.T) {
 	}
 }
 
-// The same for a node this API cannot reach: the screen's facts, and
-// what is wrong beside them.
-func TestTheInfoRouteAnswersAnUnreachableSidecar(t *testing.T) {
+func TestTheInfoRouteServesAnUnreachableSidecar(t *testing.T) {
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 	server.sidecars = newSidecarIndex()
 
 	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1", nil)
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("a screen whose node cannot be reached answered %d, want 200", resp.StatusCode)
+		t.Fatalf("a screen whose node cannot be reached responded with %d, want 200", resp.StatusCode)
 	}
 	var info screenInfo
 	if err := json.Unmarshal([]byte(body(t, resp)), &info); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the info document: %v", err)
 	}
 	if info.Sidecar != "unreachable" {
-		t.Errorf("the document says sidecar %q, want unreachable", info.Sidecar)
+		t.Errorf("the document reports sidecar %q, want unreachable", info.Sidecar)
 	}
 	if info.Width != 1920 || info.Height != 1080 {
-		t.Errorf("the document reports %dx%d, want the mode the Display states", info.Width, info.Height)
+		t.Errorf("the document reports %dx%d, want the mode in the Display's spec", info.Width, info.Height)
 	}
 	if !strings.Contains(info.Detail, "node-1") {
 		t.Errorf("the document's detail is %q, want the node it could not reach", info.Detail)
 	}
 }
 
-// A refusal that could not reach a node names the node and what went
-// wrong with it, and never the address, the port, or the path on the
-// private leg. Those are the shape of the cluster, and the log line
-// is where they belong.
+// The address, port, and path of the connection to a sidecar go to
+// the log line only, because a caller who may read screens does not
+// need the cluster's layout.
 func TestASidecarRefusalNamesTheNodeAndNotTheAddress(t *testing.T) {
 	sidecar := newSidecarFixture(t)
 	server := newTestAPI(t, newTestCluster(t), sidecar)
@@ -666,27 +641,25 @@ func TestASidecarRefusalNamesTheNodeAndNotTheAddress(t *testing.T) {
 	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.png", nil)
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("a sidecar with an unknown certificate answered %d, want 503", resp.StatusCode)
+		t.Fatalf("a sidecar with an unknown certificate responded with %d, want 503", resp.StatusCode)
 	}
 	var document problemDocument
 	if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the problem document: %v", err)
 	}
 	if document.Detail != "the capture sidecar on node-1 did not present a certificate this API trusts" {
 		t.Errorf("the detail is %q, want the node and the reason", document.Detail)
 	}
 	for _, leaked := range []string{"127.0.0.1", "9201", "/v1/display/displays/HDMI-A-1", "x509"} {
 		if strings.Contains(document.Detail, leaked) {
-			t.Errorf("the detail carries %q, which is the cluster's own shape", leaked)
+			t.Errorf("the detail has %q, which is the cluster's own shape", leaked)
 		}
 	}
 }
 
-// The encoder's own failure is a typed problem, so a client matches
-// on it, and its detail is the one line ffmpeg ended with.
 func TestAnEncoderFailureIsTyped(t *testing.T) {
 	sidecar := newSidecarFixture(t)
-	sidecar.answers(answerProblem(http.StatusInternalServerError, problemEncoderFailed,
+	sidecar.respondWith(sidecarProblem(http.StatusInternalServerError, problemEncoderFailed,
 		"/usr/bin/ffmpeg: exit status 251: Conversion failed!", ""))
 	server := newTestAPI(t, newTestCluster(t), sidecar)
 
@@ -694,20 +667,18 @@ func TestAnEncoderFailureIsTyped(t *testing.T) {
 
 	var document problemDocument
 	if err := json.Unmarshal([]byte(body(t, resp)), &document); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the problem document: %v", err)
 	}
 	if resp.StatusCode != http.StatusInternalServerError || document.Type != problemEncoderFailed {
-		t.Errorf("the API answered %d %s, want 500 %s", resp.StatusCode, document.Type, problemEncoderFailed)
+		t.Errorf("the API responded with %d %s, want 500 %s", resp.StatusCode, document.Type, problemEncoderFailed)
 	}
 	if got := resp.Header.Get("Retry-After"); got != "" {
-		t.Errorf("an encoder failure carries Retry-After %q; a retry never clears it", got)
+		t.Errorf("an encoder failure has Retry-After %q; a retry never clears it", got)
 	}
 }
 
-// A HEAD takes no frame, so the Content-Type it answers with is
-// worked out from the Display's own mode. It names the same codec a
-// GET would, because a client that asked what it would get must be
-// able to act on the answer.
+// A HEAD request takes no frame, so the API computes its Content-Type
+// from the Display's mode.
 func TestAHeadNamesTheCodecItWouldServe(t *testing.T) {
 	sidecar := newSidecarFixture(t)
 	server := newTestAPI(t, newTestCluster(t), sidecar)
@@ -715,19 +686,18 @@ func TestAHeadNamesTheCodecItWouldServe(t *testing.T) {
 	resp := call(t, server, http.MethodHead, apiRoot+"/displays/HDMI-A-1/screen.mp4", nil)
 
 	if got := resp.Header.Get("Content-Type"); got != clipContentType {
-		t.Errorf("the HEAD answered %q, want %q", got, clipContentType)
+		t.Errorf("the HEAD responded with %q, want %q", got, clipContentType)
 	}
 	if sidecar.called() != 0 {
 		t.Errorf("the HEAD called the node %d times", sidecar.called())
 	}
 }
 
-// The API answers the type the node is encoding, parameters and all,
-// so the codecs parameter names the level the encoder pinned rather
-// than one the API worked out a second time.
-func TestTheAPIAnswersTheTypeTheNodeEncodes(t *testing.T) {
+// The codecs parameter has the H.264 level the sidecar chose, so the
+// API passes the Content-Type through and does not compute it again.
+func TestTheAPIReturnsTheContentTypeTheNodeSent(t *testing.T) {
 	sidecar := newSidecarFixture(t)
-	sidecar.answers(func(w http.ResponseWriter, _ *http.Request) {
+	sidecar.respondWith(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", `video/mp4; codecs="avc1.640033"`)
 		_, _ = w.Write([]byte("fragment"))
 	})
@@ -736,22 +706,19 @@ func TestTheAPIAnswersTheTypeTheNodeEncodes(t *testing.T) {
 	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-1/screen.mp4", nil)
 
 	if got := resp.Header.Get("Content-Type"); got != `video/mp4; codecs="avc1.640033"` {
-		t.Errorf("the API answered %q, want the node's own type", got)
+		t.Errorf("the API responded with %q, want the node's own type", got)
 	}
 }
 
-// The public leg puts its headers on the wire as soon as the node
-// has answered, not when the first body byte arrives. Go holds a
-// written header block until the body has bytes, and a capture's
-// first byte waits for the t= begin, so without the flush the
-// headers of t=1,3 arrive a second and a third late. media-api reads
-// the instant they arrive as this API's zero, and a delay there
-// reaches a composed stream as an offset the length of the lead-in.
+// net/http does not send headers until the body has bytes, and the
+// first byte of a capture waits for the t= begin. Without a flush, the
+// headers of t=1,3 would arrive one second late, and media-api would
+// shift the picture against the sound by that second.
 func TestTheAPIFlushesItsHeadersBeforeTheFirstByte(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const begin = 600 * time.Millisecond
 		sidecar := newPipedSidecar(t)
-		sidecar.answers(func(w http.ResponseWriter, r *http.Request) {
+		sidecar.respondWith(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "video/mp4")
 			w.WriteHeader(http.StatusOK)
 			_ = http.NewResponseController(w).Flush()
@@ -767,27 +734,27 @@ func TestTheAPIFlushesItsHeadersBeforeTheFirstByte(t *testing.T) {
 		request, err := http.NewRequest(http.MethodGet,
 			apiservertest.Host+apiRoot+"/displays/HDMI-A-1/screen.mp4?t=0.6,2", nil)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("building the request: %v", err)
 		}
 		request.Header.Set("Authorization", "Bearer a-caller-token")
 
 		sent := time.Now()
 		resp, err := api.Client().Do(request)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("requesting the clip: %v", err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		headers := time.Since(sent)
 
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("the clip answered %d", resp.StatusCode)
+			t.Fatalf("the clip responded with %d", resp.StatusCode)
 		}
 		if headers != 0 {
 			t.Errorf("the headers reached the caller %s after the request, want at once", headers)
 		}
 		one := make([]byte, 1)
 		if _, err := io.ReadFull(resp.Body, one); err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the first body byte: %v", err)
 		}
 		if body := time.Since(sent); body != begin {
 			t.Errorf("the first body byte arrived %s after the request, want it at the %s beginning", body, begin)
@@ -795,38 +762,36 @@ func TestTheAPIFlushesItsHeadersBeforeTheFirstByte(t *testing.T) {
 	})
 }
 
-// A retry cannot bring an unplugged monitor back, so the refusal of a
-// screen with no panel asks for no retry.
-func TestAScreenWithNoPanelAsksForNoRetry(t *testing.T) {
+// A retry cannot reconnect an unplugged monitor, so this refusal has
+// no Retry-After.
+func TestAScreenWithNoPanelHasNoRetryAfter(t *testing.T) {
 	server := newTestAPI(t, newTestCluster(t), newSidecarFixture(t))
 
 	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-4/screen.png", nil)
 
 	if got := resp.Header.Get("Retry-After"); got != "" {
-		t.Errorf("the refusal carries Retry-After %q for a monitor that is not on the wire", got)
+		t.Errorf("the refusal has Retry-After %q for a monitor that is not connected", got)
 	}
 }
 
-// The info route answers a screen with no panel from the Display
-// alone, and says that the panel is what is missing.
-func TestTheInfoRouteAnswersAScreenWithNoPanel(t *testing.T) {
+func TestTheInfoRouteServesAScreenWithNoPanel(t *testing.T) {
 	sidecar := newSidecarFixture(t)
 	server := newTestAPI(t, newTestCluster(t), sidecar)
 
 	resp := call(t, server, http.MethodGet, apiRoot+"/displays/HDMI-A-4", nil)
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("a screen with no panel answered %d, want 200", resp.StatusCode)
+		t.Fatalf("a screen with no panel responded with %d, want 200", resp.StatusCode)
 	}
 	var info screenInfo
 	if err := json.Unmarshal([]byte(body(t, resp)), &info); err != nil {
-		t.Fatal(err)
+		t.Fatalf("decoding the info document: %v", err)
 	}
 	if info.Panel != "disconnected" || info.Compositor != "" || info.Sidecar != "" {
-		t.Errorf("the document says panel %q, compositor %q, sidecar %q, want panel disconnected alone",
+		t.Errorf("the document reports panel %q, compositor %q, sidecar %q, want panel disconnected alone",
 			info.Panel, info.Compositor, info.Sidecar)
 	}
-	if info.Detail != "no panel on HDMI-A-4" {
+	if info.Detail != "No panel is connected to HDMI-A-4" {
 		t.Errorf("the document's detail is %q, want the Connected condition's own words", info.Detail)
 	}
 	if sidecar.called() != 0 {

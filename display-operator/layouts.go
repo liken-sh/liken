@@ -1,21 +1,15 @@
 package main
 
-// The Layout resource: the regions of one screen, each a fraction of
-// it with a label selector. A Display names the Layout it shows.
+// The Layout resource divides one screen into regions. Each region is
+// a rectangle given as fractions of the screen, with a label selector
+// for the claims shown in it. A Display refers to the Layout it shows.
+// A Layout names no namespace or monitor, so it is cluster-scoped and
+// one Layout fits any screen.
 //
-// A Layout is cluster-scoped because nothing in it names a namespace
-// or a monitor. Its rectangles are fractions and its selectors match
-// labels, so one Layout serves a screen in one building and a screen
-// in another, the way a Keymap does. The order of the regions is the
-// stacking order, last on top, which is why the CRD marks the list
-// atomic: a map-typed list would let server-side apply reorder the
-// regions and restack the screen.
+// A person or a tool writes Layouts. The operator only reads them, and
+// writes the result for each screen in the Display's status.
 //
-// The operator only reads Layouts. A person or a tool writes them,
-// and what a screen made of one is on the Display's status, not on
-// the Layout.
-//
-// These structs hold only the fields this operator reads; the CRD in
+// These structs have only the fields this operator reads. The CRD in
 // deploy/layouts.yaml is the full schema.
 
 import (
@@ -27,12 +21,12 @@ import (
 	"github.com/liken-sh/liken/kubernetes/informer"
 )
 
-// The Layout collection, under the same group and version the
-// Display resource is served at.
+// LayoutsPath is the Layout collection, in the same API group and
+// version as Display.
 const LayoutsPath = "/apis/" + DisplayGroup + "/" + DisplayVersion + "/layouts"
 
-// The condition a Display carries for the Layout it names. Its
-// reasons are in reasons.go.
+// LayoutResolvedCondition is the condition on a Display that reports
+// whether its Layout was found. Its reasons are in reasons.go.
 const LayoutResolvedCondition = "LayoutResolved"
 
 type Layout struct {
@@ -42,9 +36,8 @@ type Layout struct {
 	Spec       LayoutSpec `json:"spec"`
 }
 
-// The operator never writes a Layout, so there is no
-// resourceVersion here: nothing of this resource is read to be
-// written back.
+// LayoutMeta has no resourceVersion because the operator never
+// writes a Layout back.
 type LayoutMeta struct {
 	Name string `json:"name"`
 }
@@ -53,8 +46,10 @@ type LayoutSpec struct {
 	Regions []LayoutRegion `json:"regions,omitempty"`
 }
 
-// One region of the screen. Its position in the list is its position
-// in the stacking order, last on top.
+// LayoutRegion is one region of the screen. Its position in the list
+// is its place in the stacking order, with the last on top. The CRD
+// marks the list atomic, because server-side apply can reorder a list
+// of type map and so change which region is on top.
 type LayoutRegion struct {
 	Name       string            `json:"name"`
 	Rect       LayoutRect        `json:"rect"`
@@ -62,8 +57,8 @@ type LayoutRegion struct {
 	Transition *LayoutTransition `json:"transition,omitempty"`
 }
 
-// A rectangle in fractions of the screen, so one Layout fits a 4K
-// television and a 1080p panel without a second copy.
+// LayoutRect is a rectangle in fractions of the screen, so one Layout
+// fits a 4K television and a 1080p panel.
 type LayoutRect struct {
 	Left   float64 `json:"left"`
 	Top    float64 `json:"top"`
@@ -71,28 +66,27 @@ type LayoutRect struct {
 	Height float64 `json:"height"`
 }
 
-// How a surface enters the region and how it leaves. The compositor
-// animates both, because the workload never knows where it is. The
-// enter half runs when a surface arrives in the region, and the exit
-// half runs when a surface that is still drawing stops matching it.
-// A client that exits takes its surface with it, and no exit runs for
-// a surface the compositor no longer holds.
+// LayoutTransition is how a surface enters a region and how it leaves.
+// The compositor animates both, because the workload does not know
+// where its surface is on screen. Enter runs when a surface arrives in
+// the region. Exit runs when a surface that is still drawing stops
+// matching the region. When a client exits, its surface is gone, so
+// no exit runs.
 type LayoutTransition struct {
 	Enter LayoutTransitionHalf `json:"enter"`
 	Exit  LayoutTransitionHalf `json:"exit"`
 }
 
-// One half of a transition: what it does, over how long. A half with
-// no kind does nothing, so a region may state an entrance and no
-// exit.
+// LayoutTransitionHalf is the enter or exit half of a transition: its
+// kind and its duration. A half with no kind does nothing, so a region
+// can have an enter transition and no exit transition.
 type LayoutTransitionHalf struct {
 	Kind         string `json:"kind,omitempty"`
 	Milliseconds int    `json:"milliseconds,omitempty"`
 }
 
-// The label selector of the upstream API, held here for the reason
-// every other struct in this program is held here: this program reads
-// these fields and no others. The matching is in placement.go.
+// LabelSelector mirrors the Kubernetes label selector, with only the
+// fields this program reads. The matching code is in placement.go.
 type LabelSelector struct {
 	MatchLabels      map[string]string          `json:"matchLabels,omitempty"`
 	MatchExpressions []LabelSelectorRequirement `json:"matchExpressions,omitempty"`
@@ -104,7 +98,7 @@ type LabelSelectorRequirement struct {
 	Values   []string `json:"values,omitempty"`
 }
 
-// The four operators the schema states.
+// The operators a LabelSelectorRequirement accepts.
 const (
 	selectorIn           = "In"
 	selectorNotIn        = "NotIn"
@@ -116,9 +110,9 @@ func getLayout(c *apiclient.Client, name string) (*Layout, error) {
 	return apiclient.Get[Layout](c, LayoutsPath+"/"+name)
 }
 
-// openLayouts starts the Layout watch, which turns a Layout a person
-// edited into one wake. Its store holds every Layout, and the placement
-// pass reads a Layout from it (objectcache.go).
+// openLayouts watches Layouts and wakes the operator's loop when one
+// changes. The returned collection holds every Layout, and the
+// placement pass reads Layouts from it (objectcache.go).
 func openLayouts(ctx context.Context, client dynamic.Interface, wake func(), readings *metrics) *informer.Collection {
 	return wakeWatch(ctx, client, kindLayout, informer.Source{Resource: layoutResource}, nil, wake, readings)
 }

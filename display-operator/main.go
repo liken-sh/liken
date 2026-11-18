@@ -1,33 +1,26 @@
-// display-operator publishes each of a graphics card's monitor
-// outputs as its own DRA device. A pod claims one screen by its
-// connector name or by what the monitor is, and receives a Wayland
-// socket of its own that puts its window on that screen.
+// display-operator publishes each monitor output of a graphics card as
+// its own DRA device under the driver name display.liken.sh. A pod
+// claims one screen by its connector name or by the monitor's identity,
+// and gets a Wayland socket that puts its window on that screen.
 //
-// It is an instance of liken's device operator pattern. The operator
-// claims the card's display device through an ordinary liken.sh claim
-// and publishes what the compositor drives under its own driver name,
-// display.liken.sh.
+// The operator's own pod claims the card through an ordinary liken.sh
+// claim for the card's display device. Only a machine with a graphics
+// card publishes that device, so the claim schedules the pod onto the
+// machines with monitors, and no node selector is needed. liken
+// publishes the card as an exclusive device, so the pod that holds the
+// claim is the only program that sets a mode on the card. The scheduler
+// also allocates each screen to one claim, so a pod cannot take a screen
+// that another claim holds by writing its name in a config file.
 //
-// Weston with ivi-shell runs in a container of its own in the same
-// pod, and the operator's own controller module runs inside it. The
-// compositor's container starts weston again after each restart the
-// operator orders, and the kubelet restarts the container when weston
-// crashes (restartorders.go).
+// Weston runs with ivi-shell in its own container in the same pod, with
+// the operator's controller module loaded. When the operator restarts
+// Weston, the compositor container starts it again without exiting.
+// When Weston crashes, the container exits and the kubelet restarts it
+// (restartrequests.go).
 //
-// The operator uses no private interface into liken. The raw claim,
-// the slices it writes, and the CDI files it leaves for the runtime
-// are the public contracts that any DRA driver on any cluster gets.
-//
-// The claim does two jobs that a person would otherwise write down. It
-// places the pod, because only a machine that has a graphics card
-// publishes a display device, so no node selector names the machine
-// with the monitors. And it arbitrates, because liken publishes the
-// card node as an exclusive device, so the claim holder is the only
-// program setting a mode on that card.
-//
-// The published outputs then arbitrate for every consumer: the
-// scheduler allocates a screen once, and a client cannot take the
-// same screen by repeating its name from a config.
+// The operator uses only interfaces that every DRA driver has: the
+// claim, the ResourceSlices it writes, and the CDI files it writes for
+// the container runtime.
 package main
 
 import (
@@ -45,121 +38,94 @@ import (
 )
 
 const (
-	// settleWindow is how long the loop waits for quiet after the last
-	// event before it writes. One monitor plugged in produces a burst
-	// of uevents, and one write must cover the whole burst.
-	//
-	// Every ResourceSlice write wakes every DRA-pending pod in the
-	// cluster, because the scheduler event that a slice change raises
-	// includes no queueing hint. A cable that flaps must not turn into
-	// a cluster-wide scheduling storm.
+	// settleWindow is how long the loop waits for no new event before it
+	// writes the ResourceSlice. Plugging in one monitor produces a burst of
+	// uevents, and one write should cover the whole burst. Each
+	// ResourceSlice write wakes every pod in the cluster that waits for DRA
+	// allocation, because the scheduler's event for a slice change has no
+	// queueing hint, so a flapping cable must not cause a write per event.
 	settleWindow = 1500 * time.Millisecond
 
-	// settleLimit bounds the wait. A monitor that wakes and sleeps in
-	// a loop restarts the quiet window forever, and the state it
-	// settles on may never arrive, so the loop publishes what it
-	// reads at this interval regardless.
+	// settleLimit is the longest that a burst can delay the write, counted
+	// from its first event.
 	settleLimit = 10 * time.Second
 
-	// backstopInterval is how often the loop reconciles with no event
-	// to prompt it. A uevent loss that the socket reports wakes the loop
-	// at once (uevents.go), and a write that fails schedules one retry.
-	// This tick covers what neither one reaches: a write that failed
-	// twice, and a change that no reader reported.
-	//
-	// The Display loop uses the same interval as two windows for state
-	// that raises no event. A panel whose DDC/CI a person turned on at
-	// its own menu raises no uevent, so a refused probe is asked again
-	// once per window. The sweep for resources whose panel left runs
-	// once per window when the panels on the node did not change.
+	// backstopInterval is how often the loop runs a pass with no event, to
+	// cover a change that no event reported. A lost uevent and a failed
+	// write each wake the loop on their own (uevents.go, writeRetryDelay).
+	// The Display controller uses the same interval to retry the DDC/CI
+	// probe of a panel that refused it (panels.go), and to sweep the
+	// Display resources of panels that left while the node's set of panels
+	// did not change.
 	backstopInterval = 60 * time.Second
 
-	// writeRetryDelay is how long the loop waits before it writes a
-	// second time. One retry covers the conflict that a concurrent
-	// writer causes and the API server that was restarting. Anything
-	// past that is the next pass's work, and the backstop tick
-	// guarantees there is one.
-	//
-	// The wait is a timer that wakes the loop, never a sleep inside
-	// it. The same loop watches the compositor and the pod's own
-	// shutdown, and a sleep there would leave a dead compositor
-	// unreported for as long as it lasted.
+	// writeRetryDelay is how long the loop waits after a failed write
+	// before it runs another pass. The retry covers a conflict with another
+	// writer and an API server that is restarting. The wait is a timer that
+	// requests a pass, because a sleep would block the loop, which also
+	// watches the compositor and the pod's shutdown.
 	writeRetryDelay = 2 * time.Second
 )
 
-// componentName is this repository's own name, the component label
-// every process in the organization carries on its liken_build_info
-// gauge, so one panel lists every release running in the cluster.
+// componentName is the component label of this process's
+// liken_build_info metric. Every liken component sets that label, so
+// one dashboard can list the release of each component in the cluster.
 const componentName = "display-operator"
 
-// version is this build's own release. The Dockerfile sets it with
-// -ldflags at build time, to the same version release.yaml tags the
-// image with, so a running pod's liken_build_info names the release
-// it actually runs.
+// version is the release of this build. The Dockerfile sets it with
+// -ldflags, so liken_build_info reports the release that a pod runs.
 var version = "dev"
 
-// westonConfigPath is where the declare container writes the
-// compositor's config and where the compositor's container reads it.
-//
-// The volume the two containers share is the pod's own: the file
-// describes the monitors this pod found, so no deployment supplies
-// it, and no edit to it survives the pod. It is a variable so the
-// tests can point it at a directory they control.
+// westonConfigPath is weston.ini. The declare container writes it and
+// the compositor container reads it, through a volume that only this
+// pod's containers share. It describes the monitors that this pod
+// found, so no manifest supplies it, and an edit by hand ends with the
+// pod. It is a variable so that tests can move it.
 var westonConfigPath = "/etc/weston/weston.ini"
 
-// ModeRecordPath is where the operator records the mode each
-// claim asked for, in the same volume as the config.
-//
-// The record is the operator's own file, and weston.ini is
-// derived from it and the connector walk on every write. The record is
-// what the declare container reads to build the config the compositor
-// starts from, so a compositor that restarts comes back at the modes
-// the held claims stated. The volume dies with the pod, so a machine
-// with no consumer left comes up at every monitor's preferred mode.
+// modeRecordPath records the mode that each claim asked for, in the
+// same volume as weston.ini. The operator writes weston.ini from this
+// record and the connectors. The declare container reads the record
+// too, so a compositor that restarts comes back at the modes of the
+// claims that are still held. The volume ends with the pod, so a new
+// pod starts every monitor at its preferred mode.
 var modeRecordPath = "/etc/weston/modes.json"
 
-// ProcRoot is the process tree this operator reads to find the
-// compositor. The pod shares one process namespace, so the
-// compositor's process is in this one. It is a variable so the tests
-// can point it at a directory they control.
+// procRoot is the process tree that the operator reads to find the
+// compositor. The pod has one process namespace, so the compositor's
+// process is in this tree. It is a variable so that tests can move it.
 var procRoot = "/proc"
 
-// defaultSocketDir is where the compositor listens and where a
-// consumer's container mounts. The path is the same on the host, in
-// this pod, and in the consumer's container, because the CDI mount
-// names one path for both ends.
+// defaultSocketDir holds the compositor's Wayland sockets, and each
+// consumer's container mounts it. The CDI mount uses one path for both
+// sides, so the path is the same in this pod and in the consumer's
+// container.
 const defaultSocketDir = "/var/run/display.liken.sh"
 
-// socketName is the compositor's own Wayland socket inside that
-// directory, the one weston's --socket names.
+// socketName is the compositor's own socket in that directory, the
+// value of weston's --socket flag. It is a constant and not read from
+// WAYLAND_DISPLAY, because a WAYLAND_DISPLAY in the operator pod's
+// environment would move the socket that the output watch connects to,
+// and the watch would report a compositor that serves nothing.
 //
-// It is a constant, not a setting. An operator pod that inherited a
-// WAYLAND_DISPLAY of its own would rename the socket the operator's
-// own watch connects to, and the watch would report a compositor that
-// serves nothing.
-//
-// A prepared claim receives a socket of its own instead, opened by the
-// layout module and named after the claim's UID. This one keeps
-// listening: a pod prepared before the per-claim sockets existed
-// holds WAYLAND_DISPLAY=wayland-0 in its environment and reconnects
-// to it, and a surface on it belongs to no claim.
+// Each prepared claim gets its own socket, which the layout module
+// opens and names after the claim's UID. A pod whose environment sets
+// WAYLAND_DISPLAY=wayland-0 connects to this socket instead, and its
+// surfaces belong to no claim.
 const socketName = "wayland-0"
 
-// sysRoot is the sysfs mount this operator reads. It is a variable so
-// the tests can point it at a directory they control.
+// sysRoot is the sysfs mount that the operator reads. It is a variable
+// so the tests can point it at a directory they control.
 var sysRoot = "/sys"
 
-// driRoot is where the claim delivers the card node. The operator
-// reads the name of its own card from here rather than naming one,
-// because the kernel renumbers cards across a reboot.
+// driRoot is the directory where the claim puts the card node. It is a
+// variable so that tests can move it.
 var driRoot = "/dev/dri"
 
-// main selects the role from the command line.
-//
-// This one binary is every process of the display domain. The
-// argument the manifest passes selects which: the config write, the
-// compositor, the capture sidecar, the API, or the OpenAPI printer,
-// and no argument runs the driver.
+// main selects the role of the process from its first argument, so one
+// binary runs every container of the display pods: the config writer,
+// the compositor, the capture sidecar, the API, and the OpenAPI
+// printer. With no argument, the process runs the driver.
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -183,11 +149,10 @@ func main() {
 	operate()
 }
 
-// claimedCard names the one card node the pod's claim delivered.
-//
-// All three roles read the same directory rather than taking a
-// device path from anywhere, because the kernel renumbers cards
-// across a reboot and no manifest can name one.
+// claimedCard returns the card node that the pod's claim put in
+// driRoot, and exits unless there is exactly one. Each role reads the
+// directory and takes no device path from configuration, because the
+// kernel renumbers cards across a reboot.
 func claimedCard() string {
 	cards, err := cardNode(driRoot)
 	if err != nil {
@@ -196,9 +161,9 @@ func claimedCard() string {
 	switch len(cards) {
 	case 1:
 	case 0:
-		fatal("no card node in %s; does this pod claim a display device?", driRoot)
+		fatal("no card node in %s, so this pod has no claim for a display device", driRoot)
 	default:
-		fatal("this pod holds %d card nodes (%v); one compositor drives one card", len(cards), cards)
+		fatal("this pod holds %d card nodes (%v), and one compositor drives one card", len(cards), cards)
 	}
 	return cards[0]
 }
@@ -207,78 +172,74 @@ func operate() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// The DaemonSet gives the pod its node's name through the downward
-	// API. A ResourceSlice names the node whose hardware it describes,
-	// and a pod cannot read that from anywhere else without asking the
-	// API server which node it is on.
+	// The DaemonSet sets NODE_NAME from spec.nodeName through the downward
+	// API. The ResourceSlice names the node that it describes.
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
-		fatal("NODE_NAME is unset; the DaemonSet must supply it from spec.nodeName")
+		fatal("NODE_NAME is not set, and the DaemonSet must set it from spec.nodeName")
 	}
 	socketDir := envOr("SOCKET_DIR", defaultSocketDir)
 	fmt.Printf("%s: operating the monitors on %s\n", DriverName, nodeName)
 
-	// The registry every /metrics scrape reads. An empty address
-	// disables the listener, which is how a workstation run and every
-	// test in this repository serve no port at all.
+	// An empty METRICS_ADDR disables the listener, so a run on a
+	// workstation and every test in this repository listen on no port.
 	readings := newMetrics(componentName, version)
 	metricsListener, err := readings.listen(envOr("METRICS_ADDR", defaultMetricsAddr))
 	if err != nil {
-		fatal("metrics listener: %v", err)
+		fatal("opening the metrics listener: %v", err)
 	}
 	if metricsListener != nil {
 		go serveMetrics(ctx, metricsListener, readings)
 	}
 
-	// Failures during setup end the process deliberately. This code
-	// has no retry logic of its own, because the kubelet already
-	// provides it: a pod that exits nonzero restarts with backoff, and
-	// the failure shows in kubectl instead of hiding in a log.
+	// A failure during setup ends the process. The kubelet restarts it with
+	// backoff, so the setup needs no retry of its own, and the failure
+	// shows as a restart in kubectl and not only in a log.
 	client, err := apiclient.InCluster(apiclient.InClusterOptions{})
 	if err != nil {
-		fatal("in-cluster config: %v", err)
+		fatal("reading the in-cluster configuration: %v", err)
 	}
 	watcher, err := informer.InCluster()
 	if err != nil {
-		fatal("in-cluster config for the watches: %v", err)
+		fatal("reading the in-cluster configuration for the watches: %v", err)
 	}
 	owner, err := NodeOwner(client, nodeName)
 	if err != nil {
 		fatal("reading node %s: %v", nodeName, err)
 	}
 
-	// One recorder posts every Event of this operator, about the
-	// Displays of this node. The pod's name is each Event's
-	// reportingInstance, so a person can tell which node's operator
-	// wrote it. notices finds the Display of a connector for the code
-	// that acts on a connector, once the Display store below is set.
+	// One recorder posts every Event of this operator. Its
+	// reportingInstance is the pod's name, so a person can tell which
+	// node's operator wrote an Event. notices finds the Display of a
+	// connector for code that acts on a connector, once the Display store
+	// is set below.
 	recorder := events.New(ctx, client, componentName, events.Options{Instance: os.Getenv("POD_NAME")})
 	notices := &screenNotices{node: nodeName}
 
 	card := claimedCard()
 	socketPath := socketDir + "/" + socketName
 
-	// The link to the compositor's controller module. It opens the
-	// socket each claim receives and reports every surface the
-	// compositor holds, and the store it keeps is what a placement
-	// pass reads.
+	// layout is the connection to the compositor's controller module. The
+	// module opens a socket for each claim and reports every surface in the
+	// compositor, and layout keeps the reports in a store that the
+	// placement pass reads.
 	layout := newLayoutLink(layoutSocketPath)
 
-	// The plugin registers whether or not a compositor serves. A
-	// prepare call that arrives while the socket is gone must be
-	// refused with a reason, and an unregistered driver answers with
-	// nothing at all.
+	// The plugin registers even while no compositor serves, so that a
+	// prepare call that arrives then is refused with a reason. The kubelet
+	// gets no response at all from a driver that is not registered.
 	plugin := newDRAPlugin(client, card, socketDir, layout)
 	plugin.metrics = readings
 	plugin.notices = notices
-	// A panel whose claim ended while the last operator container ran
-	// may still wait for its standby, and the record says which.
+	// A panel whose claim ended while the previous operator container ran
+	// can still be waiting to go to standby. resumeReleases reads the power
+	// record and starts their grace periods again.
 	plugin.resumeReleases()
 
-	// Every connection to the module starts with no socket open,
-	// because the compositor's restart took them, so the link replays
-	// what the prepared claims hold. The hook is wired before the link
-	// dials, because the replay runs on the first connection too.
+	// A compositor restart closes the module's connection and every claim
+	// socket that the module opened. So on each new connection, the link
+	// opens the sockets of the prepared claims again. The hook is set
+	// before the link dials, because the first connection replays too.
 	layout.replay = plugin.replaySockets
 	go layout.run(ctx)
 
@@ -287,95 +248,94 @@ func operate() {
 		fatal("watching for kernel events: %v", err)
 	}
 
-	// A write that failed and the end of a hotplug hold each schedule
-	// one more pass through the settled channel (hotplughold.go).
+	// A hotplug hold keeps publishing a disconnected connector's last
+	// connected reading until a deadline (hotplughold.go). The end of a
+	// hold and a failed write each request another pass through retries.
 	retries := make(chan struct{}, 1)
-	again := func() {
+	requestPass := func() {
 		select {
 		case retries <- struct{}{}:
 		default:
 		}
 	}
-	// Each drm uevent is counted before it wakes a pass, so the hold
-	// can tell a connector that stayed dark from one that moved.
+	// countHotplugs counts each drm uevent before it wakes a pass, so the
+	// hold can tell a connector that stayed disconnected from one that
+	// reconnected and dropped again between two reads.
 	hotplugs := newHotplugCounts(card)
 	uevents = countHotplugs(ctx, uevents, hotplugs)
 	hold := newCardHold(retries, hotplugs.count)
 
-	// One walk of the card answers the Display controller and the
-	// placement pass, so the two name the same connectors and monitors,
-	// and one view of the hold covers both. The slice publisher's pass
-	// makes its own walk, behind a view of its own. The views share
-	// each connector's dark time, so all three report a monitor that
-	// left at one deadline.
+	// The Display controller and the placement pass share one read of the
+	// card through screensView, so they see the same connectors. The slice
+	// pass reads the card through its own view, sliceHold. The views share
+	// the time that each connector first read disconnected, so each of them
+	// reports a monitor that left at the same deadline.
 	screensView := hold.view()
 	screensOf := screensView.wrap(func() []Output {
 		return screens(card, plugin.currentModes, plugin.connectorModes)
 	})
 	sliceHold := hold.view()
 
-	// The link history is the operator's own, one for the process,
-	// because the answer it holds is measured across passes.
+	// One link history serves the whole process, because it tracks each
+	// connector's monitor across passes.
 	links := newLinkHistory()
-	// A restarted operator starts with no history, and a machine that
-	// booted with its panel on another input has no EDID in sysfs
-	// either. The Display resources are what carry a node's screens
-	// across a restart, so the history starts from them. A read that
-	// fails costs the dark screens their identity until a monitor
-	// answers, which is the behavior of an operator with no seed, so it
-	// is reported and not fatal.
+	// A restarted operator has no link history, and a machine that booted
+	// with its panel on another input has no EDID in sysfs. The Display
+	// resources outlive the operator, so the history starts from them.
+	// When the list fails, the operator logs it and starts with an empty
+	// history, and a disconnected screen has no identity until its monitor
+	// reconnects.
 	if displays, err := listDisplays(client); err != nil {
 		fmt.Fprintf(os.Stderr, "reading the screens this node last served: %v\n", err)
 	} else {
-		links.seed(displays, nodeName, discoverOutputs(sysRoot, card))
+		links.loadFromDisplays(displays, nodeName, discoverOutputs(sysRoot, card))
 	}
-	// An operator that starts during a drop reads its screen dark, and
-	// the Display controller would report the panel gone at once. The
-	// screens' view starts holding each screen the history remembers,
-	// so a screen that answers within the settle time changes nothing,
-	// and one that does not is reported at the hold's deadline.
-	screensView.seed(rememberedScreens(discoverOutputs(sysRoot, card), links))
-	// The prepare path reads the same history the slice is published
-	// from, so a claim on a dark screen is delivered exactly when the
-	// slice still publishes that screen.
+	// An operator that starts while a link is down reads that screen as
+	// disconnected, and the Display controller would report the panel gone
+	// at once. So screensView starts a hold on each screen that the history
+	// remembers. A screen that reconnects before the hold ends changes
+	// nothing, and one that does not is reported gone when the hold ends.
+	screensView.assumeConnected(rememberedScreens(discoverOutputs(sysRoot, card), links))
+	// The prepare path reads the same history as the slice pass, so a claim
+	// for a disconnected screen is prepared exactly when the slice still
+	// publishes that screen.
 	plugin.links = links
 
-	// The Display controller runs beside the slice publisher and
-	// writes the panels' own resources. It reads the same connectors
-	// and shares the probe cache, so the two never ask one panel twice.
-	// Its own loop is what keeps an override off the slice publisher's
-	// settle window.
+	// The Display controller writes the Display resources. It reads the
+	// same connectors as the slice pass and shares its probe cache,
+	// plugin.controls, so no panel is probed twice. It runs its own loop,
+	// so a panel override does not wait for settleWindow.
 	panels := newDisplayControl(client, nodeName, plugin.controls, screensOf)
 	panels.metrics = readings
-	// The mode seams are the prepare path's own, so a resting
-	// mode and a claim's mode take one road to the compositor and hold
-	// one lock between them. The heal's restart is that road with no
-	// config change.
+	// A declared mode and a claim's mode both go through applyMode, so both
+	// reach the compositor the same way and take the same lock. When the
+	// compositor destroys an output and creates it again, the Display
+	// controller repairs the canvas sizes with restartCompositor, which
+	// restarts the compositor with no change to the config.
 	panels.setMode = func(ctx context.Context, output Output, mode string) error {
 		return plugin.applyMode(ctx, output, mode)
 	}
 	panels.restart = plugin.restartCompositor
-	// The compositor's own registry reports when an output was
-	// destroyed and re-created. The watch holds one standing
-	// connection to the compositor's socket, and every restart the
-	// operator makes ends that connection, so the operator's own
-	// restarts report nothing.
-	watch := newOutputWatch(socketPath, panels.outputsMoved)
-	// The same connection answers the mode readback: a switch
-	// waits for the compositor that started after its restart to
-	// report the mode the claim stated.
+	// The output watch keeps one connection open to the compositor's socket
+	// and reads the registry, which reports an output that was destroyed
+	// and created again. Every restart that the operator makes closes that
+	// connection, so the operator's own restarts are not reported as moved
+	// outputs.
+	watch := newOutputWatch(socketPath, panels.outputsChanged)
+	// After a mode switch, the prepare path uses the same connection to
+	// wait for the restarted compositor to report the mode that the
+	// claim asked for.
 	plugin.served = watch.served
-	// The same connection fills the second half of the mode the
-	// Display reports: status.mode.kernel is what the card is synced
-	// to, and status.mode.weston is what the compositor serves
-	// canvases at.
+	// The same connection supplies status.mode.weston, the mode at which
+	// the compositor serves canvases. status.mode.kernel is the mode
+	// that the card is synced to.
 	panels.served = watch.served
-	// The same connection opens the card gate. The gate refuses every
-	// read of the card while the operator holds no connection to a
-	// compositor, so no read by the operator takes DRM master from a
-	// compositor on its way up. The connection
-	// wakes the slice pass and the Display pass, because a closed gate
-	// cost them the fields that the card fills.
+	// The output watch's connection also opens the card gate. With no
+	// connection to a compositor, the gate refuses every read of the card,
+	// so a read by the operator cannot take DRM master from a compositor
+	// that is still starting. A new connection wakes the slice pass and the
+	// Display controller, to fill the fields that the closed gate left
+	// empty.
 	plugin.gate.live = watch.serving
 	connections := make(chan struct{}, 1)
 	watch.connected = func() {
@@ -385,26 +345,24 @@ func operate() {
 		}
 		panels.wake()
 	}
-	// A read that finds its file was master reports the compositor,
-	// which then holds no master and shows no frame. One goroutine
-	// restarts it, because applyMode reads the card while it holds the
-	// lock that a restart takes.
+	// When a read of the card finds that the operator's own file became DRM
+	// master, the compositor has no master and shows no frame (cardgate.go).
+	// restartMasterless restarts it from its own goroutine, because
+	// applyMode reads the card while it holds the lock that a restart takes.
 	go plugin.restartMasterless(ctx, plugin.gate.masterless)
 	go watch.run(ctx)
 
-	// The placement pass reads the surfaces the module reports and
-	// draws each screen to the Layout its Display names. It probes the
-	// same socket the slice publisher taints by, so one pass taints a
-	// screen whose compositor stopped answering and reports it with no
-	// surfaces.
+	// The placement pass places each screen's surfaces in the Layout that
+	// the screen's Display names. It probes the same socket as the slice
+	// pass, so when the compositor stops replying, the slice taints the
+	// screens and the placement pass reports no surfaces.
 	places := newPlacementPass(client, nodeName, socketPath, layout, plugin.claims, screensOf)
 	places.metrics = readings
 
-	// The pod and the Layout watches share one channel, because a
-	// wake means read again and one pass reads every pod and every
-	// Layout. A Display carries the name of the Layout its screen
-	// shows, so its watch wakes both loops: the panels' loop writes
-	// the panel's own status, and this loop places the surfaces.
+	// The pod, Layout, and Display watches wake the loops through one
+	// channel, because each wake means read everything again, and one
+	// placement pass reads every pod and every Layout. A Display change
+	// also wakes the Display controller, which writes the panel's status.
 	resources := make(chan struct{}, 1)
 	resourceWake := func() {
 		select {
@@ -418,8 +376,8 @@ func operate() {
 		panels.wake()
 		resourceWake()
 	}, readings)
-	// Both passes read the objects the watches hold from their stores,
-	// and share one Display store, so each reads the other's writes
+	// Both passes read pods and Layouts from the watches' stores, and
+	// they share one Display store, so each reads the other's writes
 	// (objectcache.go).
 	stores := clusterStores{layouts: layouts.View(), pods: pods.View()}
 	shared := newDisplayStore(client, displays.View())
@@ -427,16 +385,14 @@ func operate() {
 	notices.displays.Store(shared)
 	panels.displays = shared
 	places.displays, places.stores = shared, stores
-	// The Display controller starts once its store is set, because its
-	// goroutine reads the store from its first pass.
+	// The Display controller starts after its store is set, because its
+	// goroutine reads the store on its first pass.
 	go panels.run(ctx)
 
-	// How often the kubelet has started the compositor's container
-	// again, read from this pod's own status on the passes that publish
-	// the slice. A restart lands on one of those passes, because the
-	// socket that ended with it wakes the loop. A pod reads which pod
-	// it is from the downward API, and an operator run by hand names
-	// no pod and counts nothing.
+	// restarts counts the kubelet's restarts of the compositor's container
+	// from this pod's status, and publish records them as a metric. The pod
+	// reads its own name from the downward API. An operator run by hand has
+	// no pod name, so restarts is nil and counts nothing.
 	restarts := newWestonRestarts(client, os.Getenv("POD_NAMESPACE"), os.Getenv("POD_NAME"))
 	if restarts != nil {
 		restarts.pods = stores
@@ -448,67 +404,65 @@ func operate() {
 				sliceHold, readings)
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "publishing the slice: %v; retrying in %s\n", err, writeRetryDelay)
-			time.AfterFunc(writeRetryDelay, again)
+			fmt.Fprintf(os.Stderr, "publishing the ResourceSlice: %v, trying again in %s\n", err, writeRetryDelay)
+			time.AfterFunc(writeRetryDelay, requestPass)
 		}
 		if growth, err := restarts.growth(); err != nil {
-			fmt.Fprintf(os.Stderr, "reading how often the compositor restarted: %v\n", err)
+			fmt.Fprintf(os.Stderr, "reading the compositor restart count: %v\n", err)
 		} else {
 			readings.recordCompositorRestarts(growth)
 		}
-		// Hardware that moved reaches the Display controller
-		// through the same settled pass, so one burst of uevents costs
-		// one pass over the resources.
+		// A hardware change reaches the Display controller through this
+		// same settled pass, so one burst of uevents causes one pass
+		// over the Display resources.
 		panels.wake()
 	}
 
-	// A prepare republishes through the same pass every event takes,
-	// so the mode list it read reaches the slice without waiting for
-	// a wake. The seam is assigned before the plugin serves, because
-	// the kubelet calls into the plugin from its own goroutine and a
-	// later write would race it.
+	// A prepare republishes through the same function that every event
+	// uses, so the modes that it read reach the slice without waiting
+	// for a wake. republish is set before the plugin serves, because
+	// the kubelet calls the plugin from its own goroutine and a later
+	// assignment would race with it.
 	plugin.republish = publish
 	go func() {
 		if err := serveDRAPlugin(ctx, plugin); err != nil {
-			fatal("the DRA plugin is not serving: %v", err)
+			fatal("serving the DRA plugin: %v", err)
 		}
 	}()
-	// A placement that failed is reported and left to the next pass.
-	// Every wake source the loop has reaches the same pass, and the
-	// backstop tick guarantees there is one.
+	// A placement that fails is logged and left for the next pass. Every
+	// wake source reaches the same pass, and the backstop tick
+	// guarantees that there is a next one.
 	place := func() {
 		if err := readings.reconciled(kindLayout, places.pass); err != nil {
 			fmt.Fprintf(os.Stderr, "placing the surfaces on each screen: %v\n", err)
 		}
 	}
 
-	// The card's events settle before a pass, because a monitor that
-	// flaps produces a burst of them. The module's reports and the two
-	// resource watches do not settle: a surface that arrived is a
-	// film's first frame, and a person is watching the screen it lands
-	// on, so the pass that places it runs at once. The placement pass
-	// is silent when nothing changed, so the prompt path costs nothing
-	// on a wake that carried no news.
+	// The card's uevents, retries, the socket watch, and the output watch's
+	// connections go through settle, because a flapping monitor produces a
+	// burst of uevents. The module's reports and the resource watches wake
+	// the placement pass at once, because a new surface can be the first
+	// frame of a video that a person is watching. The placement pass writes
+	// nothing when nothing changed.
 	settled := settle(ctx,
 		wakes(ctx, uevents, retries, watchSocket(ctx, socketPath, probeCompositor, plugin.killHungCompositor), connections, nil, nil),
 		settleWindow, settleLimit)
-	prompt := wakes(ctx, nil, nil, nil, nil, layout.reports, resources)
+	immediate := wakes(ctx, nil, nil, nil, nil, layout.reports, resources)
 
-	// The first pass runs before any event. It replaces the slice the
-	// previous pod left and states whether a compositor serves right
-	// now, tainted if the socket is not up yet.
+	// The first pass runs before any event. It replaces the slice that
+	// the previous pod left, and records whether a compositor serves
+	// now. The slice is tainted if the socket is not up yet.
 	publish()
 	place()
 
 	for {
 		select {
 		case <-ctx.Done():
-			// Nothing is retracted. The slice outlives the pod on
-			// purpose: a consumer's allocation names a device, and a
-			// device that leaves the inventory strands the kubelet's
-			// prepare call with no bound on its retry. The Node owns
-			// the slice, so a node that leaves the cluster is what
-			// takes it away.
+			// The slice is not deleted at shutdown. A consumer's
+			// allocation names a device, and a device that leaves the
+			// inventory leaves the kubelet's prepare call retrying
+			// with no limit. The Node owns the slice, so the slice is
+			// deleted when the node leaves the cluster.
 			return
 		case _, ok := <-settled:
 			if !ok {
@@ -519,7 +473,7 @@ func operate() {
 			}
 			publish()
 			place()
-		case _, ok := <-prompt:
+		case _, ok := <-immediate:
 			if !ok {
 				return
 			}
@@ -528,14 +482,11 @@ func operate() {
 	}
 }
 
-// One walk of the card for the Display controller: the
-// connectors from sysfs, the mode each output drives, and the modes
-// each connector offers. It is the same pair of reads the slice pass
-// makes, through the same seams, so the resource and the slice report
-// one card and cannot disagree about it. A read that fails costs the
-// field it fills and nothing else. The card gate logs once when the
-// operator loses its connection to a compositor, so the reads here log
-// only other failures.
+// screens reads the card for the Display controller with the same
+// functions as the slice pass, so the Display resources and the slice
+// describe the same card. A failed read loses only the field that it
+// fills. The card gate logs once when the operator loses its connection
+// to the compositor, so screens does not log errCompositorAbsent.
 func screens(card string,
 	currentModes func() (map[string]string, error),
 	connectorModes func() (map[string][]drmMode, error),
@@ -552,13 +503,11 @@ func screens(card string,
 	return withOfferedModes(withCurrentModes(outputs, current), offered)
 }
 
-// eventsEnded says what a closed wake channel means.
-//
-// It means nothing while the process is stopping, which is how every
-// shutdown ends. Any other time it means the kernel's uevent socket
-// closed under a running operator, and an operator that kept going
-// would publish only on the backstop tick, minutes after a monitor
-// moved. The pod's restart is the repair.
+// eventsEnded returns nil when the wake channel closed because the
+// process is shutting down. Otherwise the kernel's uevent socket
+// closed, and the operator would publish only on the backstop tick, up
+// to backstopInterval after a monitor changes. The error makes the
+// process exit, so the kubelet restarts the pod.
 func eventsEnded(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return nil
@@ -566,54 +515,40 @@ func eventsEnded(ctx context.Context) error {
 	return errors.New("the kernel event stream ended while the operator was running")
 }
 
-// reconcile makes the published slice agree with what sysfs says about
-// the card's connectors right now, and with whether a compositor
-// serves them. The caller schedules another pass when this one returns
-// an error.
+// reconcile writes the node's ResourceSlice from the card's connectors
+// in sysfs and from whether a compositor serves them. It returns an
+// error when the write fails, and the caller schedules another pass.
+// reconcile writes links, so the caller must not share links with
+// another pass.
 //
-// A pass that finds no connector writes nothing. The card registers
-// its connectors when the driver binds and keeps them until the card
-// leaves, so an empty answer means the card is going away or the walk
-// read the wrong path, and publishing it would delete every device a
-// consumer holds.
+// When the walk finds no connector, reconcile writes nothing. A card
+// registers its connectors when its driver binds and keeps them until
+// the card is removed, so an empty walk means that the card is going
+// away or that the walk read the wrong path. Publishing it would delete
+// every device that a consumer holds.
 //
-// Every pass reads the connectors again, so the pass that follows a
-// compositor's return carries the mode list the kernel re-probed on
-// the way up. A list read too early stays stale only until the next
-// wake.
+// The currentMode attribute is the mode that each output runs now, read
+// from the card with currentModes. The prepare path makes the same
+// read, so the slice and a prepared claim agree. When the read fails,
+// or while the card gate refuses reads, the slice is published without
+// currentMode.
 //
-// CurrentModes is the card's own answer about what each output
-// runs right now. The pass publishes it as an attribute, so the slice
-// always says what a claim's mode did and what a mode a claim left
-// behind is still doing. It is the same read the prepare path makes,
-// so the slice and a delivery never disagree.
-//
-// A read that fails costs the attribute and nothing else. The
-// rest of the slice is what sysfs says, and a card that cannot answer
-// the ioctl still has connectors, monitors, and a compositor. While
-// the operator holds no connection to a compositor, the card gate
-// opens nothing, so every compositor restart costs the attribute until
-// the operator connects again.
-//
-// The link history holds the taint on a dark connector back for the
-// grace, so an HDMI link that goes down and comes back carrying the
-// same monitor taints nothing. One pass writes the history once, so no
-// other caller may pass one in.
+// The link history keeps publishing a disconnected connector with the
+// monitor it last had, and no pass taints it for staying disconnected.
+// A connector that reconnects with a different monitor is tainted for
+// disconnectGrace.
 func reconcile(client *apiclient.Client, nodeName string, owner OwnerReference, card, socketPath string,
 	currentModes func() (map[string]string, error), controls *panelControls, links *linkHistory,
 	hold *hotplugView, readings *metrics) error {
 	outputs := discoverOutputs(sysRoot, card)
 	if len(outputs) == 0 {
-		return fmt.Errorf("%s registers no connectors, so the published slice stays as it is", card)
+		return fmt.Errorf("%s registers no connectors, so the ResourceSlice is not written", card)
 	}
 	now := time.Now()
 	modes, err := currentModes()
-	// The card source is this ioctl: the same read that fills the
-	// slice's currentMode attribute. A failure here costs that
-	// attribute, and it is the fact display_observation_valid reports.
-	// A read while the operator holds no connection to a compositor
-	// records nothing: a compositor restart is not a broken card, and
-	// the card gate logs it once.
+	// display_observation_valid{source="card"} records whether this read
+	// succeeded. errCompositorAbsent records nothing, because a compositor
+	// restart is not a broken card, and the card gate logs it once.
 	switch {
 	case errors.Is(err, errCompositorAbsent):
 	case err != nil:
@@ -622,45 +557,38 @@ func reconcile(client *apiclient.Client, nodeName string, owner OwnerReference, 
 	default:
 		readings.recordObservation("card", true, now)
 	}
-	// The pass asks each panel what controls it carries. The answer
-	// is cached against the monitor's EDID, so a pass over unchanged
-	// hardware sends nothing on any i2c wire, and a panel that refuses
-	// DDC/CI publishes no control attribute and no control device.
+	// withControls asks each panel which DDC/CI controls it supports. The
+	// result is cached by the monitor's EDID, so a pass over unchanged
+	// hardware sends nothing on any i2c bus. A panel that refuses DDC/CI
+	// gets no control attribute and no control device.
 	//
-	// The link history reads the wire as it is, so a monitor that left
-	// and a different one that arrived inside a hold still reads as a
-	// replacement. The hold reads the history's answer, so a connector
-	// in a short drop publishes the device it published while lit: the
-	// same monitor, modes, current mode, controls, and taints.
+	// hold.apply runs after withLinks, so the link history reads each
+	// connector as the kernel reports it, and a monitor that is replaced
+	// during a hold still counts as replaced. While a connector is held,
+	// the slice publishes what it published while connected.
 	observed := hold.apply(withLinks(withControls(withCurrentModes(outputs, modes), controls), links))
 
-	// The claim answer is the same file read the canvas heal already
-	// makes. Reusing it here means the connected and claimed gauges
-	// come from one pass over the card and one read of the CDI specs,
-	// not a second walk of either.
+	// The claimed gauge comes from the same pass as the connected gauge, so
+	// the two describe the same moment.
 	claimed, err := preparedOutputs()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "reading the claims the kubelet prepared: %v\n", err)
 	}
 	readings.recordOutputs(observed, claimed)
 	devices := sliceDevices(observed)
-	// The compositor source is this handshake: the same check that
-	// decides the NoExecute taint below. A socket that refuses the
-	// connect and a socket that accepts and answers nothing are both a
-	// compositor that does not serve, which is the one fact the slice
-	// states.
+	// compositorServing is the handshake that also decides the taints
+	// below. It returns false for a socket that refuses the connection and
+	// for one that accepts and never replies.
 	serving := compositorServing(socketPath)
 	readings.recordObservation("compositor", serving, now)
 	readings.recordCompositorServing(serving)
 	if !serving {
-		// No compositor holds the screens, so every output and draw
-		// device says it serves nobody, and the NoExecute taint is what
-		// ends the clients whose connections died with the socket. A
-		// control device keeps its own taints, because the i2c bus it
-		// delivers needs no compositor, and an output whose claim is
-		// still preparing keeps none, because its pod has started
-		// nothing. When the claims cannot be read, every output is
-		// tainted.
+		// With no compositor serving, every output and draw device gets a
+		// NoExecute taint, which evicts the pods whose connections ended with
+		// the socket. A control device keeps its own taints, because its i2c
+		// bus needs no compositor. An output whose claim is still preparing
+		// gets no taint, because its pod has not started (slices.go). When the
+		// ResourceClaims cannot be listed, every output is tainted.
 		allocated, err := allocatedOutputs(client, nodeName, clusterStores{})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "reading which claims hold a screen: %v\n", err)
@@ -670,38 +598,30 @@ func reconcile(client *apiclient.Client, nodeName string, owner OwnerReference, 
 	return EnsureResourceSlice(client, nodeName, owner, devices)
 }
 
-// watchSocket wakes the loop when a compositor starts answering on the
-// socket and when it stops.
+// watchSocket probes the compositor's socket every socketWatchInterval
+// and sends on the returned channel each time the result changes
+// between serving and not serving.
 //
-// The watch probes on a tick, and the change from one reading to the
-// next is the whole signal. The socket's arrival is an event, and the
-// output watch and the layout link wait on it (arrivals.go). A
-// compositor that holds its socket and stops answering raises no
-// event: only an exchange that gets no answer finds it, so this watch
-// probes on a clock. A compositor that exits closes its socket, and a
-// pidfd or the standing output watch could report that as an event,
-// but the probe that finds a freeze finds an exit in the same second,
-// so one clock covers both. The pass it wakes is what taints or frees
-// the screens.
+// It polls because a compositor that freezes keeps its socket open and
+// raises no event, and only an exchange that gets no reply detects it.
+// The same probe detects an exit within one interval. The output watch
+// and the layout link already receive the socket's arrival as an event
+// (arrivals.go).
 //
-// The watch also repairs a compositor that accepts on its socket and
-// answers nothing. It is the one reader that probes on a clock, so it
-// is the one reader that measures how long a freeze has lasted. Once
-// the probe has read Hung for compositorHungLimit, the watch calls
-// repair, which sends SIGKILL to the compositor, once per outage. A
-// nil repair ends nothing, which is what every test that drives the
-// watch alone passes.
+// When the probe has reported the compositor hung for
+// compositorHungLimit, watchSocket calls repair once for that outage.
+// The operator passes killHungCompositor, which sends SIGKILL. A nil
+// repair kills nothing.
 //
-// The operator passes probeCompositor as probe. The probe is a
-// parameter because a probe of a real socket waits on the kernel, and
-// a test of this watch runs the ticker on synctest's fake clock, which
+// probe is a parameter because a probe of a real socket waits on the
+// kernel, and a test runs this watch on synctest's fake clock, which
 // advances only while nothing waits on the kernel.
 func watchSocket(ctx context.Context, socketPath string, probe func(socketPath string) compositorLiveness,
 	repair func() error) <-chan struct{} {
 	out := make(chan struct{}, 1)
-	// The first reading is taken before the ticker starts, so it is
-	// the same state the caller's first pass publishes, and no change
-	// falls between the two.
+	// The first reading is taken before the ticker starts, so it
+	// matches the state that the caller's first pass publishes, and no
+	// change falls between the two.
 	live := probe(socketPath)
 	serving := live.serving
 	frozen := &hungCompositor{}
@@ -723,7 +643,7 @@ func watchSocket(ctx context.Context, socketPath string, probe func(socketPath s
 					continue
 				}
 				serving = live.serving
-				fmt.Printf("the compositor's socket at %s: serving=%v\n", socketPath, serving)
+				fmt.Printf("the compositor socket %s is serving: %v\n", socketPath, serving)
 				select {
 				case out <- struct{}{}:
 				default:
@@ -734,27 +654,24 @@ func watchSocket(ctx context.Context, socketPath string, probe func(socketPath s
 	return out
 }
 
-// EndHungCompositor runs the kill for a compositor that has answered
-// nothing for compositorHungLimit. A kill that failed is logged and
-// left to the next tick, because the outage is still running and
-// nothing else ends it.
+// endHungCompositor calls repair for a compositor that has replied
+// nothing for compositorHungLimit. When repair fails, it logs the
+// failure, and the next tick calls repair again, because the outage
+// continues.
 func endHungCompositor(socketPath string, frozen *hungCompositor, repair func() error) {
 	if err := repair(); err != nil {
-		fmt.Fprintf(os.Stderr, "ending the compositor that answers nothing on %s: %v\n", socketPath, err)
+		fmt.Fprintf(os.Stderr, "ending the compositor that does not reply on %s: %v\n", socketPath, err)
 		return
 	}
 	frozen.done()
-	fmt.Printf("the compositor answered nothing on %s for %s: ended, and it starts again\n",
+	fmt.Printf("ended the compositor that did not reply on %s for %s, and its container starts it again\n",
 		socketPath, compositorHungLimit)
 }
 
-// wakes turns the kernel's drm events, the write retries and the ends
-// of hotplug holds, the compositor's socket, the output watch's
-// connections, the layout module's reports, and the resources a pass
-// reads into one channel of wakes, with a backstop tick in it.
-// Nothing on any of them holds state that the loop uses: each wake
-// means look again, and the look is a fresh read of sysfs, of the
-// module's store, and of the resources.
+// wakes merges the loop's event sources into one channel and adds a
+// tick every backstopInterval. A wake carries no data: each one means
+// that the loop reads sysfs, the module's store, and the resources
+// again. A nil source never sends.
 func wakes(ctx context.Context, uevents <-chan drmEvent,
 	retries, sockets, connections, reports, resources <-chan struct{}) <-chan struct{} {
 	out := make(chan struct{}, 1)
@@ -811,13 +728,11 @@ func wakes(ctx context.Context, uevents <-chan drmEvent,
 	return out
 }
 
-// settle collapses a burst of events into one wake. It emits after the
-// input has been quiet for window, or after limit has passed since the
-// first event of the burst, whichever comes first.
-//
-// The limit keeps the loop publishing under a flapping cable. Without
-// it, hardware that changes faster than the quiet window would restart
-// the wait on every event and the loop would never write.
+// settle merges a burst of events into one wake. It sends when the
+// input has been quiet for window, or when limit has passed since the
+// first event of the burst, whichever comes first. Without the limit, a
+// cable that flaps faster than window would restart the wait on every
+// event, and the loop would never write.
 func settle(ctx context.Context, in <-chan struct{}, window, limit time.Duration) <-chan struct{} {
 	out := make(chan struct{}, 1)
 	go func() {
@@ -861,8 +776,8 @@ func settle(ctx context.Context, in <-chan struct{}, window, limit time.Duration
 	return out
 }
 
-// envOr reads one setting from the pod's environment, with the value
-// the deployment usually leaves alone as the fallback.
+// envOr returns the environment variable name, or fallback when the
+// variable is unset or empty.
 func envOr(name, fallback string) string {
 	if value := os.Getenv(name); value != "" {
 		return value

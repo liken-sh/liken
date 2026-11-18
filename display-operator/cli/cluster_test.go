@@ -233,6 +233,6 @@ func TestClientCertificateAbsent(t *testing.T) {
 		t.Fatalf("clientCertificate: %v", err)
 	}
 	if accessor != nil {
-		t.Fatal("clientCertificate found a certificate in a context that carries none")
+		t.Fatal("clientCertificate found a certificate in a context that has none")
 	}
 }

@@ -1,8 +1,7 @@
 package main
 
-// These tests drive the store from the module's own events. The
-// events arrive on a real socket, so what the store holds is what a
-// line off the wire put there.
+// These tests send lines to the store from a fake module over a real
+// socket, so the store holds only what its parser read from the wire.
 
 import (
 	"testing"
@@ -13,7 +12,7 @@ func TestLayoutLinkStoresTheSurfacesTheModuleReports(t *testing.T) {
 	module := newFakeModule(t, moduleScript{})
 	link := servedLayoutLink(t, module)
 
-	// The socket names the claim, and wayland-0 names none of them.
+	// The socket identifies the claim. wayland-0 belongs to no claim.
 	module.send("surface 7 wayland-claim-1 1920 1080")
 	module.send("surface 8 wayland-0 640 480")
 	waitUntil(t, "both surfaces arrive", func() bool { return len(link.state().Surfaces) == 2 })
@@ -29,8 +28,8 @@ func TestLayoutLinkStoresTheSurfacesTheModuleReports(t *testing.T) {
 		}
 	}
 
-	// A surface that commits a buffer of a new size keeps its id and
-	// its socket, and one that goes leaves the store.
+	// A resize keeps the surface's id and socket, and surface-gone
+	// removes the surface from the store.
 	module.send("surface-size 7 1344 1080")
 	waitUntil(t, "the surface reports its new size", func() bool {
 		return link.state().Surfaces[7].Width == 1344
@@ -42,7 +41,7 @@ func TestLayoutLinkStoresTheSurfacesTheModuleReports(t *testing.T) {
 	waitUntil(t, "the surface leaves the store", func() bool { return len(link.state().Surfaces) == 1 })
 }
 
-func TestLayoutLinkForgetsAnOutputThatLeaves(t *testing.T) {
+func TestLayoutLinkRemovesAnOutputThatLeaves(t *testing.T) {
 	module := newFakeModule(t, moduleScript{greeting: []string{"output HDMI-A-1 1920 1080 2"}})
 	link := servedLayoutLink(t, module)
 
@@ -53,16 +52,16 @@ func TestLayoutLinkForgetsAnOutputThatLeaves(t *testing.T) {
 func TestLayoutLinkWakesTheLoopOnEveryEvent(t *testing.T) {
 	module := newFakeModule(t, moduleScript{})
 	link := servedLayoutLink(t, module)
-	// The connection itself wakes the loop, so the test waits for
-	// quiet before it counts the event's own wake.
+	// Connecting also wakes the loop, so wait until those wakes stop
+	// before counting the wake from the event.
 	drainWakes(t, link.reports)
 
 	module.send("surface 7 wayland-claim-1 1920 1080")
 	waitForWake(t, link.reports, time.Second)
 }
 
-// drainWakes reads the wakes a new connection sent and returns when
-// the channel has been quiet for a moment.
+// drainWakes discards wakes from reports until none arrives for 100
+// milliseconds.
 func drainWakes(t *testing.T, reports <-chan struct{}) {
 	t.Helper()
 	for {
@@ -78,10 +77,9 @@ func TestLayoutLinkDropsAnEventItCannotRead(t *testing.T) {
 	module := newFakeModule(t, moduleScript{})
 	link := servedLayoutLink(t, module)
 
-	// Each line below is one the store must not take: a verb this
-	// operator does not read, a count the protocol does not state, a
-	// size that is not a number, and a size for a surface that has
-	// never arrived.
+	// None of these lines can be read: an unknown first word, a wrong
+	// number of fields, a size that is not a number, a size for a
+	// surface that never arrived, and an id that is not a number.
 	for _, line := range []string{
 		"pipe 7 HDMI-A-1",
 		"output HDMI-A-1 1920 1080",
@@ -92,12 +90,12 @@ func TestLayoutLinkDropsAnEventItCannotRead(t *testing.T) {
 	} {
 		module.send(line)
 	}
-	// One event the store does take, sent last, is what says every
-	// line before it was read and dropped.
+	// The store handles lines in order, so once this valid line has
+	// taken effect, the lines before it have been read and dropped.
 	module.send("output HDMI-A-1 1920 1080 2")
 	waitUntil(t, "the readable event arrives", func() bool { return len(link.state().Outputs) == 1 })
 
 	if surfaces := link.state().Surfaces; len(surfaces) != 0 {
-		t.Errorf("the store holds %+v, and every surface line was unreadable", surfaces)
+		t.Errorf("the store holds surfaces %+v, want none because every surface line is malformed", surfaces)
 	}
 }

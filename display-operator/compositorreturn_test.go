@@ -1,10 +1,10 @@
 package main
 
-// These tests cover a mode switch whose compositor comes back late.
-// The kubelet treats each restart the operator orders as a crash, so a
-// second restart within ten minutes waits in its crash backoff, and the
-// backoff doubles up to five minutes. The readback's budget starts when
-// the new compositor answers, so a late compositor is not a decline.
+// The compositor can return late: when weston crashes during a mode
+// switch, the container exits and the kubelet's crash backoff delays
+// the next start by up to five minutes. modeSwitchTimeout starts only
+// when the new compositor first responds, so a late compositor is not
+// counted as declining the mode.
 
 import (
 	"context"
@@ -29,8 +29,6 @@ func TestAModeSwitchWaitsForTheCompositorToComeBack(t *testing.T) {
 			backoff: 0,
 		},
 		{
-			// The drill on stick-1: the second restart within a
-			// minute waited 23 seconds in the crash backoff.
 			name:    "the compositor waits out a crash backoff",
 			backoff: 23 * time.Second,
 			waited:  23 * time.Second,
@@ -66,27 +64,27 @@ func TestAModeSwitchWaitsForTheCompositorToComeBack(t *testing.T) {
 				err := plugin.applyMode(t.Context(), Output{Connector: "HDMI-A-2"}, "1280x720@60")
 
 				if (err != nil) != c.fails {
-					t.Fatalf("the switch answered %v, want a failure: %v", err, c.fails)
+					t.Fatalf("applyMode returned %v, want an error: %v", err, c.fails)
 				}
 				if errors.Is(err, errModeDeclined) != c.declined {
-					t.Errorf("the switch answered %v, want a decline: %v", err, c.declined)
+					t.Errorf("applyMode returned %v, want errModeDeclined: %v", err, c.declined)
 				}
-				// The fallback look runs each millisecond, so the switch
-				// ends within one of the moment the answer arrives.
+				// The bench sets switchFallback to a millisecond, so
+				// modeSwitchFallback is a loose upper bound on the delay.
 				if waited := time.Since(start); waited < c.waited || waited > c.waited+modeSwitchFallback {
-					t.Errorf("the switch waited %v, want %v", waited, c.waited)
+					t.Errorf("applyMode waited %v, want %v", waited, c.waited)
 				}
 				if compositor.ended() != 1 {
-					t.Errorf("the switch ended the compositor %d times, want once", compositor.ended())
+					t.Errorf("applyMode ended the compositor %d times, want once", compositor.ended())
 				}
 			})
 		})
 	}
 }
 
-// A compositor that is still in its crash backoff when the kubelet's
-// call ends is not a decline either, so the retry reads the screen
-// again and restarts nothing.
+// When the kubelet's call ends while the compositor is still in its
+// crash backoff, the switch has not been declined, and the retry finds
+// the screen at the mode without another restart.
 func TestARetryAfterTheCallEndsRestartsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		plugin, compositor := modeSwitchBench(t)
@@ -97,15 +95,15 @@ func TestARetryAfterTheCallEndsRestartsNothing(t *testing.T) {
 
 		err := plugin.applyMode(call, Output{Connector: "HDMI-A-2"}, "1280x720@60")
 		if err == nil || errors.Is(err, errModeDeclined) {
-			t.Fatalf("the switch answered %v, want the call's end and no decline", err)
+			t.Fatalf("applyMode returned %v, want the context deadline error and not errModeDeclined", err)
 		}
 		time.Sleep(2 * time.Minute)
 
 		if err := plugin.applyMode(t.Context(), Output{Connector: "HDMI-A-2"}, "1280x720@60"); err != nil {
-			t.Fatalf("the retry answered %v", err)
+			t.Fatalf("retrying applyMode after the backoff: %v", err)
 		}
 		if compositor.ended() != 1 {
-			t.Errorf("the switch and its retry ended the compositor %d times, want once", compositor.ended())
+			t.Errorf("applyMode and its retry ended the compositor %d times, want once", compositor.ended())
 		}
 	})
 }

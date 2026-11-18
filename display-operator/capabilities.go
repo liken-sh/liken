@@ -1,14 +1,11 @@
 package main
 
-// The MCCS capability string. A DDC/CI panel declares its whole
-// feature list in one string, and the host reads it in fragments:
-// one 0xf3 request per fragment, one 0xe3 reply that names the
-// offset it answers. This file reads the string, parses its vcp
-// section, and keeps the MCCS common core under plain names. Every
-// manufacturer-specific code is dropped, because a published
-// attribute is a contract, and no consumer has named one yet. The
-// probe cache holds one read per panel, so a steady-state pass
-// sends nothing on the wire.
+// A DDC/CI panel lists the VCP codes it supports in its MCCS
+// capability string, and the host reads the string in fragments. The
+// operator publishes only the codes of the MCCS common core, under
+// readable names. It drops every manufacturer-specific code, because
+// each published name is an interface that consumers can depend on,
+// and no consumer uses those codes.
 
 import (
 	"fmt"
@@ -17,30 +14,27 @@ import (
 	"time"
 )
 
-// The two opcodes of the capability exchange. The reply carries the
-// offset it answers.
 const (
 	vcpCapabilitiesRequest = 0xf3
 	vcpCapabilitiesReply   = 0xe3
 )
 
-// The reply frame. 32 data bytes at most, three header bytes
-// (opcode and the two offset bytes), and the source, length and
-// checksum around them. The display pads a short fragment, the way it
-// pads a short Get reply.
+// A fragment is at most 32 bytes of the string. The reply data adds
+// the opcode and the two offset bytes, and the frame adds the source,
+// length, and checksum bytes. A display pads a reply with a short
+// fragment to the full frame length.
 const (
 	capabilitiesFragmentBytes = 32
 	capabilitiesReplyData     = capabilitiesFragmentBytes + 3
 	capabilitiesReplyLength   = capabilitiesReplyData + 3
 )
 
-// The bound on the whole string. A panel that answers a full
-// fragment forever would never end the loop, and a real string runs a
-// few hundred bytes.
+// capabilitiesLimit stops Capabilities on a panel that never returns
+// an empty fragment.
 const capabilitiesLimit = 8 << 10
 
-// The six VCP codes this file adds to the two that controls.go
-// already names. The common core is these eight and nothing else.
+// The VCP codes of the common core, besides vcpBrightness and
+// vcpPowerMode, which controls.go defines.
 const (
 	vcpContrast    = 0x12
 	vcpColorPreset = 0x14
@@ -50,9 +44,8 @@ const (
 	vcpAudioMute   = 0x8d
 )
 
-// The plain names the Display publishes, and why a name rather
-// than a code: a person reads the resource, and the code is the
-// protocol's business.
+// The control names that the Display resource publishes in place of
+// VCP codes.
 const (
 	brightnessControl  = "brightness"
 	contrastControl    = "contrast"
@@ -64,8 +57,8 @@ const (
 	powerControl       = "power"
 )
 
-// The whole map between the wire and the resource. A code
-// outside this list is read from no panel and published for none.
+// coreControls maps each VCP code of the common core to its published
+// name.
 var coreControls = []struct {
 	Code byte
 	Name string
@@ -80,17 +73,15 @@ var coreControls = []struct {
 	{vcpPowerMode, powerControl},
 }
 
-// The power names are PascalCase, the Kubernetes form for an enum
-// value. A capture in status.captured can hold the lowercase word from
-// an earlier build, so valueRaw reads a power name in any case, and the
-// capture still restores. The other tables compare exactly, because
-// their names are the panel's own menu words and a spec states them.
+// coreValues names the values of the non-continuous core codes, by
+// their numbers in MCCS 2.2a. valueName publishes a value that is not
+// in the table as its hexadecimal number, because a panel can accept
+// values that the table does not name.
 //
-// The values of each non-continuous core code, in MCCS 2.2a's
-// own numbering, under the names a person reads on the panel's own
-// menu. A value outside the list publishes as its hexadecimal number,
-// because a panel may carry a value this table does not name and the
-// list has to stay honest about what the panel accepts.
+// The power names are PascalCase, the Kubernetes style for an enum
+// value. valueRaw matches power names in any case, because
+// status.captured can hold a lowercase power name that an earlier
+// version of the operator wrote. Every other name must match exactly.
 var coreValues = map[byte]map[uint16]string{
 	vcpColorPreset: {
 		0x01: "sRGB", 0x02: "native", 0x03: "4000K", 0x04: "5000K",
@@ -114,24 +105,23 @@ var coreValues = map[byte]map[uint16]string{
 	},
 }
 
-// The two names of the mute control, named as constants because
-// the spec's boolean maps onto them.
+// The values of the audioMute control, which the spec sets as a
+// boolean.
 const (
 	audioMuted   = "mute"
 	audioUnmuted = "unmute"
 )
 
-// What one control carries. A continuous control states the
-// largest value the panel accepts, and a non-continuous one states
-// every value it accepts. The two are apart because the capability
-// string states a value list for one and nothing for the other.
+// panelCapability describes one control of a panel: the largest value
+// of a continuous control, or every value of a non-continuous control.
+// The capability string lists values only for a non-continuous
+// control.
 type panelCapability struct {
 	Max    int      `json:"max,omitempty"`
 	Values []string `json:"values,omitempty"`
 }
 
-// The name one core code publishes under, and the empty string
-// for every other code.
+// capabilityName returns an empty string for a code outside the core.
 func capabilityName(code byte) string {
 	for _, control := range coreControls {
 		if control.Code == code {
@@ -141,8 +131,6 @@ func capabilityName(code byte) string {
 	return ""
 }
 
-// One value under the name the resource publishes, and as a
-// hexadecimal number when this file names none.
 func valueName(code byte, raw uint16) string {
 	if name, named := coreValues[code][raw]; named {
 		return name
@@ -150,8 +138,7 @@ func valueName(code byte, raw uint16) string {
 	return fmt.Sprintf("%#02x", raw)
 }
 
-// The number behind one published value name, both directions
-// of the table above.
+// valueRaw is the reverse of valueName.
 func valueRaw(code byte, name string) (uint16, bool) {
 	for raw, named := range coreValues[code] {
 		if named == name || (code == vcpPowerMode && strings.EqualFold(named, name)) {
@@ -164,8 +151,6 @@ func valueRaw(code byte, name string) (uint16, bool) {
 	return 0, false
 }
 
-// The request packet: source, length, opcode, and the offset
-// the host asks the display to continue from.
 func capabilitiesRequest(offset uint16) []byte {
 	return withChecksum([]byte{
 		ddcHostAddress, ddcLengthFlag | 3, vcpCapabilitiesRequest,
@@ -173,9 +158,8 @@ func capabilitiesRequest(offset uint16) []byte {
 	})
 }
 
-// Capabilities reads the whole string. The display answers one
-// fragment per request, the host adds the fragment's length to the
-// offset, and a reply with no data is the end of the string.
+// Capabilities reads the display's whole capability string, one
+// fragment per request. An empty fragment ends the string.
 func (d *DDC) Capabilities() (string, error) {
 	var text strings.Builder
 	for offset := 0; ; {
@@ -189,16 +173,15 @@ func (d *DDC) Capabilities() (string, error) {
 		text.Write(fragment)
 		offset += len(fragment)
 		if text.Len() > capabilitiesLimit {
-			return "", fmt.Errorf("the display's capability string passes %d bytes", capabilitiesLimit)
+			return "", fmt.Errorf("the capability string is longer than the limit of %d bytes", capabilitiesLimit)
 		}
 	}
 }
 
-// The retry, for the reason GetVCP retries: one refusal says
-// nothing about a monitor.
-//
-// The wait before each read doubles with the attempt, the same
-// ladder GetVCP climbs and for the same panel.
+// capabilitiesFragment retries a failed exchange as GetVCP does,
+// because one failed read does not show that the monitor lacks DDC/CI.
+// The wait before the read doubles on each attempt, for a panel that
+// replies slowly.
 func (d *DDC) capabilitiesFragment(offset uint16) ([]byte, error) {
 	var err error
 	wait := ddcReplyDelay
@@ -216,7 +199,6 @@ func (d *DDC) capabilitiesFragment(offset uint16) ([]byte, error) {
 	return nil, fmt.Errorf("reading the capability string at offset %d: %w", offset, err)
 }
 
-// One exchange, on the timing every other message follows.
 func (d *DDC) capabilitiesOnce(offset uint16, wait time.Duration) ([]byte, error) {
 	if err := d.bus.Write(capabilitiesRequest(offset)); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNoAnswer, err)
@@ -229,10 +211,9 @@ func (d *DDC) capabilitiesOnce(offset uint16, wait time.Duration) ([]byte, error
 	return parseCapabilitiesReply(reply, offset)
 }
 
-// The reply is checked as a frame before any byte of it is
-// read, the way parseGetReply is, and the offset it answers must be
-// the offset that was asked for: a display that answers an older
-// offset would otherwise repeat a fragment into the string.
+// parseCapabilitiesReply validates the frame as parseGetReply does.
+// It also refuses a reply to another offset, because a display that
+// replies to an earlier offset would repeat a fragment in the string.
 func parseCapabilitiesReply(reply []byte, offset uint16) ([]byte, error) {
 	if silent(reply) {
 		return nil, ErrNoAnswer
@@ -252,16 +233,16 @@ func parseCapabilitiesReply(reply []byte, offset uint16) ([]byte, error) {
 		return nil, fmt.Errorf("%w: its checksum is %#04x, and the bytes add up to %#04x",
 			ErrGarbledReply, reply[2+length], sum)
 	}
-	if answered := uint16(reply[3])<<8 | uint16(reply[4]); answered != offset {
-		return nil, fmt.Errorf("%w: it answers offset %d, and the request asked for %d",
-			ErrGarbledReply, answered, offset)
+	if replyOffset := uint16(reply[3])<<8 | uint16(reply[4]); replyOffset != offset {
+		return nil, fmt.Errorf("%w: the reply has offset %d, and the request asked for %d",
+			ErrGarbledReply, replyOffset, offset)
 	}
 	return body[5:], nil
 }
 
-// capabilityCodes reads the vcp section: every code the panel
-// carries, with the values it accepts for the codes that state a list.
-// A code with no list is a continuous control.
+// capabilityCodes parses the vcp section into the codes the panel
+// supports, each with its value list. A code with no value list is a
+// continuous control.
 func capabilityCodes(text string) map[byte][]uint16 {
 	section, found := vcpSection(text)
 	if !found {
@@ -298,10 +279,9 @@ func capabilityCodes(text string) map[byte][]uint16 {
 	return codes
 }
 
-// The vcp section, found by its own name rather than by
-// position: a capability string states its sections in any order, and
-// only this one says what the panel carries. The name must start a
-// word, so a section named vcpname or mvcp is not this one.
+// vcpSection returns the text inside the vcp(...) section, which can
+// be at any position in the string. A longer name that ends in vcp,
+// such as mvcp(...), does not match.
 func vcpSection(text string) (string, bool) {
 	for index := 0; ; {
 		found := strings.Index(text[index:], "vcp(")
@@ -318,9 +298,8 @@ func vcpSection(text string) (string, bool) {
 	}
 }
 
-// The index of the parenthesis that closes the one at open, and
-// the end of the text when the string is cut short. A value list can
-// hold groups of its own, so the walk counts depth.
+// matchingParenthesis returns the index of the parenthesis that
+// closes the one at open, or len(text) when the string ends first.
 func matchingParenthesis(text string, open int) int {
 	depth := 0
 	for index := open; index < len(text); index++ {
@@ -337,8 +316,9 @@ func matchingParenthesis(text string, open int) int {
 	return len(text)
 }
 
-// The values of one list. A group inside the list belongs to a
-// value this operator does not read, so the walk skips it whole.
+// hexNumbers returns the hexadecimal values in one list. It skips a
+// nested group, which describes a value that the operator does not
+// read.
 func hexNumbers(list string) []uint16 {
 	var values []uint16
 	for index := 0; index < len(list); {
@@ -358,7 +338,6 @@ func hexNumbers(list string) []uint16 {
 	return values
 }
 
-// One run of hexadecimal digits, and where the run ends.
 func hexToken(text string, start int) (string, int) {
 	end := start
 	for end < len(text) && isHexDigit(text[end]) {
@@ -373,9 +352,6 @@ func isHexDigit(character byte) bool {
 		(character >= 'A' && character <= 'F')
 }
 
-// What may appear before a section name and still make it a name of
-// its own, so the search finds a section and not the tail of another
-// word.
 func isNameCharacter(character byte) bool {
 	return isHexDigit(character) || character == '_' ||
 		(character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z')

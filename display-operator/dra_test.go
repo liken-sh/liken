@@ -1,10 +1,9 @@
 package main
 
-// These tests drive the real plugin through the kubelet's own call,
-// against an API server that serves one allocated claim and a sysfs
-// tree that holds the lab machine's monitors. What they cover is the
-// decision inside prepare: which allocations become a delivery, and
-// which ones the driver refuses.
+// These tests call the plugin's prepare and unprepare as the kubelet
+// does, against a fake API server that serves one allocated claim and a
+// sysfs tree with the lab machine's monitors. They check which
+// allocations prepare delivers and which it refuses.
 
 import (
 	"context"
@@ -26,20 +25,20 @@ import (
 )
 
 const (
-	testClaimNamespace = "house"
-	testClaimName      = "kitchen-screen"
+	testClaimNamespace = "signage"
+	testClaimName      = "menu-screen"
 	testClaimUID       = "claim-uid-1"
 )
 
-// allocatedClaim answers the one GET the driver makes, with the
-// allocation the scheduler would have written on the claim's status:
-// the results, and the config the scheduler resolved from the claim's
-// own blocks and the DeviceClass's.
+// allocatedClaim returns a client for a fake API server that serves
+// the claim with the status the scheduler would have written: the
+// results, and the config merged from the claim's blocks and the
+// DeviceClass's blocks.
 func allocatedClaim(t *testing.T, results []AllocatedDevice, config string) *apiclient.Client {
 	t.Helper()
 	encoded, err := json.Marshal(results)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encoding the allocation results: %v", err)
 	}
 	body := fmt.Sprintf(
 		`{"metadata":{"name":%q,"namespace":%q,"uid":%q},"status":{"allocation":{"devices":{"results":%s,"config":[%s]}}}}`,
@@ -54,14 +53,11 @@ func allocatedClaim(t *testing.T, results []AllocatedDevice, config string) *api
 	}))
 }
 
-// fakeCompositor stands in for the two things a mode switch touches
-// outside this process: the current mode the card reports, and the
-// signal that ends the compositor.
-//
-// The kubelet is what restarts the container, so the restart is
-// modeled here: an ended compositor comes back with the modes the
-// record states, unless the test says it declines them, which is what
-// a mode weston cannot match does.
+// fakeCompositor replaces the card's mode reads and the compositor
+// process that a mode switch ends. In production the compositor
+// container starts weston again after the operator ends it, so the fake
+// starts again too, with the modes in the record, unless declines is
+// set. Weston declines a mode that it cannot match.
 type fakeCompositor struct {
 	mu          sync.Mutex
 	record      string
@@ -71,19 +67,18 @@ type fakeCompositor struct {
 	republishes int
 	declines    bool
 	readErr     error
-	// Which compositor is answering. Every restart is a new one,
-	// and a readback takes no answer from the compositor it ended.
+	// session identifies the running compositor. Every restart starts
+	// a new one, so a readback ignores replies from the one it ended.
 	session uint64
-	// How long the new compositor takes to start, as a compositor that
-	// crashed waits in the kubelet's crash backoff, and whether it never
-	// starts.
-	// A backoff runs on the clock, so a test that sets one runs in a
-	// synctest bubble.
+	// backoff is how long the new compositor takes to start, like a
+	// crashed container in the kubelet's crash backoff. The delay uses
+	// the clock, so a test that sets it runs in a synctest bubble. The
+	// fake can also be set to never start.
 	backoff time.Duration
 	gone    bool
 }
 
-// modes is the GETCRTC readback: what each connector runs right now.
+// modes replaces the GETCRTC read: the mode each connector runs.
 func (f *fakeCompositor) modes() (map[string]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -97,8 +92,8 @@ func (f *fakeCompositor) modes() (map[string]string, error) {
 	return current, nil
 }
 
-// Connectors stands in for the GETCONNECTOR read: every mode each
-// connector offers now, with the kernel's vrefresh beside its name.
+// connectors replaces the GETCONNECTOR read: every mode each connector
+// offers, with the kernel's vrefresh next to its name.
 func (f *fakeCompositor) connectors() (map[string][]drmMode, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -109,9 +104,9 @@ func (f *fakeCompositor) connectors() (map[string][]drmMode, error) {
 	return offered, nil
 }
 
-// Applied is what the card reports after weston takes the record's
-// entry: the connector's first timing that matches it, with its
-// refresh.
+// applied returns the mode the card reports after weston reads the
+// record's entry: the first timing of the connector that matches it,
+// with its refresh.
 func (f *fakeCompositor) applied(connector, mode string) string {
 	for _, offered := range f.offers[connector] {
 		if modeMatches(mode, fmt.Sprintf("%s@%d", offered.Name, offered.Refresh)) {
@@ -121,22 +116,19 @@ func (f *fakeCompositor) applied(connector, mode string) string {
 	return mode
 }
 
-// What the compositor itself reports about the outputs it
-// serves, which is what a mode readback reads. The fixture serves
-// what the card runs, because one compositor drives one card and the
-// modes it serves are the modes the card is set to.
+// serving replaces the compositor's report of its outputs, with the
+// card's current modes.
 func (f *fakeCompositor) serving() servedOutputs {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return servedOutputs{session: f.session, modes: maps.Clone(f.current)}
 }
 
-// pids is the compositor process that runs now. The fake runs one.
 func (f *fakeCompositor) pids() []int {
 	return []int{14}
 }
 
-// signal is the signal and the compositor role's restart in one step.
+// signal ends the compositor and restarts it, in one step.
 func (f *fakeCompositor) signal(int, syscall.Signal) error {
 	return f.end()
 }
@@ -159,8 +151,8 @@ func (f *fakeCompositor) end() error {
 	return f.start()
 }
 
-// start is the new compositor. It is a new one whether or not it
-// takes the mode the record states. The caller holds mu.
+// start starts a new compositor, whether or not it takes the mode in
+// the record. The caller holds mu.
 func (f *fakeCompositor) start() error {
 	f.session++
 	if f.declines {
@@ -182,9 +174,9 @@ func (f *fakeCompositor) ended() int {
 	return f.kills
 }
 
-// Republish stands in for the operator's own reconcile pass, which
-// re-reads the connectors and writes the slice on divergence. The
-// tests count calls, because the pass itself is main's wiring.
+// republish replaces the operator's reconcile pass, which reads the
+// connectors again and writes the slice when it differs. Tests count
+// the calls, because main sets up the real pass.
 func (f *fakeCompositor) republish() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -197,29 +189,28 @@ func (f *fakeCompositor) republished() int {
 	return f.republishes
 }
 
-// labPlugin is the driver as it runs on the lab machine: an ultrawide
-// on HDMI-A-1, a portable monitor on HDMI-A-2, and an empty DP-1, with
-// a compositor serving its socket in the pod's runtime directory.
+// labPlugin is the driver on the lab machine: an ultrawide monitor on
+// HDMI-A-1, a portable monitor on HDMI-A-2, and nothing on DP-1, with a
+// compositor serving its socket in the pod's runtime directory.
 func labPlugin(t *testing.T, results []AllocatedDevice) *draPlugin {
 	t.Helper()
 	plugin, _ := labPluginWithConfig(t, results, "")
 	return plugin
 }
 
-// labPluginWithConfig is the same driver, with the resolved config
-// entries a claim and its DeviceClass produced, and with the
-// compositor the switch acts on. The ultrawide runs its preferred
-// mode and the portable panel runs 1920x1080, which is what both
-// monitors come up at.
+// labPluginWithConfig is labPlugin with the merged config entries of a
+// claim and its DeviceClass, and with the fake compositor that a mode
+// switch acts on. At the start the ultrawide runs its preferred mode
+// and the portable panel runs 1920x1080.
 func labPluginWithConfig(t *testing.T, results []AllocatedDevice, config string) (*draPlugin, *fakeCompositor) {
 	t.Helper()
 	plugin, compositor, _ := labPluginWithModule(t, results, config)
 	return plugin, compositor
 }
 
-// labPluginWithModule is the same driver again, with the layout
-// module the prepare path opens each claim's socket through. A test
-// that reads what the module was asked for takes it too.
+// labPluginWithModule is labPluginWithConfig with the fake layout
+// module that prepare opens each claim's socket through. It also
+// returns the module, so a test can read the requests it received.
 func labPluginWithModule(t *testing.T, results []AllocatedDevice, config string) (*draPlugin, *fakeCompositor, *fakeModule) {
 	t.Helper()
 	cdiDir = t.TempDir()
@@ -233,21 +224,20 @@ func labPluginWithModule(t *testing.T, results []AllocatedDevice, config string)
 		offers: labConnectorModes(),
 	}
 	plugin := &draPlugin{
-		client:     allocatedClaim(t, results, config),
-		sysRoot:    labSysfs(t),
-		card:       "card1",
-		socketDir:  servedSocketDir(t),
-		configPath: filepath.Join(configDir, "weston.ini"),
-		recordPath: compositor.record,
-		// The wait is the same wait the operator runs on the machine,
-		// with the bounds shortened so that a test that must reach the
-		// timeout reaches it at once.
+		client:         allocatedClaim(t, results, config),
+		sysRoot:        labSysfs(t),
+		card:           "card1",
+		socketDir:      servedSocketDir(t),
+		configPath:     filepath.Join(configDir, "weston.ini"),
+		recordPath:     compositor.record,
 		currentModes:   compositor.modes,
 		connectorModes: compositor.connectors,
 		compositors:    compositor.pids,
 		signal:         compositor.signal,
 		served:         compositor.serving,
 		republish:      compositor.republish,
+		// Short limits, so that a test of a declined mode reaches the
+		// timeout quickly.
 		switchTimeout:  200 * time.Millisecond,
 		switchFallback: time.Millisecond,
 	}
@@ -256,9 +246,8 @@ func labPluginWithModule(t *testing.T, results []AllocatedDevice, config string)
 	return plugin, compositor, module
 }
 
-// LabConnectorModes is what the kernel answers for the lab
-// machine's connectors: the names its sysfs lists, with the
-// refreshes each name carries.
+// labConnectorModes returns the modes the kernel lists for the lab
+// machine's connectors, with the refresh rates of each mode.
 func labConnectorModes() map[string][]drmMode {
 	return map[string][]drmMode{
 		"HDMI-A-1": {
@@ -281,19 +270,19 @@ func labConnectorModes() map[string][]drmMode {
 	}
 }
 
-// modeRecord reads the record the plugin keeps beside weston.ini.
+// modeRecord reads the mode record that the plugin writes beside
+// weston.ini.
 func modeRecord(t *testing.T, plugin *draPlugin) map[string]string {
 	t.Helper()
 	record, err := readModeRecord(plugin.recordPath)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the mode record: %v", err)
 	}
 	return record
 }
 
-// westonINI reads the config the plugin regenerates on every change.
-// A pod whose claims stated no mode has no file here at all, because
-// the declare container writes it in a volume of the pod's own.
+// westonINI returns the config that the plugin wrote, or "" when the
+// plugin wrote none.
 func westonINI(t *testing.T, plugin *draPlugin) string {
 	t.Helper()
 	written, err := os.ReadFile(plugin.configPath)
@@ -301,14 +290,13 @@ func westonINI(t *testing.T, plugin *draPlugin) string {
 		return ""
 	}
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the weston config: %v", err)
 	}
 	return string(written)
 }
 
-// servedSocketDir is a runtime directory with a compositor answering
-// in it. The socket is the delivery, so prepare answers only while a
-// compositor is on the other end of it.
+// servedSocketDir returns a runtime directory with a compositor
+// listening on its socket, because prepare fails while none listens.
 func servedSocketDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -326,26 +314,25 @@ func prepare(t *testing.T, plugin *draPlugin) *drav1.NodePrepareResourceResponse
 		}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("calling NodePrepareResources: %v", err)
 	}
-	// The response must carry one entry for each claim, because the
-	// kubelet treats a missing entry as a failure to retry.
 	if len(resp.Claims) != 1 {
-		t.Fatalf("claims = %+v", resp.Claims)
+		t.Fatalf("the response has %d claims, want 1: %+v", len(resp.Claims), resp.Claims)
 	}
 	claim, ok := resp.Claims[testClaimUID]
 	if !ok {
-		t.Fatalf("the response has no answer for the claim: %+v", resp.Claims)
+		t.Fatalf("the response has no entry for the claim: %+v", resp.Claims)
 	}
 	return claim
 }
 
-// specFiles lists what prepare left for the container runtime.
+// specFiles lists the CDI spec files that prepare wrote for the
+// container runtime.
 func specFiles(t *testing.T) []string {
 	t.Helper()
 	entries, err := os.ReadDir(cdiDir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the CDI spec files: %v", err)
 	}
 	var names []string
 	for _, entry := range entries {
@@ -361,38 +348,38 @@ func TestPrepareDeliversTheSocketAndTheAppID(t *testing.T) {
 
 	claim := prepare(t, plugin)
 	if claim.Error != "" {
-		t.Fatalf("prepare refused a live output: %s", claim.Error)
+		t.Fatalf("prepare of a live output returned the error %q, want none", claim.Error)
 	}
 	if len(claim.Devices) != 1 {
-		t.Fatalf("devices = %+v", claim.Devices)
+		t.Fatalf("devices = %+v, want one", claim.Devices)
 	}
 	device := claim.Devices[0]
 	if device.DeviceName != "hdmi-a-1" || device.PoolName != "liken-1" {
-		t.Errorf("device = %+v", device)
+		t.Errorf("device = %+v, want hdmi-a-1 of pool liken-1", device)
 	}
 	if len(device.RequestNames) != 1 || device.RequestNames[0] != "screen" {
-		t.Errorf("requestNames = %v", device.RequestNames)
+		t.Errorf("requestNames = %v, want [screen]", device.RequestNames)
 	}
-	// The CDI ID names the file's device, and the claim's UID is in it
-	// so a claim recreated under one name never reuses a stale grant.
+	// The claim's UID is in the CDI ID, so a claim created again under
+	// the same name never gets the device edits of the old claim.
 	wantID := "display.liken.sh/output=" + testClaimUID + "-hdmi-a-1"
 	if len(device.CdiDeviceIds) != 1 || device.CdiDeviceIds[0] != wantID {
 		t.Errorf("cdiDeviceIds = %v, want %q", device.CdiDeviceIds, wantID)
 	}
 
 	if got := specFiles(t); len(got) != 1 || got[0] != "display.liken.sh-"+testClaimUID+".json" {
-		t.Fatalf("the spec files are %v", got)
+		t.Fatalf("the spec files are %v, want the one of the claim", got)
 	}
 	raw, err := os.ReadFile(filepath.Join(cdiDir, "display.liken.sh-"+testClaimUID+".json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CDI spec: %v", err)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the CDI spec: %v", err)
 	}
 	if len(spec.Devices) != 1 || spec.Devices[0].Name != testClaimUID+"-hdmi-a-1" {
-		t.Fatalf("spec devices = %+v", spec.Devices)
+		t.Fatalf("spec devices = %+v, want one for hdmi-a-1", spec.Devices)
 	}
 	edits := spec.Devices[0].ContainerEdits
 	for _, want := range []string{
@@ -405,15 +392,14 @@ func TestPrepareDeliversTheSocketAndTheAppID(t *testing.T) {
 		}
 	}
 	if len(edits.Mounts) != 1 || edits.Mounts[0].ContainerPath != plugin.socketDir {
-		t.Errorf("mounts = %+v", edits.Mounts)
+		t.Errorf("mounts = %+v, want one at the socket directory", edits.Mounts)
 	}
 }
 
 func TestPrepareRefusesWhileNoCompositorServes(t *testing.T) {
-	// The compositor died and left its socket file behind, and its
-	// container is restarting. The screen is real and the allocation
-	// stands, and a delivery now would hand the client a path that
-	// refuses it, so the kubelet holds the pod and retries.
+	// The compositor exited and left its socket file. A client given
+	// that path would get a refused connection, so prepare fails and
+	// the kubelet retries.
 	plugin := labPlugin(t, []AllocatedDevice{
 		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-1"},
 	})
@@ -422,7 +408,7 @@ func TestPrepareRefusesWhileNoCompositorServes(t *testing.T) {
 
 	claim := prepare(t, plugin)
 	if claim.Error == "" {
-		t.Fatal("prepare delivered a socket that no compositor serves")
+		t.Fatal("prepare returned no error although no compositor serves the socket")
 	}
 	if !strings.Contains(claim.Error, "compositor") {
 		t.Errorf("error = %q, want it to say %q", claim.Error, "compositor")
@@ -433,9 +419,9 @@ func TestPrepareRefusesWhileNoCompositorServes(t *testing.T) {
 }
 
 func TestPrepareRefusesAnOutputWithNoMonitorOnIt(t *testing.T) {
-	// The monitor left between the allocation and this call.
+	// The monitor was unplugged between the allocation and this call.
 	// Delivering the socket anyway would put the client's surface on
-	// the first output, on top of whatever was there.
+	// the first output, over whatever is there.
 	plugin := labPlugin(t, []AllocatedDevice{
 		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "dp-1"},
 	})
@@ -448,7 +434,7 @@ func TestPrepareRefusesAnOutputWithNoMonitorOnIt(t *testing.T) {
 		t.Errorf("error = %q, want it to say %q", claim.Error, "no monitor")
 	}
 	if len(claim.Devices) != 0 {
-		t.Errorf("devices = %+v", claim.Devices)
+		t.Errorf("devices = %+v, want none", claim.Devices)
 	}
 	if got := specFiles(t); len(got) != 0 {
 		t.Errorf("a refused claim left %v behind", got)
@@ -456,9 +442,8 @@ func TestPrepareRefusesAnOutputWithNoMonitorOnIt(t *testing.T) {
 }
 
 func TestPrepareServesEveryConnectorWithAMonitorOnIt(t *testing.T) {
-	// The driver checks one fact: whether a monitor is connected. The
-	// config has a section for every connector, so when the monitor
-	// arrived does not matter.
+	// weston.ini has a section for every connector, so prepare accepts
+	// a monitor that was plugged in after the compositor started.
 	for _, device := range []string{"hdmi-a-1", "hdmi-a-2"} {
 		t.Run(device, func(t *testing.T) {
 			plugin := labPlugin(t, []AllocatedDevice{
@@ -467,37 +452,36 @@ func TestPrepareServesEveryConnectorWithAMonitorOnIt(t *testing.T) {
 
 			claim := prepare(t, plugin)
 			if claim.Error != "" {
-				t.Fatalf("prepare refused %s: %s", device, claim.Error)
+				t.Fatalf("prepare of %s returned the error %q, want none", device, claim.Error)
 			}
 			if len(claim.Devices) != 1 || claim.Devices[0].DeviceName != device {
-				t.Fatalf("devices = %+v", claim.Devices)
+				t.Fatalf("devices = %+v, want one device for the claim", claim.Devices)
 			}
 		})
 	}
 }
 
 func TestPrepareLeavesAnotherDriversAllocationAlone(t *testing.T) {
-	// A claim that asks for a screen and that screen's speakers holds
-	// a result from each driver, and each driver's own plugin prepares
-	// its own.
+	// A claim for a screen and its speakers has a result from each
+	// driver, and each driver's plugin prepares its own result.
 	plugin := labPlugin(t, []AllocatedDevice{
 		{Request: "speakers", Driver: "audio.liken.sh", Pool: "liken-1", Device: "hdmi-1"},
 	})
 
 	claim := prepare(t, plugin)
 	if claim.Error != "" {
-		t.Fatalf("prepare failed on another driver's allocation: %s", claim.Error)
+		t.Fatalf("prepare of another driver's allocation returned the error %q, want none", claim.Error)
 	}
 	if len(claim.Devices) != 0 {
-		t.Errorf("devices = %+v", claim.Devices)
+		t.Errorf("devices = %+v, want none", claim.Devices)
 	}
 	if got := specFiles(t); len(got) != 0 {
 		t.Errorf("the driver wrote %v for another driver's device", got)
 	}
 }
 
-// screenRequest is the one allocation result a claim on the lab's
-// portable panel holds.
+// screenRequest is the allocation result of a claim for the lab's
+// portable panel.
 func screenRequest() []AllocatedDevice {
 	return []AllocatedDevice{
 		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-2"},
@@ -505,18 +489,16 @@ func screenRequest() []AllocatedDevice {
 }
 
 func TestPrepareDeliversAModeTheScreenAlreadyRuns(t *testing.T) {
-	// The readback is what decides, so a claim that asks for the mode
-	// on the screen right now delivers at once. This is what makes the
-	// kubelet's retry free and the whole flow idempotent: nothing is
-	// written and nothing restarts.
+	// Prepare compares the mode with the one the screen runs before it
+	// writes, so a kubelet retry writes nothing and restarts nothing.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1920x1080"}`))
 
 	claim := prepare(t, plugin)
 	if claim.Error != "" {
-		t.Fatalf("prepare refused the mode the screen runs: %s", claim.Error)
+		t.Fatalf("prepare of the mode the screen runs returned the error %q, want none", claim.Error)
 	}
 	if len(claim.Devices) != 1 {
-		t.Fatalf("devices = %+v", claim.Devices)
+		t.Fatalf("devices = %+v, want one device for the claim", claim.Devices)
 	}
 	if compositor.ended() != 0 {
 		t.Errorf("the compositor was ended %d times for a mode it already runs", compositor.ended())
@@ -530,23 +512,23 @@ func TestPrepareDeliversAModeTheScreenAlreadyRuns(t *testing.T) {
 }
 
 func TestPrepareSwitchesTheModeAndWaitsForTheReadback(t *testing.T) {
-	// The whole flow: the record takes the mode, the config regenerates
-	// from the connector walk and the record, the compositor ends once,
-	// and the delivery waits for GETCRTC to report the mode.
+	// The record gets the mode, weston.ini is written from the
+	// connectors and the record, the compositor ends once, and prepare
+	// waits until the compositor reports the mode.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1280x720"}`))
 
 	claim := prepare(t, plugin)
 	if claim.Error != "" {
-		t.Fatalf("prepare refused a mode the connector offers: %s", claim.Error)
+		t.Fatalf("prepare of a mode the connector offers returned the error %q, want none", claim.Error)
 	}
 	if len(claim.Devices) != 1 || claim.Devices[0].DeviceName != "hdmi-a-2" {
-		t.Fatalf("devices = %+v", claim.Devices)
+		t.Fatalf("devices = %+v, want one device for the claim", claim.Devices)
 	}
 	if compositor.ended() != 1 {
 		t.Errorf("the compositor was ended %d times, want once", compositor.ended())
 	}
 	if got := modeRecord(t, plugin); got["HDMI-A-2"] != "1280x720" {
-		t.Errorf("record = %v", got)
+		t.Errorf("record = %v, want HDMI-A-2 at 1280x720", got)
 	}
 	config := westonINI(t, plugin)
 	for _, want := range []string{
@@ -560,19 +542,19 @@ func TestPrepareSwitchesTheModeAndWaitsForTheReadback(t *testing.T) {
 }
 
 func TestPrepareSwitchesToAModeWithARefresh(t *testing.T) {
-	// The whole WIDTHxHEIGHT@REFRESH string passes through to
-	// weston's mode= line, which already reads that form.
+	// weston's mode= line accepts WIDTHxHEIGHT@REFRESH, so the whole
+	// string goes into it.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1280x720@24"}`))
 
 	claim := prepare(t, plugin)
 	if claim.Error != "" {
-		t.Fatalf("prepare refused a refresh the connector offers: %s", claim.Error)
+		t.Fatalf("prepare of a refresh the connector offers returned the error %q, want none", claim.Error)
 	}
 	if compositor.ended() != 1 {
 		t.Errorf("the compositor was ended %d times, want once", compositor.ended())
 	}
 	if got := modeRecord(t, plugin); got["HDMI-A-2"] != "1280x720@24" {
-		t.Errorf("record = %v", got)
+		t.Errorf("record = %v, want HDMI-A-2 at 1280x720@24", got)
 	}
 	if got := westonINI(t, plugin); !strings.Contains(got, "name=HDMI-A-2\nmode=1280x720@24\n") {
 		t.Errorf("the config does not state the refresh:\n%s", got)
@@ -580,13 +562,13 @@ func TestPrepareSwitchesToAModeWithARefresh(t *testing.T) {
 }
 
 func TestPrepareDeliversARefreshTheScreenAlreadyRuns(t *testing.T) {
-	// The readback speaks the same vocabulary, so a claim that names
-	// the refresh already on screen delivers with no restart.
+	// The current mode includes its refresh in the same format, so a
+	// claim for the refresh that the screen runs needs no restart.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1920x1080@60"}`))
 
 	claim := prepare(t, plugin)
 	if claim.Error != "" {
-		t.Fatalf("prepare refused the refresh the screen runs: %s", claim.Error)
+		t.Fatalf("prepare of the refresh the screen runs returned the error %q, want none", claim.Error)
 	}
 	if compositor.ended() != 0 {
 		t.Errorf("the compositor was ended %d times for a mode it already runs", compositor.ended())
@@ -594,8 +576,8 @@ func TestPrepareDeliversARefreshTheScreenAlreadyRuns(t *testing.T) {
 }
 
 func TestPrepareRefusesARefreshTheConnectorDoesNotOffer(t *testing.T) {
-	// Weston falls back silently for a refresh no timing carries, so
-	// the refusal must name the refreshes that do exist.
+	// Weston silently falls back when no timing has the requested
+	// refresh, so the error must list the refreshes that exist.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1280x720@100"}`))
 
 	claim := prepare(t, plugin)
@@ -613,8 +595,8 @@ func TestPrepareRefusesARefreshTheConnectorDoesNotOffer(t *testing.T) {
 }
 
 func TestPrepareRefusesARefreshThatIsNotAWholeNumber(t *testing.T) {
-	// Weston parses the refresh as an integer, so 59.94 would read
-	// as 59, match nothing, and fall back silently.
+	// Weston parses the refresh as an integer, so 59.94 would become
+	// 59, match no timing, and fall back silently.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1920x1080@59.94"}`))
 
 	claim := prepare(t, plugin)
@@ -630,13 +612,13 @@ func TestPrepareRefusesARefreshThatIsNotAWholeNumber(t *testing.T) {
 }
 
 func TestPrepareRepublishesTheSliceAfterTheReadback(t *testing.T) {
-	// The compositor probes the link on its way up and the mode list
-	// grows with no uevent, so the pass after the readback is what
-	// takes the list the kernel holds now.
+	// The mode list can grow with no uevent while the new compositor
+	// probes the link, so prepare runs the reconcile pass after the
+	// switch.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1280x720"}`))
 
 	if claim := prepare(t, plugin); claim.Error != "" {
-		t.Fatal(claim.Error)
+		t.Fatalf("prepare returned the error %q, want none", claim.Error)
 	}
 
 	if compositor.republished() != 1 {
@@ -645,14 +627,12 @@ func TestPrepareRepublishesTheSliceAfterTheReadback(t *testing.T) {
 }
 
 func TestPrepareRepublishesTheSliceWithNoRestart(t *testing.T) {
-	// The case the folded open problem measured had no restart at
-	// all, so a prepare that delivers a mode already on screen must
-	// look again too. It just read the kernel, and the write costs
-	// nothing when nothing moved.
+	// A mode list can also grow with no restart, so a prepare for the
+	// mode already on screen republishes too.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1920x1080"}`))
 
 	if claim := prepare(t, plugin); claim.Error != "" {
-		t.Fatal(claim.Error)
+		t.Fatalf("prepare returned the error %q, want none", claim.Error)
 	}
 
 	if compositor.ended() != 0 {
@@ -664,8 +644,8 @@ func TestPrepareRepublishesTheSliceWithNoRestart(t *testing.T) {
 }
 
 func TestPrepareRepublishesNothingForAModeItRefused(t *testing.T) {
-	// A prepare that failed validation never reached the card, so it
-	// read no list and has nothing to republish.
+	// A mode that fails validation stops prepare before it reads the
+	// current mode, so there is nothing new to republish.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1234x567"}`))
 
 	if claim := prepare(t, plugin); claim.Error == "" {
@@ -678,10 +658,10 @@ func TestPrepareRepublishesNothingForAModeItRefused(t *testing.T) {
 }
 
 func TestPrepareRefusesAModeTheConnectorDoesNotOffer(t *testing.T) {
-	// Validation reads the connector's own sysfs list, never the
-	// published attribute, and the failure names the whole list. The
-	// attribute stops at 64 characters, so it is the one place a person
-	// sees the names the attribute could not carry.
+	// Validation reads the kernel's GETCONNECTOR mode list, not the
+	// published attribute, and the error lists every mode. The
+	// attribute stops at 64 characters, so this error is the only place
+	// a person sees the modes that it cuts off.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1234x567"}`))
 
 	claim := prepare(t, plugin)
@@ -702,9 +682,8 @@ func TestPrepareRefusesAModeTheConnectorDoesNotOffer(t *testing.T) {
 }
 
 func TestPrepareRefusesAModeOnAConnectorWithNoMonitor(t *testing.T) {
-	// DP-1 has nothing on it, so there is no mode list to validate
-	// against and no screen to light. The pod waits in
-	// ContainerCreating, and the failure says why.
+	// DP-1 has no monitor, so there is no mode list to validate
+	// against.
 	plugin, compositor := labPluginWithConfig(t, []AllocatedDevice{
 		{Request: "screen", Driver: DriverName, Pool: "liken-1", Device: "dp-1"},
 	}, claimMode(`{"mode": "1280x720"}`))
@@ -722,9 +701,8 @@ func TestPrepareRefusesAModeOnAConnectorWithNoMonitor(t *testing.T) {
 }
 
 func TestPrepareRefusesParametersItCannotRead(t *testing.T) {
-	// A key this driver does not read fails the prepare rather than
-	// being dropped, whichever source wrote it. A dropped typo would
-	// drive the wrong mode with nothing said anywhere.
+	// A mistyped key that prepare ignored would leave the screen at the
+	// wrong mode with no message.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"resolution": "1280x720"}`))
 
 	claim := prepare(t, plugin)
@@ -740,17 +718,15 @@ func TestPrepareRefusesParametersItCannotRead(t *testing.T) {
 }
 
 func TestPrepareRefusesToRestartTwiceForAModeTheCompositorDeclined(t *testing.T) {
-	// Weston falls back to the preferred mode silently when it cannot
-	// match what the config asks for, with no log line and no failed
-	// exit. The readback is what catches that, and a second restart
-	// would blank every screen on the machine for the same wrong
-	// answer.
+	// Weston falls back to the preferred mode when it cannot match the
+	// config, with no log line and no failed exit. Only the mode that
+	// the compositor reports after the restart shows the fallback.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1280x720"}`))
 	compositor.declines = true
 
 	first := prepare(t, plugin)
 	if first.Error == "" {
-		t.Fatal("prepare delivered a screen that never took the mode")
+		t.Fatal("prepare returned no error although the screen never switched to the mode")
 	}
 	if !strings.Contains(first.Error, "1280x720") {
 		t.Errorf("error = %q, want it to name the mode", first.Error)
@@ -759,12 +735,11 @@ func TestPrepareRefusesToRestartTwiceForAModeTheCompositorDeclined(t *testing.T)
 		t.Fatalf("the compositor was ended %d times, want once", compositor.ended())
 	}
 
-	// The kubelet retries the prepare it holds a pod for. The config
-	// already asks for this mode and a restart already happened, so the
-	// answer is the failure and not another dark machine.
+	// The kubelet's retry fails without a second restart, because a
+	// restart blanks every screen on the card.
 	second := prepare(t, plugin)
 	if second.Error == "" {
-		t.Fatal("the retry delivered a screen that never took the mode")
+		t.Fatal("the retry returned no error although the screen never switched to the mode")
 	}
 	if !strings.Contains(second.Error, "declined") {
 		t.Errorf("error = %q, want it to say the compositor declined the mode", second.Error)
@@ -775,14 +750,12 @@ func TestPrepareRefusesToRestartTwiceForAModeTheCompositorDeclined(t *testing.T)
 }
 
 func TestUnprepareTakesTheModeOutOfTheRecord(t *testing.T) {
-	// A claim that ends restarts nothing: the device allocates to one
-	// claim at a time, and a revert would restart every screen on the
-	// machine to serve nobody. The record and the config lose the
-	// entry, so the next compositor start comes up at the mode the
-	// monitor prefers.
+	// Unprepare does not restart the compositor to revert the mode. It
+	// removes the entry from the record and the config, so the next
+	// compositor start uses the mode the monitor prefers.
 	plugin, compositor := labPluginWithConfig(t, screenRequest(), claimMode(`{"mode": "1280x720"}`))
 	if claim := prepare(t, plugin); claim.Error != "" {
-		t.Fatal(claim.Error)
+		t.Fatalf("prepare returned the error %q, want none", claim.Error)
 	}
 
 	unprepare(t, plugin)
@@ -791,25 +764,25 @@ func TestUnprepareTakesTheModeOutOfTheRecord(t *testing.T) {
 		t.Errorf("record = %v, want nothing left", got)
 	}
 	if got := westonINI(t, plugin); !strings.Contains(got, "name=HDMI-A-2\nmode=preferred") {
-		t.Errorf("the config still states a mode:\n%s", got)
+		t.Errorf("the config still sets a mode:\n%s", got)
 	}
 	if compositor.ended() != 1 {
 		t.Errorf("the compositor was ended %d times, want only the switch's restart", compositor.ended())
 	}
 }
 
-// unprepare runs the kubelet's own call for the one claim these tests
-// use, and fails when the driver answers with anything but success.
+// unprepare unprepares the test claim as the kubelet does, and fails
+// the test on any error.
 func unprepare(t *testing.T, plugin *draPlugin) {
 	t.Helper()
 	resp, err := plugin.NodeUnprepareResources(context.Background(), &drav1.NodeUnprepareResourcesRequest{
 		Claims: []*drav1.Claim{{Namespace: testClaimNamespace, Name: testClaimName, Uid: testClaimUID}},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("calling NodeUnprepareResources: %v", err)
 	}
-	if answer := resp.Claims[testClaimUID]; answer == nil || answer.Error != "" {
-		t.Fatalf("unprepare = %+v", resp.Claims)
+	if result := resp.Claims[testClaimUID]; result == nil || result.Error != "" {
+		t.Fatalf("unprepare returned %+v, want an entry with no error", resp.Claims)
 	}
 }
 
@@ -826,10 +799,9 @@ func TestUnprepareRemovesTheSpec(t *testing.T) {
 	}
 }
 
-// labPluginWithClaim is the driver on the lab machine with the panels
-// wired to the i2c nodes their connectors name, for whatever
-// allocation the claim holds. The control device's delivery is a node
-// path, so these tests need the `ddc` links that benchPanels writes.
+// labPluginWithClaim is labPluginWithConfig with the `ddc` links that
+// benchPanels writes from each connector to its panel's i2c node, which
+// a control device delivers.
 func labPluginWithClaim(t *testing.T, results []AllocatedDevice, config string,
 	monitors map[string]*fakeMonitor) (*draPlugin, *panelBench) {
 	t.Helper()
@@ -840,25 +812,24 @@ func labPluginWithClaim(t *testing.T, results []AllocatedDevice, config string,
 	return plugin, bench
 }
 
-// controlRequest allocates the control device of the lab's portable
-// panel, the second device HDMI-A-2 publishes.
+// controlRequest is the allocation result for the control device of
+// the lab's portable panel on HDMI-A-2.
 func controlRequest() []AllocatedDevice {
 	return []AllocatedDevice{
 		{Request: "panel", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-2-control"},
 	}
 }
 
-// preparedSpec reads the one file prepare left for the container
-// runtime.
+// preparedSpec reads the CDI spec file that prepare wrote.
 func preparedSpec(t *testing.T) cdiSpec {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(cdiDir, cdiPrefix+testClaimUID+".json"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the CDI spec: %v", err)
 	}
 	var spec cdiSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the CDI spec: %v", err)
 	}
 	return spec
 }
@@ -869,10 +840,10 @@ func TestPrepareDeliversTheControlNodeAndItsPath(t *testing.T) {
 
 	claim := prepare(t, plugin)
 	if claim.Error != "" {
-		t.Fatalf("prepare refused a panel that answers DDC/CI: %s", claim.Error)
+		t.Fatalf("prepare of a panel that responds to DDC/CI returned the error %q, want none", claim.Error)
 	}
 	if len(claim.Devices) != 1 || claim.Devices[0].DeviceName != "hdmi-a-2-control" {
-		t.Fatalf("devices = %+v", claim.Devices)
+		t.Fatalf("devices = %+v, want one device for the claim", claim.Devices)
 	}
 	wantID := cdiKind + "=" + testClaimUID + "-hdmi-a-2-control"
 	if got := claim.Devices[0].CdiDeviceIds; len(got) != 1 || got[0] != wantID {
@@ -881,22 +852,23 @@ func TestPrepareDeliversTheControlNodeAndItsPath(t *testing.T) {
 
 	spec := preparedSpec(t)
 	if len(spec.Devices) != 1 {
-		t.Fatalf("spec devices = %+v", spec.Devices)
+		t.Fatalf("spec devices = %+v, want the devices of the claim", spec.Devices)
 	}
 	edits := spec.Devices[0].ContainerEdits
-	// HDMI-A-2 reaches its panel on i2c-2 in this fixture, and the
-	// kernel's numbering is why the path also travels as a variable.
+	// In this fixture HDMI-A-2 reaches its panel on i2c-2. The kernel
+	// can number the node differently on another boot, so the spec
+	// also passes the path as an environment variable.
 	if len(edits.DeviceNodes) != 1 || edits.DeviceNodes[0].Path != "/dev/i2c-2" {
-		t.Fatalf("deviceNodes = %+v", edits.DeviceNodes)
+		t.Fatalf("deviceNodes = %+v, want /dev/i2c-2", edits.DeviceNodes)
 	}
 	if edits.DeviceNodes[0].Permissions != "rw" {
-		t.Errorf("permissions = %q", edits.DeviceNodes[0].Permissions)
+		t.Errorf("permissions = %q, want rw", edits.DeviceNodes[0].Permissions)
 	}
 	if !containsString(edits.Env, "DISPLAY_CONTROL_BUS=/dev/i2c-2") {
-		t.Errorf("env = %v", edits.Env)
+		t.Errorf("env = %v, want DISPLAY_CONTROL_BUS=/dev/i2c-2 in it", edits.Env)
 	}
-	// The consumer holds the wire and makes every write on it, so this
-	// prepare puts nothing on the bus and never wakes the panel.
+	// The consumer writes to the bus itself, so prepare sends nothing
+	// to the panel and does not wake it.
 	if bench.opened() != 0 {
 		t.Errorf("prepare opened %d buses for a control device", bench.opened())
 	}
@@ -906,10 +878,10 @@ func TestPrepareDeliversTheControlNodeAndItsPath(t *testing.T) {
 }
 
 func TestPrepareDeliversAScreenAndItsControlChannel(t *testing.T) {
-	// The two requests of one claim: the screen, whose brightness this
-	// operator sets at prepare, and the control channel, which the
-	// consumer drives itself. The block names the screen's request,
-	// because a block that names none applies to every request.
+	// The operator sets the screen's brightness at prepare, and the
+	// consumer drives the control channel itself. The parameter block
+	// names the screen's request, because a block with no request name
+	// applies to every request.
 	panel := newFakeMonitor()
 	results := append(screenRequest(), controlRequest()...)
 	plugin, _ := labPluginWithClaim(t, results,
@@ -917,24 +889,23 @@ func TestPrepareDeliversAScreenAndItsControlChannel(t *testing.T) {
 
 	claim := prepare(t, plugin)
 	if claim.Error != "" {
-		t.Fatalf("prepare refused a claim on a screen and its controls: %s", claim.Error)
+		t.Fatalf("prepare of a claim on a screen and its controls returned the error %q, want none", claim.Error)
 	}
 	if len(claim.Devices) != 2 {
-		t.Fatalf("devices = %+v", claim.Devices)
+		t.Fatalf("devices = %+v, want one device for the claim", claim.Devices)
 	}
 
-	// One kind and one file for the whole claim, so an unprepare has
-	// one file to remove however many devices the claim held.
+	// A claim has one CDI spec file for all its devices.
 	if got := specFiles(t); len(got) != 1 {
-		t.Fatalf("the spec files are %v", got)
+		t.Fatalf("the spec files are %v, want one", got)
 	}
 	spec := preparedSpec(t)
 	if spec.Kind != cdiKind || len(spec.Devices) != 2 {
-		t.Fatalf("spec = %+v", spec)
+		t.Fatalf("spec = %+v, want kind %s with 2 devices", spec, cdiKind)
 	}
 	screen, control := spec.Devices[0], spec.Devices[1]
 	if screen.Name != testClaimUID+"-hdmi-a-2" || control.Name != testClaimUID+"-hdmi-a-2-control" {
-		t.Fatalf("spec devices = %+v", spec.Devices)
+		t.Fatalf("spec devices = %+v, want the devices of the claim", spec.Devices)
 	}
 	if len(screen.ContainerEdits.Mounts) != 1 || len(screen.ContainerEdits.DeviceNodes) != 0 {
 		t.Errorf("the screen's edits = %+v", screen.ContainerEdits)
@@ -942,18 +913,14 @@ func TestPrepareDeliversAScreenAndItsControlChannel(t *testing.T) {
 	if len(control.ContainerEdits.DeviceNodes) != 1 || len(control.ContainerEdits.Mounts) != 0 {
 		t.Errorf("the control device's edits = %+v", control.ContainerEdits)
 	}
-	// The screen's own request still sets what it states.
-	if got := panel.took(vcpBrightness); len(got) != 1 || got[0] != 40 {
-		t.Errorf("the panel took %v, want the brightness the screen's request states", got)
+	if got := panel.writesTo(vcpBrightness); len(got) != 1 || got[0] != 40 {
+		t.Errorf("the panel received the writes %v, want the brightness that the screen's request sets", got)
 	}
 }
 
 func TestPrepareRefusesParametersOnAControlRequest(t *testing.T) {
-	// A control device is the opposite bargain: the consumer holds the
-	// wire and makes every write. A parameter that resolved onto its
-	// request named the wrong request, and a silent drop would leave a
-	// person waiting for a brightness that no code was ever going to
-	// set.
+	// If prepare ignored a parameter on a control request, the person
+	// would wait for a brightness that nothing sets.
 	cases := []struct {
 		name   string
 		config string
@@ -988,17 +955,17 @@ func TestPrepareRefusesParametersOnAControlRequest(t *testing.T) {
 }
 
 func TestPrepareRefusesAControlOnAConnectorWithNoDDCChannel(t *testing.T) {
-	// The fixture wires the portable panel only, so HDMI-A-1 has no
-	// `ddc` link, which is what a DisplayPort connector behind an MST
-	// hub also has: its DDC travels inside the AUX stream, where no
-	// i2c-dev node reaches it.
+	// The fixture links only the portable panel, so HDMI-A-1 has no
+	// `ddc` link. A DisplayPort connector behind an MST hub has none
+	// either, because its DDC travels inside the AUX stream, which no
+	// i2c-dev node reaches.
 	plugin, _ := labPluginWithClaim(t, []AllocatedDevice{
 		{Request: "panel", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-1-control"},
 	}, "", claimedPanel(newFakeMonitor()))
 
 	claim := prepare(t, plugin)
 	if claim.Error == "" {
-		t.Fatal("prepare delivered a control device with no node behind it")
+		t.Fatal("prepare returned no error for a control device with no node behind it")
 	}
 	for _, want := range []string{"HDMI-A-1", "DDC/CI"} {
 		if !strings.Contains(claim.Error, want) {
@@ -1011,9 +978,9 @@ func TestPrepareRefusesAControlOnAConnectorWithNoDDCChannel(t *testing.T) {
 }
 
 func TestPrepareRefusesAControlOnAConnectorWithNoMonitor(t *testing.T) {
-	// The panel that answered the probe is gone, so the wire behind
-	// the node answers nothing. The pod waits in ContainerCreating and
-	// the output's NoExecute taint is what ends it.
+	// The panel that replied to the probe is gone, so the i2c bus behind
+	// the node gets no reply. The pod waits in ContainerCreating until
+	// the output's NoExecute taint evicts it.
 	plugin, _ := labPluginWithClaim(t, []AllocatedDevice{
 		{Request: "panel", Driver: DriverName, Pool: "liken-1", Device: "dp-1-control"},
 	}, "", claimedPanel(newFakeMonitor()))
@@ -1030,13 +997,12 @@ func TestPrepareRefusesAControlOnAConnectorWithNoMonitor(t *testing.T) {
 }
 
 func TestUnprepareOfAControlWritesNothingToThePanel(t *testing.T) {
-	// Nothing powers a panel on or off for a control device, at either
-	// end of the claim. The operator wrote no VCP code at prepare, so
-	// it owes the panel nothing when the claim ends.
+	// The operator writes no VCP code at prepare of a control device,
+	// so it has no power command to send at unprepare.
 	panel := newFakeMonitor()
 	plugin, bench := labPluginWithClaim(t, controlRequest(), "", claimedPanel(panel))
 	if claim := prepare(t, plugin); claim.Error != "" {
-		t.Fatal(claim.Error)
+		t.Fatalf("prepare returned the error %q, want none", claim.Error)
 	}
 
 	unprepare(t, plugin)
@@ -1052,8 +1018,8 @@ func TestUnprepareOfAControlWritesNothingToThePanel(t *testing.T) {
 	}
 }
 
-// drawRequest allocates the draw device of the lab's portable panel,
-// the shared companion HDMI-A-2 publishes beside its output.
+// drawRequest is the allocation result for the draw device of the
+// lab's portable panel on HDMI-A-2.
 func drawRequest() []AllocatedDevice {
 	return []AllocatedDevice{
 		{Request: "idle", Driver: DriverName, Pool: "liken-1", Device: "hdmi-a-2-draw"},
@@ -1062,10 +1028,8 @@ func drawRequest() []AllocatedDevice {
 
 func TestPrepareDeliversTheSocketForADrawDevice(t *testing.T) {
 	// A draw device delivers the claim's own socket on the output's
-	// connector, so a second client draws on the same screen. It sets
-	// no mode and no panel power: the output device owns the mode, and
-	// a power write from one of many holders would act on a screen the
-	// others hold.
+	// screen, so a second client can draw there. It sets no mode and no
+	// panel power.
 	panel := newFakeMonitor()
 	plugin, compositor := labPluginWithConfig(t, drawRequest(), "")
 	controls, bench := benchPanels(t, plugin.sysRoot, plugin.card, claimedPanel(panel))
@@ -1074,10 +1038,10 @@ func TestPrepareDeliversTheSocketForADrawDevice(t *testing.T) {
 
 	claim := prepare(t, plugin)
 	if claim.Error != "" {
-		t.Fatalf("prepare refused a draw device on a live output: %s", claim.Error)
+		t.Fatalf("prepare of a draw device on a live output returned the error %q, want none", claim.Error)
 	}
 	if len(claim.Devices) != 1 || claim.Devices[0].DeviceName != "hdmi-a-2-draw" {
-		t.Fatalf("devices = %+v", claim.Devices)
+		t.Fatalf("devices = %+v, want one device for the claim", claim.Devices)
 	}
 	wantID := cdiKind + "=" + testClaimUID + "-hdmi-a-2-draw"
 	if got := claim.Devices[0].CdiDeviceIds; len(got) != 1 || got[0] != wantID {
@@ -1086,7 +1050,7 @@ func TestPrepareDeliversTheSocketForADrawDevice(t *testing.T) {
 
 	spec := preparedSpec(t)
 	if len(spec.Devices) != 1 || spec.Devices[0].Name != testClaimUID+"-hdmi-a-2-draw" {
-		t.Fatalf("spec devices = %+v", spec.Devices)
+		t.Fatalf("spec devices = %+v, want the devices of the claim", spec.Devices)
 	}
 	edits := spec.Devices[0].ContainerEdits
 	for _, want := range []string{
@@ -1101,13 +1065,10 @@ func TestPrepareDeliversTheSocketForADrawDevice(t *testing.T) {
 	if len(edits.Mounts) != 1 || edits.Mounts[0].ContainerPath != plugin.socketDir {
 		t.Errorf("mounts = %+v", edits.Mounts)
 	}
-	// The draw device delivers a socket, not a device node.
 	if len(edits.DeviceNodes) != 0 {
-		t.Errorf("the draw device delivered device nodes: %+v", edits.DeviceNodes)
+		t.Errorf("the draw device added device nodes: %+v", edits.DeviceNodes)
 	}
 
-	// No mode: the record stays empty and the compositor never
-	// restarts, because the output device is the one that sets a mode.
 	if record := modeRecord(t, plugin); len(record) != 0 {
 		t.Errorf("the draw device wrote a mode record: %+v", record)
 	}
@@ -1117,8 +1078,7 @@ func TestPrepareDeliversTheSocketForADrawDevice(t *testing.T) {
 	if got := westonINI(t, plugin); got != "" {
 		t.Errorf("the draw device rewrote weston.ini: %q", got)
 	}
-	// No panel power: nothing reached the i2c wire and the power record
-	// stays empty, so the draw device owes the panel nothing.
+	// An empty power record means unprepare schedules no standby.
 	if bench.opened() != 0 {
 		t.Errorf("the draw device opened %d buses", bench.opened())
 	}

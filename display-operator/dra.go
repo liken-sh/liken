@@ -1,26 +1,22 @@
 package main
 
-// The DRA driver's kubelet half: the plugin the kubelet calls before
-// it starts a pod that holds a claim on an output.
+// This file is the kubelet side of the DRA driver: the plugin that the
+// kubelet calls before it starts a pod whose claim holds an output.
 //
-// The wire arrangement is the opposite of what the word "plugin"
-// suggests. The driver runs two gRPC servers and the kubelet is the
-// only client of both. The first is registration: the kubelet watches
-// a well-known directory for sockets, dials each one, and calls
-// GetInfo to read what is there. The second is the DRA plugin API
-// itself, on a socket of the driver's own, whose path GetInfo
-// announces. Unix sockets are the whole transport, and file
-// permissions on the kubelet's directories are the authentication.
+// The kubelet is the client of two gRPC servers on Unix sockets. It
+// watches the registry directory for sockets, dials each one, and calls
+// GetInfo, which returns the path of the second socket, where the DRA
+// plugin API runs. File permissions on the kubelet's directories are
+// the only authentication.
 //
-// The prepare protocol tells the driver almost nothing: a claim's
-// namespace, name, and UID. What was allocated is on the claim's
-// status in the API server, so the driver reads that back, walks sysfs
-// again, and answers for the output the claim holds now.
+// A prepare request has only a claim's namespace, name, and UID, so the
+// driver reads the claim's allocation from the API server and reads the
+// card's connectors from sysfs on each call.
 //
-// Failures are per-claim strings inside the response, not gRPC errors.
-// The kubelet holds the affected pod in ContainerCreating and retries,
-// which is what should happen for an output whose monitor is dark:
-// the pod waits, visibly, and a describe of the pod says why.
+// A failure is an error string in the claim's entry of the response,
+// not a gRPC error. The kubelet keeps the pod in ContainerCreating and
+// retries, so a pod whose monitor is disconnected waits, and
+// `kubectl describe pod` shows the reason.
 
 import (
 	"context"
@@ -41,152 +37,125 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The kubelet's plugin directories. The registry is where the kubelet
-// discovers plugins, and the plugin's own directory holds the socket
-// that answers the prepare calls. These are variables so the tests can
-// substitute them.
+// The kubelet finds plugins by their sockets in draRegistryDir, and
+// draPluginDir holds the socket of the DRA plugin API. They are
+// variables so that tests can point them at a temporary directory.
 var (
 	draRegistryDir = "/var/lib/kubelet/plugins_registry"
 	draPluginDir   = "/var/lib/kubelet/plugins/" + DriverName
 )
 
-// draPlugin answers the kubelet's DRA calls. It holds the API client,
-// the card whose connectors it publishes, and the directory of the
-// socket a consumer receives. Everything else it derives again on each
-// call, from the claim and from sysfs.
-//
-// The mode fields are what a claim that states a resolution
-// touches: the compositor's config and the record beside it, the two
-// seams a switch acts through, and the bounds of the wait for the
-// screen to come back.
+// draPlugin serves the kubelet's DRA calls. The function fields let a
+// test replace the card and the compositor. main sets notices, served,
+// republish, links, and metrics after newDRAPlugin returns, and each
+// field's comment says what a nil value does.
 type draPlugin struct {
 	drav1.UnimplementedDRAPluginServer
 	client *apiclient.Client
-	// notices posts the Events of the plugin's actions on the screens:
-	// a mode change, a compositor it ended, a standby that failed. Nil
-	// posts nothing.
-	notices   *screenNotices
-	sysRoot   string
-	card      string
-	socketDir string
-	// The two files in the pod's config volume. The operator
-	// mounts the same volume the declare container writes and the
-	// compositor reads.
+	// notices posts an Event for each mode change, each compositor
+	// that the plugin ends, and each standby that fails. Nil posts
+	// nothing.
+	notices    *screenNotices
+	sysRoot    string
+	card       string
+	socketDir  string
 	configPath string
 	recordPath string
-	// PowerPath is the third file in that volume: the record of which
-	// panels a claim promised to put back to standby.
-	powerPath string
-	// Controls speaks DDC/CI to the panels themselves. The same
-	// instance publishes the slice's control attributes, so the probe
-	// cache serves both paths and a prepare after a publish costs
-	// nothing on the wire.
+	powerPath  string
+	// controls sends DDC/CI commands to the panels. The same instance
+	// publishes the control attributes of the slice, so a prepare right
+	// after a publish reads the probe from its cache and sends nothing
+	// to the panel.
 	controls *panelControls
-	// Claims is the index from a claim's UID to its namespace and
-	// name. A prepare is the one place the two are known together, and
-	// the placement pass starts from a socket that carries the UID
-	// alone.
+	// claims maps a claim's UID to its namespace and name. Prepare
+	// records each claim, because the placement pass starts from a
+	// socket name, which has only the UID.
 	claims *claimIndex
-	// Layout is the link to the compositor's controller module, which
-	// opens the Wayland socket each claim receives. A prepare that
-	// found no module serving delivers nothing, because the socket it
-	// would name in the CDI spec is the socket the module opens.
+	// layout is the link to the compositor's layout module, which opens
+	// the Wayland socket that each claim receives.
 	layout *layoutLink
-	// Gate opens the card for both reads below. It answers
-	// errCompositorAbsent while the operator holds no connection to a
-	// compositor, and it
-	// reports a compositor with no DRM master.
+	// gate opens the card for currentModes and connectorModes. It
+	// returns errCompositorAbsent while the operator has no connection
+	// to a compositor, and it reports a compositor that serves without
+	// DRM master.
 	gate *cardGate
-	// CurrentModes reads what each output runs, and connectorModes
-	// reads what each connector offers. Both are fields rather than
-	// calls to the functions themselves, so a test drives a prepare
-	// with no card node behind it.
+	// currentModes reads the mode each output runs, and connectorModes
+	// reads the modes each connector offers.
 	currentModes   func() (map[string]string, error)
 	connectorModes func() (map[string][]drmMode, error)
-	// Compositors lists the compositor processes that run now, and
-	// signal sends one of them a signal. Every restart the operator
-	// orders goes through endCompositor (restartorders.go), which
-	// places the order in orders before the signal, so the compositor
-	// role starts weston again instead of exiting.
-	compositors func() []int
-	signal      func(pid int, signal syscall.Signal) error
-	orders      restartOrders
-	// What the compositor itself reports about the outputs it
-	// serves, which is what a mode switch reads back. It is nil until
-	// the operator wires the standing Wayland connection, and a nil
-	// seam reports nothing, so every readback runs out its budget and
-	// fails with the reason.
+	// compositors lists the pids of the running compositors, and signal
+	// sends one of them a signal. Every restart goes through
+	// endCompositor, which writes a restart request file before it sends the
+	// signal, so the main process of the compositor container starts
+	// weston again instead of exiting.
+	compositors     func() []int
+	signal          func(pid int, signal syscall.Signal) error
+	restartRequests restartRequests
+	// served returns the outputs and modes that the compositor reports,
+	// which a mode switch reads to confirm the new mode. While it is
+	// nil, every mode switch waits for its time limit and fails.
 	served func() servedOutputs
-	// Republish is the operator's own reconcile pass, run after a
-	// prepare that read the kernel, so the slice follows what the
-	// prepare read. It is nil until the operator wires it, and a nil
-	// seam republishes nothing.
+	// republish runs the operator's reconcile pass, so that the slice
+	// shows the mode list that a prepare read from the kernel. Nil does
+	// nothing.
 	republish func()
-	// The operator's link history, which is what answers the monitor a
-	// dark connector still carries. It is nil until the operator wires
-	// it, and a nil history remembers nothing, so a dark connector is
-	// then a connector with no screen.
+	// links is the history of each connector's monitor, which supplies
+	// the monitor of a disconnected connector. While it is nil, a
+	// disconnected connector has no monitor.
 	links *linkHistory
-	// The bounds of the wait for the socket and the mode to come
-	// back.
+	// switchTimeout and switchFallback are modeSwitchTimeout and
+	// modeSwitchFallback, in fields so that a test can shorten them.
 	switchTimeout  time.Duration
 	switchFallback time.Duration
-	// ModeSwitches serializes the whole switch. The record is
-	// one file for every connector, and two prepares that rewrote it at
-	// once would restart the compositor twice for one config.
+	// modeSwitches serializes mode switches. The mode record is one
+	// file for every connector, and two prepares that rewrote it at the
+	// same time would restart the compositor twice for one config.
 	modeSwitches sync.Mutex
-	// PowerRecords guards the power record the way modeSwitches
-	// guards the mode record. It is a second lock because a power-down
-	// on the wire must not wait behind a compositor restart.
+	// powerRecords serializes writes to the power record. It is a
+	// separate lock so that a power-down does not wait for a compositor
+	// restart.
 	powerRecords sync.Mutex
-	// The grace period between the end of an onWhileClaimed claim and
-	// the standby, and the timer that waits it out. The timer is a
-	// field so a test runs the standby when it chooses.
+	// releaseGrace is how long a panel stays on after its
+	// onWhileClaimed claim ends, before it goes to standby. afterGrace
+	// schedules the standby, and nil uses time.AfterFunc. A test
+	// replaces it to run the standby when it chooses.
 	releaseGrace time.Duration
 	afterGrace   func(delay time.Duration, run func())
-	// Restarted remembers the restart this process already
-	// ordered for a connector, which is the restart budget: a readback
-	// that still disagrees after one restart means weston declined the
-	// mode, and a second restart would blank every screen for the same
-	// wrong answer.
+	// restarted maps a connector to the mode that this process last
+	// restarted the compositor for. applyMode reads it to restart at
+	// most once for each mode, and releaseModes deletes the entry.
 	restarted map[string]string
-	// Metrics counts every restart this plugin orders, by why. It is
-	// nil in every test that drives a prepare with no listener behind
-	// it, and a nil metrics counts nothing.
+	// metrics counts the compositor restarts that the plugin requests, by
+	// reason. Nil counts nothing.
 	metrics *metrics
 }
 
-// NewDRAPlugin builds the plugin the kubelet talks to.
-//
-// Every seam takes its real implementation here and a stand-in
-// only in a test, so this is the one place the card readback and the
-// compositor's restart are named together.
 func newDRAPlugin(client *apiclient.Client, card, socketDir string, layout *layoutLink) *draPlugin {
 	gate := newCardGate(filepath.Join(driRoot, card), procRoot)
 	return &draPlugin{
-		client:         client,
-		sysRoot:        sysRoot,
-		card:           card,
-		socketDir:      socketDir,
-		configPath:     westonConfigPath,
-		recordPath:     modeRecordPath,
-		powerPath:      powerRecordPath,
-		controls:       newPanelControls(sysRoot, card),
-		claims:         newClaimIndex(client),
-		layout:         layout,
-		gate:           gate,
-		currentModes:   gate.currentModes,
-		connectorModes: gate.connectorModes,
-		compositors:    func() []int { return compositorProcesses(procRoot) },
-		signal:         signalProcess,
-		orders:         restartOrders(restartOrdersPath),
-		switchTimeout:  modeSwitchTimeout,
-		switchFallback: modeSwitchFallback,
-		releaseGrace:   powerReleaseGrace,
+		client:          client,
+		sysRoot:         sysRoot,
+		card:            card,
+		socketDir:       socketDir,
+		configPath:      westonConfigPath,
+		recordPath:      modeRecordPath,
+		powerPath:       powerRecordPath,
+		controls:        newPanelControls(sysRoot, card),
+		claims:          newClaimIndex(client),
+		layout:          layout,
+		gate:            gate,
+		currentModes:    gate.currentModes,
+		connectorModes:  gate.connectorModes,
+		compositors:     func() []int { return compositorProcesses(procRoot) },
+		signal:          signalProcess,
+		restartRequests: restartRequests(restartRequestsPath),
+		switchTimeout:   modeSwitchTimeout,
+		switchFallback:  modeSwitchFallback,
+		releaseGrace:    powerReleaseGrace,
 	}
 }
 
-// draRegistrar answers the kubelet's plugin-watcher handshake.
+// draRegistrar serves the kubelet's plugin registration calls.
 type draRegistrar struct {
 	regv1.UnimplementedRegistrationServer
 	endpoint string
@@ -197,12 +166,11 @@ func (r *draRegistrar) GetInfo(ctx context.Context, req *regv1.InfoRequest) (*re
 		Type:     regv1.DRAPlugin,
 		Name:     DriverName,
 		Endpoint: r.endpoint,
-		// These strings name gRPC services, not semantic versions. The
-		// kubelet picks the newest version it also supports, and this
-		// driver serves exactly the v1 API.
-		// The list names no health service, so the kubelet opens no
-		// device-health stream. This operator reports health through
-		// the device taints, which evict a pod when a monitor goes dark.
+		// The versions are gRPC service names. The list leaves out the
+		// DRAResourceHealth service, so the kubelet opens no device
+		// health stream. The operator reports health with device
+		// taints instead, which evict a pod when its monitor
+		// disconnects.
 		SupportedVersions: []string{drav1.DRAPluginService},
 	}, nil
 }
@@ -214,13 +182,12 @@ func (r *draRegistrar) NotifyRegistrationStatus(ctx context.Context, status *reg
 	return &regv1.RegistrationStatusResponse{}, nil
 }
 
-// serveDRAPlugin starts both servers and blocks until the context ends
-// or a server fails. The order matters: the plugin socket must already
-// be listening before the registration socket exists, because the
-// kubelet dials the announced endpoint as soon as it sees the
-// registration. The function removes stale sockets from a previous pod
-// first, because a bind to an orphaned socket file fails even when
-// nothing is listening on it.
+// serveDRAPlugin runs the plugin and registration servers until the
+// context ends or a server fails. The plugin socket listens before the
+// registration socket exists, because the kubelet dials the plugin as
+// soon as it sees the registration. A socket file left by a previous
+// pod is removed first, because bind fails on an existing file even
+// when nothing listens on it.
 func serveDRAPlugin(ctx context.Context, plugin *draPlugin) error {
 	if err := os.MkdirAll(draPluginDir, 0o755); err != nil {
 		return err
@@ -229,7 +196,7 @@ func serveDRAPlugin(ctx context.Context, plugin *draPlugin) error {
 	_ = os.Remove(pluginSocket)
 	pluginListener, err := net.Listen("unix", pluginSocket)
 	if err != nil {
-		return fmt.Errorf("the plugin socket: %w", err)
+		return fmt.Errorf("listening on the plugin socket: %w", err)
 	}
 	pluginServer := grpc.NewServer()
 	drav1.RegisterDRAPluginServer(pluginServer, plugin)
@@ -238,7 +205,7 @@ func serveDRAPlugin(ctx context.Context, plugin *draPlugin) error {
 	_ = os.Remove(registrationSocket)
 	registrationListener, err := net.Listen("unix", registrationSocket)
 	if err != nil {
-		return fmt.Errorf("the registration socket: %w", err)
+		return fmt.Errorf("listening on the registration socket: %w", err)
 	}
 	registrationServer := grpc.NewServer()
 	regv1.RegisterRegistrationServer(registrationServer, &draRegistrar{endpoint: pluginSocket})
@@ -256,11 +223,9 @@ func serveDRAPlugin(ctx context.Context, plugin *draPlugin) error {
 	}
 }
 
-// NodePrepareResources prepares every claim in the request. The
-// response must include one entry for each claim, because the kubelet
-// treats a missing entry as a failure to retry. Each entry is
-// independent, so trouble with one claim never blocks another claim's
-// pod.
+// NodePrepareResources returns an entry for each claim, because the
+// kubelet treats a missing entry as a failure and retries. A claim that
+// fails does not block the pods of the other claims.
 func (p *draPlugin) NodePrepareResources(ctx context.Context, req *drav1.NodePrepareResourcesRequest) (*drav1.NodePrepareResourcesResponse, error) {
 	resp := &drav1.NodePrepareResourcesResponse{Claims: map[string]*drav1.NodePrepareResourceResponse{}}
 	for _, claim := range req.Claims {
@@ -281,23 +246,18 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		return fail("reading the claim: %v", err)
 	}
 	if allocated.Metadata.UID != claim.Uid {
-		// The named claim was deleted and recreated after the kubelet
-		// asked. Whatever this new claim holds, it is not the grant
-		// this pod was scheduled against.
+		// The claim was deleted and created again under the same name
+		// after the kubelet sent the request, so the pod was scheduled
+		// against the old allocation.
 		return fail("the claim's UID changed (%s became %s)", claim.Uid, allocated.Metadata.UID)
 	}
 	if allocated.Status.Allocation == nil {
 		return fail("the claim has no allocation yet")
 	}
-	// The placement pass reads a claim's holders from a surface's
-	// socket, which names the UID and nothing else. This call is where
-	// the UID, the namespace, and the name are known together.
 	p.claims.remember(claim.Uid, claim.Namespace, claim.Name)
 
-	// The allocation's config is the resolved list: the claim's
-	// own blocks and the DeviceClass's, each marked with its source.
-	// The scheduler passed every opaque block through unread, so this
-	// is the first code anywhere that reads this driver's parameters.
+	// The scheduler does not read opaque parameters, so prepare is the
+	// first place that validates them.
 	selection, err := claimModes(allocated.Status.Allocation.Devices.Config)
 	if err != nil {
 		return fail("%v", err)
@@ -307,21 +267,18 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		return fail("%v", err)
 	}
 
-	// One walk answers every result in the claim, and it is the same
-	// walk that publishes the slice, so the two always report the same
-	// connectors.
-	//
-	// The walk is not filtered to the lit connectors. A monitor that
-	// shows another input is dark on the wire and still the screen the
-	// claim named, and the slice keeps publishing it for that reason.
-	// Everything below that needs the wire states its own answer.
+	// discoverOutputs is the walk that also publishes the slice, so
+	// prepare finds every connector that the slice lists. It includes
+	// disconnected connectors, because a monitor that shows another
+	// input reads as disconnected and is still the screen that the
+	// claim was allocated.
 	onCard := map[string]Output{}
 	for _, output := range discoverOutputs(p.sysRoot, p.card) {
 		onCard[deviceName(output.Connector)] = output
 	}
 
-	// The socket each Wayland result delivers, named before the loop
-	// so that every result on one connector delivers one name.
+	// The socket names are chosen before the loop, so that the output
+	// and draw results of one connector get the same socket.
 	sockets := claimSocketNames(claim.Uid, allocated.Status.Allocation.Devices.Results)
 
 	var specDevices []cdiDevice
@@ -329,27 +286,24 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 	waylandChecked := false
 	for _, result := range allocated.Status.Allocation.Devices.Results {
 		if result.Driver != DriverName {
-			// This is another driver's allocation in the same claim.
-			// That driver's own plugin prepares it. A claim that asks
-			// for a screen and that screen's speakers holds two
-			// results, and each driver answers for its own.
+			// A claim for a screen and its speakers also has a result
+			// from the audio driver, whose plugin prepares it.
 			continue
 		}
-		// A connector publishes up to three devices, the output, its
-		// control channel, and the draw companion that many claims
-		// share, and the name is what tells them apart. All three
-		// resolve against the same walk and the same connector.
+		// A connector publishes an output device, a control device for
+		// its DDC/CI channel, and a draw device that many claims share.
+		// outputOfControl and outputOfDraw return the output's name for
+		// the other devices.
 		device, control := outputOfControl(result.Device)
 		draw := false
 		if base, isDraw := outputOfDraw(result.Device); isDraw {
 			device, draw = base, true
 		}
-		// An output result and a draw result deliver a Wayland socket,
-		// so each one waits for the compositor. A control result
-		// delivers the i2c node, which reaches the panel with no
-		// compositor running, so it does not wait. The check comes
-		// before any result writes to the panel or opens a socket, so
-		// a claim that waits changes nothing on this pass.
+		// Output and draw results deliver a Wayland socket, so they need
+		// a serving compositor. A control result delivers an i2c node,
+		// which works without one. The check runs before any result
+		// writes to a panel or opens a socket, so a claim that fails it
+		// changes nothing.
 		if !control && !waylandChecked {
 			if err := p.waylandServing(); err != nil {
 				return fail("%v", err)
@@ -358,17 +312,15 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		}
 		output, onThisCard := onCard[device]
 		if !onThisCard {
-			// The allocation names a connector this card does not have.
-			// A slice this operator wrote never names one, so the claim
-			// was allocated against another machine's pool.
+			// The operator publishes devices only for its card's
+			// connectors, so the claim was allocated from another
+			// machine's pool.
 			return fail("this card has no connector named %s", device)
 		}
 		if !output.Connected {
-			// The monitor is not answering. It is dark because it shows
-			// another input, or because somebody unplugged it, and the
-			// wire says the same thing either way. The claim is
-			// delivered when the operator still carries the screen, and
-			// refused when nothing was ever on the connector.
+			// A monitor that shows another input and an unplugged
+			// monitor read the same in sysfs. Prepare continues when the
+			// link history has a monitor for the connector.
 			output.Remembered = p.links.remembered(output.Connector)
 			if monitorID(output.Remembered) == "" {
 				return fail("output %s has no monitor on it right now", device)
@@ -377,69 +329,57 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 		var edits cdiEdits
 		switch {
 		case draw:
-			// A draw result delivers the claim's socket on the output's
-			// own connector, the same Wayland connection the output
-			// result delivers, so the client draws on the screen the
-			// module places its surfaces on. It sets no mode and no
-			// panel power: the output device owns the mode, and many
-			// claims share the draw device, so a mode or a power write
-			// from one would act on a screen the others hold. A draw
-			// client needs the compositor and the module as much as an
-			// output client, so the same check at the top of the loop
-			// is its wait.
+			// A draw result sets no mode and no panel power, because
+			// many claims share the draw device and a write from one of
+			// them would change the screen for the others.
 			if err := p.layout.Listen(sockets[device], output.Connector); err != nil {
 				return fail("%v", err)
 			}
 			edits = outputEdits(p.socketDir, sockets[device], appID(output.Connector))
 		case control:
-			// A control result prepares nothing on the wire. The
-			// consumer holds the node and drives the panel itself, so
-			// this operator writes no VCP code for it, at prepare or at
-			// any time after.
+			// The consumer of a control device opens the i2c node and
+			// sends its own commands, so prepare writes nothing to the
+			// panel.
 			if err := controlTakesNoParameters(result.Device,
 				selection.forRequest(result.Request), controls.forRequest(result.Request)); err != nil {
 				return fail("%v", err)
 			}
-			// The node is read here rather than published as an
+			// The node number is read here and not published as an
 			// attribute, because the kernel numbers i2c adapters in the
-			// order it registers them. The number holds for this boot
-			// only, and the delivery is the one place it is read fresh.
+			// order it registers them, and the number can change at the
+			// next boot.
 			node := connectorBus(p.sysRoot, p.card, output.Connector)
 			if node == "" {
-				return fail("%s carries no DDC/CI channel this operator can hand over", output.Connector)
+				return fail("%s has no DDC/CI channel that this operator can pass to a pod", output.Connector)
 			}
 			edits = controlEdits(node)
 		default:
-			// The panel's own controls are set before the mode. A
-			// panel in standby drives no mode, so a switch that waited
-			// for the card to report one would wait on a screen nobody
-			// woke.
+			// The controls go before the mode, because a panel in
+			// standby reports no mode, and the mode switch would wait
+			// for one until the panel woke.
 			if err := p.applyControls(output, controls.forRequest(result.Request)); err != nil {
 				return fail("%v", err)
 			}
-			// The delivery waits for the switch. Between the restart
-			// and the readback the screen runs the mode the claim replaced,
-			// and a delivery that raced it would start the consumer against
-			// a screen that is about to go dark.
+			// applyMode returns after the compositor reports the new
+			// mode, because a consumer started before that would lose
+			// its screen when the compositor restarts.
 			if mode := selection.forRequest(result.Request); mode != "" {
-				// A dark connector offers no mode list to validate
-				// against and no screen to light. The kubelet's retry
-				// is the wait, and the mode goes on when the monitor
-				// comes back.
+				// A disconnected connector has no mode list to validate
+				// the mode against, so prepare fails until the monitor
+				// is connected again.
 				if !output.Connected {
-					return fail("%s has no monitor answering right now, so it cannot take the mode %s",
+					return fail("%s has no monitor connected right now, so it cannot take the mode %s",
 						output.Connector, mode)
 				}
 				if err := p.applyMode(ctx, output, mode); err != nil {
 					return fail("%v", err)
 				}
 			}
-			// The socket opens after the mode switch, because a switch
-			// restarts the compositor and a restart takes every socket
-			// the module opened. The link to the new module may not be
-			// up yet at this moment, and the kubelet's retry is the
-			// wait: the record already holds the mode, so the retry
-			// restarts nothing and opens the socket.
+			// The socket opens after the mode switch, because a
+			// compositor restart closes every socket that the layout
+			// module opened. When the module is not serving again yet,
+			// Listen fails, and the kubelet's retry finds the mode
+			// already on screen and opens the socket.
 			if err := p.layout.Listen(sockets[device], output.Connector); err != nil {
 				return fail("%v", err)
 			}
@@ -465,77 +405,63 @@ func (p *draPlugin) prepareClaim(ctx context.Context, claim *drav1.Claim) *drav1
 	return &drav1.NodePrepareResourceResponse{Devices: devices}
 }
 
-// waylandServing answers whether the two halves of a Wayland
-// delivery serve now, and why not when they do not.
-//
-// The first half is the compositor's socket. A claim prepared while
-// the compositor is restarting would hand a client a path with nothing
-// behind it. The kubelet holds the pod in ContainerCreating and asks
-// again, and the retry is the wait.
-//
-// The second half is the layout module, which opens the claim's own
-// socket in the same directory. A prepare that ran with no module
-// serving would name a socket in the CDI spec that nothing listens on,
-// and the client would fail to connect with nothing to read that said
-// why.
+// waylandServing returns an error unless the compositor and its layout
+// module both serve. While the compositor restarts, its socket file can
+// exist with nothing listening on it. The layout module opens each
+// claim's socket, and without it the CDI spec would name a socket that
+// nothing listens on, and the client would fail to connect with no
+// message that says why.
 func (p *draPlugin) waylandServing() error {
 	socketPath := filepath.Join(p.socketDir, socketName)
 	if live := probeCompositor(socketPath); !live.serving {
-		return fmt.Errorf("no compositor is serving %s right now (%s: %s)", socketPath, live.reason, live.detail)
+		return fmt.Errorf("no compositor is serving %s (%s: %s)", socketPath, live.reason, live.detail)
 	}
 	if !p.layout.moduleServing() {
-		return fmt.Errorf("the layout module is not serving %s right now", layoutSocketPath)
+		return fmt.Errorf("the layout module is not serving %s", layoutSocketPath)
 	}
 	return nil
 }
 
-// ControlTakesNoParameters refuses a claim whose parameters resolved
-// onto a control request. A mode, a brightness, and a power are all
-// things this operator does to an output, and a control device is the
-// opposite arrangement: the consumer holds the wire and makes every
-// write itself. Such a claim either named the wrong request or
-// expected this operator to act, and both deserve a failure the
-// person can read, not a parameter silently dropped.
+// controlTakesNoParameters fails a claim that sets a mode, a
+// brightness, or a power on a control request. The consumer of a
+// control device sends its own commands to the panel, so the operator
+// would ignore the parameter, and the person would get no error.
 //
-// The common way to hit this: a block that names no request applies
-// to every request in the claim, so a claim that asks for a screen
-// and its control channel together must name the screen's request on
-// the block that states the parameters.
+// The usual cause is a parameter block with no request name, which
+// applies to every request in the claim. A claim for a screen and its
+// control channel must name the screen's request in the block.
 func controlTakesNoParameters(device, mode string, want requestedControls) error {
-	var stated []string
+	var parameters []string
 	if mode != "" {
-		stated = append(stated, modeParameter)
+		parameters = append(parameters, modeParameter)
 	}
-	if want.Brightness.Stated {
-		stated = append(stated, brightnessParameter)
+	if want.Brightness.Set {
+		parameters = append(parameters, brightnessParameter)
 	}
 	if want.Power != "" {
-		stated = append(stated, powerParameter)
+		parameters = append(parameters, powerParameter)
 	}
-	if len(stated) == 0 {
+	if len(parameters) == 0 {
 		return nil
 	}
-	return fmt.Errorf("the claim states %s for %s, and a control device takes no parameters:"+
-		" name the request that holds the output on the block that states them",
-		strings.Join(stated, " and "), device)
+	return fmt.Errorf("the claim sets %s for %s, and a control device takes no parameters:"+
+		" set the request name of the screen on the parameter block that sets them",
+		strings.Join(parameters, " and "), device)
 }
 
-// NodeUnprepareResources removes each claim's CDI spec, takes the
-// modes it stated out of the record, and asks the module to close the
-// sockets it opened for it. As with prepare, every claim gets an
-// answer and failures stay specific to each claim. The screen needs
-// nothing given back: the compositor keeps it, and the next claim
-// receives a socket of its own on it.
+// NodeUnprepareResources removes each claim's modes from the mode
+// record, closes the claim's sockets, and removes its CDI spec. Like
+// prepare, it returns an entry for every claim, and a failure applies
+// to its claim only.
 //
-// Nothing restarts here, so the screen keeps the mode until the
-// next compositor start. The record is what the next start reads, so
-// dropping the entry is what returns the screen to the mode its
-// monitor prefers.
+// Unprepare does not restart the compositor, because a restart blanks
+// every screen on the card. The screen keeps the claim's mode until the
+// next compositor start, which reads the record and starts the screen
+// at its declared mode or at the mode the monitor prefers.
 //
-// The panel's power goes back the same way: a claim that stated
-// onWhileClaimed powers its panel down after the grace period, unless
-// a new claim prepares on the connector first, and a claim that stated
-// on leaves the panel as it is.
+// A panel whose claim set onWhileClaimed goes to standby after
+// releaseGrace, unless another claim prepares on the connector first.
+// A panel whose claim set on stays as it is.
 func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeUnprepareResourcesRequest) (*drav1.NodeUnprepareResourcesResponse, error) {
 	resp := &drav1.NodeUnprepareResourcesResponse{Claims: map[string]*drav1.NodeUnprepareResourceResponse{}}
 	for _, claim := range req.Claims {
@@ -549,12 +475,10 @@ func (p *draPlugin) NodeUnprepareResources(ctx context.Context, req *drav1.NodeU
 	return resp, nil
 }
 
-// UnprepareClaim gives back what one claim held.
-//
-// The record is released before the spec is removed, because
-// the spec is what names the claim's outputs. A failure between the
-// two leaves the spec in place, and the kubelet's next unprepare
-// reads it again and releases what is left.
+// unprepareClaim reads the claim's devices from its CDI spec, so it
+// removes the spec last. When releasing the modes or removing the spec
+// fails, the spec stays, and the kubelet's next unprepare reads it
+// again and finishes the release.
 func (p *draPlugin) unprepareClaim(claimUID string) error {
 	devices, err := preparedDevices(claimUID)
 	if err != nil {
@@ -563,27 +487,20 @@ func (p *draPlugin) unprepareClaim(claimUID string) error {
 	if err := p.releaseModes(devices); err != nil {
 		return err
 	}
-	// The power-down runs before the spec goes, for the reason the
-	// mode release does: the spec is what names the claim's devices,
-	// and an unprepare that ran again after it was gone would have
-	// nothing left to read.
 	p.releasePower(devices)
 	p.releaseSockets(claimUID)
 	if err := removeCDISpec(claimUID); err != nil {
 		return err
 	}
-	// The pass that follows an unprepare is what puts a resting
-	// mode back and what pays a deferred canvas restart, and both wait
-	// on the screen being free. The wake comes after the spec is gone,
-	// because the spec is what says a claim still holds the screen.
+	// The republish also wakes the Display controller, which does not
+	// restore a declared mode or restart the compositor while a CDI spec
+	// lists the screen. So it runs after the spec is removed.
 	p.republishSlice()
 	return nil
 }
 
-// ResourceClaim holds the part of a claim that the driver reads: which
-// devices were allocated, from which driver's pools. This operator
-// never writes a claim. Workloads create them and the scheduler
-// allocates them.
+// ResourceClaim holds the fields of a ResourceClaim that the driver
+// reads. The operator never writes a claim.
 type ResourceClaim struct {
 	Metadata struct {
 		Name      string `json:"name"`
@@ -592,20 +509,17 @@ type ResourceClaim struct {
 	} `json:"metadata"`
 	Status struct {
 		Allocation *struct {
-			// The driver reads the allocation's config and never
-			// the claim's own spec. The scheduler resolves the
-			// DeviceClass's blocks and the claim's into this one list
-			// and marks each entry's source, so cluster policy is
-			// visible here and nowhere else.
+			// The driver reads the config here and not in the claim's
+			// spec, because the scheduler merges the DeviceClass's
+			// parameter blocks and the claim's blocks into this list.
 			Devices struct {
 				Results []AllocatedDevice `json:"results"`
 				Config  []AllocatedConfig `json:"config"`
 			} `json:"devices"`
 		} `json:"allocation"`
-		// The objects that hold the claim. A region's selector matches
-		// the labels of the pods named here, so this field is the route
-		// from the socket a surface arrived on to the labels that place
-		// it.
+		// A Layout region's selector matches the labels of the pods
+		// listed here, so the placement pass finds a socket's region
+		// from the pods that its claim is reserved for.
 		ReservedFor []ClaimConsumer `json:"reservedFor,omitempty"`
 	} `json:"status"`
 }
@@ -614,19 +528,17 @@ type ResourceClaimList struct {
 	Items []ResourceClaim `json:"items"`
 }
 
-// ClaimConsumer is one holder of a claim. Resource names the holding
-// kind's plural, and this operator reads the pods: a claim held by
-// anything else carries no labels a region can match.
+// ClaimConsumer is one entry of a claim's reservedFor list. Resource is
+// the plural name of its kind, and the operator uses only pods.
 type ClaimConsumer struct {
 	Resource string `json:"resource"`
 	Name     string `json:"name"`
 	UID      string `json:"uid"`
 }
 
-// AllocatedDevice is one allocation result. The scheduler chose Device
-// from Pool, published by Driver, to satisfy the claim's named
-// Request. Driver matters because one claim can mix devices from
-// several drivers.
+// AllocatedDevice is one allocation result: the scheduler allocated
+// Device from Pool, which Driver publishes, for the request named
+// Request.
 type AllocatedDevice struct {
 	Request string `json:"request"`
 	Driver  string `json:"driver"`
@@ -634,8 +546,7 @@ type AllocatedDevice struct {
 	Device  string `json:"device"`
 }
 
-// GetResourceClaim reads one claim. Claims are namespaced, because a
-// claim belongs to the workload that created it.
+// GetResourceClaim reads one claim from the API server.
 func GetResourceClaim(c *apiclient.Client, namespace, name string) (*ResourceClaim, error) {
 	path := "/apis/resource.k8s.io/v1/namespaces/" + namespace + "/resourceclaims/" + name
 	claim := &ResourceClaim{}

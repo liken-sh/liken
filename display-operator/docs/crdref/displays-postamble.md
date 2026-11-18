@@ -1,277 +1,281 @@
-## The resting layer
+## The declared settings
 
-A declared field is a standing instruction. On every pass the
-operator compares the declaration with the value it last saw, and it
-writes the panel only where the two diverge, so a settled panel
-costs nothing on the wire. A declared value is validated against
-`status.capabilities`: a value the panel does not carry fails the
-pass and is never written. An empty `spec` writes nothing at all.
-The operator invents no value, ever: a panel with no declarations
-keeps whatever its own menu holds.
+The fields of `spec` declare the values you want a panel to keep. On
+every pass the operator compares each declared value with the value
+it last read from the panel, and it writes the panel only when they
+differ. It first checks the value against `status.capabilities`, and
+when the panel does not support it, the pass fails and nothing is
+written. An empty `spec` makes no writes, so a panel with no
+declarations keeps whatever its own menu sets.
 
-A panel can take a write and read back another value. For example, a
-panel can report its input under a code other than the one the
-operator wrote. The operator writes such a value once for each
-`metadata.generation`, records it in `status.unconfirmed` with the
-value the panel read back, and does not write it again until `spec`
-changes. The record is in status, so a restarted operator does not
-write it again either.
+Some panels accept a write and then report a different value, such
+as an input under a different code from the one the operator wrote.
+The operator writes such a value once for each `metadata.generation`
+and records it in `status.unconfirmed`, with the value the panel
+reported. It doesn't write the value again until `spec` changes. The
+record is in status, so a restarted operator doesn't write it again
+either.
 
-A panel can also take the write, confirm it, and later change the
-value by itself. For example, a panel can switch to the input that
-carries a signal. The operator writes a declared value back at most
-three times in one generation after the first write, and counts the
-writes in `status.written`. After the third write back, it records
-the value in `status.unconfirmed` with a message that says the panel
-keeps changing it, and it writes the value again only after `spec`
-changes. A person who changes a value at the panel's own buttons
-uses the same count.
+Other panels confirm a write and later change the value on their
+own, for example by switching to the input that has a signal. After
+the first write, the operator writes a declared value back at most
+three more times in one generation, and counts the writes in
+`status.written`. After the third, it records the value in
+`status.unconfirmed` with a message that the panel keeps changing it,
+and writes it again only after `spec` changes. A change that a person
+makes with the panel's buttons counts the same way.
 
-Each write to a panel prints one line in the operator's log, with
-the value before and the value after.
+Each write to a panel adds a line to the operator's log, with the
+value before and after the write.
 
 ## The override
 
-`spec.override` holds a temporary state above the resting layer, the
-way `kubectl cordon` holds `spec.unschedulable` above a `Node`'s
-definition. A writer adds the block, and the operator obeys it. The
-writer deletes the block, and the operator restores the panel: to
-the resting declaration where `spec` states one, otherwise to the
-value it captured.
+`spec.override` sets a temporary state that takes priority over the
+rest of `spec`, much as `kubectl cordon` sets `spec.unschedulable` on
+a `Node` without changing the rest of it. A controller or a person
+adds the `override` block, and the operator applies it. When the
+block is deleted, the operator restores the panel to the value that
+`spec` declares, or, when `spec` declares none, to the value it
+captured before the override.
 
-The capture is the load-bearing step. Before the operator obeys
-`backlight: Off`, it reads the panel's brightness and writes the
-value to `status.captured`, and only a committed capture is followed
-by the write that darkens the panel. A capture in `etcd` survives an
-operator restart, a pod move, and a reboot, so the restore does too.
-The restore retries until the panel reads back the value, because a
-panel that is waking answers late. It makes at most eight writes of
-each control, over about 90 seconds. A restore that runs out of
-writes keeps `status.captured`, and `status.unconfirmed` names the
-control. An edit to `spec` starts the restore again.
+Before the operator applies `backlight: Off`, it reads the panel's
+brightness and writes it to `status.captured`. It writes the panel
+only after the API server has saved the capture. The capture is in
+`etcd`, so the restore still works after an operator restart, a pod
+move, or a reboot.
 
-An override has no timeout. If the writer that set one crashes, the
-panel stays dark until the writer returns or a person deletes the
-block. That failure is visible: `kubectl get display` shows the
-standing override, and the block's field manager names the writer
-that owes the lift.
+A panel that is waking up can respond late, so the restore retries
+until the panel reads back the value. It makes at most eight writes
+of each control, over about 90 seconds. When the restore runs out of
+writes, `status.captured` stays in place and `status.unconfirmed`
+names the control. An edit to `spec` starts the restore again.
 
-## The resting mode
+An override has no timeout. When the controller that set an override
+crashes, the panel stays dark until the controller returns or a
+person deletes the block. `kubectl get display` shows the active
+override, and the field manager of the `override` block names the
+controller that has to remove it.
 
-`spec.mode` follows the resting pattern with one difference in
-weight: a mode lands through the compositor, and applying it
-restarts the compositor once, which ends every Wayland client on
-the card. So the operator applies a resting mode only while no
-claim holds the screen. A claim's own `mode` parameter wins for the
-claim's lifetime, a `spec.mode` edit during a claim waits for the
-claim to end, and the unprepare that frees the screen restores the
-declaration promptly. A claim holds the screen while a pod that is
-not being deleted holds the claim, before its prepare succeeds too.
-The kubelet retries a prepare that failed, and each prepare switches
-the screen to the claim's mode, so a resting mode applied between
-two retries would restart the compositor each way.
+## The declared mode
 
-A new operator pod starts the compositor at each monitor's resting
-mode, so the screen takes one modeset, not a modeset to the
-preferred mode and a second one to `spec.mode`. When the compositor
-serves another mode after its restart, the operator records the
-mode in `status.unconfirmed` and does not restart the compositor for
-it again until `spec` changes. A compositor that crashed waits in
-the kubelet's crash backoff and has served no mode yet, so the
-operator waits for it to start, up to six minutes, and gives it 10
-seconds from then.
+`spec.mode` works like the other declared values, except that the
+compositor applies a mode, and applying it restarts the compositor.
+That ends every Wayland client on the graphics card. So the operator
+applies `spec.mode` only while no claim holds the screen. A claim's
+own `mode` parameter takes priority for as long as the claim exists.
+When you edit `spec.mode` during a claim, the operator applies the new
+mode as soon as the kubelet unprepares the claim and frees the screen.
+
+A claim holds the screen while a pod that is not being deleted holds
+the claim, even before the claim's prepare succeeds. The kubelet
+retries a failed prepare, and each prepare switches the screen to the
+claim's mode. If the operator applied `spec.mode` between two
+retries, it would restart the compositor once for each retry.
+
+A new operator pod starts the compositor at each monitor's
+`spec.mode`, so the screen changes mode once at startup, not first to
+the preferred mode and then to `spec.mode`. When the compositor runs
+a different mode after its restart, the operator records the mode in
+`status.unconfirmed` and doesn't restart the compositor for that mode
+again until `spec` changes.
+
+When the compositor crashes, the kubelet delays its next start with a
+crash backoff. The operator waits up to six minutes for the
+compositor to start, and then gives it 10 seconds to serve the mode.
 
 ## The two values of the mode
 
-`status.mode` reports the mode twice, because two parties each
-report one and they can disagree. `kernel` is the mode the graphics
-card is synced to on the connector. `weston` is the mode the
-compositor lays canvases out at, read from the compositor's own
-`wl_output` events over a standing connection the operator holds.
-A client draws at the second one. When the two values differ, the
-clients on that screen are drawn at the wrong size, and the
-operator restarts the compositor to correct it once the screens are
-free. `weston` is absent while the operator holds no connection to
-a compositor. `kernel` is absent while the connector drives nothing,
-and also while the operator holds no connection to a compositor,
-because the operator opens the card only while it holds a connection
-to a compositor. `kubectl get displays` shows the two as the `MODE`
+The kernel and the compositor each report a mode, and they can
+disagree, so `status.mode` has both. `kernel` is the mode that the
+graphics card drives on the connector. `weston` is the mode that the
+compositor lays out canvases at, which the operator reads from the
+compositor's `wl_output` events. Clients draw at the `weston` mode,
+so when the two differ, clients on that screen draw at the wrong
+size. The operator then restarts the compositor to correct it, once
+no claim holds the screen.
+
+`weston` is absent while the operator has no connection to a
+compositor. `kernel` is absent while the connector drives no display,
+and also while the operator has no connection to a compositor,
+because the operator opens the graphics card only while it has that
+connection. `kubectl get displays` shows the two values in the `MODE`
 and `CANVAS` columns.
 
 ## The physical address
 
-`status.physicalAddress` is the HDMI-CEC physical address of the
-port this machine's cable is in: four hex digits that give the path
-from the TV, one digit for each HDMI port on the way. A machine on
-input 2 of a receiver that is on the TV's input 1 reads `1.2.0.0`.
-An HDMI sink serves each of its ports an EDID whose vendor block
-states that port's address, and the operator reads it from the EDID
-on the connector. A CEC adapter on the machine has no EDID of its
-own, so it announces this address when it sends `Active Source`,
-and the receiver and the TV switch to the machine's picture. The
-operator does not open a CEC adapter or send a CEC message.
+`status.physicalAddress` is the HDMI-CEC physical address of the port
+that this machine's cable is plugged into. Its four hex digits give
+the path from the TV, one digit for each HDMI port on the way. A
+machine on input 2 of a receiver that is on the TV's input 1 reads
+`1.2.0.0`.
 
-A receiver in standby can stop serving its EDID, or pass the TV's
-EDID through, which belongs to another `Display`. The machine's port
-has not moved, so the field keeps the last valid address, and the
-`PhysicalAddressCurrent` condition states where the value came
+An HDMI sink serves an EDID on each of its ports, and the EDID's
+vendor block has that port's address. The operator reads the address
+from the EDID on the connector. A CEC adapter on the machine has no
+EDID of its own, so the program that drives the adapter needs this
+address to send `Active Source`, which switches the receiver and the
+TV to the machine's picture. `display-operator` itself does not open
+a CEC adapter or send CEC messages.
+
+A receiver in standby can stop serving its EDID, or pass through the
+TV's EDID, which belongs to another `Display`. The machine's port has
+not moved, so `status.physicalAddress` keeps the last valid address,
+and the `PhysicalAddressCurrent` condition says where the value came
 from:
 
 | Status | Reason | Meaning |
 | --- | --- | --- |
-| `True` | `ReadFromEDID` | The connector's current EDID serves this address. |
-| `False` | `Retained` | The connector serves no EDID for this monitor, or serves no valid address in it. The message names the time it stopped serving the address. |
-| `False` | `Ambiguous` | Two connected connectors serve this monitor with different addresses. The message names both connectors and both addresses. |
+| `True` | `ReadFromEDID` | The connector's current EDID has this address. |
+| `False` | `Retained` | The connector serves no EDID for this monitor, or the EDID has no valid address. The message gives the time that the connector stopped serving the address. |
+| `False` | `Ambiguous` | Two connected connectors serve this monitor with different addresses. The message lists both connectors and both addresses. |
 
 The condition is absent while the monitor has never served a valid
-address, for example on a DisplayPort cable. `0.0.0.0` is the TV's
-own address, which a sink serves when it states none, and `f.f.f.f`
-is the invalid address, so the operator publishes neither. It also
+address, for example on a DisplayPort cable. The operator never
+publishes `0.0.0.0`, the TV's own address, which a sink serves when
+it has no address to give, or `f.f.f.f`, the invalid address. It also
 refuses an address with a non-zero digit after a zero, such as
-`1.0.2.0`, because a zero ends the path. The output device publishes
-the same value as its `physicalAddress` attribute, from the current
-EDID only, so a dark connector publishes none. Read the retained
-value from the `Display`.
+`1.0.2.0`, because a zero ends the path.
 
-The address belongs to one connector, and a `Display` has one
-connector. Two connectors on one machine that serve EDIDs with the
-same identity, such as two cables to one receiver, map to one
-`Display`, and it reports the connector that sorts last by name
-among those that are connected.
+The output device has the same value in its `physicalAddress`
+attribute, but only while the current EDID has it, so a connector with
+no signal publishes none. To read the retained value, read the
+`Display`.
 
-Those two connectors can serve different addresses, for example one
-cable that carries the picture into a receiver input and a second,
-through a CEC adapter, into another input of the same receiver. When
-they disagree, the `Display` publishes no current address:
-`PhysicalAddressCurrent` reads `Ambiguous`, neither connector's
-device states a `physicalAddress` attribute, and `status.physicalAddress`
-keeps the value it held before the two disagreed.
+When two connectors on one machine serve EDIDs with the same
+identity, such as two cables to one receiver, the operator creates
+one `Display` for them. It reports whichever connected connector has
+the name that sorts last.
+
+The two connectors can serve different addresses, for example when
+one cable carries the picture into one input of a receiver and a
+second cable, through a CEC adapter, goes into another input. Then
+neither address is right, so the `Display` publishes no current
+address. `PhysicalAddressCurrent` reads `Ambiguous`, neither
+connector's device has a `physicalAddress` attribute, and
+`status.physicalAddress` keeps the value it had before the connectors
+disagreed.
 
 ## Shared screens
 
-A monitor with several inputs dims all of them at once, because
-brightness and power are panel-global, and the operator writes what
-an override states whenever the panel answers. Panels do not say
-reliably which input they show: the query is optional, and a panel
-can answer it with the name of the port the question arrived on. So
-whether a screen should ever go dark is its owner's declaration,
-not the operator's guess. State it in the layer that writes the
-override; the media operator's `Player` carries an idle policy
-whose `offAfterSeconds: 0` keeps a shared screen's panel untouched.
+Brightness and power apply to the whole panel, so dimming a monitor
+dims every input on it. The operator can't tell which input a panel
+is showing, because that query is optional in DDC/CI, and a panel can
+answer it with the port that the query arrived on. So the operator
+applies an override whenever the panel responds, and the component
+that writes the override decides whether a shared screen may go dark.
+For example, the `Player` of `media-operator` has an idle policy, and
+`offAfterSeconds: 0` in it leaves the panel of a shared screen alone.
 
 ## Observed values
 
-`status.observed` is what the operator last read or wrote. The
-operator touches the wire when it probes, when it captures before
-an override, when it actuates, and about every ten seconds for a
-panel that is lit and under no override. That last read is what
-finds a change a person made at the panel's own menu, and it is
-what makes
-a resting declaration hold: the pass that finds the divergence
-writes the declaration back, up to three times in one generation. A panel in standby or off, a panel an
-override holds, and a panel that answers nothing are never read on
-a timer, because a DDC/CI read is itself a wake stimulus on some
-panels, and a polling loop would relight the screens the override
-layer darkened. For those panels, `observed` stays what the
-operator last saw.
+`status.observed` holds the values that the operator last read from
+the panel or wrote to it. The operator reads or writes the panel when
+it probes the panel, when it captures a value before an override, and
+when it applies a value. It also reads a panel every 10 to 20 seconds
+while the panel is on, responds, and has no override. That read finds
+a change that a person made in the panel's own menu, and the same pass
+writes the declared value back, up to three times in one generation.
+
+The operator doesn't read a panel on a timer while it is in standby
+or off, while an override or a restore applies to it, or while it
+doesn't respond. A DDC/CI read wakes some panels, so polling them
+would light up screens that an override turned dark. For those
+panels, `observed` keeps the values the operator last read.
 
 ## Arrangers
 
-A screen has two owners. The `Layout` that `spec.layout` names owns
-the screen, and gives each claim a region of it. Inside a region, one
-client of the claim can place the claim's own windows, through the
+The `Layout` that `spec.layout` names divides the screen into regions
+and gives each claim a region. Inside its region, one client of the
+claim can place the claim's own windows through the
 `liken_arrangement_v1` Wayland protocol. That client is the claim's
 arranger. The [arrangement reference](/docs/reference/arrangement/)
 describes the protocol for the author of a workload.
 
 `status.arrangers` lists each claim on the screen that has an
 arranger, with the region that shows the claim and the name of the
-arrangement it committed last. Each window in `status.surfaces`
-carries the `appID` an arrangement names it by.
-`duplicateAppIDs` lists each app_id that two or more of the claim's
-windows carry, because one entry of an arrangement moves all of
-them:
+arrangement that the arranger committed last. Each window in
+`status.surfaces` has the `appID` that an arrangement uses to name
+it. `duplicateAppIDs` lists each `app_id` that more than one window of
+the claim has, because one entry of an arrangement moves all of those
+windows:
 
 ```yaml
 status:
   surfaces:
     - id: film-cla-4
-      claim: living-room/film
+      claim: media/film
       appID: liken-film
       region: main
     - id: film-cla-5
-      claim: living-room/film
+      claim: media/film
       appID: liken-display
       region: main
   arrangers:
-    - claim: living-room/film
+    - claim: media/film
       region: main
-      pods: [living-room/player-0]
+      pods: [media/player-0]
       arrangement: credits
 ```
 
 The arranger is a process in one of the pods that hold the claim.
-The compositor reads a client's pid from the socket, and the kernel
-reports pid 0 for a client in another pod's pid namespace, so
-`status.arrangers` names the pods and states no pid or container for
-a workload's arranger.
+`status.arrangers` lists those pods, and gives no pid or container,
+because the compositor reads a client's pid from the socket, and the
+kernel reports pid 0 for a client in another pod's pid namespace.
 
 ## One writer per wire
 
-The operator is the one process that writes a panel's i2c wire for
-the `Display`: resting declarations, overrides, and restores all
-land through the same reconciler. The
-[one-writer rule](/docs/reference/devices/#the-control-device) in
-the devices reference still governs the other paths: a pod that
-holds a connector's control device owns that wire while it runs, so
-do not declare resting values or write overrides for a screen whose
-control device a pod holds.
+Declared values, overrides, and restores all go through the operator,
+so it is the only process that writes a panel's DDC/CI bus for a
+`Display`. A pod that holds a connector's
+[control device](/docs/reference/devices/#the-control-device) writes
+that bus itself while it runs. Don't set declared values or write
+overrides for a screen whose control device a pod holds.
 
 ## Events
 
 The operator posts an `Event` on a `Display` for each condition that
-changes and for each action it takes on the screen. A condition
-states what is true now. An `Event` states what happened, and the
-API server deletes it one hour after its last write. A `Display` is
+changes and for each action it takes on the screen. The API server
+deletes an `Event` one hour after its last write. A `Display` is
 cluster-scoped, so its `Event`s are in the `default` namespace.
-`kubectl describe display` shows them. `kubectl events` shows them
+`kubectl describe display` shows them, and `kubectl events` shows them
 only with `-n default` or `-A`:
 
     kubectl events -n default --for display/boe-1080-display
 
-A condition that changes posts one `Event` with the condition's own
-reason and message. A new message with the same status and reason
-posts nothing. The operator posts the `Event` after the status write
-lands, so a write the API server refuses posts nothing. The same
-`Event` again within 10 minutes adds to the count of the first one,
-and `kubectl describe` shows it once, with the count.
+A condition change posts one `Event` with the condition's reason and
+message. A new message with the same status and reason posts nothing.
+The operator posts the `Event` after the status write succeeds, so a
+write that the API server refuses posts nothing. When the same
+`Event` is posted again within 10 minutes, the operator adds to the
+count of the first one, and `kubectl describe` shows it once, with
+the count.
 
 | Reason | Type | Condition or action |
 | --- | --- | --- |
 | `PanelAttached` | Normal | `Connected` is `True`: a panel is on the connector. |
 | `NoPanel` | Normal | `Connected` is `False`: the connector has served no EDID for this monitor for 5 seconds. |
 | `AnswersDDC` | Normal | `Responsive` is `True`. |
-| `NoDDCReply` | Normal | `Responsive` is `False`. A panel in standby does not answer DDC/CI. |
+| `NoDDCReply` | Normal | `Responsive` is `False`. A panel in standby does not respond to DDC/CI. |
 | `Serving` | Normal | `CompositorServing` is `True`. |
-| `Down` | Warning | `CompositorServing` is `False`: the compositor's socket refuses the connect. |
-| `Hung` | Warning | `CompositorServing` is `False`: the socket accepts and the compositor answers nothing. |
+| `Down` | Warning | `CompositorServing` is `False`: the compositor's socket refuses the connection. |
+| `Hung` | Warning | `CompositorServing` is `False`: the socket accepts the connection and the compositor does not respond. |
 | `ReadFromEDID` | Normal | `PhysicalAddressCurrent` is `True`. |
-| `Retained` | Normal | `PhysicalAddressCurrent` is `False`, and the field keeps the last valid address. |
+| `Retained` | Normal | `PhysicalAddressCurrent` is `False`, and `status.physicalAddress` keeps the last valid address. |
 | `Ambiguous` | Warning | `PhysicalAddressCurrent` is `False`: two connectors serve this monitor with different addresses. |
 | `LayoutFound`, `DefaultLayout` | Normal | `LayoutResolved` is `True`. |
-| `LayoutNotFound` | Warning | `LayoutResolved` is `False`: no `Layout` has the name `spec.layout` states. |
-| `WriteUnconfirmed` | Warning | A write is new in `status.unconfirmed`. The message names the control, the value, and what the device read back. |
-| `ModeChanged` | Normal | A mode change restarts the compositor. The message names the mode before and after. Every screen on the card blanks. |
-| `CompositorKilled` | Warning | The compositor answered nothing for 10 seconds, and the operator ended it. The compositor's container starts it again. The `Event` is on every `Display` of the node. |
-| `PanelStandbyFailed` | Warning | The panel did not take the standby after its last claim ended, and stays on. The operator does not try again. |
-| `Captured` | Normal | A capture through the API returned bytes. The message names the subject, the aspect, and the media type. |
-| `ArrangerGranted` | Normal | A client of a claim became the claim's arranger, and is new in `status.arrangers`. The message names the claim, the pods that hold it, and the region. |
-| `ArrangerLost` | Warning | A claim's arranger disconnected while a pod that holds the claim still runs and is not being deleted. A client that crashed looks like this. The claim's windows return to fill the region. |
-| `ArrangerReleased` | Normal | A claim's arranger destroyed its arranger object and gave the region up, or disconnected after the pods that held the claim were gone or being deleted. |
+| `LayoutNotFound` | Warning | `LayoutResolved` is `False`: no `Layout` has the name in `spec.layout`. |
+| `WriteUnconfirmed` | Warning | A write is new in `status.unconfirmed`. The message gives the control, the value, and the value the device read back. |
+| `ModeChanged` | Normal | A mode change restarts the compositor, and every screen on the card goes blank. The message gives the mode before and after. |
+| `CompositorKilled` | Warning | The compositor did not respond for 10 seconds, and the operator ended it. The compositor's container starts it again. The `Event` is on every `Display` of the node. |
+| `PanelStandbyFailed` | Warning | The panel did not enter standby after its last claim ended, and stays on. The operator does not try again. |
+| `Captured` | Normal | A capture through the API returned bytes. The message gives the subject, the aspect, and the media type. |
+| `ArrangerGranted` | Normal | A client of a claim became the claim's arranger, and is new in `status.arrangers`. The message gives the claim, the pods that hold it, and the region. |
+| `ArrangerLost` | Warning | A claim's arranger disconnected while a pod that holds the claim still runs and is not being deleted, as when the client crashes. The claim's windows return to fill the region. |
+| `ArrangerReleased` | Normal | A claim's arranger destroyed its arranger object and gave up the region, or it disconnected after the pods that held the claim were gone or being deleted. |
 
-An arranger that commits a new arrangement posts no `Event`. A
-commit follows a key press, so `status.arrangers` shows the name of
-the last one and nothing more. The compositor's restart ends every
-arranger, and the pass that reads the new compositor posts no
-`ArrangerLost` for them, because `CompositorServing` or
-`CompositorKilled` already reports the restart.
+An arranger that commits a new arrangement posts no `Event`, because
+a commit follows each key press. `status.arrangers` shows the name of
+the last arrangement. A compositor restart ends every arranger, and
+the pass that reads the new compositor posts no `ArrangerLost` for
+them, because `CompositorServing` or `CompositorKilled` already
+reports the restart.

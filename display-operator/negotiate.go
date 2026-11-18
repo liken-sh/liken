@@ -1,22 +1,19 @@
 package main
 
-// This file holds proactive content negotiation, RFC 9110 section
-// 12.5.1. The route's own order decides every tie and every
-// wildcard, so a client that states no preference gets image/png,
-// the cheapest form to take, and never a stream it did not ask for.
-// An extension route offers one type, so on it Accept decides
-// between 200 and 406 and never between types.
+// Content negotiation on the Accept header, as RFC 9110 section 12.5.1
+// defines it. When offers tie on q, or one wildcard matches several of
+// them, the earliest offer wins. So a client that sends no Accept, or
+// only */*, gets the first of screenForms, image/png, and not a stream.
 
 import (
 	"strconv"
 	"strings"
 )
 
-// chooseType picks the media type to serve from the offers, which
-// are in the route's own order.
+// chooseType returns the offer that the Accept header ranks highest,
+// and false when it admits none. Offers that tie keep the order given.
 func chooseType(accept string, offers []string) (string, bool) {
-	// A request with no Accept field takes any type the route serves
-	// (RFC 9110 section 12.5.1), so it gets the first offer.
+	// RFC 9110 treats a missing Accept field as accepting any type.
 	if strings.TrimSpace(accept) == "" {
 		if len(offers) == 0 {
 			return "", false
@@ -28,8 +25,8 @@ func chooseType(accept string, offers []string) (string, bool) {
 	best := 0.0
 	for _, offer := range offers {
 		quality, matched := offerQuality(ranges, offer)
-		// q=0 is a refusal. Only a strictly higher q replaces an
-		// earlier offer, so offers that tie keep the route's order.
+		// q=0 means the client refuses the type. Only a strictly higher
+		// q replaces the chosen offer, so ties go to the earlier offer.
 		if !matched || quality <= 0 || quality <= best {
 			continue
 		}
@@ -38,23 +35,23 @@ func chooseType(accept string, offers []string) (string, bool) {
 	return chosen, chosen != ""
 }
 
-// acceptsType reports whether Accept admits one fixed
-// representation, the question an extension route asks.
+// acceptsType reports whether Accept admits mediaType. selectType
+// calls it for a route with a file extension, which serves one type.
 func acceptsType(accept, mediaType string) bool {
 	_, ok := chooseType(accept, []string{mediaType})
 	return ok
 }
 
-// One media range from Accept: the type and subtype, which match
-// case-insensitively, and the weight its q parameter states.
+// mediaRange is one entry of an Accept header. kind and subtype are
+// lowercase, and quality is the value of the q parameter.
 type mediaRange struct {
 	kind    string
 	subtype string
 	quality float64
 }
 
-// A malformed entry in the list is skipped, and the entries beside
-// it still count, rather than one bad entry failing the whole field.
+// parseAccept returns the valid entries of an Accept header. It skips
+// a malformed entry, so one bad entry does not discard the others.
 func parseAccept(accept string) []mediaRange {
 	ranges := make([]mediaRange, 0, strings.Count(accept, ",")+1)
 	for _, entry := range strings.Split(accept, ",") {
@@ -76,10 +73,9 @@ func parseMediaRange(entry string) (mediaRange, bool) {
 	return mediaRange{kind: kind, subtype: subtype, quality: rangeQuality(fields[1:])}, true
 }
 
-// The parameters before q belong to the media type, and a range is
-// matched on its type and subtype only, so they are skipped. The
-// parameters after q are accept extensions, also skipped. A
-// malformed q is read as absent, which is 1.
+// rangeQuality returns the q parameter, or 1 when there is none or it
+// is not a number from 0 to 1. Other parameters are ignored because a
+// range matches on type and subtype only.
 func rangeQuality(parameters []string) float64 {
 	for _, parameter := range parameters {
 		name, value, _ := strings.Cut(parameter, "=")
@@ -95,8 +91,9 @@ func rangeQuality(parameters []string) float64 {
 	return 1
 }
 
-// The most specific range that matches an offer is the one whose q
-// the offer carries, per section 12.5.1.
+// offerQuality returns the q of the most specific range that matches
+// the offer, and false when no range matches. Section 12.5.1 says the
+// most specific range decides, so image/png;q=0 beats */*.
 func offerQuality(ranges []mediaRange, offer string) (float64, bool) {
 	kind, subtype, _ := strings.Cut(strings.ToLower(offer), "/")
 	precision := -1
@@ -111,9 +108,8 @@ func offerQuality(ranges []mediaRange, offer string) (float64, bool) {
 	return quality, precision >= 0
 }
 
-// The three ways a range matches a type, from the most specific to
-// the least, the order section 12.5.1 ranks them in: the exact type,
-// the type with any subtype, and any type at all.
+// matchPrecision ranks how a range matches a type: 2 for an exact
+// match, 1 for kind/*, 0 for */*, and -1 for no match.
 func matchPrecision(candidate mediaRange, kind, subtype string) int {
 	switch {
 	case candidate.kind == kind && candidate.subtype == subtype:

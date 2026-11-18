@@ -1,11 +1,11 @@
 package main
 
-// The Events a person reads with `kubectl describe display`: one for
-// each condition transition after its status write lands, one for each
-// write the panel did not confirm, and one for each action the
-// operator took on a screen. Each test runs in a synctest bubble, so
+// The Events that `kubectl describe display` shows: one for each
+// condition transition after its status write succeeds, one for each
+// write the panel did not confirm, and one for each action the operator
+// takes on a screen. Each test runs in a synctest bubble, so
 // synctest.Wait lets the recorder's goroutine write its queue before
-// the test reads the fake API server's Events.
+// the test reads the Events from the fake API server.
 
 import (
 	"fmt"
@@ -18,26 +18,26 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events"
 )
 
-// eventLines answers each Event as its type, reason, and message, the
-// three columns a person reads in `kubectl describe`.
-func eventLines(held []events.Event) []string {
+// eventLines returns each Event as its type, reason, and message, the
+// columns that `kubectl describe` shows.
+func eventLines(recorded []events.Event) []string {
 	var lines []string
-	for _, event := range held {
+	for _, event := range recorded {
 		lines = append(lines, event.Type+" "+event.Reason+" "+event.Message)
 	}
 	return lines
 }
 
-// A panel that arrives posts one Event for each condition its first
-// status write states, a pass that changes nothing posts nothing, and
-// the panel that leaves posts the Connected transition. Both are
-// Normal, because a person plugs and unplugs a monitor.
+// A panel that arrives posts the transitions of its first status write,
+// a pass that changes nothing posts nothing, and a panel that leaves
+// posts NoPanel. All are Normal, because a person plugs and unplugs
+// monitors.
 func TestAPanelThatArrivesAndLeavesPostsItsTransitions(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+		fixture := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
 
 		if err := fixture.pass(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("running a pass: %v", err)
 		}
 		fixture.passes(2)
 		fixture.present["HDMI-A-1"] = false
@@ -45,9 +45,9 @@ func TestAPanelThatArrivesAndLeavesPostsItsTransitions(t *testing.T) {
 		synctest.Wait()
 
 		want := []string{
-			"Normal PanelAttached HDMI-A-1 carries this panel",
-			"Normal AnswersDDC the panel answers DDC/CI",
-			"Normal NoPanel no panel on HDMI-A-1",
+			"Normal PanelAttached The panel is connected to HDMI-A-1",
+			"Normal AnswersDDC The panel responds to DDC/CI",
+			"Normal NoPanel No panel is connected to HDMI-A-1",
 		}
 		if got := eventLines(fixture.events.About("Display", labDisplayName())); !slices.Equal(got, want) {
 			t.Errorf("the Events are\n%q\nwant\n%q", got, want)
@@ -55,11 +55,11 @@ func TestAPanelThatArrivesAndLeavesPostsItsTransitions(t *testing.T) {
 	})
 }
 
-// A status write the API server refuses posts nothing, and the pass
-// that writes the same status later posts its transitions once.
+// A status write that the API server refuses posts nothing. A later
+// pass that writes the same status posts its transitions once.
 func TestARefusedStatusWritePostsNoEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+		fixture := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
 		fixture.declare(DisplaySpec{})
 		fixture.refuse = 1
 
@@ -72,8 +72,8 @@ func TestARefusedStatusWritePostsNoEvent(t *testing.T) {
 		fixture.passes(2)
 		synctest.Wait()
 		want := []string{
-			"Normal PanelAttached HDMI-A-1 carries this panel",
-			"Normal AnswersDDC the panel answers DDC/CI",
+			"Normal PanelAttached The panel is connected to HDMI-A-1",
+			"Normal AnswersDDC The panel responds to DDC/CI",
 		}
 		if got := eventLines(fixture.events.About("Display", labDisplayName())); !slices.Equal(got, want) {
 			t.Errorf("the Events are\n%q\nwant\n%q", got, want)
@@ -81,12 +81,12 @@ func TestARefusedStatusWritePostsNoEvent(t *testing.T) {
 	})
 }
 
-// A write the panel reads back differently is recorded once in
-// status, and posts one Warning with the value and the readback,
-// however many passes follow.
+// A write that the panel reads back with a different value is recorded
+// once in the status and posts one Warning with the written value and
+// the readback. Later passes post nothing more.
 func TestAWriteThePanelDidNotConfirmPostsOneWarning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		panel := drillPanel(t, "lg-hdr-wqhd")
+		panel := recordedPanel(t, "lg-hdr-wqhd")
 		panel.clamps[vcpInput] = 0x0f
 		fixture := newDisplayFixture(t, panel)
 		fixture.declare(DisplaySpec{Input: stringOf("HDMI-1")})
@@ -101,17 +101,17 @@ func TestAWriteThePanelDidNotConfirmPostsOneWarning(t *testing.T) {
 			}
 		}
 		entry := fixture.display().Status.Unconfirmed[0]
-		want := []string{fmt.Sprintf("Warning the operator wrote input HDMI-1 and the device did not confirm it; it reads back DP-1: %s. "+
-			"The operator does not write it again until spec changes", entry.Message)}
+		want := []string{fmt.Sprintf("Warning The device did not confirm the write of input HDMI-1, and it reports DP-1: %s. "+
+			"The operator does not write the value again until spec changes", entry.Message)}
 		if !slices.Equal(warnings, want) {
 			t.Errorf("the WriteUnconfirmed Events are\n%q\nwant\n%q", warnings, want)
 		}
 	})
 }
 
-// Each condition a pass writes through the store posts its
-// transition, and the reason decides the type: a fault a person must
-// fix is a Warning, and a state a person causes is Normal.
+// The reason decides the type of a transition's Event: a fault that a
+// person must fix is a Warning, and a state that a person caused is
+// Normal.
 func TestATransitionIsAWarningOnlyForAFault(t *testing.T) {
 	cases := []struct {
 		condition string
@@ -132,7 +132,7 @@ func TestATransitionIsAWarningOnlyForAFault(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.reason, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+				fixture := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
 				display := fixture.captured(labDisplayName(), "HDMI-A-1", DisplayValues{})
 				next := fixture.control.condition(c.condition, c.status, c.reason, "the message")
 
@@ -141,7 +141,7 @@ func TestATransitionIsAWarningOnlyForAFault(t *testing.T) {
 					return published, true
 				})
 				if err != nil {
-					t.Fatal(err)
+					t.Fatalf("publishing the Display status: %v", err)
 				}
 				synctest.Wait()
 
@@ -154,24 +154,24 @@ func TestATransitionIsAWarningOnlyForAFault(t *testing.T) {
 	}
 }
 
-// screensOfTwoNodes is a fixture whose API server holds two Displays of
-// this node and one of another node, and the notices of this node over
-// its store.
+// screensOfTwoNodes returns a fixture whose fake API server has two
+// Displays of this node and one Display of another node, with a
+// screenNotices for this node that uses the fixture's store.
 func screensOfTwoNodes(t *testing.T) (*displayFixture, *screenNotices) {
 	t.Helper()
-	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
-	fixture.captured("living-room", "HDMI-A-1", DisplayValues{})
-	fixture.captured("desk", "HDMI-A-2", DisplayValues{})
-	elsewhere := fixture.captured("kitchen", "HDMI-A-1", DisplayValues{})
+	fixture := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
+	fixture.captured("screen-a", "HDMI-A-1", DisplayValues{})
+	fixture.captured("screen-b", "HDMI-A-2", DisplayValues{})
+	elsewhere := fixture.captured("screen-c", "HDMI-A-1", DisplayValues{})
 	elsewhere.Status.Node = "node-2"
 	notices := &screenNotices{node: "liken-1"}
 	notices.displays.Store(fixture.control.displays)
 	return fixture, notices
 }
 
-// A notice names a connector, and goes on the Display of this node
-// that the connector serves. A notice with no connector goes on every
-// Display of this node, and never on another node's.
+// A notice with a connector goes on the Display of this node that has
+// that connector. A notice with no connector goes on every Display of
+// this node, and never on a Display of another node.
 func TestANoticeGoesOnTheScreensOfThisNode(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture, notices := screensOfTwoNodes(t)
@@ -181,13 +181,13 @@ func TestANoticeGoesOnTheScreensOfThisNode(t *testing.T) {
 		synctest.Wait()
 
 		got := map[string][]string{}
-		for _, name := range []string{"living-room", "desk", "kitchen"} {
+		for _, name := range []string{"screen-a", "screen-b", "screen-c"} {
 			got[name] = eventLines(fixture.events.About("Display", name))
 		}
 		want := map[string][]string{
-			"living-room": {"Warning CompositorKilled every screen"},
-			"desk":        {"Normal ModeChanged one screen", "Warning CompositorKilled every screen"},
-			"kitchen":     nil,
+			"screen-a": {"Warning CompositorKilled every screen"},
+			"screen-b": {"Normal ModeChanged one screen", "Warning CompositorKilled every screen"},
+			"screen-c": nil,
 		}
 		for name := range want {
 			if !slices.Equal(got[name], want[name]) {
@@ -197,8 +197,8 @@ func TestANoticeGoesOnTheScreensOfThisNode(t *testing.T) {
 	})
 }
 
-// Notices before the Display store is set post nothing, and so do nil
-// notices, which is a plugin built with none.
+// A screenNotices whose store is not set posts nothing, and neither
+// does the nil *screenNotices of a plugin built without notices.
 func TestNoticesWithNoStorePostNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture, _ := screensOfTwoNodes(t)
@@ -214,9 +214,9 @@ func TestNoticesWithNoStorePostNothing(t *testing.T) {
 	})
 }
 
-// A compositor that answered nothing and was ended posts a Warning on
-// every screen of the node, because every screen on the card blanks.
-// A kill that found no compositor posts nothing.
+// A compositor that did not respond and was killed posts a Warning on
+// every screen of the node, because every screen on the GPU goes blank.
+// A kill that finds no compositor posts nothing.
 func TestAHungCompositorThatWasEndedPostsOnEveryScreen(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture, notices := screensOfTwoNodes(t)
@@ -228,14 +228,14 @@ func TestAHungCompositorThatWasEndedPostsOnEveryScreen(t *testing.T) {
 		missing := &draPlugin{compositors: func() []int { return nil }, notices: notices}
 
 		if err := plugin.killHungCompositor(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("killing the hung compositor: %v", err)
 		}
 		_ = missing.killHungCompositor()
 		synctest.Wait()
 
-		want := []string{"Warning CompositorKilled the compositor answered nothing for " + compositorHungLimit.String() +
-			"; the operator ended it, and it starts again"}
-		for _, name := range []string{"living-room", "desk"} {
+		want := []string{"Warning CompositorKilled Ended the compositor, which did not reply for " + compositorHungLimit.String() +
+			". Its container starts it again"}
+		for _, name := range []string{"screen-a", "screen-b"} {
 			if got := eventLines(fixture.events.About("Display", name)); !slices.Equal(got, want) {
 				t.Errorf("%s has the Events %q, want %q", name, got, want)
 			}
@@ -243,29 +243,29 @@ func TestAHungCompositorThatWasEndedPostsOnEveryScreen(t *testing.T) {
 	})
 }
 
-// A panel that does not take the standby after its last claim ended
-// stays on, and the Warning says so on its Display.
+// A panel that fails to go to standby after its last claim ended posts
+// a Warning.
 func TestAStandbyThatFailedPostsAWarning(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture, notices := screensOfTwoNodes(t)
 		controls, _ := benchPanels(t, t.TempDir(), "card1", nil)
 		plugin := &draPlugin{controls: controls, powerPath: t.TempDir() + "/power.json", notices: notices}
 		if err := writePowerRecord(plugin.powerPath, map[string]string{"HDMI-A-2": powerReleased}); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the power record: %v", err)
 		}
 
 		plugin.standbyReleased("HDMI-A-2")
 		synctest.Wait()
 
-		got := fixture.events.About("Display", "desk")
+		got := fixture.events.About("Display", "screen-b")
 		if len(got) != 1 || got[0].Type != events.TypeWarning || got[0].Reason != PanelStandbyFailedReason {
-			t.Errorf("desk has the Events %q, want one PanelStandbyFailed Warning", eventLines(got))
+			t.Errorf("screen-b has the Events %q, want one PanelStandbyFailed Warning", eventLines(got))
 		}
 	})
 }
 
 // A mode switch that restarts the compositor posts ModeChanged on the
-// screen whose mode changed, with the mode before and after.
+// screen whose mode changed. The message has the old and the new mode.
 func TestAModeSwitchPostsModeChanged(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fixture, notices := screensOfTwoNodes(t)
@@ -274,29 +274,28 @@ func TestAModeSwitchPostsModeChanged(t *testing.T) {
 		portable := Output{Connector: "HDMI-A-2"}
 
 		if err := plugin.applyMode(t.Context(), portable, "1280x720"); err != nil {
-			t.Fatal(err)
+			t.Fatalf("applying the mode: %v", err)
 		}
 		synctest.Wait()
 
-		want := []string{"Normal ModeChanged the mode of HDMI-A-2 goes from 1920x1080@60 to 1280x720; " +
-			"the compositor restarts, and every screen on the card blanks"}
-		if got := eventLines(fixture.events.About("Display", "desk")); !slices.Equal(got, want) {
-			t.Errorf("desk has the Events %q, want %q", got, want)
+		want := []string{"Normal ModeChanged Changed the mode of HDMI-A-2 from 1920x1080@60 to 1280x720. " +
+			"The compositor restarts, and every screen on the card goes blank"}
+		if got := eventLines(fixture.events.About("Display", "screen-b")); !slices.Equal(got, want) {
+			t.Errorf("screen-b has the Events %q, want %q", got, want)
 		}
 	})
 }
 
-// modeSwitchPlugin is the lab's plugin with only the seams a mode
-// switch acts through: the fake compositor, and no layout module, so
-// the switch runs in a synctest bubble.
+// modeSwitchPlugin returns a plugin with a fake compositor and no
+// layout module, so a mode switch runs inside a synctest bubble.
 func modeSwitchPlugin(t *testing.T) *draPlugin {
 	t.Helper()
 	plugin, _ := modeSwitchBench(t)
 	return plugin
 }
 
-// modeSwitchBench is the same plugin and the fake compositor behind
-// it, for a test that changes how the compositor comes back.
+// modeSwitchBench returns the same plugin and its fake compositor, for
+// a test that changes how the compositor restarts.
 func modeSwitchBench(t *testing.T) (*draPlugin, *fakeCompositor) {
 	t.Helper()
 	configDir := t.TempDir()

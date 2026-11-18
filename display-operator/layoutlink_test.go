@@ -1,10 +1,7 @@
 package main
 
-// These tests drive the real link against a module on a real unix
-// socket in a directory the test owns. What they cover is the
-// contract with liken-layout.so: the handshake, the sequence numbers
-// a request and its reply are matched by, the store the events build,
-// and what a reconnect replays.
+// These tests run the link against a fake liken-layout.so on a unix
+// socket in a temporary directory.
 
 import (
 	"bufio"
@@ -17,38 +14,31 @@ import (
 	"time"
 )
 
-// The lines the module sends are spelled again here, from the
-// protocol, rather than built from the operator's own constants. A
-// verb that is wrong in one place has to be wrong in both before a
-// test passes.
+// The fake module's lines are literals, not built from the operator's
+// constants, so a wrong verb in the operator's code fails a test.
 const moduleHelloLine = "hello liken-layout 1"
 
-// moduleScript is what one test's module answers with. It is stated
-// before the listener starts, because the module answers on its own
-// goroutine from the first connection on.
+// moduleScript sets how a fake module behaves. A test must not change
+// it after the module starts, because the module reads it from its own
+// goroutines without a lock.
 type moduleScript struct {
-	// The first line it sends. A test that states another version
-	// drives the mismatch, and an empty one is the version this
-	// operator speaks.
+	// hello is the first line the module sends. Empty means
+	// moduleHelloLine.
 	hello string
-	// The lines it sends after its hello and before it accepts the
-	// operator's, which is where the module reports the outputs it
-	// has at connect time.
+	// greeting is the events the module sends before it replies to
+	// the operator's hello.
 	greeting []string
-	// The requests, by verb, that it refuses, and the reason it
-	// gives.
+	// refuse maps a request verb to the reason of the "error" reply.
 	refuse map[string]string
-	// A module that answers nothing at all, which is a compositor
-	// whose event loop stopped before the operator connected.
-	mute bool
-	// A module that greets the operator and answers nothing after
-	// that, which is the same compositor a moment later.
+	// mute makes the module reply to nothing, like a compositor whose
+	// event loop has stopped. muteAfterHello makes it stop after its
+	// reply to the hello.
+	mute           bool
 	muteAfterHello bool
 }
 
-// fakeModule is liken-layout.so's side of the control socket: a unix
-// listener that greets each connection, answers every request it
-// reads, and sends the events its script states.
+// fakeModule sends a hello on each connection and replies to each
+// request as its script says.
 type fakeModule struct {
 	t        *testing.T
 	path     string
@@ -67,8 +57,8 @@ func newFakeModule(t *testing.T, script moduleScript) *fakeModule {
 	return fakeModuleOn(t, filepath.Join(t.TempDir(), "layout.sock"), script)
 }
 
-// fakeModuleOn is the same module on a path the caller names, which is
-// how a test starts the module after the link.
+// fakeModuleOn starts the fake module at path, so that a test can
+// start the link first.
 func fakeModuleOn(t *testing.T, path string, script moduleScript) *fakeModule {
 	t.Helper()
 	if script.hello == "" {
@@ -95,8 +85,6 @@ func (m *fakeModule) serve() {
 	}
 }
 
-// One connection: the hello, then one reply for every request, with
-// the scripted greeting in the window the protocol allows for it.
 func (m *fakeModule) session(connection net.Conn) {
 	defer func() { _ = connection.Close() }()
 
@@ -117,9 +105,9 @@ func (m *fakeModule) session(connection net.Conn) {
 		m.mu.Unlock()
 		reason := m.script.refuse[verb]
 
-		// The greeting goes out before the hello's own answer,
-		// because the protocol lets an event arrive at any time after
-		// the module's hello.
+		// The real module sends its state after its reply to the hello.
+		// The fake sends it before, so the tests also cover the events
+		// that handshake reads while it waits for the reply.
 		if isHello {
 			for _, event := range m.script.greeting {
 				fmt.Fprintf(connection, "%s\n", event)
@@ -138,7 +126,6 @@ func (m *fakeModule) session(connection net.Conn) {
 	}
 }
 
-// send puts one event on the connection the module serves now.
 func (m *fakeModule) send(line string) {
 	m.t.Helper()
 	m.mu.Lock()
@@ -149,8 +136,7 @@ func (m *fakeModule) send(line string) {
 	fmt.Fprintf(m.live, "%s\n", line)
 }
 
-// drop ends the connection the module serves now, which is what a
-// compositor restart does to it.
+// drop closes the current connection, as a compositor restart does.
 func (m *fakeModule) drop() {
 	m.t.Helper()
 	m.mu.Lock()
@@ -161,6 +147,8 @@ func (m *fakeModule) drop() {
 	_ = m.live.Close()
 }
 
+// read returns the requests the module has received, in order,
+// including the operator's hello.
 func (m *fakeModule) read() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -173,7 +161,8 @@ func (m *fakeModule) sessions() int {
 	return m.connections
 }
 
-// accepted waits for the module to accept one operator's hello.
+// accepted waits until the module has received a hello from the
+// operator.
 func (m *fakeModule) accepted() {
 	m.t.Helper()
 	select {
@@ -183,27 +172,25 @@ func (m *fakeModule) accepted() {
 	}
 }
 
-// servedLayoutLink is a link with a module answering it, running for
-// the length of the test. Its waits are short, so a test that must
-// reach a timeout reaches it at once.
+// servedLayoutLink starts a link to the module and waits until it
+// serves. The link runs until the test ends.
 func servedLayoutLink(t *testing.T, module *fakeModule) *layoutLink {
 	t.Helper()
 	link := newLayoutLink(module.path)
-	link.reply = 200 * time.Millisecond
-	link.dial = time.Millisecond
+	link.replyTimeout = 200 * time.Millisecond
+	link.dialWait = time.Millisecond
 	go link.run(t.Context())
 	module.accepted()
 	waitUntil(t, "the link serves", link.moduleServing)
 	return link
 }
 
-// The link starts before the module, and its fallback timer is far
-// longer than the test. The module's socket arrives, and the link dials
-// it on the arrival.
-func TestTheLinkDialsWhenTheModulesSocketArrives(t *testing.T) {
+// The dial wait is an hour, so only the new socket file can make the
+// link dial before the test times out.
+func TestLayoutLinkDialsWhenTheModulesSocketAppears(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "layout.sock")
 	link := newLayoutLink(path)
-	link.dial, link.dialLimit = time.Hour, time.Hour
+	link.dialWait, link.dialWaitLimit = time.Hour, time.Hour
 	go link.run(t.Context())
 	time.Sleep(50 * time.Millisecond)
 
@@ -213,9 +200,9 @@ func TestTheLinkDialsWhenTheModulesSocketArrives(t *testing.T) {
 	waitUntil(t, "the link serves", link.moduleServing)
 }
 
-// waitUntil polls one state the link reaches on a goroutine of its
-// own. Every wait is bounded, and a bound that is reached is the
-// failure the test reports.
+// waitUntil polls ready until it returns true, and fails the test
+// after five seconds. The link changes state on its own goroutine, and
+// no channel reports each change, so the tests poll.
 func waitUntil(t *testing.T, what string, ready func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -228,8 +215,8 @@ func waitUntil(t *testing.T, what string, ready func() bool) {
 }
 
 func TestLayoutLinkGreetsTheModuleAndReadsItsOutputs(t *testing.T) {
-	// The module reports every output it has before it answers the
-	// hello, so the handshake reads events as they arrive.
+	// The fake module sends its outputs before it replies to the
+	// hello, so the handshake must store events while it waits.
 	module := newFakeModule(t, moduleScript{greeting: []string{
 		"output HDMI-A-1 1920 1080 2",
 		"output HDMI-A-2 1920 1080 1",
@@ -243,8 +230,8 @@ func TestLayoutLinkGreetsTheModuleAndReadsItsOutputs(t *testing.T) {
 	if !state.Serving || state.Reason != "" {
 		t.Errorf("state = %+v, want a serving link with no reason", state)
 	}
-	// The logical size is what a rectangle for that screen is in: the
-	// 4K panel at scale 2 lays out as a 1080p one.
+	// Width and height are logical sizes, the units of a placement
+	// rectangle, so a 4K panel at scale 2 is 1920 by 1080.
 	want := map[string]layoutOutput{
 		"HDMI-A-1": {Connector: "HDMI-A-1", Width: 1920, Height: 1080, Scale: 2},
 		"HDMI-A-2": {Connector: "HDMI-A-2", Width: 1920, Height: 1080, Scale: 1},
@@ -260,8 +247,6 @@ func TestLayoutLinkSendsEachRequestWithItsSequence(t *testing.T) {
 	module := newFakeModule(t, moduleScript{})
 	link := servedLayoutLink(t, module)
 
-	// Every call blocks until the module answers the number it sent,
-	// so the requests below are read in this order.
 	for _, send := range []func() error{
 		func() error { return link.Listen("wayland-claim-1", "HDMI-A-1") },
 		func() error {
@@ -273,7 +258,7 @@ func TestLayoutLinkSendsEachRequestWithItsSequence(t *testing.T) {
 		func() error { return link.Close("wayland-claim-1") },
 	} {
 		if err := send(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending a request over a serving link: %v", err)
 		}
 	}
 
@@ -305,28 +290,27 @@ func TestLayoutLinkReportsWhatTheModuleRefuses(t *testing.T) {
 
 	err := link.Listen("wayland-claim-1", "HDMI-A-1")
 	if err == nil {
-		t.Fatal("a refused listen answered no error")
+		t.Fatal("a refused listen returned no error")
 	}
 	if !strings.Contains(err.Error(), "is not a name libwayland accepts") {
-		t.Errorf("the error is %q, and it does not carry the module's reason", err)
+		t.Errorf("the error is %q, want it to include the module's reason", err)
 	}
 }
 
 func TestLayoutLinkGivesUpOnAModuleThatAnswersNothing(t *testing.T) {
-	// A compositor that stopped running its event loop answers no
-	// request. The prepare call that waits on it is the kubelet's, and
-	// it must not hang.
+	// The kubelet's prepare call must not block on a compositor whose
+	// event loop has stopped.
 	module := newFakeModule(t, moduleScript{mute: true})
 	link := newLayoutLink(module.path)
-	link.reply = 100 * time.Millisecond
-	link.dial = time.Millisecond
+	link.replyTimeout = 100 * time.Millisecond
+	link.dialWait = time.Millisecond
 	go link.run(t.Context())
 
-	waitUntil(t, "the link reports a module that answers nothing", func() bool {
+	waitUntil(t, "the link reports a module that does not reply", func() bool {
 		return strings.Contains(link.state().Reason, "accept the hello")
 	})
 	if link.moduleServing() {
-		t.Error("a module that answered no hello serves the operator")
+		t.Error("a module that sent no hello serves the operator")
 	}
 }
 
@@ -335,20 +319,18 @@ func TestLayoutLinkRefusesARequestWithNoModuleServing(t *testing.T) {
 
 	err := link.Commit()
 	if err == nil {
-		t.Fatal("a commit with no connection answered no error")
+		t.Fatal("a commit with no connection returned no error")
 	}
 	if !strings.Contains(err.Error(), "is not serving") {
-		t.Errorf("the error is %q, and it does not say the module serves nothing", err)
+		t.Errorf("the error is %q, want it to say the layout module is not serving", err)
 	}
 }
 
 func TestLayoutLinkReconnectsAndReplays(t *testing.T) {
 	module := newFakeModule(t, moduleScript{greeting: []string{"output HDMI-A-1 1920 1080 2"}})
 	link := newLayoutLink(module.path)
-	link.reply = 200 * time.Millisecond
-	link.dial = time.Millisecond
-	// The replay is what the operator's own hook does: it re-opens
-	// the socket every prepared claim holds.
+	link.replyTimeout = 200 * time.Millisecond
+	link.dialWait = time.Millisecond
 	link.replay = func() error { return link.Listen("wayland-claim-1", "HDMI-A-1") }
 	go link.run(t.Context())
 	module.accepted()
@@ -359,8 +341,8 @@ func TestLayoutLinkReconnectsAndReplays(t *testing.T) {
 	module.send("surface 7 wayland-claim-1 1920 1080")
 	waitUntil(t, "the surface arrives", func() bool { return len(link.state().Surfaces) == 1 })
 
-	// The compositor restarts on every mode change, which ends the
-	// connection and every surface with it.
+	// A compositor restart closes the connection and removes every
+	// surface.
 	module.drop()
 	module.accepted()
 	waitUntil(t, "the link serves the second connection", link.moduleServing)
@@ -371,11 +353,10 @@ func TestLayoutLinkReconnectsAndReplays(t *testing.T) {
 	if sessions := module.sessions(); sessions != 2 {
 		t.Errorf("the module served %d connections, want 2", sessions)
 	}
-	// The store is the new compositor's: the surfaces went with the
-	// old one, and the outputs came back in its greeting.
+	// The store holds only what the second connection reported.
 	state := link.state()
 	if len(state.Surfaces) != 0 {
-		t.Errorf("the store holds %+v, and the compositor that drew them is gone", state.Surfaces)
+		t.Errorf("the store holds the surfaces %+v of the old compositor, want none", state.Surfaces)
 	}
 	if len(state.Outputs) != 1 {
 		t.Errorf("the store holds %+v, want the output the new connection reported", state.Outputs)
@@ -393,17 +374,16 @@ func TestLayoutLinkReconnectsAndReplays(t *testing.T) {
 }
 
 func TestLayoutLinkFailsAWaitingRequestWhenTheConnectionEnds(t *testing.T) {
-	// A request must not wait out its timeout on a connection that is
-	// already gone, because the caller is the kubelet's prepare call.
+	// The request must fail when the connection ends, not after the
+	// 30-second reply timeout, because the caller can be the kubelet's
+	// prepare call.
 	module := newFakeModule(t, moduleScript{muteAfterHello: true})
 	link := newLayoutLink(module.path)
-	link.reply = 30 * time.Second
-	link.dial = time.Millisecond
+	link.replyTimeout = 30 * time.Second
+	link.dialWait = time.Millisecond
 	go link.run(t.Context())
 	module.accepted()
 
-	// The module accepted the hello and answers nothing after it, so
-	// the link serves and the commit below waits.
 	waitUntil(t, "the link serves", link.moduleServing)
 	failed := make(chan error, 1)
 	go func() { failed <- link.Commit() }()
@@ -413,7 +393,7 @@ func TestLayoutLinkFailsAWaitingRequestWhenTheConnectionEnds(t *testing.T) {
 	select {
 	case err := <-failed:
 		if err == nil {
-			t.Fatal("a commit on a connection that ended answered no error")
+			t.Fatal("a commit on a connection that ended returned no error")
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the commit waited on a connection that had ended")
@@ -421,15 +401,14 @@ func TestLayoutLinkFailsAWaitingRequestWhenTheConnectionEnds(t *testing.T) {
 }
 
 func TestLayoutLinkStopsWhenTheModuleRefusesTheHello(t *testing.T) {
-	// The module answers the hello with an error when it does not
-	// speak the version the operator states, so the refusal is read
-	// the same way the version line is.
+	// The real module replies "error" to a hello with a version it
+	// does not speak.
 	module := newFakeModule(t, moduleScript{refuse: map[string]string{
 		layoutHelloEvent: "this module speaks version 2",
 	}})
 	link := newLayoutLink(module.path)
-	link.reply = 200 * time.Millisecond
-	link.dial = time.Millisecond
+	link.replyTimeout = 200 * time.Millisecond
+	link.dialWait = time.Millisecond
 	go link.run(t.Context())
 
 	waitUntil(t, "the link reports the refusal", func() bool {
@@ -441,25 +420,22 @@ func TestLayoutLinkStopsWhenTheModuleRefusesTheHello(t *testing.T) {
 }
 
 func TestLayoutLinkReadsAnAnswerNothingWaitsFor(t *testing.T) {
-	// A request that ran out its timeout leaves no waiter behind, and
-	// the module may answer it after that. The answer is read and
-	// dropped, and the connection keeps serving.
+	// A reply can arrive after its request timed out. The link must
+	// drop it and keep serving.
 	module := newFakeModule(t, moduleScript{})
 	link := servedLayoutLink(t, module)
 
 	module.send("ok 99")
 	if err := link.Commit(); err != nil {
-		t.Fatalf("the connection stopped serving after a late answer: %v", err)
+		t.Fatalf("the connection stopped serving after a late reply: %v", err)
 	}
 }
 
 func TestLayoutLinkRefusesAProtocolVersionItDoesNotSpeak(t *testing.T) {
-	// A module the operator does not speak to is a module that serves
-	// nothing, the same answer a socket nothing listens on gives.
 	module := newFakeModule(t, moduleScript{hello: "hello liken-layout 2"})
 	link := newLayoutLink(module.path)
-	link.reply = 200 * time.Millisecond
-	link.dial = time.Millisecond
+	link.replyTimeout = 200 * time.Millisecond
+	link.dialWait = time.Millisecond
 	go link.run(t.Context())
 
 	waitUntil(t, "the link reports the version it does not speak", func() bool {
@@ -468,8 +444,8 @@ func TestLayoutLinkRefusesAProtocolVersionItDoesNotSpeak(t *testing.T) {
 	if link.moduleServing() {
 		t.Error("a module speaking another version serves the operator")
 	}
-	// The link keeps dialing, because the compositor that restarts
-	// next may carry the module this operator speaks to.
+	// The link keeps dialing, because the next compositor restart can
+	// load a module with a matching version.
 	waitUntil(t, "the link dials again", func() bool { return module.sessions() > 1 })
 }
 
@@ -496,15 +472,13 @@ func TestLayoutLinkRefusesATransitionTheModuleDoesNotRun(t *testing.T) {
 
 	err := link.Place(7, "HDMI-A-1", rect{W: 1920, H: 1080}, "dissolve", 300)
 	if err == nil {
-		t.Fatal("a placement with an unknown transition answered no error")
+		t.Fatal("a placement with an unknown transition returned no error")
 	}
-	// A hide runs no move: the surface is leaving the screen, and
-	// there is no rectangle to glide it to.
 	if err := link.Hide(7, transitionMove, 300); err == nil {
-		t.Fatal("a hide with a move answered no error")
+		t.Fatal("a hide with a move returned no error")
 	}
 	if requests := module.read(); len(requests) != 1 {
-		t.Errorf("the module read %q, and neither transition must reach it", requests)
+		t.Errorf("the module read %q, want neither transition sent", requests)
 	}
 }
 
@@ -513,16 +487,16 @@ func TestLayoutLinkRefusesAnOrderThatNamesNoSurface(t *testing.T) {
 	link := servedLayoutLink(t, module)
 
 	if err := link.Order("HDMI-A-1", nil); err == nil {
-		t.Fatal("an order with no surface in it answered no error")
+		t.Fatal("an order with no surface in it returned no error")
 	}
 	if requests := module.read(); len(requests) != 1 {
-		t.Errorf("the module read %q, and an empty order must not reach it", requests)
+		t.Errorf("the module read %q, want an empty order not sent", requests)
 	}
 }
 
 func TestNoLayoutLinkServesNothing(t *testing.T) {
-	// The operator wires the link in one place. A plugin built without
-	// one refuses every prepare instead of dereferencing nothing.
+	// A plugin with a nil link must fail each prepare call with an
+	// error, not a nil pointer dereference.
 	var link *layoutLink
 
 	if link.moduleServing() {
@@ -532,7 +506,7 @@ func TestNoLayoutLinkServesNothing(t *testing.T) {
 		t.Errorf("state = %+v, want a reason and no serving", state)
 	}
 	if err := link.Listen("wayland-claim-1", "HDMI-A-1"); err == nil {
-		t.Error("a listen on a link that is not there answered no error")
+		t.Error("a listen on a link that is not there returned no error")
 	}
 }
 
@@ -550,10 +524,10 @@ func TestParseLayoutReplyMatchesAnAnswerToItsRequest(t *testing.T) {
 		"error eight the reason":    {},
 		"surface 7 wayland-0 16 16": {},
 	} {
-		sequence, answer, isReply := parseLayoutReply(line)
-		if isReply != want.isReply || sequence != want.sequence || (answer.err != nil) != want.failed {
-			t.Errorf("parseLayoutReply(%q) = %d, %v, %v; want %d, failed=%v, reply=%v",
-				line, sequence, answer.err, isReply, want.sequence, want.failed, want.isReply)
+		sequence, reply, isReply := parseLayoutReply(line)
+		if isReply != want.isReply || sequence != want.sequence || (reply.err != nil) != want.failed {
+			t.Errorf("parseLayoutReply(%q) = %d, %v, %v, want sequence %d, failed %v, reply %v",
+				line, sequence, reply.err, isReply, want.sequence, want.failed, want.isReply)
 		}
 	}
 }

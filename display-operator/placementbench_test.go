@@ -1,11 +1,11 @@
 package main
 
-// One fixture holds every party the placement pass reads: the layout
-// module on a real socket, an API server that stores the Displays,
-// Layouts, claims and pods, and the CDI specs a prepare left on disk.
-// A test states what the compositor holds and what the cluster
-// declares, runs one pass, and reads the lines the module received
-// and the status the API server stored.
+// placementFixture fakes everything that the placement pass reads: a
+// layout module on a real socket, an API server that stores Displays,
+// Layouts, claims, and pods, and the CDI specs that a prepare writes to
+// disk. A test sets up the compositor and the cluster, runs one pass,
+// and then checks the lines that the module received and the status
+// that the API server stored.
 
 import (
 	"encoding/json"
@@ -23,9 +23,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
-// The claims of the drills below. A surface id carries the first
-// eight characters of its claim's UID, so these read in an
-// assertion.
+// The claim UIDs that the tests use. A surface id includes the first
+// eight characters of its claim's UID, so these values are easy to
+// recognize in an assertion.
 const (
 	idleClaimUID    = "idle-claim-0001"
 	filmClaimUID    = "film-claim-0002"
@@ -33,8 +33,9 @@ const (
 	lotClaimUID     = "lot0-claim-0004"
 )
 
-// One screen on the bench: the connector and monitor the card
-// reports, and the logical size and scale the module reports for it.
+// wiredScreen is one screen of the fixture: the connector and monitor
+// that the card reports, and the logical size and scale that the
+// module reports for the output.
 type wiredScreen struct {
 	Output Output
 	Width  int
@@ -42,16 +43,17 @@ type wiredScreen struct {
 	Scale  int
 }
 
-// The living-room panel of plan 15: 4K at scale 2, which the
-// compositor lays out at 1920 by 1080.
-func livingRoomScreen() wiredScreen {
-	return wiredScreen{Output: litOutput("HDMI-A-1", labMonitor()), Width: 1920, Height: 1080, Scale: 2}
+// primaryScreen is a 4K monitor at scale 2, which the compositor
+// lays out at 1920 by 1080.
+func primaryScreen() wiredScreen {
+	return wiredScreen{Output: connectedOutput("HDMI-A-1", labMonitor()), Width: 1920, Height: 1080, Scale: 2}
 }
 
-// The second screen of the bench, at its own logical size, so a test
-// proves each rectangle is computed against its own output.
-func deskScreen() wiredScreen {
-	return wiredScreen{Output: litOutput("HDMI-A-2", portableMonitor()), Width: 1280, Height: 800, Scale: 1}
+// secondaryScreen is a second screen with a different logical size, so a
+// test can check that each rectangle is computed from its own
+// output's size.
+func secondaryScreen() wiredScreen {
+	return wiredScreen{Output: connectedOutput("HDMI-A-2", portableMonitor()), Width: 1280, Height: 800, Scale: 1}
 }
 
 type placementFixture struct {
@@ -66,22 +68,22 @@ type placementFixture struct {
 	layouts  map[string]*Layout
 	claims   map[string]*ResourceClaim
 	pods     map[string]*Pod
-	// The pods the node listing leaves out, which is what the read of
-	// one holder by name answers for.
+	// The pods that the node's pod list leaves out. A request for one
+	// of them by name still returns it.
 	elsewhere map[string]bool
-	// What the API server was asked for, and what it refuses.
+	// Counts of the requests that the API server received, and the
+	// number of times it must still fail each path.
 	claimLists   int
 	podLists     int
 	podGets      int
 	displayLists int
 	refuse       map[string]int
-	// requests is every request the API server received, as the
-	// method and the path.
+	// The method and path of every request that the API server received.
 	requests []string
-	// events holds the Events a recorder posts. The pass has no
-	// recorder until a test gives it one (arrangers_test.go).
+	// The Events that a recorder posts. The pass has no recorder until a
+	// test sets one, as arrangers_test.go does.
 	events eventstest.Events
-	// seen is the Event lines posted() already answered.
+	// The Event lines that posted() has already returned.
 	seen []string
 
 	ids     int
@@ -94,15 +96,16 @@ func newPlacementFixture(t *testing.T, wired ...wiredScreen) *placementFixture {
 	return newPlacementBench(t, nil, wired...)
 }
 
-// The same bench with a module that refuses the named requests, which
-// is a compositor that will not take what the pass states.
+// newPlacementBench is newPlacementFixture with a module that rejects
+// the named requests, which simulates a compositor that refuses what
+// the pass sends.
 func newPlacementBench(t *testing.T, refuse map[string]string, wired ...wiredScreen) *placementFixture {
 	t.Helper()
 	if len(wired) == 0 {
-		wired = []wiredScreen{livingRoomScreen()}
+		wired = []wiredScreen{primaryScreen()}
 	}
-	// The specs a prepare leaves are the record of which claim holds
-	// which socket, so every fixture owns its own directory of them.
+	// The CDI specs record which claim owns which socket, so each
+	// fixture needs its own spec directory.
 	cdiDir = t.TempDir()
 
 	var greeting []string
@@ -125,25 +128,24 @@ func newPlacementBench(t *testing.T, refuse map[string]string, wired ...wiredScr
 	fixture.link = servedLayoutLink(t, fixture.module)
 	fixture.pass = newPlacementPass(fixture.client, "liken-1", filepath.Join(t.TempDir(), socketName),
 		fixture.link, newClaimIndex(fixture.client), fixture.outputs)
-	// Every drill runs against a compositor that answers the probe. A
-	// drill of a compositor that does not answer states its own
-	// answer.
+	// Tests start with a compositor that replies to the probe. A test of
+	// a compositor that does not reply sets its own probe result.
 	fixture.serves()
-	// The condition's timestamp moves only when the condition does, so
-	// the clock stands still and a pass that changes nothing writes
-	// nothing.
+	// The condition's transition time changes only when its status
+	// changes. A fixed clock makes a pass that changes nothing produce
+	// the same status, so it writes nothing.
 	fixture.pass.now = func() time.Time { return time.Unix(0, 0).UTC() }
 	fixture.read = len(fixture.module.read())
 	return fixture
 }
 
-// serves makes the compositor answer the probe.
+// serves makes the compositor reply to the probe.
 func (f *placementFixture) serves() {
 	f.probes(compositorLiveness{serving: true, reason: CompositorServingReason})
 }
 
-// probes sets what the probe finds on the compositor's socket from
-// here on.
+// probes sets the result of every later probe of the compositor's
+// socket.
 func (f *placementFixture) probes(live compositorLiveness) {
 	f.pass.compositor = func() compositorLiveness { return live }
 }
@@ -156,8 +158,8 @@ func (f *placementFixture) outputs() []Output {
 	return outputs
 }
 
-// The resource of one screen, as a person or a machine writer wrote
-// it.
+// screen stores the Display of one monitor, as a person or the
+// operator would have written it.
 func (f *placementFixture) screen(monitor EDID, spec DisplaySpec) *Display {
 	display := &Display{
 		APIVersion: DisplayAPIVersion,
@@ -176,7 +178,7 @@ func (f *placementFixture) store(display *Display) {
 	f.displays[display.Metadata.Name] = display
 }
 
-// A Layout the cluster owner wrote.
+// layout stores a Layout that the cluster owner wrote.
 func (f *placementFixture) layout(name string, regions ...LayoutRegion) {
 	f.layouts[name] = &Layout{
 		APIVersion: DisplayAPIVersion,
@@ -186,21 +188,21 @@ func (f *placementFixture) layout(name string, regions ...LayoutRegion) {
 	}
 }
 
-// A claim the kubelet prepared on one output, held by the named
-// pods. The answer is the socket the module opened for it, which is
-// the socket a test's surface arrives on.
+// prepareClaim stores a claim that the kubelet prepared on one output and that
+// the named pods prepareClaim. It returns the socket that the module opened
+// for the claim, which is the socket that a test's surfaces connect on.
 //
-// The spec on disk and the index in this process are both what a
-// prepare leaves behind, so a fixture that skips the index drives the
-// operator's container restarting under a compositor that kept
-// running.
-func (f *placementFixture) hold(namespace, name, uid, connector string, pods ...string) string {
+// A prepare leaves a CDI spec on disk and an entry in the operator's
+// claim index. This function writes both. A test that wrote only the
+// spec would simulate the operator container restarting while the
+// compositor kept running.
+func (f *placementFixture) prepareClaim(namespace, name, uid, connector string, pods ...string) string {
 	f.t.Helper()
 	socket := waylandSocketPrefix + uid
 	device := deviceName(connector)
 	edits := outputEdits(defaultSocketDir, socket, device)
 	if err := writeCDISpec(uid, []cdiDevice{{Name: uid + "-" + device, ContainerEdits: edits}}); err != nil {
-		f.t.Fatal(err)
+		f.t.Fatalf("writing the CDI spec for claim %s: %v", uid, err)
 	}
 	claim := &ResourceClaim{}
 	claim.Metadata.Namespace, claim.Metadata.Name, claim.Metadata.UID = namespace, name, uid
@@ -213,16 +215,17 @@ func (f *placementFixture) hold(namespace, name, uid, connector string, pods ...
 	return socket
 }
 
-// One pod holding a claim, with the labels a region's selector reads.
+// pod stores a pod with the labels that a region's selector matches.
 func (f *placementFixture) pod(namespace, name string, labels map[string]string) {
 	f.pods[namespace+"/"+name] = &Pod{
 		Metadata: PodMeta{Name: name, Namespace: namespace, Labels: labels},
 	}
 }
 
-// The module reports one surface, and the pass reads it on its next
-// look. The ids count up the way the module's own do, so the id is
-// also the order the surfaces arrived in.
+// surface makes the module report one surface and returns its id.
+// The pass reads the surface on its next run. The ids increase the way
+// the module's ids do, so they also give the order in which the
+// surfaces arrived.
 func (f *placementFixture) surface(socket string, width, height int) int {
 	f.t.Helper()
 	f.ids++
@@ -231,8 +234,8 @@ func (f *placementFixture) surface(socket string, width, height int) int {
 	return id
 }
 
-// The same surface line, for the ids a reconnected module reports
-// again.
+// report sends the surface line for a given id. A module that
+// reconnects reports the same ids again.
 func (f *placementFixture) report(id int, socket string, width, height int) {
 	f.t.Helper()
 	f.module.send(fmt.Sprintf("surface %d %s %d %d", id, socket, width, height))
@@ -242,12 +245,11 @@ func (f *placementFixture) report(id int, socket string, width, height int) {
 	})
 }
 
-// darken takes one monitor off the wire. The card stops reporting the
-// connector as lit, and the compositor destroys the output, which the
-// module reports. The surfaces that were on it stay: the module hides
-// each one and clears its placement, and the client keeps its
-// connection.
-func (f *placementFixture) darken(connector string) {
+// disconnect disconnects one monitor. The card then reports the connector
+// with no monitor, and the module reports that the compositor destroyed
+// the output. The surfaces on the output remain. The module hides
+// each one and clears its placement, and the client stays connected.
+func (f *placementFixture) disconnect(connector string) {
 	f.t.Helper()
 	for i, screen := range f.wired {
 		if screen.Output.Connector == connector {
@@ -261,9 +263,9 @@ func (f *placementFixture) darken(connector string) {
 	})
 }
 
-// light puts a monitor back on the wire, which creates the output
-// again.
-func (f *placementFixture) light(screen wiredScreen) {
+// reconnect reconnects a monitor, which makes the compositor create its
+// output again.
+func (f *placementFixture) reconnect(screen wiredScreen) {
 	f.t.Helper()
 	connector := screen.Output.Connector
 	for i, wired := range f.wired {
@@ -279,10 +281,11 @@ func (f *placementFixture) light(screen wiredScreen) {
 	})
 }
 
-// The lines the module read since a test last asked, so each pass is
-// read on its own batch. The hello of each connection is not one of
-// them: it is the link's own, and a test that counts connections
-// counts them on the module.
+// sent returns the lines that the module has read since the last call,
+// so a test sees the lines of one pass at a time. It leaves out the
+// hello line that each connection starts with, because the link sends
+// that line on its own. A test that counts connections counts them on
+// the module.
 func (f *placementFixture) sent() []string {
 	read := f.module.read()
 	var fresh []string
@@ -299,7 +302,7 @@ func (f *placementFixture) sent() []string {
 func (f *placementFixture) run() {
 	f.t.Helper()
 	if err := f.pass.pass(); err != nil {
-		f.t.Fatalf("the pass failed: %v", err)
+		f.t.Fatalf("running the placement pass: %v", err)
 	}
 }
 
@@ -307,7 +310,7 @@ func (f *placementFixture) status(monitor EDID) DisplayStatus {
 	f.t.Helper()
 	display, held := f.displays[monitorID(monitor)]
 	if !held {
-		f.t.Fatalf("no Display for %s; the fixture holds %v", monitorID(monitor), f.names())
+		f.t.Fatalf("the fixture has no Display for %s, and holds %v", monitorID(monitor), f.names())
 	}
 	return display.Status
 }
@@ -321,8 +324,8 @@ func (f *placementFixture) names() []string {
 	return names
 }
 
-// assertSent compares one pass's batch with the lines the protocol
-// states for it, in order.
+// assertSent checks that one pass sent exactly the wanted protocol
+// lines, in order.
 func assertSent(t *testing.T, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {
@@ -370,13 +373,14 @@ func (f *placementFixture) handler() http.Handler {
 			f.podGets++
 			f.serve(w, f.pods[namespacedName(r.URL.Path, "pods")])
 		default:
-			f.t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			f.t.Errorf("the fake API server received %s %s, which it does not serve", r.Method, r.URL.Path)
 		}
 	})
 }
 
-// The namespace and name at the end of a namespaced path, in the form
-// this fixture keys its objects by.
+// namespacedName extracts the namespace and name from a namespaced
+// path, as the "namespace/name" key that the fixture stores objects
+// under.
 func namespacedName(path, resource string) string {
 	fields := strings.Split(path, "/")
 	for i, field := range fields {
@@ -412,8 +416,8 @@ func (f *placementFixture) serveDisplay(w http.ResponseWriter, r *http.Request) 
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		// A write from a version older than the stored one is refused,
-		// the way the API server refuses it.
+		// A write based on an older resourceVersion than the stored
+		// object fails with a conflict, as in the real API server.
 		if version := written.Metadata.ResourceVersion; version != "" && version != held.Metadata.ResourceVersion {
 			w.WriteHeader(http.StatusConflict)
 			return
@@ -426,9 +430,9 @@ func (f *placementFixture) serveDisplay(w http.ResponseWriter, r *http.Request) 
 	f.serve(w, f.displays[name])
 }
 
-// One object, or the answer the API server gives for an object that
-// is not there. A nil pointer of any type reads as absent here, which
-// is a Layout a Display names and no one wrote.
+// serve writes an object as JSON, or a 404 when the object is a nil
+// pointer. A nil Layout is the case of a Display that names a Layout
+// that does not exist.
 func (f *placementFixture) serve(w http.ResponseWriter, object any) {
 	switch held := object.(type) {
 	case *Display:
@@ -455,8 +459,7 @@ func (f *placementFixture) serve(w http.ResponseWriter, object any) {
 	_ = json.NewEncoder(w).Encode(object)
 }
 
-// The condition of the pass, which is the only report of a name that
-// resolved to nothing.
+// conditionOf returns the LayoutResolved condition.
 func conditionOf(status DisplayStatus) DisplayCondition {
 	return conditionByType(status, LayoutResolvedCondition)
 }

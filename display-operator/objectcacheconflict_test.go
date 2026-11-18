@@ -1,26 +1,19 @@
 package main
 
-// These tests cover a status write from a Display copy in the store
-// that another writer changed since. The API server refuses the write,
-// and each writer reads the Display again: the sweep and the dark
-// report write once more only when the fresh copy still names this
-// node, the placement report composes its fields onto the fresh
-// status, and the Display controller wakes its next pass.
+// Tests of a status write from a Display in the display store that
+// another writer has changed since. The API server rejects the write
+// with a conflict, and the writer reads the Display again.
 
 import (
 	"testing"
 )
 
-// A copy that another writer changed after the store took it: the
-// fixture's Display at a newer version, with its status node set.
-func changedSince(display *Display, node string) {
+func setStatusNode(display *Display, node string) {
 	display.Status.Node = node
 }
 
-// The sweep reads a Display again after a conflict, and writes the
-// absence only when the fresh copy still names this node. A monitor
-// that moved to another node since the store's copy keeps the status
-// that node wrote.
+// After a conflict, the Display pass's sweep writes the disconnected
+// status only when the fresh copy still has this node in status.node.
 func TestTheSweepRechecksTheNodeAfterAConflict(t *testing.T) {
 	for _, c := range []struct {
 		name      string
@@ -28,21 +21,21 @@ func TestTheSweepRechecksTheNodeAfterAConflict(t *testing.T) {
 		wantWrite bool
 	}{
 		{"it is still this node's", "liken-1", true},
-		{"another node took it", "node-2", false},
+		{"another node has it", "node-2", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+			fixture := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
 			if err := fixture.pass(); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the pass: %v", err)
 			}
 			fixture.control.displays = newDisplayStore(fixture.client, storeHolding(t, displaysOf(fixture.displays)...))
 			display := fixture.display()
-			changedSince(display, c.node)
+			setStatusNode(display, c.node)
 			fixture.store(display)
 			fixture.present["HDMI-A-1"] = false
 
 			if err := fixture.pass(); err != nil {
-				t.Fatal(err)
+				t.Fatalf("running the pass: %v", err)
 			}
 
 			connected := condition(fixture.display(), ConnectedCondition)
@@ -56,16 +49,17 @@ func TestTheSweepRechecksTheNodeAfterAConflict(t *testing.T) {
 	}
 }
 
-// A panel whose status write is refused with a conflict wakes the next
-// pass at once, because a status write wakes no pass and the next
-// would wait for the poll's tick.
+// When the API server rejects a Display's status write with a
+// conflict, the controller wakes the next pass at once. A status write
+// triggers no pass, so without the wake the next pass would wait for
+// the poll interval.
 func TestAConflictOnAPanelWakesTheNextPass(t *testing.T) {
-	fixture := newDisplayFixture(t, drillPanel(t, "lg-hdr-wqhd"))
+	fixture := newDisplayFixture(t, recordedPanel(t, "lg-hdr-wqhd"))
 	if err := fixture.pass(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the pass: %v", err)
 	}
-	// The store's copy is older, with a status the pass writes over, and
-	// the API server holds a newer version.
+	// The display store's copy is older than the API server's, and its
+	// status differs from what the pass writes.
 	older := *fixture.display()
 	older.Status.Connector = ""
 	fixture.control.displays = newDisplayStore(fixture.client, storeHolding(t, older))
@@ -80,14 +74,13 @@ func TestAConflictOnAPanelWakesTheNextPass(t *testing.T) {
 	}
 }
 
-// The placement report reads the Display again after a conflict and
-// composes its fields onto the fresh status, so the surfaces land and
-// the field another writer wrote stays.
-func TestAPlacementReportAfterAConflictLandsOnTheFreshStatus(t *testing.T) {
+// After a conflict, the placement report writes its surfaces onto the
+// fresh status and keeps the connector that the other writer set.
+func TestAPlacementReportAfterAConflictKeepsTheFreshStatus(t *testing.T) {
 	fixture := newPlacementFixture(t)
 	fixture.screen(labMonitor(), DisplaySpec{})
-	film := fixture.hold("living-room", "film", filmClaimUID, "HDMI-A-1", "film-0")
-	fixture.pod("living-room", "film-0", map[string]string{"media.liken.sh/focus": "true"})
+	film := fixture.prepareClaim("media", "film", filmClaimUID, "HDMI-A-1", "film-0")
+	fixture.pod("media", "film-0", map[string]string{"media.liken.sh/focus": "true"})
 	fixture.pass.displays = newDisplayStore(fixture.client, storeHolding(t, displaysOf(fixture.displays)...))
 	display := fixture.displays[labDisplayName()]
 	display.Status.Connector = "HDMI-A-1"
@@ -105,20 +98,20 @@ func TestAPlacementReportAfterAConflictLandsOnTheFreshStatus(t *testing.T) {
 	}
 }
 
-// The dark report reads the Display again after a conflict, and
-// leaves it when the fresh copy names another node.
-func TestTheDarkReportLeavesADisplayAnotherNodeTook(t *testing.T) {
+// After a conflict, reportNoCompositor does not write a Display whose
+// fresh copy has another node in status.node.
+func TestReportNoCompositorLeavesADisplayAnotherNodeTook(t *testing.T) {
 	fixture := newPlacementFixture(t)
 	fixture.screen(labMonitor(), DisplaySpec{})
 	fixture.pass.displays = newDisplayStore(fixture.client, storeHolding(t, displaysOf(fixture.displays)...))
 	display := fixture.displays[labDisplayName()]
-	changedSince(display, "node-2")
+	setStatusNode(display, "node-2")
 	fixture.store(display)
 	fixture.probes(compositorLiveness{reason: CompositorHungReason, detail: "i/o timeout"})
 
 	fixture.run()
 
 	if serving := conditionByType(fixture.status(labMonitor()), CompositorServingCondition); serving.Type != "" {
-		t.Errorf("the dark report wrote %+v on another node's Display", serving)
+		t.Errorf("the report of the hung compositor wrote %+v on another node's Display", serving)
 	}
 }

@@ -18,20 +18,18 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-// objectStore is an API server that holds one collection. It answers a
-// get, a list, a watch, a create, and an update, which is every request
-// the watches and the certificate and anchor loops make. The tests run
-// client-go's real reflector against it, so the watch answers the way
-// the API server does: a streaming list sends each object as an ADDED
-// event and then a bookmark that ends the initial events, and a watch
-// from a version first sends the changes after that version.
+// objectStore is a fake API server for one collection. It handles get,
+// list, watch, create, and update, which are all the requests that the
+// watches and the certificate and anchor loops make. The tests run
+// client-go's reflector against it, so its watch does what the API
+// server's does: a streaming list sends each object as an ADDED event
+// and then the bookmark that ends the initial events, and a watch from
+// a resourceVersion first sends the changes after that version.
 //
-// A field selector on metadata.name narrows a list and a watch to that
-// object. The store keeps every other selector a request carries, so a
-// test reads what the watch asked for, and it filters by none of them.
-//
-// The store answers over the in-memory connections of apiservertest,
-// so a test that runs a watch against it can run in a synctest bubble.
+// The store filters only by a field selector on metadata.name, and it
+// records the query of each list and watch, so a test can check which
+// selectors a watch sent. It serves over the in-memory connections of
+// apiservertest, so a watch against it can run in a synctest bubble.
 type objectStore struct {
 	server     *apiservertest.Server
 	t          *testing.T
@@ -43,12 +41,11 @@ type objectStore struct {
 	version  int
 	objects  map[string]map[string]any
 	watchers []storeWatcher
-	// Every change, in order, as the watch line it makes and the
-	// version it made, so a watch that starts at an older version
-	// first gets the changes it missed, the way the API server's watch
-	// cache replays them.
+	// history is every change in order, so a watch from an older
+	// resourceVersion first receives the changes after it, as the API
+	// server's watch cache replays them.
 	history []storeChange
-	// The query of each list and watch, in order.
+	// queries holds the query of each list and watch, in order.
 	queries []url.Values
 }
 
@@ -58,8 +55,9 @@ type storeChange struct {
 	line    string
 }
 
-// One open watch: the name its field selector names, or none for the
-// whole collection, and the lines still to be written to it.
+// storeWatcher is one open watch. name is the metadata.name of its
+// field selector, or empty for the whole collection. An empty line on
+// events ends the watch.
 type storeWatcher struct {
 	name   string
 	events chan string
@@ -75,7 +73,8 @@ func newObjectStore(t *testing.T, collection, apiVersion, kind string) *objectSt
 	return store
 }
 
-// A store of one namespace's ConfigMaps, and one of its Secrets.
+// newConfigMapStore and newSecretStore return a store for the
+// ConfigMaps or the Secrets of one namespace.
 func newConfigMapStore(t *testing.T, namespace string) *objectStore {
 	return newObjectStore(t, configMapsPath(namespace), "v1", "ConfigMap")
 }
@@ -93,36 +92,36 @@ func (o *objectStore) watcher() dynamic.Interface {
 	return dynamicClient(o.t, o.server)
 }
 
-// put stores an object under its name, the way a writer's create or
-// update lands, and tells every open watch.
+// put creates or updates an object and sends the change to the
+// watches.
 func (o *objectStore) put(object any) {
 	o.t.Helper()
 	raw, err := json.Marshal(object)
 	if err != nil {
-		o.t.Fatal(err)
+		o.t.Fatalf("encoding the object: %v", err)
 	}
-	var held map[string]any
-	if err := json.Unmarshal(raw, &held); err != nil {
-		o.t.Fatal(err)
+	var stored map[string]any
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		o.t.Fatalf("decoding the object: %v", err)
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.land(held)
+	o.apply(stored)
 }
 
-// remove deletes an object and tells every open watch.
+// remove deletes an object and sends the change to the watches.
 func (o *objectStore) remove(name string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	held := o.objects[name]
+	stored := o.objects[name]
 	delete(o.objects, name)
 	o.version++
-	held["metadata"].(map[string]any)["resourceVersion"] = strconv.Itoa(o.version)
-	o.announce("DELETED", held)
+	stored["metadata"].(map[string]any)["resourceVersion"] = strconv.Itoa(o.version)
+	o.notify("DELETED", stored)
 }
 
-// hangUp ends every open watch with no error, the way the API server
-// ends a watch at its timeout.
+// hangUp ends every open watch without an error, as the API server
+// does when a watch reaches its timeout.
 func (o *objectStore) hangUp() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -131,7 +130,7 @@ func (o *objectStore) hangUp() {
 	}
 }
 
-// asked answers the query of each list and watch so far.
+// asked returns the query of each list and watch received so far.
 func (o *objectStore) asked() []url.Values {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -144,27 +143,29 @@ func (o *objectStore) watching() int {
 	return len(o.watchers)
 }
 
-// Held under mu. The kind and the version are set on every object, as
-// the API server sets them, because a watch cannot decode an object
-// that names no kind.
-func (o *objectStore) land(held map[string]any) {
-	name := held["metadata"].(map[string]any)["name"].(string)
+// apply stores an object with the apiVersion, kind, and new
+// resourceVersion that the API server would set, because a watch
+// cannot decode an object with no kind. Then it sends the change to the
+// watches. The caller holds mu.
+func (o *objectStore) apply(stored map[string]any) {
+	name := stored["metadata"].(map[string]any)["name"].(string)
 	kind := "MODIFIED"
 	if _, there := o.objects[name]; !there {
 		kind = "ADDED"
 	}
-	held["apiVersion"] = o.apiVersion
-	held["kind"] = o.kind
+	stored["apiVersion"] = o.apiVersion
+	stored["kind"] = o.kind
 	o.version++
-	held["metadata"].(map[string]any)["resourceVersion"] = strconv.Itoa(o.version)
-	o.objects[name] = held
-	o.announce(kind, held)
+	stored["metadata"].(map[string]any)["resourceVersion"] = strconv.Itoa(o.version)
+	o.objects[name] = stored
+	o.notify(kind, stored)
 }
 
-// Held under mu.
-func (o *objectStore) announce(kind string, held map[string]any) {
-	line, _ := json.Marshal(map[string]any{"type": kind, "object": held})
-	name := held["metadata"].(map[string]any)["name"].(string)
+// notify records a change in history and sends it to each watch whose
+// selector matches. The caller holds mu.
+func (o *objectStore) notify(kind string, stored map[string]any) {
+	line, _ := json.Marshal(map[string]any{"type": kind, "object": stored})
+	name := stored["metadata"].(map[string]any)["name"].(string)
 	o.history = append(o.history, storeChange{name: name, version: o.version, line: string(line)})
 	for _, watcher := range o.watchers {
 		if watcher.name == "" || watcher.name == name {
@@ -173,19 +174,20 @@ func (o *objectStore) announce(kind string, held map[string]any) {
 	}
 }
 
-// Held under mu. The objects a request's field selector names.
+// matching returns the objects that a field selector on name selects,
+// or all objects when name is empty. The caller holds mu.
 func (o *objectStore) matching(name string) []map[string]any {
 	var items []map[string]any
-	for held, object := range o.objects {
-		if name == "" || held == name {
+	for key, object := range o.objects {
+		if name == "" || key == name {
 			items = append(items, object)
 		}
 	}
 	return items
 }
 
-// selectedName is the name a request's field selector names, and
-// empty for a request that names none.
+// selectedName returns the metadata.name in the request's field
+// selector, or empty when the selector does not select by name.
 func selectedName(query url.Values) string {
 	name, found := strings.CutPrefix(query.Get("fieldSelector"), "metadata.name=")
 	if !found {
@@ -205,12 +207,11 @@ func (o *objectStore) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && query.Get("watch") == "true":
 		o.stream(w, r)
 	case r.Method == http.MethodGet && named:
-		// Each answer marshals under the lock, because remove and land
-		// change a stored object in place, and an encode after the
-		// unlock would read it while they write.
+		// Marshal under the lock, because remove and apply modify a
+		// stored object in place.
 		o.mu.Lock()
-		held, there := o.objects[name]
-		raw, _ := json.Marshal(held)
+		stored, there := o.objects[name]
+		raw, _ := json.Marshal(stored)
 		o.mu.Unlock()
 		if !there {
 			w.WriteHeader(http.StatusNotFound)
@@ -231,23 +232,23 @@ func (o *objectStore) serve(w http.ResponseWriter, r *http.Request) {
 		o.mu.Unlock()
 		_, _ = w.Write(raw)
 	default:
-		var held map[string]any
+		var stored map[string]any
 		body, _ := io.ReadAll(r.Body)
-		if err := json.Unmarshal(body, &held); err != nil {
+		if err := json.Unmarshal(body, &stored); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		o.mu.Lock()
-		o.land(held)
-		raw, _ := json.Marshal(held)
+		o.apply(stored)
+		raw, _ := json.Marshal(stored)
 		o.mu.Unlock()
 		_, _ = w.Write(raw)
 	}
 }
 
-// stream answers one watch. A streaming list sends the objects as they
-// stand and the bookmark that ends them. A watch from a version first
-// sends each change after it.
+// stream serves one watch. A streaming list sends the current objects
+// and then the bookmark that ends the initial events. A watch from a
+// resourceVersion first sends each change after that version.
 func (o *objectStore) stream(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	name := selectedName(query)
@@ -256,8 +257,8 @@ func (o *objectStore) stream(w http.ResponseWriter, r *http.Request) {
 	o.mu.Lock()
 	o.queries = append(o.queries, query)
 	if query.Get("sendInitialEvents") == "true" {
-		for _, held := range o.matching(name) {
-			line, _ := json.Marshal(map[string]any{"type": "ADDED", "object": held})
+		for _, stored := range o.matching(name) {
+			line, _ := json.Marshal(map[string]any{"type": "ADDED", "object": stored})
 			initial = append(initial, string(line))
 		}
 		initial = append(initial, fmt.Sprintf(
@@ -302,8 +303,8 @@ func (o *objectStore) stream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// testWatcher serves the handler over in-memory connections, and
-// points a dynamic client at it.
+// testWatcher returns a dynamic client connected to handler over
+// in-memory connections.
 func testWatcher(t *testing.T, handler http.Handler) dynamic.Interface {
 	t.Helper()
 	return dynamicClient(t, apiservertest.Start(t, handler))
@@ -313,14 +314,14 @@ func dynamicClient(t *testing.T, server *apiservertest.Server) dynamic.Interface
 	t.Helper()
 	client, err := dynamic.NewForConfig(server.Config())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the dynamic client: %v", err)
 	}
 	return client
 }
 
-// idleWatcher is a dynamic client whose API server answers nothing
-// until the request ends. A test that starts a watch it does not read
-// gets no error from it and no log line.
+// idleWatcher returns a dynamic client whose API server sends nothing
+// until the request ends, so a test can start a watch that it does not
+// read without an error or a log line.
 func idleWatcher(t *testing.T) dynamic.Interface {
 	t.Helper()
 	return testWatcher(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -328,8 +329,8 @@ func idleWatcher(t *testing.T) dynamic.Interface {
 	}))
 }
 
-// eventually waits for a condition a loop reaches on a goroutine of
-// its own, and fails the test when five seconds pass first.
+// eventually polls reached until it returns true, and fails the test
+// after five seconds.
 func eventually(t *testing.T, what string, reached func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

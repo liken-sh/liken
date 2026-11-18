@@ -2,10 +2,7 @@ package main
 
 import "testing"
 
-func TestConnectorNameMatchesTheOneSysfsSpells(t *testing.T) {
-	// The published attributes, weston.ini, and the mode record all key
-	// on the connector name sysfs prints, and this is the only place
-	// the kernel's numeric type becomes that name again.
+func TestConnectorNameMatchesTheKernelsName(t *testing.T) {
 	cases := []struct {
 		connectorType uint32
 		typeID        uint32
@@ -27,9 +24,8 @@ func TestConnectorNameMatchesTheOneSysfsSpells(t *testing.T) {
 	}
 }
 
-// crtcWithMode is what GETCRTC fills in for a lit output: the name is
-// a NUL-terminated array of 32 bytes, the same vocabulary the sysfs
-// mode list and a claim's mode parameter use.
+// crtcWithMode builds a GETCRTC result with the mode name and the
+// ModeValid value that a test gives.
 func crtcWithMode(name string, valid uint32) drmCrtc {
 	crtc := drmCrtc{ModeValid: valid}
 	copy(crtc.Mode.Name[:], name)
@@ -38,13 +34,11 @@ func crtcWithMode(name string, valid uint32) drmCrtc {
 
 func TestCrtcModeReadsTheKernelsOwnName(t *testing.T) {
 	if got := crtcMode(crtcWithMode("1280x720", 1)); got != "1280x720" {
-		t.Errorf("mode = %q", got)
+		t.Errorf("mode = %q, want %q", got, "1280x720")
 	}
 }
 
-func TestCrtcModeCarriesTheRefreshTheCardReports(t *testing.T) {
-	// The readback speaks the claim's vocabulary, and the kernel's
-	// vrefresh is the whole number weston matches against.
+func TestCrtcModeAppendsTheRefreshTheCardReports(t *testing.T) {
 	crtc := crtcWithMode("3840x1600", 1)
 	crtc.Mode.Vrefresh = 24
 	if got := crtcMode(crtc); got != "3840x1600@24" {
@@ -52,9 +46,7 @@ func TestCrtcModeCarriesTheRefreshTheCardReports(t *testing.T) {
 	}
 }
 
-func TestCrtcModeWithoutARefresh(t *testing.T) {
-	// A card that states no vrefresh answers the name alone, because
-	// "1280x720@0" names a mode nothing accepts.
+func TestCrtcModeOmitsAZeroRefresh(t *testing.T) {
 	if got := crtcMode(crtcWithMode("1280x720", 1)); got != "1280x720" {
 		t.Errorf("mode = %q, want %q", got, "1280x720")
 	}
@@ -64,14 +56,13 @@ func TestModeNameStopsAtTheNulByte(t *testing.T) {
 	info := drmModeInfo{Vrefresh: 60}
 	copy(info.Name[:], "1920x1080")
 	if got := modeName(info); got != "1920x1080" {
-		t.Errorf("name = %q", got)
+		t.Errorf("name = %q, want %q", got, "1920x1080")
 	}
 }
 
 func TestCrtcModeReportsNothingForACrtcThatDrivesNothing(t *testing.T) {
-	// The kernel sets mode_valid only while the crtc is enabled, and
-	// the mode it leaves beside it means nothing then. An output that
-	// runs no mode publishes no currentMode.
+	// The kernel clears mode_valid while the crtc is disabled, and Mode
+	// then holds whatever the caller sent.
 	if got := crtcMode(crtcWithMode("1280x720", 0)); got != "" {
 		t.Errorf("mode = %q, want nothing", got)
 	}

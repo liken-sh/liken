@@ -1,28 +1,22 @@
 package main
 
-// Listening for the kernel's display hotplug events.
+// The kernel broadcasts every device change on a netlink socket of
+// protocol NETLINK_KOBJECT_UEVENT. Each datagram is "action@devpath"
+// followed by KEY=VALUE pairs, and each part ends with a NUL byte.
+// Plugging in or unplugging a monitor produces a "change" event on the
+// drm subsystem with HOTPLUG=1. The event does not hold the new state of
+// the connector, so the operator reads sysfs again when one arrives.
 //
-// The kernel broadcasts every device change on a netlink socket,
-// NETLINK_KOBJECT_UEVENT. Each datagram is "action@devpath" followed
-// by KEY=VALUE pairs, each part ending in a NUL byte. A monitor
-// plugged in or unplugged produces a "change" event on the drm
-// subsystem, with HOTPLUG=1, for the card rather than for the
-// connector, so the event says only that something moved and the
-// operator re-reads sysfs for the new state.
+// The socket opens without an error and then receives nothing in two
+// cases, so avoid both:
 //
-// Two ways to open this socket fail silently:
-//
-//   - Bind group 1, never group 2. Group 1 carries the kernel's own
-//     broadcasts. Group 2 carries udev's re-broadcasts to libudev
-//     clients. On a machine with no udev the bind to group 2
-//     succeeds, the socket opens, and it delivers nothing forever,
-//     because nothing writes to that group.
-//   - Do not run in a non-init user namespace. The kernel delivers
-//     uevents to the initial user namespace only, and a process in its
-//     own user namespace receives an empty stream with no error to
-//     read. An unprivileged process in the initial namespace may
-//     receive group 1, because the kernel creates the uevent socket
-//     with NL_CFG_F_NONROOT_RECV.
+//   - A bind to group 2. Group 1 is the kernel's own broadcasts, and
+//     group 2 is what udev sends again to libudev clients. A machine
+//     with no udev sends nothing to group 2.
+//   - A process outside the initial user namespace. The kernel sends
+//     uevents only to that namespace. An unprivileged process in it can
+//     receive group 1, because the kernel creates the uevent socket with
+//     NL_CFG_F_NONROOT_RECV.
 
 import (
 	"bytes"
@@ -33,25 +27,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// drmEvent reports that something changed on the drm subsystem, or
-// that the socket lost events that may have said so. Action is the
-// kernel's word, and DevPath names the card or the connector the
-// kernel attached the event to. For a loss, Action is "lost events"
-// and DevPath holds the socket's error. Neither holds the new state,
-// so both exist for the log line alone.
+// drmEvent is a change on the drm subsystem, or a report that the
+// socket lost datagrams. For a loss, Action is lostEventsAction and
+// DevPath holds the socket error. hotplugCounts uses DevPath and
+// Connector to count the events of each connector of one card.
 type drmEvent struct {
 	Action  string
 	DevPath string
-	// Connector is the DRM object id of the connector the kernel
-	// attached a hotplug to, from the CONNECTOR property, and empty
-	// when the event names the card alone.
+	// Connector is the DRM object id from the event's CONNECTOR
+	// property. It is empty when the event does not name a connector.
 	Connector string
 }
 
-// parseUevent splits one datagram into its action, its DEVPATH, and
-// its key-value pairs. A datagram that does not start with
-// "action@devpath" is a libudev message on the same socket, and the
-// second return value reports that.
+// parseUevent returns false for a datagram that does not start with
+// "action@devpath", such as a libudev message.
 func parseUevent(datagram []byte) (action, devpath string, values map[string]string, ok bool) {
 	parts := bytes.Split(bytes.TrimRight(datagram, "\x00"), []byte{0})
 	if len(parts) == 0 {
@@ -71,16 +60,9 @@ func parseUevent(datagram []byte) (action, devpath string, values map[string]str
 	return string(head), string(path), values, true
 }
 
-// drmEventFrom turns one datagram into an event, when the datagram
-// reports a change on the drm subsystem. Everything else on the
-// socket, which on a running machine is most of it, reports false.
-//
-// The subsystem test drops every other subsystem's events, and the
-// action test keeps a monitor's own events in the stream. A hotplug is a
-// "change" on an existing card, not an "add": the card and its
-// connectors were registered when the driver bound. An "add" or a
-// "remove" of a drm device is the card itself arriving or leaving, and
-// the operator re-reads sysfs for those too.
+// drmEventFrom keeps "add" and "remove" as well as "change", because
+// they mean that a card arrived or left, and the operator reads sysfs
+// again for those too. A hotplug is a "change".
 func drmEventFrom(datagram []byte) (drmEvent, bool) {
 	action, devpath, values, ok := parseUevent(datagram)
 	if !ok {
@@ -96,16 +78,10 @@ func drmEventFrom(datagram []byte) (drmEvent, bool) {
 	return drmEvent{}, false
 }
 
-// listenForUevents opens the kernel's uevent socket and returns a
-// channel of drm events. The channel is buffered, and a full channel
-// drops the event: every consumer of this channel re-reads the whole
-// of sysfs, so the events say when to look, never what is there.
-//
-// The socket is non-blocking. The reader waits for it in poll, not in
-// a read, so it can also watch a cancel pipe in the same poll and stop
-// the moment the context ends. This is liken's own arrangement, for
-// the reason liken states: closing a descriptor does not wake a thread
-// already blocked on a read of it.
+// listenForUevents returns a channel that is closed when ctx ends.
+// The reader waits in poll on the socket and on a cancel pipe, because
+// closing a socket descriptor does not wake a thread that is blocked
+// reading it. Closing the pipe's write end does.
 func listenForUevents(ctx context.Context) (<-chan drmEvent, error) {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, unix.NETLINK_KOBJECT_UEVENT)
 	if err != nil {
@@ -129,10 +105,6 @@ func listenForUevents(ctx context.Context) (<-chan drmEvent, error) {
 	return events, nil
 }
 
-// readUevents is the reader loop. It blocks in poll over the uevent
-// socket and the cancel pipe. A ready socket means a datagram to read;
-// a ready cancel pipe means the context is done and the loop returns.
-// It closes the descriptors it owns as it leaves.
 func readUevents(fd, cancelRead int, events chan<- drmEvent) {
 	defer unix.Close(fd)
 	defer unix.Close(cancelRead)
@@ -157,8 +129,7 @@ func readUevents(fd, cancelRead int, events chan<- drmEvent) {
 		size, _, err := unix.Recvfrom(fd, buf, 0)
 		if err != nil {
 			// A lost datagram may have been a hotplug, so the loss wakes
-			// the loop, and the pass reads the whole of sysfs now and not
-			// on the next unrelated event or the backstop tick.
+			// a pass now, not at the next event or the backstop tick.
 			if event, lost := lostUevents(err); lost {
 				sendDRMEvent(events, event)
 			}
@@ -172,26 +143,22 @@ func readUevents(fd, cancelRead int, events chan<- drmEvent) {
 	}
 }
 
-// lostEventsAction is the Action of the event that reports a loss.
 const lostEventsAction = "lost events"
 
-// lostUevents turns a receive error into an event when the error left
-// a datagram unread. ENOBUFS is the usual one: the kernel's receive
-// buffer overflowed and it dropped datagrams before this read ran.
-// EAGAIN means the poll woke with no datagram to read, and EINTR means
-// a signal interrupted the read before it took anything, so neither one
-// loses a datagram. Every other error counts as a loss, because the
-// poll said the socket was ready and the read returned no datagram.
+// lostUevents reports whether a receive error may have dropped
+// datagrams. ENOBUFS means that the receive buffer overflowed and the
+// kernel dropped datagrams. EAGAIN and EINTR drop nothing. Any other
+// error counts as a loss, because poll reported the socket readable and
+// the read returned no datagram.
 func lostUevents(err error) (drmEvent, bool) {
 	if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EINTR) {
 		return drmEvent{}, false
 	}
-	return drmEvent{Action: lostEventsAction, DevPath: "the uevent socket answered " + err.Error()}, true
+	return drmEvent{Action: lostEventsAction, DevPath: "reading the uevent socket: " + err.Error()}, true
 }
 
-// sendDRMEvent offers one event without blocking. A full channel
-// drops it, because every consumer re-reads the whole of sysfs on the
-// events already queued.
+// sendDRMEvent drops the event when the channel is full, because the
+// events already queued wake a pass that reads all of sysfs.
 func sendDRMEvent(events chan<- drmEvent, event drmEvent) {
 	select {
 	case events <- event:

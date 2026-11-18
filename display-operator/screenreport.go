@@ -1,10 +1,8 @@
 package main
 
-// What the placement pass writes to a Display about one screen: the
-// windows on it, the layout it is drawn to, the arrangers inside its
-// regions, and the two conditions the pass owns. The pass decides and
-// places in placementpass.go, and this file turns the decision into
-// status.
+// This file writes the placement pass's result to a Display's status.
+// placementpass.go decides what goes where, and report turns that
+// decision into status fields.
 
 import (
 	"errors"
@@ -13,21 +11,16 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// report writes what one screen shows. The write happens only where
-// the status this pass computed differs from the published one, so a
-// steady screen writes nothing.
+// report writes the surfaces, layout, arrangers, and the LayoutResolved
+// and CompositorServing conditions of one screen to the Display's
+// status. It writes nothing when the status it computed equals the
+// published one.
 //
-// The Display controller writes the same status from its own loop,
-// and the two write different fields of it: this pass writes the
-// surfaces, the layout, and the LayoutResolved condition, and the
-// controller writes the panel's own facts. Each starts from the
-// status it read, so neither drops what the other wrote. A write the
-// two raced is refused with a conflict, and this pass reads the
-// Display again and composes its fields onto the fresh status.
-//
-// The arrangers' Events compare the arrangers of the copy the last
-// compose read with the arrangers it wrote, so a write that a conflict
-// made this pass compose again posts what the landed write changed.
+// The Display controller also writes this status and owns the panel
+// fields. Each writer sets only its own fields on the status it last
+// read. On a conflict, settleStatus reads the Display again and
+// composes again. before and after come from the last compose, so the
+// arranger Events describe the write that succeeded.
 func (p *placementPass) report(display *Display, held *screenSurfaces, decision screenPlacement,
 	name string, resolved, serving DisplayCondition) error {
 	on, arrangers := surfacesOn(held), arrangersOn(held)
@@ -44,8 +37,8 @@ func (p *placementPass) report(display *Display, held *screenSurfaces, decision 
 	}
 	err := p.displays.settleStatus(display, compose)
 	if errors.Is(err, apiclient.ErrNotFound) {
-		// A Display somebody deleted is the Display controller's to
-		// create again, and this pass reports the screen after that.
+		// The Display controller creates a deleted Display again, and a
+		// later pass reports to it.
 		return nil
 	}
 	if err == nil {
@@ -55,17 +48,30 @@ func (p *placementPass) report(display *Display, held *screenSurfaces, decision 
 }
 
 func (p *placementPass) condition(met bool, reason, message string) DisplayCondition {
-	return p.stated(LayoutResolvedCondition, met, reason, message)
+	return p.newCondition(LayoutResolvedCondition, met, reason, message)
 }
 
-// serving is the condition that reports the compositor. Its message is
-// the socket's own words for the failure, so a person reads the cause
-// from the resource.
+// serving builds the CompositorServing condition. Its message is the
+// detail from the probe of the compositor's socket, so the cause of a
+// failure shows on the resource.
 func (p *placementPass) serving(live compositorLiveness) DisplayCondition {
-	return p.stated(CompositorServingCondition, live.serving, live.reason, live.detail)
+	return p.newCondition(CompositorServingCondition, live.serving, live.reason, servingMessage(live))
 }
 
-func (p *placementPass) stated(kind string, met bool, reason, message string) DisplayCondition {
+// servingMessage states what the probe found, and puts the socket
+// error after it.
+func servingMessage(live compositorLiveness) string {
+	switch {
+	case live.serving:
+		return "The compositor replies on its Wayland socket"
+	case live.reason == CompositorHungReason:
+		return "The compositor accepts connections on its Wayland socket and does not reply: " + live.detail
+	default:
+		return "The compositor's Wayland socket refuses or closes the connection: " + live.detail
+	}
+}
+
+func (p *placementPass) newCondition(kind string, met bool, reason, message string) DisplayCondition {
 	status := conditionFalse
 	if met {
 		status = conditionTrue
@@ -79,10 +85,9 @@ func (p *placementPass) stated(kind string, met bool, reason, message string) Di
 	}
 }
 
-// Every surface on the screen, whether or not a region took it. A
-// surface with no region is a program that is running and not on the
-// screen, which is the first thing to read when a program draws
-// nothing a person can see.
+// surfaceStatus lists every surface on the screen, including those that
+// no region took. An empty Region shows a person why a running program
+// is not visible.
 func surfaceStatus(on []screenSurface, decision screenPlacement) []DisplaySurface {
 	regions := map[string]string{}
 	for _, place := range decision.placed {
@@ -103,8 +108,8 @@ func surfaceStatus(on []screenSurface, decision screenPlacement) []DisplaySurfac
 	return surfaces
 }
 
-// Each region in stacking order, with the surface it shows or the
-// word empty.
+// regionStatus lists each region in stacking order with the surface it
+// shows. Surface is emptyRegion when the region shows none.
 func regionStatus(decision screenPlacement) []DisplayRegion {
 	var regions []DisplayRegion
 	for _, region := range decision.regions {
@@ -113,9 +118,9 @@ func regionStatus(decision screenPlacement) []DisplayRegion {
 	return regions
 }
 
-// The name status reports: the Layout in force, or the word default
-// for a screen that names none and for a name that resolved to
-// nothing.
+// layoutName returns the name that status.layout reports: the named
+// Layout when one resolved, and defaultLayoutName when the screen names
+// no Layout or the name matched none.
 func layoutName(named string, layout *LayoutSpec) string {
 	if layout == nil {
 		return defaultLayoutName

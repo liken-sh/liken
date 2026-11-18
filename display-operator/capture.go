@@ -1,13 +1,14 @@
 package main
 
-// This file is the capture sidecar: the one program on a node that
-// may take a frame from the compositor. It answers the info route
-// and the capture routes on the private leg, and it answers
-// display-api alone, whose token carries the audience
-// display-capture. It holds one capture per output, because the
-// compositor's framebuffer source disables hardware planes and
-// forces a repaint per frame, and two captures on one output would
-// double that cost while each got half the frames.
+// The capture sidecar is the only process on a node that reads frames
+// from the compositor. It serves the info and capture routes over
+// TLS, and only to display-api, which authenticates with a token for
+// the audience display-capture.
+//
+// It allows one capture per output by default. The compositor's
+// framebuffer source turns off hardware planes and forces a repaint
+// for every frame, so a second capture on the same output would
+// double that cost and each capture would get half the frames.
 
 import (
 	"context"
@@ -27,54 +28,54 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The role argument the pod's fourth container passes, and the
-// component label this process carries on liken_build_info.
+// captureMode is the first argument that starts the binary as the
+// capture sidecar. captureComponent is the component label on
+// liken_build_info.
 const (
 	captureMode      = "capture"
 	captureComponent = "display-capture"
 )
 
-// The one listener this process opens. It serves captures and
-// metrics together, because 9200, the port every liken process
-// serves metrics on, belongs to the operator container in the same
-// pod.
+// defaultCaptureAddr serves captures and metrics on one port. The
+// operator container in the same pod already listens on the usual
+// metrics port, 9200.
 const defaultCaptureAddr = ":9201"
 
-// The socket the layout module opens for this process alone. It is
-// in the weston-config emptyDir, not under XDG_RUNTIME_DIR, because
-// CDI delivers that directory to consumer pods and the capture socket
-// must never be delivered.
+// captureSocketPath is the Wayland socket that the layout module
+// opens for the sidecar alone. It is in the weston-config emptyDir and
+// not in XDG_RUNTIME_DIR, because the CDI spec mounts that directory
+// into every consumer container, and a consumer must not be able to
+// capture the screen.
 const captureSocketPath = "/etc/weston/wayland-capture"
 
-// The knob that says how many captures one output may carry. The
-// default is one: every capture holds the output's planes off and
-// forces a repaint per frame, and a second one would take frames
-// from the first.
+// capturePerOutput is the environment variable that sets how many
+// captures can run on one output at once. The default is 1, for the
+// reason at the top of this file.
 const capturePerOutput = "CAPTURE_PER_OUTPUT"
 
-// The knob that picks the conversion graph, and the two values it
-// takes. It is a setting rather than a per-request retry, because a
-// graph that cannot be built fails the same way on every request,
-// and the probe below reads that answer once. An owner who sets it
-// overrides the probe in either direction.
+// captureConversion is the environment variable that selects the
+// ffmpeg conversion graph, softwareGraph or vaapiGraph, in place of the
+// probe in chooseConversion. The sidecar chooses once at startup,
+// because a graph that cannot be built fails the same way on every
+// request.
 const (
 	captureConversion = "CAPTURE_CONVERSION"
 	softwareGraph     = "software"
 	vaapiGraph        = "vaapi"
 )
 
-// How long the startup probe may take. It encodes one 64 by 64 frame
-// to nothing, which is milliseconds of work, so a probe still
-// running after this is a driver that is not answering.
+// conversionProbeTimeout limits the startup probe, which converts one
+// 64 by 64 frame. A probe that runs this long means that the GPU
+// driver does not respond.
 const conversionProbeTimeout = 20 * time.Second
 
-// How long the client waits on the compositor for each step of the
-// exchange: the connection, the registry, the output's events, and
-// each frame.
+// captureOpenTimeout is how long the client waits for the compositor
+// at each step: the connection, the registry, the output's events,
+// and each frame.
 const captureOpenTimeout = 5 * time.Second
 
-// The sidecar holds the socket it captures through, the render node
-// it encodes on, and the captures running now, keyed by connector.
+// captureServer serves the sidecar's routes. running lists the
+// captures in progress on each connector.
 type captureServer struct {
 	client     *apiclient.Client
 	tokens     *tokenCache
@@ -90,15 +91,16 @@ type captureServer struct {
 	software bool
 }
 
-// A running capture records when it ends, so the 503 a second caller
-// gets says how long to wait.
+// runningCapture records when a capture ends, so the 503 to the next
+// caller can say how long to wait. ends is the zero time when the
+// capture lasts until its client disconnects.
 type runningCapture struct {
 	ends time.Time
 }
 
-// The capture role. The certificate comes first, so the listener
-// always answers the liveness probe, then the render node, then the
-// one listener.
+// serveCaptureSidecar runs the capture sidecar until SIGINT or
+// SIGTERM. It exits when the serving certificate does not load,
+// before it opens the listener.
 func serveCaptureSidecar() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -114,22 +116,22 @@ func serveCaptureSidecar() {
 	if err := loadCaptureLeaf(directory, holder, time.Now()); err != nil {
 		fatal("the capture certificate: %v", err)
 	}
-	readings.ready(holder.held())
+	readings.ready(holder.verifiable())
 	go watchCaptureLeaf(ctx, directory, holder, readings, reloadFallback)
 
-	// A node with no render device still serves the metrics and
-	// answers a capture with the encoder's own words, rather than
-	// refusing to start and holding the pod in a restart loop.
+	// A node with no render node still starts the sidecar, so the pod
+	// does not restart in a loop. The sidecar serves its metrics, and
+	// chooseConversion selects the CPU graph.
 	device, err := renderNode(driRoot)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "the render node: %v\n", err)
+		fmt.Fprintf(os.Stderr, "finding the render node: %v\n", err)
 	}
 
 	server := &captureServer{
 		client:     client,
 		tokens:     newTokenCache(func(token string) (*caller, *fault) { return reviewToken(client, token, captureAudience) }),
 		readings:   readings,
-		process:    processHandler(readings.registry, holder.held),
+		process:    processHandler(readings.registry, holder.verifiable),
 		socketPath: envOr("CAPTURE_SOCKET", captureSocketPath),
 		device:     device,
 		perOutput:  perOutputLimit(),
@@ -144,9 +146,8 @@ func serveCaptureSidecar() {
 	if err != nil {
 		fatal("the capture listener on %s: %v", address, err)
 	}
-	// The realm a challenge names is this process, not the caller it
-	// expects, so a 401 from the capture port reads as the capture
-	// port's own.
+	// A 401 from this port names the realm display-capture, so a person
+	// who reads the header can tell it from a 401 of display-api.
 	authenticateRealm = `Bearer realm="display-capture"`
 	fmt.Printf("%s: serving captures on %s through %s\n", captureComponent, address, server.socketPath)
 	serving := &http.Server{
@@ -163,21 +164,20 @@ func serveCaptureSidecar() {
 	}
 }
 
-// Which conversion graph this process runs, decided once at startup.
-// A node that was told which graph to run is believed, because an
-// owner who set the knob knows something the probe cannot read. Every
-// other node is asked: the GPU graph runs one synthetic frame, and a
-// failure selects the software conversion for the life of the
-// process. Either way the choice and the reason go in the log, so a
-// node's own line answers which graph it takes.
+// chooseConversion returns true when the sidecar converts frames on
+// the CPU, and false when it converts them in scale_vaapi on the GPU.
+// A value of CAPTURE_CONVERSION is used as given, because a person can
+// know about a driver fault that the probe does not find. With no
+// value, a node with no render node uses the CPU, and any other node
+// uses the GPU when the probe succeeds.
 func chooseConversion(ctx context.Context, device string) bool {
 	switch envOr(captureConversion, "") {
 	case softwareGraph:
-		fmt.Printf("%s: %s names the software conversion, so this node converts on the CPU\n",
+		fmt.Printf("%s: %s is set to the software conversion, so this node converts on the CPU\n",
 			captureComponent, captureConversion)
 		return true
 	case vaapiGraph:
-		fmt.Printf("%s: %s names the GPU graph, so this node converts in scale_vaapi\n",
+		fmt.Printf("%s: %s is set to the GPU graph, so this node converts in scale_vaapi\n",
 			captureComponent, captureConversion)
 		return false
 	}
@@ -196,6 +196,8 @@ func chooseConversion(ctx context.Context, device string) bool {
 	return false
 }
 
+// perOutputLimit returns 1 when CAPTURE_PER_OUTPUT is not a positive
+// integer.
 func perOutputLimit() int {
 	value, err := strconv.Atoi(envOr(capturePerOutput, "1"))
 	if err != nil || value < 1 {
@@ -204,8 +206,9 @@ func perOutputLimit() int {
 	return value
 }
 
-// /metrics, /healthz, and /readyz take no token, so the kubelet and
-// the scrape need none. Every other path takes display-api's own.
+// ServeHTTP serves /metrics, /healthz, and /readyz with no token,
+// because the kubelet and the metrics scraper send none. Every other
+// path needs display-api's token.
 func (s *captureServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/metrics", "/healthz", "/readyz":
@@ -217,11 +220,11 @@ func (s *captureServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	head := r.Method == http.MethodHead
 	route, connector, matched := matchRoute(r.URL.Path)
 	if !matched || route.kind == documentRoute {
-		writeFault(w, notFound(fmt.Sprintf("this sidecar serves no route at %s", r.URL.Path)), r.URL.Path, id, head)
+		writeFault(w, notFound(fmt.Sprintf("the capture sidecar has no route at %s", r.URL.Path)), r.URL.Path, id, head)
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		writeFault(w, methodNotAllowed(fmt.Sprintf("%s is not a method this sidecar answers", r.Method)), r.URL.Path, id, head)
+		writeFault(w, methodNotAllowed(fmt.Sprintf("the capture sidecar does not accept the method %s", r.Method)), r.URL.Path, id, head)
 		return
 	}
 	if f := s.authenticate(r); f != nil {
@@ -235,28 +238,27 @@ func (s *captureServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.answerCapture(w, r, route, connector, id, head)
 }
 
-// The only caller this sidecar answers is display-api. A
-// TokenReview for the audience display-capture tells its projected
-// token from any other token in the cluster, and the username has to
-// be the display-api ServiceAccount's own.
+// authenticate accepts only display-api. The TokenReview is for the
+// audience display-capture, so a token for another audience fails
+// with a 401. A valid token of another ServiceAccount fails with a 403.
 func (s *captureServer) authenticate(r *http.Request) *fault {
 	scheme, token, split := strings.Cut(r.Header.Get("Authorization"), " ")
 	if !split || !strings.EqualFold(scheme, "Bearer") || strings.TrimSpace(token) == "" {
 		return unauthenticated("")
 	}
-	who, f := s.tokens.verdict(strings.TrimSpace(token))
+	who, f := s.tokens.lookup(strings.TrimSpace(token))
 	if f != nil {
 		return f
 	}
-	if !servesAccount(who.Username, sidecarNamespace, apiServiceName) {
+	if !isServiceAccount(who.Username, sidecarNamespace, apiServiceName) {
 		return unauthorized(fmt.Sprintf("%s is not the display API", who.Username))
 	}
 	return nil
 }
 
-// The info answer is the compositor's own numbers, read on a
-// connection that is opened and closed for this one question, so
-// the sidecar holds no Wayland connection while unused.
+// answerInfo opens a Wayland connection for each request and closes
+// it after, so the sidecar keeps no connection to the compositor while
+// no one captures.
 func (s *captureServer) answerInfo(w http.ResponseWriter, r *http.Request, connector, id string, head bool) {
 	session, err := openCapture(s.socketPath, connector, captureOpenTimeout)
 	if err != nil {
@@ -286,11 +288,10 @@ func (s *captureServer) answerInfo(w http.ResponseWriter, r *http.Request, conne
 	_, _ = w.Write(body)
 }
 
-// A capture the compositor refuses becomes one of two faults. A
-// failed event is a 500 capture-denied that carries weston's own
-// word, unauthorized, and no retry clears it. Every other failure to
-// reach the compositor, a socket that is absent, a connection it
-// closed, or a step that timed out, is a 503 a retry may clear.
+// compositorFault returns a 500 when weston refused the capture with
+// a failed event, because a retry gets the same refusal. Any other
+// error, such as a missing socket, a closed connection, or a timeout,
+// is a 503, because a retry can succeed.
 func (s *captureServer) compositorFault(connector string, err error) *fault {
 	var refused *captureFailure
 	if errors.As(err, &refused) {
@@ -301,9 +302,9 @@ func (s *captureServer) compositorFault(connector string, err error) *fault {
 	return unavailable(problemNoNode, fmt.Sprintf("the compositor on %s: %v", connector, err))
 }
 
-// One capture per output, outputs on one card independent. A second
-// request on a busy output gets a 503 whose detail names the running
-// capture's end, or says that its client's hang-up ends it.
+// take reserves one capture on a connector and returns the function
+// that releases it. When the connector already has perOutput captures
+// running, it returns a 503 whose detail gives the end of the oldest.
 func (s *captureServer) take(connector string, ends time.Time) (func(), *fault) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -328,8 +329,7 @@ func (s *captureServer) release(connector string) {
 	s.running[connector] = held[1:]
 }
 
-// A capture with a t= end names its end. One with none names what
-// ends it: its client's hang-up.
+// until returns the end of a capture for the 503 detail.
 func until(ends time.Time) string {
 	if ends.IsZero() {
 		return "until its client closes"
@@ -337,10 +337,8 @@ func until(ends time.Time) string {
 	return "until " + ends.UTC().Format(time.RFC3339)
 }
 
-// The sidecar parses and refuses the query itself, although
-// display-api refused the same query before it forwarded anything.
-// The sidecar is a door of its own, and nothing it serves may depend
-// on what a caller upstream checked.
+// answerCapture parses the query again, after display-api has
+// validated it, so the sidecar does not depend on its caller's checks.
 func (s *captureServer) answerCapture(w http.ResponseWriter, r *http.Request, route apiRoute, connector, id string, head bool) {
 	mediaType := route.mediaType
 	if mediaType == "" {
@@ -362,8 +360,6 @@ func (s *captureServer) answerCapture(w http.ResponseWriter, r *http.Request, ro
 		return
 	}
 
-	// A capture with a t= end records when it ends, so the 503 a
-	// second caller gets names that instant rather than a hang-up.
 	ends := time.Time{}
 	if chosen.Time.HasEnd {
 		ends = s.now().Add(seconds(chosen.Time.End))
@@ -380,12 +376,10 @@ func (s *captureServer) answerCapture(w http.ResponseWriter, r *http.Request, ro
 	}
 }
 
-// One line at the first frame of every capture. It carries what the
-// compositor sent and what this process made of it: the DRM fourcc,
-// the -pixel_format derived from it, the size and scale the output
-// reported, and the graph the frames run through. A drill reads the
-// node's own answer here rather than inferring it from ffmpeg's echo
-// of its input.
+// report logs the first frame of a capture: the output's size and
+// scale, the DRM fourcc that the compositor sent, the ffmpeg
+// -pixel_format for it, the socket, and the conversion graph, so a
+// person does not have to infer them from ffmpeg's log of its input.
 func (s *captureServer) report(connector string, screen captureScreen, mediaType string) {
 	fmt.Printf("the capture of %s: %s at %dx%d scale %d, fourcc %s (%#08x) as %s, %s, %s conversion\n",
 		connector, mediaType, screen.Width, screen.Height, screen.Scale,
@@ -393,33 +387,29 @@ func (s *captureServer) report(connector string, screen captureScreen, mediaType
 		s.socketPath, s.conversionName())
 }
 
-// An answer that is already streaming cannot become a problem
-// document, because its status line is on the wire. This reports the
-// cause to the log, and the response ends.
+// reportMidStream logs an error after the response began. The status
+// line is already sent, so the error cannot become a problem document.
 func (s *captureServer) reportMidStream(connector string, err error) {
-	fmt.Fprintf(os.Stderr, "the capture of %s ended: %v\n", connector, err)
+	fmt.Fprintf(os.Stderr, "the capture of %s ended after the response began: %v\n", connector, err)
 }
 
-// The same report for a capture that ended while its caller was
-// still reading, which is where a mode change lands: the compositor
-// destroys the output, the connection dies with it, and the feed
-// reads an end of file. The line carries both sizes, the one the
-// capture was encoding at and the one the screen serves now, because
-// a reader of the log cannot otherwise tell a mode change from a
-// compositor that stopped.
+// reportEnded logs a capture that ended while its caller still read.
+// A mode change ends a capture this way, because the compositor
+// destroys the output and the connection closes. The line gives the
+// size that the capture encoded and the output's size now, so a person
+// can tell a mode change from a compositor that stopped.
 func (s *captureServer) reportEnded(connector string, was captureScreen, err error) {
 	fmt.Fprintf(os.Stderr, "the capture of %s ended at %dx%d: %v%s\n",
 		connector, was.Width, was.Height, err, s.sizeNow(connector))
 }
 
-// The size the screen serves now, for the log line of a capture that
-// ended. A compositor that answers nothing says so instead: a mode
-// change ends the connection, and the compositor is often still
-// restarting when this line is written.
+// sizeNow returns the output's size now, or the error when the
+// compositor does not respond, which is common while it restarts after
+// a mode change.
 func (s *captureServer) sizeNow(connector string) string {
 	session, err := openCapture(s.socketPath, connector, captureOpenTimeout)
 	if err != nil {
-		return fmt.Sprintf("; %s serves nothing now: %v", connector, err)
+		return fmt.Sprintf("; %s has no screen now: %v", connector, err)
 	}
 	defer func() { _ = session.close() }()
 	screen := session.screen()

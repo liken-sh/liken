@@ -1,10 +1,5 @@
 package main
 
-// The Events a person reads when a claim gains or loses its arranger.
-// The pass posts them after its status write lands, from the
-// difference between the arrangers it read and the arrangers it wrote
-// (screenreport.go).
-
 import (
 	"errors"
 	"fmt"
@@ -15,22 +10,22 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// announceArrangers posts the Events of one status write that landed:
-// one for each claim that gained an arranger, and one for each claim
-// that lost one.
+// announceArrangers compares the arrangers before and after a status
+// write that succeeded, and posts an Event for each claim that gained
+// an arranger and for each claim that lost one.
 //
-// The module reports why each arranger left. A client that released
-// its arranger gave the region up on purpose, which is Normal. A
-// client that disconnected while a pod that holds the claim still
-// runs and is not being deleted is how a crash looks, and is a
-// Warning. A disconnect with the pods gone or going is a workload that
-// ended, which is Normal. A departure the pass could not resolve to
-// its claim reads as a disconnect.
+// departures holds the reason that the compositor module reported for
+// each arranger that left. A client that released its arranger posts a
+// Normal Event. A client that disconnected while a pod of the claim
+// still runs and is not being deleted posts a Warning, because that is
+// what a crash looks like. A disconnect after the pods are gone or
+// being deleted means the workload ended, which is Normal. A claim
+// with no reason in departures is treated as a disconnect.
 //
-// A pass on a new connection to the module posts no loss. The
-// compositor or this operator restarted, every arranger went with the
-// old compositor, and the CompositorServing condition or the restart's
-// own Event already reports it.
+// The first pass on a new connection to the module posts no Event for
+// a lost arranger. The compositor or this operator restarted, so every
+// arranger left with the old connection, and the CompositorServing
+// condition or the restart's own Event already reports that.
 func (p *placementPass) announceArrangers(display *Display, before, after []DisplayArranger,
 	departures map[string]string) {
 	recorder := p.displays.recorder
@@ -52,28 +47,28 @@ func (p *placementPass) announceArrangers(display *Display, before, after []Disp
 		}
 		if departures[lost.Claim] == arrangerReleased {
 			recorder.Normal(object, ArrangerReleasedReason, fmt.Sprintf(
-				"the arranger of claim %s gave up the region, so the claim's surfaces return to fill %s",
+				"The arranger of claim %s released the region, so the claim's surfaces fill %s again",
 				lost.Claim, regionWords(lost.Region)))
 			continue
 		}
 		if running := p.runningHolder(lost.Pods); running != "" {
 			recorder.Warning(object, ArrangerLostReason, fmt.Sprintf(
-				"the arranger of claim %s disconnected while pod %s still runs, so the claim's surfaces return to fill %s",
+				"The arranger of claim %s disconnected while pod %s still runs, so the claim's surfaces fill %s again",
 				lost.Claim, running, regionWords(lost.Region)))
 			continue
 		}
 		recorder.Normal(object, ArrangerReleasedReason, fmt.Sprintf(
-			"the arranger of claim %s left with its pods, so the claim's surfaces return to fill %s",
+			"The arranger of claim %s ended with its pods, so the claim's surfaces fill %s again",
 			lost.Claim, regionWords(lost.Region)))
 	}
 }
 
 func sameClaim(claim string) func(DisplayArranger) bool {
-	return func(held DisplayArranger) bool { return held.Claim == claim }
+	return func(arranger DisplayArranger) bool { return arranger.Claim == claim }
 }
 
 func grantedMessage(arranger DisplayArranger) string {
-	message := "a client of claim " + arranger.Claim
+	message := "A client of claim " + arranger.Claim
 	if len(arranger.Pods) > 0 {
 		message += " in " + strings.Join(arranger.Pods, ", ")
 	}
@@ -90,10 +85,9 @@ func regionWords(region string) string {
 	return "region " + region
 }
 
-// runningHolder answers the first of the pods that still runs and is
-// not being deleted, or "" when none does. A pod that is gone does
-// not run. A pod the API server cannot answer for counts as not
-// running, and the log says why.
+// runningHolder returns the first pod in pods, as namespace/name, that
+// exists and is not being deleted, or "" when there is none. A pod
+// that fails to read counts as not running, and the error is logged.
 func (p *placementPass) runningHolder(pods []string) string {
 	for _, key := range pods {
 		namespace, name, _ := strings.Cut(key, "/")

@@ -1,10 +1,9 @@
 package main
 
-// Kubectl-liken-display is the display operator's CLI plugin.
-// kubectl finds it on PATH and runs "kubectl liken display capture
-// HDMI-A-1" as this binary with "capture HDMI-A-1". It owns the
-// display verbs and takes the cluster's identity from the standard
-// kube flags.
+// kubectl-liken-display is the display operator's kubectl plugin.
+// kubectl finds it on PATH, so "kubectl liken display capture
+// lg-hdr-wqhd-display" runs this binary with the arguments "capture
+// lg-hdr-wqhd-display".
 
 import (
 	"context"
@@ -17,12 +16,11 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
-// The release this binary was built from; the build
-// stamps it with -ldflags "-X main.version=...", the same way the
-// operator image is stamped, and every other build reports dev.
+// version is the release this binary was built from. The build sets it
+// with -ldflags "-X main.version=...", and any other build reports
+// "dev".
 var version = "dev"
 
-// The usage block and the one-line flag descriptions.
 const (
 	usageText = `kubectl liken display: capture what a display output shows
 
@@ -32,7 +30,7 @@ Verbs:
 
 Example:
   kubectl liken display capture hdmi-a-1 | mpv -`
-	formatUsage     = "mp4 or png"
+	formatUsage     = "capture format, mp4 or png"
 	forceUsage      = "run despite a version mismatch"
 	versionUsage    = "print the version"
 	kubeconfigUsage = "path to the kubeconfig file"
@@ -46,22 +44,20 @@ func main() {
 	}
 }
 
-// run parses the flags and dispatches the verb; it is
-// the whole of the binary's behavior, so a test drives it with its own
-// arguments and writers.
+// run parses args and runs the verb. main only wraps it, so a test can
+// call it with its own arguments and writers.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	// The __complete verb answers the shell's completion request. It
-	// runs before the flag parse, because a request carries a partial
-	// flag and a trailing empty word that the parser would reject.
+	// A shell completion request can end in a partial flag or an empty
+	// word, which the flag parser would reject, so it is handled before
+	// parsing.
 	if len(args) > 0 && args[0] == "__complete" {
 		return runComplete(ctx, args[1:], stdout)
 	}
 
 	flags := pflag.NewFlagSet("kubectl-liken-display", pflag.ContinueOnError)
 	flags.SetOutput(stderr)
-	// The help prints the verbs and an example first, then the flags,
-	// so a reader learns what the command does before how to call it.
-	// pflag's own usage prints the flags alone, so it is silenced here.
+	// printHelp prints the verbs and an example before the flags, so
+	// pflag's own usage, which prints only the flags, is turned off.
 	flags.Usage = func() {}
 	printHelp := func() {
 		fmt.Fprintln(stderr, usageText)
@@ -72,16 +68,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	format := flags.String("format", "mp4", formatUsage)
 	force := flags.Bool("force", false, forceUsage)
 
-	// The standard kube flags come from cli-runtime,
-	// and this getter turns them into a REST config; only context and
-	// kubeconfig are bound, so the help stays short.
+	// cli-runtime turns the kubeconfig flags into a REST config. Only
+	// --kubeconfig and --context are bound, to keep the help short.
 	config := genericclioptions.NewConfigFlags(true)
 	flags.StringVar(config.KubeConfig, "kubeconfig", *config.KubeConfig, kubeconfigUsage)
 	flags.StringVar(config.Context, "context", *config.Context, contextUsage)
 
 	if err := flags.Parse(args); err != nil {
-		// --help is not a failure. printHelp writes the usage, so the
-		// branch returns no error.
 		if errors.Is(err, pflag.ErrHelp) {
 			printHelp()
 			return nil
@@ -110,12 +103,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "completion":
 		return completionScript(argAt(positional, 1), stdout)
 	default:
-		return fmt.Errorf("unknown verb %q", positional[0])
+		return fmt.Errorf("unknown verb %q, want capture or completion", positional[0])
 	}
 }
 
-// argAt returns the positional argument at index, or an
-// empty string when the caller gave none.
 func argAt(positional []string, index int) string {
 	if index < len(positional) {
 		return positional[index]

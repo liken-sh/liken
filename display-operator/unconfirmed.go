@@ -1,16 +1,16 @@
 package main
 
-// Writes a device did not confirm.
+// Writes that a device did not confirm.
 //
-// A panel can take a write and read back another value, and a
-// compositor can start and serve another mode. A write repeated on
-// every pass against such a device repeats what a person sees: an
-// input banner, a resync blank, a restart of every screen on the
-// card. So the operator makes such a write once for each spec
-// generation and records the result in status. The record is in the
-// API server and not in memory, so a restarted operator reads it and
-// does not make the write again. An edit to spec raises the
-// generation, and the new generation starts with no record.
+// A panel can accept a write and then read back a different value, and
+// a compositor can restart and serve a different mode than the one
+// requested. Repeating such a write on every pass is visible on the
+// screen as an input banner, a blank while the panel resyncs, or a
+// restart of every screen on the card. So the operator makes each such
+// write once per spec generation and records the result in the
+// Display's status. A restarted operator reads that record from the
+// API server and does not write again. An edit to spec raises the
+// generation, which allows one more write.
 
 import (
 	"strconv"
@@ -18,11 +18,11 @@ import (
 	"time"
 )
 
-// One write the device did not confirm. Control names the control
-// in status.capabilities' spelling, or mode for the screen's mode.
-// Value is what the operator wrote, readback is what the device held
-// after the write, and message is the failure in the words of the
-// party that reported it.
+// DisplayUnconfirmed is one write that the device did not confirm.
+// Control is the control's name as status.capabilities spells it, or
+// mode for the screen's mode. Value is what the operator wrote, and
+// Readback is what the device reported afterwards. Message is the
+// error that explains why the operator stopped writing.
 type DisplayUnconfirmed struct {
 	Control    string `json:"control"`
 	Value      string `json:"value"`
@@ -32,8 +32,8 @@ type DisplayUnconfirmed struct {
 	Time       string `json:"time"`
 }
 
-// One declared value the operator wrote in a spec generation, and how
-// many writes the panel confirmed.
+// DisplayWritten counts the confirmed writes of one declared value to
+// one control in one spec generation.
 type DisplayWritten struct {
 	Control    string `json:"control"`
 	Value      string `json:"value"`
@@ -41,56 +41,59 @@ type DisplayWritten struct {
 	Count      int    `json:"count"`
 }
 
-// How many times the operator writes a declared value back after the
-// panel moved away from it, in one spec generation. The first write
-// does not count. A person who changes a value at the panel's own
-// buttons gets it written back, and a panel that switches the value by
-// itself, such as a panel that moves to the input that carries a
-// signal, stops getting writes after this many.
+// writeBackLimit is how many times in one spec generation the operator
+// writes a declared value back after the panel reports a different
+// value. The first write does not count. Writing back restores a value
+// that a person changed with the panel's buttons, and the limit stops
+// the operator from fighting a panel that changes the value itself,
+// such as one that switches to whichever input has a signal.
 const writeBackLimit = 3
 
-// The control name a mode write is recorded under. No DDC/CI control
-// has this name, so the two kinds of write never share an entry.
+// modeControl is the control name that records a mode write. No DDC/CI
+// control has this name, so mode records never collide with panel
+// control records.
 const modeControl = "mode"
 
-// The records of one Display for one pass. The pass starts from the
-// records of the current generation, adds and removes records while
-// it writes, and publishes the result in status.
-type unconfirmedLedger struct {
+// writeRecords holds the unconfirmed and confirmed writes of one Display
+// during one pass. The pass starts from the records of the current
+// generation in status, changes them as it writes, and publishes them to
+// status.
+type writeRecords struct {
 	generation int64
 	entries    []DisplayUnconfirmed
 	written    []DisplayWritten
 }
 
-// The records that apply now. A record of an earlier generation was
-// made against a spec that no longer stands, so the pass drops it.
-func ledgerOf(display *Display) *unconfirmedLedger {
-	ledger := &unconfirmedLedger{generation: display.Metadata.Generation}
+// writeRecordsOf reads the records in a Display's status that belong
+// to its current generation, and drops the records of earlier
+// generations.
+func writeRecordsOf(display *Display) *writeRecords {
+	records := &writeRecords{generation: display.Metadata.Generation}
 	for _, entry := range display.Status.Unconfirmed {
-		if entry.Generation == ledger.generation {
-			ledger.entries = append(ledger.entries, entry)
+		if entry.Generation == records.generation {
+			records.entries = append(records.entries, entry)
 		}
 	}
 	for _, entry := range display.Status.Written {
-		if entry.Generation == ledger.generation {
-			ledger.written = append(ledger.written, entry)
+		if entry.Generation == records.generation {
+			records.written = append(records.written, entry)
 		}
 	}
-	return ledger
+	return records
 }
 
-// Whether a value in a status record and a value this pass computed
-// name the same thing. They compare without case, because a record can
-// hold a power name in the lowercase form an earlier build wrote, and a
-// record that did not match would make a restarted operator write the
-// panel again. No two names of one control differ in case alone.
+// sameValue compares a value recorded in status with a value computed
+// in this pass, ignoring case. Status can hold a power name in
+// lowercase that an earlier version of the operator wrote, and a
+// mismatch would make the operator write to the panel again. No two
+// values of one control differ only in case.
 func sameValue(recorded, value string) bool {
 	return strings.EqualFold(recorded, value)
 }
 
-// How many confirmed writes of this value the control took in this
-// generation.
-func (l *unconfirmedLedger) writes(control, value string) int {
+// confirmedWrites returns how many confirmed writes of this value the
+// control has had in this generation.
+func (l *writeRecords) confirmedWrites(control, value string) int {
 	for _, entry := range l.written {
 		if entry.Control == control && sameValue(entry.Value, value) {
 			return entry.Count
@@ -99,8 +102,8 @@ func (l *unconfirmedLedger) writes(control, value string) int {
 	return 0
 }
 
-// Count one confirmed write.
-func (l *unconfirmedLedger) wrote(control, value string) {
+// countWrite counts one confirmed write of this value to the control.
+func (l *writeRecords) countWrite(control, value string) {
 	for i, entry := range l.written {
 		if entry.Control == control && sameValue(entry.Value, value) {
 			l.written[i].Count++
@@ -112,18 +115,18 @@ func (l *unconfirmedLedger) wrote(control, value string) {
 	})
 }
 
-// The counts as status publishes them, and nothing when there are
-// none.
-func (l *unconfirmedLedger) writtenPublished() []DisplayWritten {
+// publishedWrites returns the write counts for status, or nil when
+// there are none.
+func (l *writeRecords) publishedWrites() []DisplayWritten {
 	if len(l.written) == 0 {
 		return nil
 	}
 	return l.written
 }
 
-// Whether the operator already wrote this value to this control in
-// this generation, and the device did not confirm it.
-func (l *unconfirmedLedger) declined(control, value string) bool {
+// isUnconfirmed reports whether the operator already wrote this value to the
+// control in this generation and the device did not confirm it.
+func (l *writeRecords) isUnconfirmed(control, value string) bool {
 	for _, entry := range l.entries {
 		if entry.Control == control && sameValue(entry.Value, value) {
 			return true
@@ -132,9 +135,10 @@ func (l *unconfirmedLedger) declined(control, value string) bool {
 	return false
 }
 
-// Record one unconfirmed write. It replaces any record of the same
-// control, because one control holds one pending value.
-func (l *unconfirmedLedger) record(control, value, readback string, failure error, now time.Time) {
+// record stores one unconfirmed write. It replaces any earlier record
+// of the same control, because a control has one declared value at a
+// time.
+func (l *writeRecords) record(control, value, readback string, failure error, now time.Time) {
 	l.clear(control)
 	entry := DisplayUnconfirmed{
 		Control:    control,
@@ -149,9 +153,9 @@ func (l *unconfirmedLedger) record(control, value, readback string, failure erro
 	l.entries = append(l.entries, entry)
 }
 
-// Remove the record of one control. The operator does this when the
-// device holds the declared value, whoever put it there.
-func (l *unconfirmedLedger) clear(control string) {
+// clear removes the record of one control. The operator calls it when
+// the device already reports the declared value, whoever set it.
+func (l *writeRecords) clear(control string) {
 	kept := l.entries[:0:0]
 	for _, entry := range l.entries {
 		if entry.Control != control {
@@ -161,19 +165,19 @@ func (l *unconfirmedLedger) clear(control string) {
 	l.entries = kept
 }
 
-// The records as status publishes them. No record publishes nothing,
-// so a settled Display has no field and a steady pass writes nothing.
-func (l *unconfirmedLedger) published() []DisplayUnconfirmed {
+// publishedUnconfirmed returns the records for status, or nil when there
+// are none.
+func (l *writeRecords) publishedUnconfirmed() []DisplayUnconfirmed {
 	if len(l.entries) == 0 {
 		return nil
 	}
 	return l.entries
 }
 
-// One control's value in the spelling status uses: the published
-// name for a control with named values, and the number for a
-// continuous control.
-func spokenValue(code byte, raw uint16) string {
+// statusValue formats a raw control value as status spells it: the
+// published name for a control with named values, and the decimal
+// number for any other control.
+func statusValue(code byte, raw uint16) string {
 	if _, named := coreValues[code]; named {
 		return valueName(code, raw)
 	}

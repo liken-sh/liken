@@ -1,15 +1,9 @@
 package main
 
-// metrics.go holds what milestone 65 requires of every process in the
-// organization: the Go runtime's own series, one build_info gauge, and
-// the reconcile loop's duration, errors, and watch restarts. All three
-// live on one registry, so a scrape of /metrics reads them together.
-// displaymetrics.go adds the signals that are this operator's own.
-//
-// A scrape reads this registry and nothing else. Every Set and Inc
-// here happens on a pass that already walked sysfs, wrote a status, or
-// watched a socket for its own reason, so recording a reading costs no
-// second card, socket, D-Bus, or API call.
+// A scrape only reads the registry. Each Set and Inc happens in a pass
+// that already read sysfs, wrote a status, or watched a socket for its
+// own work, so a scrape never reads the card, a socket, D-Bus, or the
+// API server.
 
 import (
 	"context"
@@ -23,19 +17,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// metricsDeadline bounds a scrape's headers and the listener's stop.
+// metricsDeadline is the time a client has to send its request headers.
 const metricsDeadline = 30 * time.Second
 
-// defaultMetricsAddr is the port milestone 65 gives every process:
-// this operator runs on the pod network, not the host network, so it
-// takes no port of its own. The manifest states it in METRICS_ADDR
-// explicitly, so this default only matters to a binary run outside
-// the deployment.
+// defaultMetricsAddr is the metrics port of every liken process. The
+// pods use the pod network, so the port does not collide on the node.
+// The manifests set METRICS_ADDR too, so the default applies only to a
+// binary run outside them.
 const defaultMetricsAddr = ":9200"
 
-// reconcileKind names the resource kind a pass or a watch serves.
-// The label is bounded to these four, because milestone 65 forbids a
-// label with unbounded cardinality.
+// reconcileKind is the kind label of the reconcile and watch series.
+// It takes only the constants below, so the label's cardinality stays
+// bounded.
 type reconcileKind string
 
 const (
@@ -45,10 +38,9 @@ const (
 	kindPod           reconcileKind = "Pod"
 )
 
-// metrics is the registry the listener serves. Layer 1 and layer 2 are
-// declared here, under every process's own names; layer 3, this
-// operator's domain metrics, is declared in displaymetrics.go on the
-// same struct, so one registry answers for all three.
+// metrics is the registry that the listener serves and the series on
+// it. newDisplayMetrics in displaymetrics.go creates the series after
+// watchRestarts.
 type metrics struct {
 	registry *prometheus.Registry
 
@@ -62,9 +54,9 @@ type metrics struct {
 	observationSuccess *prometheus.GaugeVec
 	outputMode         *prometheus.GaugeVec
 	compositorRestarts *prometheus.CounterVec
-	// The compositor's own two series carry no label. One pod runs one
-	// compositor, and the PodMonitor's relabeling puts the node on
-	// every series this process serves.
+	// The two compositor series have no label because one pod runs one
+	// compositor. The PodMonitor's relabeling adds the node label to
+	// every series of this process.
 	compositorServing           prometheus.Gauge
 	compositorContainerRestarts prometheus.Counter
 	surfaces                    *prometheus.GaugeVec
@@ -72,12 +64,10 @@ type metrics struct {
 	panelBrightness             *prometheus.GaugeVec
 }
 
-// newProcessRegistry builds the registry and states this build's
-// identity on it. component and version are the two liken_build_info
-// labels every process in the organization carries, so one panel
-// lists every release running in the cluster. Every role of this
-// binary serves the same Go runtime series and the same gauge, and
-// this is the registry each one of them starts from.
+// newProcessRegistry returns a registry with the Go runtime and
+// process collectors and the liken_build_info gauge. Every liken
+// process serves liken_build_info with its component and version, so
+// one query lists every release that runs in the cluster.
 func newProcessRegistry(component, version string) *prometheus.Registry {
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(
@@ -94,7 +84,8 @@ func newProcessRegistry(component, version string) *prometheus.Registry {
 	return registry
 }
 
-// newMetrics adds the operator's own series to the process registry.
+// newMetrics returns the process registry with this operator's series
+// added.
 func newMetrics(component, version string) *metrics {
 	registry := newProcessRegistry(component, version)
 
@@ -122,10 +113,8 @@ func newMetrics(component, version string) *metrics {
 	return m
 }
 
-// reconciled times one pass and counts it if it failed. The caller
-// passes the function that does the pass's own work, so a duration
-// covers exactly what the pass did and nothing this file adds around
-// it.
+// reconciled runs pass, records its duration, counts it when it fails,
+// and returns its error. A nil *metrics runs pass and records nothing.
 func (m *metrics) reconciled(kind reconcileKind, pass func() error) error {
 	if m == nil {
 		return pass()
@@ -139,9 +128,9 @@ func (m *metrics) reconciled(kind reconcileKind, pass func() error) error {
 	return err
 }
 
-// watchRestarted counts one watch that the API server accepted after
-// an earlier one. The first watch of a process is not a restart, and a
-// refused watch is a retry, not a restart.
+// watchRestarted counts a watch that the API server accepted after the
+// first one of the same kind. informer.Options.Reopened calls it, and
+// does not call it for a refused watch.
 func (m *metrics) watchRestarted(kind reconcileKind) {
 	if m == nil {
 		return
@@ -149,9 +138,8 @@ func (m *metrics) watchRestarted(kind reconcileKind) {
 	m.watchRestarts.WithLabelValues(string(kind)).Inc()
 }
 
-// listen opens the address METRICS_ADDR names. An empty address
-// serves no metrics, which is every test in this repository and an
-// operator a person runs by hand with no listener at all.
+// listen opens a TCP listener on address. An empty address returns a
+// nil listener and no error.
 func (m *metrics) listen(address string) (net.Listener, error) {
 	if address == "" {
 		return nil, nil
@@ -159,17 +147,16 @@ func (m *metrics) listen(address string) (net.Listener, error) {
 	return net.Listen("tcp", address)
 }
 
-// handler serves the registry at /metrics and nothing else.
+// handler serves the registry at /metrics and no other path.
 func (m *metrics) handler() http.Handler {
 	served := http.NewServeMux()
 	served.Handle("/metrics", promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}))
 	return served
 }
 
-// serveMetrics answers on the listener until the run ends. A failure
-// here is logged and never fatal: the compositor and the DRA plugin
-// are the work this pod exists for, and neither depends on a scrape
-// succeeding.
+// serveMetrics serves scrapes until ctx ends. It logs a failure and
+// does not return it, because the compositor and the DRA plugin do not
+// depend on metrics.
 func serveMetrics(ctx context.Context, listener net.Listener, readings *metrics) {
 	serving := &http.Server{
 		Handler:           readings.handler(),
@@ -180,6 +167,6 @@ func serveMetrics(ctx context.Context, listener net.Listener, readings *metrics)
 		_ = serving.Close()
 	}()
 	if err := serving.Serve(listener); err != nil && ctx.Err() == nil {
-		slog.Warn("the metrics listener stopped", "error", err)
+		slog.Warn("The metrics listener stopped", "error", err)
 	}
 }

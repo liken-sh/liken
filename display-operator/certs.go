@@ -1,12 +1,12 @@
 package main
 
-// This file mints the one CA the display domain serves under and the
-// two leaves it signs: the API's own, for the Service's names, and
-// the sidecar's, for the name display-capture. The API mints its own
-// material at first start, so an install works with no cert-manager
-// and no step before the first request. An owner who runs
-// cert-manager writes the Secret display-api-tls instead, and the API
-// serves what it holds and mints nothing.
+// The API mints its own certificate authority (CA) at its first start,
+// so an install needs no cert-manager and no setup step before the
+// first request. The CA signs a leaf for the names of the API's
+// Service, and a leaf for the capture sidecars under the name
+// display-capture. An owner who runs cert-manager writes the Secret
+// display-api-tls instead, and the API serves that Secret's
+// certificate and mints nothing.
 
 import (
 	"crypto/ecdsa"
@@ -25,24 +25,22 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The CA lives ten years and a leaf lives one. A leaf is re-minted
-// once less than a third of its life remains, so a renewal has months
-// of margin and a pod that was down for a while still comes up with
-// a leaf that stands.
+// A leaf is renewed when less than a third of its life remains, so a
+// pod that was down for several months still starts with a valid leaf.
 const (
 	authorityLife = 10 * 365 * 24 * time.Hour
 	leafLife      = 365 * 24 * time.Hour
 )
 
-// The one SAN on the sidecar's leaf. The two leaves are told apart by
-// their SANs, and the API verifies a sidecar under this name because
-// a pod IP is not a name a certificate can carry across restarts.
+// sidecarName is the only SAN on the sidecar's leaf. The API checks the
+// sidecar's certificate against this name and not against the pod's IP
+// address, because a pod gets a new IP address when it restarts.
 const sidecarName = captureAudience
 
-// The Secret type Kubernetes defines for a serving certificate,
-// which requires tls.crt and tls.key. The API adds ca.crt beside
-// them, and ca.key in its own Secret alone, so a restart signs with
-// the CA it minted.
+// kubernetes.io/tls is the Secret type for a serving certificate, and
+// it requires tls.crt and tls.key. The API also writes ca.crt. It
+// writes ca.key only in the API's own Secret, so that after a restart
+// the API signs with the CA it minted.
 const (
 	tlsSecretType = "kubernetes.io/tls"
 	tlsCertKey    = "tls.crt"
@@ -51,16 +49,16 @@ const (
 	caKeyKey      = "ca.key"
 )
 
-// Secret and ConfigMap hold only the fields this program reads and
-// writes, the way displays.go holds Display.
+// objectMeta, Secret, and ConfigMap have only the fields that this
+// program reads and writes.
 type objectMeta struct {
 	Name            string `json:"name"`
 	Namespace       string `json:"namespace,omitempty"`
 	ResourceVersion string `json:"resourceVersion,omitempty"`
 }
 
-// A Secret's data is base64 on the wire, which is what a []byte
-// marshals to, so the PEM goes in and comes out as bytes.
+// Data is map[string][]byte because Secret data is base64 in JSON, and
+// encoding/json encodes a []byte as base64.
 type Secret struct {
 	APIVersion string            `json:"apiVersion,omitempty"`
 	Kind       string            `json:"kind,omitempty"`
@@ -69,8 +67,6 @@ type Secret struct {
 	Data       map[string][]byte `json:"data,omitempty"`
 }
 
-// A ConfigMap's data is plain text, so a client reads the trust
-// anchor with an ordinary get and never touches a Secret.
 type ConfigMap struct {
 	APIVersion string            `json:"apiVersion,omitempty"`
 	Kind       string            `json:"kind,omitempty"`
@@ -86,8 +82,8 @@ func configMapsPath(namespace string) string {
 	return "/api/v1/namespaces/" + namespace + "/configmaps"
 }
 
-// The authority holds the parsed certificate and key the API signs
-// with, and the PEM of both, which is what the Secret carries.
+// certificateAuthority is a CA's certificate and private key, parsed
+// for signing, and the PEM encoding of each that the Secret stores.
 type certificateAuthority struct {
 	certificate *x509.Certificate
 	key         *ecdsa.PrivateKey
@@ -95,8 +91,8 @@ type certificateAuthority struct {
 	keyPEM      []byte
 }
 
-// The CA is minted once, at the API's first start, and lives ten
-// years.
+// mintAuthority creates a self-signed CA that is valid for
+// authorityLife from now.
 func mintAuthority(now time.Time) (*certificateAuthority, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -118,11 +114,11 @@ func mintAuthority(now time.Time) (*certificateAuthority, error) {
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
 	if err != nil {
-		return nil, fmt.Errorf("signing the authority: %w", err)
+		return nil, fmt.Errorf("signing the authority certificate: %w", err)
 	}
 	certificate, err := x509.ParseCertificate(der)
 	if err != nil {
-		return nil, fmt.Errorf("reading the authority back: %w", err)
+		return nil, fmt.Errorf("parsing the signed authority certificate: %w", err)
 	}
 	keyPEM, err := privateKeyPEM(key)
 	if err != nil {
@@ -136,12 +132,13 @@ func mintAuthority(now time.Time) (*certificateAuthority, error) {
 	}, nil
 }
 
-// A leaf is a serving certificate for the names it is given, and it
-// lives one year.
+// mintLeaf creates a serving certificate for dnsNames, signed by the
+// CA and valid for leafLife from now, and returns it and its private
+// key as PEM.
 func (ca *certificateAuthority) mintLeaf(commonName string, dnsNames []string, now time.Time) (certPEM, keyPEM []byte, err error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, nil, fmt.Errorf("generating the leaf's key: %w", err)
+		return nil, nil, fmt.Errorf("generating the leaf certificate's key: %w", err)
 	}
 	serial, err := randomSerial()
 	if err != nil {
@@ -160,7 +157,7 @@ func (ca *certificateAuthority) mintLeaf(commonName string, dnsNames []string, n
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, ca.certificate, key.Public(), ca.key)
 	if err != nil {
-		return nil, nil, fmt.Errorf("signing the leaf: %w", err)
+		return nil, nil, fmt.Errorf("signing the leaf certificate: %w", err)
 	}
 	keyPEM, err = privateKeyPEM(key)
 	if err != nil {
@@ -169,19 +166,20 @@ func (ca *certificateAuthority) mintLeaf(commonName string, dnsNames []string, n
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), keyPEM, nil
 }
 
-// needsRenewal reports whether a leaf has less than a third of its
-// life left.
+// needsRenewal reports whether less than a third of the leaf's life
+// remains at now.
 func needsRenewal(leaf *x509.Certificate, now time.Time) bool {
 	life := leaf.NotAfter.Sub(leaf.NotBefore)
 	return 3*leaf.NotAfter.Sub(now) < life
 }
 
-// RFC 5280 asks for a serial number that is positive and unique
-// within one CA. A random 128-bit number plus one is both.
+// RFC 5280 requires a certificate's serial number to be positive and
+// unique among the certificates of one CA. A random number below 2^128,
+// plus one, is positive, and a collision is not a practical risk.
 func randomSerial() (*big.Int, error) {
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
-		return nil, fmt.Errorf("drawing a serial number: %w", err)
+		return nil, fmt.Errorf("generating a random serial number: %w", err)
 	}
 	return serial.Add(serial, big.NewInt(1)), nil
 }
@@ -189,26 +187,26 @@ func randomSerial() (*big.Int, error) {
 func privateKeyPEM(key *ecdsa.PrivateKey) ([]byte, error) {
 	der, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
-		return nil, fmt.Errorf("encoding a private key: %w", err)
+		return nil, fmt.Errorf("encoding a private key as PKCS #8: %w", err)
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), nil
 }
 
-// What the API serves from: the leaf, its key, the CA a client
-// trusts, and the expiry date the certificate gauge publishes.
+// servingMaterial is what the API serves TLS with: the leaf, its key,
+// the CA certificate that clients trust, and the leaf's expiry, which
+// the certificate expiry gauge reports.
 type servingMaterial struct {
 	CertPEM, KeyPEM []byte
 	CAPEM           []byte
 	Expires         time.Time
 }
 
-// ensureServingMaterial reads the Secret the API serves from and
-// mints it when it is absent.
+// ensureServingMaterial reads the Secret that the API serves from, and
+// creates it with a new CA and leaf when it does not exist.
 //
-// A Secret that carries no ca.key is an owner's, written by
-// cert-manager or by hand. The API serves what it holds, mints
-// nothing, and answers with no authority, and the caller decides
-// what a sidecar leaf means without one.
+// A Secret without ca.key belongs to the owner, who wrote it with
+// cert-manager or by hand. For such a Secret, it returns a nil
+// authority and mints nothing.
 func ensureServingMaterial(c *apiclient.Client, namespace, secretName string, names []string, now time.Time) (*servingMaterial, *certificateAuthority, error) {
 	held, err := apiclient.Get[Secret](c, secretsPath(namespace)+"/"+secretName)
 	if err == nil {
@@ -239,9 +237,10 @@ func ensureServingMaterial(c *apiclient.Client, namespace, secretName string, na
 		},
 	}
 
-	// A create that loses the race reads the winner, because two
-	// replicas that each minted a CA would serve two, and a client
-	// trusting one would refuse the other.
+	// When the create loses a race, use the Secret that won. Two
+	// replicas that each kept their own CA would serve certificates
+	// from different CAs, and a client that trusts one CA would reject
+	// the other replica.
 	err = writeObject(c, http.MethodPost, secretsPath(namespace), secret)
 	if errors.Is(err, apiclient.ErrConflict) {
 		winner, readErr := apiclient.Get[Secret](c, secretsPath(namespace)+"/"+secretName)
@@ -256,8 +255,8 @@ func ensureServingMaterial(c *apiclient.Client, namespace, secretName string, na
 	return readServingMaterial(secret)
 }
 
-// The material and the authority are read out of one Secret,
-// whichever party wrote it.
+// readServingMaterial reads the serving material from a Secret, and
+// the CA too when the Secret has ca.key.
 func readServingMaterial(secret *Secret) (*servingMaterial, *certificateAuthority, error) {
 	leaf, err := leafOf(secret)
 	if err != nil {
@@ -279,8 +278,8 @@ func readServingMaterial(secret *Secret) (*servingMaterial, *certificateAuthorit
 	return material, ca, nil
 }
 
-// A restarted API reads the CA back out of the Secret that holds it,
-// which is how it signs with the CA it minted.
+// readAuthority parses a CA from its PEM certificate and its PKCS #8
+// ECDSA private key.
 func readAuthority(certPEM, keyPEM []byte) (*certificateAuthority, error) {
 	certificate, err := parsePEM(certPEM)
 	if err != nil {
@@ -288,15 +287,15 @@ func readAuthority(certPEM, keyPEM []byte) (*certificateAuthority, error) {
 	}
 	block, _ := pem.Decode(keyPEM)
 	if block == nil {
-		return nil, fmt.Errorf("the authority's key holds no PEM block")
+		return nil, fmt.Errorf("the authority's private key contains no PEM block")
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("reading the authority's key: %w", err)
+		return nil, fmt.Errorf("parsing the authority's private key: %w", err)
 	}
 	key, ok := parsed.(*ecdsa.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("the authority's key is %T, not ECDSA", parsed)
+		return nil, fmt.Errorf("the authority's private key is %T, want ECDSA", parsed)
 	}
 	return &certificateAuthority{certificate: certificate, key: key, certPEM: certPEM, keyPEM: keyPEM}, nil
 }
@@ -308,25 +307,26 @@ func leafOf(secret *Secret) (*x509.Certificate, error) {
 func parsePEM(certPEM []byte) (*x509.Certificate, error) {
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
-		return nil, fmt.Errorf("the certificate holds no PEM block")
+		return nil, fmt.Errorf("the certificate contains no PEM block")
 	}
 	certificate, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("reading a certificate: %w", err)
+		return nil, fmt.Errorf("parsing a certificate: %w", err)
 	}
 	return certificate, nil
 }
 
-// ensureSidecarLeaf puts the sidecar's leaf, whose one SAN tells it
-// from the public leaf, into its own Secret, which every node's pod
-// mounts as an optional volume.
+// ensureSidecarLeaf writes the sidecar's leaf to its own Secret, which
+// the operator's pod on each node mounts as an optional volume. It
+// creates the Secret when it is missing, and replaces the leaf when the
+// leaf does not parse, has another SAN, or is due for renewal.
 func ensureSidecarLeaf(c *apiclient.Client, namespace, secretName string, ca *certificateAuthority, sanName string, now time.Time) error {
 	path := secretsPath(namespace) + "/" + secretName
 	held, err := apiclient.Get[Secret](c, path)
 	if err != nil && !errors.Is(err, apiclient.ErrNotFound) {
 		return err
 	}
-	if err == nil && sidecarLeafStands(held, sanName, now) {
+	if err == nil && sidecarLeafUsable(held, sanName, now) {
 		return nil
 	}
 
@@ -347,6 +347,9 @@ func ensureSidecarLeaf(c *apiclient.Client, namespace, secretName string, ca *ce
 	}
 	if held == nil {
 		err = writeObject(c, http.MethodPost, secretsPath(namespace), secret)
+		// A conflict means another API replica created the Secret
+		// first. Every replica signs with the CA in the API's own
+		// Secret, so the other replica's leaf is as valid as this one.
 		if errors.Is(err, apiclient.ErrConflict) {
 			return nil
 		}
@@ -356,9 +359,9 @@ func ensureSidecarLeaf(c *apiclient.Client, namespace, secretName string, ca *ce
 	return writeObject(c, http.MethodPut, path, secret)
 }
 
-// renewServingMaterial re-mints the public leaf once less than a
-// third of its life remains. While the leaf stands it answers nil,
-// so the caller writes nothing on an ordinary pass.
+// renewServingMaterial mints a new API leaf when the current one needs
+// renewal, writes it to the Secret, and returns the new material.
+// Otherwise it returns nil and writes nothing.
 func renewServingMaterial(c *apiclient.Client, namespace, secretName string,
 	ca *certificateAuthority, names []string, now time.Time) (*servingMaterial, error) {
 	path := secretsPath(namespace) + "/" + secretName
@@ -386,9 +389,10 @@ func renewServingMaterial(c *apiclient.Client, namespace, secretName string,
 	return material, err
 }
 
-// A leaf stands while its one SAN names the sidecar and it keeps
-// more than a third of its life, so a steady pass writes nothing.
-func sidecarLeafStands(secret *Secret, sanName string, now time.Time) bool {
+// sidecarLeafUsable reports whether the sidecar's Secret has a usable
+// leaf: one whose only SAN is sanName and that is not due for renewal.
+// It does not check which CA signed the leaf.
+func sidecarLeafUsable(secret *Secret, sanName string, now time.Time) bool {
 	leaf, err := leafOf(secret)
 	if err != nil {
 		return false
@@ -399,9 +403,8 @@ func sidecarLeafStands(secret *Secret, sanName string, now time.Time) bool {
 	return !needsRenewal(leaf, now)
 }
 
-// ensureTrustAnchor publishes the CA certificate alone in a
-// ConfigMap, so a client reads it with an ordinary get and never
-// touches a Secret.
+// ensureTrustAnchor writes the CA certificate, without the key, to a
+// ConfigMap, so a client can read it with no access to Secrets.
 func ensureTrustAnchor(c *apiclient.Client, namespace, configMapName string, caPEM []byte) error {
 	path := configMapsPath(namespace) + "/" + configMapName
 	held, err := apiclient.Get[ConfigMap](c, path)
@@ -417,10 +420,10 @@ func ensureTrustAnchor(c *apiclient.Client, namespace, configMapName string, caP
 	}
 	if held == nil {
 		err = writeObject(c, http.MethodPost, configMapsPath(namespace), anchor)
-		// A create that lost the race reads the winner once and takes
-		// it when it holds the same anchor. A winner that holds
-		// another anchor is overwritten with this one, and a second
-		// race has nothing new to answer.
+		// When the create loses a race, keep the winner if it has the
+		// same CA, and otherwise replace it. The replacement sends the
+		// winner's resourceVersion, so it fails with a conflict when
+		// another write came first.
 		if errors.Is(err, apiclient.ErrConflict) {
 			winner, readErr := apiclient.Get[ConfigMap](c, path)
 			if readErr != nil {
@@ -441,8 +444,6 @@ func ensureTrustAnchor(c *apiclient.Client, namespace, configMapName string, caP
 	return writeObject(c, http.MethodPut, path, anchor)
 }
 
-// A write reads nothing back, because the API holds what it sent and
-// the answer carries no new fact.
 func writeObject(c *apiclient.Client, method, path string, object any) error {
 	body, err := json.Marshal(object)
 	if err != nil {

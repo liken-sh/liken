@@ -1,9 +1,5 @@
 package main
 
-// These tests cover the Layout client: the read of the one Layout a
-// Display names, the listing a pass reads, and the watch that turns an
-// edited Layout into a wake.
-
 import (
 	"context"
 	"fmt"
@@ -11,10 +7,9 @@ import (
 	"testing"
 )
 
-// The front desk of the plan, as the API server serves it. The
-// fixture is JSON rather than a struct, because what these tests
-// prove is that the field names on the wire reach the fields this
-// program reads.
+// frontDeskJSON is a Layout as the API server returns it. It is JSON
+// and not a struct so that the test checks the field names on the wire
+// decode into the fields this program reads.
 const frontDeskJSON = `{
   "apiVersion": "display.liken.sh/v1alpha1",
   "kind": "Layout",
@@ -32,17 +27,17 @@ const frontDeskJSON = `{
   ]}
 }`
 
-func TestGetLayoutReadsTheLayoutADisplayNames(t *testing.T) {
+func TestGetLayoutReadsTheLayoutADisplayReferences(t *testing.T) {
 	client := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != LayoutsPath+"/front-desk" {
-			t.Errorf("the operator read %s, want the front-desk layout", r.URL.Path)
+			t.Errorf("the operator read %s, want the front-desk layout path", r.URL.Path)
 		}
 		fmt.Fprint(w, frontDeskJSON)
 	}))
 
 	layout, err := getLayout(client, "front-desk")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("getting the layout front-desk: %v", err)
 	}
 	if layout.Metadata.Name != "front-desk" {
 		t.Errorf("the layout is named %q, want front-desk", layout.Metadata.Name)
@@ -70,9 +65,9 @@ func TestGetLayoutReadsTheLayoutADisplayNames(t *testing.T) {
 	}
 }
 
-// The watch reopens its connection until the context ends, and a
-// context that ended is what stops it. Without that, a shutdown would
-// wait out the retry.
+// The watch retries a failed connection until the context ends. A
+// cancelled context must stop it, or shutdown would wait for the next
+// retry.
 func TestTheLayoutWatchEndsWithTheContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	watcher := testWatcher(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

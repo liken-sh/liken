@@ -1,16 +1,10 @@
 package main
 
-// A watch keeps this program's view of a collection current without a
-// timer. The API server sends each change to the collection as it
-// happens, and a watch with no change to send costs nothing. The
-// operator watches Displays, Layouts, and the pods on its node, and
-// display-api watches its capture sidecars, its two Secrets, and the
-// cluster's client authority.
-//
-// The shared informer package runs each watch on client-go's reflector,
-// and keeps the copy of the collection that a pass reads
-// (objectcache.go). The shared apiclient package sends every write, and
-// every read that a watch's copy does not answer.
+// Every watch in this program runs on client-go's reflector through
+// the informer package, which also keeps the copy of the collection
+// that a pass reads (objectcache.go). The operator watches Displays,
+// Layouts, and the pods on its node. display-api watches its capture
+// sidecars, its TLS Secrets, and the ConfigMap of the client CA.
 
 import (
 	"context"
@@ -31,27 +25,24 @@ var (
 	configMapResource = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
 )
 
-// wakeWatch starts a watch that turns a change to a collection into
-// one wake, and runs it until the context ends. The pass that follows
-// reads every object again from the watch's store, the same way every
-// other wake in this operator works, so the handler converts nothing.
-// With no handler of its own, the watch wakes on every change: a
-// Layout has no status, so each update to one is a person's edit. The
-// pod watch (openPods) and the Display watch (openDisplays) pass a
-// handler that wakes only on the changes their passes read.
+// wakeWatch watches one collection and calls wake on each change until
+// ctx ends. wake receives no object, because the pass it starts reads
+// the returned collection.
 //
-// The first read is a wake of its own, even a read that finds no
-// object. At a start, a pass can read the collection before the watch
-// does, and a change made between the two reads is in the watch's read
-// and in no event. A watch that the API server closed resumes from the
-// last version it delivered, so the API server sends each change made
-// during the gap as an event. When it cannot resume, after a 410 Gone,
-// the informer reads the collection again and reports each object as
-// an add, an update, or a delete. Either way each change wakes the
-// pass, and no change in the gap is lost.
+// A nil handler wakes on every add, update, and delete. openLayouts
+// uses it, because a Layout has no status and every update is an edit.
+// openPods and openDisplays pass a handler that wakes only on the
+// changes their passes read.
 //
-// Each watch the API server accepts after the first counts as one
-// restart on display_watch_restarts_total.
+// wake also runs once when the first list completes, even for an empty
+// list. A pass at startup can read the collection before that list,
+// and a change made in between shows up in the list and not as an
+// event.
+//
+// When the API server closes the watch, the informer resumes it from
+// the last resourceVersion, or lists again after a 410 Gone, so every
+// change still calls wake. Each watch opened after the first
+// increments display_watch_restarts_total.
 func wakeWatch(ctx context.Context, client dynamic.Interface, kind reconcileKind, source informer.Source,
 	handler cache.ResourceEventHandler, wake func(), readings *metrics) *informer.Collection {
 	if handler == nil {

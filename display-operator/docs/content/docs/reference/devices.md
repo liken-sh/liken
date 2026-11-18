@@ -6,25 +6,28 @@ toc: true
 
 # Devices
 
-`display-operator` publishes one
-[Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-device for each connector on the graphics card its pod claims
-from [`liken`](https://liken.sh/docs/). The device count follows the
-card's connectors, whether or not a monitor is plugged into each
-one. A cabled monitor that is asleep still answers its EDID,
-so its output publishes untainted and a claim on it starts a pod. An
-empty connector publishes with the `disconnected` taint, so a claim
-on it parks instead of failing.
+`display-operator` publishes the connectors of a node's graphics card
+as [Dynamic Resource Allocation (DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
+devices, so that a pod can claim a screen.
+[Put a window on a screen](/docs/guides/claim/) shows how.
 
-The operator publishes the devices into one
+The operator publishes devices for every connector on the card that
+its pod claims from [`liken`](https://liken.sh/docs/), whether or not
+a monitor is plugged in. A monitor that is cabled but asleep still
+returns its EDID, so its devices have no taint and a pod that claims
+one starts. A connector that has had no monitor since the operator
+started has the `display.liken.sh/disconnected` taint, so a pod that
+claims it stays `Pending` until a monitor is plugged in.
+
+The devices of a node are in one
 [`ResourceSlice`](https://kubernetes.io/docs/reference/kubernetes-api/resource/resource-slice-v1/)
-per node, named `<node>-display.liken.sh`, beside the slice `liken`
-itself publishes:
+named `<node>-display.liken.sh`, separate from the slice that `liken`
+publishes for the same node:
 
     kubectl get resourceslice <node>-display.liken.sh -o yaml
     spec:
       driver: display.liken.sh
-      nodeName: kitchen
+      nodeName: node-1
       devices:
         - name: hdmi-a-1
           attributes:
@@ -50,10 +53,10 @@ itself publishes:
 
 ## The device class
 
-A consumer claims through a
+A workload claims an output through a
 [`DeviceClass`](https://kubernetes.io/docs/reference/kubernetes-api/resource/device-class-v1/)
-that selects this driver. You create it, because a class a
-workload claims through is cluster policy, and this manual calls
+that selects this driver. You create the class, because the classes
+that workloads claim through are cluster policy. This manual calls
 it `display-output`:
 
     apiVersion: resource.k8s.io/v1
@@ -67,98 +70,99 @@ it `display-output`:
               device.driver == "display.liken.sh" &&
               has(device.attributes["display.liken.sh"].appId)
 
-The `appId` guard keeps the class on outputs, because the driver
-also publishes each panel's
-[control device](#the-control-device), which carries no `appId`.
+The `appId` check limits the class to output devices, because each
+connector also has devices that are not outputs. A
+[control device](#the-control-device) exists when the panel supports
+DDC/CI. A draw device, named like the output with a `-draw` suffix,
+has the `draw` attribute, the `connector`, and the monitor's
+`manufacturer`, `model`, `serial`, and `monitor.liken.sh/id`. Many
+claims can allocate a draw device at the same time, and each claim
+gets its own Wayland socket on that output, so other programs can draw
+on a screen that an output claim drives. Neither of these devices has
+`appId`.
 
-The class is yours to rename or narrow, the way a `StorageClass`
-is;
+You can rename or narrow the class, as you can a `StorageClass`.
 [Install the operator](/docs/guides/install/#2-the-device-classes)
-explains the split between the shipped wiring classes and this
-one, and its
+explains how this class differs from the classes the operator's own
+pod claims, and its
 [Generic or specific](/docs/guides/install/#generic-or-specific)
-section shows a class that names one screen. This generic class
-alone allocates any output that has a monitor. To name one screen
-from a claim instead, add a selector on the attributes below, as
+section shows a class that matches one screen. The generic class
+matches every output. To pick one screen in a claim instead, add a
+selector on the attributes below, as
 [Put a window on a screen](/docs/guides/claim/) shows.
 
-The other three classes from the install guide, `display-gpu`,
-`display-render`, and `display-i2c`, are not for consumers. They
-select the raw card node, the render node, and the card's
-monitor-control wires that `liken`'s own driver publishes, and the
-operator's own pod claims one of each. The pod cannot start without
-them.
-[Devices](https://liken.sh/docs/reference/devices/) in the `liken`
-manual describes those raw devices.
+The install guide also defines `display-gpu`, `display-render`, and
+`display-i2c`. Workloads do not claim these. They select the raw card
+node, the render node, and the card's i2c buses, which `liken`'s own
+driver publishes. The operator's pod claims one of each and does not
+start without them. [Devices](https://liken.sh/docs/reference/devices/)
+in the `liken` manual describes those devices.
 
 ## The attributes
 
-The device name is the connector in lowercase, because a DRA device
-name must be a DNS label. Every attribute except `connector` and
-`appId` comes from the monitor's EDID, which the operator reads from
-sysfs.
+The device name is the connector name in lowercase, because a DRA
+device name must be a DNS label. Most attributes come from the
+monitor's EDID, which the operator reads from sysfs. `modes` and
+`currentMode` come from the kernel, and `controlsBrightness` and
+`controlsPower` come from a DDC/CI probe of the panel.
 
 | Attribute | Type | What it is |
 |---|---|---|
-| `connector` | string | the kernel's connector name: `HDMI-A-1` |
-| `appId` | string | the connector in lowercase, delivered as `DISPLAY_APP_ID`: `hdmi-a-1`. Nothing routes by it, and the device class selects on it to keep the class on outputs |
-| `manufacturer` | string | the EDID's three-letter PNP id: `GSM` is LG |
-| `model` | string | the monitor name the EDID states |
-| `serial` | string | the serial the EDID states |
-| `widthPixels`, `heightPixels` | int | the preferred mode, which the compositor drives unless a claim states another |
-| `refreshMillihertz` | int | the preferred mode's refresh rate, in millihertz: a selector that wants 60 Hz exactly asks for `60000`, and a real monitor may answer `59999` |
+| `connector` | string | the connector name that the kernel uses: `HDMI-A-1` |
+| `appId` | string | the connector name in lowercase, `hdmi-a-1`. The operator also sets it as the `DISPLAY_APP_ID` environment variable of the claiming pod. The `display-output` class selects on it to match only outputs |
+| `manufacturer` | string | the three-letter PNP ID from the EDID: `GSM` is LG |
+| `model` | string | the monitor name in the EDID |
+| `serial` | string | the serial number in the EDID |
+| `widthPixels`, `heightPixels` | int | the preferred mode, which the compositor runs unless a claim sets another mode |
+| `refreshMillihertz` | int | the preferred mode's refresh rate, in millihertz. A monitor that runs at 60 Hz can report `59999`, so a selector for exactly `60000` does not match it |
 | `widthMillimeters`, `heightMillimeters` | int | the panel's physical size |
 | `modes` | string | the resolutions the monitor accepts, described below |
 | `currentMode` | string | the mode the output runs right now, described below |
-| `physicalAddress` | string | the HDMI-CEC physical address of the port this cable is in, `1.2.0.0`, from the EDID's HDMI vendor block. It follows the EDID on the wire now, so a dark connector publishes none; the [`Display`](/docs/reference/displays/#the-physical-address) keeps the last address |
-| `monitor.liken.sh/id` | string | the pairing identity, described below |
-| `controlsBrightness` | bool | the panel answered the brightness control over DDC/CI, described below |
-| `controlsPower` | bool | the panel answered the power control over DDC/CI, described below |
+| `physicalAddress` | string | the HDMI-CEC physical address of the port that the cable is plugged into, such as `1.2.0.0`, from the HDMI vendor block of the EDID. It is absent while the connector is disconnected, and when two connectors report the same monitor with different addresses. The [`Display`](/docs/reference/displays/#the-physical-address) keeps the last address |
+| `monitor.liken.sh/id` | string | the identity that pairs this screen with its speakers, described below |
+| `controlsBrightness` | bool | the panel responded to a brightness read over DDC/CI, described below |
+| `controlsPower` | bool | the panel responded to a power read over DDC/CI, described below |
 
 A selector reads an unqualified attribute through the driver's
 domain: `device.attributes["display.liken.sh"].model`.
 
-Only `connector` and `appId` are always present. The monitor's
-attributes leave when the monitor does, and a monitor that states
-nothing in a field publishes no attribute for it. A selector that
-reads a missing attribute fails the whole allocation, so guard every
-monitor attribute first:
+Only `connector` and `appId` are always present. A monitor whose EDID
+has no value for a field has no attribute for it. While a connector is
+disconnected, its device keeps the `manufacturer`, `model`, `serial`,
+and `monitor.liken.sh/id` of the monitor it last had, as
+[the taint](#the-taint) explains, and has none of the other monitor
+attributes. A selector that reads a missing attribute makes the whole
+allocation fail, so check each monitor attribute with `has()` first:
 
     has(device.attributes["display.liken.sh"].model) &&
     device.attributes["display.liken.sh"].model == "LG HDR WQHD"
 
 ## The modes
 
-`modes` holds the resolutions the kernel says the connector can
-drive, space joined, with the preferred mode first and the rest in
-descending order. A name carries no refresh rate, so a resolution
-the monitor accepts at both 60 Hz and 30 Hz appears once. The
-preferred mode is the same one `widthPixels`, `heightPixels`, and
-`refreshMillihertz` describe.
+`modes` lists the resolutions that the kernel reports for the
+connector, separated by spaces. The preferred mode is first and the
+rest follow in descending order. A resolution has no refresh rate in
+its name, so a resolution that the monitor accepts at both 60 Hz and
+30 Hz appears once. The output runs the preferred mode until a claim
+sets another.
 
-The preferred mode is the same one `widthPixels`, `heightPixels`,
-and `refreshMillihertz` describe, and it is what an output runs
-until a claim states another one.
-
-The list is one string because a device attribute holds one bool,
-int, string, or version, and no array. A selector asks with
-`.contains()`:
+The list is one string because a device attribute can hold a bool, an
+int, a string, or a version, and cannot hold an array. A selector
+checks it with `.contains()`:
 
     has(device.attributes["display.liken.sh"].modes) &&
     device.attributes["display.liken.sh"].modes.contains("3840x2160")
 
-The list can be shorter than the monitor's. The API stops a string
-attribute at 64 characters, so the value ends on the last whole
-resolution that fits, and the descending order makes the dropped
-tail the smallest ones. A monitor that accepts sixteen resolutions
-publishes about six. Read the attribute as the large modes the
-monitor accepts, never as the whole list.
+The API limits a string attribute to 64 characters, so the operator
+ends the value at the last whole resolution that fits, and the
+smallest resolutions can be missing. Treat the attribute as the larger
+modes that the monitor accepts, not as all of them.
 
-A claim selects one of these names with an opaque parameter this
-driver reads. The operator writes the name into the compositor's
-config and restarts the compositor, which is why every Wayland
-client on every output of that card ends when a claim states a
-mode. [Ask for a mode](/docs/guides/claim/#ask-for-a-mode) has the
+A claim picks a mode with an opaque parameter that this driver reads.
+The operator writes the mode into the compositor's configuration and
+restarts the compositor. That ends every Wayland client on every
+output of the card, so a claim that sets a mode interrupts the other
+screens. [Ask for a mode](/docs/guides/claim/#ask-for-a-mode) has the
 whole recipe and the warning.
 
     spec:
@@ -169,104 +173,105 @@ whole recipe and the warning.
               parameters:
                 mode: "1280x720"
 
-This driver reads three parameters, `mode`, `brightness`, and
-`power`, and a key it does not read fails the prepare, so a typo
-stops the pod instead of running a mode nobody asked for. The value
-of `mode` is a resolution name,
-spelled exactly as the kernel spells it, with an optional refresh
-after an `@`: `1280x720` takes whatever rate the compositor picks
-for that name, and `3840x1600@24` asks for the 24 Hz timing. The
-refresh is a whole number of hertz. `@59.94` fails the prepare,
-because the compositor reads a refresh as an integer and a
-fraction would fall back silently.
+The driver reads three parameters, `mode`, `brightness`, and
+`power`. A claim with any other key fails at prepare, so a typo stops
+the pod instead of running with a mode nobody asked for. The value of
+`mode` is a resolution name spelled as the kernel spells it, with an
+optional refresh rate after an `@`. `1280x720` uses the refresh rate
+that the compositor picks for that resolution, and `3840x1600@24`
+asks for the 24 Hz timing. The refresh rate is a whole number of
+hertz. `@59.94` fails at prepare, because the compositor reads the
+refresh rate as an integer and would silently drop the fraction.
 
-The mode is validated against the connector's own kernel mode list
-and never against this attribute, so a mode the attribute's
-64-character cut dropped is still a mode a claim can ask for. A
-name the connector does not offer fails the prepare, and the
-failure names the whole list. A refresh the connector does not
-offer for that name also fails the prepare, and the failure names
-the refreshes that exist. The whole list, with every refresh,
-is on the panel's [`Display`](/docs/reference/displays/) under
-`status.modes`, which has no length limit.
+The operator checks the mode against the connector's full kernel mode
+list, not against the `modes` attribute, so a claim can set a mode
+that the 64-character limit cut from the attribute. A resolution that
+the connector does not offer fails at prepare, and the error lists
+every resolution the connector offers. A refresh rate that the
+connector does not offer for that resolution also fails, and the error
+lists the refresh rates it does offer. The panel's
+[`Display`](/docs/reference/displays/) lists every mode with every
+refresh rate under `status.modes`, which has no length limit.
 
-A `DeviceClass` can carry the same block as cluster policy. The
-scheduler resolves the class's config and the claim's into one list
-on the allocation and marks each entry's source, and the claim's
-own choice wins over the class's, whichever order the two are
-listed in.
+A `DeviceClass` can carry the same `config` block as cluster policy.
+The scheduler merges the class's config and the claim's config into
+one list on the allocation and records where each entry came from. An
+entry from the claim wins over an entry from the class, in whichever
+order they are listed.
 
 ## The current mode
 
-`currentMode` is the mode the output runs right now, with its
-refresh: `3840x1600@24`. It is read from the card itself with the
-DRM `GETCRTC` ioctl on every reconcile pass, and the name stands
-alone when the card reports no refresh. It follows a claim's mode,
-and it is what shows the mode a released claim left behind, because
-releasing a claim restarts nothing.
+`currentMode` is the mode that the output runs now, with its refresh
+rate, such as `3840x1600@24`. On each pass of the reconcile loop the
+operator reads it from the graphics card with the DRM `GETCRTC` ioctl.
+When the card reports no refresh rate, the value is the resolution
+alone. The value changes when a claim sets a mode. After the claim is
+released, the output keeps running that mode, because releasing a
+claim does not restart the compositor.
 
-The attribute is absent while the output drives nothing, which
-covers a connector with no monitor and one the compositor left
-disabled, and absent when the card could not answer the ioctl. It
-is also absent while the operator holds no connection to a
-compositor, for example during a compositor restart. The operator
-opens the card only while it holds a connection to a compositor, so
-that its read cannot take DRM master from the compositor.
-Guard it with `has()`, like every other monitor attribute.
+The attribute is absent when the output shows nothing, because no
+monitor is connected or the compositor left the output disabled. It is
+also absent when the card does not respond to the ioctl, and while the
+operator has no connection to the compositor, for example while the
+compositor restarts. The operator opens the card only while it is
+connected to a compositor, so that its read cannot take DRM master
+away from the compositor.
 
 ## The pairing identity
 
-`monitor.liken.sh/id` pairs a screen with that screen's speakers,
-which the [audio operator](https://liken.sh/audio/) publishes from
-the same monitor's HDMI ELD. Both drivers build the value the same
-way, byte for byte, because the scheduler compares them under a
-`matchAttribute` constraint. The value is the lowercase PNP id, the
-four-digit hexadecimal product code, then the lowercase monitor name
-with each run of spaces turned to one dash. An LG ultrawide reads
-`gsm-5b09-lg-ultrawide`. A monitor with no name keeps the two-part
-form, `boe-095f`. Two monitors of one model share one value, so
-either pairing satisfies a constraint.
+`monitor.liken.sh/id` lets one claim take a screen and that screen's
+speakers. The [audio operator](https://liken.sh/audio/) publishes the
+speakers from the ELD of the same monitor's HDMI connection. Both
+drivers build the value in the same way, because the scheduler
+compares the two values in a `matchAttribute` constraint. The value is
+the lowercase PNP ID, the four-digit hexadecimal product code, and the
+lowercase monitor name, joined by dashes. Each run of spaces in the
+name becomes one dash. An LG ultrawide monitor has the value
+`gsm-5b09-lg-ultrawide`. A monitor with no name has only the first two
+parts, such as `boe-095f`. Two monitors of the same model have the
+same value, so a constraint can match either of them.
 
-The attribute has its own domain because an unqualified name
-belongs to the driver that published it. A bare `model` here and a
-bare `model` in the audio driver's slice would never match.
+The attribute has its own domain, `monitor.liken.sh`, because an
+unqualified attribute name belongs to the driver that published it.
+A `model` attribute in this driver's slice and a `model` attribute in
+the audio driver's slice are different attributes, and a constraint
+never matches them.
 
-The identity needs the manufacturer, so a monitor whose EDID states
-no readable manufacturer publishes no `monitor.liken.sh/id` at all,
-even while it is connected. A value without the manufacturer would
-match every other monitor that also states none. Guard a selector
-on this attribute with `has()`, like every other monitor attribute.
+A monitor whose EDID has no readable manufacturer has no
+`monitor.liken.sh/id`, even when it is connected, because the value
+would then be the same as that of every other monitor with no
+manufacturer.
 
 ## The panel's controls
 
-A monitor's brightness and power live in the panel, not in the
-graphics card, and DDC/CI is the channel that reaches them: a slow
-serial protocol on two wires of the display cable, speaking to the
-same settings as the buttons on the monitor's bezel. Support is per
-panel. Of two monitors on one lab machine, one answers the protocol
-and one refuses it, and a panel that answers at all may still carry
-only some controls.
+A monitor keeps its brightness and power settings in the panel, not
+in the graphics card. DDC/CI reads and writes them. It is a slow
+serial protocol on two wires of the display cable, and it changes the
+same settings as the buttons on the monitor. Support differs between
+panels. One monitor can support DDC/CI and another on the same machine
+can refuse it, and a panel that supports it can support only some of
+the controls.
 
-So the operator asks instead of assuming. At inventory it probes each
-connected panel, read-only: it reads the panel's own feature list,
-the MCCS capability string, and asks each declared core control for
-its value. Two of the answers publish on the devices as attributes:
+So the operator probes each connected panel. The probe only reads. It
+reads the panel's capability string, which is the MCCS list of the
+controls the panel supports, and it reads the value of each core
+control that the panel lists. Two results appear on the device as
+attributes:
 
-* `controlsBrightness`: the panel answered VCP code `0x10`.
-* `controlsPower`: the panel answered VCP code `0xD6`.
+* `controlsBrightness`: the panel responded to a read of VCP code `0x10`.
+* `controlsPower`: the panel responded to a read of VCP code `0xD6`.
 
-Each attribute is present and true, or absent. The whole list,
-brightness and power beside contrast, sharpness, color preset, input
-source, and the audio controls, publishes on the panel's
-[`Display`](/docs/reference/displays/) under `status.capabilities`.
-The probe runs once per monitor and its answer is cached against the
-monitor's EDID, so steady hardware costs no bus traffic. A panel
-that refused the probe is asked again about once a minute, because
-DDC/CI can arrive later than the panel: an input switch or a menu
-toggle turns it on with no event the operator could see.
+An attribute is either present and true, or absent. The full list of
+controls is on the panel's [`Display`](/docs/reference/displays/)
+under `status.capabilities`. It covers brightness and power, and also
+contrast, sharpness, color preset, input source, and the audio
+controls. The operator caches the probe result against the monitor's
+EDID, so the same monitor is probed once. A panel that refused is
+probed again about once a minute, because DDC/CI can become available
+later without any event that the operator can see. Switching the
+monitor's input or changing a setting in its menu can turn it on.
 
-A claim sets two opaque parameters, beside
-`mode`:
+A claim can set two more opaque parameters beside `mode`:
 
     spec:
       devices:
@@ -277,66 +282,63 @@ A claim sets two opaque parameters, beside
                 brightness: 87
                 power: OnWhileClaimed
 
-`brightness` is a whole number from 0 to 100, a percentage of the
-panel's own maximum, because one panel counts its scale to 100 and
-another to 255. The operator reads the brightness at prepare, sets it
-when the panel holds another value, and reads it back. A readback
-that disagrees fails the claim, because a panel acknowledges a write
-whether it applies the value or not.
+`brightness` is a whole number from 0 to 100. It is a percentage of
+the panel's own maximum, because some panels count to 100 and others
+to 255. At prepare the operator reads the panel's brightness, writes
+the new value if it differs, and reads it back. If the value that it
+reads back differs, the claim fails, because a panel can acknowledge
+a write and not apply it.
 
-`power` takes two values, `On` and `OnWhileClaimed`. It also takes
-the lowercase `on` and `onWhileClaimed`, with the same meaning. `On`
-powers the panel on at prepare and never touches it again.
-`OnWhileClaimed` also powers the panel back
-down 30 seconds after the claim ends, for a claimant that owns the
-screen outright. A `Deployment` that replaces its pod ends one claim
-and makes another, so a prepare on the same connector inside the 30
-seconds cancels the power-down, and the screen does not blink on a
-rollout. The operator records the pending power-down in its pod's
-config volume, so an operator container restart inside the 30
-seconds starts the period again. The power-down reads the power mode
-first and writes nothing to a panel that is already down. It writes
-standby first and falls back to off, because some panels implement
-only a subset of the power values.
+`power` takes `On` or `OnWhileClaimed`. The lowercase forms `on` and
+`onWhileClaimed` mean the same. `On` powers the panel on at prepare
+and does not touch it again. `OnWhileClaimed` also powers the panel
+down 30 seconds after the claim ends. Use it when the claiming
+workload is the only user of the screen. A `Deployment` that replaces
+its pod ends one claim and creates another. If the new claim is
+prepared on the same connector within the 30 seconds, the operator
+cancels the power-down, so the screen does not turn off during a
+rollout. The operator records the pending power-down in the config
+volume of its pod, so when the operator container restarts within the
+30 seconds, the 30 seconds start again. Before the power-down, the
+operator reads the power mode and writes nothing if the panel is
+already off. It writes standby first and then off, because some
+panels support only one of the two values.
 
-At prepare, the operator reads the power mode before it writes it,
-and a panel that is already on takes no write. A panel that does not
-answer the read takes no write, and the prepare fails with the
-read's error.
+At prepare, the operator reads the power mode before it writes
+anything, and it does not write to a panel that is already on. If the
+panel does not respond to the read, the operator writes nothing and
+the prepare fails with the error of the read.
 
-For a claim, the operator writes to a panel only when the claim
-states one of these parameters. A claim with no parameters changes
-nothing, at prepare or after. The panel's
-[`Display`](/docs/reference/displays/) is the declarative write
-path beside this one: a resting declaration or an override there is
-also written by the operator, and only the operator.
+A claim with none of these parameters changes nothing on the panel, at
+prepare or afterward. The other way to set a panel is its
+[`Display`](/docs/reference/displays/): when you set a value
+or an override in its spec, the operator writes it to the panel.
 
-The scheduler reads no opaque parameter, so a selector is what keeps
-a claim off a panel that cannot serve it. Select on the attribute
-that matches the parameter you state:
+The scheduler does not read opaque parameters, so only a selector
+keeps a claim off a panel that cannot do what the claim asks. Select
+on the attribute that matches the parameter that the claim sets:
 
     has(device.attributes["display.liken.sh"].controlsBrightness) &&
     device.attributes["display.liken.sh"].controlsBrightness
 
-A claim that states a parameter anyway, on a panel with no matching
-attribute, fails at prepare with the missing capability named.
+A claim that sets a parameter on a panel without the matching
+attribute fails at prepare, and the error names the missing control.
 
 ## The control device
 
-A connector whose panel answered at least one control publishes a
-second device, named after the output with a `-control` suffix:
-`hdmi-a-2` and `hdmi-a-2-control`. Its claim is for a pod that drives
-the panel itself while it runs, with its own `ddcutil` and its own
-protocol code, rather than a value stated once at prepare. For a
-panel that only needs its settings held or temporarily overridden,
-the [`Display`](/docs/reference/displays/) does the same job with no
-wire handover: state the desire on the resource, and the operator
-writes it.
+A connector whose panel responded to at least one control has a
+control device, named like the output with a `-control` suffix:
+`hdmi-a-2` and `hdmi-a-2-control`. A pod claims it to send its own
+DDC/CI commands to the panel while the pod runs, with `ddcutil` or its
+own protocol code. A claim for the output, by contrast, sets a value
+once at prepare. If a panel only needs a setting kept or overridden
+for a while, use the panel's [`Display`](/docs/reference/displays/)
+instead: you set the value on the resource, the operator writes it,
+and no pod needs access to the bus.
 
-The control device's attributes are `connector`, the
-`monitor.liken.sh/id` pairing identity, the two control booleans, and
-`control`, a marker that is always true. A class selects on the
-marker:
+The control device has the attributes `connector`,
+`monitor.liken.sh/id`, `controlsBrightness`, `controlsPower`, and
+`control`, which is always true. A class selects on `control`:
 
     apiVersion: resource.k8s.io/v1
     kind: DeviceClass
@@ -349,139 +351,147 @@ marker:
               device.driver == "display.liken.sh" &&
               has(device.attributes["display.liken.sh"].control)
 
-Like `display-output`, this class is yours to create and to narrow;
-the operator ships no consumer class. The pairing identity is on both
-of the connector's devices, so one claim takes a screen and its
-control channel with a `matchAttribute` constraint across its two
-requests.
+Like `display-output`, you create this class and can narrow it. The
+operator ships no class for workloads. The output and the control
+device of a connector both have `monitor.liken.sh/id`, so one claim
+can take a screen and its control device with a `matchAttribute`
+constraint across its two requests.
 
-A prepared control claim delivers two things and performs no write:
+When a control claim is prepared, the operator writes nothing to the
+panel and gives the pod:
 
 | What | Value |
 |---|---|
 | device node | the connector's `/dev/i2c-N`, read-write |
 | `DISPLAY_CONTROL_BUS` | that node's path |
 
-Read the bus from the variable, never guess the number: the kernel
-numbers i2c adapters in the order it registers them, and the number
-holds for one boot only.
+Read the bus path from the variable and do not assume the number. The
+kernel numbers i2c adapters in the order it registers them, so a
+number is valid only until the next boot.
 
-The three parameters above act on outputs, and a control request
-takes none of them. A config block that names no request applies to
-every request in a claim, so a claim that asks for a screen and its
-control channel together must name the screen's request on the block
-that states the parameters, or the prepare fails.
+A control request accepts none of the `mode`, `brightness`, and
+`power` parameters. A config block that names no request applies to
+every request in the claim, so when one claim requests a screen and
+its control device, the config block that sets the parameters must
+name the screen's request, or the prepare fails.
 
 **Do not write to any i2c address other than `0x37`, the DDC/CI
-address.** The node is the connector's whole i2c bus, and the
-monitor's EDID EEPROM answers on the same bus at address `0x50`. On
-some panels that EEPROM accepts writes, and a write corrupts the
-monitor's identity block on every machine it ever plugs into, until
-someone reprograms the chip. Tools built for DDC/CI, such as
-`ddcutil`, stay on the right address.
+address.** The device node is the connector's whole i2c bus, and the
+monitor's EDID EEPROM is on the same bus at address `0x50`. On some
+panels that EEPROM accepts writes. A write corrupts the monitor's
+identity data, on every machine the monitor is plugged into
+afterward, until someone reprograms the chip. Tools made for DDC/CI,
+such as `ddcutil`, use the correct address.
 
-**One writer per wire.** The operator itself writes this bus for two
-of its surfaces, a claim on the same connector that states
-`brightness` or `power`, at prepare and at unprepare, and the
-panel's [`Display`](/docs/reference/displays/), whenever its spec
-diverges from the panel. The i2c layer does not arbitrate between
-two userspace writers. So on a screen whose control device a pod
-holds, the holder owns the panel: no claim states `power`, no
-`Display` spec declares a resting value, and no writer sets an
-override there. A claim may still state `brightness`. That write
-lands once at the claim's prepare, and a holder that dims the panel
-restores the value it last read from the panel, so the two writers
-never pull in opposite directions.
+**Only one writer may use the bus at a time.** The operator writes to
+this bus for a claim on the same connector that sets `brightness` or
+`power`, at prepare and at unprepare, and for the panel's
+[`Display`](/docs/reference/displays/) whenever its spec differs from
+the panel. The i2c layer does not arbitrate between two userspace
+writers, and the operator does not stop you from setting both. So
+while a pod holds the control device of a screen, do not set `power`
+in another claim on that screen, and do not set a value or an
+override in its `Display`. A claim can still set `brightness`, because
+that write happens once, at the claim's prepare. A pod that holds the
+control device and dims the panel should afterward restore the
+brightness it last read from the panel.
 
-The operator's own exchanges with one panel take turns. A claim's
-prepare, the `Display` pass, the probe, and a restore each wait for
-the bus, and each waits 50 ms after the last one ends, because a
-panel holds one reply at a time and needs that gap before the next
-message.
+The operator's own exchanges with one panel run one at a time. A
+claim's prepare, the `Display` pass, the probe, and a restore each
+wait for the bus. Each also waits 50 ms after the previous exchange
+ends, because a panel handles one message at a time and needs that
+gap before the next one.
 
-The control device exists only while a monitor is connected. It
-takes the `disconnected` taint when a different monitor replaced the
-one the connector carried, the same as the output beside it. It does
-not take the taint when no compositor answers, because the i2c bus
-reaches the panel with no compositor running. A claim that holds only control devices prepares while the
-compositor restarts, and its pod keeps running through the restart.
-A claim that also holds an output or a draw device waits for the
-compositor, because those devices deliver a Wayland socket.
+The control device exists only while a monitor is connected, so it
+gets the `disconnected` taint only when a different monitor replaces
+the one that the connector had. It does not get the taint while the
+compositor is down, because the i2c bus reaches the panel without a
+compositor. A claim that holds only control devices is prepared while
+the compositor restarts, and its pod keeps running through the
+restart. A claim that also holds an output or a draw device waits for
+the compositor, because those devices give the pod a Wayland socket.
 
 ## The taint
 
-`display.liken.sh/disconnected`, with effect `NoExecute`, is the one
-taint a device has, and it means the output can serve nobody
-right now. It appears in two cases:
+`display.liken.sh/disconnected`, with effect `NoExecute`, is the only
+taint that this driver sets. It means that no workload can use the
+output now. The operator sets it in these cases:
 
-* the connector has no screen behind it. Either nothing is in it, or
-  this operator has not seen a monitor on it since it started. A
-  different monitor arriving on the connector taints it too, because
-  the claim on it asked for the monitor that left,
-* nothing answers on the compositor's socket, which covers the
-  moment before the compositor's container is up and every restart
-  of the compositor. The compositor's container starts weston again
-  after a restart the operator orders, the kubelet restarts the
-  container after a crash, and the taint lifts on the pass that finds
-  the socket answering.
-  This case taints the output and draw devices only. A control
-  device delivers an i2c node, which needs no compositor. An output
-  whose claim is still preparing is not tainted either: a claim that
-  states a mode restarts the compositor during its prepare, and its
-  pod has started nothing that the restart could end.
+* The connector has had no monitor since the operator started.
+* A different monitor appears on the connector. The taint stays for
+  90 seconds, because a claim on that connector was allocated for the
+  monitor that left, and the taint-eviction controller must read the
+  taint and evict the pod.
+* The compositor does not respond on its socket. This is the case
+  before the compositor's container is running and during every
+  compositor restart. After a restart that the operator orders, the
+  compositor's container starts weston again. After a crash, the
+  kubelet restarts the container. In both cases the operator removes
+  the taint on the first pass that finds the compositor responding.
+  Only output and draw devices get the taint in this case, because a
+  control device gives the pod an i2c node, which needs no compositor.
+  An output whose claim is still preparing does not get the taint
+  either, because a claim that sets a mode restarts the compositor
+  during its prepare, before the pod has started anything that the
+  restart could end.
 
-A connector that carried a monitor and then went dark is not one of
-them. It keeps that monitor for as long as it stays dark, and the
-slice keeps publishing the monitor's identity, so the claim on that
-screen still allocates and the pod on it keeps running. A monitor
-that shows another input drops hot plug detect, and the kernel
-reports that exactly as it reports a cable somebody pulled out. An
-A/V receiver does the same for about eighty seconds on every input
-change. Nothing on the wire tells the two apart, so the operator
-keeps the screen and the `Connected` condition on the `Display`
-reports what the wire says.
+A connector that had a monitor and then reads disconnected does not
+get the taint. The operator keeps that monitor's identity for as long
+as the connector stays disconnected, so the claim on that screen still
+allocates and the pod on it keeps running. The reason is that the
+kernel reports a monitor that switches to another input the same way
+as a pulled cable, because the monitor drops hot plug detect. An A/V
+receiver does the same while it renegotiates its HDMI link after each
+input change.
+The cost is that a monitor that someone really unplugged keeps its
+devices claimable, and the pod on it keeps drawing to a screen that
+is not there. The `Connected` condition on the `Display` reports what
+the kernel reads.
 
-The cost is that a monitor somebody really unplugged keeps its
-devices claimable, and the pod on it keeps drawing into nothing.
-Read `Connected` on the `Display` to see the wire.
+A workload that must survive a short disconnection sets
+`tolerationSeconds` on its toleration. That is how long the pod can
+stay on a screen that has the taint before the taint-eviction
+controller evicts it. Thirty seconds covers a cable that is plugged in
+again and a restart of the operator.
 
-A consumer tolerates it with a `tolerationSeconds`, which is how
-long the pod may hold a dark screen before the eviction controller
-ends it. Thirty seconds covers a reseated cable and an operator
-restart. The operator taints a device and never deletes it: the
-allocation on a running claim names the device, and a device removed
-from the slice would strand the kubelet's prepare retries.
+The operator taints a device and never deletes it. The allocation of
+a running claim names the device, and if the operator removed the
+device from the slice, the kubelet's retries of the prepare would
+never succeed.
 
-## What a prepared claim delivers
+## What the container receives
 
-An output's delivery is a mount and three environment variables,
-which the runtime applies to the container. It has no device node,
-because a Wayland client draws through the compositor, which holds
-the card. A control device's delivery is the node and the variable
-the [control device](#the-control-device) section lists.
+For an output or a draw device, the operator gives the container a
+mount and three environment variables, and the container runtime
+applies them. There is no device node, because a Wayland client draws
+through the compositor, and the compositor holds the card. For a
+control device, the container receives the device node and the
+variable that [the control device](#the-control-device) lists.
 
 | What | Value |
 |---|---|
-| mount | `/var/run/display.liken.sh`, read-write, the same path as on the host |
+| mount | `/var/run/display.liken.sh`, read-write, at the same path as on the host |
 | `XDG_RUNTIME_DIR` | `/var/run/display.liken.sh` |
-| `WAYLAND_DISPLAY` | `wayland-<the claim's UID>`, a socket the compositor opened for this claim |
-| `DISPLAY_APP_ID` | the allocated output's name; nothing reads it, and a later release stops delivering it |
+| `WAYLAND_DISPLAY` | `wayland-<the claim's UID>`, a socket that the compositor opened for this claim |
+| `DISPLAY_APP_ID` | the name of the allocated output. The compositor does not route by it. The operator sets it for images that pass it to their toolkit, and it may be removed in a later release |
 
-The socket is the identity. A window that arrives on it belongs to
-this claim, and nothing in the container can name another claim's
-socket.
+The compositor identifies a claim by the socket that a window
+connects on, so every window on that socket belongs to the claim, and
+a container cannot name the socket of another claim.
 
-A claim that allocates two outputs into one container delivers two
-sockets and two app-ids, and only the last of each survives. One
-container drives one screen; a pod that drives two screens runs two
-containers, each naming its own request.
+A claim that allocates two outputs for one container sets
+`WAYLAND_DISPLAY` and `DISPLAY_APP_ID` twice, and only the last
+value of each takes effect, so a container can draw on one screen. A
+pod that draws on two screens needs two containers, each referring to
+its own request.
 
-## The slice's lifetime
+## The lifetime of the slice
 
-The operator creates its slice on the first pass, rewrites it when
-it differs from sysfs, and never deletes it. The `Node` owns the
-slice, so a node that leaves the cluster takes the slice with it.
-The slice outlives the operator's pod on purpose, so removing the
-operator for good ends with:
+The operator creates its slice on its first pass and rewrites the
+slice whenever it differs from what the operator reads. It never
+deletes the slice. The `Node` owns the slice, so when a node leaves
+the cluster, Kubernetes deletes the slice with it. The slice stays
+after the operator's pod is gone. When you remove the operator for
+good, delete the slice yourself:
 
     kubectl delete resourceslice <node>-display.liken.sh

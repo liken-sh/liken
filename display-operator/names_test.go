@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-func TestDeviceNameIsTheConnectorAsADNSLabel(t *testing.T) {
+func TestDeviceNameIsTheLowercaseConnector(t *testing.T) {
 	cases := []struct {
 		connector string
 		want      string
@@ -16,9 +16,6 @@ func TestDeviceNameIsTheConnectorAsADNSLabel(t *testing.T) {
 			if got := deviceName(c.connector); got != c.want {
 				t.Fatalf("deviceName = %q, want %q", got, c.want)
 			}
-			// Version 0 routes by the device name, so the two agree by
-			// construction and a claim's DISPLAY_APP_ID is readable
-			// from the allocation alone.
 			if got := appID(c.connector); got != c.want {
 				t.Fatalf("appID = %q, want %q", got, c.want)
 			}
@@ -40,33 +37,26 @@ func TestControlNameIsTheOutputsNameWithASuffix(t *testing.T) {
 			if got := controlName(c.connector); got != c.want {
 				t.Fatalf("controlName = %q, want %q", got, c.want)
 			}
-			// An allocation result carries a device name and nothing
-			// else, so prepare works the connector's two devices apart
-			// with this one read.
 			output, control := outputOfControl(c.want)
 			if !control || output != deviceName(c.connector) {
-				t.Fatalf("outputOfControl(%q) = %q, %v", c.want, output, control)
+				t.Fatalf("outputOfControl(%q) = %q, %v, want %q, true", c.want, output, control, deviceName(c.connector))
 			}
 		})
 	}
 }
 
 func TestOutputOfControlLeavesAnOutputsNameAlone(t *testing.T) {
-	// The kernel names a connector after its type and its index, so no
-	// output device's name ends in the suffix.
 	output, control := outputOfControl("hdmi-a-1")
 	if control || output != "hdmi-a-1" {
-		t.Fatalf("outputOfControl = %q, %v", output, control)
+		t.Fatalf("outputOfControl(%q) = %q, %v, want %q, false", "hdmi-a-1", output, control, "hdmi-a-1")
 	}
 }
 
-// These are the pairing vectors. The audio operator holds this same
-// table against its own derivation from the ELD, and the two suites
-// together prove the drivers produce the same values. A
-// matchAttribute constraint compares the values byte for byte, so a
-// one-character difference parks every pairing claim forever. Change
-// a row here only with the same row changed there.
-func TestMonitorIDPairsAScreenWithItsSpeakers(t *testing.T) {
+// audio-operator tests the same table against the value it builds from
+// the ELD. Change a row here only together with the same row there,
+// because a matchAttribute constraint compares the values byte for
+// byte.
+func TestMonitorIDMatchesTheAudioOperatorsValueForTheSameMonitor(t *testing.T) {
 	cases := []struct {
 		name string
 		edid EDID
@@ -78,9 +68,8 @@ func TestMonitorIDPairsAScreenWithItsSpeakers(t *testing.T) {
 			want: "gsm-5b09-lg-ultrawide",
 		},
 		{
-			// A nameless panel takes the two-part form, never a
-			// trailing dash and never an empty value, because those
-			// two parts are what the ELD also holds.
+			// With no name, the value has two parts and no trailing
+			// dash, because the ELD has only those two parts.
 			name: "a monitor with no name",
 			edid: EDID{Manufacturer: "BOE", ProductCode: 0x095f},
 			want: "boe-095f",
@@ -91,9 +80,9 @@ func TestMonitorIDPairsAScreenWithItsSpeakers(t *testing.T) {
 			want: "del-a0c5-dell-u2415",
 		},
 		{
-			// An empty value publishes no attribute at all, which
+			// An empty value publishes no attribute, as
 			// TestSliceDevicesPublishesNoPairingIDWithoutAManufacturer
-			// holds to.
+			// checks.
 			name: "a manufacturer that does not decode",
 			edid: EDID{ProductCode: 0x095f, ModelName: "Panel"},
 			want: "",
@@ -114,30 +103,28 @@ func TestMonitorIDPairsAScreenWithItsSpeakers(t *testing.T) {
 }
 
 func TestMonitorIDCollapsesRunsOfSpaces(t *testing.T) {
-	// Two spaces between words make one dash, not two. A monitor that
-	// pads its name descriptor mid-string is where this shows up.
+	// A run of spaces becomes one dash. Some monitors pad the middle
+	// of their name descriptor with extra spaces.
 	edid := EDID{Manufacturer: "GSM", ProductCode: 0x7716, ModelName: "LG   HDR  WQHD"}
 	if got := monitorID(edid); got != "gsm-7716-lg-hdr-wqhd" {
-		t.Fatalf("monitorID = %q", got)
+		t.Fatalf("monitorID = %q, want %q", got, "gsm-7716-lg-hdr-wqhd")
 	}
 }
 
-func TestMonitorIDOfARealMonitor(t *testing.T) {
+func TestMonitorIDFromARealMonitorsEDID(t *testing.T) {
 	edid, err := ParseEDID(loadEDID(t, "lg-hdr-wqhd"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the lg-hdr-wqhd EDID: %v", err)
 	}
 	if got := monitorID(edid); got != "gsm-7716-lg-hdr-wqhd" {
-		t.Fatalf("monitorID = %q", got)
+		t.Fatalf("monitorID = %q, want %q", got, "gsm-7716-lg-hdr-wqhd")
 	}
 }
 
-func TestPairingAttributeCarriesItsOwnDomain(t *testing.T) {
-	// An attribute name with no domain belongs to the driver that
-	// published it, so a bare name here and a bare name in the audio
-	// operator would be two different fully qualified names and would
-	// never match.
+func TestPairingAttributeHasItsOwnDomain(t *testing.T) {
+	// A name with no domain belongs to the publishing driver, and would
+	// never match audio-operator's attribute.
 	if pairingAttribute != "monitor.liken.sh/id" {
-		t.Fatalf("pairingAttribute = %q", pairingAttribute)
+		t.Fatalf("pairingAttribute = %q, want %q", pairingAttribute, "monitor.liken.sh/id")
 	}
 }

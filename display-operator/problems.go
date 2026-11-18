@@ -1,10 +1,10 @@
 package main
 
-// This file holds RFC 9457 problem documents, the one error shape
-// every route answers with. A fault carries the status, the problem
-// type, the source's own words, and the response fields the status
-// requires, so the one place that writes a refusal has everything it
-// needs and no route writes a status of its own.
+// Every route reports an error as an RFC 9457 problem document. A
+// route returns a fault, which holds the status, the problem type, the
+// detail, and the response fields that the status requires. Only
+// writeFault writes a response from a fault, so no route sets an error
+// status itself.
 
 import (
 	"crypto/rand"
@@ -14,20 +14,17 @@ import (
 	"net/http"
 )
 
-// The problem types the three capture APIs share live under liken.sh,
-// so a client handles one type the same way whichever API answered.
-// A type only this domain answers lives under the display manual's
-// section of liken.sh.
+// The display, audio, and media capture APIs share some problem types,
+// which are under liken.sh/problems, so a client handles a type the
+// same way whichever API returned it. The types that only this API
+// returns are under the display manual's section of liken.sh.
 const (
 	sharedProblemBase  = "https://liken.sh/problems/"
 	displayProblemBase = "https://liken.sh/display/problems/"
 )
 
-// The eight typed problems this API answers with. no-node,
-// not-acceptable, capture-busy, upstream-failed, and away are shared
-// with the audio and media APIs. capture-denied, compositor-down, and
-// encoder-failed are display's own, because only this domain has a
-// compositor and an encoder.
+// capture-denied, compositor-down, and encoder-failed are under the
+// display base because only this API has a compositor and an encoder.
 const (
 	problemBlank          = "about:blank"
 	problemNoNode         = sharedProblemBase + "no-node"
@@ -40,9 +37,8 @@ const (
 	problemEncoderFailed  = displayProblemBase + "encoder-failed"
 )
 
-// Every type this API answers with, for the OpenAPI document's own
-// enumeration of them. A reader of the description then meets the
-// same list a caller meets.
+// problemTypes lists every type this API returns, for the enumeration
+// in the OpenAPI document.
 func problemTypes() []string {
 	return []string{
 		problemBlank,
@@ -57,32 +53,30 @@ func problemTypes() []string {
 	}
 }
 
-// The media type RFC 9457 registers. Every refusal is sent under it,
-// so a client tells a problem document from a capture body by the
+// The media type that RFC 9457 registers. Every error response uses
+// it, so a client tells a problem document from a capture by the
 // Content-Type alone.
 const problemMediaType = "application/problem+json"
 
-// The realm every WWW-Authenticate field names, and the scope a 403
-// names beside error="insufficient_scope", RFC 6750 section 3.
+// The scope that a 403 names beside error="insufficient_scope" in its
+// WWW-Authenticate field (RFC 6750 section 3).
 const captureScope = "displays/screen"
 
-// The realm a challenge names is the process that answers it. The
-// API keeps the default; the capture sidecar names itself at
-// startup, so a 401 from either one says which door refused.
+// The API process uses this realm, and the capture sidecar replaces it
+// with display-capture at startup, so a 401 shows which process refused
+// the request.
 var authenticateRealm = `Bearer realm="display-api"`
 
-// One entry of a 406 document's acceptable member: the
-// "representation characteristics and corresponding resource
-// identifiers" RFC 9110 section 15.5.7 asks for, as the extension
-// member RFC 9457 section 3.2 allows.
+// One entry of the acceptable member of a 406 document. RFC 9110
+// section 15.5.7 says a 406 response should list the available
+// representations and where to get each one, and RFC 9457 section 3.2
+// allows a problem document to carry that list as an extension member.
 type acceptableForm struct {
 	Type string `json:"type"`
 	Href string `json:"href"`
 }
 
-// The five members RFC 9457 defines, plus acceptable on a 406.
-// instance is the request path plus the request id, and the log line
-// for the request carries the same id.
+// The members that RFC 9457 defines, plus acceptable on a 406.
 type problemDocument struct {
 	Type       string           `json:"type"`
 	Title      string           `json:"title"`
@@ -92,22 +86,20 @@ type problemDocument struct {
 	Acceptable []acceptableForm `json:"acceptable,omitempty"`
 }
 
-// A fault is the answer a route refuses with, carried up to the one
-// place that writes it.
 type fault struct {
 	status     int
 	kind       string
 	title      string
 	detail     string
 	acceptable []acceptableForm
-	// What the log line says where the caller is told less. A
-	// refusal that names an address, a port, or a path inside the
-	// cluster tells a caller who may only read screens something
-	// about the shape of the cluster, so the caller gets the fact and
-	// the log gets the words.
+	// The text for the log line, when it differs from detail. An error
+	// that names an address, a port, or a path inside the cluster would
+	// show the cluster's layout to a caller who is only allowed to read
+	// screens, so the response gets a shorter detail and the log gets
+	// the full text.
 	log string
-	// The fields RFC 9110 requires beside certain status codes:
-	// Allow on a 405, Retry-After on a 503, WWW-Authenticate on a
+	// The header fields that RFC 9110 requires with some statuses:
+	// Allow on a 405, Retry-After on a 503, and WWW-Authenticate on a
 	// 401 and a 403.
 	headers [][2]string
 }
@@ -116,8 +108,6 @@ func (f *fault) Error() string {
 	return fmt.Sprintf("%d %s: %s", f.status, f.title, f.detail)
 }
 
-// What this refusal writes to the log, which is the detail unless the
-// fault carries words of its own.
 func (f *fault) logged() string {
 	if f.log != "" {
 		return f.log
@@ -125,23 +115,24 @@ func (f *fault) logged() string {
 	return f.detail
 }
 
-// A fault with no type of its own is about:blank, and its title is
-// the status phrase (RFC 9457 section 4.2.1).
+// newFault builds a fault. A kind with no title of its own, which
+// includes about:blank, gets the HTTP status phrase as its title (RFC
+// 9457 section 4.2.1).
 func newFault(status int, kind, detail string) *fault {
 	return &fault{status: status, kind: kind, title: faultTitle(kind, status), detail: detail}
 }
 
-// The titles of the eight typed problems. A title names the condition
-// and never the one request it happened to; detail carries that.
+// The title of each typed problem. A title describes the condition in
+// general. The detail member describes the request that hit it.
 var problemTitles = map[string]string{
 	problemNoNode:         "The screen cannot be reached",
 	problemNotAcceptable:  "No representation of this screen is acceptable",
 	problemCaptureBusy:    "The output is already being captured",
-	problemUpstreamFailed: "The capture sidecar failed",
+	problemUpstreamFailed: "The capture sidecar returned an error",
 	problemAway:           "The screen is away",
 	problemCaptureDenied:  "The compositor denied the capture",
 	problemCompositorDown: "The compositor is not serving this screen",
-	problemEncoderFailed:  "The encoder wrote no picture",
+	problemEncoderFailed:  "The encoder produced no frame",
 }
 
 func faultTitle(kind string, status int) string {
@@ -151,24 +142,21 @@ func faultTitle(kind string, status int) string {
 	return http.StatusText(status)
 }
 
-// The faults the router, the parser, and the private leg answer
-// with. Each one's detail carries the source's own words: the query
-// the parser refused, the TokenReview's error, the condition's
-// message, or the sidecar's problem, so a person reads the cause from
-// the answer and needs no log.
+// Each constructor below takes the text of the failure as its detail,
+// such as the query that the parser rejected, the TokenReview's error,
+// or the sidecar's problem document, so a caller can read the cause
+// from the response.
 func badRequest(detail string) *fault {
 	return newFault(http.StatusBadRequest, problemBlank, detail)
 }
 
-// The detail of a 401 that met no token at all. RFC 9457 asks every
-// problem for one, and a caller who sent no field reads what the
-// field is called and what it carries.
-const noTokenDetail = "no Authorization field carries a Bearer token"
+const noTokenDetail = "the request has no Authorization header with a Bearer token"
 
 func unauthenticated(detail string) *fault {
-	// RFC 6750 section 3 gives WWW-Authenticate two forms here: the
-	// bare challenge for a request with no token, and invalid_token
-	// with the review's own words for a token it refused.
+	// RFC 6750 section 3 defines two WWW-Authenticate forms for a 401.
+	// A request with no token gets the challenge alone. A rejected
+	// token also gets error="invalid_token" and the review's error
+	// text.
 	if detail == "" {
 		f := newFault(http.StatusUnauthorized, problemBlank, noTokenDetail)
 		f.headers = [][2]string{{"WWW-Authenticate", authenticateRealm}}
@@ -213,21 +201,16 @@ func upstreamFailed(detail string) *fault {
 
 func unavailable(kind, detail string) *fault {
 	f := newFault(http.StatusServiceUnavailable, kind, detail)
-	// Retry-After (RFC 9110 section 10.2.3) says how long to wait
-	// before the client asks again. Every 503 in the three capture
-	// APIs carries the same five seconds, so one client wait fits all
-	// of them.
 	f.headers = [][2]string{{"Retry-After", retryAfterSeconds}}
 	return f
 }
 
-// A screen whose monitor is off its connector is away, and away is a
-// 409, RFC 9110 section 15.5.10: the Display exists, so it is not a
-// 404, and a retry cannot help while the monitor stays unplugged, so
-// it is not a 503 with Retry-After. The caller acts on it by
-// connecting the monitor or by asking for another screen. The audio
-// API answers the same type for a Sink or a Source with no node, and
-// the media API relays it on a composed stream.
+// away is the fault for a Display whose monitor is not connected. It
+// is a 409 (RFC 9110 section 15.5.10). It is not a 404, because the
+// Display exists, and not a 503, because a retry fails until someone
+// connects the monitor. The audio API returns the same type for a Sink
+// or a Source with no node, and the media API passes it through on a
+// composed stream.
 func away(detail string) *fault {
 	return newFault(http.StatusConflict, problemAway, detail)
 }
@@ -236,35 +219,32 @@ func gatewayTimeout(detail string) *fault {
 	return newFault(http.StatusGatewayTimeout, problemUpstreamFailed, detail)
 }
 
-// The seconds every 503 in the three capture APIs asks the client to
-// wait.
+// The Retry-After value, in seconds, of every 503. The audio and media
+// APIs send the same value, so a client needs one wait for all of them.
 const retryAfterSeconds = "5"
 
-// The three methods every route answers. No route takes a body, so a
-// POST gets 405 with this field and 415 is never sent.
+// The methods that every route accepts. No route reads a request
+// body, so a POST gets a 405 with this Allow value, and the API never
+// returns a 415.
 const allowedMethods = "GET, HEAD, OPTIONS"
 
-// The request id is eight hex characters. It is in the problem's
-// instance member and in the request's log line, so a caller's
-// report names the line to read.
+// newRequestID returns eight random hex characters. The id is in the
+// instance member of the problem document and in the request's log
+// line, so a caller can report the id and a person can find the line.
 func newRequestID() string {
 	var raw [4]byte
-	// A failed read leaves the id all zeros, which still names the
-	// request in the log.
+	// When the read fails, the id is all zeros, which still identifies
+	// the request in the log.
 	_, _ = rand.Read(raw[:])
 	return hex.EncodeToString(raw[:])
 }
 
-// instance is the request path, a number sign, and the request id,
-// the same in all three capture APIs.
 func problemInstance(path, id string) string {
 	return path + "#" + id
 }
 
-// Writing a problem: first the fields every answer of this API
-// carries, then the fields the fault carries, then the document. A
-// HEAD gets the status and the fields and no body (RFC 9110 section
-// 15.5).
+// writeFault writes the response for a fault. A HEAD request gets the
+// status and the header fields but no body (RFC 9110 section 9.3.2).
 func writeFault(w http.ResponseWriter, f *fault, path, id string, head bool) {
 	w.Header().Set("Vary", "Accept")
 	serviceLinks(w)
@@ -290,10 +270,9 @@ func writeFault(w http.ResponseWriter, f *fault, path, id string, head bool) {
 	_, _ = w.Write(append(body, '\n'))
 }
 
-// The two relations RFC 8631 defines, service-desc and service-doc,
-// are on every answer this API writes, an error included. A client
-// that met a refusal is the client that most needs the description
-// and the manual.
+// serviceLinks adds the RFC 8631 service-desc and service-doc links,
+// which point to the OpenAPI document and the manual, to a response.
+// Every response of this API has them, errors included.
 func serviceLinks(w http.ResponseWriter) {
 	w.Header().Add("Link", fmt.Sprintf(`<%s/openapi.json>; rel="service-desc"`, apiRoot))
 	w.Header().Add("Link", fmt.Sprintf(`<%s>; rel="service-doc"`, serviceDocument))

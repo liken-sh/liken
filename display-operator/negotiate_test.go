@@ -2,8 +2,8 @@ package main
 
 import "testing"
 
-// These rows are the manual's negotiation table, and chooseType and
-// acceptsType each answer every one of them.
+// negotiationRows begins with the rows of the "Content negotiation"
+// table in docs/content/docs/reference/api.md. Keep them in step.
 var negotiationRows = []struct {
 	name   string
 	accept string

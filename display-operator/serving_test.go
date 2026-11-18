@@ -12,123 +12,116 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// The holder is what a handshake asks, so a certificate that changed
-// is served with no restart.
-func TestTheHolderServesWhatItWasGiven(t *testing.T) {
+func TestTheHolderServesTheCertificateItWasGiven(t *testing.T) {
 	ca := testAuthority(t)
 	certPEM, keyPEM, err := ca.mintLeaf("display-api", serviceNames(testNamespace), mintTime)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the API leaf: %v", err)
 	}
 	holder := &certificateHolder{}
-	if holder.held() {
-		t.Error("an empty holder says it holds a certificate")
+	if holder.verifiable() {
+		t.Error("an empty holder reports a certificate, want none")
 	}
 	if _, err := holder.get(nil); err == nil {
-		t.Error("an empty holder answered a handshake")
+		t.Error("an empty holder returned a certificate for a handshake, want an error")
 	}
 	if err := holder.set(certPEM, keyPEM, false); err != nil {
-		t.Fatal(err)
+		t.Fatalf("storing the leaf in the holder: %v", err)
 	}
-	if !holder.held() {
-		t.Error("the holder does not report the certificate it was given")
+	if !holder.verifiable() {
+		t.Error("the holder reports no certificate after set, want one")
 	}
 	pair, err := holder.get(nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("getting the certificate from the holder: %v", err)
 	}
 	if pair.Leaf.Subject.CommonName != "display-api" {
-		t.Errorf("the handshake answers %q", pair.Leaf.Subject.CommonName)
+		t.Errorf("the handshake certificate is for %q, want display-api", pair.Leaf.Subject.CommonName)
 	}
 	if !holder.expiry().Equal(pair.Leaf.NotAfter) {
-		t.Errorf("the holder reports %s, want the leaf's own date", holder.expiry())
+		t.Errorf("the holder expires at %s, want the leaf's NotAfter %s", holder.expiry(), pair.Leaf.NotAfter)
 	}
 }
 
-// A certificate a process minted for itself leaves it not ready,
-// because nothing else verifies it.
-func TestACertificateAProcessMintedItselfIsNotReady(t *testing.T) {
+func TestASelfSignedCertificateIsServedButNotReady(t *testing.T) {
 	ca := testAuthority(t)
 	certPEM, keyPEM, err := ca.mintLeaf(sidecarName, []string{sidecarName}, mintTime)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the sidecar leaf: %v", err)
 	}
 	holder := &certificateHolder{}
 	if err := holder.set(certPEM, keyPEM, true); err != nil {
-		t.Fatal(err)
+		t.Fatalf("storing the self-signed leaf in the holder: %v", err)
 	}
-	if holder.held() {
-		t.Error("a process that minted its own certificate reports itself ready")
+	if holder.verifiable() {
+		t.Error("a self-signed certificate counts as held, want not held")
 	}
 	if _, err := holder.get(nil); err != nil {
-		t.Errorf("the listener has no certificate to answer with: %v", err)
+		t.Errorf("getting a self-signed certificate for a handshake: %v, want it served", err)
 	}
 }
 
-// The sidecar answers on a certificate of its own making until the
-// API mints one, and takes the minted one when it lands in the
-// directory.
-func TestTheSidecarTakesTheLeafWhenItLands(t *testing.T) {
+func TestTheSidecarLoadsTheLeafOnceItAppears(t *testing.T) {
 	directory := t.TempDir()
 	holder := &certificateHolder{}
 	now := time.Now()
 
 	if err := loadCaptureLeaf(directory, holder, now); err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the capture leaf from an empty directory: %v", err)
 	}
-	if holder.held() {
-		t.Error("the sidecar reports itself ready with no leaf from the API")
+	if holder.verifiable() {
+		t.Error("the sidecar reports a held certificate with no leaf from the API, want none")
 	}
 	if _, err := holder.get(nil); err != nil {
-		t.Fatalf("the sidecar's listener cannot answer: %v", err)
+		t.Fatalf("getting a certificate for a handshake before the API leaf arrives: %v, want its own certificate", err)
 	}
 
 	ca := testAuthority(t)
 	certPEM, keyPEM, err := ca.mintLeaf(sidecarName, []string{sidecarName}, now)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the sidecar leaf: %v", err)
 	}
 	if err := os.WriteFile(directory+"/"+tlsCertFile, certPEM, 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the certificate file: %v", err)
 	}
 	if err := os.WriteFile(directory+"/"+tlsKeyFile, keyPEM, 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the key file: %v", err)
 	}
 	if err := loadCaptureLeaf(directory, holder, now); err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the capture leaf from the files: %v", err)
 	}
-	if !holder.held() {
-		t.Error("the sidecar did not take the leaf the API minted")
+	if !holder.verifiable() {
+		t.Error("the sidecar does not hold the leaf the API minted, want it held")
 	}
 	pair, err := holder.get(nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("getting the certificate from the holder: %v", err)
 	}
 	if len(pair.Leaf.DNSNames) != 1 || pair.Leaf.DNSNames[0] != sidecarName {
-		t.Errorf("the sidecar serves %v, want the name the API verifies it under", pair.Leaf.DNSNames)
+		t.Errorf("the sidecar leaf has DNS names %v, want [%s], the name the API verifies", pair.Leaf.DNSNames, sidecarName)
 	}
 }
 
 // writeSecretVolume writes files the way the kubelet updates a Secret
-// volume: the files go into a new timestamped directory, a ..data_tmp
-// link points at it, and a rename moves that link over ..data. Each
-// key's file is a link through ..data.
+// volume. It writes them into a new timestamped directory, points a
+// ..data_tmp symlink at that directory, and renames the symlink over
+// ..data. Each file name is a symlink through ..data.
 func writeSecretVolume(t *testing.T, dir string, files map[string][]byte) {
 	t.Helper()
 	stamp := fmt.Sprintf("..%d", time.Now().UnixNano())
 	if err := os.Mkdir(filepath.Join(dir, stamp), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the volume version directory: %v", err)
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, stamp, name), content, 0o600); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing a volume file: %v", err)
 		}
 	}
 	if err := os.Symlink(stamp, filepath.Join(dir, "..data_tmp")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("linking ..data_tmp: %v", err)
 	}
 	if err := os.Rename(filepath.Join(dir, "..data_tmp"), filepath.Join(dir, secretVolumeData)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("renaming ..data_tmp over ..data: %v", err)
 	}
 	for name := range files {
 		link := filepath.Join(dir, name)
@@ -136,41 +129,38 @@ func writeSecretVolume(t *testing.T, dir string, files map[string][]byte) {
 			continue
 		}
 		if err := os.Symlink(filepath.Join(secretVolumeData, name), link); err != nil {
-			t.Fatal(err)
+			t.Fatalf("linking a volume file: %v", err)
 		}
 	}
 }
 
-// The Secret lands in the sidecar's volume, and the sidecar takes the
-// leaf on the kubelet's rename. The fallback timer is longer than the
-// test, so only the rename can end the wait in time.
-func TestTheSidecarTakesTheLeafOnTheVolumesRename(t *testing.T) {
+// The fallback interval is longer than the test's deadline, so only
+// the rename of ..data can wake the sidecar in time.
+func TestTheSidecarLoadsTheLeafWhenTheVolumeIsRenamed(t *testing.T) {
 	directory := t.TempDir()
 	holder := &certificateHolder{}
 	go watchCaptureLeaf(t.Context(), directory, holder, nil, time.Hour)
 	time.Sleep(50 * time.Millisecond)
-	if holder.held() {
-		t.Fatal("the sidecar reports itself ready with no leaf from the API")
+	if holder.verifiable() {
+		t.Fatal("the sidecar reports a held certificate with no leaf from the API, want none")
 	}
 
 	certPEM, keyPEM, err := testAuthority(t).mintLeaf(sidecarName, []string{sidecarName}, time.Now())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the sidecar leaf: %v", err)
 	}
 	writeSecretVolume(t, directory, map[string][]byte{tlsCertFile: certPEM, tlsKeyFile: keyPEM})
 
 	deadline := time.Now().Add(5 * time.Second)
-	for !holder.held() {
+	for !holder.verifiable() {
 		if time.Now().After(deadline) {
-			t.Fatal("the sidecar did not take the leaf the rename delivered")
+			t.Fatal("the sidecar did not load the leaf within 5 seconds of the ..data rename")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 }
 
-// The leaf names the four names the Service answers on and
-// localhost, the one a port-forward reaches it by.
-func TestTheServiceNames(t *testing.T) {
+func TestTheLeafCoversTheServiceNamesAndLocalhost(t *testing.T) {
 	names := serviceNames("liken-system")
 	want := []string{
 		"display-api",
@@ -180,7 +170,7 @@ func TestTheServiceNames(t *testing.T) {
 		"localhost",
 	}
 	if len(names) != len(want) {
-		t.Fatalf("the leaf names %v", names)
+		t.Fatalf("serviceNames returned %d names %v, want %d", len(names), names, len(want))
 	}
 	for i, name := range want {
 		if names[i] != name {
@@ -189,52 +179,47 @@ func TestTheServiceNames(t *testing.T) {
 	}
 }
 
-// The API's first start leaves three objects behind, the two Secrets
-// and the ConfigMap, and a client reads the trust anchor from the
-// ConfigMap.
-func TestTheAPIMintsItsAuthorityAtFirstStart(t *testing.T) {
+func TestTheFirstStartMintsTheAuthorityAndPublishesItsCertificate(t *testing.T) {
 	api := newObjectAPI()
 	client := objectClient(t, api)
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 
-	readings := newAPIMetrics(apiComponent, version)
+	metrics := newAPIMetrics(apiComponent, version)
 	holder := &certificateHolder{}
-	anchor, err := startAuthority(ctx, client, idleWatcher(t), testNamespace, holder, readings)
+	anchor, err := startAuthority(ctx, client, idleWatcher(t), testNamespace, holder, metrics)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("starting the authority: %v", err)
 	}
-	if !holder.held() {
-		t.Fatal("the API holds no serving certificate after its first start")
+	if !holder.verifiable() {
+		t.Fatal("the holder has no certificate after the first start, want one")
 	}
 
 	var sidecar Secret
-	api.held(t, secretsPath(testNamespace)+"/"+sidecarTLSSecret, &sidecar)
+	api.load(t, secretsPath(testNamespace)+"/"+sidecarTLSSecret, &sidecar)
 	leaf := parseCertificate(t, sidecar.Data[tlsCertKey])
 	if _, err := leaf.Verify(x509.VerifyOptions{Roots: anchor, DNSName: sidecarName}); err != nil {
-		t.Errorf("the sidecar's leaf does not verify under the anchor: %v", err)
+		t.Errorf("verifying the sidecar leaf under the trust anchor: %v, want it to verify", err)
 	}
 
 	var trust ConfigMap
-	api.held(t, configMapsPath(testNamespace)+"/"+trustAnchorMap, &trust)
+	api.load(t, configMapsPath(testNamespace)+"/"+trustAnchorMap, &trust)
 	if trust.Data[caCertKey] == "" {
-		t.Error("the ConfigMap carries no trust anchor")
+		t.Error("the ConfigMap has no trust anchor, want one")
 	}
 	if trust.Data[caKeyKey] != "" {
-		t.Error("the ConfigMap carries the authority's key, which no client may read")
+		t.Error("the ConfigMap has the authority's key, want none because clients can read the ConfigMap")
 	}
 }
 
-// An owner who brought their own certificate keeps it, and this API
-// mints nothing beside it.
-func TestTheAPIMintsNothingBesideAnOwnersCertificate(t *testing.T) {
+func TestTheAPIServesAnOwnersCertificateAndCreatesNoSecrets(t *testing.T) {
 	ca := testAuthority(t)
 	certPEM, keyPEM, err := ca.mintLeaf("display-api", serviceNames(testNamespace), mintTime)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the API leaf: %v", err)
 	}
 	api := newObjectAPI()
-	api.hold(t, secretsPath(testNamespace)+"/"+apiTLSSecret, Secret{
+	api.store(t, secretsPath(testNamespace)+"/"+apiTLSSecret, Secret{
 		APIVersion: "v1", Kind: "Secret",
 		Metadata: objectMeta{Name: apiTLSSecret, Namespace: testNamespace},
 		Type:     tlsSecretType,
@@ -250,93 +235,86 @@ func TestTheAPIMintsNothingBesideAnOwnersCertificate(t *testing.T) {
 	holder := &certificateHolder{}
 	if _, err := startAuthority(ctx, objectClient(t, api), idleWatcher(t), testNamespace, holder,
 		newAPIMetrics(apiComponent, version)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("starting the authority: %v", err)
 	}
-	if !holder.held() {
-		t.Error("the API did not serve the certificate the owner supplied")
+	if !holder.verifiable() {
+		t.Error("the holder has no certificate, want the one the owner supplied")
 	}
 	if creates, _ := api.counts(secretsPath(testNamespace)); creates != 0 {
-		t.Errorf("the API created %d Secrets beside the owner's", creates)
+		t.Errorf("the API created %d Secrets, want none beside the owner's", creates)
 	}
 }
 
-// A leaf is re-minted under a third of its life and left alone
-// above it, so an ordinary pass writes nothing.
-func TestTheLeafIsReMintedUnderAThirdOfItsLife(t *testing.T) {
+func TestTheLeafIsMintedAgainWhenAThirdOfItsLifeRemains(t *testing.T) {
 	api := newObjectAPI()
 	client := objectClient(t, api)
 	material, ca, err := ensureServingMaterial(client, testNamespace, apiTLSSecret,
 		serviceNames(testNamespace), mintTime)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the serving material: %v", err)
 	}
 
-	standing, err := renewServingMaterial(client, testNamespace, apiTLSSecret, ca,
+	unchanged, err := renewServingMaterial(client, testNamespace, apiTLSSecret, ca,
 		serviceNames(testNamespace), mintTime.Add(30*24*time.Hour))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("renewing the serving material after 30 days: %v", err)
 	}
-	if standing != nil {
-		t.Error("a leaf with most of its life left was re-minted")
+	if unchanged != nil {
+		t.Error("a leaf with most of its life left was minted again, want it kept")
 	}
 
 	renewed, err := renewServingMaterial(client, testNamespace, apiTLSSecret, ca,
 		serviceNames(testNamespace), material.Expires.Add(-24*time.Hour))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("renewing the serving material near expiry: %v", err)
 	}
 	if renewed == nil {
-		t.Fatal("a leaf near the end of its life was not re-minted")
+		t.Fatal("a leaf near the end of its life was kept, want it minted again")
 	}
 	if !renewed.Expires.After(material.Expires) {
-		t.Errorf("the new leaf expires %s, want later than %s", renewed.Expires, material.Expires)
+		t.Errorf("the new leaf expires %s, want after %s", renewed.Expires, material.Expires)
 	}
 }
 
-// The sidecar's Secret is put back within the minute if it goes
-// away. Nothing else puts it back, and while it is missing every
-// sidecar serves a certificate of its own making and every capture
-// in the cluster answers 503.
-func TestTheSidecarSecretIsMintedAgainWhenItGoesAway(t *testing.T) {
+func TestTheSidecarSecretIsCreatedAgainAfterItIsDeleted(t *testing.T) {
 	api := newObjectAPI()
 	client := objectClient(t, api)
 	_, ca, err := ensureServingMaterial(client, testNamespace, testSecret, serviceNames(testNamespace), mintTime)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the serving material: %v", err)
 	}
 	if err := ensureSidecarLeaf(client, testNamespace, sidecarTLSSecret, ca, sidecarName, mintTime); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the sidecar leaf: %v", err)
 	}
 	created, _ := api.counts(secretsPath(testNamespace))
 
-	// A pass over a Secret that stands writes nothing.
 	if err := ensureSidecarLeaf(client, testNamespace, sidecarTLSSecret, ca, sidecarName, mintTime.Add(time.Minute)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the sidecar leaf again: %v", err)
 	}
 	if again, _ := api.counts(secretsPath(testNamespace)); again != created {
-		t.Errorf("a pass over a Secret that stands created %d, want %d", again, created)
+		t.Errorf("a Secret with a good leaf was created again: %d creates, want %d", again, created)
 	}
 
-	api.forget(secretsPath(testNamespace) + "/" + sidecarTLSSecret)
+	api.remove(secretsPath(testNamespace) + "/" + sidecarTLSSecret)
 	if err := ensureSidecarLeaf(client, testNamespace, sidecarTLSSecret, ca, sidecarName, mintTime.Add(2*time.Minute)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the sidecar leaf after the Secret was deleted: %v", err)
 	}
 
 	var minted Secret
-	api.held(t, secretsPath(testNamespace)+"/"+sidecarTLSSecret, &minted)
+	api.load(t, secretsPath(testNamespace)+"/"+sidecarTLSSecret, &minted)
 	leaf := parseCertificate(t, minted.Data[tlsCertKey])
 	if len(leaf.DNSNames) != 1 || leaf.DNSNames[0] != sidecarName {
-		t.Errorf("the leaf names %v, want the sidecar's own SAN", leaf.DNSNames)
+		t.Errorf("the leaf has DNS names %v, want [%s]", leaf.DNSNames, sidecarName)
 	}
 }
 
-// An owner's Secret: a leaf and its CA certificate, and no CA key, the
-// way cert-manager writes it.
+// ownersSecret returns a Secret with a leaf and the CA certificate and
+// no CA key, as cert-manager writes it.
 func ownersSecret(t *testing.T, ca *certificateAuthority) Secret {
 	t.Helper()
 	certPEM, keyPEM, err := ca.mintLeaf(apiAudience, serviceNames(testNamespace), time.Now())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("minting the owner's leaf: %v", err)
 	}
 	return Secret{
 		Metadata: objectMeta{Name: apiTLSSecret, Namespace: testNamespace},
@@ -345,7 +323,7 @@ func ownersSecret(t *testing.T, ca *certificateAuthority) Secret {
 	}
 }
 
-// The serial of the leaf the holder serves now.
+// servedSerial returns "" when the holder serves no leaf.
 func servedSerial(t *testing.T, holder *certificateHolder) string {
 	t.Helper()
 	pair, err := holder.get(nil)
@@ -359,14 +337,12 @@ func serialOf(t *testing.T, secret Secret) string {
 	t.Helper()
 	leaf, err := leafOf(&secret)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the leaf of the Secret: %v", err)
 	}
 	return leaf.SerialNumber.String()
 }
 
-// The API serves an owner's Secret and watches it, so a leaf the
-// owner's cert-manager rotated reaches the listener as it lands.
-func TestTheAPITakesUpALeafTheOwnerRotated(t *testing.T) {
+func TestTheAPIServesALeafTheOwnerRotated(t *testing.T) {
 	ca := testAuthority(t)
 	api := newSecretStore(t, testNamespace)
 	first, second := ownersSecret(t, ca), ownersSecret(t, ca)
@@ -380,15 +356,15 @@ func TestTheAPITakesUpALeafTheOwnerRotated(t *testing.T) {
 	eventually(t, "the rotated leaf", func() bool { return servedSerial(t, holder) == serialOf(t, second) })
 }
 
-// An owner deletes the sidecar's Secret, and the API mints it again on
-// the watch's news, not on a clock.
-func TestTheAPIMintsTheSidecarsSecretAgainWhenItGoes(t *testing.T) {
+// keepSidecarLeaf has no timer, so only the watch's report of the
+// deletion can trigger the second mint.
+func TestTheAPICreatesTheSidecarSecretAgainWhenItIsDeleted(t *testing.T) {
 	ca := testAuthority(t)
 	api := newSecretStore(t, testNamespace)
 	go keepSidecarLeaf(t.Context(), api.client(), api.watcher(), testNamespace, ca)
 	minted := func() bool {
 		held, err := apiclient.Get[Secret](api.client(), secretsPath(testNamespace)+"/"+sidecarTLSSecret)
-		return err == nil && sidecarLeafStands(held, sidecarName, time.Now())
+		return err == nil && sidecarLeafUsable(held, sidecarName, time.Now())
 	}
 	eventually(t, "the first mint", minted)
 

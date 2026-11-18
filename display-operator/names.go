@@ -1,129 +1,103 @@
 package main
 
-// The identity of a published device.
+// Each device that display-operator publishes is named after the DRM
+// connector of one graphics card output, such as HDMI-A-1 or DP-2. The
+// connector belongs to the card, so the name stays the same across
+// reboots and whether or not a monitor is plugged in. The monitor's
+// EDID facts are published as attributes of the device.
 //
-// The name is the connector the kernel assigns to one of the graphics
-// card's outputs: HDMI-A-1, DP-2, eDP-1. A connector is a property of
-// the card's own hardware, so the name is the same after a reboot, and
-// it is the same whether a monitor is plugged into it or not. It says
-// nothing about which monitor that is, which is why the EDID facts
-// publish beside it.
+// A DRA device name must be a DNS label, so the device name is the
+// connector in lowercase (hdmi-a-1). The connector attribute keeps the
+// kernel's spelling, because weston.ini and kernel log lines use it.
 //
-// A DRA device name must be a DNS label, so the published name is the
-// connector in lowercase: hdmi-a-1. The connector publishes as an
-// attribute in the kernel's own spelling, because that is what
-// weston.ini names, what a kernel log line prints, and what a person
-// reads off `kubectl get resourceslice`.
-//
-// The pairing identity is a third name. `monitor.liken.sh/id` is a
-// fully qualified attribute in a domain that neither this driver nor
-// the audio operator owns, and both build it the same way, so one
-// claim can hold a request against each driver with a matchAttribute
-// constraint across the two. An attribute written without a domain
-// belongs to the driver that published it, so a bare `model` here and
-// a bare `model` there would never match.
+// The attribute monitor.liken.sh/id identifies a monitor, and
+// audio-operator publishes the same value for that monitor's speakers.
+// So one claim can request a screen from this driver and speakers from
+// audio-operator, and a matchAttribute constraint on the attribute
+// selects a screen and speakers of the same monitor. The attribute
+// needs a domain, because an attribute with no domain belongs to the
+// driver that publishes it, and a bare name from each driver would
+// never match.
 
 import (
 	"fmt"
 	"strings"
 )
 
-// pairingAttribute is the fully qualified name that the display
-// operator and the audio operator both publish. The domain is
-// monitor.liken.sh, which is neither driver's own name: the
-// QualifiedName documentation reserves an unqualified name for the
-// publishing driver, so a shared value needs a domain that
-// says what it identifies rather than who wrote it.
+// pairingAttribute is the attribute that display-operator and
+// audio-operator both publish.
 const pairingAttribute = "monitor.liken.sh/id"
 
-// deviceName turns a connector into the DNS label that a DRA device
-// name must be. The API rejects an uppercase letter, and every
-// connector name the kernel produces is otherwise already a legal
-// label: letters, digits, and dashes.
+// deviceName returns the connector in lowercase. Kernel connector names
+// are otherwise valid DNS labels already.
 func deviceName(connector string) string {
 	return strings.ToLower(strings.TrimSpace(connector))
 }
 
-// A connector whose panel answers DDC/CI publishes a second device,
-// named after the output device with this suffix. The suffix carries
-// the tie between the two, because an allocation result names a
-// device and nothing else, so the name is all a prepare has to work
-// out which of the connector's two devices the claim holds.
+// A connector whose panel supports DDC/CI also publishes a control
+// device, named with this suffix. An allocation result has only a
+// device name, so prepare reads the suffix to tell which of the
+// connector's devices a claim holds.
 const controlSuffix = "-control"
 
-// ControlName names the control device beside one output, built from
-// the same connector, so the two names always agree.
+// controlName returns the name of the control device for a connector.
 func controlName(connector string) string {
 	return deviceName(connector) + controlSuffix
 }
 
-// OutputOfControl answers which output a device name belongs to, and
-// whether it named the control. The answer is unambiguous because the
-// kernel names a connector after its physical type and its index, so
-// no connector name ends in -control, and no output device's name can
-// read as a control device's.
+// outputOfControl returns the output device name for a control device
+// name, and false for any other name. Kernel connector names are a type
+// and an index, so no output device name ends in -control.
 func outputOfControl(device string) (string, bool) {
 	return strings.CutSuffix(device, controlSuffix)
 }
 
-// A connector also publishes a draw device, named after the output
-// device with this suffix. The draw device shares the compositor
-// socket with many claims at once, where the output device takes one
-// claim. The suffix is the tie between the two, the same way
-// controlSuffix ties the control device to its output.
+// Every connector also publishes a draw device, named with this
+// suffix. Many claims can hold the draw device at once, and each gets
+// its own Wayland socket. The output device allows one claim.
 const drawSuffix = "-draw"
 
-// DrawName names the draw device beside one output, built from the
-// same connector, so the two names always agree.
+// drawName returns the name of the draw device for a connector.
 func drawName(connector string) string {
 	return deviceName(connector) + drawSuffix
 }
 
-// OutputOfDraw answers which output a device name belongs to, and
-// whether it named the draw companion. The answer is unambiguous for
-// the reason outputOfControl gives: the kernel names a connector after
-// its type and its index, so no connector name ends in -draw, and no
-// output device's name can read as a draw device's.
+// outputOfDraw returns the output device name for a draw device name,
+// and false for any other name.
 func outputOfDraw(device string) (string, bool) {
 	return strings.CutSuffix(device, drawSuffix)
 }
 
-// appID is the app-id one output's claim receives, the device name. A
-// claim on hdmi-a-1 receives DISPLAY_APP_ID=hdmi-a-1.
+// appID returns the value of DISPLAY_APP_ID for a claim on one output,
+// which is the output's device name (hdmi-a-1 for HDMI-A-1).
 //
-// The app-id routes nothing. The socket a surface arrives on is what
-// names the claim that drew it, and the layout module reports that
-// socket, so the operator reads an identity no client can set. The
-// variable is still delivered, unchanged, so a consumer image that
-// passes it to its toolkit still starts. It retires once every
-// consumer image has been rebuilt without the flag.
+// Nothing routes by it. The operator finds the claim that drew a
+// surface from the Wayland socket that the layout module reports the
+// client connected on. The variable is still set because consumer
+// images pass it to their toolkit.
 func appID(connector string) string {
 	return deviceName(connector)
 }
 
-// monitorID builds the value both operators publish under
+// monitorID returns the value both operators publish as
 // monitor.liken.sh/id: the manufacturer's PNP id in lowercase, the
 // product code as four lowercase hexadecimal digits, and the monitor
 // name descriptor in lowercase with each run of spaces replaced by one
-// dash. An LG ultrawide reads gsm-5b09-lg-ultrawide.
+// dash. An LG ultrawide gives gsm-5b09-lg-ultrawide.
 //
-// The rule is shared with the audio operator, which derives the same
-// value from the HDMI ELD, and the scheduler compares the two byte for
-// byte. Two drivers whose values differ by one character park every
-// pairing claim forever, so the three steps are fixed:
+// audio-operator builds the same value from the HDMI ELD, and the
+// scheduler compares the two values byte for byte. A difference of one
+// character means no claim that pairs them can be allocated, so both
+// operators follow these rules exactly:
 //
-//   - Decode the manufacturer. A decode that fails publishes no
-//     pairing attribute at all, because a value with no manufacturer
-//     in it would match every other monitor that also states none.
-//   - Join the lowercase PNP id and the product code as four lowercase
-//     hexadecimal digits.
-//   - Append the dashed lowercase name only when the name says
-//     something after trimming. A monitor with no name descriptor gets
-//     the two-part form, boe-095f, and never a trailing dash or an
-//     empty string. The ELD holds the manufacturer, the product
-//     code, and the monitor name and nothing else, so a nameless panel
-//     still pairs with its own speakers on the two parts both drivers
-//     can build.
+//   - When the manufacturer does not decode, return an empty string, so
+//     no attribute is published. Otherwise the value would match every
+//     other monitor whose manufacturer did not decode.
+//   - Append the name only when it is not empty after trimming. A
+//     monitor with no name gives boe-095f, with no trailing dash. The
+//     ELD has only the manufacturer, product code, and monitor name, so
+//     a monitor with no name still matches its speakers on the first
+//     two parts.
 func monitorID(edid EDID) string {
 	if edid.Manufacturer == "" {
 		return ""
@@ -135,9 +109,8 @@ func monitorID(edid EDID) string {
 	return id
 }
 
-// slug turns a monitor name into the form the pairing identity
-// uses: lowercase, with each run of spaces replaced by one dash.
-// "LG HDR WQHD" becomes lg-hdr-wqhd.
+// slug lowercases a monitor name and replaces each run of spaces with
+// one dash, so "LG HDR WQHD" becomes lg-hdr-wqhd.
 func slug(name string) string {
 	return strings.Join(strings.Fields(strings.ToLower(name)), "-")
 }

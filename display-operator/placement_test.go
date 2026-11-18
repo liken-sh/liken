@@ -1,31 +1,21 @@
 package main
 
-// These tests cover the one decision the layout engine makes: which
-// claim each region of a screen shows, where its surfaces are drawn,
-// and which surfaces no region took. The function reads no clock and opens
-// nothing, so the cases are tables.
-
 import (
 	"reflect"
 	"testing"
 )
 
-// A surface that arrived on a claim's own socket, with the labels the
-// pods holding that claim share.
 func claimedSurface(id, claim string, arrival int, labels map[string]string) surface {
 	return surface{id: id, claimKey: claim, labels: labels, arrival: arrival}
 }
 
-// A region with a rectangle and a matchLabels selector.
 func labelRegion(name string, rect LayoutRect, labels map[string]string) LayoutRegion {
 	return LayoutRegion{Name: name, Rect: rect, Selector: LabelSelector{MatchLabels: labels}}
 }
 
-// The two rectangles of the front desk in the plan: notices on the
-// left seven tenths, and the parking lot above its right corner.
 var (
 	noticesRect = LayoutRect{Left: 0, Top: 0, Width: 0.7, Height: 1}
-	lotRect     = LayoutRect{Left: 0.7, Top: 0, Width: 0.3, Height: 0.6}
+	cornerRect  = LayoutRect{Left: 0.7, Top: 0, Width: 0.3, Height: 0.6}
 )
 
 func TestPlaceSurfaces(t *testing.T) {
@@ -36,7 +26,7 @@ func TestPlaceSurfaces(t *testing.T) {
 		want     screenPlacement
 	}{
 		{
-			name: "a screen that names no Layout and holds no surface",
+			name: "a screen that names no Layout and has no surface",
 			want: screenPlacement{
 				regions: []placedRegion{{name: "default", surface: "empty"}},
 			},
@@ -76,8 +66,8 @@ func TestPlaceSurfaces(t *testing.T) {
 			layout: &LayoutSpec{Regions: []LayoutRegion{
 				labelRegion("notices", noticesRect, map[string]string{"panel": "notices"}),
 				{
-					Name:     "lot",
-					Rect:     lotRect,
+					Name:     "corner",
+					Rect:     cornerRect,
 					Selector: LabelSelector{MatchLabels: map[string]string{"panel": "parking-lot"}},
 					Transition: &LayoutTransition{
 						Enter: LayoutTransitionHalf{Kind: "fade", Milliseconds: 300},
@@ -88,13 +78,13 @@ func TestPlaceSurfaces(t *testing.T) {
 			want: screenPlacement{
 				placed: []placement{
 					{surface: "a-1", region: "notices", rect: noticesRect, stack: 0},
-					{surface: "b-2", region: "lot", rect: lotRect, stack: 1,
+					{surface: "b-2", region: "corner", rect: cornerRect, stack: 1,
 						transition: LayoutTransition{
 							Enter: LayoutTransitionHalf{Kind: "fade", Milliseconds: 300},
 							Exit:  LayoutTransitionHalf{Kind: "fade", Milliseconds: 250},
 						}},
 				},
-				regions: []placedRegion{{name: "notices", surface: "a-1"}, {name: "lot", surface: "b-2"}},
+				regions: []placedRegion{{name: "notices", surface: "a-1"}, {name: "corner", surface: "b-2"}},
 			},
 		},
 		{
@@ -105,14 +95,14 @@ func TestPlaceSurfaces(t *testing.T) {
 			},
 			layout: &LayoutSpec{Regions: []LayoutRegion{
 				labelRegion("notices", LayoutRect{Width: 1, Height: 1}, map[string]string{"panel": "notices"}),
-				labelRegion("lot", lotRect, map[string]string{"panel": "parking-lot"}),
+				labelRegion("corner", cornerRect, map[string]string{"panel": "parking-lot"}),
 			}},
 			want: screenPlacement{
 				placed: []placement{
 					{surface: "a-1", region: "notices", rect: LayoutRect{Width: 1, Height: 1}, stack: 0},
-					{surface: "b-2", region: "lot", rect: lotRect, stack: 1},
+					{surface: "b-2", region: "corner", rect: cornerRect, stack: 1},
 				},
-				regions: []placedRegion{{name: "notices", surface: "a-1"}, {name: "lot", surface: "b-2"}},
+				regions: []placedRegion{{name: "notices", surface: "a-1"}, {name: "corner", surface: "b-2"}},
 			},
 		},
 		{
@@ -172,13 +162,13 @@ func TestPlaceSurfaces(t *testing.T) {
 			surfaces: []surface{claimedSurface("a-1", "notices/board", 0, map[string]string{"panel": "notices"})},
 			layout: &LayoutSpec{Regions: []LayoutRegion{
 				labelRegion("notices", noticesRect, map[string]string{"panel": "notices"}),
-				labelRegion("lot", lotRect, map[string]string{"panel": "parking-lot"}),
+				labelRegion("corner", cornerRect, map[string]string{"panel": "parking-lot"}),
 			}},
 			want: screenPlacement{
 				placed: []placement{
 					{surface: "a-1", region: "notices", rect: noticesRect, stack: 0},
 				},
-				regions: []placedRegion{{name: "notices", surface: "a-1"}, {name: "lot", surface: "empty"}},
+				regions: []placedRegion{{name: "notices", surface: "a-1"}, {name: "corner", surface: "empty"}},
 			},
 		},
 		{
@@ -193,7 +183,7 @@ func TestPlaceSurfaces(t *testing.T) {
 						{Key: "media.liken.sh/focus", Operator: selectorIn, Values: []string{"true"}},
 					},
 				}},
-				{Name: "corner", Rect: lotRect, Selector: LabelSelector{
+				{Name: "corner", Rect: cornerRect, Selector: LabelSelector{
 					MatchExpressions: []LabelSelectorRequirement{
 						{Key: "media.liken.sh/focus", Operator: selectorDoesNotExist},
 					},
@@ -202,13 +192,13 @@ func TestPlaceSurfaces(t *testing.T) {
 			want: screenPlacement{
 				placed: []placement{
 					{surface: "a-1", region: "focus", rect: LayoutRect{Width: 1, Height: 1}, stack: 0},
-					{surface: "b-2", region: "corner", rect: lotRect, stack: 1},
+					{surface: "b-2", region: "corner", rect: cornerRect, stack: 1},
 				},
 				regions: []placedRegion{{name: "focus", surface: "a-1"}, {name: "corner", surface: "b-2"}},
 			},
 		},
 		{
-			name:     "a surface that holds no claim matches no selector",
+			name:     "a surface with no claim matches no selector",
 			surfaces: []surface{{id: "a-1", arrival: 0}},
 			layout: &LayoutSpec{Regions: []LayoutRegion{
 				{Name: "anything", Rect: LayoutRect{Width: 1, Height: 1}},
@@ -228,9 +218,7 @@ func TestPlaceSurfaces(t *testing.T) {
 	}
 }
 
-// The labels one claim's holders share, which every selector below is
-// judged against.
-var holderLabels = map[string]string{"panel": "notices", "tier": "front"}
+var claimLabels = map[string]string{"panel": "notices", "tier": "front"}
 
 func TestMatchesSelector(t *testing.T) {
 	for _, test := range []struct {
@@ -239,11 +227,11 @@ func TestMatchesSelector(t *testing.T) {
 		want     bool
 	}{
 		{
-			name: "a selector that states nothing matches any labels",
+			name: "an empty selector matches any labels",
 			want: true,
 		},
 		{
-			name:     "matchLabels holds when every value is the one held",
+			name:     "matchLabels matches when every value is equal",
 			selector: LabelSelector{MatchLabels: map[string]string{"panel": "notices", "tier": "front"}},
 			want:     true,
 		},
@@ -252,11 +240,11 @@ func TestMatchesSelector(t *testing.T) {
 			selector: LabelSelector{MatchLabels: map[string]string{"panel": "parking-lot"}},
 		},
 		{
-			name:     "matchLabels fails on a key the labels do not carry",
+			name:     "matchLabels fails on a missing key",
 			selector: LabelSelector{MatchLabels: map[string]string{"room": "lobby"}},
 		},
 		{
-			name: "In holds on a value in the list",
+			name: "In matches a value in the list",
 			selector: LabelSelector{MatchExpressions: []LabelSelectorRequirement{
 				{Key: "panel", Operator: selectorIn, Values: []string{"notices", "menu"}},
 			}},
@@ -269,20 +257,20 @@ func TestMatchesSelector(t *testing.T) {
 			}},
 		},
 		{
-			name: "In fails on a key the labels do not carry",
+			name: "In fails on a missing key",
 			selector: LabelSelector{MatchExpressions: []LabelSelectorRequirement{
 				{Key: "room", Operator: selectorIn, Values: []string{"lobby"}},
 			}},
 		},
 		{
-			name: "NotIn holds on a value the list leaves out",
+			name: "NotIn matches a value the list leaves out",
 			selector: LabelSelector{MatchExpressions: []LabelSelectorRequirement{
 				{Key: "panel", Operator: selectorNotIn, Values: []string{"menu"}},
 			}},
 			want: true,
 		},
 		{
-			name: "NotIn holds on a key the labels do not carry",
+			name: "NotIn matches a missing key",
 			selector: LabelSelector{MatchExpressions: []LabelSelectorRequirement{
 				{Key: "room", Operator: selectorNotIn, Values: []string{"lobby"}},
 			}},
@@ -295,47 +283,47 @@ func TestMatchesSelector(t *testing.T) {
 			}},
 		},
 		{
-			name: "Exists holds on a key the labels carry",
+			name: "Exists matches a present key",
 			selector: LabelSelector{MatchExpressions: []LabelSelectorRequirement{
 				{Key: "tier", Operator: selectorExists},
 			}},
 			want: true,
 		},
 		{
-			name: "Exists fails on a key the labels do not carry",
+			name: "Exists fails on a missing key",
 			selector: LabelSelector{MatchExpressions: []LabelSelectorRequirement{
 				{Key: "room", Operator: selectorExists},
 			}},
 		},
 		{
-			name: "DoesNotExist holds on a key the labels do not carry",
+			name: "DoesNotExist matches a missing key",
 			selector: LabelSelector{MatchExpressions: []LabelSelectorRequirement{
 				{Key: "room", Operator: selectorDoesNotExist},
 			}},
 			want: true,
 		},
 		{
-			name: "DoesNotExist fails on a key the labels carry",
+			name: "DoesNotExist fails on a present key",
 			selector: LabelSelector{MatchExpressions: []LabelSelectorRequirement{
 				{Key: "tier", Operator: selectorDoesNotExist},
 			}},
 		},
 		{
-			name: "every requirement has to hold",
+			name: "every requirement has to match",
 			selector: LabelSelector{MatchExpressions: []LabelSelectorRequirement{
 				{Key: "tier", Operator: selectorExists},
 				{Key: "panel", Operator: selectorIn, Values: []string{"menu"}},
 			}},
 		},
 		{
-			name: "an operator the schema does not state matches nothing",
+			name: "an unknown operator matches nothing",
 			selector: LabelSelector{MatchExpressions: []LabelSelectorRequirement{
 				{Key: "tier", Operator: "Gt"},
 			}},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := matchesSelector(test.selector, holderLabels); got != test.want {
+			if got := matchesSelector(test.selector, claimLabels); got != test.want {
 				t.Errorf("the selector matched %v, want %v", got, test.want)
 			}
 		})
