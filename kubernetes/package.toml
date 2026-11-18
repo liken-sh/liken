@@ -3,9 +3,6 @@
 name = "kubernetes"
 license = "MIT"
 
-# gofmt, vet, a tidy check of go.mod, and one run of the tests that
-# checks for races and writes the coverage profile, then the coverage
-# gate on that profile. .testcoverage.yml holds the floor.
 [[jobs]]
 name = "go"
 toolchain = "go"
@@ -13,11 +10,8 @@ run = "make test"
 timeout = 15
 coverage = ["coverage.out"]
 
-# The hooks in .pre-commit-config.yaml: the formatters, the linters,
-# and the hygiene checks. The jobs above run the tests and the
-# coverage gates.
 [[jobs]]
 name = "prek"
 toolchain = "prek"
-# The go job runs the same checks as these hooks.
+# `make test` in the `go` job already runs these three checks.
 skip = ["gofmt", "go-vet", "go-mod-tidy"]

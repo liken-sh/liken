@@ -1,23 +1,22 @@
-// Package informer keeps an operator's copy of a Kubernetes collection
-// current, and answers a pass's reads from that copy.
+// Package informer keeps an operator's store of a Kubernetes collection
+// current, and serves a reconcile pass's reads from that store.
 //
-// The API server sends each change to a collection as it happens, on a
-// watch, and a watch with no change to send costs nothing. client-go's
-// reflector runs each watch. It reads the whole collection first, as a
-// streaming list or as a plain list, and then watches from the version
-// that read returned, so it receives every change made after the read.
-// It resumes a watch that the API server closed from the last version
-// it delivered, reads the collection again after a 410 Gone, and backs
-// off while the API server fails. Upstream maintains and tests that
-// loop, so no operator keeps one of its own.
+// client-go's reflector runs each watch. It first reads the whole
+// collection, as a streaming list or a plain list, and then watches
+// from the resourceVersion that the read returned, so it receives every
+// change made after the read. When the API server closes a watch, the
+// reflector resumes from the last version it received. After a 410 Gone
+// it reads the collection again, and it backs off while the API server
+// fails. Upstream maintains and tests that loop, so no operator writes
+// its own.
 //
-// The package imports only three parts of client-go: the reflector and
-// the informer in tools/cache, the dynamic client that lists and
-// watches any kind with no generated code, and rest for the in-cluster
+// The package imports only these parts of client-go: the reflector and
+// informer in tools/cache, the dynamic client, which lists and watches
+// any kind without generated code, and rest for the in-cluster
 // configuration. The typed clientset and the informer factories link a
-// client and an informer for every built-in kind, which doubles the
-// size of a binary. The apiclient package sends every write, and every
-// read that the copy does not answer (cache.go).
+// client and an informer for every built-in kind, which makes a binary
+// much larger. The apiclient package sends every write, and every
+// read that the store cannot serve (see cache.go).
 package informer
 
 import (
@@ -43,10 +42,9 @@ func InCluster() (dynamic.Interface, error) {
 	return InClusterAt("")
 }
 
-// InClusterAt is InCluster with the API server's address in place of
-// the one the environment names, for the reason that
-// apiclient.InClusterOptions.Server gives. An empty server means the
-// environment's address.
+// InClusterAt is InCluster with an explicit API server address, for the
+// reason given at apiclient.InClusterOptions.Server. An empty server
+// uses the address from the pod's environment.
 func InClusterAt(server string) (dynamic.Interface, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -58,10 +56,10 @@ func InClusterAt(server string) (dynamic.Interface, error) {
 	return dynamic.NewForConfig(config)
 }
 
-// Source names one collection and the part of it to watch. A watch
-// covers only the objects the operator reads, so the API server filters
-// the rest and never sends them. An empty Namespace watches a
-// cluster-scoped kind, or every namespace of a namespaced kind.
+// Source is the collection to watch. The API server applies the
+// selectors, so it never sends an object that they exclude. An empty
+// Namespace watches a cluster-scoped kind, or every namespace of a
+// namespaced kind.
 type Source struct {
 	Resource      schema.GroupVersionResource
 	Namespace     string
@@ -69,7 +67,7 @@ type Source struct {
 	FieldSelector string
 }
 
-// String names the source in a log line.
+// String describes the source for a log line.
 func (s Source) String() string {
 	name := s.Resource.Resource
 	if s.Namespace != "" {
@@ -84,133 +82,134 @@ func (s Source) String() string {
 	return name
 }
 
-// Options are the optional parts of a watch.
+// Options are the optional settings of a watch.
 type Options struct {
-	// Handler receives each change after the copy holds it. A nil
-	// Handler receives nothing, for a watch that only keeps a copy for
-	// the pass to read.
+	// Handler receives each change after the store is updated with
+	// it. It can be nil when the pass only reads the store.
 	Handler cache.ResourceEventHandler
 
-	// Synced runs once, after the first read of the collection is in
-	// the copy and the handler has taken each object of it. A pass that
-	// started before then read the API server, and an edit made between
-	// that read and the watch's first read is in no event. A wake here
-	// makes the pass read again.
+	// Synced runs once, after the first read of the collection is
+	// in the store and the handler has received each object of it.
+	// A pass that runs before then reads the API server, and an
+	// object that changes between that pass's read and the watch's
+	// first read produces no update event. So Synced should start a
+	// pass again.
 	Synced func()
 
-	// Reopened runs each time the API server accepts a watch after the
-	// first one it accepted. The API server ends a watch on its own
-	// schedule, so a low rate is normal, and a high rate says the stream
-	// breaks faster than the watch can use it. A refused watch opened
-	// nothing, so it does not count, and neither does the quiet stream
-	// of an absent collection.
+	// Reopened runs each time the API server accepts a watch after
+	// the first, so a caller can count reconnections. The API
+	// server closes watches on its own schedule, so an occasional
+	// reopen is normal, and frequent ones mean that the connection
+	// keeps breaking. Reopened does not run for a refused watch, or
+	// for the empty watch that absent.go returns for an absent
+	// collection.
 	Reopened func()
 
-	// Recovered runs when the API server accepts a watch after the last
-	// attempt to watch the collection failed, such as after an outage of
-	// the API server. A routine reopen follows no failure and does not
-	// count. The copy answers again from that moment, before the
-	// reflector delivers the events missed during the outage, so a
-	// caller that wakes on it reads the collection from the API server
-	// once, not from the copy.
+	// Recovered runs when a watch is accepted after the previous
+	// attempt to watch failed, such as at the end of an API server
+	// outage. At that moment Synced can be true while the reflector
+	// has not yet received the changes made during the outage. So a
+	// pass that Recovered starts should read the API server, not
+	// the store.
 	Recovered func()
 
-	// Absent, when it is not nil, names the refusals that mean the
-	// collection is not there to watch, such as the 404 of a kind whose
-	// definition another operator installs. The copy then holds an empty
-	// collection, and the watch finds the collection when it arrives
-	// (absent.go).
+	// Absent, when it is not nil, reports whether a list error
+	// means that the collection does not exist, such as the 404 for
+	// a kind whose CRD another operator installs. The store is then
+	// empty, and the watch lists the collection again after
+	// AbsentRecheck (see absent.go).
 	Absent func(error) bool
 
-	// AbsentRecheck is how long the watch of an absent collection waits
-	// before it asks the API server again. Zero means five minutes.
+	// AbsentRecheck is how long the watch of an absent collection
+	// waits before it lists the collection again. Zero means five
+	// minutes.
 	AbsentRecheck time.Duration
 
-	// ListFailed, when it is not nil, runs each time a list of the whole
-	// collection fails, with the error. An operator that waits for its
-	// first read uses it to stop waiting for a read that fails, such as
-	// the list of a kind the cluster does not serve.
+	// ListFailed, when it is not nil, runs with the error each time
+	// a list of the whole collection fails. An operator that waits
+	// for the first read can use it to stop waiting when that read
+	// fails, such as the list of a kind the cluster does not serve.
 	ListFailed func(error)
 
-	// Transform, when it is not nil, trims each object before the copy
-	// holds it, after the managedFields are gone. A field that no pass
-	// reads costs memory for every object of the kind, such as the list
-	// of images a Node's runtime holds.
+	// Transform, when it is not nil, edits each object before the
+	// informer stores it, after metadata.managedFields is removed.
+	// Use it to drop fields that no pass reads, such as a Node's
+	// list of images, because otherwise the store keeps them in
+	// memory for every object of the kind.
 	Transform func(*unstructured.Unstructured)
 
-	// UnreadyOnWatchError, when it is true, makes the copy stop
-	// answering after any failed watch, not only after a 401 or a 403,
-	// until the API server accepts a watch again. While the API server
-	// restarts, the reflector backs off for up to a minute, and a write
-	// that lands on the API server in that time is in no copy. An
-	// operator whose pass must never act on such a copy sets it, and
-	// its pass reads the API server instead. liken's operators set it:
-	// a machine that acted on a copy older than a withdrawn rollout
-	// could stage the old target and reboot into it.
+	// UnreadyOnWatchError, when it is true, makes Synced return
+	// false after any failed watch, not only after a 401 or a 403,
+	// until the API server accepts a watch again. While the API
+	// server restarts, the reflector backs off for up to a minute,
+	// and a write made in that time is missing from the store. Set
+	// it when a pass must never act on such a store, so the pass
+	// reads the API server instead. liken's operators set it,
+	// because a machine that acted on a store older than a
+	// withdrawn rollout could stage the old target and reboot into
+	// it.
 	UnreadyOnWatchError bool
 
-	// Indexers name the indexes the copy keeps, for a pass that reads
-	// the objects of one label value without a scan of the whole copy.
-	// The store of a watch with indexers is a cache.Indexer.
+	// Indexers define indexes of the store, so a pass can read the
+	// objects with one index value, such as one label value,
+	// without scanning the whole store. With indexers, View().Store
+	// is a cache.Indexer.
 	Indexers cache.Indexers
 }
 
-// Collection is the copy of one watched collection.
+// Collection is the store of one watched collection.
 //
-// A nil *Collection is valid and never syncs. Its View answers nothing,
-// and each read goes to the API server.
+// A nil *Collection is valid and is never Synced. Its View serves
+// nothing, so each read goes to the API server.
 type Collection struct {
 	store      cache.Store
 	controller cache.Controller
 	done       chan struct{}
 
-	// watching is true after the API server accepts a watch, and false
-	// again after it forbids one, or after any failed watch when strict
-	// is true. Synced says why it matters.
+	// watching is true after the API server accepts a watch, and
+	// false after it refuses one with a 401 or a 403, or after any
+	// failed watch when unreadyOnWatchError is true.
 	watching atomic.Bool
 
-	// strict is Options.UnreadyOnWatchError.
-	strict bool
+	unreadyOnWatchError bool
 
-	// absent is true while the last list of the collection was refused
-	// as absent (Options.Absent), so the copy's empty collection stands
-	// in for a kind the cluster does not serve.
+	// absent is true while the last list failed with an error that
+	// Options.Absent matched, so the store is empty because the
+	// cluster does not serve the kind.
 	absent atomic.Bool
 }
 
-// noteWatch records whether the API server grants the watch. An
-// accepted watch grants it, and a 401 or a 403 refuses it. Any other
-// failure, such as a refused connection while the API server restarts,
-// or a 5xx, says nothing about the permission, so the flag keeps its
-// last value, unless the copy is strict (Options.UnreadyOnWatchError).
-// The dynamic client answers each refusal as a *errors.StatusError,
-// which carries the HTTP status.
+// noteWatch sets c.watching from the result of opening a watch. A
+// success sets it, and a 401 or a 403 clears it. Any other failure,
+// such as a refused connection while the API server restarts or a 5xx,
+// does not show whether the watch is permitted, so the flag keeps its
+// value unless Options.UnreadyOnWatchError is set.
 func (c *Collection) noteWatch(err error) {
 	switch {
 	case err == nil:
 		c.watching.Store(true)
-	case c.strict, apierrors.IsForbidden(err), apierrors.IsUnauthorized(err):
+	case c.unreadyOnWatchError, apierrors.IsForbidden(err), apierrors.IsUnauthorized(err):
 		c.watching.Store(false)
 	}
 }
 
 // Start opens the watch and returns at once. The watch runs until the
 // context ends. Done closes after the informer has stopped and the last
-// handler call and the Synced call have returned, so a caller that
-// closes a channel after Done never sends on a closed channel.
+// Handler and Synced calls have returned, so a caller can close a
+// channel that those callbacks send on once Done has closed.
 func Start(ctx context.Context, client dynamic.Interface, source Source, options Options) *Collection {
 	var collection dynamic.ResourceInterface = client.Resource(source.Resource)
 	if source.Namespace != "" {
 		collection = client.Resource(source.Resource).Namespace(source.Namespace)
 	}
-	c := &Collection{done: make(chan struct{}), strict: options.UnreadyOnWatchError}
+	c := &Collection{done: make(chan struct{}), unreadyOnWatchError: options.UnreadyOnWatchError}
 	scope := func(list *metav1.ListOptions) {
 		list.LabelSelector = source.LabelSelector
 		list.FieldSelector = source.FieldSelector
 	}
 	var opened atomic.Int64
-	// failed records that the last attempt to watch failed, so the next
-	// accepted watch is a recovery (Options.Recovered).
+	// failed is true after a failed watch, so the next accepted
+	// watch calls Options.Recovered.
 	var failed atomic.Bool
 	accepted := func() {
 		if failed.Swap(false) && options.Recovered != nil {
@@ -232,10 +231,12 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 		WatchFuncWithContext: func(ctx context.Context, list metav1.ListOptions) (watch.Interface, error) {
 			scope(&list)
 			if quiet, ok := absent.watch(ctx, list); ok {
-				// The quiet stream stands in for an accepted watch of an
-				// empty collection, so the empty copy answers a pass. It
-				// is no watch the API server accepted, so Reopened does
-				// not count it.
+				// absent.go returns a watch with no
+				// events for an absent collection, so
+				// the empty store is Synced and a pass
+				// can read it. The API server did not
+				// accept this watch, so it does not
+				// count toward Reopened.
 				c.noteWatch(nil)
 				accepted()
 				return quiet, nil
@@ -245,13 +246,18 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 			if err != nil {
 				failed.Store(true)
 			} else {
-				// The API server serves the collection, whether this
-				// watch is a streaming list or follows a plain list.
+				// An accepted watch shows that the
+				// collection exists. A streaming list
+				// makes no call to List, so this is the
+				// place that clears absent after a
+				// streaming list.
 				c.absent.Store(false)
 				accepted()
 			}
-			// The first accepted watch is the streaming list of the first
-			// read, or the watch after a plain list.
+			// The first accepted watch is part of the first
+			// read: it is the streaming list, or the watch
+			// that follows a plain list. Each later accepted
+			// watch is a reopen.
 			if err == nil && opened.Add(1) > 1 && options.Reopened != nil {
 				options.Reopened()
 			}
@@ -287,33 +293,33 @@ func Start(ctx context.Context, client dynamic.Interface, source Source, options
 	return c
 }
 
-// Done closes when the watch has stopped.
+// Done returns a channel that closes when the watch has stopped.
 func (c *Collection) Done() <-chan struct{} { return c.done }
 
-// Synced answers whether the copy holds the whole collection and the
-// watch keeps it current. Until the first read is done, a read of the
-// copy could miss an object that exists.
+// Synced reports whether the store has the whole collection and a
+// watch keeps it current. Before the first read finishes, the store
+// could lack an object that exists.
 //
-// A copy whose watch the API server forbids is not current, even after
-// a list. The case is a release skew: a new binary under the previous
-// release's RBAC, which grants list and not watch. The reflector then
-// lists the collection again after each backoff, which grows to between
-// thirty and sixty seconds, and in between the copy holds no change at
-// all. So after a 401
-// or a 403 on a watch, the copy does not answer and the pass reads the
-// API server, until the API server accepts a watch again.
+// A store is not current when the API server forbids its watch, even
+// after a list. This happens, for example, when a new binary runs under
+// the previous release's RBAC, which grants list and not watch. The
+// reflector then lists the collection again after each backoff, which
+// grows to between thirty and sixty seconds, and the store receives no
+// change in between.
+// So after a 401 or a 403 on a watch, Synced is false and the pass
+// reads the API server, until the API server accepts a watch again.
 //
-// A watch that fails for another reason does not stop the copy, unless
-// the copy is strict (Options.UnreadyOnWatchError). While the API
-// server is down, a read of the API server fails too, and the copy lets
-// an operator keep its local work going. The reflector resumes the
-// watch from the copy's last version when the API server returns, or
-// lists again, so the copy then receives each change it missed.
+// A watch that fails for another reason does not make Synced false,
+// unless Options.UnreadyOnWatchError is set. While the
+// API server is down, reads from it fail too, so the operator keeps
+// working from the store. When the API server returns,
+// the reflector resumes the watch from the store's last version, or
+// lists again, so the store receives each change it missed.
 func (c *Collection) Synced() bool {
 	return c != nil && c.controller.HasSynced() && c.watching.Load()
 }
 
-// View answers the copy for a pass to read (cache.go).
+// View returns the store in the form a pass reads it (see cache.go).
 func (c *Collection) View() View {
 	if c == nil {
 		return View{}
@@ -321,17 +327,17 @@ func (c *Collection) View() View {
 	return View{Store: c.store, Synced: c.Synced, Absent: c.absent.Load()}
 }
 
-// trim answers the transform that removes metadata.managedFields from
-// each object before the informer stores it, and then runs the
-// operator's own. The field records which client set each field of the
-// object. No operator reads it, and without the transform the copy
-// holds it for every object.
-func trim(operators func(*unstructured.Unstructured)) cache.TransformFunc {
+// trim returns the transform that removes metadata.managedFields from
+// each object before the informer stores it, and then calls custom if
+// it is not nil. The field records which client set each field. No
+// operator reads it, and without the transform every object in the
+// store would keep it.
+func trim(custom func(*unstructured.Unstructured)) cache.TransformFunc {
 	return func(object any) (any, error) {
 		if item, ok := object.(*unstructured.Unstructured); ok {
 			item.SetManagedFields(nil)
-			if operators != nil {
-				operators(item)
+			if custom != nil {
+				custom(item)
 			}
 		}
 		return object, nil

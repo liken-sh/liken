@@ -1,62 +1,56 @@
-// Package events posts Kubernetes Events about the objects a liken
-// component manages, so `kubectl describe` shows a person what
+// Package events posts Kubernetes Events about the objects that a
+// liken component manages, so that `kubectl describe` shows what
 // happened to an object in the last hour.
 //
-// A status condition answers "what is true now", for automation. An
-// Event answers "what just happened", for a person. A log line holds
-// every attempt and detail. So a component posts one Event for each
-// condition transition (SetCondition, or Transition after a status
-// write) and one for each action it takes that changes no condition,
-// such as a pod created again or a reboot requested. It never posts a
-// reading, a key press, or each retry of a retry loop.
+// A status condition tells automation what is true now. An Event tells
+// a person what just happened. A log line records every attempt and
+// detail. So a component posts one Event for each condition transition
+// (SetCondition, or Transition after a status write) and one for each
+// action that changes no condition, such as recreating a pod or
+// requesting a reboot. It never posts a reading, a key press, or each
+// retry of a retry loop.
 //
 // A component builds one Recorder in main and passes it down:
 //
 //	recorder := events.New(ctx, client, "observatory-operator", events.Options{})
-//	recorder.Warning(object, "StepFailed", "Connect failed: the mount did not answer")
+//	recorder.Warning(object, "StepFailed", "The mount does not respond to CONNECT")
 //	recorder.SetCondition(object, &status.Conditions, ready, conditions.False)
 //
-// The recorder writes core/v1 Events through apiclient, and imports
-// nothing from k8s.io, so a build that must not link client-go can
-// link it. It leaves out eventTime, because the API server applies the
-// strict checks of events.k8s.io/v1, which refuse a note longer than
-// 1024 bytes, only to an Event that states one. `kubectl describe` and
-// `kubectl events` read core/v1.
+// The recorder writes core/v1 Events, which `kubectl describe` and
+// `kubectl events` read. It writes them through apiclient and imports
+// nothing from k8s.io, so a program that must not link client-go can
+// use it.
 //
-// A write is best effort. Normal and Warning put the Event on a
-// bounded queue and return at once, and one goroutine writes the
-// queue, so a reconcile pass never waits on an Event and never fails
-// because of one. The goroutine sends a failed write again (attempts),
-// and logs one line when the last attempt fails. A full queue drops
-// the Event and counts it (Dropped). An Event in a namespace that is
-// gone, or that the API server is deleting, is dropped at once with no
-// log line.
+// Writes are best effort, so a reconcile pass never waits for an Event
+// and never fails because of one. Normal and Warning put the Event on a
+// queue and return immediately, and one goroutine sends the queued
+// Events to the API server. It tries each write up to three times and
+// logs a line when the last try fails. When the queue is full, the
+// recorder drops the Event and counts it in Dropped.
 //
-// A repeat of the same Event on the same object within the window
-// patches count and lastTimestamp on the Event the recorder wrote, in
-// place of a new Event, so `kubectl describe` prints one line such as
-// "(x37 over 1h)" in place of 37 lines.
+// When the same Event about the same object repeats within 10 minutes
+// of its last repeat, the recorder patches count and lastTimestamp on
+// the Event it already wrote. `kubectl describe` then prints one line
+// such as "(x37 over 1h)" in place of 37 lines.
 //
 // The API server deletes an Event one hour after its last write
-// (kube-apiserver's --event-ttl, which k3s does not change). So a
-// condition or a status field, not an Event, holds a fact that must
-// last longer.
+// (kube-apiserver's --event-ttl, which k3s does not change). A fact
+// that must last longer belongs in a condition or a status field.
 //
-// The Events about a cluster-scoped object go in the namespace
-// default, because the API server accepts them only in default or
-// kube-system. `kubectl describe` finds them there. `kubectl events
-// --for` finds them only with -n default or -A.
+// The API server accepts an Event about a cluster-scoped object only
+// in the namespace default or kube-system, so the recorder writes
+// these Events in default. `kubectl events --for` finds them only with
+// -n default or -A.
 //
 // A component needs the RBAC verbs create and patch on events in each
 // namespace it posts to.
 //
-// The recorder's goroutine ends with the context New takes, and a
-// request in flight then ends at once. An Event still queued is lost,
-// and a request that the client cut off can still land on the API
-// server after the goroutine returns. A component that must know when
-// its last write has returned, such as an elected operator that
-// releases its Lease after its last write, passes New a context that
-// outlives its last pass, and calls Shutdown after that pass:
+// When the context passed to New ends, the goroutine cancels its
+// request and returns, and the Events still queued are lost. The
+// cancelled request can still reach the API server after that. A
+// component that needs its last write to return first, such as
+// an elected operator that releases its Lease, passes New a context
+// that outlives its last pass and calls Shutdown after that pass:
 //
 //	ctx, cancel := context.WithTimeout(context.Background(), events.ShutdownTimeout)
 //	defer cancel()
@@ -64,9 +58,9 @@
 //		lead.StepDown()
 //	}
 //
-// A test serves eventstest.Events in front of its fake API server,
-// through apiservertest, and reads what the recorder wrote from it. A
-// test passes New t.Context().
+// A test serves eventstest.Events in front of its fake API server
+// (from apiservertest), reads the written Events from it, and passes
+// New t.Context().
 package events
 
 import (
@@ -85,16 +79,15 @@ import (
 )
 
 // queueLength bounds the Events that wait to be written. A component
-// posts a few Events for each object in an hour, so a full queue
-// means the API server stopped answering, and the recorder drops new
-// Events instead of holding memory for them.
+// posts few Events for each object in an hour, so a full queue means
+// that the API server stopped responding, and the recorder drops new
+// Events instead of using more memory.
 const queueLength = 256
 
-// attempts is how many times the recorder sends one write, and
-// retryWait is the clock between two sends. An API server that
-// restarts refuses connections for some seconds, and three sends 10
-// seconds apart cover that without holding the queue for long. This
-// is the interval of client-go's own recorder, which sends 12 times.
+// An API server that restarts refuses connections for some seconds.
+// Three sends 10 seconds apart cover a restart without blocking the
+// queue for long. client-go's event recorder also waits 10 seconds
+// between sends.
 const (
 	attempts  = 3
 	retryWait = 10 * time.Second
@@ -110,10 +103,11 @@ type Recorder struct {
 	queue   chan Event
 	dropped atomic.Uint64
 
-	// mu guards stopping, so that no post queues an Event after
-	// Shutdown began and the goroutine may have read the queue for the
-	// last time. stop closes when Shutdown begins, abandon when the
-	// context of Shutdown ends, and done when the goroutine returns.
+	// mu guards stopping. Once Shutdown sets it, post queues no
+	// more Events, because the goroutine may already have read the
+	// queue for the last time. stop closes when Shutdown starts,
+	// abandon when the context passed to Shutdown ends, and done
+	// when the goroutine returns.
 	mu          sync.Mutex
 	stopping    bool
 	stop        chan struct{}
@@ -121,28 +115,30 @@ type Recorder struct {
 	abandonOnce sync.Once
 	done        chan struct{}
 
-	// series is read and written only by the goroutine that writes
-	// the queue.
+	// Only the goroutine that sends the queued Events reads and
+	// writes series.
 	series *series
 }
 
 // Options are the optional parts of a Recorder.
 type Options struct {
-	// Instance is the reportingInstance of each Event: the name of the
-	// pod, or of the node for a DaemonSet that runs on the host's
-	// network. Empty means the host name, which is the pod's name in a
-	// pod.
+	// Instance is the reportingInstance of each Event: the name of
+	// the pod, or the name of the node for a DaemonSet pod that
+	// uses the host's network. When empty, the recorder uses the
+	// host name, which is the pod's name inside a pod.
 	Instance string
 
-	// Log receives one line for each Event the recorder could not
-	// write, and for the first Event it dropped. Nil means standard
-	// error.
+	// Log receives a line for each Event that the recorder fails to
+	// write, for the first Event that it drops because the queue is
+	// full, for each Event posted after Shutdown, and for the count
+	// of Events that Shutdown did not write. When nil, the recorder
+	// writes to standard error.
 	Log io.Writer
 }
 
-// New starts a recorder that writes until ctx ends, or until Shutdown
-// has written the queue. component is the
-// reportingComponent of each Event, such as machine-operator.
+// New starts a recorder that writes Events until ctx ends or until
+// Shutdown has sent the queued Events. component is the reportingComponent
+// of each Event, such as machine-operator.
 func New(ctx context.Context, client *apiclient.Client, component string, options Options) *Recorder {
 	instance := options.Instance
 	if instance == "" {
@@ -167,19 +163,19 @@ func New(ctx context.Context, client *apiclient.Client, component string, option
 	return r
 }
 
-// Normal posts an Event about an expected transition or an action the
-// component took. A nil recorder posts nothing.
+// Normal posts an Event about an expected transition or an action that
+// the component took. A nil recorder posts nothing.
 func (r *Recorder) Normal(object ObjectReference, reason, message string) {
 	r.post(object, TypeNormal, reason, message)
 }
 
-// Warning posts an Event about something a person may need to act on.
-// A nil recorder posts nothing.
+// Warning posts an Event about something that a person may need to act
+// on. A nil recorder posts nothing.
 func (r *Recorder) Warning(object ObjectReference, reason, message string) {
 	r.post(object, TypeWarning, reason, message)
 }
 
-// Dropped answers how many Events the recorder dropped because its
+// Dropped returns how many Events the recorder dropped because its
 // queue was full.
 func (r *Recorder) Dropped() uint64 {
 	if r == nil {
@@ -188,7 +184,6 @@ func (r *Recorder) Dropped() uint64 {
 	return r.dropped.Load()
 }
 
-// post builds an Event at the time of the call, and queues it.
 func (r *Recorder) post(object ObjectReference, eventType, reason, message string) {
 	if r == nil {
 		return
@@ -227,25 +222,23 @@ func (r *Recorder) post(object ObjectReference, eventType, reason, message strin
 	}
 }
 
-// ShutdownTimeout is the time an operator gives Shutdown. A queue of a
-// few Events writes in milliseconds, and an API server that does not
-// answer in 5 seconds will not answer before the pod's grace period
-// ends. The rest of the default grace period of 30 seconds covers the
-// release of a Lease, which kubernetes/election bounds at 16 seconds.
+// ShutdownTimeout is the timeout of the context that an operator passes
+// to Shutdown. A few queued Events normally write in milliseconds, so
+// an API server that has not responded in 5 seconds is unlikely to
+// respond before the pod's grace period ends. The remaining 25 seconds
+// of the default 30-second grace period cover the release of the
+// Lease, which kubernetes/election limits to 16 seconds.
 const ShutdownTimeout = 5 * time.Second
 
-// Shutdown stops the recorder and writes the Events it holds. It
-// follows client-go's event broadcaster: a later Normal or Warning
-// drops its Event, each Event still queued is sent once, and a write
-// that fails is logged and not sent again. An Event that waits to be
-// sent again is given up at once. Shutdown answers nil when the queue
-// is empty and the last request has returned, so the caller's next
-// step, such as the release of a Lease, comes after every write of the
-// recorder.
+// Shutdown stops the recorder and sends each Event still in its queue
+// once, with no retry. A write that fails is logged. An Event that is
+// waiting for a retry is logged and dropped, and a Normal or Warning
+// call after Shutdown drops its Event. Shutdown returns nil after the
+// queue is empty and the last request has returned, so the caller's
+// next step, such as releasing a Lease, happens after every write.
 //
-// Unlike client-go's Shutdown, it waits for that last request. When ctx
-// ends first, Shutdown answers ctx's error at once, and a request can
-// still be in flight. The recorder then sends nothing after that
+// When ctx ends first, Shutdown returns ctx's error at once, and a
+// request can still be in flight. The recorder sends nothing after that
 // request returns, and logs how many Events it did not write.
 func (r *Recorder) Shutdown(ctx context.Context) error {
 	if r == nil {
@@ -266,15 +259,15 @@ func (r *Recorder) Shutdown(ctx context.Context) error {
 	return fmt.Errorf("the Event recorder's last write had not returned: %w", ctx.Err())
 }
 
-// run writes the queue until ctx ends, or until Shutdown has emptied
-// it.
+// run sends the queued Events to the API server until ctx ends or until
+// Shutdown has emptied the queue.
 func (r *Recorder) run(ctx context.Context) {
 	defer close(r.done)
 	for {
-		// A Shutdown takes the queue to drain, which stops when the
-		// context of Shutdown ends. The select below picks at random
-		// when the queue and stop are both ready, so stop is read
-		// first.
+		// When the queue and stop are both ready, the select
+		// below picks one at random. Checking stop first makes
+		// Shutdown start draining instead of writing more
+		// Events with retries.
 		select {
 		case <-r.stop:
 			r.drain(ctx)
@@ -293,9 +286,8 @@ func (r *Recorder) run(ctx context.Context) {
 	}
 }
 
-// drain sends each Event left in the queue once, after Shutdown. No
-// post adds to the queue once Shutdown began, so an empty queue is the
-// end.
+// drain sends each Event left in the queue once. post queues nothing
+// after Shutdown starts, so drain returns when the queue is empty.
 func (r *Recorder) drain(ctx context.Context) {
 	for {
 		select {
@@ -310,7 +302,7 @@ func (r *Recorder) drain(ctx context.Context) {
 		}
 		select {
 		case event := <-r.queue:
-			if err := r.writeOnce(event); err != nil && !leaving(err) {
+			if err := r.writeOnce(event); err != nil && !namespaceGone(err) {
 				r.logFailure(event, err)
 			}
 		default:
@@ -319,12 +311,10 @@ func (r *Recorder) drain(ctx context.Context) {
 	}
 }
 
-// write sends one Event, and sends it again after a failure, up to
-// attempts times.
 func (r *Recorder) write(ctx context.Context, event Event) {
 	for attempt := 1; ; attempt++ {
 		err := r.writeOnce(event)
-		if err == nil || leaving(err) {
+		if err == nil || namespaceGone(err) {
 			return
 		}
 		if attempt == attempts {
@@ -345,25 +335,26 @@ func (r *Recorder) write(ctx context.Context, event Event) {
 	}
 }
 
-// writeOnce patches the Event of a series that is still open, or
+// writeOnce patches the earlier Event of a repeat within the window, or
 // creates a new Event.
 func (r *Recorder) writeOnce(event Event) error {
 	key := keyOf(event)
 	collection := "/api/v1/namespaces/" + event.Metadata.Namespace + "/events"
-	if held, ok := r.series.get(key); ok && event.LastTimestamp.Sub(held.last) < window {
-		count := held.count + 1
-		// Strings, counts, and times of this century always encode,
-		// so neither Marshal below can fail.
+	if earlier, ok := r.series.get(key); ok && event.LastTimestamp.Sub(earlier.last) < window {
+		count := earlier.count + 1
+		// json.Marshal fails on a time only outside the years 0
+		// to 9999, so neither Marshal below can fail.
 		patch, _ := json.Marshal(map[string]any{"count": count, "lastTimestamp": event.LastTimestamp})
-		err := r.client.Request(http.MethodPatch, collection+"/"+held.name, "application/merge-patch+json", patch, nil)
+		err := r.client.Request(http.MethodPatch, collection+"/"+earlier.name, "application/merge-patch+json", patch, nil)
 		if err == nil {
-			r.series.put(key, entry{name: held.name, count: count, last: event.LastTimestamp})
+			r.series.put(key, entry{name: earlier.name, count: count, last: event.LastTimestamp})
 			return nil
 		}
 		if !errors.Is(err, apiclient.ErrNotFound) {
 			return err
 		}
-		// The TTL deleted the Event, so the series starts again.
+		// The API server deleted the Event after its TTL, so
+		// create a new one.
 		r.series.remove(key)
 	}
 	body, _ := json.Marshal(event)
@@ -375,26 +366,23 @@ func (r *Recorder) writeOnce(event Event) error {
 	return nil
 }
 
-// leaving reports whether a write failed because the Event's namespace
-// is gone or the API server is deleting it. The delete would remove the
-// Event with the namespace, so no person would read it, and the
-// recorder drops it with no retry and no log line. A namespace delete
-// removes objects in no set order, so an operator that watches it
-// changes the conditions of the objects left, and posts a burst of
-// these Events. A post answers 404 only when the namespace is gone,
-// because writeOnce handles the 404 of a patch.
-func leaving(err error) bool {
+// namespaceGone reports whether a write failed because the Event's namespace
+// does not exist or the API server is deleting it. The recorder then
+// drops the Event with no retry and no log line, because nobody could
+// read it. While a namespace is deleted, the API server deletes its
+// objects one at a time, and an operator posts a burst of these Events.
+// writeOnce handles a 404 on a patch itself, so a 404 here is from a
+// create, and means the namespace is gone.
+func namespaceGone(err error) bool {
 	return errors.Is(err, apiclient.ErrNamespaceTerminating) || errors.Is(err, apiclient.ErrNotFound)
 }
 
-// logFailure logs the last failure of an Event that the recorder gives
-// up on.
 func (r *Recorder) logFailure(event Event, err error) {
 	r.logf("writing the %s Event %s on the %s: %v", event.Type, event.Reason, describe(event.InvolvedObject), err)
 }
 
-// describe names an object for a log line: its kind, and its namespace
-// and name. Two namespaces can hold objects of the same kind and name.
+// describe returns an object's kind, namespace, and name for a log
+// line.
 func describe(object ObjectReference) string {
 	if object.Namespace == "" {
 		return object.Kind + " " + object.Name

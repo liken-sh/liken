@@ -1,39 +1,41 @@
-// Package election keeps one acting copy of a singleton operator.
+// Package election lets one replica of a singleton operator act at a
+// time, by competing for a coordination.k8s.io Lease.
 //
 // A singleton operator creates and deletes objects and writes status
-// from one view of the cluster. Two copies that act at once race: both
-// create a pod for one object, or one deletes the pod the other just
-// made, or two status writes overwrite each other. A rolling update, a
-// node partition, and a replica count above one each run a second copy,
-// so every singleton operator elects one copy with a coordination.k8s.io
-// Lease, through this package.
+// from one view of the cluster. Two replicas acting at once race: both
+// create a pod for one object, one deletes the pod the other just
+// created, or their status writes overwrite each other. A rolling
+// update, a node partition, or a replica count above one can each run a
+// second replica, so every singleton operator elects its acting replica
+// through this package.
 //
 // The election is client-go's leaderelection package with a LeaseLock.
-// Only the copy that holds the Lease acts. Every other copy waits and
-// reads the Lease, so a rolling update starts the new pod beside the old
-// one, and the new pod takes over when the old one releases the Lease.
+// Only the replica that holds the Lease acts. The other replicas read
+// the Lease and wait, so in a rolling update the new pod starts beside
+// the old one and takes the Lease when the old one releases it.
 //
-// This package adds four things to client-go's election:
+// The package adds to client-go's election:
 //
-//   - A second release after client-go's, which survives a renewal that
-//     lands late (Lead.end).
-//   - The exit of the process when the Lease is lost.
-//   - The take of an expired Lease that an earlier process of the same
-//     pod held (renewalClock.Get).
-//   - A write guard for the operator's client (Lead.MayWrite).
+//   - Lead.end releases the Lease again after client-go's own release,
+//     because client-go's release gives up on some errors.
+//   - The process exits when it loses the Lease.
+//   - renewalRecordingLock.Get lets a restarted process take the expired
+//     Lease of an earlier process in the same pod, without waiting out
+//     the Lease duration.
+//   - Lead.MayWrite is a write guard for the operator's API client.
 //
 // The election is not fencing. A leader that pauses, for example on a
 // stalled node, can resume after its Lease expired and finish a request
-// it had already sent. A leader that runs stops sending writes, and
-// exits, before another copy can take the Lease, because of the timings
-// below and the write guard. A write it sent before that can still land
-// after another copy took the Lease (RequestTimeout says why). So a
-// write that must not land late names a precondition that the next
-// leader moves, such as the resourceVersion of the object it changes.
+// it had already sent. A running leader stops sending writes and exits
+// before another replica can take the Lease, but the API server can
+// still commit a write after that (RequestTimeout explains). So a write
+// that must not be committed late has to be conditional on something
+// the next leader changes, such as the resourceVersion of the object it
+// writes.
 //
 // The package links client-go's typed clientset for the coordination
-// group. A program that must stay small, such as the pod build of
-// media-operator, never imports it.
+// group, so a program that must stay small, such as the pod build of
+// media-operator, does not import it.
 package election
 
 import (
@@ -55,98 +57,100 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
-// The election's three durations set the Lease's duration to 30
-// seconds, twice client-go's default, with client-go's 10-second
-// renewal deadline and a 5-second retry period in place of its 2
-// seconds.
+// The durations are chosen so that a leader stops writing and exits
+// before a waiting replica can take the Lease. The Lease duration is 30
+// seconds, twice client-go's default of 15. The renewal deadline is
+// client-go's default of 10 seconds. The retry period is 5 seconds,
+// where client-go's default is 2.
 //
-// The retry period sets the load. The leader renews once per retry
-// period, and a waiting copy reads the Lease once every 5 to 11
-// seconds, because client-go adds up to 1.2 retry periods of jitter. A
-// cluster can already have several clients that renew a Lease every one
-// or two seconds, and an operator does not need faster failover.
+// The retry period sets the load on the API server. The leader renews
+// once per retry period, and a waiting replica reads the Lease every 5
+// to 11 seconds, because client-go adds up to 1.2 retry periods of
+// jitter. A cluster can already have several clients that renew a Lease
+// every one or two seconds, and an operator does not need faster
+// failover.
 //
-// The duration sets the safety margin. After its last renewal at T, the
-// leader tries again at T+5s, and gives up at T+15s when the renewal
-// deadline passes. client-go then releases the Lease, bounded by one
-// more renewal deadline, before it calls OnStoppedLeading, so the
-// leader exits by T+25s. A waiting copy takes the Lease 30 seconds
-// after it saw the last renewal, which is after T+30s. With client-go's
-// 15-second duration, the two times would meet.
+// The Lease duration decides how long the old leader has to exit.
+// Say the leader last renewed at T. It
+// tries again at T+5s, and gives up at T+15s when the renewal deadline
+// passes. client-go then releases the Lease, which takes at most one
+// more renewal deadline, and calls OnStoppedLeading, so the leader
+// exits by T+25s. A waiting replica takes the Lease 30 seconds after it
+// first saw the last renewal, which is after T+30s. With client-go's
+// 15-second duration, a waiting replica could take the Lease at T+15s,
+// while the old leader still runs.
 //
-// The write guard is stricter than the elector. It refuses a write once
-// the last renewal is one renewal deadline old, at T+10s. The client
-// gives up on a write it allowed by T+25s, through RequestTimeout,
-// before a new leader can start at T+30s.
-//
-// The cost is failover time. A waiting copy takes a released Lease on
-// its next read, within about 11 seconds, and an abandoned Lease 30 to
-// 41 seconds after the last renewal.
+// The cost is failover time. A waiting replica takes a released Lease
+// on its next read, within about 11 seconds, and an abandoned Lease 30
+// to 41 seconds after the last renewal.
 const (
 	Duration      = 30 * time.Second
 	RenewDeadline = 10 * time.Second
 	RetryPeriod   = 5 * time.Second
 )
 
-// RequestTimeout is the longest request the client of an elected
-// operator may send: pass it as apiclient.InClusterOptions.Timeout. The
-// client gives up on a write that the guard allowed just before T+10s
-// by T+25s, one retry period before a new leader can start at T+30s.
-// apiclient's default of 30 seconds is too long.
+// RequestTimeout is the longest that a request from an elected
+// operator's client may take. Pass it as
+// apiclient.InClusterOptions.Timeout. When the last renewal was at T,
+// the write guard can allow a write just before T+10s, and with this
+// timeout the client abandons it by T+25s, before a new leader can
+// start at T+30s. apiclient's default timeout of 30 seconds is too
+// long for that.
 //
 // The timeout ends the client's wait, not the write. kube-apiserver
-// keeps running a request's handler after the request timed out, and
+// keeps running a request's handler after the request times out, and
 // counts each such handler in apiserver_request_post_timeout_total, so
 // the API server can commit a write after the client gave up on it and
-// after a new leader took the Lease. The timeout bounds how long a
-// leader waits on a write. It does not keep a late write out.
+// after a new leader took the Lease.
 const RequestTimeout = Duration - RenewDeadline - RetryPeriod
 
-// Options name the Lease and the process that competes for it.
+// Options configures an election: the Lease to compete for, and the
+// process that competes for it.
 type Options struct {
-	// Name and Namespace name the Lease.
+	// Name and Namespace identify the Lease.
 	Name      string
 	Namespace string
-	// Pod is the name of the pod this process runs in. The identity the
-	// Lease names is the pod's name and a random suffix, so `kubectl get
-	// lease` shows which pod leads.
+	// Pod is the name of the pod this process runs in. The identity
+	// in the Lease starts with it, so `kubectl get lease` shows
+	// which pod leads.
 	Pod string
 
-	// Report receives each line the election logs. The operator adds
-	// its own prefix and writes the line where its log goes.
+	// Report receives each line the election logs.
 	Report func(line string)
-	// Exit ends the process after a lost Lease, with code 1. It is
-	// os.Exit unless a test sets it.
+	// Exit ends the process with code 1 after the Lease is lost. It
+	// defaults to os.Exit.
 	Exit func(code int)
 }
 
-// Lead is this process's part in the election.
+// Lead is one process's participation in the election for a Lease.
 type Lead struct {
 	options  Options
 	elector  *leaderelection.LeaderElector
 	identity string
-	lock     *renewalClock
+	lock     *renewalRecordingLock
 
-	// leases reaches the Lease itself, for the release that follows
-	// client-go's own. end says why.
+	// leases is the client that clearIfHeld reads and writes the
+	// Lease with.
 	leases coordinationv1.LeasesGetter
 
-	// started closes when this process takes the Lease, and done closes
-	// when the election ends.
+	// started closes when this process takes the Lease, and done
+	// closes when the election ends.
 	started chan struct{}
 	done    chan struct{}
 	cancel  context.CancelFunc
 
-	// stepping marks an end this process chose, a shutdown, so the end
-	// of the election is not a loss.
+	// stepping is set when this process ends the election on
+	// purpose, so that OnStoppedLeading does not treat the end as a
+	// loss.
 	stepping atomic.Bool
 }
 
-// New builds the election. The identity is the pod's name and a random
-// suffix, so a restarted container is a new candidate.
+// New builds an election for the Lease. The identity is the pod name
+// plus a random suffix, so a restarted container competes as a new
+// candidate.
 func New(config *rest.Config, options Options) (*Lead, error) {
 	if options.Name == "" || options.Namespace == "" || options.Pod == "" {
-		return nil, errors.New("the election needs the Lease's name and namespace and the pod's name")
+		return nil, errors.New("Options.Name, Options.Namespace, and Options.Pod must all be set")
 	}
 	if options.Report == nil {
 		options.Report = func(string) {}
@@ -167,7 +171,7 @@ func New(config *rest.Config, options Options) (*Lead, error) {
 		started:  make(chan struct{}),
 		done:     make(chan struct{}),
 	}
-	l.lock = &renewalClock{
+	l.lock = &renewalRecordingLock{
 		Interface: &resourcelock.LeaseLock{
 			LeaseMeta:  metav1.ObjectMeta{Name: options.Name, Namespace: options.Namespace},
 			Client:     leases,
@@ -182,10 +186,10 @@ func New(config *rest.Config, options Options) (*Lead, error) {
 		LeaseDuration: Duration,
 		RenewDeadline: RenewDeadline,
 		RetryPeriod:   RetryPeriod,
-		// The release writes the Lease with no holder when the election's
-		// context ends, so a waiting copy takes it on its next retry
-		// instead of after the Lease's duration. end follows it with a
-		// release of its own, for the case where client-go's fails.
+		// ReleaseOnCancel makes client-go write the Lease with
+		// no holder when the election's context ends, so a
+		// waiting replica takes it on its next read and does
+		// not wait out the Lease duration.
 		ReleaseOnCancel: true,
 		Name:            options.Name,
 		Callbacks: leaderelection.LeaderCallbacks{
@@ -198,15 +202,18 @@ func New(config *rest.Config, options Options) (*Lead, error) {
 					report(fmt.Sprintf("waiting for %s, held by %s", subject, holder))
 				}
 			},
-			// client-go calls this whenever the election ends. A loss ends
-			// the process at once, because a pass in flight must not keep
-			// writing after another copy takes the Lease. The kubelet
-			// restarts the container, and it competes as a new candidate.
+			// client-go calls this whenever the election
+			// ends. Unless this process ended it on
+			// purpose, the Lease is lost, and the process
+			// exits at once so that a reconcile pass in
+			// progress cannot keep writing after another
+			// replica takes the Lease. The kubelet then
+			// restarts the container.
 			OnStoppedLeading: func() {
 				if l.stepping.Load() {
 					return
 				}
-				report(fmt.Sprintf("lost %s", subject))
+				report(fmt.Sprintf("lost %s, exiting", subject))
 				l.options.Exit(1)
 			},
 		},
@@ -217,14 +224,13 @@ func New(config *rest.Config, options Options) (*Lead, error) {
 	return l, nil
 }
 
-// ErrStopped says that stop ended before this process could act. A copy
-// that never led has nothing to release, so the operator exits cleanly.
-var ErrStopped = errors.New("the stop came before the Lease")
+// ErrStopped is returned by Start when stop ends before this process
+// takes the Lease. The process never led, so the operator can exit
+// with no cleanup.
+var ErrStopped = errors.New("the election was stopped before this process took the Lease")
 
-// Start builds the election, runs it, and blocks until this process may
-// act. It answers ErrStopped when stop ends first. Every singleton
-// operator starts its election this way, with the configuration of its
-// pod's service account.
+// Start builds the election, runs it, and blocks until this process
+// holds the Lease. It returns ErrStopped when stop ends first.
 func Start(stop context.Context, config *rest.Config, options Options) (*Lead, error) {
 	l, err := New(config, options)
 	if err != nil {
@@ -237,14 +243,13 @@ func Start(stop context.Context, config *rest.Config, options Options) (*Lead, e
 	return l, nil
 }
 
-// Identity is the name this process holds the Lease under.
+// Identity is the holder name that this process writes into the Lease.
 func (l *Lead) Identity() string { return l.identity }
 
 func (l *Lead) subject() string {
 	return "Lease " + l.options.Namespace + "/" + l.options.Name
 }
 
-// Run starts the election in the background.
 func (l *Lead) Run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	l.cancel = cancel
@@ -254,14 +259,11 @@ func (l *Lead) Run() {
 	}()
 }
 
-// Await returns true when this process holds the Lease and may act. It
-// returns false when stop ends first. After a false return the election
-// has ended and this process holds nothing.
+// Await blocks until this process holds the Lease and returns true.
+// When stop ends first, it ends the election and returns false.
 //
-// A copy acts only while it holds the Lease. An error on a request of
-// the Lease, a 403 Forbidden among them, is an ordinary failure of the
-// election: a waiting copy keeps waiting, and a leader stops writing at
-// the write guard and exits when the elector gives up.
+// A failed request for the Lease, a 403 Forbidden included, does not
+// end the wait, because client-go retries it.
 func (l *Lead) Await(stop context.Context) bool {
 	select {
 	case <-l.started:
@@ -274,7 +276,8 @@ func (l *Lead) Await(stop context.Context) bool {
 	return false
 }
 
-// Leads answers whether the elector has started this process's lead.
+// Leads reports whether this process has taken the Lease. It does not
+// become false afterwards, so call MayWrite before a write.
 func (l *Lead) Leads() bool {
 	select {
 	case <-l.started:
@@ -284,51 +287,47 @@ func (l *Lead) Leads() bool {
 	}
 }
 
-// ErrNotLeading refuses a write while this process cannot show that it
-// holds the Lease.
-var ErrNotLeading = errors.New("this copy does not hold a current leader Lease")
+// ErrNotLeading is returned by MayWrite when it refuses a write.
+var ErrNotLeading = errors.New("this process does not hold a current leader Lease")
 
-// MayWrite is the client's write guard: pass it to
-// apiclient.Client.WithWriteGuard, on a client whose requests end
-// within RequestTimeout. It allows a write only while this
-// process leads and its last renewal is younger than one renewal
-// deadline. The elector itself gives up only after the renewal deadline
-// passes with no success, which is up to one retry period later, so the
-// guard stops writes first.
+// MayWrite is the write guard for the operator's API client. Pass it
+// to apiclient.Client.WithWriteGuard, on a client whose requests time
+// out within RequestTimeout. It allows a write only while this
+// process leads, is not stepping down, and its last renewal is less
+// than one renewal deadline old. So after a last renewal at T it
+// refuses writes from T+10s, and the elector gives up later, at
+// T+15s.
 func (l *Lead) MayWrite() error {
 	if !l.Leads() || l.stepping.Load() {
 		return ErrNotLeading
 	}
 	if age := time.Since(l.lock.lastRenewal()); age >= RenewDeadline {
-		return fmt.Errorf("%w: the last renewal was %s ago", ErrNotLeading, age.Round(time.Second))
+		return fmt.Errorf("%w: the last renewal was %s ago, and a write needs one less than %s old", ErrNotLeading, age.Round(time.Second), RenewDeadline)
 	}
 	return nil
 }
 
-// StepDown ends this process's lead on a shutdown, and releases the
-// Lease. The caller calls it after its last write has returned, so
-// nothing writes once the Lease is free. A caller that cannot show
-// that, because a writer did not stop in time, does not call StepDown:
-// the process exits holding the Lease, and a waiting copy takes it when
-// it expires, after any write still in flight can land.
+// StepDown ends this process's lead on a shutdown and releases the
+// Lease. Call it after the last write has returned, so that nothing
+// writes once the Lease is free. When a writer did not stop in time,
+// do not call StepDown. The process then exits holding the Lease, and
+// a waiting replica takes it only when it expires, which gives a write
+// still in progress time to finish.
 func (l *Lead) StepDown() {
 	l.end()
 }
 
-// end stops the election and waits for the release. The kubelet kills
-// the container at the end of its grace period. client-go bounds its
-// release by the renewal deadline, and clearIfHeld is bounded by half of
-// it, so the wait ends well before that.
+// end stops the election, waits for client-go's release, and then
+// releases the Lease itself with clearIfHeld. client-go's release gives
+// up on any error other than a conflict. It also releases only a Lease
+// that this process took. When a stop comes after Get found the expired
+// Lease of an earlier process of this pod, and before the elector took
+// it, clearIfHeld clears that Lease too.
 //
-// client-go's release can fail on a normal shutdown. The cancel ends
-// the renewal loop, but a renewal that was already sent can still reach
-// the API server after the release read the Lease. The release's update
-// then carries a stale resourceVersion, the API server refuses it with a
-// conflict, and a waiting copy waits out the whole duration. So once the
-// election has ended, end reads the Lease again and clears it itself if
-// it still names this process. The late renewal can land after this
-// read too, so a conflict reads the Lease again. The renewal loop sends
-// one renewal at a time, so at most one late write is in flight.
+// end waits at most 16 seconds: 11 for client-go's release and 5 for
+// clearIfHeld. The kubelet's default grace period of 30 seconds is
+// longer, so the release finishes before the kubelet kills the
+// container.
 func (l *Lead) end() {
 	l.stepping.Store(true)
 	l.cancel()
@@ -342,14 +341,15 @@ func (l *Lead) end() {
 	l.clearIfHeld(ctx)
 }
 
-// clearIfHeld writes the Lease with no holder when it still names this
+// clearIfHeld writes the Lease with no holder when it names this
 // process, or an earlier process of this pod whose Lease has expired
-// (renewalClock.Get says why that one is safe to clear). A stop can
-// arrive before the elector's next read takes such a Lease, and without
-// this clear a copy in another pod waits out the whole duration. It
-// reads the Lease again after a conflict, because the write it lost to
-// can be this process's own late renewal. A Lease that names another
-// process, or no process, is left alone.
+// (renewalRecordingLock.Get explains why that one is safe to clear).
+// Without this, a replica in another pod waits out the whole duration.
+//
+// After a conflict it reads the Lease again, because the write it lost
+// to can be a renewal of this process that the API server committed
+// after the elector stopped. The elector sends one renewal at a time,
+// so at most one such write is pending.
 func (l *Lead) clearIfHeld(ctx context.Context) {
 	leases := l.leases.Leases(l.options.Namespace)
 	subject := l.subject()
@@ -380,8 +380,6 @@ func (l *Lead) clearIfHeld(ctx context.Context) {
 	}
 }
 
-// mayClear answers whether clearIfHeld may write the Lease with no
-// holder.
 func (l *Lead) mayClear(lease *coordination.Lease) bool {
 	if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity == "" {
 		return false

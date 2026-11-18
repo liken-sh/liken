@@ -11,28 +11,27 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// reports records what a watch of one object reported, in order: the
-// size of each copy, and "absent" for a report that the object does
-// not exist.
+// reports records what a watch of one object delivered, in order: the
+// size of each version, and "absent" for each nil.
 type reports struct {
-	mu   sync.Mutex
-	said []string
+	mu        sync.Mutex
+	delivered []string
 }
 
-func (r *reports) see(held *thing) {
+func (r *reports) record(object *thing) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if held == nil {
-		r.said = append(r.said, "absent")
+	if object == nil {
+		r.delivered = append(r.delivered, "absent")
 		return
 	}
-	r.said = append(r.said, fmt.Sprint(held.Spec.Size))
+	r.delivered = append(r.delivered, fmt.Sprint(object.Spec.Size))
 }
 
 func (r *reports) all() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return slices.Clone(r.said)
+	return slices.Clone(r.delivered)
 }
 
 func sized(name, version string, size int) thing {
@@ -41,48 +40,47 @@ func sized(name, version string, size int) thing {
 	return item
 }
 
-// unconvertible is a watch event whose object has text where the struct
-// holds a number.
+// unconvertible is a watch event whose spec.size is a string, so it
+// does not convert to thing.
 func unconvertible(kind, name, version string) string {
 	return fmt.Sprintf(`{"type":%q,"object":{"apiVersion":%q,"kind":%q,"metadata":{"name":%q,"resourceVersion":%q},"spec":{"size":"large"}}}`,
 		kind, testAPI, testKind, name, version)
 }
 
-// The report after the first read depends on what the handler took and
-// on what the store holds, in whatever order the informer's two
-// goroutines run. Each step is one call: "read empty" and "read held"
-// are the end of the first read with an empty store or a store that
-// holds the object, "take 1" and "take bad" are an add or an update
-// with a copy that converts or does not, and "gone" is a deletion.
-func TestAWatchOfOneObjectReportsAbsenceOnlyWhenNothingArrived(t *testing.T) {
+// Whether firstReadDone delivers nil depends on which events the
+// handler has received and on what the store has, in either order of
+// the informer's goroutines. Each step is one call: firstReadDone with
+// an empty store or with the object in the store, onChange with an
+// object that converts or does not, or onDelete.
+func TestAWatchOfOneObjectDeliversNilOnlyWhenNoEventArrived(t *testing.T) {
 	cases := []struct {
 		name  string
 		steps []string
 		want  []string
 	}{
-		{"an empty first read", []string{"read empty"}, []string{"absent"}},
-		{"an object in the first read", []string{"take 1", "read held"}, []string{"1"}},
-		{"an object in the first read that does not convert", []string{"take bad", "read held"}, nil},
-		{"an object stored after the read, before its event", []string{"read held", "take 1"}, []string{"1"}},
-		{"an object that arrives after an empty read", []string{"read empty", "take 1"}, []string{"absent", "1"}},
-		{"an object deleted before the read's report", []string{"take 1", "gone", "read empty"}, []string{"1", "absent"}},
+		{"an empty first read", []string{"first read, empty"}, []string{"absent"}},
+		{"an object in the first read", []string{"change", "first read, stored"}, []string{"1"}},
+		{"an object in the first read that does not convert", []string{"bad change", "first read, stored"}, nil},
+		{"an object stored after the read, before its event", []string{"first read, stored", "change"}, []string{"1"}},
+		{"an object created after an empty read", []string{"first read, empty", "change"}, []string{"absent", "1"}},
+		{"an object deleted before the first read ends", []string{"change", "delete", "first read, empty"}, []string{"1", "absent"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			seen := &reports{}
-			report := &oneReport[thing]{what: "the test thing", seen: seen.see}
+			report := &oneReport[thing]{what: "the test thing", deliver: seen.record}
 			for _, step := range c.steps {
 				switch step {
-				case "read empty":
-					report.firstRead(func() bool { return true })
-				case "read held":
-					report.firstRead(func() bool { return false })
-				case "take 1":
-					report.take(asObject(t, sized("a", "7", 1)))
-				case "take bad":
-					report.take("not an object")
-				case "gone":
-					report.gone()
+				case "first read, empty":
+					report.firstReadDone(func() bool { return true })
+				case "first read, stored":
+					report.firstReadDone(func() bool { return false })
+				case "change":
+					report.onChange(asObject(t, sized("a", "7", 1)))
+				case "bad change":
+					report.onChange("not an object")
+				case "delete":
+					report.onDelete()
 				}
 			}
 			if got := seen.all(); !slices.Equal(got, c.want) {
@@ -92,23 +90,22 @@ func TestAWatchOfOneObjectReportsAbsenceOnlyWhenNothingArrived(t *testing.T) {
 	}
 }
 
-// watchThing watches the thing named a until the test ends.
 func watchThing(t *testing.T, server *watchServer, seen *reports, synced func()) {
 	t.Helper()
 	ctx, stop := context.WithCancel(t.Context())
-	watch := WatchOne(ctx, testWatcher(t, server), One{Resource: thingResource, Name: "a", What: "the thing a"}, seen.see, synced)
+	watch := WatchOne(ctx, testWatcher(t, server), One{Resource: thingResource, Name: "a", What: "the thing a"}, seen.record, synced)
 	t.Cleanup(func() {
 		stop()
 		<-watch.Done()
 	})
 }
 
-// The first read reports the object as it stands, and each change after
-// it reaches the owner in order: an update, a deletion, and a new
-// object. The watch asks for the one object by name, because RBAC
-// matches a list and a watch against a Role's resourceNames only
-// through that field selector.
-func TestAWatchOfOneObjectReportsEachChange(t *testing.T) {
+// The first read delivers the object as it is, and each later change is
+// delivered in order: an update, a deletion, and a new object. The
+// watch selects the object by name, because RBAC checks a list and a
+// watch against a Role's resourceNames only through that field
+// selector.
+func TestAWatchOfOneObjectDeliversEachChange(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newWatchServer(thingsPath, [][]thing{{sized("a", "7", 1)}}, []string{
 			event("MODIFIED", sized("a", "8", 2)),
@@ -125,15 +122,15 @@ func TestAWatchOfOneObjectReportsEachChange(t *testing.T) {
 		}
 		for _, query := range server.sent() {
 			if query != "labelSelector= fieldSelector=metadata.name=a" {
-				t.Errorf("a request asked for %q, want the field selector metadata.name=a", query)
+				t.Errorf("a request used %q, want the field selector metadata.name=a", query)
 			}
 		}
 	})
 }
 
 // An object absent from the first read has no event, so the watch
-// reports it absent once that read is done, and then runs synced.
-func TestAWatchOfOneObjectReportsAnAbsentObjectBeforeSynced(t *testing.T) {
+// delivers nil once that read is done, and then runs synced.
+func TestAWatchOfOneObjectDeliversNilBeforeSynced(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newWatchServer(thingsPath, [][]thing{{}})
 		seen := &reports{}
@@ -146,9 +143,7 @@ func TestAWatchOfOneObjectReportsAnAbsentObjectBeforeSynced(t *testing.T) {
 	})
 }
 
-// An object absent from the first read is reported absent, and when
-// it is created after that read, the owner takes it.
-func TestAWatchOfOneObjectReportsAnAbsentObjectAndItsArrival(t *testing.T) {
+func TestAWatchOfOneObjectDeliversNilThenTheNewObject(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newWatchServer(thingsPath, [][]thing{{}}, []string{awaitGate, event("ADDED", sized("a", "8", 5)), holdOpen})
 		seen := &reports{}
@@ -161,9 +156,7 @@ func TestAWatchOfOneObjectReportsAnAbsentObjectAndItsArrival(t *testing.T) {
 	})
 }
 
-// A copy that does not convert is logged, and the owner keeps the copy
-// it holds, because the next version of the object can be valid.
-func TestAWatchOfOneObjectSkipsACopyThatDoesNotConvert(t *testing.T) {
+func TestAWatchOfOneObjectSkipsAVersionThatDoesNotConvert(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newWatchServer(thingsPath, [][]thing{{sized("a", "7", 1)}}, []string{
 			unconvertible("MODIFIED", "a", "8"),
@@ -180,23 +173,21 @@ func TestAWatchOfOneObjectSkipsACopyThatDoesNotConvert(t *testing.T) {
 	})
 }
 
-// An owner that reads the object itself takes it as Unstructured, which
-// every copy converts to.
-func TestAWatchOfOneObjectHandsOverAnUnstructuredCopy(t *testing.T) {
+func TestAWatchOfOneObjectDeliversAnUnstructuredVersion(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newWatchServer(thingsPath, [][]thing{{}}, []string{unconvertible("ADDED", "a", "8"), holdOpen})
 		var mu sync.Mutex
 		var sizes []any
 		ctx, stop := context.WithCancel(t.Context())
 		watch := WatchOne(ctx, testWatcher(t, server), One{Resource: thingResource, Name: "a", What: "the thing a"},
-			func(held *unstructured.Unstructured) {
+			func(object *unstructured.Unstructured) {
 				mu.Lock()
 				defer mu.Unlock()
-				if held == nil {
+				if object == nil {
 					sizes = append(sizes, nil)
 					return
 				}
-				size, _, _ := unstructured.NestedFieldNoCopy(held.Object, "spec", "size")
+				size, _, _ := unstructured.NestedFieldNoCopy(object.Object, "spec", "size")
 				sizes = append(sizes, size)
 			}, nil)
 		t.Cleanup(func() {
@@ -208,7 +199,7 @@ func TestAWatchOfOneObjectHandsOverAnUnstructuredCopy(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		if len(sizes) == 0 || sizes[len(sizes)-1] != "large" {
-			t.Errorf("the owner took sizes %v, want the last to be large", sizes)
+			t.Errorf("the owner received sizes %v, want the last to be large", sizes)
 		}
 	})
 }

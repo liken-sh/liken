@@ -48,6 +48,6 @@ or leader election.
 ## Watches
 
 Load the `operators` skill in `.agents/skills` before you change a
-watch, the copy a pass reads, or the memo. It holds the three guards of
+watch, the store a pass reads, or the memo. It holds the three guards of
 a watch, the scenarios a watch must pass, and the reasons the watches
 run on client-go's reflector.

@@ -10,17 +10,17 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// Convert decodes one object from a watch into the operator's own
-// struct. The informer hands a handler an *unstructured.Unstructured,
-// or, for an object that was deleted while the watch was down, a
-// tombstone that holds the last copy the informer had. A tombstone can
-// hold no copy at all, and then the error names the tombstone's key.
+// Convert decodes an object that an informer gave a handler into T. The
+// object is an *unstructured.Unstructured, or a
+// cache.DeletedFinalStateUnknown tombstone for an object that was
+// deleted while the watch was disconnected. A tombstone holds the last
+// copy the informer cached, and Convert decodes that copy. When the
+// tombstone holds none, the error names the tombstone's key.
 //
-// An object that does not convert has a field whose type differs from
-// the operator's struct, so the CRD schema and the struct disagree.
-// The error names the object, and the caller reports it, because an
-// object that is dropped with no word leaves nobody a way to find out
-// why the operator ignored an edit.
+// A conversion fails when a field has a different type from the one in
+// T, which means the CRD schema and T disagree. The error names the
+// object. The caller should report it with Report, because without a
+// log line nobody can find out why the operator ignored an edit.
 func Convert[T any](object any) (T, error) {
 	var out T
 	if tombstone, ok := object.(cache.DeletedFinalStateUnknown); ok {
@@ -37,13 +37,14 @@ func Convert[T any](object any) (T, error) {
 	if err == nil {
 		return out, nil
 	}
-	// The converter refuses a number for a field whose type is a string
-	// with its own UnmarshalJSON, and does not call that method. A
-	// Service's targetPort is a number or a name, and an operator holds
-	// it as text that its UnmarshalJSON reads from either, so the
-	// converter refuses a Service that a read from the API server
-	// decodes. An object the converter refuses is decoded again from its
-	// JSON, the same way a read from the API server decodes it.
+	// The converter calls UnmarshalJSON only for a map, slice,
+	// pointer, struct, or interface type. It converts a value of
+	// any other kind directly, so it refuses a number for a string
+	// type even when that type's UnmarshalJSON accepts one. A
+	// Service's targetPort is a number or a name, and an operator
+	// can read it into such a type. So decode the object from its
+	// JSON again, the way apiclient decodes a response from the API
+	// server.
 	if body, marshalErr := json.Marshal(item.Object); marshalErr == nil {
 		var decoded T
 		if json.Unmarshal(body, &decoded) == nil {
@@ -53,8 +54,8 @@ func Convert[T any](object any) (T, error) {
 	return out, fmt.Errorf("%s %s does not convert: %w", item.GetKind(), objectName(item), err)
 }
 
-// objectName is namespace/name for a namespaced object and name for a
-// cluster-scoped one.
+// objectName returns namespace/name, or only the name for a
+// cluster-scoped object.
 func objectName(item *unstructured.Unstructured) string {
 	if item.GetNamespace() == "" {
 		return item.GetName()
@@ -62,8 +63,8 @@ func objectName(item *unstructured.Unstructured) string {
 	return item.GetNamespace() + "/" + item.GetName()
 }
 
-// Report logs an object that Convert refused. what names the watch or
-// the read, such as "the PairingRequests".
+// Report writes the error from a failed Convert to standard error. what
+// describes the watch or read, such as "the PairingRequests".
 func Report(what string, err error) {
 	fmt.Fprintf(os.Stderr, "watching %s: %v\n", what, err)
 }

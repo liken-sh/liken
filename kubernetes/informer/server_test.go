@@ -1,9 +1,9 @@
 package informer
 
-// The test kind, and the scripted API server that the tests run the
-// real reflector against. The server answers over the in-memory
-// connections of apiservertest, so each test runs in a synctest bubble
-// and waits out the reflector's backoff on the fake clock.
+// The tests run client-go's reflector against a scripted fake API
+// server. The fake serves through apiservertest's in-memory
+// connections, so a test in a synctest bubble waits out the reflector's
+// backoff on the fake clock.
 
 import (
 	"encoding/json"
@@ -41,7 +41,6 @@ func (m *thingMeta) GetName() string            { return m.Name }
 func (m *thingMeta) GetNamespace() string       { return m.Namespace }
 func (m *thingMeta) GetResourceVersion() string { return m.ResourceVersion }
 
-// thing is the operator's own struct for the test kind.
 type thing struct {
 	APIVersion string    `json:"apiVersion"`
 	Kind       string    `json:"kind"`
@@ -64,49 +63,50 @@ func newThing(name, version string, generation int64) thing {
 	return t
 }
 
-// asObject is an object the way the informer hands it to a handler.
+// asObject converts item to the unstructured object that the informer
+// passes to a handler.
 func asObject(t *testing.T, item thing) *unstructured.Unstructured {
 	t.Helper()
 	fields, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&item)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the dynamic client: %v", err)
 	}
 	return &unstructured.Unstructured{Object: fields}
 }
 
-// serverDown, as a failure, takes the server down, so it closes each
-// connection and refuses each new one, the way an API server that
-// restarts does.
+// serverDown, passed to watchServer.failing, makes the server close
+// each connection and refuse each new one, like an API server that is
+// restarting.
 const serverDown = -1
 
 // holdOpen, as the last line of a script, keeps the stream open until
-// the watcher ends the request. Any other script ends the stream after
-// its last line, the way the API server does at timeoutSeconds.
+// the client ends the request. Without it, the stream ends after the
+// last line, as the API server ends a watch at timeoutSeconds.
 const holdOpen = "hold"
 
-// awaitGate, as a line of a script, holds the stream until the test
-// closes the server's gate, so an event reaches the watcher only after
-// a step of the test, such as the end of the first read.
+// awaitGate, as a line of a script, pauses the stream until the test
+// closes the server's gate channel, so a test can send an event only
+// after a step such as the end of the first read.
 const awaitGate = "gate"
 
-// watchServer is an API server for one collection. Each read of the
-// collection answers the next of reads, and the last one again after
-// that. Each watch connection plays the next script of events. While a
-// failure is set, the server fails every watch with it.
+// watchServer is a fake API server for one collection. Each read of the
+// collection returns the next element of reads, and the last element
+// again after they run out. Each watch connection plays the next script
+// of events. While a failure is set, every watch fails with it.
 //
-// The reflector reads a collection with a streaming list: a watch that
-// asks for the initial events. The server answers it the way the API
-// server does, with one ADDED event for each object and a bookmark
-// that marks the end of the initial events, and then plays the
-// connection's script on the same stream. It answers a plain list too,
-// which the reflector sends when a streaming list fails.
+// The reflector reads a collection with a streaming list, which is a
+// watch with sendInitialEvents set. The server responds like the API
+// server does: one ADDED event for each object, a bookmark that ends
+// the initial events, and then the connection's script on the same
+// stream. It also serves a plain list, which the reflector sends when a
+// streaming list fails.
 type watchServer struct {
 	path    string
 	reads   [][]thing
 	scripts [][]string
 	gate    chan struct{}
 
-	// server serves the collection to the test's client (testWatcher).
+	// testWatcher sets server.
 	server *apiservertest.Server
 
 	mu        sync.Mutex
@@ -130,8 +130,8 @@ func (s *watchServer) read() ([]thing, string) {
 }
 
 // failing sets how the server fails each watch from now on: with an
-// HTTP status, or by going down. A failure of 0 accepts every watch,
-// and brings a server that was down up again.
+// HTTP status, or by going down (serverDown). A failure of 0 accepts
+// every watch and brings a server that was down back up.
 func (s *watchServer) failing(failure int) {
 	s.mu.Lock()
 	s.failure = failure
@@ -139,7 +139,7 @@ func (s *watchServer) failing(failure int) {
 	s.server.SetDown(failure == serverDown)
 }
 
-// failed answers how many watches and connections the server refused.
+// failed returns how many watches and connections the server refused.
 func (s *watchServer) failed() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -214,7 +214,7 @@ func (s *watchServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// fail answers one watch with the HTTP status, and counts it.
+// fail responds to one watch with the HTTP status, and counts it.
 func (s *watchServer) fail(w http.ResponseWriter, status int) {
 	w.WriteHeader(status)
 	_, _ = fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":%q,"code":%d}`,
@@ -234,36 +234,35 @@ func event(kind string, item thing) string {
 	return fmt.Sprintf(`{"type":%q,"object":%s}`, kind, object)
 }
 
-// testWatcher serves the collection, and points a dynamic client at it.
-// The server counts each connection it refuses while it is down as a
-// failure. A test that calls it runs in a synctest bubble, because its
+// testWatcher serves the collection and returns a dynamic client for
+// it. A test that calls it must run in a synctest bubble, because its
 // cleanup sleeps for a minute.
 //
-// client-go's reflector waits out its backoff after a refused streaming
-// list without reading its context. The backoff is at most 30 seconds
-// with full jitter, so the wait lasts less than a minute. The cleanup
-// sleeps past it, so the reflector returns before the bubble ends.
-func testWatcher(t *testing.T, script *watchServer) dynamic.Interface {
+// After a refused streaming list, client-go's reflector waits out its
+// backoff without checking its context. The backoff is at most 30
+// seconds with full jitter, so after the minute the reflector has
+// returned and the bubble can end.
+func testWatcher(t *testing.T, fake *watchServer) dynamic.Interface {
 	t.Helper()
-	script.server = apiservertest.Start(t, script)
+	fake.server = apiservertest.Start(t, fake)
 	t.Cleanup(func() { time.Sleep(time.Minute) })
-	config := script.server.Config()
-	config.Transport = countRefusals{script}
+	config := fake.server.Config()
+	config.Transport = countRefusals{fake}
 	client, err := dynamic.NewForConfig(config)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("converting the item to an unstructured object: %v", err)
 	}
 	return client
 }
 
-// countRefusals sends each request to the script's server, and counts
-// each connection the server refuses while it is down as a failure.
-type countRefusals struct{ script *watchServer }
+// countRefusals counts each request that fails to connect, while the
+// server is down, as a failure of the server.
+type countRefusals struct{ fake *watchServer }
 
 func (c countRefusals) RoundTrip(req *http.Request) (*http.Response, error) {
-	resp, err := c.script.server.RoundTrip(req)
+	resp, err := c.fake.server.RoundTrip(req)
 	if err != nil {
-		c.script.countFailure()
+		c.fake.countFailure()
 	}
 	return resp, err
 }

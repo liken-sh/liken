@@ -12,53 +12,48 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
-// sendTo sends one request through the server and answers its status
-// and body.
 func sendTo(t *testing.T, server *apiservertest.Server, method, path, contentType, body string) (int, string) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), method, apiservertest.Host+path, strings.NewReader(body))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the request: %v", err)
 	}
 	req.Header.Set("Content-Type", contentType)
 	resp, err := server.Client().Do(req)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sending the request: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	answer, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, strings.TrimSpace(string(answer))
+	responseBody, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, strings.TrimSpace(string(responseBody))
 }
 
 const podEvent = `{"metadata":{"generateName":"east.","namespace":"observatory"},"involvedObject":{"kind":"Pod","namespace":"observatory","name":"east"},"reason":"Created","type":"Normal","count":1}`
 
-// echo answers each request with its method and its path, the way a
-// test's own fake would answer it.
+// echo plays the test's own fake, and writes back each request's method
+// and path.
 var echo = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, r.Method+" "+r.URL.Path)
 })
 
-// Around answers each Event request itself and hands every other
-// request to the test's own fake.
 func TestEventsServesOnlyEventRequests(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		held := &eventstest.Events{}
-		server := apiservertest.Start(t, held.Around(echo))
+		fake := &eventstest.Events{}
+		server := apiservertest.Start(t, fake.Around(echo))
 
 		created, _ := sendTo(t, server, http.MethodPost, "/api/v1/namespaces/observatory/events", "application/json", podEvent)
 		_, other := sendTo(t, server, http.MethodGet, "/api/v1/namespaces/observatory/pods", "", "")
 
-		if created != http.StatusCreated || len(held.About("Pod", "east")) != 1 || len(held.About("Pod", "west")) != 0 {
-			t.Errorf("the create answered %d and the fake holds %+v, want 201 and one Event about Pod east", created, held.List())
+		if created != http.StatusCreated || len(fake.About("Pod", "east")) != 1 || len(fake.About("Pod", "west")) != 0 {
+			t.Errorf("the create returned %d and the fake stores %+v, want 201 and one Event about Pod east", created, fake.List())
 		}
 		if other != "GET /api/v1/namespaces/observatory/pods" {
-			t.Errorf("the other request reached %q, want the test's fake", other)
+			t.Errorf("the other request returned %q, want the response of the test's fake", other)
 		}
 	})
 }
 
-// The fake refuses what the API server refuses.
-func TestEventsRefusesWhatTheAPIServerRefuses(t *testing.T) {
+func TestEventsRejectsWhatTheAPIServerRejects(t *testing.T) {
 	cases := []struct {
 		name, method, path, contentType, body string
 		want                                  int
@@ -76,26 +71,24 @@ func TestEventsRefusesWhatTheAPIServerRefuses(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				held := &eventstest.Events{}
-				server := apiservertest.Start(t, held)
+				fake := &eventstest.Events{}
+				server := apiservertest.Start(t, fake)
 
 				status, _ := sendTo(t, server, c.method, c.path, c.contentType, c.body)
 
-				if status != c.want || len(held.List()) != 0 {
-					t.Errorf("the fake answered %d and holds %+v, want %d and nothing", status, held.List(), c.want)
+				if status != c.want || len(fake.List()) != 0 {
+					t.Errorf("the fake returned %d and stores %+v, want %d and nothing", status, fake.List(), c.want)
 				}
 			})
 		})
 	}
 }
 
-// A create in a namespace that is being deleted answers the API
-// server's 403, and one in a namespace that is gone answers 404.
-func TestEventsRefusesACreateInANamespaceThatIsGoing(t *testing.T) {
+func TestEventsRejectsACreateInANamespaceThatIsBeingDeleted(t *testing.T) {
 	cases := []struct {
-		name  string
-		leave func(*eventstest.Events, string)
-		want  int
+		name          string
+		markNamespace func(*eventstest.Events, string)
+		want          int
 	}{
 		{"terminating", (*eventstest.Events).Terminate, http.StatusForbidden},
 		{"deleted", (*eventstest.Events).DeleteNamespace, http.StatusNotFound},
@@ -103,74 +96,71 @@ func TestEventsRefusesACreateInANamespaceThatIsGoing(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				held := &eventstest.Events{}
-				server := apiservertest.Start(t, held)
-				c.leave(held, "observatory")
+				fake := &eventstest.Events{}
+				server := apiservertest.Start(t, fake)
+				c.markNamespace(fake, "observatory")
 
 				status, _ := sendTo(t, server, http.MethodPost, "/api/v1/namespaces/observatory/events", "application/json", podEvent)
 
-				if status != c.want || len(held.List()) != 0 {
-					t.Errorf("the fake answered %d and holds %+v, want %d and nothing", status, held.List(), c.want)
+				if status != c.want || len(fake.List()) != 0 {
+					t.Errorf("the fake returned %d and stores %+v, want %d and nothing", status, fake.List(), c.want)
 				}
 			})
 		})
 	}
 }
 
-// A merge patch changes the fields it names, merges an object into an
-// object, and removes a field it sets to null.
+// A merge patch replaces the fields it sets, merges an object into the
+// existing object, and removes a field that it sets to null.
 func TestEventsAppliesAMergePatch(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		held := &eventstest.Events{}
-		server := apiservertest.Start(t, held)
+		fake := &eventstest.Events{}
+		server := apiservertest.Start(t, fake)
 		sendTo(t, server, http.MethodPost, "/api/v1/namespaces/observatory/events", "application/json", podEvent)
-		name := held.List()[0].Metadata.Name
+		name := fake.List()[0].Metadata.Name
 
 		status, _ := sendTo(t, server, http.MethodPatch, "/api/v1/namespaces/observatory/events/"+name, "application/merge-patch+json",
 			`{"count":2,"reason":null,"involvedObject":{"uid":"uid-1"}}`)
 
 		want := events.ObjectReference{Kind: "Pod", Namespace: "observatory", Name: "east", UID: "uid-1"}
-		if got := held.List(); status != http.StatusOK || len(got) != 1 || got[0].Count != 2 || got[0].Reason != "" || got[0].InvolvedObject != want {
-			t.Errorf("the patch answered %d and the fake holds %+v", status, got)
+		if got := fake.List(); status != http.StatusOK || len(got) != 1 || got[0].Count != 2 || got[0].Reason != "" || got[0].InvolvedObject != want {
+			t.Errorf("the patch returned %d and the fake stores %+v, want 200 and one Event with count 2, no reason, and uid-1 in the involved object", status, got)
 		}
 	})
 }
 
-// A patch that does not fit the Event's fields is refused.
-func TestEventsRefusesAPatchThatDoesNotFit(t *testing.T) {
+func TestEventsRejectsAPatchWithWrongFieldTypes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		held := &eventstest.Events{}
-		server := apiservertest.Start(t, held)
+		fake := &eventstest.Events{}
+		server := apiservertest.Start(t, fake)
 		sendTo(t, server, http.MethodPost, "/api/v1/namespaces/observatory/events", "application/json", podEvent)
-		name := held.List()[0].Metadata.Name
+		name := fake.List()[0].Metadata.Name
 
 		status, _ := sendTo(t, server, http.MethodPatch, "/api/v1/namespaces/observatory/events/"+name, "application/merge-patch+json", `{"count":"two"}`)
 
-		if got := held.List(); status != http.StatusUnprocessableEntity || got[0].Count != 1 {
-			t.Errorf("the patch answered %d and the fake holds %+v, want 422 and count 1", status, got)
+		if got := fake.List(); status != http.StatusUnprocessableEntity || got[0].Count != 1 {
+			t.Errorf("the patch returned %d and the fake stores %+v, want 422 and count 1", status, got)
 		}
 	})
 }
 
-// Refuse answers the next writes with 503, the way an API server that
-// restarts does, and Expire deletes every Event, the way the TTL does.
-func TestEventsRefusesAndExpires(t *testing.T) {
+func TestEventsRefuseFailsWritesAndExpireDeletesEvents(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		held := &eventstest.Events{}
-		server := apiservertest.Start(t, held)
-		held.Refuse(2)
+		fake := &eventstest.Events{}
+		server := apiservertest.Start(t, fake)
+		fake.Refuse(2)
 
-		refusedCreate, _ := sendTo(t, server, http.MethodPost, "/api/v1/namespaces/observatory/events", "application/json", podEvent)
-		refusedPatch, _ := sendTo(t, server, http.MethodPatch, "/api/v1/namespaces/observatory/events/east.1", "application/merge-patch+json", `{"count":2}`)
+		createDuringRestart, _ := sendTo(t, server, http.MethodPost, "/api/v1/namespaces/observatory/events", "application/json", podEvent)
+		patchDuringRestart, _ := sendTo(t, server, http.MethodPatch, "/api/v1/namespaces/observatory/events/east.1", "application/merge-patch+json", `{"count":2}`)
 		created, _ := sendTo(t, server, http.MethodPost, "/api/v1/namespaces/observatory/events", "application/json", podEvent)
-		before := len(held.List())
-		held.Expire()
+		before := len(fake.List())
+		fake.Expire()
 
-		if refusedCreate != http.StatusServiceUnavailable || refusedPatch != http.StatusServiceUnavailable || created != http.StatusCreated {
-			t.Errorf("the fake answered %d, %d, and %d; want 503, 503, and 201", refusedCreate, refusedPatch, created)
+		if createDuringRestart != http.StatusServiceUnavailable || patchDuringRestart != http.StatusServiceUnavailable || created != http.StatusCreated {
+			t.Errorf("the fake returned %d, %d, and %d; want 503, 503, and 201", createDuringRestart, patchDuringRestart, created)
 		}
-		if before != 1 || len(held.List()) != 0 {
-			t.Errorf("the fake held %d Events and then %d, want 1 and then none", before, len(held.List()))
+		if before != 1 || len(fake.List()) != 0 {
+			t.Errorf("the fake stored %d Events and then %d, want 1 and then none", before, len(fake.List()))
 		}
 	})
 }

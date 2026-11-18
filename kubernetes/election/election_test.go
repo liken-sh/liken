@@ -1,13 +1,8 @@
 package election_test
 
-// These tests cover what the package adds to client-go's election: the
-// write guard, the release on a shutdown, the exit on a lost Lease, the
-// prompt takeover a release gives a waiting copy, and the take of an
-// expired Lease of an earlier process of the same pod. They run in
-// synctest bubbles against the fake API server of electiontest.
-// synctest.Wait returns once the elector has done all it can at the
-// present moment, and a time.Sleep waits out a retry period or a Lease
-// duration on the fake clock.
+// These tests cover what the package adds to client-go's election.
+// They run in synctest bubbles against the fake API server of
+// electiontest.
 
 import (
 	"context"
@@ -32,9 +27,9 @@ const (
 	leaseNamespace = "liken-system"
 )
 
-// nextTry is the longest wait between two tries of a copy that waits
-// for the Lease: one retry period, and up to 1.2 retry periods of
-// client-go's jitter.
+// nextTry is the longest interval between two reads of the Lease by a
+// waiting replica: one retry period plus client-go's jitter of up to
+// 1.2 retry periods.
 var nextTry = election.RetryPeriod +
 	time.Duration(leaderelection.JitterFactor*float64(election.RetryPeriod))
 
@@ -42,8 +37,9 @@ func newServer() *electiontest.Server {
 	return electiontest.New(leaseName, leaseNamespace)
 }
 
-// candidate is one operator process under test, with the exit code it
-// would have ended with, or -1. exits closes when it exits.
+// candidate is one operator process under test. exitCode is the code
+// that the process passed to Exit, or -1 before it exits, and exits
+// closes when it exits.
 type candidate struct {
 	*election.Lead
 	exitCode atomic.Int32
@@ -56,7 +52,7 @@ func newCandidate(t *testing.T, server *electiontest.Server, pod string) *candid
 	t.Helper()
 	c := &candidate{exits: make(chan struct{})}
 	c.exitCode.Store(-1)
-	// The lines go to a buffer the test prints when it ends, because
+	// Report lines are kept and logged in the cleanup, because
 	// client-go can call back after the test's last assertion.
 	var lines sync.Mutex
 	var reported []string
@@ -76,7 +72,7 @@ func newCandidate(t *testing.T, server *electiontest.Server, pod string) *candid
 		},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the election: %v", err)
 	}
 	c.Lead = l
 	c.Run()
@@ -96,28 +92,28 @@ func newCandidate(t *testing.T, server *electiontest.Server, pod string) *candid
 	return c
 }
 
-// leadsAtOnce answers whether the candidate holds the Lease once the
-// election has done all it can with no time passing.
+// leadsAtOnce reports whether the candidate holds the Lease after the
+// election has done all it can without the fake clock advancing.
 func leadsAtOnce(c *candidate) bool {
 	synctest.Wait()
 	return c.Leads()
 }
 
-// awaitWithin runs Await with a deadline, and answers whether the
-// candidate may act.
-func awaitWithin(c *candidate, spell time.Duration) bool {
-	stop, cancel := context.WithTimeout(context.Background(), spell)
+// awaitWithin runs Await with a timeout, and reports whether the
+// candidate took the Lease within it.
+func awaitWithin(c *candidate, limit time.Duration) bool {
+	stop, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	return c.Await(stop)
 }
 
-// A shutdown releases the Lease, and it is not a loss.
+// A step down releases the Lease and does not count as a loss.
 func TestAStepDownReleasesTheLease(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newServer()
 		leader := newCandidate(t, server, "an-operator-a")
 		if !leadsAtOnce(leader) {
-			t.Fatal("the copy did not take a Lease that nobody holds")
+			t.Fatal("the replica did not take a Lease that nobody holds")
 		}
 
 		leader.StepDown()
@@ -126,27 +122,26 @@ func TestAStepDownReleasesTheLease(t *testing.T) {
 			t.Errorf("holder after the step down = %q, want the Lease released", server.Holder())
 		}
 		if leader.exited() {
-			t.Errorf("a shutdown exited with %d", leader.exitCode.Load())
+			t.Errorf("a step down exited the process with code %d, want no exit", leader.exitCode.Load())
 		}
 		if err := leader.MayWrite(); err == nil {
-			t.Error("a copy that stepped down still allows writes")
+			t.Error("MayWrite allows a write after the step down, want ErrNotLeading")
 		}
 	})
 }
 
-// A renewal the step down cancelled can still land on the API server
-// after client-go's release read the Lease, and the release then fails
-// with a conflict. The step down still leaves the Lease released, so a
-// waiting copy does not wait out the Lease's duration.
+// The API server can commit a renewal after client-go's release has
+// read the Lease, and then the release's update conflicts. The step down still
+// releases the Lease.
 func TestAStepDownReleasesTheLeaseAfterALateRenewal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newServer()
 		leader := newCandidate(t, server, "an-operator-a")
 		if !leadsAtOnce(leader) {
-			t.Fatal("the copy did not take a Lease that nobody holds")
+			t.Fatal("the replica did not take a Lease that nobody holds")
 		}
 
-		server.LandAWriteAfterTheNextRead()
+		server.RewriteAfterNextRead()
 		leader.StepDown()
 
 		if server.Holder() != "" {
@@ -155,28 +150,27 @@ func TestAStepDownReleasesTheLeaseAfterALateRenewal(t *testing.T) {
 	})
 }
 
-// A waiting copy takes a released Lease on its next try, well inside
-// the Lease's duration. This is what makes a rolling update fast: the
-// new pod waits beside the old one, and takes over when the old one
-// steps down.
-func TestAWaitingCopyTakesAReleasedLeaseAtOnce(t *testing.T) {
+// A waiting replica takes a released Lease on its next read, well
+// inside the Lease duration, so a rolling update does not wait out the
+// duration.
+func TestAWaitingReplicaTakesAReleasedLeaseOnItsNextRead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newServer()
 		old := newCandidate(t, server, "an-operator-old")
 		if !leadsAtOnce(old) {
-			t.Fatal("the old copy did not take a Lease that nobody holds")
+			t.Fatal("the old replica did not take a Lease that nobody holds")
 		}
 		replacement := newCandidate(t, server, "an-operator-new")
 		time.Sleep(2 * election.Duration)
 		synctest.Wait()
 		if replacement.Leads() {
-			t.Fatal("the new copy took a Lease the old copy holds")
+			t.Fatal("the new replica took a Lease the old replica holds")
 		}
 
 		old.StepDown()
 
 		if !awaitWithin(replacement, nextTry) {
-			t.Fatalf("the new copy did not take the released Lease within %s, its longest wait between tries", nextTry)
+			t.Fatalf("the new replica did not take the released Lease within %s, its longest wait between tries", nextTry)
 		}
 	})
 }
@@ -186,7 +180,7 @@ func TestALeaderWhoseLeaseAnotherProcessTookExits(t *testing.T) {
 		server := newServer()
 		leader := newCandidate(t, server, "an-operator-a")
 		if !leadsAtOnce(leader) {
-			t.Fatal("the copy did not take a Lease that nobody holds")
+			t.Fatal("the replica did not take a Lease that nobody holds")
 		}
 		renewed := leader.LastRenewal()
 
@@ -203,8 +197,8 @@ func TestALeaderWhoseLeaseAnotherProcessTookExits(t *testing.T) {
 	})
 }
 
-// A shutdown that arrives while the copy waits ends the wait with no
-// Lease and no exit code of its own.
+// A stop while the replica waits ends the wait. The replica takes no
+// Lease, leaves the holder's Lease alone, and does not call Exit.
 func TestAStopWhileWaitingLeavesTheHolderAlone(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newServer()
@@ -223,15 +217,15 @@ func TestAStopWhileWaitingLeavesTheHolderAlone(t *testing.T) {
 	})
 }
 
-// The leader renews from the version it wrote last, so a steady leader
-// sends one update each retry period and does not read the Lease
-// before each one.
+// The leader renews from the resourceVersion it wrote last, so a
+// steady leader sends one update each retry period and does not read
+// the Lease first.
 func TestASteadyLeaderRenewsWithNoRead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newServer()
 		leader := newCandidate(t, server, "an-operator-a")
 		if !leadsAtOnce(leader) {
-			t.Fatal("the copy did not take a Lease that nobody holds")
+			t.Fatal("the replica did not take a Lease that nobody holds")
 		}
 		reads, updates := server.Count(http.MethodGet), server.Count(http.MethodPut)
 
@@ -239,7 +233,7 @@ func TestASteadyLeaderRenewsWithNoRead(t *testing.T) {
 		synctest.Wait()
 
 		if sent, read := server.Count(http.MethodPut)-updates, server.Count(http.MethodGet)-reads; sent != 5 || read != 0 {
-			t.Errorf("%d updates and %d reads in five retry periods of the lead, want 5 updates and no read", sent, read)
+			t.Errorf("%d updates and %d reads in five retry periods of the leader, want 5 updates and no read", sent, read)
 		}
 	})
 }
@@ -256,9 +250,6 @@ func TestTheIdentityIsNewForEachProcess(t *testing.T) {
 	})
 }
 
-// The write guard allows a write only while this copy leads and its
-// last renewal is younger than one renewal deadline. The elector gives
-// up later than that, so the guard stops writes first.
 func TestTheWriteGuardAllowsOnlyAFreshLeader(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -267,7 +258,7 @@ func TestTheWriteGuardAllowsOnlyAFreshLeader(t *testing.T) {
 		renewedAt time.Duration
 		allowed   bool
 	}{
-		{name: "a waiting copy", leading: false, renewedAt: 0, allowed: false},
+		{name: "a waiting replica", leading: false, renewedAt: 0, allowed: false},
 		{name: "a leader that just renewed", leading: true, renewedAt: 0, allowed: true},
 		{name: "a leader one retry period after its renewal", leading: true, renewedAt: election.RetryPeriod, allowed: true},
 		{name: "a leader one renewal deadline after its renewal", leading: true, renewedAt: election.RenewDeadline, allowed: false},
@@ -284,9 +275,8 @@ func TestTheWriteGuardAllowsOnlyAFreshLeader(t *testing.T) {
 	}
 }
 
-// A step down whose release the API server refuses leaves the Lease
-// with this copy's name, to expire after its duration, and still
-// returns, so the process exits inside its grace period.
+// When the API server refuses the release, a step down leaves this
+// replica as the holder, and still returns.
 func TestAStepDownWhoseReleaseIsRefusedLeavesTheLeaseToExpire(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodPut} {
 		t.Run(method, func(t *testing.T) {
@@ -294,14 +284,14 @@ func TestAStepDownWhoseReleaseIsRefusedLeavesTheLeaseToExpire(t *testing.T) {
 				server := newServer()
 				leader := newCandidate(t, server, "an-operator-a")
 				if !leadsAtOnce(leader) {
-					t.Fatal("the copy did not take a Lease that nobody holds")
+					t.Fatal("the replica did not take a Lease that nobody holds")
 				}
 				server.Refuse(method, http.StatusInternalServerError)
 
 				leader.StepDown()
 
 				if server.Holder() != leader.Identity() || leader.exited() {
-					t.Errorf("holder = %q, exit = %d; want the Lease still held and no exit",
+					t.Errorf("holder = %q, exit = %d, want the Lease still held and no exit",
 						server.Holder(), leader.exitCode.Load())
 				}
 			})
@@ -309,15 +299,13 @@ func TestAStepDownWhoseReleaseIsRefusedLeavesTheLeaseToExpire(t *testing.T) {
 	}
 }
 
-// A Lease that an earlier process of this pod held is free once its
-// last renewal is one Lease duration old. The kubelet runs one process
-// of a container at a time, so that process has exited, and its
-// renewal time comes from this node's clock. A Lease that another pod
-// holds, or that this pod's earlier process renewed within the
-// duration, waits out the duration from this process's first read of
-// it, as client-go measures it. So a copy takes only the first kind
-// within one second less than a whole duration.
-func TestAnExpiredLeaseOfAnEarlierProcessOfThisPodIsTakenAtOnce(t *testing.T) {
+// A restarted replica takes the Lease of an earlier process of its pod
+// as soon as the last renewal is one Lease duration old. When another
+// pod holds the Lease, or the renewal is newer, client-go waits one
+// whole duration from the replica's first read. So one second before
+// the duration ends, the replica has taken only an expired Lease of its
+// own pod.
+func TestARestartedReplicaTakesAnExpiredLeaseOfAnEarlierProcessOfItsPodWithoutWaitingTheDuration(t *testing.T) {
 	cases := []struct {
 		name    string
 		holder  string
@@ -328,9 +316,8 @@ func TestAnExpiredLeaseOfAnEarlierProcessOfThisPodIsTakenAtOnce(t *testing.T) {
 		{name: "this pod, renewed within the duration", holder: "an-operator-a_0badc0de", renewed: 0, taken: false},
 		{name: "another pod, renewed long ago", holder: "an-operator-b_0badc0de", renewed: 3 * election.Duration, taken: false},
 		{name: "a pod whose name starts with this pod's", holder: "an-operator-a-2_0badc0de", renewed: 3 * election.Duration, taken: false},
-		// The first read finds the Lease current, and a later read finds
-		// it expired, before a whole duration from the first read: half
-		// a duration, and at most one wait between tries, from the start.
+		// The Lease expires half a duration after the start,
+		// and the replica takes it on its next read after that.
 		{name: "this pod, expiring while this process waits", holder: "an-operator-a_0badc0de", renewed: election.Duration / 2, taken: true},
 	}
 	for _, c := range cases {
@@ -342,29 +329,28 @@ func TestAnExpiredLeaseOfAnEarlierProcessOfThisPodIsTakenAtOnce(t *testing.T) {
 				restarted := newCandidate(t, server, "an-operator-a")
 
 				if taken := awaitWithin(restarted, election.Duration-time.Second); taken != c.taken {
-					t.Errorf("took the Lease within one second less than its duration = %v, want %v", taken, c.taken)
+					t.Errorf("the Lease taken one second before its duration ends = %v, want %v", taken, c.taken)
 				}
 			})
 		})
 	}
 }
 
-// A stop that arrives before the elector's next read still frees a
-// Lease that an earlier process of this pod left, so the copy that
-// waits in another pod takes it on its next retry. The same rule as
-// the take above decides which Lease the release may clear.
+// The release clears an expired Lease of an earlier process of this
+// pod, which the elector has not taken yet, so a waiting replica in
+// another pod does not wait out the duration.
 func TestTheReleaseClearsAnExpiredLeaseOfAnEarlierProcessOfThisPod(t *testing.T) {
 	cases := []struct {
 		name    string
 		holder  string
 		renewed time.Duration
-		cleared bool
+		free    bool
 	}{
-		{name: "this pod, renewed long ago", holder: "an-operator-a_0badc0de", renewed: 3 * election.Duration, cleared: true},
-		{name: "this pod, renewed within the duration", holder: "an-operator-a_0badc0de", renewed: 0, cleared: false},
-		{name: "another pod, renewed long ago", holder: "an-operator-b_0badc0de", renewed: 3 * election.Duration, cleared: false},
-		{name: "a pod whose name starts with this pod's", holder: "an-operator-a-2_0badc0de", renewed: 3 * election.Duration, cleared: false},
-		{name: "no holder", holder: "", renewed: 3 * election.Duration, cleared: true},
+		{name: "this pod, renewed long ago", holder: "an-operator-a_0badc0de", renewed: 3 * election.Duration, free: true},
+		{name: "this pod, renewed within the duration", holder: "an-operator-a_0badc0de", renewed: 0, free: false},
+		{name: "another pod, renewed long ago", holder: "an-operator-b_0badc0de", renewed: 3 * election.Duration, free: false},
+		{name: "a pod whose name starts with this pod's", holder: "an-operator-a-2_0badc0de", renewed: 3 * election.Duration, free: false},
+		{name: "no holder stays free", holder: "", renewed: 3 * election.Duration, free: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -374,20 +360,20 @@ func TestTheReleaseClearsAnExpiredLeaseOfAnEarlierProcessOfThisPod(t *testing.T)
 				Name: leaseName, Namespace: leaseNamespace, Pod: "an-operator-a",
 			})
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("creating the election: %v", err)
 			}
 
 			election.ClearIfHeld(stopped, context.Background())
 
-			if cleared := server.Holder() == ""; cleared != c.cleared {
-				t.Errorf("holder after the release = %q, want cleared %v", server.Holder(), c.cleared)
+			if free := server.Holder() == ""; free != c.free {
+				t.Errorf("holder after the release = %q, want a Lease with no holder %v", server.Holder(), c.free)
 			}
 		})
 	}
 }
 
-// A release of a Lease that does not exist, or that the API server
-// cannot read, writes nothing.
+// A release writes nothing when the Lease does not exist or the read of
+// it fails.
 func TestTheReleaseOfALeaseItCannotReadWritesNothing(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -407,7 +393,7 @@ func TestTheReleaseOfALeaseItCannotReadWritesNothing(t *testing.T) {
 				Name: leaseName, Namespace: leaseNamespace, Pod: "an-operator-a",
 			})
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("creating the election: %v", err)
 			}
 
 			election.ClearIfHeld(stopped, context.Background())
@@ -419,7 +405,6 @@ func TestTheReleaseOfALeaseItCannotReadWritesNothing(t *testing.T) {
 	}
 }
 
-// An election needs the name of its Lease and of its pod.
 func TestAnElectionWithoutANameIsRefused(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -432,22 +417,20 @@ func TestAnElectionWithoutANameIsRefused(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := election.New(&rest.Config{Host: "https://localhost"}, c.options); err == nil {
-				t.Error("New accepted an election with no name")
+				t.Error("New returned no error for options with no name, namespace, or pod, want one")
 			}
 		})
 	}
 }
 
-// Start answers a lead that may act, or ErrStopped when the stop comes
-// first.
-func TestStartAnswersALeadOrTheStop(t *testing.T) {
+func TestStartReturnsALeadOrErrStopped(t *testing.T) {
 	cases := []struct {
 		name   string
 		holder string
 		err    error
 	}{
 		{name: "a free Lease", err: nil},
-		{name: "a Lease another copy holds", holder: "an-operator-b_0badc0de", err: election.ErrStopped},
+		{name: "a Lease another replica holds", holder: "an-operator-b_0badc0de", err: election.ErrStopped},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -464,7 +447,7 @@ func TestStartAnswersALeadOrTheStop(t *testing.T) {
 				})
 
 				if !errors.Is(err, c.err) || (lead != nil) != (c.err == nil) {
-					t.Fatalf("Start = %v, %v; want the error %v", lead, err, c.err)
+					t.Fatalf("Start = %v, %v, want the error %v", lead, err, c.err)
 				}
 				if lead != nil {
 					lead.StepDown()
@@ -476,6 +459,6 @@ func TestStartAnswersALeadOrTheStop(t *testing.T) {
 
 func TestStartRefusesAnElectionWithoutAName(t *testing.T) {
 	if _, err := election.Start(t.Context(), &rest.Config{Host: "https://localhost"}, election.Options{}); err == nil {
-		t.Error("Start elected with no name")
+		t.Error("Start returned no error for options with no name, namespace, or pod, want one")
 	}
 }

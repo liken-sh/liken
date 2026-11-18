@@ -2,26 +2,28 @@ package election
 
 import "time"
 
-// These give the tests in election_test the state they check.
+// These expose the state of Lead to the tests in package election_test.
 
 func (l *Lead) Started() <-chan struct{} { return l.started }
 func (l *Lead) LastRenewal() time.Time   { return l.lock.lastRenewal() }
 
-// Halt ends the election without a release, the way a test's cleanup
-// leaves it, and answers the channel that closes when it has ended.
+// Halt cancels the election as end does, but skips clearIfHeld. It
+// returns the channel that closes when client-go's elector returns,
+// after its own release of the Lease.
 func (l *Lead) Halt() <-chan struct{} {
 	l.stepping.Store(true)
 	l.cancel()
 	return l.done
 }
 
-// ClearIfHeld is the release that follows client-go's own.
+// ClearIfHeld lets a test run the Lead's own release of the Lease on
+// its own, after the election has stopped.
 var ClearIfHeld = (*Lead).clearIfHeld
 
-// Guarded is a Lead in the state the write guard reads, with no
-// election behind it.
+// Guarded returns a Lead with the given state for the write guard to
+// read, and no election running behind it.
 func Guarded(leading, stepping bool, renewed time.Time) *Lead {
-	l := &Lead{started: make(chan struct{}), lock: &renewalClock{renewed: renewed}}
+	l := &Lead{started: make(chan struct{}), lock: &renewalRecordingLock{renewed: renewed}}
 	if leading {
 		close(l.started)
 	}

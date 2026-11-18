@@ -1,8 +1,5 @@
 package apiclient
 
-// The 429 answer: the client waits the time the API server asks for,
-// sends the request again, and ends the wait with its context.
-
 import (
 	"context"
 	"errors"
@@ -15,8 +12,8 @@ import (
 	"time"
 )
 
-// throttling answers 429 to the first requests, with the given headers
-// and body, and then answers the object. It counts the requests.
+// throttling returns 429, with retryAfter and body, to the first
+// refusals requests, and then returns an object. It counts the requests.
 type throttling struct {
 	refusals   int
 	retryAfter string
@@ -36,11 +33,10 @@ func (s *throttling) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"metadata":{"name":"studio"}}`))
 }
 
-// A 429 is sent again after the wait the API server asks for, while
-// the total wait stays within maxThrottleWait. The API server states
-// the wait in the Retry-After header, in the Status body, or not at
-// all, which means one second.
-func TestA429IsSentAgainAfterTheWaitItAsksFor(t *testing.T) {
+// The API server gives the wait in the Retry-After header or in the
+// Status body. When it gives neither, the client waits one second. The
+// client stops retrying when the total wait would pass maxThrottleWait.
+func TestA429IsRetriedAfterTheWaitItAsksFor(t *testing.T) {
 	status := `{"kind":"Status","message":"storage is (re)initializing","details":{"retryAfterSeconds":2}}`
 	cases := []struct {
 		name         string
@@ -49,9 +45,9 @@ func TestA429IsSentAgainAfterTheWaitItAsksFor(t *testing.T) {
 		wantRequests int64
 		wantWait     time.Duration
 	}{
-		{"the header", &throttling{refusals: 2, retryAfter: "3"}, false, 3, 6 * time.Second},
+		{"the Retry-After header", &throttling{refusals: 2, retryAfter: "3"}, false, 3, 6 * time.Second},
 		{"the Status body", &throttling{refusals: 2, body: status}, false, 3, 4 * time.Second},
-		{"no advice", &throttling{refusals: 1}, false, 2, time.Second},
+		{"no wait given", &throttling{refusals: 1}, false, 2, time.Second},
 		{"longer than the limit", &throttling{refusals: 100, retryAfter: "4"}, true, 3, 8 * time.Second},
 	}
 	for _, c := range cases {
@@ -79,9 +75,7 @@ func TestA429IsSentAgainAfterTheWaitItAsksFor(t *testing.T) {
 	}
 }
 
-// A write that meets a 429 is sent again with its whole body, and with
-// its content type.
-func TestAWriteAfterA429SendsItsWholeBodyAgain(t *testing.T) {
+func TestAWriteIsRetriedAfterA429WithItsWholeBody(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var bodies, types []string
 		refused := false
@@ -98,7 +92,7 @@ func TestAWriteAfterA429SendsItsWholeBodyAgain(t *testing.T) {
 		body := `{"metadata":{"name":"studio","resourceVersion":"7"},"status":{"phase":"Ready"}}`
 
 		if err := client.Request(http.MethodPut, "/things/studio/status", "application/json", []byte(body), nil); err != nil {
-			t.Fatal(err)
+			t.Fatalf("sending the PUT request: %v", err)
 		}
 
 		if len(bodies) != 2 || bodies[0] != body || bodies[1] != body || types[1] != "application/json" {
@@ -107,8 +101,6 @@ func TestAWriteAfterA429SendsItsWholeBodyAgain(t *testing.T) {
 	})
 }
 
-// The wait after a 429 ends when the client's context ends, and the
-// request answers the 429.
 func TestTheWaitAfterA429EndsWithTheContext(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := &throttling{refusals: 100, retryAfter: "4"}
@@ -128,11 +120,11 @@ func TestTheWaitAfterA429EndsWithTheContext(t *testing.T) {
 	})
 }
 
-// A request a client with a wait context already sent runs to its
-// answer when the context ends. A writer that must know whether its
-// write landed, such as an operator that releases a Lease after its last
-// write, still learns the answer.
-func TestAWaitContextLetsARequestSentRunToItsAnswer(t *testing.T) {
+// The wait context ends only the waits after a 429. A request already
+// sent still returns its response, so a caller that needs to know
+// whether its write succeeded, such as an operator that releases a
+// Lease after its last write, receives the result.
+func TestAWaitContextDoesNotCancelASentRequest(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		release := make(chan struct{})
@@ -146,13 +138,11 @@ func TestAWaitContextLetsARequestSentRunToItsAnswer(t *testing.T) {
 		err := client.WithWaitContext(ctx).RequestJSON(http.MethodGet, "/things/studio", nil, nil)
 
 		if err != nil {
-			t.Errorf("err = %v, want the answer of the request that was sent", err)
+			t.Errorf("err = %v, want the response to the request that was sent", err)
 		}
 	})
 }
 
-// The wait after a 429 of a client with a wait context ends when the
-// context ends, and the request answers the 429.
 func TestAWaitContextEndsTheWaitAfterA429(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
@@ -164,14 +154,11 @@ func TestAWaitContextEndsTheWaitAfterA429(t *testing.T) {
 		err := client.WithWaitContext(ctx).RequestJSON(http.MethodGet, "/things/studio", nil, nil)
 
 		if !errors.Is(err, ErrThrottled) || time.Since(began) != 0 || throttled.requests.Load() != 1 {
-			t.Errorf("err = %v after %s and %d requests, want the 429 at once", err, time.Since(began), throttled.requests.Load())
+			t.Errorf("err = %v after %s and %d requests, want the 429 error at once", err, time.Since(began), throttled.requests.Load())
 		}
 	})
 }
 
-// WithContext replaces a wait context, so a client bound to a new
-// context waits out a 429 under it, and not under the wait context that
-// ended.
 func TestWithContextReplacesAWaitContext(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ended, cancel := context.WithCancel(t.Context())
@@ -182,22 +169,21 @@ func TestWithContextReplacesAWaitContext(t *testing.T) {
 		err := client.WithWaitContext(ended).WithContext(t.Context()).RequestJSON(http.MethodGet, "/things/studio", nil, nil)
 
 		if err != nil || time.Since(began) != time.Second {
-			t.Errorf("err = %v after %s, want the 429's one second waited out under the new context", err, time.Since(began))
+			t.Errorf("err = %v after %s, want the 429 retried after one second under the new context", err, time.Since(began))
 		}
 	})
 }
 
-// A 429 the client answered states the seconds the API server asked the
-// caller to wait. A 429 that stated no wait, and any other error, state
-// none.
-func TestA429StatesTheWaitTheAPIServerAskedFor(t *testing.T) {
+// RetryAfterSeconds returns 0 for a 429 that gave no wait and for any
+// other error.
+func TestRetryAfterSecondsReturnsTheWaitOfA429(t *testing.T) {
 	cases := []struct {
 		name   string
 		server *throttling
 		want   int
 	}{
-		{"the header", &throttling{refusals: 100, retryAfter: "11"}, 11},
-		{"no advice", &throttling{refusals: 100}, 0},
+		{"the Retry-After header", &throttling{refusals: 100, retryAfter: "11"}, 11},
+		{"no wait given", &throttling{refusals: 100}, 0},
 		{"no 429", &throttling{}, 0},
 	}
 	for _, c := range cases {
@@ -217,15 +203,14 @@ func TestA429StatesTheWaitTheAPIServerAskedFor(t *testing.T) {
 	}
 }
 
-// The guard runs again before a write is sent again after a 429, so a
-// write that waited past the guard's deadline is not sent again.
-func TestAWriteGuardRunsBeforeEachSendAfterA429(t *testing.T) {
+// A write that waited past the guard's deadline is not sent again.
+func TestTheWriteGuardRunsBeforeEachRetryAfterA429(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := &throttling{refusals: 1, retryAfter: "1"}
 		client, _ := testClient(t, server)
-		var asked atomic.Int64
+		var guardCalls atomic.Int64
 		guarded := client.WithWriteGuard(func() error {
-			if asked.Add(1) > 1 {
+			if guardCalls.Add(1) > 1 {
 				return errors.New("the lease is overdue")
 			}
 			return nil
@@ -233,9 +218,9 @@ func TestAWriteGuardRunsBeforeEachSendAfterA429(t *testing.T) {
 
 		err := guarded.RequestJSON(http.MethodPut, "/api/v1/nodes/node-1", []byte(`{}`), nil)
 
-		if err == nil || asked.Load() != 2 || server.requests.Load() != 1 {
+		if err == nil || guardCalls.Load() != 2 || server.requests.Load() != 1 {
 			t.Errorf("err = %v after %d guard calls and %d sends, want a refusal on the second call and one send",
-				err, asked.Load(), server.requests.Load())
+				err, guardCalls.Load(), server.requests.Load())
 		}
 	})
 }

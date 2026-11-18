@@ -1,13 +1,13 @@
 // The client, the watch, the cache, and the Event writer that the
 // operators share. The apiclient, memo, events, and conditions packages
-// import nothing from k8s.io, so a program that must not link
-// client-go can use them. The informer package
-// links the three parts of client-go that a watch needs, and the
-// election package links client-go's leader election.
+// depend on no k8s.io module, so a program that must not link client-go
+// can use them. The informer package links client-go's reflector,
+// dynamic client, and rest packages, and the election package links
+// client-go's leader election.
 //
-// The Kubernetes libraries follow the Kubernetes minor that liken
-// ships: liken's k3s/VERSION names v1.36.3+k3s1, so client-go stays on
-// v0.36.3. The Go version matches liken's for the same reason.
+// The k8s.io modules follow the Kubernetes minor version of the k3s
+// that liken ships, which liken/k3s/VERSION names. The Go version
+// matches the one in liken/go.mod for the same reason.
 module github.com/liken-sh/liken/kubernetes
 
 go 1.27.4

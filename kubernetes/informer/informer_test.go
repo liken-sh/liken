@@ -1,14 +1,13 @@
 package informer
 
-// These tests run the copy through client-go's real reflector, against
-// a scripted API server. The reflector's own loop is upstream's to
-// test. What these tests prove is that the copy holds the collection,
-// that each change the API server sends reaches the handler, and that
-// the copy stops answering only while the API server forbids its watch.
+// These tests run client-go's real reflector against a scripted API
+// server. Upstream tests the reflector's own loop, so these tests check
+// what this package adds: what the store stores, which callbacks run,
+// and when Synced is false.
 //
 // Each test that runs a watch runs in a synctest bubble. synctest.Wait
-// returns once the reflector has done all it can do at the present
-// moment, and a time.Sleep waits out its backoff on the fake clock.
+// returns when the reflector has nothing left to do at the current fake
+// time, and time.Sleep waits out a backoff on the fake clock.
 
 import (
 	"context"
@@ -27,17 +26,14 @@ import (
 
 const thingsPath = "/apis/test.liken.sh/v1/things"
 
-// A pod with no in-cluster environment gets no client for its watches.
-func TestInClusterNeedsThePodsEnvironment(t *testing.T) {
+func TestInClusterFailsWithoutThePodsEnvironment(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	if _, err := InCluster(); err == nil {
-		t.Error("InCluster built a client with no environment")
+		t.Error("InCluster returned no error with KUBERNETES_SERVICE_HOST empty, want one")
 	}
 }
 
-// A source names itself in a log line with its namespace and its
-// selectors.
-func TestASourceNamesItsSelection(t *testing.T) {
+func TestASourceStringIncludesItsSelection(t *testing.T) {
 	cases := []struct {
 		source Source
 		want   string
@@ -53,19 +49,17 @@ func TestASourceNamesItsSelection(t *testing.T) {
 	}
 }
 
-// A copy that never started cannot answer, so the pass reads the API
-// server instead.
-func TestACollectionThatNeverStartedCannotAnswer(t *testing.T) {
+func TestANilCollectionIsNeverSynced(t *testing.T) {
 	var missing *Collection
 	if missing.Synced() || missing.View().Ready() {
-		t.Error("a nil collection answered")
+		t.Error("a nil Collection reports Synced or Ready, want neither")
 	}
 }
 
-// The synced copy holds each object of the first read with no
-// managedFields, runs Synced once, and hands the handler each object.
-// Done closes after the watch stops.
-func TestTheSyncedCopyHoldsTheFirstRead(t *testing.T) {
+// The store stores each object of the first read without managedFields,
+// calls Synced once, and calls the handler for each object. Done closes
+// after the watch stops.
+func TestASyncedCollectionStoresTheFirstRead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		a, b := newThing("a", "7", 1), newThing("b", "8", 1)
 		a.Metadata.ManagedFields = []any{map[string]any{"manager": "kubectl"}}
@@ -78,9 +72,9 @@ func TestTheSyncedCopyHoldsTheFirstRead(t *testing.T) {
 		})
 		synctest.Wait()
 
-		held := CachedList[thing](c.View())
-		if !c.Synced() || len(held) != 2 || held[0].Metadata.Name != "a" || held[0].Metadata.ManagedFields != nil {
-			t.Errorf("the copy holds %+v, synced: %v; want a with no managedFields, then b", held, c.Synced())
+		cached := CachedList[thing](c.View())
+		if !c.Synced() || len(cached) != 2 || cached[0].Metadata.Name != "a" || cached[0].Metadata.ManagedFields != nil {
+			t.Errorf("the store contains %+v, synced: %v; want a with no managedFields, then b", cached, c.Synced())
 		}
 		cancel()
 		synctest.Wait()
@@ -90,27 +84,24 @@ func TestTheSyncedCopyHoldsTheFirstRead(t *testing.T) {
 			t.Fatal("the watch never stopped")
 		}
 		if synced.Load() != 1 || added.Load() != 2 {
-			t.Errorf("Synced ran %d times and the handler took %d objects, want 1 and 2", synced.Load(), added.Load())
+			t.Errorf("Synced ran %d times and the handler received %d objects, want 1 and 2", synced.Load(), added.Load())
 		}
 	})
 }
 
-// A watch with no handler keeps a copy for the pass to read.
-func TestAWatchWithNoHandlerKeepsACopy(t *testing.T) {
+func TestAWatchWithNoHandlerStillFillsTheStore(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newWatchServer(thingsPath, [][]thing{{newThing("a", "7", 1)}})
 		c := Start(t.Context(), testWatcher(t, server), Source{Resource: thingResource}, Options{})
 		synctest.Wait()
 
 		if _, ok := Cached[thing](c.View(), "a"); !ok {
-			t.Error("the copy does not hold a")
+			t.Error("the store has no object a, want one")
 		}
 	})
 }
 
-// The list and every watch carry the source's namespace and selectors,
-// so the API server sends only the objects the operator reads.
-func TestEveryRequestCarriesTheSelection(t *testing.T) {
+func TestEveryRequestIncludesTheSelection(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newWatchServer("/apis/test.liken.sh/v1/namespaces/liken-system/things", [][]thing{{}}, []string{})
 		source := Source{Resource: thingResource, Namespace: "liken-system", LabelSelector: "app=test", FieldSelector: "metadata.name=a"}
@@ -126,9 +117,9 @@ func TestEveryRequestCarriesTheSelection(t *testing.T) {
 	})
 }
 
-// A watch that the API server ends is opened again, and each open after
-// the first counts. A change on the stream reaches the handler.
-func TestAWatchOpenedAgainCounts(t *testing.T) {
+// When the API server ends a watch, the reflector opens it again, and
+// each open after the first calls Reopened but not Recovered.
+func TestAReopenedWatchCallsReopened(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		changed := newThing("a", "150", 2)
 		server := newWatchServer(thingsPath, [][]thing{{newThing("a", "7", 1)}}, []string{event("MODIFIED", changed)})
@@ -142,15 +133,13 @@ func TestAWatchOpenedAgainCounts(t *testing.T) {
 		synctest.Wait()
 
 		if reopened.Load() != 1 || updated.Load() != 1 || recovered.Load() != 0 {
-			t.Errorf("the watch counted %d reopened watches, %d recoveries, and the handler took %d updates, want 1, 0, and 1",
+			t.Errorf("the watch counted %d reopened watches, %d recoveries, and the handler received %d updates, want 1, 0, and 1",
 				reopened.Load(), recovered.Load(), updated.Load())
 		}
 	})
 }
 
-// A watch that the API server accepts after an outage is a recovery,
-// and the outage's failed attempts count once, not once each.
-func TestAWatchAcceptedAfterAnOutageRecovers(t *testing.T) {
+func TestAWatchAcceptedAfterAnOutageCallsRecoveredOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newWatchServer(thingsPath, [][]thing{{newThing("a", "7", 1)}}, []string{})
 		var recovered atomic.Int64
@@ -174,10 +163,9 @@ func TestAWatchAcceptedAfterAnOutageRecovers(t *testing.T) {
 	})
 }
 
-// A copy whose watch the API server forbids holds a list, and still
-// answers nothing, because no watch keeps the list current. When the
-// API server accepts the watch again, the copy answers.
-func TestACopyWithAForbiddenWatchDoesNotAnswer(t *testing.T) {
+// A store whose watch the API server forbids stores the list but is not
+// Synced, because no watch keeps the list current.
+func TestACollectionWithAForbiddenWatchIsNotSynced(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := newWatchServer(thingsPath, [][]thing{{newThing("a", "7", 1)}})
 		client := testWatcher(t, server)
@@ -185,27 +173,26 @@ func TestACopyWithAForbiddenWatchDoesNotAnswer(t *testing.T) {
 		c := Start(t.Context(), client, Source{Resource: thingResource}, Options{})
 		synctest.Wait()
 
-		if _, held := Cached[thing](c.View(), "a"); !c.controller.HasSynced() || c.Synced() || c.View().Ready() || held {
-			t.Error("the copy answers, or holds no list, while the API server forbids its watch")
+		if _, cached := Cached[thing](c.View(), "a"); !c.controller.HasSynced() || c.Synced() || c.View().Ready() || cached {
+			t.Error("while the API server forbids the watch, Synced or Ready is true or the store has a, want none of them")
 		}
 		server.failing(0)
 		time.Sleep(time.Minute)
 		synctest.Wait()
 		if !c.Synced() {
-			t.Error("the copy does not answer a minute after the API server accepts its watch")
+			t.Error("Synced is false a minute after the API server accepts the watch, want true")
 		}
 	})
 }
 
-// Only a refusal of the permission to watch stops a synced copy from
-// answering. A watch that fails because the API server is down or busy
-// says nothing about the copy's permission, and the operator keeps its
-// local work going from the copy until the API server returns.
-func TestOnlyARefusedPermissionStopsASyncedCopy(t *testing.T) {
+// A watch that fails because the API server is down or busy does not
+// show whether the watch is permitted, so only a 401 or a 403 makes the
+// store not Synced.
+func TestOnlyARefusedPermissionMakesASyncedCollectionNotSynced(t *testing.T) {
 	cases := []struct {
-		name    string
-		failure int
-		answers bool
+		name       string
+		failure    int
+		wantSynced bool
 	}{
 		{"the API server refuses the connection", serverDown, true},
 		{"the API server is unavailable", http.StatusServiceUnavailable, true},
@@ -222,63 +209,59 @@ func TestOnlyARefusedPermissionStopsASyncedCopy(t *testing.T) {
 				time.Sleep(time.Minute)
 				synctest.Wait()
 
-				if server.failed() == 0 || c.Synced() != tc.answers {
-					t.Errorf("Synced() = %v after %d failures, want %v after a failed watch", c.Synced(), server.failed(), tc.answers)
+				if server.failed() == 0 || c.Synced() != tc.wantSynced {
+					t.Errorf("Synced() = %v after %d failures, want %v after a failed watch", c.Synced(), server.failed(), tc.wantSynced)
 				}
 			})
 		})
 	}
 }
 
-// A copy whose Options.UnreadyOnWatchError is set stops answering after
-// any failed watch, and a read of it goes to the API server until the
-// API server accepts a watch again. The same failures leave a copy
-// without the option answering. An operator sets it when a copy that
-// missed changes, such as the changes made while its reflector waited
-// out a backoff after an API server restart, must never decide a pass.
-func TestAStrictCopyStopsAnsweringAfterAnyFailedWatch(t *testing.T) {
+// A collection with Options.UnreadyOnWatchError set is not Synced after
+// any failed watch, so ReadOne reads the API server. The same failures
+// leave a collection without the option Synced, and ReadOne reads the
+// store.
+func TestACollectionWithUnreadyOnWatchErrorIsNotSyncedAfterAnyFailedWatch(t *testing.T) {
 	cases := []struct {
-		name    string
-		failure int
-		strict  bool
-		answers bool
+		name                string
+		failure             int
+		unreadyOnWatchError bool
+		wantSynced          bool
 	}{
-		{"a strict copy, the API server refuses the connection", serverDown, true, false},
-		{"a strict copy, the API server is unavailable", http.StatusServiceUnavailable, true, false},
-		{"a strict copy, the watch is forbidden", http.StatusForbidden, true, false},
-		{"a copy, the API server refuses the connection", serverDown, false, true},
-		{"a copy, the API server is unavailable", http.StatusServiceUnavailable, false, true},
+		{"UnreadyOnWatchError set, the API server refuses the connection", serverDown, true, false},
+		{"UnreadyOnWatchError set, the API server is unavailable", http.StatusServiceUnavailable, true, false},
+		{"UnreadyOnWatchError set, the watch is forbidden", http.StatusForbidden, true, false},
+		{"UnreadyOnWatchError unset, the API server refuses the connection", serverDown, false, true},
+		{"UnreadyOnWatchError unset, the API server is unavailable", http.StatusServiceUnavailable, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				server := newWatchServer(thingsPath, [][]thing{{newThing("a", "7", 1)}}, []string{})
-				c := Start(t.Context(), testWatcher(t, server), Source{Resource: thingResource}, Options{UnreadyOnWatchError: tc.strict})
+				c := Start(t.Context(), testWatcher(t, server), Source{Resource: thingResource}, Options{UnreadyOnWatchError: tc.unreadyOnWatchError})
 				synctest.Wait()
 				server.failing(tc.failure)
 				time.Sleep(time.Minute)
 				synctest.Wait()
 				api := newFakeAPI(newThing("a", "9", 1))
 
-				held := Held{View: c.View(), Versions: memo.New()}
-				got, err := ReadOne[thing](testClient(t, api), held, "a", thingPath("a"))
+				watched := Held{View: c.View(), Versions: memo.New()}
+				got, err := ReadOne[thing](testClient(t, api), watched, "a", thingPath("a"))
 
-				if err != nil || server.failed() == 0 || c.Synced() != tc.answers {
+				if err != nil || server.failed() == 0 || c.Synced() != tc.wantSynced {
 					t.Fatalf("Synced() = %v, err = %v after %d failures; want %v and no error after a failed watch",
-						c.Synced(), err, server.failed(), tc.answers)
+						c.Synced(), err, server.failed(), tc.wantSynced)
 				}
 				fromServer := got.Metadata.ResourceVersion == "9" && len(api.sent()) == 1
-				if fromServer == tc.answers {
-					t.Errorf("the read answered version %s; want the store's copy %v", got.Metadata.ResourceVersion, tc.answers)
+				if fromServer == tc.wantSynced {
+					t.Errorf("the read returned version %s, want the store's copy %v", got.Metadata.ResourceVersion, tc.wantSynced)
 				}
 			})
 		})
 	}
 }
 
-// An operator's transform trims each object before the copy holds it,
-// after the managedFields are gone.
-func TestTheCopyHoldsWhatTheTransformLeaves(t *testing.T) {
+func TestTheStoreKeepsWhatTheTransformLeaves(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		a := newThing("a", "7", 1)
 		a.Spec.Size = 3
@@ -289,16 +272,14 @@ func TestTheCopyHoldsWhatTheTransformLeaves(t *testing.T) {
 		})
 		synctest.Wait()
 
-		held, ok := Cached[thing](c.View(), "a")
-		if !ok || held.Spec.Size != 0 || held.Metadata.ManagedFields != nil {
-			t.Errorf("the copy holds %+v, want a with no size and no managedFields", held)
+		cached, ok := Cached[thing](c.View(), "a")
+		if !ok || cached.Spec.Size != 0 || cached.Metadata.ManagedFields != nil {
+			t.Errorf("the store contains %+v, want a with no size and no managedFields", cached)
 		}
 	})
 }
 
-// A list that fails is reported to the operator, which can stop waiting
-// for a first read that does not come.
-func TestAFailedListIsReported(t *testing.T) {
+func TestAFailedListCallsListFailed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		failures := make(chan error, 16)
 		Start(t.Context(), undefinedWatcher(t, &undefined{}), Source{Resource: thingResource}, Options{
@@ -309,17 +290,15 @@ func TestAFailedListIsReported(t *testing.T) {
 		select {
 		case err := <-failures:
 			if !apierrors.IsNotFound(err) {
-				t.Errorf("the failed list reported %v, want the 404", err)
+				t.Errorf("ListFailed received %v, want the 404", err)
 			}
 		default:
-			t.Fatal("no failed list was reported")
+			t.Fatal("ListFailed was not called, want a call with the 404")
 		}
 	})
 }
 
-// A watch with indexers keeps each index in its store, so a pass reads
-// the objects of one value without a scan of the whole copy.
-func TestAWatchKeepsTheIndexesItNames(t *testing.T) {
+func TestAWatchMaintainsItsIndexes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		small, large := newThing("a", "7", 1), newThing("b", "8", 1)
 		small.Spec.Size, large.Spec.Size = 1, 9
@@ -341,14 +320,14 @@ func TestAWatchKeepsTheIndexesItNames(t *testing.T) {
 
 		indexer, ok := c.View().Store.(cache.Indexer)
 		if !ok {
-			t.Fatal("the store of a watch with indexers is not a cache.Indexer")
+			t.Fatal("the store of a watch with indexers is not a cache.Indexer, want one")
 		}
-		held, err := indexer.ByIndex("size", "large")
-		if err != nil || len(held) != 1 {
-			t.Fatalf("ByIndex = %d objects, %v; want b alone", len(held), err)
+		cached, err := indexer.ByIndex("size", "large")
+		if err != nil || len(cached) != 1 {
+			t.Fatalf("ByIndex = %d objects, %v; want b alone", len(cached), err)
 		}
-		if item, _ := Convert[thing](held[0]); item.Metadata.Name != "b" {
-			t.Errorf("the large index holds %q, want b", item.Metadata.Name)
+		if item, _ := Convert[thing](cached[0]); item.Metadata.Name != "b" {
+			t.Errorf("the large index contains %q, want b", item.Metadata.Name)
 		}
 	})
 }

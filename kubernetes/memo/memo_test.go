@@ -10,72 +10,70 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiclient"
 )
 
-// A request the API server answers notes the version it answered, so a
-// store's copy at that version is current and a copy at any other
-// version is not. A failed request notes that the operator holds no
-// copy of the API server's: a 404, a 409, or a write whose answer was
-// lost and may have landed.
-func TestTheMemoNotesWhatTheAPIServerAnswered(t *testing.T) {
+// After a successful request, only a store copy at the returned version
+// is current. After a failed request, no store copy is current, because
+// the object may exist at a version the operator never read.
+func TestSendRecordsTheReturnedVersionOnlyOnSuccess(t *testing.T) {
 	for _, c := range []struct {
-		name      string
-		answer    error
-		wantNoted bool
+		name        string
+		requestErr  error
+		wantCurrent bool
 	}{
-		{"an answer", nil, true},
-		{"a failure", errors.New("connection refused"), false},
+		{"a request that succeeds", nil, true},
+		{"a request that fails", errors.New("connection refused"), false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			memo := New()
 			memo.Note("studio", "7")
 
-			err := memo.Send("studio", func() (string, error) { return "8", c.answer })
+			err := memo.Send("studio", func() (string, error) { return "8", c.requestErr })
 
-			if !errors.Is(err, c.answer) {
-				t.Errorf("Send answered %v, want %v", err, c.answer)
+			if !errors.Is(err, c.requestErr) {
+				t.Errorf("Send returned %v, want %v", err, c.requestErr)
 			}
-			if got := memo.Current("studio", "8"); got != c.wantNoted {
-				t.Errorf("a copy at the answered version is current: %v, want %v", got, c.wantNoted)
+			if got := memo.Current("studio", "8"); got != c.wantCurrent {
+				t.Errorf("Current(studio, 8) = %v after the request returned version 8, want %v", got, c.wantCurrent)
 			}
 			if memo.Current("studio", "7") {
-				t.Error("a copy at the version before the request is current")
+				t.Error("Current(studio, 7) = true after the request, want false")
 			}
 		})
 	}
 }
 
-// An object the memo has not noted counts as current at any version,
-// and a nil memo remembers nothing and still sends the request.
-func TestAnUnnotedObjectIsCurrent(t *testing.T) {
+// An object with no record is current at any version. A nil memo
+// records nothing, treats every copy as current, and still sends the
+// request.
+func TestAnObjectWithNoRecordIsCurrent(t *testing.T) {
 	var none *Versions
 	sent := false
 	if err := none.Send("studio", func() (string, error) { sent = true; return "8", nil }); err != nil {
-		t.Fatal(err)
+		t.Fatalf("sending through a nil memo: %v", err)
 	}
 	none.Note("studio", "8")
 	if !sent {
-		t.Error("a nil memo did not send the request")
+		t.Error("a nil memo did not call the request function, want it called")
 	}
 	if !none.Current("studio", "1") {
-		t.Error("a nil memo holds a copy as older")
+		t.Error("Current(studio, 1) = false on a nil memo, want true")
 	}
 	if none.Unheld(store{}) != nil {
-		t.Error("a nil memo answered keys")
+		t.Error("Unheld on a nil memo returned keys, want none")
 	}
 	if !New().Current("den", "1") {
-		t.Error("an empty memo holds a copy as older")
+		t.Error("Current(den, 1) = false on an empty memo, want true")
 	}
 }
 
-// store is a store that holds the named keys.
+// store is a KeyGetter that holds the keys that are true in it.
 type store map[string]bool
 
 func (s store) GetByKey(key string) (any, bool, error) { return nil, s[key], nil }
 
-// The keys the memo noted at a version and the store does not hold are
-// the objects a list from a whole store reads from the API server: one
-// the operator created a moment ago. A key noted as gone, and a key the
-// store holds, are not among them.
-func TestTheMemoAnswersTheNotedKeysTheStoreDoesNotHold(t *testing.T) {
+// Unheld returns the keys that have a version and are missing from the
+// store, such as an object the operator created a moment ago. It leaves
+// out a key recorded with no version and a key the store has.
+func TestUnheldReturnsVersionedKeysMissingFromTheStore(t *testing.T) {
 	memo := New()
 	memo.Note("den", "3")
 	memo.Note("studio", "4")
@@ -88,23 +86,19 @@ func TestTheMemoAnswersTheNotedKeysTheStoreDoesNotHold(t *testing.T) {
 	}
 }
 
-// A request that fails with an error other than 404 leaves the
-// object's state unknown: a create whose answer was lost may have
-// landed, and a 409 says that the object exists. So the memo answers
-// such an object among the keys that a list of a whole store reads
-// from the API server, and keeps its record when a list leaves it out.
-// A 404 says that the object is gone, and a delete answers no copy, so
-// the memo answers neither key, and a list that leaves the key out
-// forgets it.
-func TestTheMemoKeepsAnObjectWhoseRequestFailed(t *testing.T) {
+// After a request fails with an error other than 404, the object may
+// exist, so Unheld returns it and ForgetGone keeps its record. After a
+// 404 or a delete, Unheld leaves it out and ForgetGone drops its
+// record.
+func TestAFailedRequestLeavesTheObjectUnknown(t *testing.T) {
 	for _, c := range []struct {
 		name       string
 		version    string
-		answer     error
+		requestErr error
 		wantUnheld []string
 		wantKept   bool
 	}{
-		{"a lost answer", "8", errors.New("connection refused"), []string{"studio"}, true},
+		{"a request that fails with no status", "8", errors.New("connection refused"), []string{"studio"}, true},
 		{"a 409", "8", apiclient.ErrConflict, []string{"studio"}, true},
 		{"a 404", "8", apiclient.ErrNotFound, nil, false},
 		{"a delete", "", nil, nil, false},
@@ -112,28 +106,28 @@ func TestTheMemoKeepsAnObjectWhoseRequestFailed(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			memo := New()
 			memo.Note("studio", "7")
-			_ = memo.Send("studio", func() (string, error) { return c.version, c.answer })
+			_ = memo.Send("studio", func() (string, error) { return c.version, c.requestErr })
 
 			current := memo.Current("studio", "7") || memo.Current("studio", "8")
 			unheld := memo.Unheld(store{})
 			memo.ForgetGone(store{}, map[string]bool{})
 
 			if current {
-				t.Error("a store's copy is current after the request")
+				t.Error("a copy in the store is current after the request, want none current")
 			}
 			if !slices.Equal(unheld, c.wantUnheld) {
 				t.Errorf("Unheld = %v, want %v", unheld, c.wantUnheld)
 			}
 			if memo.Noted("studio") != c.wantKept {
-				t.Errorf("the memo kept studio after a list left it out: %v, want %v", memo.Noted("studio"), c.wantKept)
+				t.Errorf("Noted(studio) = %v after ForgetGone, want %v", memo.Noted("studio"), c.wantKept)
 			}
 		})
 	}
 }
 
-// Two requests about one object run one at a time, so the memo notes
-// their answers in the order the API server gave them. A request about
-// another object does not wait.
+// Two requests about one object run one at a time, so the memo records
+// their versions in the order the API server returned them. A request
+// about another object does not wait.
 func TestRequestsAboutOneObjectRunOneAtATime(t *testing.T) {
 	memo := New()
 	first, release := make(chan struct{}), make(chan struct{})
@@ -155,7 +149,7 @@ func TestRequestsAboutOneObjectRunOneAtATime(t *testing.T) {
 	select {
 	case <-other:
 	case <-time.After(5 * time.Second):
-		t.Fatal("a request about another object waited")
+		t.Fatal("a request about den did not finish in 5 seconds while a request about studio was in flight, want it to run at once")
 	}
 
 	second := make(chan struct{})
@@ -165,7 +159,7 @@ func TestRequestsAboutOneObjectRunOneAtATime(t *testing.T) {
 	}()
 	select {
 	case <-second:
-		t.Fatal("a second request about the object ran while the first was in flight")
+		t.Fatal("a second request about studio ran while the first was in flight, want it to wait")
 	case <-time.After(50 * time.Millisecond):
 	}
 	close(release)
@@ -173,13 +167,14 @@ func TestRequestsAboutOneObjectRunOneAtATime(t *testing.T) {
 	<-second
 
 	if !memo.Current("studio", "9") {
-		t.Error("the memo does not hold the second answer")
+		t.Error("Current(studio, 9) = false, want true after the second request returned version 9")
 	}
 }
 
-// A list forgets each noted object that it did not answer and the store
-// does not hold. An object the store still holds keeps its record until
-// the watch delivers the delete, so its older copy is not current.
+// ForgetGone drops each object that the list did not return and the
+// store does not have. An object the store still has keeps its record
+// until the watch delivers the delete, so the store's older copy does
+// not become current.
 func TestAListForgetsTheObjectsThatAreGone(t *testing.T) {
 	memo := New()
 	memo.Note("den", "3")
@@ -189,41 +184,41 @@ func TestAListForgetsTheObjectsThatAreGone(t *testing.T) {
 	memo.ForgetGone(store{"studio": true}, map[string]bool{"den": true})
 
 	if !memo.Current("den", "3") || memo.Current("den", "2") {
-		t.Error("the memo forgot den, which the list answered")
+		t.Error("ForgetGone dropped den, which the list returned, want its record kept at version 3")
 	}
 	if memo.Current("studio", "2") {
-		t.Error("the memo forgot studio, which the store still holds")
+		t.Error("ForgetGone dropped studio, which the store still has, want its record kept")
 	}
 	if !memo.Current("kitchen", "2") {
-		t.Error("the memo kept kitchen, which is gone")
+		t.Error("ForgetGone kept kitchen, which is in neither the list nor the store, want its record dropped")
 	}
 	var none *Versions
 	none.ForgetGone(store{}, nil)
 }
 
-// The memo reports a key it noted at any version, or with none, and
-// nothing once it forgets the key.
+// Noted reports a key recorded with a version or with none, and stops
+// reporting it after Forget.
 func TestTheMemoForgetsOneObject(t *testing.T) {
 	memo := New()
 	memo.Note("den", "3")
 	memo.Note("studio", "")
 
 	if !memo.Noted("den") || !memo.Noted("studio") || memo.Noted("kitchen") {
-		t.Error("the memo does not report the keys it noted")
+		t.Error("Noted is false for den or studio, or true for kitchen, want true, true, false")
 	}
 	memo.Forget("den")
 	if memo.Noted("den") || !memo.Current("den", "2") {
-		t.Error("the memo kept den after it forgot it")
+		t.Error("Noted(den) = true after Forget, want its record dropped")
 	}
 	var none *Versions
 	none.Forget("den")
 	if none.Noted("den") {
-		t.Error("a nil memo noted a key")
+		t.Error("Noted(den) = true on a nil memo, want false")
 	}
 }
 
-// ForgetAt drops a record only at the version it holds. A record of a
-// newer write, or of a failed request, stays.
+// ForgetAt drops a record only when it has the given version, and an
+// empty version drops nothing.
 func TestTheMemoForgetsARecordAtItsVersion(t *testing.T) {
 	versions := New()
 	versions.Note("a", "7")
@@ -232,21 +227,22 @@ func TestTheMemoForgetsARecordAtItsVersion(t *testing.T) {
 	versions.ForgetAt("a", "6")
 	versions.ForgetAt("b", "")
 	if !versions.Noted("a") || !versions.Noted("b") {
-		t.Fatal("ForgetAt dropped a record at another version")
+		t.Fatal("ForgetAt dropped a record whose version differs from the one given, want it kept")
 	}
 	versions.ForgetAt("a", "7")
 	if versions.Noted("a") {
-		t.Error("ForgetAt kept a record at its own version")
+		t.Error("ForgetAt kept a record at the version given, want it dropped")
 	}
 	var none *Versions
 	none.ForgetAt("a", "7")
 }
 
-// A list notes the version of each object it answered, so a store's
-// copy older than the list is not current. An object that a request
-// noted while the list was in flight keeps that request's version,
-// because the list can hold a copy from before the request's answer.
-func TestAListNotesEachObjectThatNoRequestNotedDuringIt(t *testing.T) {
+// SendList records the version of each object the list returned, so a
+// store copy older than the list is not current. An object that a
+// request recorded while the list was in flight keeps the request's
+// version, because the list can contain a copy from before that
+// request's response.
+func TestSendListRecordsEachObjectThatNoRequestRecordedDuringIt(t *testing.T) {
 	memo := New()
 	memo.Note("den", "1")
 
@@ -256,20 +252,20 @@ func TestAListNotesEachObjectThatNoRequestNotedDuringIt(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sending the list: %v", err)
 	}
 	if !memo.Current("den", "2") || memo.Current("den", "1") {
-		t.Error("the memo does not hold den at the listed version")
+		t.Error("den is not current at the listed version 2, want it current")
 	}
 	if !memo.Current("studio", "9") {
-		t.Error("the list replaced the version a request noted during it")
+		t.Error("the list replaced the version 9 that a request recorded while the list was in flight, want 9 kept")
 	}
 	if !memo.Current("kitchen", "4") || memo.Current("kitchen", "3") {
-		t.Error("the memo does not hold kitchen at the listed version")
+		t.Error("kitchen is not current at the listed version 4, want it current")
 	}
 }
 
-// A list that fails notes nothing, and a nil memo still sends the list.
+// A failed list records nothing. A nil memo still sends the list.
 func TestAFailedListNotesNothing(t *testing.T) {
 	memo := New()
 	memo.Note("den", "1")
@@ -278,12 +274,12 @@ func TestAFailedListNotesNothing(t *testing.T) {
 	err := memo.SendList(func() (map[string]string, error) { return nil, refused })
 
 	if !errors.Is(err, refused) || !memo.Current("den", "1") {
-		t.Errorf("SendList = %v, and den is not at 1; want the failure and no note", err)
+		t.Errorf("SendList = %v and den current at version 1 is %v, want the list's error and true", err, memo.Current("den", "1"))
 	}
 	var none *Versions
 	sent := false
 	_ = none.SendList(func() (map[string]string, error) { sent = true; return nil, nil })
 	if !sent {
-		t.Error("a nil memo did not send the list")
+		t.Error("a nil memo did not call the list function, want it called")
 	}
 }

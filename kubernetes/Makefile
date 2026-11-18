@@ -1,30 +1,25 @@
-# The checks of the shared module. CI runs `make test`, the same target
-# a workstation runs.
-#
-# One run of the tests gives both the race check and the coverage
-# profile, because -race with -covermode=atomic does both.
-
-# A recipe that fails, or a build that is killed during one, leaves its
-# target partly written and newer than its inputs. make deletes that
-# target, so the next build makes it again and does not take it as
-# current.
 .DELETE_ON_ERROR:
 
-# A package with no test file writes no rows to the profile, so the
-# gate never counts it: its number is not low, it is missing. This
-# lists such packages, and test fails on the first one.
+# A package with no test file adds no rows to the coverage profile, so
+# the coverage gate cannot see it. This command lists such packages,
+# and `test` fails if it prints any.
 UNTESTED_PACKAGES := go list -f '{{if not (or .TestGoFiles .XTestGoFiles)}}{{.ImportPath}}{{end}}' ./...
 
-# The pod build of library-operator must not link client-go, and its
-# Makefile fails when it does. So apiclient, memo, events, and
-# conditions import nothing from k8s.io, and a program that must not
-# link client-go can still use them. informer links client-go's reflector, its dynamic client, and
-# rest. The pod build of media-operator and the node build of
-# equipment-operator link informer, and must not link the typed
-# clientset, the informer factories, or leader election, which would
-# more than double each program. Leader election lives in election,
-# which only the build of an operator that elects imports. These two
-# lists find each import that breaks either rule.
+# Some programs that import this module must stay small, so `test`
+# checks which k8s.io packages these packages link.
+#
+# library-operator's pod build imports `apiclient`, `memo`, `events`, and
+# `conditions`, and its Makefile fails when that build links client-go.
+# PLAIN_K8S lists every k8s.io package that these four packages depend
+# on, and `test` fails when the list is not empty.
+#
+# media-operator's pod build and equipment-operator's node build import
+# `informer`, which needs only client-go's reflector, dynamic client, and
+# rest packages. It must not depend on the typed clientset, the informer
+# factories, or leader election, because they are large, and
+# INFORMER_HEAVY lists any of them that it does depend on. Leader
+# election is in `election`, which only an operator that elects a leader
+# imports.
 PLAIN_K8S := go list -deps ./apiclient ./memo ./events ./conditions | grep '^k8s.io/'
 INFORMER_HEAVY := go list -deps ./informer | grep -E '^k8s.io/client-go/(kubernetes|informers|dynamic/dynamicinformer|tools/leaderelection)(/|$$)'
 
@@ -33,20 +28,17 @@ test:
 	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
 	go mod tidy -diff
 	test -z "$$($(UNTESTED_PACKAGES))" || { echo 'packages with no test file:'; $(UNTESTED_PACKAGES); exit 1; }
-	test -z "$$($(PLAIN_K8S))" || { echo 'apiclient, memo, events, or conditions imports from k8s.io:'; $(PLAIN_K8S); exit 1; }
-	test -z "$$($(INFORMER_HEAVY))" || { echo 'informer links more of client-go than a watch needs:'; $(INFORMER_HEAVY); exit 1; }
+	test -z "$$($(PLAIN_K8S))" || { echo 'apiclient, memo, events, or conditions depends on these k8s.io packages, want none:'; $(PLAIN_K8S); exit 1; }
+	test -z "$$($(INFORMER_HEAVY))" || { echo 'informer depends on these client-go packages, want none of the typed clientset, the informer factories, or leader election:'; $(INFORMER_HEAVY); exit 1; }
 	go vet ./...
 	go test -race -covermode=atomic -coverprofile=coverage.out ./...
 	go tool go-test-coverage --config=.testcoverage.yml
 
-# The coverage report is the profile the gate already measured, drawn
-# as one HTML page. This module has no manual, so the site serves the
-# page at coverage/kubernetes.html. `test` does not depend on it: the
-# gate decides whether a change passes, and the report only shows a
-# reader what the tests reached.
-#
-# coverage is brand's tool. This module has no docs module to pin it
-# as a tool, so the command runs it from brand's own module.
+# Writes the coverage profile from `test` as one HTML page, which CI
+# publishes on the site at coverage/kubernetes.html. `test` does not
+# depend on this target, because the coverage gate decides whether a
+# change passes and the page is only for reading. The page generator is
+# `coverage` in the `brand` module, so the recipe runs it from there.
 .PHONY: coverage-report
 coverage-report: coverage.out
 	cd ../brand && go run ./coverage -title kubernetes -root ../kubernetes \

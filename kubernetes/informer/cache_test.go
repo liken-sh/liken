@@ -19,10 +19,10 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// fakeAPI holds things by key, and answers a read of one and a write of
-// its status the way the API server does: a write from a copy at an
-// older resourceVersion answers 409, and each write that lands makes a
-// new version. failing answers 500 to every request.
+// fakeAPI serves reads and status writes of things like the API server:
+// a status write with an old resourceVersion gets 409, and each
+// successful write sets a new version. While failing is true, every
+// request gets 500.
 type fakeAPI struct {
 	mu       sync.Mutex
 	objects  map[string]thing
@@ -39,7 +39,6 @@ func newFakeAPI(things ...thing) *fakeAPI {
 	return api
 }
 
-// fakeThingsPath lists every thing, and thingPath names one.
 const fakeThingsPath = "/things"
 
 func thingPath(key string) string { return fakeThingsPath + "/" + key }
@@ -82,8 +81,8 @@ func (api *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(stored)
 }
 
-// put changes a thing the way another writer does, and answers the
-// copy the API server holds now.
+// put writes a thing as another writer would, and returns it with its
+// new version.
 func (api *fakeAPI) put(item thing) thing {
 	api.mu.Lock()
 	defer api.mu.Unlock()
@@ -93,7 +92,7 @@ func (api *fakeAPI) put(item thing) thing {
 	return item
 }
 
-// sent answers the requests the API server received, and forgets them.
+// sent returns the requests received since the last call.
 func (api *fakeAPI) sent() []string {
 	api.mu.Lock()
 	defer api.mu.Unlock()
@@ -108,8 +107,7 @@ func testClient(t *testing.T, api *fakeAPI) *apiclient.Client {
 	return apiclient.New(apiservertest.Host, server.Client(), "")
 }
 
-// storeOf is a store that holds the objects, the way a watch's store
-// holds them once its first read is done.
+// storeOf returns a ready View over a store that holds the objects.
 func storeOf(t *testing.T, objects ...any) View {
 	t.Helper()
 	store := cache.NewStore(cache.MetaNamespaceKeyFunc)
@@ -118,7 +116,7 @@ func storeOf(t *testing.T, objects ...any) View {
 			object = asObject(t, item)
 		}
 		if err := store.Add(object); err != nil {
-			t.Fatal(err)
+			t.Fatalf("adding the object to the store: %v", err)
 		}
 	}
 	return View{Store: store, Synced: func() bool { return true }}
@@ -129,14 +127,12 @@ func mistyped(t *testing.T, name string) *unstructured.Unstructured {
 	t.Helper()
 	object := asObject(t, newThing(name, "5", 1))
 	if err := unstructured.SetNestedField(object.Object, "large", "spec", "size"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting spec.size to a string: %v", err)
 	}
 	return object
 }
 
-// The store answers a copy it holds that converts, and nothing
-// otherwise, so the caller reads the API server.
-func TestAStoreAnswersACopyItHolds(t *testing.T) {
+func TestCachedReturnsOnlyAConvertibleCopyOfAReadyStore(t *testing.T) {
 	view := storeOf(t, newThing("a", "5", 1), mistyped(t, "b"))
 	notReady := view
 	notReady.Synced = func() bool { return false }
@@ -156,15 +152,13 @@ func TestAStoreAnswersACopyItHolds(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got, ok := Cached[thing](c.view, c.key)
 			if ok != c.wantOK || (ok && got.Metadata.Name != c.key) {
-				t.Errorf("Cached(%s) = %+v, %v; want an answer: %v", c.key, got, ok, c.wantOK)
+				t.Errorf("Cached(%s) = %+v, %v; want ok = %v", c.key, got, ok, c.wantOK)
 			}
 		})
 	}
 }
 
-// A list from the store is in the order of the keys, the order of a
-// list from the API server, and leaves out a copy that does not convert.
-func TestAListFromTheStoreIsInKeyOrder(t *testing.T) {
+func TestCachedListSortsByKeyAndSkipsUnconvertibleCopies(t *testing.T) {
 	view := storeOf(t, newThing("c", "5", 1), mistyped(t, "b"), newThing("a", "6", 1))
 
 	var names []string
@@ -177,10 +171,7 @@ func TestAListFromTheStoreIsInKeyOrder(t *testing.T) {
 	}
 }
 
-// A read answers the store's copy while it is current, and reads the
-// API server when the store holds no copy, a copy older than the
-// operator's own last write, or a copy that no watch keeps current.
-func TestAReadGoesToTheAPIServerOnlyWhenTheStoreCannotAnswer(t *testing.T) {
+func TestReadOneReadsTheAPIServerOnlyWhenTheStoreCopyIsNotUsable(t *testing.T) {
 	cases := []struct {
 		name        string
 		stored      []any
@@ -213,16 +204,15 @@ func TestAReadGoesToTheAPIServerOnlyWhenTheStoreCannotAnswer(t *testing.T) {
 				t.Errorf("the read sent %v, want %d reads", reads, c.wantReads)
 			}
 			if !versions.Current("a", c.wantVersion) {
-				t.Errorf("the memo does not hold version %s", c.wantVersion)
+				t.Errorf("the memo has no record of version %s", c.wantVersion)
 			}
 		})
 	}
 }
 
-// A list answers each current copy from the store, reads each older
-// copy from the API server, and leaves out an object the API server no
-// longer holds.
-func TestAListReplacesEachOlderCopy(t *testing.T) {
+// c is in the store but not on the API server, so the 404 leaves it out
+// of the list.
+func TestCurrentListReplacesOlderCopiesWithReadsFromTheAPIServer(t *testing.T) {
 	api := newFakeAPI()
 	api.put(newThing("a", "", 1))
 	newer := api.put(newThing("b", "", 2))
@@ -234,7 +224,7 @@ func TestAListReplacesEachOlderCopy(t *testing.T) {
 	list, err := CurrentList[thing](testClient(t, api), Held{View: view, Versions: versions}, thingPath)
 
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("CurrentList: %v", err)
 	}
 	if len(list) != 2 || list[0].Metadata.ResourceVersion != "101" || list[1].Metadata.ResourceVersion != newer.Metadata.ResourceVersion {
 		t.Errorf("the list = %+v, want a at 101 and b at %s", list, newer.Metadata.ResourceVersion)
@@ -244,13 +234,10 @@ func TestAListReplacesEachOlderCopy(t *testing.T) {
 	}
 }
 
-// A list answers from the API server while the store is not ready, and
-// notes the version of each object. A store can be ready at a version
-// older than that list: the reflector's first read can come from the
-// API server's watch cache, which runs behind etcd. A later list reads
-// such an older copy from the API server again, so a pass never acts on
-// an object older than one it already read.
-func TestAListBeforeTheStoreIsReadyNeverGoesBackwards(t *testing.T) {
+// The store becomes ready at an older version than the list that came
+// from the API server before it was ready, as it can when the
+// reflector's first list comes from the watch cache.
+func TestListNeverReturnsAnOlderCopyThanAnEarlierList(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		api := newFakeAPI()
 		older := api.put(newThing("a", "", 1))
@@ -258,15 +245,15 @@ func TestAListBeforeTheStoreIsReadyNeverGoesBackwards(t *testing.T) {
 		view := storeOf(t, older)
 		ready := false
 		view.Synced = func() bool { return ready }
-		held := Held{View: view, Versions: memo.New()}
+		watched := Held{View: view, Versions: memo.New()}
 		client := testClient(t, api)
 
-		first, err := List[thing](client, held, fakeThingsPath, thingPath)
+		first, err := List[thing](client, watched, fakeThingsPath, thingPath)
 		if err != nil || len(first) != 1 || first[0].Metadata.ResourceVersion != newer.Metadata.ResourceVersion {
 			t.Fatalf("the list before the store is ready = %+v, %v; want a at %s", first, err, newer.Metadata.ResourceVersion)
 		}
 		ready = true
-		second, err := List[thing](client, held, fakeThingsPath, thingPath)
+		second, err := List[thing](client, watched, fakeThingsPath, thingPath)
 
 		if err != nil || len(second) != 1 || second[0].Metadata.ResourceVersion != newer.Metadata.ResourceVersion {
 			t.Errorf("the list from the ready store = %+v, %v; want a at %s, not the store's %s",
@@ -278,9 +265,9 @@ func TestAListBeforeTheStoreIsReadyNeverGoesBackwards(t *testing.T) {
 	})
 }
 
-// A list that cannot read an older copy fails, so a pass does not act
-// on a list with an object missing.
-func TestAListThatCannotReadAnOlderCopyFails(t *testing.T) {
+// The list fails instead of leaving the object out, so a pass does not
+// act on a list with an object missing.
+func TestCurrentListFailsWhenItCannotReadAReplacementCopy(t *testing.T) {
 	api := newFakeAPI()
 	api.failing = true
 	versions := memo.New()
@@ -293,35 +280,33 @@ func TestAListThatCannotReadAnOlderCopyFails(t *testing.T) {
 	}
 }
 
-// A list from a whole store that cannot read an object the operator
-// created fails, and the next list reads the object again. A list that
-// left it out instead would make the pass create the object twice.
-func TestAListReadsACreateAgainAfterAFailedRead(t *testing.T) {
+// A list that left out an object the operator created would make the
+// pass create it again.
+func TestCurrentListRetriesAnUnheldObjectAfterAFailedRead(t *testing.T) {
 	api := newFakeAPI()
 	created := api.put(newThing("a", "", 1))
 	versions := memo.New()
 	versions.Note("a", created.Metadata.ResourceVersion)
 	view := storeOf(t)
 	view.Whole = true
-	held := Held{View: view, Versions: versions}
+	watched := Held{View: view, Versions: versions}
 	client := testClient(t, api)
 	api.failing = true
-	_, failed := CurrentList[thing](client, held, thingPath)
+	_, failed := CurrentList[thing](client, watched, thingPath)
 	api.failing = false
 
-	list, err := CurrentList[thing](client, held, thingPath)
+	list, err := CurrentList[thing](client, watched, thingPath)
 
 	if failed == nil {
-		t.Error("the list that could not read a succeeded")
+		t.Error("the list succeeded although the API server refused the read of a")
 	}
 	if err != nil || len(list) != 1 || list[0].Metadata.ResourceVersion != created.Metadata.ResourceVersion {
 		t.Errorf("the list after the failure = %+v, %v; want a at %s", list, err, created.Metadata.ResourceVersion)
 	}
 }
 
-// arrivingStore is a store whose informer takes one object just after
-// the first read of its keys, the way the watch event of a create
-// lands while a pass lists.
+// arrivingStore adds one object to the store right after the first call
+// of ListKeys, as the watch event of a create does while a pass lists.
 type arrivingStore struct {
 	cache.Store
 	arriving *unstructured.Unstructured
@@ -336,11 +321,7 @@ func (s *arrivingStore) ListKeys() []string {
 	return keys
 }
 
-// A list from a whole store answers an object the operator created,
-// even when the watch event of the create reaches the store during the
-// list. A pass reads such a list to decide whether an object exists,
-// and a list that left it out would make the pass create it again.
-func TestAListAnswersACreateThatArrivesDuringTheList(t *testing.T) {
+func TestCurrentListIncludesACreateThatArrivesDuringTheList(t *testing.T) {
 	api := newFakeAPI()
 	store := &arrivingStore{Store: cache.NewStore(cache.MetaNamespaceKeyFunc), arriving: asObject(t, newThing("a", "5", 1))}
 	versions := memo.New()
@@ -357,8 +338,8 @@ func TestAListAnswersACreateThatArrivesDuringTheList(t *testing.T) {
 	}
 }
 
-// ready is a status that apply sets: it reports whether the copy needs
-// the write, the way a pass composes a status from the copy it holds.
+// ready is an apply function for SettleStatus that sets the Ready
+// phase.
 func ready(item *thing) bool {
 	if item.Status.Phase == "Ready" {
 		return false
@@ -367,13 +348,12 @@ func ready(item *thing) bool {
 	return true
 }
 
-// A copy that needs no write sends nothing.
-func TestAStatusThatNeedsNoWriteSendsNothing(t *testing.T) {
+func TestSettleStatusSendsNothingWhenTheCopyNeedsNoWrite(t *testing.T) {
 	api := newFakeAPI()
-	held := newThing("a", "5", 1)
-	held.Status.Phase = "Ready"
+	object := newThing("a", "5", 1)
+	object.Status.Phase = "Ready"
 
-	wrote, err := SettleStatus[thing](testClient(t, api), memo.New(), thingPath("a"), &held, ready)
+	wrote, err := SettleStatus[thing](testClient(t, api), memo.New(), thingPath("a"), &object, ready)
 
 	if wrote || err != nil || len(api.sent()) != 0 {
 		t.Errorf("SettleStatus = %v, %v, and sent requests; want nothing", wrote, err)

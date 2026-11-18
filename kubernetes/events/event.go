@@ -5,10 +5,10 @@ import (
 	"unicode/utf8"
 )
 
-// ObjectReference names the object an Event is about. It is the
-// involvedObject of a core/v1 Event, and `kubectl describe` finds the
-// object's Events by its kind, name, and UID. An empty Namespace
-// names a cluster-scoped object.
+// ObjectReference is the object an Event is about. It is the
+// involvedObject of a core/v1 Event, and `kubectl describe` finds an
+// object's Events by its kind, name, and UID. An empty Namespace means
+// the object is cluster-scoped.
 type ObjectReference struct {
 	APIVersion string `json:"apiVersion,omitempty"`
 	Kind       string `json:"kind"`
@@ -17,17 +17,16 @@ type ObjectReference struct {
 	UID        string `json:"uid,omitempty"`
 }
 
-// The two types of Event. Warning means a person may need to act.
+// The types of an Event. Warning means a person may need to act.
 // Normal means an expected transition or an action the component took.
 const (
 	TypeNormal  = "Normal"
 	TypeWarning = "Warning"
 )
 
-// Event is a core/v1 Event as the recorder writes it. It states no
-// eventTime: the API server applies the strict checks of
-// events.k8s.io/v1 only to an Event that states one, and those checks
-// refuse a note longer than 1024 bytes.
+// Event is a core/v1 Event as the recorder writes it. It sets no
+// eventTime, because the API server requires an action and limits the
+// length of reason and message only on an Event that has an eventTime.
 type Event struct {
 	APIVersion         string          `json:"apiVersion"`
 	Kind               string          `json:"kind"`
@@ -45,8 +44,9 @@ type Event struct {
 }
 
 // Metadata is the part of an Event's metadata that the recorder writes
-// and reads back. The recorder sends generateName, and the API server
-// answers the name it chose, which a repeat patches.
+// and reads back. The recorder creates each Event with generateName and
+// keeps the name that the API server returns, so that it can patch the
+// Event when it repeats.
 type Metadata struct {
 	Name            string `json:"name,omitempty"`
 	GenerateName    string `json:"generateName,omitempty"`
@@ -61,20 +61,19 @@ type Source struct {
 	Host      string `json:"host,omitempty"`
 }
 
-// The limits that the API server's validation states for an Event's
-// reason and note. The recorder cuts a longer reason or message to fit,
-// so the API server never refuses an Event for its length.
+// The limits that the API server enforces on reason and message for an
+// Event with an eventTime. The recorder's Events have no eventTime, but
+// the recorder still cuts a longer reason or message to these lengths.
 const (
 	maxReason  = 128
 	maxMessage = 1024
 )
 
-// clusterNamespace holds the Events about cluster-scoped objects. The
-// API server accepts such an Event only in default or kube-system.
+// clusterNamespace is the namespace of the Events about cluster-scoped
+// objects. For an Event with no eventTime, the API server accepts such
+// an Event only in default.
 const clusterNamespace = "default"
 
-// namespaceOf answers the namespace that holds the Events about an
-// object.
 func namespaceOf(object ObjectReference) string {
 	if object.Namespace == "" {
 		return clusterNamespace

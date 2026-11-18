@@ -1,20 +1,20 @@
-// Package memo records the resourceVersion of the newest copy of each
-// object that an operator wrote or read from the API server.
+// Package memo records the resourceVersion that the API server returned
+// for each object an operator wrote or read.
 //
-// An operator reads the objects that a watch holds from the watch's
-// store, not from the API server. A store's copy can be older than the
-// operator's own last write, because the watch delivers the write a
-// moment after the API server answers it, and later still while the
-// watch is down. A pass that acts on that copy acts again on a change it
-// already made: it opens a pairing window again, sends a receiver a
-// setting again, or skips a status write that the older copy hides. So
-// the operator records the version of each copy the API server answered,
-// and reads an object from the API server when the store's copy has
-// another version. When the watch delivers the write, the versions
-// match and the store answers again.
+// An operator reads most objects from a watch's local store, and the
+// store can be behind the operator's own last write: the watch delivers
+// the write some time after the API server responds to it, and not at
+// all while the watch is down. A pass that acts on the older copy
+// repeats a change it already made, such as opening a pairing window or
+// sending a receiver a setting, or skips a status write it still needs.
+//
+// So the operator records the version in each response, and reads an
+// object from the API server while the store's copy has a different
+// version. When the watch delivers the write, the versions match and
+// reads go back to the store.
 //
 // The package imports nothing from k8s.io, so a program that must not
-// link client-go can record its writes too.
+// link client-go can use it.
 package memo
 
 import (
@@ -25,92 +25,89 @@ import (
 )
 
 // Versions records, for each object by its store key, the
-// resourceVersion of the newest copy the operator wrote or read from
-// the API server. It compares versions only for equality, because the
-// API server gives them no order. A nil *Versions records nothing, and
-// every copy in a store is current to it.
+// resourceVersion of the last copy the operator wrote or read. A nil
+// *Versions records nothing, and every copy in a store counts as
+// current.
 type Versions struct {
-	mu   sync.Mutex
-	seen map[string]objectRecord
+	mu      sync.Mutex
+	records map[string]objectRecord
 
-	// notes counts every note, and notedAt holds the count at each
-	// key's last note. A list compares the two to find the keys that a
-	// request noted while the list was in flight (SendList).
-	notes   uint64
-	notedAt map[string]uint64
+	// recordCount counts every call to setRecord, and recordedAt
+	// has the value of recordCount at each key's latest record.
+	// SendList compares them to find the keys that a request
+	// recorded while the list was in flight.
+	recordCount uint64
+	recordedAt  map[string]uint64
 
-	// requests holds, for each object, one request at a time with the
-	// note of its answer, so the notes follow the order in which the API
-	// server answered. Two goroutines that write one object could
-	// otherwise note the older answer last, and a store's copy at that
-	// older version would then count as current. Requests about other
-	// objects do not wait.
-	requests map[string]*sync.Mutex
+	// requestLocks has one lock for each object. Send holds it from
+	// the request until it records the response, so the records
+	// follow the order of the API server's responses. Without it,
+	// two goroutines that write one object could record the older
+	// version last, and a store's copy at that version would count
+	// as current.
+	requestLocks map[string]*sync.Mutex
 }
 
-// objectRecord is what the memo holds about one object. A record with a
-// version holds the copy the API server answered. A record with no
-// version says that the operator holds no copy: it deleted the object,
-// the API server answered 404, or an answer carried no version. An
-// unknown record says that a request failed with another error, so the
-// object may exist at a version the operator never read: a create
-// whose answer was lost may have landed, and a 409 says the object
-// exists. No copy in a store is current to a record with no version or
-// an unknown one.
+// objectRecord is the memo's record of one object. version is the
+// version of the copy the API server last returned. An empty version
+// with unknown false means the operator has no copy: it deleted the
+// object, the API server returned 404, or the response had no version.
+// unknown is true after a request failed with any other error, because
+// the object may then exist at a version the operator never read. No
+// store copy is current against either kind of record.
 type objectRecord struct {
 	version string
 	unknown bool
 }
 
-// New answers an empty memo.
+// New returns an empty memo.
 func New() *Versions {
-	return &Versions{seen: map[string]objectRecord{}, notedAt: map[string]uint64{}, requests: map[string]*sync.Mutex{}}
+	return &Versions{records: map[string]objectRecord{}, recordedAt: map[string]uint64{}, requestLocks: map[string]*sync.Mutex{}}
 }
 
-// requestsOf answers the lock of one object's requests.
-func (m *Versions) requestsOf(key string) *sync.Mutex {
+func (m *Versions) lockFor(key string) *sync.Mutex {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	held, ok := m.requests[key]
+	lock, ok := m.requestLocks[key]
 	if !ok {
-		held = &sync.Mutex{}
-		m.requests[key] = held
+		lock = &sync.Mutex{}
+		m.requestLocks[key] = lock
 	}
-	return held
+	return lock
 }
 
-// Current reports whether a store's copy at this version is at least as
-// new as every copy the operator wrote or read. An object the memo has
-// not noted is current at any version.
+// Current reports whether a store's copy at this version matches the
+// memo's record of the object. resourceVersions have no order, so only
+// the recorded version is current. An object with no record is current
+// at any version.
 func (m *Versions) Current(key, version string) bool {
 	if m == nil {
 		return true
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	seen, noted := m.seen[key]
-	return !noted || (!seen.unknown && seen.version == version)
+	record, noted := m.records[key]
+	return !noted || (!record.unknown && record.version == version)
 }
 
-// Note records the version of a copy the API server answered. An empty
-// version records that the operator holds no copy, because it deleted
-// the object or the API server answered 404, and no copy in a store
-// matches it.
+// Note records the version of a copy the API server returned. An empty
+// version records that the operator has no copy, because it deleted the
+// object or the API server returned 404, and no copy in a store is
+// current against it.
 func (m *Versions) Note(key, version string) {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.note(key, objectRecord{version: version})
+	m.setRecord(key, objectRecord{version: version})
 }
 
-// note records what the memo holds about one object. The caller holds
-// mu.
-func (m *Versions) note(key string, r objectRecord) {
-	m.notes++
-	m.seen[key] = r
-	m.notedAt[key] = m.notes
+// setRecord replaces the record of one object. The caller holds mu.
+func (m *Versions) setRecord(key string, r objectRecord) {
+	m.recordCount++
+	m.records[key] = r
+	m.recordedAt[key] = m.recordCount
 }
 
 // KeyGetter reads one object from a store by its key. client-go's
@@ -119,12 +116,11 @@ type KeyGetter interface {
 	GetByKey(key string) (item any, exists bool, err error)
 }
 
-// Unheld answers each key that the store does not hold and that the
-// memo noted at a version or as unknown. These are objects the operator
-// created or wrote a moment ago, which the watch has not delivered yet,
-// and objects whose last request failed, which may exist. A key with no
-// version is not among them, because the operator deleted that object
-// or the API server answered 404 for it.
+// Unheld returns each key that is missing from the store and that the
+// memo recorded with a version or as unknown: an object the operator
+// wrote that the watch has not delivered yet, or one whose last request
+// failed and which may exist. It leaves out a key recorded with no
+// version, because that object is gone.
 func (m *Versions) Unheld(store KeyGetter) []string {
 	if m == nil {
 		return nil
@@ -132,75 +128,69 @@ func (m *Versions) Unheld(store KeyGetter) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var keys []string
-	for key, seen := range m.seen {
-		if _, held, _ := store.GetByKey(key); !held && (seen.unknown || seen.version != "") {
+	for key, record := range m.records {
+		if _, stored, _ := store.GetByKey(key); !stored && (record.unknown || record.version != "") {
 			keys = append(keys, key)
 		}
 	}
 	return keys
 }
 
-// Send runs one request about one object, and notes the version of the
-// copy the API server answered. A delete answers no copy and notes no
-// version, and so does any answer with no version. A 404 notes no
-// version too, because the object is gone. Any other failure, such as
-// a 409 or a write whose answer was lost and may have landed, notes the
-// object as unknown: it may exist at a version the operator never
-// read. In each case the next read of the object goes to the API
-// server, and a list of a whole store reads an unknown object even
-// when the store does not hold it (Unheld).
+// Send runs one request about one object and records the version that
+// request returns. A delete returns an empty version, and a 404 records
+// an empty version too, because the object is gone. Any other error
+// records the object as unknown. That includes a 409, which means the
+// object exists, and a lost response to a create that may have
+// succeeded. After any of these, no store copy is current, so the next
+// read of the object goes to the API server.
 func (m *Versions) Send(key string, request func() (version string, err error)) error {
 	if m == nil {
 		_, err := request()
 		return err
 	}
-	requests := m.requestsOf(key)
-	requests.Lock()
-	defer requests.Unlock()
+	lock := m.lockFor(key)
+	lock.Lock()
+	defer lock.Unlock()
 	version, err := request()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	switch {
 	case err == nil:
-		m.note(key, objectRecord{version: version})
+		m.setRecord(key, objectRecord{version: version})
 	case errors.Is(err, apiclient.ErrNotFound):
-		m.note(key, objectRecord{})
+		m.setRecord(key, objectRecord{})
 	default:
-		m.note(key, objectRecord{unknown: true})
+		m.setRecord(key, objectRecord{unknown: true})
 	}
 	return err
 }
 
-// SendList runs one list request, and notes the version of each object
-// the API server answered, by its key. A pass that lists before a
-// watch's store is ready must note these versions. The store can then
-// become ready at an older version, because the reflector's first read
-// can come from the API server's watch cache, which runs behind etcd.
-// Without the notes, the next pass reads that older copy as current and
-// acts on an object older than one it already read.
+// SendList runs one list request and records the version of each
+// object it returns, by key. A pass lists from the API server while a
+// watch's store is not ready. The reflector's first list sets
+// resourceVersion=0, so the API server's watch cache can serve it, and
+// that cache can be behind etcd. The store can then become ready with
+// copies older than the ones the pass listed, and the records keep the
+// next pass from treating those copies as current.
 //
-// An object that a request noted while the list was in flight keeps the
-// request's version. The list can hold a copy from before the request's
-// answer, and a note of that copy would make a store's copy at the older
-// version current. When the request's version is the older one instead,
-// the store's copy at the list's version is not current, and the next
-// read of the object goes to the API server once. That costs one
-// request and never answers an older copy.
+// The caller must not set resourceVersion, so that the list is a
+// consistent read and has every write that the API server acknowledged
+// before it. Only then is it safe for the list to replace the versions
+// recorded before it was sent.
 //
-// A list replaces the version of each object that the memo noted before
-// the list was sent. That is correct only for a list that etcd answers,
-// which holds every write the API server answered before the list. A
-// list with resourceVersion=0 comes from the watch cache, which can be
-// older than such a write, so the caller must not send one.
+// When a Send records an object while the list is in flight, the memo
+// keeps the Send's version, because the list can hold a copy from
+// before that write. If the Send's version is in fact the older one,
+// the cost is one extra read from the API server.
 //
-// A list that fails notes nothing, because it names no object.
+// A failed list records nothing.
 func (m *Versions) SendList(request func() (versions map[string]string, err error)) error {
 	if m == nil {
 		_, err := request()
 		return err
 	}
 	m.mu.Lock()
-	start := m.notes
+	start := m.recordCount
 	m.mu.Unlock()
 	listed, err := request()
 	if err != nil {
@@ -209,102 +199,103 @@ func (m *Versions) SendList(request func() (versions map[string]string, err erro
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for key, version := range listed {
-		if m.notedAt[key] <= start {
-			m.note(key, objectRecord{version: version})
+		if m.recordedAt[key] <= start {
+			m.setRecord(key, objectRecord{version: version})
 		}
 	}
 	return nil
 }
 
-// ForgetGone drops the record of each object that a list did not
-// answer and the store does not hold. The API server answered 404 for
-// such an object, and its watch delivered the delete. An operator whose
-// objects come and go, such as a Play for each film or a Job for each
-// run, calls it after each list, or the memo would keep a record of
-// every object for the life of the process. A key the store still holds
-// keeps its record, so a copy of an object the API server already
-// deleted is not current again before the watch removes it.
+// ForgetGone drops the record of each object that is missing from both
+// listed and the store. An operator whose objects come and go, such as
+// a Play for each film or a Job for each run, calls it after each list,
+// or the memo keeps a record of every object for the life of the
+// process.
 //
-// An unknown record stays too, because the object may exist, and a pass
-// that forgot it would create the object again. A list of a whole store
-// reads such an object from the API server (Unheld), so the record ends
-// when the API server answers it: a copy gives it a version, and a 404
-// gives it none, and the next ForgetGone drops it. An operator calls
-// ForgetGone only after a list of a whole store, where every key that
-// the list left out was read, or was noted while the list ran.
+// listed must hold the keys of a list that read Unheld's keys from the
+// API server, as informer.CurrentList does for a whole store. Otherwise
+// ForgetGone drops the record of an object the operator created that
+// the watch has not delivered yet.
+//
+// A key that the store still has keeps its record, so the store's copy
+// of a deleted object does not become current before the watch removes
+// it. An unknown record stays too, because the object may exist and a
+// pass without the record could create it again. The next list reads
+// that object from the API server, which gives the record a version or
+// none.
 func (m *Versions) ForgetGone(store KeyGetter, listed map[string]bool) {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for key, seen := range m.seen {
-		if listed[key] || seen.unknown {
+	for key, record := range m.records {
+		if listed[key] || record.unknown {
 			continue
 		}
-		if _, held, _ := store.GetByKey(key); held {
+		if _, stored, _ := store.GetByKey(key); stored {
 			continue
 		}
-		delete(m.seen, key)
-		delete(m.notedAt, key)
-		delete(m.requests, key)
+		m.drop(key)
 	}
 }
 
 // Forget drops the record of one object. An operator that reads an
-// object by name from a store forgets it once the API server answers
-// 404, so the next read of the name answers from the store and sends
-// nothing.
+// object by name from a store calls it after the API server returns
+// 404, so the next read of the name comes from the store and sends no
+// request.
 //
-// Forget and ForgetAt also drop the object's request lock (Send). A
-// Send that holds the lock at that moment runs to its end and notes its
-// answer, but a Send that starts after the forget takes a new lock, so
-// the two can run at once and note their answers out of order. An
+// Forget and ForgetAt also drop the object's request lock. A Send that
+// holds the old lock and a Send that starts afterwards with a new lock
+// can run at once and record their versions out of order. So an
 // operator that sends requests about one object from more than one
-// goroutine forgets the object only while none of them runs.
+// goroutine must forget the object only while none of them is running.
 func (m *Versions) Forget(key string) {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.seen, key)
-	delete(m.notedAt, key)
-	delete(m.requests, key)
+	m.drop(key)
 }
 
-// Noted reports whether the memo holds a record of the key, with a
-// version, with none, or unknown. A store that holds a whole selection
-// and not the key answers that no such object exists, unless the memo
-// noted it: the operator created it a moment ago, or a request about it
-// failed.
+// Noted reports whether the memo has any record of the key. A caller
+// whose store has every object it can read treats an object missing
+// from the store as absent only when Noted is false, because a record
+// means the operator may have created the object a moment ago, or a
+// request about it may have failed.
 func (m *Versions) Noted(key string) bool {
 	if m == nil {
 		return false
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	_, noted := m.seen[key]
+	_, noted := m.records[key]
 	return noted
 }
 
-// ForgetAt drops the record of one object when the record holds this
-// version, and keeps any other record. A caller passes the version of
-// the copy a store holds: once the store holds the version the memo
-// noted, every later copy the store holds is newer, so the record
-// guards nothing. Without it, each later write from another writer
-// makes the store's copy differ from the record, and costs one read
-// from the API server. The check and the delete are one step, so a
-// write that notes a newer version in the meantime keeps its record.
+// ForgetAt drops the record of one object only when the record has this
+// version, which the caller reads from the store's copy. Once the store
+// has caught up to the record, the record protects nothing, and if it
+// stayed, each later write by another client would make the store's
+// copy differ from it and cost a read from the API server. The
+// comparison and the delete run under mu, so a Send that records a
+// newer version in the meantime keeps its record.
 func (m *Versions) ForgetAt(key, version string) {
 	if m == nil || version == "" {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if seen, noted := m.seen[key]; noted && !seen.unknown && seen.version == version {
-		delete(m.seen, key)
-		delete(m.notedAt, key)
-		delete(m.requests, key)
+	if record, noted := m.records[key]; noted && !record.unknown && record.version == version {
+		m.drop(key)
 	}
+}
+
+// drop removes the record, the entry in recordedAt, and the request
+// lock of one object. The caller holds mu.
+func (m *Versions) drop(key string) {
+	delete(m.records, key)
+	delete(m.recordedAt, key)
+	delete(m.requestLocks, key)
 }

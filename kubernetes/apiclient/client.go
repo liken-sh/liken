@@ -1,18 +1,17 @@
 // Package apiclient sends an operator's reads and writes to the
 // Kubernetes API server.
 //
-// The Kubernetes API is HTTPS that serves JSON, and each read or write
-// is one request, so this client uses only net/http and encoding/json.
-// It imports nothing from k8s.io. A program that must not link
-// client-go, such as a pod build of an operator or a command-line tool,
-// can use it. The watches run on client-go's reflector, in the informer
-// package, because upstream maintains and tests that loop.
+// Each request is HTTPS with a JSON body, so the client uses only
+// net/http and encoding/json and imports nothing from k8s.io. That lets
+// a program that must not link client-go, such as a pod build of an
+// operator or a command-line tool, use it. Watches are in the informer
+// package, which runs on client-go's reflector.
 //
-// Every pod starts with what it needs to reach the API server.
-// Kubernetes injects two environment variables that name the server's
-// in-cluster address, and the kubelet mounts a CA certificate and a
-// ServiceAccount token at a known path. Those five values are the whole
-// of what client-go's rest.InClusterConfig() reads.
+// In a pod, the API server's address comes from the
+// KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT environment
+// variables, and the kubelet mounts the CA certificate and the
+// ServiceAccount token under ServiceAccountDir. InCluster reads the same
+// variables and files as client-go's rest.InClusterConfig().
 package apiclient
 
 import (
@@ -32,125 +31,118 @@ import (
 	"unicode"
 )
 
-// ServiceAccountDir is the directory where the kubelet mounts each
-// container's API credentials.
+// ServiceAccountDir is where the kubelet mounts a container's API
+// credentials.
 const ServiceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
-// ErrNotFound separates "this object does not exist" from a real
-// failure. An absent object is a normal state, and the caller handles
-// it by creating the object. ErrConflict separates "something else
-// wrote this object first" in the same way. That is a normal state
-// under optimistic concurrency, and the caller handles it by reading
-// the object again.
+// ErrNotFound is a 404. ErrConflict is a 409, which the API server
+// returns when a write has an out-of-date resourceVersion or a create
+// names an object that already exists. A caller usually handles either
+// one: it creates the missing object, or reads the object again and
+// retries the write.
 var (
 	ErrNotFound = errors.New("not found")
-	ErrConflict = errors.New("conflict: something else wrote this object first")
+	ErrConflict = errors.New("conflict: the object changed since it was read, or it already exists")
 )
 
-// ErrForbidden is any other 403: RBAC does not grant the request. A
-// caller that runs beside an older release's RBAC, such as an operator
-// that reads a kind the older release does not grant, reads it as the
-// absence of that kind.
+// ErrForbidden is a 403 because RBAC does not grant the request. An
+// operator whose ClusterRole comes from an older release can get it for
+// a kind that the older ClusterRole does not grant, and can then treat
+// the kind as absent. A 403 for a namespace that is being deleted is
+// ErrNamespaceTerminating instead.
 var ErrForbidden = errors.New("forbidden")
 
-// ErrNamespaceTerminating is the 403 that refuses a create in a
-// namespace the API server is deleting. The delete removes everything
-// in the namespace, so a caller drops the write instead of sending it
-// again.
+// ErrNamespaceTerminating is the 403 for a create in a namespace that is
+// being deleted. The deletion removes everything in the namespace, so a
+// caller can drop the write instead of retrying it.
 var ErrNamespaceTerminating = errors.New("the namespace is being deleted")
 
-// ErrThrottled is a 429 that lasted longer than the client waits for it
-// (maxThrottleWait), or past the end of the client's context. A caller
-// that must not give up, such as an operator's first read at start,
-// asks again until its own context ends.
-var ErrThrottled = errors.New("throttled: the API server asked the client to wait")
+// ErrThrottled is a 429 that the client stopped waiting out, either
+// because the waits reached maxThrottleWait or because the wait context
+// ended. A caller that must not give up, such as an operator's first
+// read at start, retries until its own context ends.
+var ErrThrottled = errors.New("throttled: the API server kept responding 429")
 
-// Stale reports whether a write failed because the copy it was made
-// from is not the API server's copy: another writer changed the
-// object, or deleted it.
+// Stale reports whether a write failed because the object it was based
+// on has since been changed or deleted: ErrConflict or ErrNotFound.
 func Stale(err error) bool {
 	return errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound)
 }
 
-// Client sends requests to one API server.
+// Client sends requests to one API server. The With methods return
+// copies that share its connections.
 type Client struct {
 	base        string
 	http        *http.Client
 	credentials string
 
-	// ctx is the context every request carries (WithContext). Nil means
-	// no context ends a request.
+	// ctx is set by WithContext. When it is nil, no context ends a
+	// request.
 	ctx context.Context
 
-	// waits is the context that ends the wait after a 429
-	// (WithWaitContext). Nil means ctx ends it.
-	waits context.Context
+	// waitCtx is set by WithWaitContext. When it is nil, ctx ends the
+	// wait after a 429.
+	waitCtx context.Context
 
-	// writeGuard, when it is set, runs before each send of a request
-	// that is not a GET (WithWriteGuard).
 	writeGuard func() error
-
-	// observer, when it is set, hears the final answer to each request
-	// (WithObserver).
-	observer func(Outcome)
+	observer   func(Outcome)
 }
 
-// Outcome is the final answer to one request, for an observer.
+// Outcome is the final result of one request, as WithObserver reports
+// it.
 type Outcome struct {
 	Method string
 	Path   string
 
-	// Status is the HTTP status of the last answer, or zero when no
-	// answer came: the connection failed, the context ended, or a
-	// write guard refused the request.
+	// Status is the HTTP status of the last response, or zero when no
+	// response came, such as when the connection failed, the context
+	// ended, or a write guard refused the request.
 	Status int
 
 	// Err is the error the caller received, or nil.
 	Err error
 }
 
-// New builds a client from its three parts. InCluster reads them from
-// the pod's environment, and a test takes them from its fake API
-// server. An empty credentials directory sends no token.
+// New builds a client for the server at base. credentials is the
+// directory that holds the file `token`, which the client sends as a
+// bearer token. When credentials is empty, the client sends no token.
 func New(base string, httpClient *http.Client, credentials string) *Client {
 	return &Client{base: base, http: httpClient, credentials: credentials}
 }
 
 // InClusterOptions are the optional parts of an in-cluster client.
 type InClusterOptions struct {
-	// ServiceAccountDir is the directory that holds the CA and the
-	// token. Empty means the directory the kubelet mounts.
+	// ServiceAccountDir holds ca.crt and token. Empty means
+	// the package constant ServiceAccountDir.
 	ServiceAccountDir string
 
-	// Server is the API server's address, such as
-	// https://127.0.0.1:6443. Empty means the address that the
-	// environment names: the Service's virtual IP, where iptables pins
-	// each new connection to one API server that the client cannot
-	// choose. A pod on the host's network, on a machine that runs an
-	// API server or k3s's local load balancer, has a better address:
-	// its own loopback, where a remote server that died cannot hold a
-	// connection. The CA and the token are the same at both addresses.
+	// Server is the API server's URL, such as https://127.0.0.1:6443.
+	// Empty means the kubernetes Service address from the environment.
+	// That address is a virtual IP, and iptables sends each new
+	// connection to one API server that the client cannot choose. A pod
+	// on the host network can set a loopback address here instead, when
+	// its machine runs an API server or k3s's local load balancer listens
+	// on that address. Then no connection goes to a remote server that
+	// has died. The CA and the token are valid at both addresses.
 	Server string
 
-	// Timeout limits one request, from the dial to the last byte of
-	// the answer. Zero means 30 seconds. A program that must abandon a
-	// write before a deadline of its own, such as a leader whose Lease
-	// another copy can take, sets a shorter limit.
+	// Timeout limits one request, from the dial to the last byte of the
+	// response. Zero means defaultTimeout. A program with a deadline of
+	// its own sets a shorter limit, such as a leader that must stop
+	// writing before another replica can take its Lease.
 	Timeout time.Duration
 }
 
-// defaultTimeout is the limit of InClusterOptions.Timeout when it is
-// zero.
 const defaultTimeout = 30 * time.Second
 
-// InCluster builds a client from the pod's environment and its
-// ServiceAccount.
+// InCluster builds a client from the pod's environment and
+// ServiceAccount files.
 func InCluster(options InClusterOptions) (*Client, error) {
 	server := options.Server
 	if server == "" {
 		host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
 		if host == "" || port == "" {
-			return nil, fmt.Errorf("not running in a cluster: KUBERNETES_SERVICE_HOST unset")
+			return nil, errors.New("not running in a cluster: KUBERNETES_SERVICE_HOST or KUBERNETES_SERVICE_PORT is not set")
 		}
 		server = "https://" + host + ":" + port
 	}
@@ -163,25 +155,24 @@ func InCluster(options InClusterOptions) (*Client, error) {
 		dir = ServiceAccountDir
 	}
 
-	// The mounted CA is the cluster's own. The client trusts only that
-	// CA, not the system trust store, so it accepts the cluster's API
-	// server and refuses any other server that answers on the address.
+	// Trust only the cluster's CA, not the system trust store, so the
+	// client refuses any other server at the API server's address.
 	caPEM, err := os.ReadFile(dir + "/ca.crt")
 	if err != nil {
 		return nil, fmt.Errorf("reading service account CA: %w", err)
 	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("service account CA contains no certificates")
+		return nil, fmt.Errorf("%s/ca.crt contains no certificates", dir)
 	}
 
 	return New(server, &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{RootCAs: roots},
-			// Each timeout limits the same failure: a server that stops
-			// answering without sending anything. A machine that fails
-			// sends no FIN and no RST, so a connection to it goes silent
-			// and every wait on it would otherwise have no limit.
+			// A machine that loses power or its network sends no FIN or
+			// RST, so a connection to it stays open with nothing on it.
+			// These timeouts limit how long each step waits on such a
+			// connection.
 			DialContext: (&net.Dialer{
 				Timeout:   5 * time.Second,
 				KeepAlive: 10 * time.Second,
@@ -189,71 +180,64 @@ func InCluster(options InClusterOptions) (*Client, error) {
 			ResponseHeaderTimeout: 10 * time.Second,
 			IdleConnTimeout:       30 * time.Second,
 		},
-		// No request of this client streams, because the informer
-		// package runs every watch. So the whole request, body
-		// included, has a limit too, and a body that stops part way
-		// cannot hold a pass.
+		// The informer package runs every watch, so no request of this
+		// client streams. That lets the limit cover the whole response
+		// body, so a body that stops part way cannot block the caller.
 		Timeout: timeout,
 	}, dir), nil
 }
 
-// WithContext answers a client whose requests carry ctx. A request
-// ends when ctx ends, and so does the wait after a 429, so a caller
-// that stops its work does not wait on the API server. The client it
-// answers shares the connections of c.
+// WithContext returns a client whose requests, and whose waits after a
+// 429, end when ctx ends. It clears any context set by WithWaitContext.
 func (c *Client) WithContext(ctx context.Context) *Client {
 	bound := *c
-	bound.ctx, bound.waits = ctx, nil
+	bound.ctx, bound.waitCtx = ctx, nil
 	return &bound
 }
 
-// WithWaitContext answers a client whose wait after a 429 ends when ctx
-// ends, and which then answers the 429. A request already sent runs to
-// its end. A request that the client cut off may still land on the API
-// server, so a writer that must know whether its write landed uses this
-// in place of WithContext: an operator that releases its Lease after
-// its last write waits for each write in flight, and not for the API
-// server's advice to wait.
+// WithWaitContext returns a client whose wait after a 429 ends when ctx
+// ends, and the request then returns ErrThrottled. ctx does not cancel
+// a request that is already sent. A caller that cancels a sent write
+// cannot tell whether the API server applied it, so a caller that needs
+// the result uses this in place of WithContext. For example, an operator that
+// releases its Lease on shutdown lets its sent writes finish, but does
+// not wait out a 429.
 func (c *Client) WithWaitContext(ctx context.Context) *Client {
 	bound := *c
-	bound.waits = ctx
+	bound.waitCtx = ctx
 	return &bound
 }
 
-// WithWriteGuard answers a client that asks guard before it sends each
-// request that is not a GET, and each time it sends one again after a
-// 429. An error from guard refuses the request, and the client sends
-// nothing. A leader uses it to stop writing once it cannot show that it
-// still holds its Lease. The guard sits in the client, so it covers
-// every write, including those that memo and informer send. The client
-// it answers shares the connections of c.
+// WithWriteGuard returns a client that calls guard before each request
+// that is not a GET, including each resend after a 429. When guard
+// returns an error, the client does not send the request and returns
+// that error. A leader uses it to stop writing when it can no longer
+// confirm that it holds its Lease. The guard is in the client so that
+// it covers every write through the client, including the status writes
+// of the memo package.
 func (c *Client) WithWriteGuard(guard func() error) *Client {
 	guarded := *c
 	guarded.writeGuard = guard
 	return &guarded
 }
 
-// WithObserver answers a client that calls observe with the final
-// answer to each request, after any wait for a 429. A caller that logs
-// a failure and carries on still leaves a record there, so a program
-// can learn from one place that something it sent did not land, and
-// send it again sooner than its next scheduled try. The client it
-// answers shares the connections of c.
+// WithObserver returns a client that calls observe with the Outcome of
+// each request, after any wait for a 429. A program can use it to see
+// every failed write in one place, including a write whose caller only
+// logs the error, and retry sooner than its next scheduled attempt.
 func (c *Client) WithObserver(observe func(Outcome)) *Client {
 	observed := *c
 	observed.observer = observe
 	return &observed
 }
 
-// waitContext answers the context that ends the wait after a 429.
 func (c *Client) waitContext() context.Context {
-	if c.waits != nil {
-		return c.waits
+	if c.waitCtx != nil {
+		return c.waitCtx
 	}
 	return c.context()
 }
 
-// context answers the context of each request.
 func (c *Client) context() context.Context {
 	if c.ctx == nil {
 		return context.Background()
@@ -261,24 +245,25 @@ func (c *Client) context() context.Context {
 	return c.ctx
 }
 
-// RequestJSON sends one request with a JSON body, and decodes the JSON
-// answer into out. A nil out discards the answer.
+// RequestJSON sends one request with a JSON body and decodes the JSON
+// response into out. A nil out discards the response body.
 func (c *Client) RequestJSON(method, path string, body []byte, out any) error {
 	return c.Request(method, path, "application/json", body, out)
 }
 
-// Request is RequestJSON with the body's content type stated. A PATCH
-// needs it: the API server reads the patch's dialect from the header
-// alone, and the same bytes mean different things as a merge patch, a
-// JSON patch, and an apply.
+// Request sends a body of the given content type. A PATCH needs it,
+// because the API server reads the patch type (merge patch, JSON patch,
+// or apply) from the Content-Type header.
 //
-// A 404 answers ErrNotFound, a 409 answers ErrConflict, and any other
-// status that is not 2xx answers an error that holds the server's own
-// message. A 429 is sent again after the wait the API server asks for,
-// as maxThrottleWait describes.
+// A 404 returns ErrNotFound, a 409 returns ErrConflict, and a 403
+// returns ErrNamespaceTerminating or ErrForbidden. Any other status
+// outside 2xx returns an error that includes the response body. After a
+// 429, Request waits as long as the API server asks and sends the
+// request again, until the total wait would pass maxThrottleWait.
 //
-// An out of type *[]byte takes the answer's body as it is, up to
-// maxDrain bytes, for an answer that is not JSON, such as a pod's log.
+// When out is a *[]byte, Request stores the raw response body in it, up
+// to maxDrain bytes, for a response that is not JSON, such as a pod's
+// log.
 func (c *Client) Request(method, path, contentType string, body []byte, out any) error {
 	status, err := c.request(method, path, contentType, body, out)
 	if c.observer != nil {
@@ -287,8 +272,8 @@ func (c *Client) Request(method, path, contentType string, body []byte, out any)
 	return err
 }
 
-// request sends a request until it gets an answer that is not a 429 it
-// can wait out, and answers the last status with the error.
+// request calls send again after each 429 that it can wait out, and
+// returns the last HTTP status and error.
 func (c *Client) request(method, path, contentType string, body []byte, out any) (int, error) {
 	var waited time.Duration
 	for {
@@ -308,30 +293,27 @@ func (c *Client) request(method, path, contentType string, body []byte, out any)
 	}
 }
 
-// maxThrottleWait is the longest total wait, in units of the wait a
-// 429 asks for, before a request answers the 429 to its caller. While
-// the API server starts the storage of a CRD it just received, it
-// answers 429 with the reason "storage is (re)initializing" for a
-// second or two. A rollout that changes a CRD meets that answer, and a
-// pass that sent the request again after the wait gets the object. A
-// server that answers 429 for longer is overloaded, and the caller's
-// own retry, which waits longer, handles it.
+// maxThrottleWait is the total number of seconds that one request waits
+// across its 429 responses before it returns ErrThrottled. While the API
+// server initializes the storage of a CRD that it has just received, it
+// responds 429 with the message "storage is (re)initializing" for a
+// second or two, so a rollout that changes a CRD gets that response and
+// a resend succeeds. A server that keeps responding 429 for longer is
+// overloaded, and the caller's own retry, which waits longer, handles it.
 //
-// The wait ends when the context of a client from WithContext or
-// WithWaitContext ends.
-// Otherwise the limit bounds it: a request holds its caller for at most
-// ten seconds of waits, plus the request timeout of each send. A caller
-// that holds a lock across the request, such as memo.Versions.Send,
-// holds it that long too, and a shutdown that waits on the caller waits
-// that long.
+// A context from WithContext or WithWaitContext can end the wait
+// sooner. Otherwise a request blocks its caller for up to this many
+// seconds plus the timeout of each send. A caller that holds a lock
+// across the request, such as memo.Versions.Send, holds it that long
+// too, and so does a shutdown that waits on that caller.
 const maxThrottleWait = 10
 
-// send sends one request once, and answers the HTTP status of the
-// answer, or zero when no answer came.
+// send makes one attempt of a request and returns the HTTP status of
+// the response, or zero when there was none.
 func (c *Client) send(method, path, contentType string, body []byte, out any) (int, error) {
 	if c.writeGuard != nil && method != http.MethodGet {
 		if err := c.writeGuard(); err != nil {
-			return 0, fmt.Errorf("%s %s not sent: %w", method, path, err)
+			return 0, fmt.Errorf("%s %s was not sent: the write guard refused it: %w", method, path, err)
 		}
 	}
 	var reader io.Reader
@@ -386,12 +368,10 @@ func (c *Client) send(method, path, contentType string, body []byte, out any) (i
 	return status, json.NewDecoder(resp.Body).Decode(out)
 }
 
-// authorize puts the ServiceAccount token on a request.
-//
-// The client reads its token from disk on every request. The tokens are
-// short-lived, and the kubelet refreshes the mounted file as each one
-// nears its expiry, so a client that holds a token in memory eventually
-// gets 401 answers.
+// authorize adds the ServiceAccount token to a request. It reads the
+// token file on every request, because the kubelet rewrites that file
+// as each short-lived token nears its expiry, and a token cached in
+// memory would eventually get 401 responses.
 func (c *Client) authorize(req *http.Request) error {
 	if c.credentials == "" {
 		return nil
@@ -404,10 +384,9 @@ func (c *Client) authorize(req *http.Request) error {
 	return nil
 }
 
-// throttledError is a 429 from the API server, which asks the client to
-// wait and send the request again. seconds is the wait the answer
-// stated, and zero when it stated none; wait is what the client waits
-// before it sends again, one second when the answer stated none.
+// throttledError is a 429. seconds is the wait the response asked for,
+// or zero when it gave none. wait is how long the client waits before
+// it resends, which is one second when seconds is zero.
 type throttledError struct {
 	err     error
 	wait    time.Duration
@@ -416,20 +395,17 @@ type throttledError struct {
 
 func (e *throttledError) Error() string { return e.err.Error() }
 
-// forbiddenError is a 403 with the API server's own text, which
-// errors.Is matches to ErrForbidden.
+func (e *throttledError) Is(target error) bool { return target == ErrThrottled }
+
 type forbiddenError struct{ err error }
 
 func (e *forbiddenError) Error() string { return e.err.Error() }
 
 func (e *forbiddenError) Is(target error) bool { return target == ErrForbidden }
 
-// Is makes a throttledError match ErrThrottled.
-func (e *throttledError) Is(target error) bool { return target == ErrThrottled }
-
-// retryAfter reads how many seconds a 429 asks the client to wait: the
-// Retry-After header, or the retryAfterSeconds of the Status body, or
-// zero when the answer states neither.
+// retryAfter returns the seconds that a 429 asks the client to wait,
+// from the Retry-After header or else the details.retryAfterSeconds
+// field of the Status body, or zero when it has neither.
 func retryAfter(header, body string) int {
 	var seconds int
 	if _, err := fmt.Sscan(header, &seconds); err == nil && seconds > 0 {
@@ -446,13 +422,12 @@ func retryAfter(header, body string) int {
 	return 0
 }
 
-// RetryAfterSeconds answers the seconds that the 429 an error holds
-// asked the caller to wait, and zero for a 429 that stated no wait and
-// for an error that holds no 429. A caller that asks again after
-// ErrThrottled waits at least that long, because the API server asked
-// for it. A 429 with no stated wait is often a refusal that time alone
-// does not end, such as an eviction that a PodDisruptionBudget refuses,
-// and the caller decides when to ask again.
+// RetryAfterSeconds returns the wait, in seconds, that the 429 inside
+// err asked for. It returns zero when the 429 gave no wait or err does
+// not wrap a 429. A caller that retries after ErrThrottled waits at least that
+// long. A 429 with no wait is often a refusal that waiting does not
+// clear, such as an eviction that a PodDisruptionBudget blocks, so the
+// caller decides when to retry.
 func RetryAfterSeconds(err error) int {
 	var throttled *throttledError
 	if !errors.As(err, &throttled) {
@@ -461,28 +436,28 @@ func RetryAfterSeconds(err error) int {
 	return throttled.seconds
 }
 
-// responseText is the start of an answer's body, for an error that
-// holds the server's own text. The API server ends its Status body with
-// a newline, and the text leaves it out, so the error and the log line
-// that prints it stay on one line.
+// responseText returns the start of a response body, for an error
+// message. It trims the trailing newline that the API server adds to a
+// Status body, so the error and the log line that prints it stay on one
+// line.
 func responseText(body io.Reader) string {
 	message, _ := io.ReadAll(io.LimitReader(body, 2048))
 	return strings.TrimRightFunc(string(message), unicode.IsSpace)
 }
 
-// terminating reports whether a 403's Status names the cause
-// NamespaceTerminating. The cause is the API server's stable signal;
-// the message beside it is prose that can change between releases.
+// terminating reports whether a 403's Status body has the cause
+// NamespaceTerminating. The cause is a stable field of the API, but the
+// message beside it can change between releases.
 func terminating(message string) bool {
-	var answer struct {
+	var status struct {
 		Details struct {
 			Causes []struct {
 				Reason string `json:"reason"`
 			} `json:"causes"`
 		} `json:"details"`
 	}
-	_ = json.Unmarshal([]byte(message), &answer)
-	for _, cause := range answer.Details.Causes {
+	_ = json.Unmarshal([]byte(message), &status)
+	for _, cause := range status.Details.Causes {
 		if cause.Reason == "NamespaceTerminating" {
 			return true
 		}
@@ -490,18 +465,16 @@ func terminating(message string) bool {
 	return false
 }
 
-// maxDrain limits the read below. The largest answer an operator asks
-// for is one list, which the caller decodes into memory anyway, so
-// reading the tail costs nothing new. Past this size, the connection is
-// the cheaper thing to lose.
+// maxDrain is the most that drain reads of what remains of a body, and
+// the most that a *[]byte target receives. Past this size, closing the
+// connection costs less than reading the rest.
 const maxDrain = 4 << 20
 
-// drain reads what the caller left in the response body, then closes
-// it. Go returns a connection to its pool only when the body reaches
-// EOF, so a body closed early costs a new TCP connection and TLS
-// handshake on the next request. The early close also reaches the API
-// server as a hang-up on a request it already answered. A 404, a 409,
-// and a status write each answer with a body that no caller reads.
+// drain reads what remains of a response body and closes it. Go
+// returns a connection to its pool only when the body reaches EOF. A
+// body closed early costs a new TCP connection and TLS handshake on the
+// next request. Callers leave the body of a 404, a 409, or a response
+// to a request with a nil out unread, so drain must read it.
 func drain(body io.ReadCloser) {
 	_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrain))
 	_ = body.Close()

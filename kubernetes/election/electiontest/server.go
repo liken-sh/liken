@@ -1,7 +1,7 @@
-// Package electiontest is a fake API server that holds one Lease, for
-// the tests of an election. It answers the way the API server does: a
-// create conflicts with a Lease that exists, and an update from a stale
-// resourceVersion conflicts with a newer write. A test serves it through
+// Package electiontest is a fake API server that stores one Lease, for
+// the tests of an election. A create of a Lease that exists fails with
+// AlreadyExists, and an update from a stale resourceVersion fails with
+// a conflict, as on the real API server. It is served through
 // apiservertest, so the election runs in a synctest bubble on the fake
 // clock.
 package electiontest
@@ -21,31 +21,28 @@ import (
 	"github.com/liken-sh/liken/kubernetes/election"
 )
 
-// Server holds the Lease named Name in Namespace.
+// Server stores the Lease called Name in Namespace.
 type Server struct {
 	Name      string
 	Namespace string
 
-	mu      sync.Mutex
-	current map[string]any
-	version int
-	// landAfterRead writes the Lease again, at a new version, right after
-	// the next read is answered. It is the state a renewal leaves when
-	// its client gave up on it and the API server applied it anyway.
-	landAfterRead bool
-	refuse        map[string]int
-	requests      map[string]int
+	mu               sync.Mutex
+	current          map[string]any
+	version          int
+	rewriteAfterRead bool
+	refuse           map[string]int
+	requests         map[string]int
 }
 
-// New is a server that holds no Lease yet.
+// New returns a server that has no Lease.
 func New(name, namespace string) *Server {
 	return &Server{Name: name, Namespace: namespace, refuse: map[string]int{}, requests: map[string]int{}}
 }
 
-// Config is a client configuration for the server, the way
-// rest.InClusterConfig is one for the real API server. The typed client
-// sends protobuf to the real API server, and JSON here, because the fake
-// decodes JSON alone.
+// Config returns a client configuration for the server, as
+// rest.InClusterConfig does for the real API server. The typed client
+// sends protobuf to the real API server. The configuration here uses
+// JSON, because the fake decodes only JSON.
 func (s *Server) Config(t *testing.T) *rest.Config {
 	t.Helper()
 	config := apiservertest.Start(t, s).Config()
@@ -53,7 +50,8 @@ func (s *Server) Config(t *testing.T) *rest.Config {
 	return config
 }
 
-// store writes a Lease at the next version. Callers hold mu.
+// store saves the Lease at the next resourceVersion. The caller holds
+// mu.
 func (s *Server) store(object map[string]any) map[string]any {
 	s.version++
 	metadata, _ := object["metadata"].(map[string]any)
@@ -62,14 +60,13 @@ func (s *Server) store(object map[string]any) map[string]any {
 	return object
 }
 
-// HoldAs writes the Lease as another process would, with a renewal that
-// is fresh now.
+// HoldAs stores the Lease as held by holder, renewed now.
 func (s *Server) HoldAs(holder string) {
 	s.HoldAsRenewedAt(holder, time.Now())
 }
 
-// HoldAsRenewedAt writes the Lease as a process that last renewed it at
-// renewed, such as a process that has since exited.
+// HoldAsRenewedAt stores the Lease as held by holder, last renewed at
+// renewed.
 func (s *Server) HoldAsRenewedAt(holder string, renewed time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -87,8 +84,8 @@ func (s *Server) HoldAsRenewedAt(holder string, renewed time.Time) {
 	})
 }
 
-// Holder is the identity the Lease names, and empty when no Lease
-// exists or it names no holder.
+// Holder returns the identity in the Lease's holderIdentity, or an empty
+// string when there is no Lease or it has no holder.
 func (s *Server) Holder() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -100,30 +97,33 @@ func (s *Server) Holder() string {
 	return holder
 }
 
-// LandAWriteAfterTheNextRead makes the next read of the Lease followed
-// by a write that the reader did not see.
-func (s *Server) LandAWriteAfterTheNextRead() {
+// RewriteAfterNextRead makes the server store the Lease again, at a new
+// resourceVersion, right after it serves the next read, so the reader's
+// copy is stale. It reproduces a renewal that its client gave up on and
+// the API server committed anyway.
+func (s *Server) RewriteAfterNextRead() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.landAfterRead = true
+	s.rewriteAfterRead = true
 }
 
-// Refuse answers every request of the method with the status code,
-// until Allow.
+// Refuse makes every request that uses the HTTP method fail with the
+// status code, until Allow.
 func (s *Server) Refuse(method string, status int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.refuse[method] = status
 }
 
-// Allow ends the refusal of the method.
+// Allow stops Refuse for the HTTP method.
 func (s *Server) Allow(method string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.refuse, method)
 }
 
-// Count is how many requests of the method the server received.
+// Count returns how many requests with the HTTP method the server has
+// received.
 func (s *Server) Count(method string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -136,8 +136,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.requests[r.Method]++
 	w.Header().Set("Content-Type", "application/json")
 	if code, refused := s.refuse[r.Method]; refused {
-		// The API server names the reason and the code in the Status
-		// it answers, and client-go reads both.
 		reasons := map[int]string{http.StatusForbidden: "Forbidden", http.StatusNotFound: "NotFound"}
 		reason, known := reasons[code]
 		if !known {
@@ -157,8 +155,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(s.current)
-		if s.landAfterRead {
-			s.landAfterRead = false
+		if s.rewriteAfterRead {
+			s.rewriteAfterRead = false
 			s.store(s.current)
 		}
 	case r.Method == http.MethodPost:
@@ -185,8 +183,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// status answers the Status object the API server sends with an error,
-// which is what client-go reads the reason from.
+// status writes the Status object that the API server sends with an
+// error. client-go reads the error's reason and code from it.
 func status(w http.ResponseWriter, code int, reason string) {
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]any{

@@ -5,27 +5,26 @@ import (
 	"time"
 )
 
-// window is how long after the last Event of a series a repeat still
-// patches that Event. A repeat after a longer gap is a new occurrence,
-// and a new Event shows where it began. client-go's recorder uses the
-// same 10 minutes.
+// window is how long after a series' last repeat the next repeat still
+// patches the same Event. After a longer gap the recorder creates a new
+// Event, so its firstTimestamp shows when the new occurrence began.
 const window = 10 * time.Minute
 
-// seriesLimit bounds the series the recorder remembers. A component
-// with more open series than this forgets the oldest, and its next
-// repeat starts a new Event. client-go's recorder uses the same 4096.
+// seriesLimit is the most series the recorder keeps, the same limit as
+// client-go's recorder. Past it, the recorder drops the least recently
+// used series, and that series' next repeat creates a new Event.
 const seriesLimit = 4096
 
-// entry is the Event that a series patches: its name, the count it
-// holds, and the time of its last repeat.
+// entry is the state needed to patch a series' Event: the Event's name,
+// its count, and the time of the last repeat.
 type entry struct {
 	name  string
 	count int32
 	last  time.Time
 }
 
-// series remembers the Event of each series, by key, and forgets the
-// one used longest ago when it holds seriesLimit.
+// series maps each series key to its entry, and drops the least
+// recently used entry when it exceeds seriesLimit.
 type series struct {
 	order *list.List
 	byKey map[string]*list.Element
@@ -40,9 +39,9 @@ func newSeries() *series {
 	return &series{order: list.New(), byKey: map[string]*list.Element{}}
 }
 
-// keyOf answers the key of an Event's series: the object, the type,
-// the reason, and the message. The UID tells apart two objects of one
-// name, one deleted and one created after it.
+// keyOf returns the key of an Event's series: the object, type, reason,
+// and message. The UID separates an object from a later object that was
+// created with the same name after the first was deleted.
 func keyOf(event Event) string {
 	object := event.InvolvedObject
 	return object.Kind + "\x00" + object.Namespace + "\x00" + object.Name + "\x00" + object.UID + "\x00" +

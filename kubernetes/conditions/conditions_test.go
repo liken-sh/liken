@@ -8,16 +8,16 @@ import (
 	"github.com/liken-sh/liken/kubernetes/conditions"
 )
 
-// earlier is the transition time of the stored condition in each case.
+// earlier is the LastTransitionTime of the existing condition in each case.
 var earlier = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 
 func ready(status conditions.Status, reason, message string) conditions.Condition {
 	return conditions.Condition{Type: "Ready", Status: status, Reason: reason, Message: message}
 }
 
-// Set moves lastTransitionTime only when the status changes, and
-// reports a transition for a new condition, a new status, or a new
-// reason. A new message alone is no transition, but the list holds it.
+// Set changes lastTransitionTime only when the status changes. It
+// returns true for a new condition, a new status, or a new reason. A
+// new message alone is not a transition, but Set stores it.
 func TestSetKeepsTheTransitionTimeUntilTheStatusChanges(t *testing.T) {
 	stored := conditions.Condition{Type: "Ready", Status: conditions.True, Reason: "Connected", Message: "Connected", LastTransitionTime: earlier}
 	cases := []struct {
@@ -47,40 +47,37 @@ func TestSetKeepsTheTransitionTimeUntilTheStatusChanges(t *testing.T) {
 					want.LastTransitionTime = time.Now().UTC()
 				}
 				if transitioned != c.transitioned || got != want || len(list) != 1 {
-					t.Errorf("Set answered %t and holds %+v in %d conditions, want %t and %+v in 1", transitioned, got, len(list), c.transitioned, want)
+					t.Errorf("Set returned %t and the list has %+v among %d conditions, want %t and %+v in 1", transitioned, got, len(list), c.transitioned, want)
 				}
 			})
 		})
 	}
 }
 
-// A transition takes the caller's time when it states one, and the
-// present time to the second otherwise, because the API server keeps
-// a date-time to the second.
-func TestSetTakesTheCallersTransitionTime(t *testing.T) {
+// A transition uses the caller's LastTransitionTime when it is set, and
+// otherwise the current time truncated to the second, in UTC.
+func TestSetUsesTheCallersTransitionTime(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		time.Sleep(1500 * time.Millisecond)
 		var list []conditions.Condition
-		stated := ready(conditions.True, "Connected", "Connected")
-		stated.LastTransitionTime = earlier
+		provided := ready(conditions.True, "Connected", "Connected")
+		provided.LastTransitionTime = earlier
 
 		conditions.Set(&list, ready(conditions.False, "Starting", "Starting"))
-		unstated, _ := conditions.Find(list, "Ready")
-		conditions.Set(&list, stated)
+		unset, _ := conditions.Find(list, "Ready")
+		conditions.Set(&list, provided)
 		got, _ := conditions.Find(list, "Ready")
 
-		if want := time.Now().UTC().Truncate(time.Second); unstated.LastTransitionTime != want || unstated.LastTransitionTime.Location() != time.UTC {
-			t.Errorf("an unstated time became %v, want %v in UTC", unstated.LastTransitionTime, want)
+		if want := time.Now().UTC().Truncate(time.Second); unset.LastTransitionTime != want || unset.LastTransitionTime.Location() != time.UTC {
+			t.Errorf("an unset time became %v, want %v in UTC", unset.LastTransitionTime, want)
 		}
 		if got.LastTransitionTime != earlier {
-			t.Errorf("a stated time became %v, want %v", got.LastTransitionTime, earlier)
+			t.Errorf("a provided time became %v, want %v", got.LastTransitionTime, earlier)
 		}
 	})
 }
 
-// Set changes only the condition of its type, and keeps the order of
-// the list.
-func TestSetLeavesTheOtherConditionsInPlace(t *testing.T) {
+func TestSetKeepsTheOtherConditionsInOrder(t *testing.T) {
 	list := []conditions.Condition{
 		{Type: "ParentFound", Status: conditions.True, Reason: "Found"},
 		{Type: "Ready", Status: conditions.True, Reason: "Connected"},
@@ -94,13 +91,12 @@ func TestSetLeavesTheOtherConditionsInPlace(t *testing.T) {
 		types = append(types, c.Type+"="+string(c.Status))
 	}
 	if got, want := types, []string{"ParentFound=True", "Ready=False", "Safe=Unknown"}; len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
-		t.Errorf("the list holds %v, want %v", got, want)
+		t.Errorf("the list is %v, want %v", got, want)
 	}
 }
 
-// Find answers false for a type the list does not hold.
-func TestFindAnswersFalseForAnAbsentType(t *testing.T) {
+func TestFindReturnsFalseForAMissingType(t *testing.T) {
 	if c, ok := conditions.Find([]conditions.Condition{{Type: "Ready"}}, "Safe"); ok || c != (conditions.Condition{}) {
-		t.Errorf("Find answered %+v, %t; want the zero condition and false", c, ok)
+		t.Errorf("Find returned %+v, %t; want the zero condition and false", c, ok)
 	}
 }

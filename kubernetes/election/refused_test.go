@@ -1,9 +1,9 @@
 package election_test
 
-// These tests cover a Lease that the API server refuses. A refusal is
-// an ordinary failure of the election: a copy that waits keeps
-// waiting, and a leader whose renewals are refused stops writing and
-// exits on the same schedule as for any other failed renewal.
+// Tests of a Lease that the API server rejects. A rejection is handled
+// like any other failure: a replica that is waiting keeps waiting, and
+// a leader whose renewals are rejected stops writing and exits on the
+// same schedule as for any other failed renewal.
 
 import (
 	"net/http"
@@ -14,11 +14,11 @@ import (
 	"github.com/liken-sh/liken/kubernetes/election"
 )
 
-// A 403 on any request of the Lease, or a 404 on its create, leaves a
-// copy waiting. Even one such answer beside a healthy leader must not
-// let the copy act, because two copies that act at once can each grant
-// a reboot turn from their own view of the fleet.
-func TestARefusedLeaseMakesACopyWait(t *testing.T) {
+// A 403 on any request for the Lease, or a 404 on its create, leaves a
+// replica waiting. One such response, while another replica leads, must
+// not let this replica act, because then two replicas would write at
+// once.
+func TestARefusedLeaseMakesAReplicaWait(t *testing.T) {
 	cases := []struct {
 		name   string
 		holder string
@@ -38,31 +38,30 @@ func TestARefusedLeaseMakesACopyWait(t *testing.T) {
 					server.HoldAs(c.holder)
 				}
 				server.Refuse(c.method, c.status)
-				copy := newCandidate(t, server, "an-operator-a")
+				candidate := newCandidate(t, server, "an-operator-a")
 
 				synctest.Wait()
-				if err := copy.MayWrite(); err == nil || copy.Leads() {
-					t.Fatalf("after one refused try, leads = %v and MayWrite = %v; want the copy waiting", copy.Leads(), err)
+				if err := candidate.MayWrite(); err == nil || candidate.Leads() {
+					t.Fatalf("after one refused try, leads = %v and MayWrite = %v; want the replica not leading and refused", candidate.Leads(), err)
 				}
-				if awaitWithin(copy, election.Duration) {
-					t.Error("a copy whose Lease requests are refused acted")
+				if awaitWithin(candidate, election.Duration) {
+					t.Error("a replica whose Lease requests are refused acted")
 				}
 			})
 		})
 	}
 }
 
-// A leader whose renewals the API server refuses with 403 stops
-// writing one renewal deadline after its last renewal, and exits with
-// 1 before a waiting copy can take the Lease, the same as for a
-// renewal that fails in the API server.
+// A leader whose renewals fail, with a 403 or a 500, stops writing one
+// renewal deadline after its last successful renewal, and exits with 1
+// before a waiting replica can take the Lease.
 func TestALeaderWhoseRenewalsAreRefusedStopsWritingAndExits(t *testing.T) {
 	cases := []struct {
 		name   string
 		status int
 	}{
 		{"refused by RBAC", http.StatusForbidden},
-		{"failed in the API server", http.StatusInternalServerError},
+		{"a server error", http.StatusInternalServerError},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -70,7 +69,7 @@ func TestALeaderWhoseRenewalsAreRefusedStopsWritingAndExits(t *testing.T) {
 				server := newServer()
 				leader := newCandidate(t, server, "an-operator-a")
 				if !leadsAtOnce(leader) {
-					t.Fatal("the copy did not take a Lease that nobody holds")
+					t.Fatal("the replica did not take a Lease that nobody holds")
 				}
 				renewed := leader.LastRenewal()
 

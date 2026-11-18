@@ -17,9 +17,9 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-// testClient points a client at a test server, with a credentials
-// directory the test owns. A test that meets a 429 runs in a synctest
-// bubble, so the client waits out the 429 on the fake clock.
+// testClient returns a client for a fake API server and the credentials
+// directory that holds its token. A test that gets a 429 runs in a
+// synctest bubble, so the wait after the 429 runs on the fake clock.
 func testClient(t *testing.T, handler http.Handler) (*Client, string) {
 	t.Helper()
 	credentials := t.TempDir()
@@ -30,13 +30,13 @@ func testClient(t *testing.T, handler http.Handler) (*Client, string) {
 func writeToken(t *testing.T, dir, token string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, "token"), []byte(token), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the token file: %v", err)
 	}
 }
 
-// The client reads the token for each request, so a token the kubelet
-// refreshed reaches the next request.
-func TestEachRequestCarriesTheTokenOnDiskNow(t *testing.T) {
+// The client reads the token file for each request, so a token that the
+// kubelet rewrites is used by the next request.
+func TestEachRequestReadsTheTokenFileAgain(t *testing.T) {
 	var seen []string
 	client, credentials := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.Header.Get("Authorization"))
@@ -44,11 +44,11 @@ func TestEachRequestCarriesTheTokenOnDiskNow(t *testing.T) {
 	}))
 
 	if err := client.RequestJSON(http.MethodGet, "/api/v1/nodes/node-1", nil, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("the first request: %v", err)
 	}
 	writeToken(t, credentials, "second-token")
 	if err := client.RequestJSON(http.MethodGet, "/api/v1/nodes/node-1", nil, nil); err != nil {
-		t.Fatal(err)
+		t.Fatalf("the second request: %v", err)
 	}
 
 	if len(seen) != 2 || seen[0] != "Bearer first-token" || seen[1] != "Bearer second-token" {
@@ -56,8 +56,9 @@ func TestEachRequestCarriesTheTokenOnDiskNow(t *testing.T) {
 	}
 }
 
-// A client with no credentials directory sends no Authorization header,
-// and a token it cannot read fails the request before it is sent.
+// A client with no credentials directory sends no Authorization header.
+// When the token file cannot be read, the request fails before it is
+// sent.
 func TestTheCredentialsDirectory(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -83,20 +84,19 @@ func TestTheCredentialsDirectory(t *testing.T) {
 				t.Errorf("err = %v, Authorization = %q; want no error and %q", err, header, c.wantHeader)
 			}
 			if c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
-				t.Errorf("err = %v, want one that says %q", err, c.wantErr)
+				t.Errorf("err = %v, want one that contains %q", err, c.wantErr)
 			}
 		})
 	}
 }
 
-// namespaceTerminating is the body of the 403 that the API server
-// answers to a create in a namespace it is deleting.
+// namespaceTerminating is the Status body of the 403 for a create in a
+// namespace that is being deleted.
 const namespaceTerminating = `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"events \"east.\" is forbidden: unable to create new content in namespace observatory because it is being terminated","reason":"Forbidden","details":{"name":"east.","kind":"events","causes":[{"reason":"NamespaceTerminating","message":"namespace observatory is being terminated","field":"metadata.namespace"}]},"code":403}`
 
-// Each status maps to the answer its caller handles: an absent object,
-// a conflict, a request RBAC refuses, a create in a namespace being
-// deleted, and a failure that holds the server's own text on one line.
-func TestEachStatusAnswersWhatItsCallerHandles(t *testing.T) {
+// Each error status returns the error its caller checks for. A 500
+// returns an error that includes the server's message on one line.
+func TestEachErrorStatusReturnsItsError(t *testing.T) {
 	cases := []struct {
 		name    string
 		status  int
@@ -129,9 +129,9 @@ func TestEachStatusAnswersWhatItsCallerHandles(t *testing.T) {
 	}
 }
 
-// A request states the content type of its body, and a request with no
-// body states none.
-func TestARequestStatesTheContentTypeOfItsBody(t *testing.T) {
+// A request sends the content type of its body, and a request with no
+// body sends none.
+func TestARequestSendsTheContentTypeOfItsBody(t *testing.T) {
 	cases := []struct {
 		name     string
 		send     func(c *Client) error
@@ -155,7 +155,7 @@ func TestARequestStatesTheContentTypeOfItsBody(t *testing.T) {
 			}))
 
 			if err := c.send(client); err != nil {
-				t.Fatal(err)
+				t.Fatalf("sending the request: %v", err)
 			}
 			if contentType != c.wantType || body != c.wantBody || accept != "application/json" {
 				t.Errorf("Content-Type %q, body %q, Accept %q; want %q, %q, application/json",
@@ -165,8 +165,8 @@ func TestARequestStatesTheContentTypeOfItsBody(t *testing.T) {
 	}
 }
 
-// Get answers the object, and nothing with an error.
-func TestGetAnswersTheObjectOrNothing(t *testing.T) {
+// Get returns the object, or nil with an error.
+func TestGetReturnsTheObjectOrNil(t *testing.T) {
 	client, _ := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/things/studio" {
 			http.NotFound(w, r)
@@ -186,9 +186,9 @@ func TestGetAnswersTheObjectOrNothing(t *testing.T) {
 	}
 }
 
-// An answer that is not JSON, such as a pod's log, reaches a caller
-// that asks for the bytes as they are.
-func TestABodyThatIsNotJSONReachesARawCaller(t *testing.T) {
+// A caller that passes a *[]byte gets a response body that is not JSON,
+// such as a pod's log, as it is.
+func TestABodyThatIsNotJSONIsReturnedRawToABytesTarget(t *testing.T) {
 	log := "fwupdtool: loading\n{\"result\":\"Scanned\"}\n"
 	client, _ := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(log))
@@ -196,12 +196,12 @@ func TestABodyThatIsNotJSONReachesARawCaller(t *testing.T) {
 
 	var body []byte
 	if err := client.RequestJSON(http.MethodGet, "/api/v1/namespaces/a/pods/b/log", nil, &body); err != nil || string(body) != log {
-		t.Errorf("the body is %q, %v; want %q", body, err, log)
+		t.Errorf("the body is %q with err %v, want %q", body, err, log)
 	}
 }
 
-// statusObject is an object with a status that the API server stores
-// only in part.
+// statusObject has a status field, Pruned, that the fake API server
+// leaves out of its response, as a CRD schema prunes an unknown field.
 type statusObject struct {
 	Metadata struct {
 		ResourceVersion string `json:"resourceVersion"`
@@ -213,19 +213,19 @@ type statusObject struct {
 	} `json:"status"`
 }
 
-// A status write goes to the status subresource, and the caller then
-// holds the API server's copy: the new resourceVersion, and no field
-// that the API server dropped. A refused write leaves the caller's
-// object as it was.
-func TestAStatusWriteLeavesTheCallerWithTheAPIServersCopy(t *testing.T) {
+// ReplaceStatus sends a PUT to the status subresource. When the write
+// succeeds, the object is replaced with the API server's copy, which has
+// the new resourceVersion and lacks the field the server dropped. When
+// the write fails, the object is unchanged.
+func TestReplaceStatusReplacesTheObjectWithTheAPIServersCopy(t *testing.T) {
 	cases := []struct {
 		name        string
-		answer      int
+		status      int
 		wantErr     error
 		wantVersion string
 		wantPruned  string
 	}{
-		{"a write that lands", http.StatusOK, nil, "8", ""},
+		{"a write that succeeds", http.StatusOK, nil, "8", ""},
 		{"a write from an older copy", http.StatusConflict, ErrConflict, "7", "kept"},
 	}
 	for _, c := range cases {
@@ -233,7 +233,7 @@ func TestAStatusWriteLeavesTheCallerWithTheAPIServersCopy(t *testing.T) {
 			var method, path string
 			client, _ := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				method, path = r.Method, r.URL.Path
-				w.WriteHeader(c.answer)
+				w.WriteHeader(c.status)
 				_, _ = w.Write([]byte(`{"metadata":{"resourceVersion":"8"},"status":{"phase":"Ready"}}`))
 			}))
 			object := &statusObject{}
@@ -256,9 +256,7 @@ func TestAStatusWriteLeavesTheCallerWithTheAPIServersCopy(t *testing.T) {
 	}
 }
 
-// Stale separates a write from an older copy, or from a copy of an
-// object that is gone, from any other failure.
-func TestStaleNamesAWriteFromACopyThatIsNotTheAPIServers(t *testing.T) {
+func TestStaleIsTrueForConflictAndNotFound(t *testing.T) {
 	cases := []struct {
 		err  error
 		want bool
@@ -275,9 +273,9 @@ func TestStaleNamesAWriteFromACopyThatIsNotTheAPIServers(t *testing.T) {
 	}
 }
 
-// An answer that no caller reads is read to its end, so the next
-// request uses the same connection.
-func TestAnAnswerNobodyReadsKeepsTheConnection(t *testing.T) {
+// The client reads a response body that no caller wants to its end, so
+// the next request reuses the connection.
+func TestAResponseNoCallerReadsStillReusesTheConnection(t *testing.T) {
 	var connections atomic.Int64
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -303,8 +301,6 @@ func TestAnAnswerNobodyReadsKeepsTheConnection(t *testing.T) {
 	}
 }
 
-// A client with a context sends each request with it, so a request
-// whose context ended is never sent.
 func TestAClientWithAnEndedContextSendsNothing(t *testing.T) {
 	server := &throttling{}
 	client, _ := testClient(t, server)
@@ -318,7 +314,7 @@ func TestAClientWithAnEndedContextSendsNothing(t *testing.T) {
 	}
 }
 
-// A write guard refuses each write and no read, and the refused write
+// A write guard refuses each write and no read, and a refused write
 // never reaches the API server.
 func TestAWriteGuardRefusesWritesAndNotReads(t *testing.T) {
 	var sent []string
@@ -330,7 +326,7 @@ func TestAWriteGuardRefusesWritesAndNotReads(t *testing.T) {
 	guarded := client.WithWriteGuard(func() error { return refusal })
 
 	if err := guarded.RequestJSON(http.MethodGet, "/api/v1/nodes/node-1", nil, nil); err != nil {
-		t.Errorf("a read under the guard failed: %v", err)
+		t.Errorf("a read under the guard returned %v, want no error", err)
 	}
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		if err := guarded.Request(method, "/api/v1/nodes/node-1", "application/json", []byte(`{}`), nil); !errors.Is(err, refusal) {
@@ -338,7 +334,7 @@ func TestAWriteGuardRefusesWritesAndNotReads(t *testing.T) {
 		}
 	}
 	if err := client.RequestJSON(http.MethodPut, "/api/v1/nodes/node-1", []byte(`{}`), nil); err != nil {
-		t.Errorf("a write from the client with no guard failed: %v", err)
+		t.Errorf("a write from the client with no guard returned %v, want no error", err)
 	}
 	if want := []string{http.MethodGet, http.MethodPut}; !slices.Equal(sent, want) {
 		t.Errorf("the API server received %q, want %q", sent, want)

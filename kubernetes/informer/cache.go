@@ -1,31 +1,28 @@
 package informer
 
-// A pass reads the objects a watch holds from the watch's store, not
-// from the API server, so a settled pass sends the API server no read
-// of a watched kind.
+// A reconcile pass reads objects from a watch's store instead of the
+// API server, so a pass that changes nothing sends no reads of a
+// watched kind.
 //
-// A store answers only while it is ready: it holds the whole first
-// read, and the API server accepted a watch and forbade none since, so
-// a watch keeps the store current. A store that holds part of the first read would
-// leave objects out of a list, and a store whose watch the API server
-// forbids holds no change made since its last list. A store whose
-// watch fails while the API server is down stays ready (Synced in
-// informer.go). While a store is not ready, every read goes to the API
-// server. An object that a ready store does not hold is read from the
-// API server too, because it can be an object the operator created a
-// moment ago.
+// A pass reads the store only while it is ready (Collection.Synced):
+// the store has the whole first list, and the API server has accepted a
+// watch and has not refused one with a 401 or a 403 since. A watch that
+// fails for another reason, such as while the API server restarts,
+// leaves the store ready, unless the collection sets
+// Options.UnreadyOnWatchError. While the store is not ready, every read
+// goes to the API server. When a ready store does not have an object,
+// ReadOne reads it from the API server too, because the operator may
+// have just created it.
 //
 // A store's copy can be older than the operator's own last write. The
-// memo package records the version of each copy the API server
-// answered, and a store's copy at another version is read from the API
-// server once. When the watch delivers the write, the store answers
-// again. A list from the API server while the store is not ready notes
-// the version of each object too (List).
+// memo records the version of each copy the API server returned, and a
+// store copy at another version is replaced by a read from the API
+// server until the watch delivers the write.
 //
-// The memo package holds the requests whose answers the memo notes,
-// because a program that must not link client-go sends them too. This
-// package names the read and the status write as well, so a pass that
-// reads a store and writes needs one import.
+// The requests that record versions are in the memo package, so that a
+// program that must not link client-go can send them. This package
+// re-exports ReadFresh and SettleStatus, so a pass that reads a store
+// and writes needs one import.
 
 import (
 	"errors"
@@ -38,35 +35,34 @@ import (
 	"github.com/liken-sh/liken/kubernetes/memo"
 )
 
-// View is one watch's store, and whether the store holds the whole
-// first read. The zero View holds nothing, and every read goes to the
-// API server.
+// View is one watch's store and its Synced function. With the zero
+// View, every read goes to the API server.
 type View struct {
 	Store  cache.Store
 	Synced func() bool
 
-	// Whole says the watch takes every object of the kind, with no
-	// selector. A list from such a store also holds each object the
-	// operator created or wrote that the store does not hold yet, and
-	// each object whose last request failed, which may exist. Leave it
-	// false for a store with a selector, because an object the operator
-	// wrote can be outside the selection.
+	// Whole is true when the watch has no selector. CurrentList
+	// then also includes the objects that the memo recorded and the
+	// store does not have yet. Leave it false for a watch with a
+	// selector, because an object the operator wrote can be outside
+	// the selection.
 	Whole bool
 
-	// Absent says the store's empty collection stands in for a kind the
-	// cluster does not serve (Options.Absent). A caller that would
-	// create an object of the kind reads it to send no create that the
-	// API server must refuse.
+	// Absent is true when the store is empty because the cluster
+	// does not serve the kind (Options.Absent). Check it before a
+	// create of the kind, which the API server would refuse.
 	Absent bool
 }
 
-// Ready reports whether a list can come from the store.
+// Ready reports whether the store can be read instead of the API
+// server.
 func (v View) Ready() bool {
 	return v.Store != nil && v.Synced != nil && v.Synced()
 }
 
-// Held is one kind's store, and the memo of the copies the operator
-// wrote or read.
+// Held is what a pass reads one kind from: the View of the kind's
+// watch, and the memo of the versions of that kind that the operator
+// wrote or read from the API server.
 type Held struct {
 	View     View
 	Versions *memo.Versions
@@ -75,24 +71,20 @@ type Held struct {
 // Meta is the part of an object's metadata that the cache reads.
 type Meta = memo.Meta
 
-// Object is a pointer to an operator's struct for one kind, which
-// answers the object's metadata.
 type Object[T any] = memo.Object[T]
 
-// Key is the key a store holds an object under: namespace/name for a
-// namespaced object and the name for a cluster-scoped one.
+// Key returns the store key of an object (memo.Key).
 func Key(meta Meta) string { return memo.Key(meta) }
 
-// Cached answers the store's copy of one object, by its key, while the
-// store is ready. A copy that does not convert is reported and not
-// answered. The caller reads the API server when Cached answers
-// nothing.
+// Cached returns the store's copy of the object with this key, while
+// the store is ready. A copy that does not convert to T is reported and
+// treated as missing.
 func Cached[T any](view View, key string) (*T, bool) {
 	if !view.Ready() {
 		return nil, false
 	}
-	object, held, err := view.Store.GetByKey(key)
-	if err != nil || !held {
+	object, stored, err := view.Store.GetByKey(key)
+	if err != nil || !stored {
 		return nil, false
 	}
 	item, err := Convert[T](object)
@@ -103,10 +95,9 @@ func Cached[T any](view View, key string) (*T, bool) {
 	return &item, true
 }
 
-// CachedList answers every copy in the store, in the order of their
-// keys, which is the order of a list from the API server. A copy that
-// does not convert is reported and left out, the same as a watch event
-// that does not convert.
+// CachedList returns every copy in the store, sorted by key, which is
+// the order of a list from the API server. A copy that does not convert
+// to T is reported and left out.
 func CachedList[T any](view View) []T {
 	objects := view.Store.List()
 	slices.SortFunc(objects, func(a, b any) int { return strings.Compare(objectKey(a), objectKey(b)) })
@@ -122,56 +113,53 @@ func CachedList[T any](view View) []T {
 	return items
 }
 
-// objectKey is the key a store holds an object under.
 func objectKey(object any) string {
 	key, _ := cache.MetaNamespaceKeyFunc(object)
 	return key
 }
 
-// ReadOne answers one object: the store's copy when the store is ready
-// and holds a current copy, and the API server's copy otherwise.
-func ReadOne[T any, P Object[T]](c *apiclient.Client, held Held, key, path string) (*T, error) {
-	if copied, ok := Cached[T](held.View, key); ok && held.Versions.Current(key, P(copied).GetObjectMeta().GetResourceVersion()) {
+// ReadOne returns the store's copy of an object when the store is ready
+// and the copy is at the version the memo recorded. Otherwise it reads
+// the object from the API server.
+func ReadOne[T any, P Object[T]](c *apiclient.Client, watched Held, key, path string) (*T, error) {
+	if copied, ok := Cached[T](watched.View, key); ok && watched.Versions.Current(key, P(copied).GetObjectMeta().GetResourceVersion()) {
 		return copied, nil
 	}
-	return ReadFresh[T, P](c, held.Versions, key, path)
+	return ReadFresh[T, P](c, watched.Versions, key, path)
 }
 
-// ReadFresh reads one object from the API server and notes its version.
 func ReadFresh[T any, P Object[T]](c *apiclient.Client, versions *memo.Versions, key, path string) (*T, error) {
 	return memo.ReadFresh[T, P](c, versions, key, path)
 }
 
-// CurrentList answers the store's copies, in the order of their keys. A
-// copy that is older than the operator's own last write, or that does
-// not convert, is replaced by the API server's copy, and an object the
-// API server no longer holds is left out. A store that holds the whole
-// collection also answers each object the memo noted and the store does
-// not hold yet, such as one the operator created a moment ago, so a
-// pass does not create it again. That includes an object whose last
-// request failed with an error other than 404 (memo.Versions.Send): a
-// read of such an object that fails again fails the list, and the next
-// list reads it again. path names the object of each key.
-func CurrentList[T any, P Object[T]](c *apiclient.Client, held Held, path func(key string) string) ([]T, error) {
-	// The informer can take a created object between the two reads, so
-	// the memo's keys are read first. In the other order, the store's
-	// keys miss the object, the memo skips it because the store now
-	// holds it, and the list leaves it out, so a pass creates it again.
-	// In this order the key is in one read or in both.
+// CurrentList returns the store's copies sorted by key. A copy that is
+// older than the operator's own last write, or that does not convert,
+// is replaced by a read from the API server, and an object that returns
+// 404 is left out. When any read fails, the list fails.
+//
+// When the store is Whole, the list also includes each object that the
+// memo recorded and the store does not have yet (memo.Versions.Unheld),
+// such as one the operator just created, so a pass does not create it
+// again. path returns the API path of the object with a given key.
+func CurrentList[T any, P Object[T]](c *apiclient.Client, watched Held, path func(key string) string) ([]T, error) {
+	// Read the memo's keys before the store's. The informer can add
+	// a created object between the two reads. In the other order,
+	// the store's keys would miss it, and Unheld would skip it
+	// because the store has it by then.
 	var keys []string
-	if held.View.Whole {
-		keys = held.Versions.Unheld(held.View.Store)
+	if watched.View.Whole {
+		keys = watched.Versions.Unheld(watched.View.Store)
 	}
-	keys = append(keys, held.View.Store.ListKeys()...)
+	keys = append(keys, watched.View.Store.ListKeys()...)
 	slices.Sort(keys)
 	keys = slices.Compact(keys)
 	current := make([]T, 0, len(keys))
 	for _, key := range keys {
-		if copied, ok := Cached[T](held.View, key); ok && held.Versions.Current(key, P(copied).GetObjectMeta().GetResourceVersion()) {
+		if copied, ok := Cached[T](watched.View, key); ok && watched.Versions.Current(key, P(copied).GetObjectMeta().GetResourceVersion()) {
 			current = append(current, *copied)
 			continue
 		}
-		fresh, err := ReadFresh[T, P](c, held.Versions, key, path(key))
+		fresh, err := ReadFresh[T, P](c, watched.Versions, key, path(key))
 		if errors.Is(err, apiclient.ErrNotFound) {
 			continue
 		}
@@ -183,28 +171,28 @@ func CurrentList[T any, P Object[T]](c *apiclient.Client, held Held, path func(k
 	return current, nil
 }
 
-// List answers every object of one kind: the store's copies through
-// CurrentList while the store is ready, and a list from the API server
-// at listPath while it is not. The list notes the version of each object
-// it answers (memo.Versions.SendList), so a later list from a store that
-// became ready at an older version reads that object from the API server
-// again. listPath carries the selector of the watch, so both answers
-// hold the same objects. It carries no resourceVersion, so etcd answers
-// the list. path names the object of each key.
+// List returns every object of one kind. While the store is ready it
+// returns CurrentList. Otherwise it lists listPath from the API server
+// and records the version of each object, because the store can become
+// ready at an older version than that list (memo.Versions.SendList).
 //
-// A pass that lists a kind it reads from a store calls List, and never
-// lists the collection from the API server itself. A list outside List
-// notes no version, and the next pass can act on an older copy.
-func List[T any, P Object[T]](c *apiclient.Client, held Held, listPath string, path func(key string) string) ([]T, error) {
-	if held.View.Ready() {
-		return CurrentList[T, P](c, held, path)
+// listPath must have the same selector as the watch, and must not set
+// resourceVersion. A list with no resourceVersion is a consistent read,
+// so it has every write that the API server acknowledged before the
+// list. With resourceVersion=0, the watch cache can serve an older
+// list. A pass that reads a kind from a store must list it through
+// List, because a list that bypasses List records no versions, and the
+// next pass can act on an older copy.
+func List[T any, P Object[T]](c *apiclient.Client, watched Held, listPath string, path func(key string) string) ([]T, error) {
+	if watched.View.Ready() {
+		return CurrentList[T, P](c, watched, path)
 	}
-	return memo.ReadList[T, P](c, held.Versions, listPath)
+	return memo.ReadList[T, P](c, watched.Versions, listPath)
 }
 
-// SettleStatus writes the status that apply sets on a copy of an
-// object, and settles on the API server's copy after a 409 or a 404
+// SettleStatus writes the status that apply sets on object, and after a
+// 409 or a 404 reads the object again and retries once
 // (memo.SettleStatus).
-func SettleStatus[T any, P Object[T]](c *apiclient.Client, versions *memo.Versions, path string, held *T, apply func(*T) bool) (bool, error) {
-	return memo.SettleStatus[T, P](c, versions, path, held, apply)
+func SettleStatus[T any, P Object[T]](c *apiclient.Client, versions *memo.Versions, path string, object *T, apply func(*T) bool) (bool, error) {
+	return memo.SettleStatus[T, P](c, versions, path, object, apply)
 }

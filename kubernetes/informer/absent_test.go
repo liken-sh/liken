@@ -14,11 +14,10 @@ import (
 	"github.com/liken-sh/liken/kubernetes/apiservertest"
 )
 
-// undefined answers 404 to every request until the collection's
-// definition arrives, the way the API server answers for a kind it
-// does not serve, and then hands each request to the collection.
-// plainWatches counts the watches it refused that ask for no initial
-// events.
+// undefined returns 404 to every request until defined is set, like the
+// API server does for a kind that no CRD defines, and then passes each
+// request to collection. plainWatches counts the watch requests it
+// rejected that did not set sendInitialEvents.
 type undefined struct {
 	defined      atomic.Bool
 	collection   http.Handler
@@ -37,22 +36,21 @@ func (u *undefined) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	u.collection.ServeHTTP(w, r)
 }
 
-// undefinedWatcher points a dynamic client at an undefined collection.
 func undefinedWatcher(t *testing.T, server *undefined) dynamic.Interface {
 	t.Helper()
 	client, err := dynamic.NewForConfig(apiservertest.Start(t, server).Config())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the dynamic client: %v", err)
 	}
 	return client
 }
 
-// A collection whose definition is absent reads as an empty copy that
-// answers a pass, and reports the collection absent. The quiet stream asks the API server nothing, and
-// counts as no watch opened again. When the definition arrives, the
-// copy holds its objects after the next recheck and the reflector's
-// backoff.
-func TestAnAbsentCollectionReadsAsEmptyUntilItArrives(t *testing.T) {
+// While the CRD does not exist, the store is ready, empty, and Absent,
+// and quietWatch sends no request to the API server. After the CRD is
+// installed, the store has the collection's objects once the recheck
+// time and the reflector's backoff have passed. quietWatch never counts
+// as a reopened watch.
+func TestAbsentCollectionIsEmptyUntilItsCRDIsInstalled(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := &undefined{collection: newWatchServer(thingsPath, [][]thing{{newThing("a", "7", 1)}})}
 		var reopened atomic.Int64
@@ -61,34 +59,32 @@ func TestAnAbsentCollectionReadsAsEmptyUntilItArrives(t *testing.T) {
 			Absent:   apierrors.IsNotFound,
 		})
 		synctest.Wait()
-		if held := CachedList[thing](c.View()); !c.View().Ready() || len(held) != 0 {
-			t.Errorf("the copy of an absent collection holds %+v, ready: %v; want an empty copy that answers", held, c.View().Ready())
+		if cached := CachedList[thing](c.View()); !c.View().Ready() || len(cached) != 0 {
+			t.Errorf("the store of an absent collection contains %+v, ready: %v, want an empty store that is ready", cached, c.View().Ready())
 		}
 		if !c.View().Absent {
-			t.Error("the copy of an absent collection does not report the collection absent")
+			t.Error("the store of an absent collection does not report Absent")
 		}
 		if server.plainWatches.Load() != 0 {
-			t.Errorf("the watch of an absent collection sent %d plain watches", server.plainWatches.Load())
+			t.Errorf("the informer sent %d plain watches for an absent collection", server.plainWatches.Load())
 		}
 
 		server.defined.Store(true)
 		time.Sleep(defaultAbsentRecheck + time.Minute)
 		synctest.Wait()
-		if _, held := Cached[thing](c.View(), "a"); !held {
-			t.Error("the copy does not hold the collection that arrived")
+		if _, cached := Cached[thing](c.View(), "a"); !cached {
+			t.Error("the store has no object a after the CRD was installed, want a")
 		}
 		if c.View().Absent {
-			t.Error("the copy reports a collection that arrived as absent")
+			t.Error("the store reports Absent after the CRD was installed")
 		}
 		if reopened.Load() != 0 {
-			t.Errorf("the watch counted %d reopened watches, want none", reopened.Load())
+			t.Errorf("Reopened ran %d times, want 0", reopened.Load())
 		}
 	})
 }
 
-// With no Absent, a 404 is a failure like any other, and the copy never
-// syncs.
-func TestAnAbsentCollectionIsAFailureWhenTheOptionIsUnset(t *testing.T) {
+func TestA404IsAFailureWhenOptionsAbsentIsNil(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		server := &undefined{collection: newWatchServer(thingsPath, [][]thing{{}})}
 		c := Start(t.Context(), undefinedWatcher(t, server), Source{Resource: thingResource}, Options{})
@@ -96,27 +92,26 @@ func TestAnAbsentCollectionIsAFailureWhenTheOptionIsUnset(t *testing.T) {
 		synctest.Wait()
 
 		if c.Synced() {
-			t.Error("a collection the API server does not serve synced")
+			t.Error("the store of a collection that returns 404 synced")
 		}
 	})
 }
 
-// The quiet stream ends when the watch's context ends, so a watch that
-// stops leaves no goroutine behind.
-func TestTheQuietStreamEndsWithTheWatch(t *testing.T) {
+// A stopped watch leaves no quietWatch goroutine running.
+func TestQuietWatchClosesWhenItsContextEnds(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
-		stream := quietWatch(ctx, time.Hour)
+		w := quietWatch(ctx, time.Hour)
 		cancel()
 		synctest.Wait()
 
 		select {
-		case _, open := <-stream.ResultChan():
+		case _, open := <-w.ResultChan():
 			if open {
-				t.Error("the quiet stream sent an event")
+				t.Error("quietWatch sent an event after its context ended, want none")
 			}
 		default:
-			t.Fatal("the quiet stream never ended")
+			t.Fatal("quietWatch is still open after its context ended, want it closed")
 		}
 	})
 }

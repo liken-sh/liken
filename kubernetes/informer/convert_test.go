@@ -10,17 +10,17 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// An object that does not convert to the operator's struct is an error
-// that names the object. A tombstone, which the informer hands a
-// handler for an object deleted while the watch was down, converts as
-// the object it holds, and a tombstone that holds no copy is an error
-// that names its key.
-func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
+// An object that does not convert to the operator's struct returns an
+// error that names the object. A DeletedFinalStateUnknown tombstone,
+// which the informer gives a handler for an object that was deleted
+// while the watch was disconnected, converts as the object inside it. A
+// tombstone with no object returns an error that names its key.
+func TestAnObjectThatDoesNotConvertReturnsAnErrorThatNamesIt(t *testing.T) {
 	good := newThing("a", "7", 2)
 	good.Metadata.Namespace = "den"
 	mistyped := asObject(t, good)
 	if err := unstructured.SetNestedField(mistyped.Object, "two", "spec", "size"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting spec.size to a string: %v", err)
 	}
 	cases := []struct {
 		name    string
@@ -40,15 +40,14 @@ func TestAnObjectThatDoesNotConvertIsAnErrorThatNamesIt(t *testing.T) {
 				t.Fatalf("Convert = %+v, %v; want generation 2 and no error", got.Metadata, err)
 			}
 			if c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)) {
-				t.Fatalf("Convert error = %v, want one that says %q", err, c.wantErr)
+				t.Fatalf("Convert error = %v, want one that contains %q", err, c.wantErr)
 			}
 		})
 	}
 }
 
-// targetPort is a port name or a port number, held as text, the way
-// an operator reads a Service's targetPort. The struct reads a number
-// only through its own UnmarshalJSON.
+// targetPort holds a Service's targetPort, which is a port name or a
+// port number, as text. Only its UnmarshalJSON accepts a number.
 type targetPort string
 
 func (p *targetPort) UnmarshalJSON(data []byte) error {
@@ -76,10 +75,9 @@ type service struct {
 	} `json:"spec"`
 }
 
-// An object whose field the converter refuses, and whose JSON the
-// operator's struct reads, converts the way a read from the API server
-// decodes it.
-func TestAnObjectTheConverterRefusesDecodesFromItsJSON(t *testing.T) {
+// When the unstructured converter refuses a field but the struct's
+// UnmarshalJSON accepts its JSON, Convert decodes the JSON instead.
+func TestConvertFallsBackToJSONWhenTheConverterRefuses(t *testing.T) {
 	cases := []struct {
 		name       string
 		targetPort any

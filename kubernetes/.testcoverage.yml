@@ -1,18 +1,6 @@
-# This is the coverage gate, enforced by `make test`, which is what CI
-# runs. The threshold only rises over time. It is set just under what
-# the tests measure today, so a change that loses coverage fails the
-# check, and a change that gains coverage should raise the number here
-# to keep the gain.
-#
-# What stays untested is the in-cluster setup of the watches, which
-# reads the pod's mounted token at a fixed path, the default
-# credentials directory, and a few error returns: a request that
-# cannot be built or sent, a body that does not encode, and a second
-# status write that fails.
-#
-# The numbers are measured with Go 1.27.2 and later, which count each basic
-# block once. Go 1.27.1 and earlier count a block once for each row
-# that comments split it into (golang/go#80974), and measure higher.
+# The coverage gate, which `make test` runs. The threshold is just under
+# the measured total, so a change that lowers coverage fails. When a
+# change raises coverage, raise the threshold to match.
 
 profile: coverage.out
 

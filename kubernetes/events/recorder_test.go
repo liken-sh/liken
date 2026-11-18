@@ -18,17 +18,15 @@ import (
 	"github.com/liken-sh/liken/kubernetes/events/eventstest"
 )
 
-// recording is a recorder that writes to a fake API server, and what
-// the server holds.
 type recording struct {
 	recorder *events.Recorder
 	server   *apiservertest.Server
-	held     *eventstest.Events
+	stored   *eventstest.Events
 	log      *syncBuffer
 }
 
-// syncBuffer is a log that the recorder's goroutine writes while the
-// test reads it.
+// syncBuffer is a log that the test reads while the recorder's
+// goroutine writes it.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -46,24 +44,23 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// notFound answers every request that is not about an Event.
 var notFound = http.NotFoundHandler()
 
-// record starts a recorder against a fake API server that serves only
-// Events. next serves the other requests.
+// record starts a recorder against a fake API server that serves
+// Events, and passes every other request to next.
 func record(t *testing.T, next http.Handler) *recording {
-	held := &eventstest.Events{}
-	server := apiservertest.Start(t, held.Around(next))
+	stored := &eventstest.Events{}
+	server := apiservertest.Start(t, stored.Around(next))
 	log := &syncBuffer{}
 	client := apiclient.New(apiservertest.Host, server.Client(), "")
 	recorder := events.New(t.Context(), client, "test-operator", events.Options{Instance: "node-1", Log: log})
-	return &recording{recorder: recorder, server: server, held: held, log: log}
+	return &recording{recorder: recorder, server: server, stored: stored, log: log}
 }
 
 var mount = events.ObjectReference{APIVersion: "observatory.liken.sh/v1alpha1", Kind: "Mount", Namespace: "observatory", Name: "east-mount", UID: "uid-1"}
 
-// A Normal and a Warning each become one core/v1 Event about the
-// object, in its namespace, from the component and its instance.
+// Normal and Warning each write one core/v1 Event about the object, in
+// the object's namespace, with the component and instance as source.
 func TestAnEventNamesItsObjectAndItsSource(t *testing.T) {
 	cases := []struct {
 		name string
@@ -91,7 +88,7 @@ func TestAnEventNamesItsObjectAndItsSource(t *testing.T) {
 					FirstTimestamp: now, LastTimestamp: now, Count: 1,
 					ReportingComponent: "test-operator", ReportingInstance: "node-1",
 				}
-				if got := r.held.List(); len(got) != 1 || got[0] != want {
+				if got := r.stored.List(); len(got) != 1 || got[0] != want {
 					t.Errorf("the server holds %+v\nwant %+v", got, want)
 				}
 			})
@@ -109,31 +106,31 @@ func TestAnEventAboutAClusterScopedObjectGoesInDefault(t *testing.T) {
 		r.recorder.Warning(machine, "MachineLost", "The heartbeat stopped.")
 		synctest.Wait()
 
-		got := r.held.About("Machine", "node-1")
+		got := r.stored.About("Machine", "node-1")
 		if len(got) != 1 || got[0].Metadata.Namespace != "default" || got[0].InvolvedObject.Namespace != "" {
 			t.Errorf("the server holds %+v, want one Event in default about the cluster-scoped Machine", got)
 		}
 	})
 }
 
-// A repeat within the window patches the Event's count and last time,
-// so `kubectl describe` prints one line. A repeat after the window
-// starts a new Event.
+// A repeat within the window patches the Event's count and last
+// timestamp, so `kubectl describe` prints one line. A repeat after the
+// window creates a new Event.
 func TestARepeatWithinTheWindowCountsOnOneEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := record(t, notFound)
 		first := time.Now().UTC()
 
 		for range 3 {
-			r.recorder.Warning(mount, "Unreachable", "The mount did not answer.")
+			r.recorder.Warning(mount, "Unreachable", "The mount does not respond")
 			synctest.Wait()
 			time.Sleep(time.Minute)
 		}
 		time.Sleep(11 * time.Minute)
-		r.recorder.Warning(mount, "Unreachable", "The mount did not answer.")
+		r.recorder.Warning(mount, "Unreachable", "The mount does not respond")
 		synctest.Wait()
 
-		got := r.held.List()
+		got := r.stored.List()
 		if len(got) != 2 {
 			t.Fatalf("the server holds %d Events, want 2", len(got))
 		}
@@ -146,7 +143,8 @@ func TestARepeatWithinTheWindowCountsOnOneEvent(t *testing.T) {
 	})
 }
 
-// Only the same object, type, reason, and message is a repeat.
+// An Event is a repeat only when its object, type, reason, and message
+// all match.
 func TestADifferentEventIsNotARepeat(t *testing.T) {
 	other := mount
 	other.Name, other.UID = "west-mount", "uid-3"
@@ -154,9 +152,9 @@ func TestADifferentEventIsNotARepeat(t *testing.T) {
 		name string
 		post func(*events.Recorder)
 	}{
-		{"another object", func(r *events.Recorder) { r.Warning(other, "Unreachable", "The mount did not answer.") }},
-		{"another type", func(r *events.Recorder) { r.Normal(mount, "Unreachable", "The mount did not answer.") }},
-		{"another reason", func(r *events.Recorder) { r.Warning(mount, "Refused", "The mount did not answer.") }},
+		{"another object", func(r *events.Recorder) { r.Warning(other, "Unreachable", "The mount does not respond") }},
+		{"another type", func(r *events.Recorder) { r.Normal(mount, "Unreachable", "The mount does not respond") }},
+		{"another reason", func(r *events.Recorder) { r.Warning(mount, "Refused", "The mount does not respond") }},
 		{"another message", func(r *events.Recorder) { r.Warning(mount, "Unreachable", "The mount refused.") }},
 	}
 	for _, c := range cases {
@@ -164,11 +162,11 @@ func TestADifferentEventIsNotARepeat(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				r := record(t, notFound)
 
-				r.recorder.Warning(mount, "Unreachable", "The mount did not answer.")
+				r.recorder.Warning(mount, "Unreachable", "The mount does not respond")
 				c.post(r.recorder)
 				synctest.Wait()
 
-				if got := r.held.List(); len(got) != 2 || got[0].Count != 1 || got[1].Count != 1 {
+				if got := r.stored.List(); len(got) != 2 || got[0].Count != 1 || got[1].Count != 1 {
 					t.Errorf("the server holds %+v, want two Events that count 1 each", got)
 				}
 			})
@@ -176,25 +174,26 @@ func TestADifferentEventIsNotARepeat(t *testing.T) {
 	}
 }
 
-// A repeat after the TTL deleted the Event creates a new one.
+// A repeat of an Event that the API server deleted after its TTL
+// creates a new Event.
 func TestARepeatAfterTheTTLCreatesANewEvent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := record(t, notFound)
-		r.recorder.Warning(mount, "Unreachable", "The mount did not answer.")
+		r.recorder.Warning(mount, "Unreachable", "The mount does not respond")
 		synctest.Wait()
-		r.held.Expire()
+		r.stored.Expire()
 
-		r.recorder.Warning(mount, "Unreachable", "The mount did not answer.")
+		r.recorder.Warning(mount, "Unreachable", "The mount does not respond")
 		synctest.Wait()
 
-		if got := r.held.List(); len(got) != 1 || got[0].Count != 1 {
+		if got := r.stored.List(); len(got) != 1 || got[0].Count != 1 {
 			t.Errorf("the server holds %+v, want one new Event that counts 1", got)
 		}
 	})
 }
 
-// A write that the API server refuses goes again after the retry wait,
-// so an API server that restarts loses no Event and no count.
+// A write that the API server refuses twice is sent a third time, so an
+// API server restart loses no Event and no count.
 func TestARefusedWriteIsSentAgain(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -208,16 +207,16 @@ func TestARefusedWriteIsSentAgain(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				r := record(t, notFound)
 				for range c.count - 1 {
-					r.recorder.Warning(mount, "Unreachable", "The mount did not answer.")
+					r.recorder.Warning(mount, "Unreachable", "The mount does not respond")
 					synctest.Wait()
 				}
-				r.held.Refuse(2)
+				r.stored.Refuse(2)
 
-				r.recorder.Warning(mount, "Unreachable", "The mount did not answer.")
+				r.recorder.Warning(mount, "Unreachable", "The mount does not respond")
 				time.Sleep(time.Minute)
 				synctest.Wait()
 
-				if got := r.held.List(); len(got) != 1 || got[0].Count != c.count || r.log.String() != "" {
+				if got := r.stored.List(); len(got) != 1 || got[0].Count != c.count || r.log.String() != "" {
 					t.Errorf("the server holds %+v and the log says %q, want one Event that counts %d and no log", got, r.log.String(), c.count)
 				}
 			})
@@ -225,15 +224,15 @@ func TestARefusedWriteIsSentAgain(t *testing.T) {
 	}
 }
 
-// A write that fails every attempt costs one log line, and the next
-// Event is written.
+// A write that fails on every attempt logs one line, and the next Event
+// is still written.
 func TestAWriteThatFailsEveryAttemptIsLoggedOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := record(t, notFound)
-		r.held.Refuse(3)
+		r.stored.Refuse(3)
 
-		r.recorder.Warning(mount, "Unreachable", "The mount did not answer.")
-		r.recorder.Normal(mount, "Reachable", "The mount answered.")
+		r.recorder.Warning(mount, "Unreachable", "The mount does not respond")
+		r.recorder.Normal(mount, "Reachable", "The mount responds")
 		time.Sleep(time.Minute)
 		synctest.Wait()
 
@@ -241,23 +240,22 @@ func TestAWriteThatFailsEveryAttemptIsLoggedOnce(t *testing.T) {
 		if len(lines) != 1 || !strings.HasPrefix(lines[0], "test-operator: writing the Warning Event Unreachable on the Mount observatory/east-mount: ") {
 			t.Errorf("the log says %q, want one line about the Unreachable Event", lines)
 		}
-		if got := r.held.List(); len(got) != 1 || got[0].Reason != "Reachable" {
+		if got := r.stored.List(); len(got) != 1 || got[0].Reason != "Reachable" {
 			t.Errorf("the server holds %+v, want only the Reachable Event", got)
 		}
 	})
 }
 
-// node is a cluster-scoped object, whose Events go in default.
 var node = events.ObjectReference{APIVersion: "v1", Kind: "Node", Name: "node-1", UID: "uid-2"}
 
-// The log line of a failed write about a cluster-scoped object names
-// no namespace.
+// The log line of a failed write about a cluster-scoped object has no
+// namespace in it.
 func TestAFailedWriteAboutAClusterScopedObjectNamesNoNamespace(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := record(t, notFound)
-		r.held.Refuse(3)
+		r.stored.Refuse(3)
 
-		r.recorder.Warning(node, "Unreachable", "The node did not answer.")
+		r.recorder.Warning(node, "Unreachable", "The node does not respond")
 		time.Sleep(time.Minute)
 		synctest.Wait()
 
@@ -267,9 +265,9 @@ func TestAFailedWriteAboutAClusterScopedObjectNamesNoNamespace(t *testing.T) {
 	})
 }
 
-// An Event in a namespace that is gone, or that the API server is
-// deleting, is dropped at once with no log line, and the next Event is
-// written.
+// An Event in a namespace that does not exist, or that the API server
+// is deleting, is dropped immediately with no log line, and the next
+// Event is still written.
 func TestAnEventInANamespaceThatIsGoingIsDroppedQuietly(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -282,7 +280,7 @@ func TestAnEventInANamespaceThatIsGoingIsDroppedQuietly(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				r := record(t, notFound)
-				c.leave(r.held, "observatory")
+				c.leave(r.stored, "observatory")
 
 				r.recorder.Warning(mount, "ParentMissing", "Missing Telescope east.")
 				r.recorder.Normal(node, "Rebooted", "The node rebooted.")
@@ -291,7 +289,7 @@ func TestAnEventInANamespaceThatIsGoingIsDroppedQuietly(t *testing.T) {
 				if log := r.log.String(); log != "" {
 					t.Errorf("the log says %q, want nothing", log)
 				}
-				if got := r.held.List(); len(got) != 1 || got[0].Reason != "Rebooted" {
+				if got := r.stored.List(); len(got) != 1 || got[0].Reason != "Rebooted" {
 					t.Errorf("the server holds %+v, want only the Rebooted Event", got)
 				}
 			})
@@ -299,16 +297,16 @@ func TestAnEventInANamespaceThatIsGoingIsDroppedQuietly(t *testing.T) {
 	}
 }
 
-// While the API server does not answer, the queue fills, and the
-// recorder drops each Event past it without waiting. It logs the first
-// drop and counts each one.
+// While the API server does not respond, the queue fills, and the
+// recorder drops each further Event without waiting. It logs the first
+// drop and counts every drop.
 func TestAFullQueueDropsAndCounts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		stalled := make(chan struct{})
-		held := &eventstest.Events{}
+		stored := &eventstest.Events{}
 		server := apiservertest.Start(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			<-stalled
-			held.ServeHTTP(w, r)
+			stored.ServeHTTP(w, r)
 		}))
 		log := &syncBuffer{}
 		recorder := events.New(t.Context(), apiclient.New(apiservertest.Host, server.Client(), ""), "test-operator", events.Options{Instance: "node-1", Log: log})
@@ -321,27 +319,27 @@ func TestAFullQueueDropsAndCounts(t *testing.T) {
 		close(stalled)
 
 		if recorder.Dropped() != 4 || strings.Count(log.String(), "dropped") != 1 {
-			t.Errorf("dropped %d and logged %q, want 4 dropped and one line", recorder.Dropped(), log.String())
+			t.Errorf("the recorder dropped %d Events and logged %q, want 4 dropped and one log line", recorder.Dropped(), log.String())
 		}
 	})
 }
 
-// A nil recorder posts nothing, so a program with no API server can
-// pass one.
+// A nil recorder posts nothing, so a program that has no API server can
+// still pass one.
 func TestANilRecorderPostsNothing(t *testing.T) {
 	var recorder *events.Recorder
 
 	recorder.Normal(mount, "PodCreated", "Created pod east-mount.")
-	recorder.Warning(mount, "Unreachable", "The mount did not answer.")
+	recorder.Warning(mount, "Unreachable", "The mount does not respond")
 
 	if recorder.Dropped() != 0 {
-		t.Errorf("a nil recorder dropped %d", recorder.Dropped())
+		t.Errorf("a nil recorder reports %d dropped Events, want 0", recorder.Dropped())
 	}
 }
 
-// The API server refuses a reason past 128 bytes and, with eventTime,
-// a note past 1024 bytes. The recorder cuts each to fit, at a
-// character boundary.
+// The recorder cuts a reason to 128 bytes and a message to 1024 bytes,
+// at a character boundary, the limits that the API server enforces on
+// an Event with eventTime.
 func TestALongReasonAndMessageAreCut(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := record(t, notFound)
@@ -352,24 +350,24 @@ func TestALongReasonAndMessageAreCut(t *testing.T) {
 		r.recorder.Normal(mount, "Short", "Short.")
 		synctest.Wait()
 
-		got := r.held.List()
+		got := r.stored.List()
 		if len(got) != 2 {
 			t.Fatalf("the server holds %d Events, want 2", len(got))
 		}
 		if len(got[0].Reason) > 128 || !strings.HasPrefix(got[0].Reason, "MovedMoved") || !strings.HasSuffix(got[0].Reason, "…") {
-			t.Errorf("the reason is %d bytes: %q", len(got[0].Reason), got[0].Reason)
+			t.Errorf("the reason is %d bytes: %q, want at most 128 bytes that start with MovedMoved and end in …", len(got[0].Reason), got[0].Reason)
 		}
 		if len(got[0].Message) > 1024 || !strings.HasPrefix(got[0].Message, "éé") || !strings.HasSuffix(got[0].Message, "é…") {
-			t.Errorf("the message is %d bytes: %q", len(got[0].Message), got[0].Message)
+			t.Errorf("the message is %d bytes: %q, want at most 1024 bytes that start with éé and end in é…", len(got[0].Message), got[0].Message)
 		}
 		if got[1].Reason != "Short" || got[1].Message != "Short." {
-			t.Errorf("a short Event became %q: %q", got[1].Reason, got[1].Message)
+			t.Errorf("a short Event became %q: %q, want Short: Short.", got[1].Reason, got[1].Message)
 		}
 	})
 }
 
-// The recorder remembers at most 4096 series. A repeat of a series it
-// forgot creates a new Event in place of a patch.
+// The recorder remembers at most 4096 series. A repeat of a series that
+// it forgot creates a new Event instead of patching one.
 func TestTheOldestSeriesIsForgotten(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := record(t, notFound)
@@ -386,7 +384,7 @@ func TestTheOldestSeriesIsForgotten(t *testing.T) {
 		post(1)
 		post(0)
 
-		got := r.held.List()
+		got := r.stored.List()
 		if len(got) != 4098 || got[1].Count != 2 || got[4097].Message != "Moved to step 0" || got[4097].Count != 1 {
 			t.Errorf("the server holds %d Events; step 1 counts %d; the last is %q and counts %d; want 4098, 2, step 0, and 1",
 				len(got), got[1].Count, got[len(got)-1].Message, got[len(got)-1].Count)
@@ -394,13 +392,13 @@ func TestTheOldestSeriesIsForgotten(t *testing.T) {
 	})
 }
 
-// A recorder whose context ends during the retry wait stops at once,
-// and logs nothing: the program is stopping.
+// A recorder whose context ends during the retry wait stops at once and
+// logs nothing, because the program is exiting.
 func TestARecorderStopsDuringTheRetryWait(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		held := &eventstest.Events{}
-		held.Refuse(1)
-		server := apiservertest.Start(t, held.Around(notFound))
+		stored := &eventstest.Events{}
+		stored.Refuse(1)
+		server := apiservertest.Start(t, stored.Around(notFound))
 		ctx, cancel := context.WithCancel(t.Context())
 		log := &syncBuffer{}
 		recorder := events.New(ctx, apiclient.New(apiservertest.Host, server.Client(), ""), "test-operator", events.Options{Log: log})
@@ -410,25 +408,25 @@ func TestARecorderStopsDuringTheRetryWait(t *testing.T) {
 		cancel()
 		synctest.Wait()
 
-		if got := held.List(); len(got) != 0 || log.String() != "" {
-			t.Errorf("the server holds %+v and the log says %q, want nothing", got, log.String())
+		if got := stored.List(); len(got) != 0 || log.String() != "" {
+			t.Errorf("the server holds %+v and the log is %q, want nothing", got, log.String())
 		}
 	})
 }
 
-// With no instance, the recorder names the host, which is the pod's
-// name in a pod.
+// With no instance set, the recorder uses the host name, which is the
+// pod's name inside a pod.
 func TestTheInstanceIsTheHostNameByDefault(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		held := &eventstest.Events{}
-		server := apiservertest.Start(t, held.Around(notFound))
+		stored := &eventstest.Events{}
+		server := apiservertest.Start(t, stored.Around(notFound))
 		recorder := events.New(t.Context(), apiclient.New(apiservertest.Host, server.Client(), ""), "test-operator", events.Options{})
 		host, _ := os.Hostname()
 
 		recorder.Normal(mount, "PodCreated", "Created pod east-mount.")
 		synctest.Wait()
 
-		if got := held.List(); len(got) != 1 || got[0].ReportingInstance != host || got[0].Source.Host != host {
+		if got := stored.List(); len(got) != 1 || got[0].ReportingInstance != host || got[0].Source.Host != host {
 			t.Errorf("the server holds %+v, want one Event from %q", got, host)
 		}
 	})

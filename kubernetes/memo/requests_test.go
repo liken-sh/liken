@@ -24,7 +24,7 @@ func (m *recordMeta) GetName() string            { return m.Name }
 func (m *recordMeta) GetNamespace() string       { return m.Namespace }
 func (m *recordMeta) GetResourceVersion() string { return m.ResourceVersion }
 
-// record is an operator's own struct for a test kind with a status.
+// record is a test kind with a status, like an operator's own struct.
 type record struct {
 	Metadata recordMeta `json:"metadata"`
 	Status   struct {
@@ -38,11 +38,10 @@ func newRecord(name, version string) record {
 	return record{Metadata: recordMeta{Name: name, ResourceVersion: version}}
 }
 
-// recordAPI holds one record, and answers a read of it and a write of
-// its status the way the API server does: a write from a copy at an
-// older resourceVersion answers 409, and each write that lands makes a
-// new version. With no record it answers 404, and failing answers 500
-// to every request.
+// recordAPI serves one record like the API server: a status write with
+// an old resourceVersion gets 409, and each successful write sets a new
+// version. With no record it returns 404, and while failing is true,
+// every request gets 500.
 type recordAPI struct {
 	mu       sync.Mutex
 	stored   *record
@@ -76,7 +75,7 @@ func (api *recordAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(api.stored)
 }
 
-// store puts a record the way another writer does.
+// store writes a record as another writer would.
 func (api *recordAPI) store(item record) {
 	api.version++
 	item.Metadata.ResourceVersion = fmt.Sprint(api.version)
@@ -92,8 +91,7 @@ func (api *recordAPI) client(t *testing.T) *apiclient.Client {
 
 const recordPath = "/records/a"
 
-// ready is a status that apply sets: it reports whether the copy needs
-// the write, the way a pass composes a status from the copy it holds.
+// ready is an apply function for SettleStatus that sets the Ready phase.
 func ready(item *record) bool {
 	if item.Status.Phase == "Ready" {
 		return false
@@ -102,17 +100,13 @@ func ready(item *record) bool {
 	return true
 }
 
-// A status write lands from a current copy. A write from an older copy
-// reads the object again and writes once more when the fresh copy
-// still needs it. A copy of an object that is gone answers
-// apiclient.ErrNotFound.
-func TestAStatusWriteSettlesOnTheAPIServersCopy(t *testing.T) {
+func TestSettleStatusRetriesOnTheAPIServersCopy(t *testing.T) {
 	alreadyReady := newRecord("a", "")
 	alreadyReady.Status.Phase = "Ready"
 	cases := []struct {
 		name      string
 		stored    *record
-		held      string
+		version   string
 		failing   bool
 		wantWrote bool
 		wantErr   string
@@ -135,59 +129,56 @@ func TestAStatusWriteSettlesOnTheAPIServersCopy(t *testing.T) {
 			if c.stored != nil {
 				api.store(*c.stored)
 			}
-			held := newRecord("a", c.held)
+			object := newRecord("a", c.version)
 			versions := New()
 
-			wrote, err := SettleStatus[record](api.client(t), versions, recordPath, &held, ready)
+			wrote, err := SettleStatus[record](api.client(t), versions, recordPath, &object, ready)
 
 			if wrote != c.wantWrote || (c.wantErr == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.wantErr)) {
-				t.Errorf("SettleStatus = %v, %v; want %v and an error that says %q", wrote, err, c.wantWrote, c.wantErr)
+				t.Errorf("SettleStatus = %v, %v; want %v and an error containing %q", wrote, err, c.wantWrote, c.wantErr)
 			}
 			if !slices.Equal(api.requests, c.wantSent) {
 				t.Errorf("the write sent %v, want %v", api.requests, c.wantSent)
 			}
-			if wrote && !versions.Current("a", held.Metadata.ResourceVersion) {
-				t.Errorf("the memo does not hold the written version %s", held.Metadata.ResourceVersion)
+			if wrote && !versions.Current("a", object.Metadata.ResourceVersion) {
+				t.Errorf("the memo has no record of version %s, the one that was written", object.Metadata.ResourceVersion)
 			}
 		})
 	}
 }
 
-// A write notes the version of the copy the API server answered, so a
-// store's copy from before the write is not current. A write that fails
-// answers no copy, and no copy is current after it.
-func TestAWriteNotesTheCopyTheAPIServerAnswered(t *testing.T) {
+// After a write, a store copy from before the write is not current.
+func TestWrittenRecordsTheReturnedVersion(t *testing.T) {
 	cases := []struct {
-		name     string
-		answer   error
-		wantCopy bool
+		name       string
+		requestErr error
+		wantCopy   bool
 	}{
-		{"a write that lands", nil, true},
+		{"a write that succeeds", nil, true},
 		{"a write that fails", errors.New("refused"), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			versions := New()
 			written, err := Written[record](versions, "a", func() (*record, error) {
-				if c.answer != nil {
-					return nil, c.answer
+				if c.requestErr != nil {
+					return nil, c.requestErr
 				}
-				answer := newRecord("a", "8")
-				return &answer, nil
+				object := newRecord("a", "8")
+				return &object, nil
 			})
 
-			if (written != nil) != c.wantCopy || !errors.Is(err, c.answer) {
-				t.Errorf("Written = %+v, %v; want a copy %v and the error %v", written, err, c.wantCopy, c.answer)
+			if (written != nil) != c.wantCopy || !errors.Is(err, c.requestErr) {
+				t.Errorf("Written = %+v, %v; want a copy %v and the error %v", written, err, c.wantCopy, c.requestErr)
 			}
 			if versions.Current("a", "7") || versions.Current("a", "8") != c.wantCopy {
-				t.Errorf("version 7 is current, or version 8 is current %v; want %v", versions.Current("a", "8"), c.wantCopy)
+				t.Errorf("Current(a, 8) = %v, want %v, and Current(a, 7) = false", versions.Current("a", "8"), c.wantCopy)
 			}
 		})
 	}
 }
 
-// A fresh read notes the version the API server answered.
-func TestAFreshReadNotesItsVersion(t *testing.T) {
+func TestReadFreshRecordsItsVersion(t *testing.T) {
 	api := &recordAPI{version: 100}
 	api.store(newRecord("a", ""))
 	versions := New()
@@ -195,13 +186,11 @@ func TestAFreshReadNotesItsVersion(t *testing.T) {
 	fresh, err := ReadFresh[record](api.client(t), versions, "a", recordPath)
 
 	if err != nil || fresh.Metadata.ResourceVersion != "101" || !versions.Current("a", "101") || versions.Current("a", "100") {
-		t.Errorf("ReadFresh = %+v, %v; want version 101, noted", fresh, err)
+		t.Errorf("ReadFresh = %+v, %v; want version 101, recorded in the memo", fresh, err)
 	}
 }
 
-// A list from the API server answers every object, and notes the
-// version of each one.
-func TestAListReadNotesEachObject(t *testing.T) {
+func TestReadListRecordsEachObjectsVersion(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"items": []record{newRecord("a", "7"), newRecord("b", "8")}})
 	}))
@@ -214,14 +203,11 @@ func TestAListReadNotesEachObject(t *testing.T) {
 		t.Fatalf("ReadList = %+v, %v; want a and b", list, err)
 	}
 	if !versions.Current("a", "7") || versions.Current("a", "6") || !versions.Current("b", "8") || versions.Current("b", "6") {
-		t.Error("the memo does not hold each object at its listed version")
+		t.Error("the memo does not record each object at its listed version")
 	}
 }
 
-// A store key is namespace/name for a namespaced object and the name
-// for a cluster-scoped one, and NamespacedPath reads a key back into
-// the object's path.
-func TestAKeyNamesTheNamespace(t *testing.T) {
+func TestKeyAndNamespacedPathRoundTripNamespacedAndClusterScopedObjects(t *testing.T) {
 	path := NamespacedPath(func(namespace, name string) string { return "/ns/" + namespace + "/records/" + name })
 	cases := []struct {
 		meta     recordMeta
@@ -239,8 +225,8 @@ func TestAKeyNamesTheNamespace(t *testing.T) {
 	}
 }
 
-// plainRecord answers its metadata with no import of this package: its
-// method returns the interface literal that Meta aliases.
+// plainRecord is like a type from a package that does not import memo.
+// Its method returns the interface literal that Meta aliases.
 type plainRecord struct {
 	Metadata recordMeta `json:"metadata"`
 }
@@ -253,14 +239,12 @@ func (r *plainRecord) GetObjectMeta() interface {
 	return &r.Metadata
 }
 
-// A type whose package does not import this one is an Object, because
-// Meta is an alias of an interface literal and not a type of its own.
-func TestATypeThatNeverNamesMetaIsAnObject(t *testing.T) {
+func TestATypeThatNeverNamesMetaSatisfiesObject(t *testing.T) {
 	versions := New()
 	written, err := Written[plainRecord](versions, "a", func() (*plainRecord, error) {
 		return &plainRecord{Metadata: recordMeta{Name: "a", ResourceVersion: "7"}}, nil
 	})
 	if err != nil || written.Metadata.ResourceVersion != "7" || !versions.Current("a", "7") {
-		t.Errorf("Written = %+v, %v; want the copy at 7, noted", written, err)
+		t.Errorf("Written = %+v, %v; want the copy at 7, recorded in the memo", written, err)
 	}
 }

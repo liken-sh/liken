@@ -1,18 +1,16 @@
-// Package conditions holds the condition type that the resources of
-// every liken component report in their status, and the setter that
-// changes a list of them.
+// Package conditions defines the condition that the resources of every
+// liken component report in their status, and Set, which updates a list
+// of conditions.
 //
-// A condition answers "what is true now" for automation:
-// `kubectl wait --for=condition=Ready` and a controller read it. An
-// Event answers "what just happened" for a person, and the events
-// package posts one Event for each condition transition
-// (events.Recorder.SetCondition). The type is in its own package so
-// that an API type package can declare it in its resources and link
-// only the time package, not the HTTP client that the events package
-// needs.
+// A condition tells `kubectl wait` and controllers what is true now. An
+// Event tells a person what just happened, and
+// events.Recorder.SetCondition posts one Event for each transition.
 //
-// A component adopts the type with an alias, so its CRDs and its Go
-// code keep their names:
+// The type has its own package so that an API type package can use it
+// without importing the HTTP client that the events package needs.
+//
+// A component uses the type through aliases, so its CRDs and its Go
+// code keep their own type names:
 //
 //	type Condition = conditions.Condition
 //	type ConditionStatus = conditions.Status
@@ -20,8 +18,8 @@ package conditions
 
 import "time"
 
-// Status is a condition's verdict. Unknown is a third state: the
-// component cannot tell yet.
+// Status is the value of a condition. Unknown means the component has
+// not determined it yet.
 type Status string
 
 const (
@@ -30,11 +28,11 @@ const (
 	Unknown Status = "Unknown"
 )
 
-// Condition has the JSON shape of metav1.Condition, so
-// `kubectl describe` and `kubectl wait` read it the way they read a
-// Pod's conditions. ObservedGeneration records which
-// metadata.generation the condition judged. LastTransitionTime is when
-// the status last changed, not when the condition was last written.
+// Condition has the JSON shape of metav1.Condition, so `kubectl
+// describe` and `kubectl wait` read it like a Pod's conditions.
+// ObservedGeneration is the metadata.generation that the component
+// evaluated when it set the condition. LastTransitionTime is when
+// Status last changed, not when the condition was last written.
 type Condition struct {
 	Type               string    `json:"type"`
 	Status             Status    `json:"status"`
@@ -44,36 +42,35 @@ type Condition struct {
 	LastTransitionTime time.Time `json:"lastTransitionTime"`
 }
 
-// Set puts next in the list in place of the condition of its type, or
-// appends it when the list holds none.
+// Set replaces the condition in list that has next's Type with next,
+// or appends next when the list has none.
 //
-// Set keeps the Kubernetes rule that makes lastTransitionTime
-// meaningful: the time moves only when the status changes. So
-// `kubectl get` answers "how long has this been Ready?" and not "when
-// did the operator last write?". When the status changes, the
-// condition takes next's LastTransitionTime, or the present time when
-// next states none. The present time is cut to the second, because the
-// API server keeps a date-time to the second, and a status composed
-// again must compare equal to the stored one.
+// As Kubernetes requires, Set changes LastTransitionTime only when
+// Status changes, so `kubectl get` shows how long a condition has had
+// its status. A new transition time is next.LastTransitionTime, or the
+// current time when that is zero. The current time is truncated to the
+// second because the API server stores a date-time to the second, and a
+// condition that the operator builds again must compare equal to the
+// stored one.
 //
-// Set answers whether the condition transitioned: it is new, or its
-// status or its reason changed. A new message alone is no transition,
-// because a message often carries a value that changes on each pass,
-// such as a count or a temperature. The list still takes the message.
+// Set returns true when the condition is new or its Status or Reason
+// changed. A changed Message alone is not a transition, because a
+// message can include a value that changes on every pass, such as a
+// count or a temperature. Set still stores the new message.
 func Set(list *[]Condition, next Condition) (transitioned bool) {
 	for i := range *list {
-		held := &(*list)[i]
-		if held.Type != next.Type {
+		existing := &(*list)[i]
+		if existing.Type != next.Type {
 			continue
 		}
-		statusChanged := held.Status != next.Status
-		transitioned = statusChanged || held.Reason != next.Reason
+		statusChanged := existing.Status != next.Status
+		transitioned = statusChanged || existing.Reason != next.Reason
 		if statusChanged {
 			next.LastTransitionTime = transitionTime(next)
 		} else {
-			next.LastTransitionTime = held.LastTransitionTime
+			next.LastTransitionTime = existing.LastTransitionTime
 		}
-		*held = next
+		*existing = next
 		return transitioned
 	}
 	next.LastTransitionTime = transitionTime(next)
@@ -81,8 +78,6 @@ func Set(list *[]Condition, next Condition) (transitioned bool) {
 	return true
 }
 
-// transitionTime answers the time a condition that changed its status
-// records.
 func transitionTime(next Condition) time.Time {
 	if !next.LastTransitionTime.IsZero() {
 		return next.LastTransitionTime
@@ -90,8 +85,8 @@ func transitionTime(next Condition) time.Time {
 	return time.Now().UTC().Truncate(time.Second)
 }
 
-// Find answers the condition of one type, and false when the list
-// holds none.
+// Find returns the condition with this type, and false when the list
+// has none.
 func Find(list []Condition, conditionType string) (Condition, bool) {
 	for _, c := range list {
 		if c.Type == conditionType {
