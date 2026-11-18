@@ -13,30 +13,28 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// crashT is the moment the fixture machine crashed. Tests that need
-// a second, older crash place it an hour earlier.
+// crashT is the time of the newest crash in the fixtures.
 var crashT = time.Date(2026, 7, 23, 4, 12, 9, 0, time.UTC)
 
-// pstoreFile is one fake record: its exact bytes and its mtime. The
-// mtime matters as much as the bytes, because pstore stamps each
-// record file with the wall clock at the moment of the crash, and
-// the parser reads the crash time from exactly that stamp.
+// pstoreFile is one fake record. The mtime matters because the code
+// reads the crash time from the mtime, as pstore sets it.
 type pstoreFile struct {
 	data  []byte
 	mtime time.Time
 }
 
-// fakePstore builds a directory of records and aims pstoreDir at it.
+// fakePstore writes the files to a temporary directory and sets
+// pstoreDir to it for the test.
 func fakePstore(t *testing.T, files map[string]pstoreFile) string {
 	t.Helper()
 	dir := t.TempDir()
 	for name, f := range files {
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, f.data, 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the test file: %v", err)
 		}
 		if err := os.Chtimes(path, f.mtime, f.mtime); err != nil {
-			t.Fatal(err)
+			t.Fatalf("setting the file time: %v", err)
 		}
 	}
 	old := pstoreDir
@@ -45,15 +43,15 @@ func fakePstore(t *testing.T, files map[string]pstoreFile) string {
 	return dir
 }
 
-// dump renders a record the way the kernel writes one: the reason
-// header first, then kmsg lines in syslog form.
+// dump returns the contents of a record: the header line, then the
+// kmsg lines.
 func dump(header string, lines ...string) []byte {
 	return []byte(header + "\n" + strings.Join(lines, "\n") + "\n")
 }
 
-// panicPstore is the common two-part panic fixture: Part1 carries
-// the newest lines including the panic message, Part2 carries the
-// older lines, exactly as kmsg_dump hands them out.
+// panicPstore is a pstore with one panic in two parts. Part1 has the
+// newest lines, including the panic message, and Part2 has older
+// lines, as the kernel writes them.
 func panicPstore(t *testing.T) string {
 	t.Helper()
 	return fakePstore(t, map[string]pstoreFile{
@@ -74,30 +72,30 @@ func panicPstore(t *testing.T) string {
 func TestParseDumpHeaderReadsReasonOrdinalAndPart(t *testing.T) {
 	reason, ordinal, part, body, ok := parseDumpHeader([]byte("Panic#3 Part2\nthe body"))
 	if !ok {
-		t.Fatal("a well-formed header must parse")
+		t.Fatal("parseDumpHeader refused a well-formed header, want it parsed")
 	}
 	if reason != "Panic" || ordinal != 3 || part != 2 {
-		t.Errorf("got %s#%d Part%d", reason, ordinal, part)
+		t.Errorf("the header is %s#%d Part%d, want Panic#3 Part2", reason, ordinal, part)
 	}
 	if body != "the body" {
-		t.Errorf("the body is everything after the header line: %q", body)
+		t.Errorf("the body is %q, want everything after the header line", body)
 	}
 }
 
 func TestParseDumpHeaderToleratesTheRamoopsTimestampLine(t *testing.T) {
 	_, _, _, body, ok := parseDumpHeader([]byte("====1721721600.123456-D\nOops#1 Part1\nthe body"))
 	if !ok {
-		t.Fatal("a ramoops zone header must not defeat the parse")
+		t.Fatal("parseDumpHeader refused a dump with a ramoops zone header, want it parsed")
 	}
 	if body != "the body" {
-		t.Errorf("got %q", body)
+		t.Errorf("the body is %q, want \"the body\"", body)
 	}
 }
 
 func TestParseDumpHeaderRejectsGarbage(t *testing.T) {
 	_, _, _, _, ok := parseDumpHeader([]byte("\x7fELF\x02\x01 not a dump at all"))
 	if ok {
-		t.Error("garbage must not parse as a dump")
+		t.Error("parseDumpHeader accepted an ELF header as a dump, want it refused")
 	}
 }
 
@@ -106,7 +104,7 @@ func TestCrashMessagePrefersTheKernelsPanicLine(t *testing.T) {
 		"<0>[   12.3] Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000100\n" +
 		"<6>[   12.4] Hardware name: QEMU")
 	if msg != "Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000100" {
-		t.Errorf("got %q", msg)
+		t.Errorf("crashMessage returned %q, want the Kernel panic line", msg)
 	}
 }
 
@@ -115,14 +113,14 @@ func TestCrashMessageFallsBackToTheBugLine(t *testing.T) {
 		"<1>[   12.3] BUG: unable to handle page fault for address: 0000000000000000\n" +
 		"<1>[   12.3] Oops: 0002 [#1] SMP NOPTI")
 	if msg != "BUG: unable to handle page fault for address: 0000000000000000" {
-		t.Errorf("got %q", msg)
+		t.Errorf("crashMessage returned %q, want the BUG line", msg)
 	}
 }
 
 func TestCrashMessageFallsBackToTheFirstLine(t *testing.T) {
 	msg := crashMessage("<6>[   12.0] nothing here says panic or BUG\n<6>[   12.1] more")
 	if msg != "nothing here says panic or BUG" {
-		t.Errorf("got %q", msg)
+		t.Errorf("crashMessage returned %q, want the first line when no line names a panic or a BUG", msg)
 	}
 }
 
@@ -130,14 +128,14 @@ func TestCrashMessageBoundsAndSanitizes(t *testing.T) {
 	long := "Kernel panic - not syncing: " + strings.Repeat("x", 4096) + "\x00\x01\x02"
 	msg := crashMessage(long)
 	if len(msg) > crashMessageCap {
-		t.Errorf("the message must stay under the cap: %d bytes", len(msg))
+		t.Errorf("the message is %d bytes, want at most %d", len(msg), crashMessageCap)
 	}
 	if strings.ContainsAny(msg, "\x00\x01\x02") {
-		t.Error("control bytes must not leave the machine")
+		t.Errorf("the message is %q, want no control bytes", msg)
 	}
 }
 
-func TestReadPstoreRecordsAcceptsEverySpellingItMayMeet(t *testing.T) {
+func TestReadPstoreRecordsReadsEveryFileAndParsesOnlyPlainDmesgDumps(t *testing.T) {
 	dir := fakePstore(t, map[string]pstoreFile{
 		"dmesg-efi_pstore-1":       {data: dump("Panic#1 Part1", "<0>[ 1.0] a"), mtime: crashT},
 		"dmesg-efi-2":              {data: dump("Panic#1 Part2", "<6>[ 0.9] b"), mtime: crashT},
@@ -147,7 +145,7 @@ func TestReadPstoreRecordsAcceptsEverySpellingItMayMeet(t *testing.T) {
 	})
 	recs := readPstoreRecords(dir)
 	if len(recs) != 5 {
-		t.Fatalf("every record is read, parseable or not: got %d", len(recs))
+		t.Fatalf("readPstoreRecords returned %d records, want every record, parseable or not", len(recs))
 	}
 	parseable := 0
 	for _, r := range recs {
@@ -156,7 +154,7 @@ func TestReadPstoreRecordsAcceptsEverySpellingItMayMeet(t *testing.T) {
 		}
 	}
 	if parseable != 3 {
-		t.Errorf("the three plain dmesg records parse: got %d", parseable)
+		t.Errorf("%d records parse, want the 3 plain dmesg records", parseable)
 	}
 }
 
@@ -166,7 +164,7 @@ func TestReadPstoreRecordsCapsARunawayRecord(t *testing.T) {
 	})
 	recs := readPstoreRecords(dir)
 	if len(recs) != 1 || len(recs[0].raw) > crashRecordCap {
-		t.Errorf("a broken backend must not hand init unbounded bytes: %d", len(recs[0].raw))
+		t.Errorf("readPstoreRecords returned %d records, want 1 of at most %d bytes", len(recs), crashRecordCap)
 	}
 }
 
@@ -174,13 +172,13 @@ func TestGroupCrashesJoinsPartsInChronologicalOrder(t *testing.T) {
 	dir := panicPstore(t)
 	groups := groupCrashes(readPstoreRecords(dir))
 	if len(groups) != 1 {
-		t.Fatalf("two parts of one dump are one crash: got %d groups", len(groups))
+		t.Fatalf("the records form %d crash groups, want 1 for two parts of one dump", len(groups))
 	}
 	text := groups[0].text()
 	older := strings.Index(text, "an older line")
 	newer := strings.Index(text, "Kernel panic")
 	if older == -1 || newer == -1 || older > newer {
-		t.Errorf("part 2 is older and must come first: %q", text)
+		t.Errorf("the dump text is %q, want part 2 first because it is older", text)
 	}
 }
 
@@ -191,10 +189,10 @@ func TestGroupCrashesSeparatesDistinctDumps(t *testing.T) {
 	})
 	groups := groupCrashes(readPstoreRecords(dir))
 	if len(groups) != 2 {
-		t.Fatalf("distinct dumps are distinct crashes: got %d", len(groups))
+		t.Fatalf("the records form %d crash groups, want 2 for distinct dumps", len(groups))
 	}
 	if groups[0].reason != "Panic" {
-		t.Errorf("the newest crash comes first: got %s", groups[0].reason)
+		t.Errorf("the first group is %s, want the newest crash", groups[0].reason)
 	}
 }
 
@@ -205,29 +203,29 @@ func TestSettleCrashPreservesClearsAndSummarizes(t *testing.T) {
 	got := settleCrashRecords(stateDir, true)
 
 	if got == nil {
-		t.Fatal("a preserved crash must be reported")
+		t.Fatal("settleCrashRecords reported no crash, want one for a preserved crash")
 	}
 	if got.Reason != machine.CrashPanic || !strings.Contains(got.Message, "sysrq triggered crash") {
-		t.Errorf("the summary carries the kernel's own words: %+v", got)
+		t.Errorf("the summary is %+v, want the kernel's own message", got)
 	}
 	if got.Time == nil || !got.Time.Equal(crashT) {
-		t.Errorf("the crash time is the record's mtime: %+v", got.Time)
+		t.Errorf("the crash time is %+v, want the mtime of the record", got.Time)
 	}
 	left, _ := os.ReadDir(pstore)
 	if len(left) != 0 {
-		t.Errorf("pstore must be cleared after the copy lands: %d files remain", len(left))
+		t.Errorf("%d files remain in pstore, want 0 after the copy", len(left))
 	}
 	preserved, err := os.ReadDir(got.Records)
 	if err != nil || len(preserved) != 2 {
-		t.Fatalf("the records field names the preserved directory: %v, %d", err, len(preserved))
+		t.Fatalf("the records field is wrong: error %v, %d preserved files, want the preserved directory", err, len(preserved))
 	}
 	raw, err := os.ReadFile(filepath.Join(got.Records, "dmesg-efi_pstore-172172172101001"))
 	if err != nil || !strings.Contains(string(raw), "sysrq triggered crash") {
-		t.Errorf("records are preserved verbatim: %v", err)
+		t.Errorf("the preserved record cannot be read or lacks \"sysrq triggered crash\" (%v), want the pstore record's text", err)
 	}
 	info, err := os.Stat(filepath.Join(got.Records, "dmesg-efi_pstore-172172172101001"))
 	if err != nil || !info.ModTime().Equal(crashT) {
-		t.Errorf("the preserved copy keeps the crash-time mtime: %v", info.ModTime())
+		t.Errorf("the preserved copy has mtime %v, want the mtime of the crash", info.ModTime())
 	}
 }
 
@@ -238,14 +236,14 @@ func TestSettleCrashLeavesRecordsWhenMemoryBacked(t *testing.T) {
 	got := settleCrashRecords(stateDir, false)
 
 	if got == nil || got.Records != pstore {
-		t.Fatalf("with no durable machineState the records stay in pstore: %+v", got)
+		t.Fatalf("the summary is %+v, want one from pstore when no durable machineState exists", got)
 	}
 	left, _ := os.ReadDir(pstore)
 	if len(left) != 2 {
-		t.Errorf("pstore is the machine's durable store; nothing is taken from it: %d", len(left))
+		t.Errorf("%d files remain in pstore, want all of them when no durable machineState exists", len(left))
 	}
 	if entries, err := os.ReadDir(filepath.Join(stateDir, "crash")); err == nil && len(entries) > 0 {
-		t.Error("nothing is preserved onto a memory-backed root")
+		t.Errorf("%s has %d records on a memory-backed root, want none copied", filepath.Join(stateDir, "crash"), len(entries))
 	}
 }
 
@@ -258,11 +256,11 @@ func TestSettleCrashPrunesOlderCrashesFromPstoreWhenMemoryBacked(t *testing.T) {
 	got := settleCrashRecords(t.TempDir(), false)
 
 	if got == nil || got.Reason != machine.CrashPanic {
-		t.Fatalf("the newest crash is the one reported: %+v", got)
+		t.Fatalf("the summary is %+v, want the newest crash", got)
 	}
 	left, _ := os.ReadDir(pstore)
 	if len(left) != 1 {
-		t.Errorf("older crashes leave pstore so variable space stays free: %d remain", len(left))
+		t.Errorf("%d files remain in pstore, want only those of the newest crash", len(left))
 	}
 }
 
@@ -270,109 +268,110 @@ func TestSettleCrashKeepsPstoreWhenPreserveFails(t *testing.T) {
 	pstore := panicPstore(t)
 	sealed := t.TempDir()
 	if err := os.Chmod(sealed, 0o555); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the directory read-only: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(sealed, 0o755) })
 
 	got := settleCrashRecords(sealed, true)
 
 	if got == nil || got.Records != pstore {
-		t.Fatalf("a failed preserve still reports, from pstore: %+v", got)
+		t.Fatalf("the summary is %+v, want one from pstore after the copy fails", got)
 	}
 	left, _ := os.ReadDir(pstore)
 	if len(left) != 2 {
-		t.Errorf("pstore must never be cleared before the copy lands: %d remain", len(left))
+		t.Errorf("%d files remain in pstore, want all of them after the copy fails", len(left))
 	}
 }
 
-// A boot that died, or failed a write, partway through the copy
-// leaves a directory that holds part of the batch. The next boot
-// must finish the copy before it clears the store, or the clear
-// erases the only copy of the records the directory lacks.
+// When a boot stops partway through the copy, the directory has only
+// some of the records. The next boot must finish the copy before it
+// clears pstore, or the clear deletes the only copy of the missing
+// records.
 func TestSettleCrashFinishesACopyThatAPriorBootLeftPartial(t *testing.T) {
 	pstore := panicPstore(t)
 	stateDir := t.TempDir()
 	partial := filepath.Join(stateDir, "crash", crashT.UTC().Format(crashDirFormat))
 	if err := os.MkdirAll(partial, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the test directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(partial, "dmesg-efi_pstore-172172172101001"), []byte("Panic#1 Pa"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the test file: %v", err)
 	}
 	want := pstoreContents(t, pstore)
 
 	settleCrashRecords(stateDir, true)
 
 	if got := pstoreContents(t, partial); !maps.Equal(got, want) {
-		t.Errorf("preserved %q, want every record of the batch, whole", slices.Sorted(maps.Keys(got)))
+		t.Errorf("the preserved files are %q, want every record of the batch, whole", slices.Sorted(maps.Keys(got)))
 	}
 }
 
-// pstoreContents reads every file in a directory by name.
+// pstoreContents returns the contents of each file in dir, by file
+// name.
 func pstoreContents(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the test directory: %v", err)
 	}
 	contents := map[string]string{}
 	for _, e := range entries {
 		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the test file: %v", err)
 		}
 		contents[e.Name()] = string(data)
 	}
 	return contents
 }
 
-// A prior boot that preserved the whole batch but died before the
-// clear leaves the same records in both places. This boot keeps the
-// copy and retries the clear.
+// When a previous boot copied the whole batch but stopped before the
+// clear, the same records are in pstore and in the crash directory.
+// This boot keeps the copy and clears pstore.
 func TestSettleCrashRetriesTheClearOfAPreservedBatch(t *testing.T) {
 	pstore := panicPstore(t)
 	stateDir := t.TempDir()
 	known := filepath.Join(stateDir, "crash", crashT.UTC().Format(crashDirFormat))
 	want := pstoreContents(t, pstore)
 	if err := os.CopyFS(known, os.DirFS(pstore)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("copying the records: %v", err)
 	}
 
 	got := settleCrashRecords(stateDir, true)
 
 	if got == nil || got.Records != known {
-		t.Fatalf("the known directory is the record's home: %+v", got)
+		t.Fatalf("the summary is %+v, want the one built from the existing crash directory", got)
 	}
 	if preserved := pstoreContents(t, known); !maps.Equal(preserved, want) {
-		t.Errorf("preserved %q, want the batch unchanged", slices.Sorted(maps.Keys(preserved)))
+		t.Errorf("the preserved files are %q, want the batch unchanged", slices.Sorted(maps.Keys(preserved)))
 	}
 	if left, _ := os.ReadDir(pstore); len(left) != 0 {
-		t.Errorf("the clear that failed last boot is retried: %d remain", len(left))
+		t.Errorf("%d files remain in pstore, want 0 after the retried delete", len(left))
 	}
 }
 
-func TestSettleCrashRederivesFromPreservedRecords(t *testing.T) {
+func TestSettleCrashBuildsTheSummaryFromPreservedRecords(t *testing.T) {
 	fakePstore(t, map[string]pstoreFile{})
 	stateDir := t.TempDir()
 	preserved := filepath.Join(stateDir, "crash", crashT.UTC().Format(crashDirFormat))
 	if err := os.MkdirAll(preserved, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the test directory: %v", err)
 	}
 	path := filepath.Join(preserved, "dmesg-efi_pstore-172172172101001")
 	if err := os.WriteFile(path, dump("Panic#1 Part1", "<0>[ 12.3] Kernel panic - not syncing: sysrq triggered crash"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the test file: %v", err)
 	}
 	if err := os.Chtimes(path, crashT, crashT); err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting the file time: %v", err)
 	}
 
 	got := settleCrashRecords(stateDir, true)
 
 	if got == nil {
-		t.Fatal("every boot re-derives the fact from the preserved records")
+		t.Fatal("settleCrashRecords reported no crash, want one from the preserved records")
 	}
 	if got.Reason != machine.CrashPanic || !strings.Contains(got.Message, "sysrq triggered crash") || got.Records != preserved {
-		t.Errorf("the re-derived summary matches the original: %+v", got)
+		t.Errorf("the summary is %+v, want the one from the original records", got)
 	}
 }
 
@@ -382,27 +381,27 @@ func TestSettleCrashPrefersTheNewestCrash(t *testing.T) {
 	oldT := crashT.Add(-24 * time.Hour)
 	preserved := filepath.Join(stateDir, "crash", oldT.UTC().Format(crashDirFormat))
 	if err := os.MkdirAll(preserved, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the test directory: %v", err)
 	}
 	path := filepath.Join(preserved, "dmesg-efi_pstore-9")
 	if err := os.WriteFile(path, dump("Oops#1 Part1", "<1>[ 5.0] BUG: yesterday's oops"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the test file: %v", err)
 	}
 	if err := os.Chtimes(path, oldT, oldT); err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting the file time: %v", err)
 	}
 
 	got := settleCrashRecords(stateDir, true)
 
 	if got == nil || got.Reason != machine.CrashPanic {
-		t.Fatalf("the newer crash wins the summary: %+v", got)
+		t.Fatalf("the summary is %+v, want the newer crash", got)
 	}
 }
 
 func TestSettleCrashWithNothingReportsNothing(t *testing.T) {
 	fakePstore(t, map[string]pstoreFile{})
 	if got := settleCrashRecords(t.TempDir(), true); got != nil {
-		t.Errorf("a machine with no crash history reports none: %+v", got)
+		t.Errorf("the summary is %+v, want none for a machine with no crash history", got)
 	}
 }
 
@@ -411,7 +410,7 @@ func TestPruneCrashStoreKeepsTheNewest(t *testing.T) {
 	for i := range 12 {
 		name := crashT.Add(time.Duration(i) * time.Hour).UTC().Format(crashDirFormat)
 		if err := os.MkdirAll(filepath.Join(store, name), 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the test directory: %v", err)
 		}
 	}
 
@@ -419,12 +418,12 @@ func TestPruneCrashStoreKeepsTheNewest(t *testing.T) {
 
 	entries, err := os.ReadDir(store)
 	if err != nil || len(entries) != crashKeep {
-		t.Fatalf("the newest %d stay: got %d, %v", crashKeep, len(entries), err)
+		t.Fatalf("%d directories remain, want the newest %d: error %v", len(entries), crashKeep, err)
 	}
 	oldest := crashT.UTC().Format(crashDirFormat)
 	for _, e := range entries {
 		if e.Name() == oldest {
-			t.Error("the oldest directories are the ones pruned")
+			t.Error("a newer directory was deleted, want the oldest ones")
 		}
 	}
 }

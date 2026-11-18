@@ -1,28 +1,17 @@
 package main
 
-// Actuating the cluster's opt-in features on this machine.
+// Init turns on the features that the Cluster enables in spec.features,
+// and returns one status for each of them for status.features.
 //
-// The Cluster document's spec.features lists the fleet's opt-ins from
-// liken's curated vocabulary (the cluster package's features.go).
-// This pass is init's half of carrying them out: one verdict per
-// enabled feature, bound for status.features through the facts tree,
-// with a console line for each, so the console and the API tell the
-// same story. The code validates the cluster document against the
-// vocabulary at parse time, so every slug that reaches this pass is a
-// known one.
-//
-// Two kinds of feature arrive here, distinguished by the vocabulary
-// table and never by the user. A bundled feature is a component the
-// k3s binary already carries. Its whole actuation is the disable
-// list this boot renders into the k3s drop-in (k3s.go); nothing
-// about it can be missing from the image, and it always reports
-// Active. A vendored feature is a payload the image ships inert:
-// kernel modules listed at /etc/liken/features/<slug>/modules.conf,
-// sometimes a workload manifest alongside them, sometimes a
-// boot-time file that only this machine can write. This pass is the
-// gate that makes a declared payload real. The absence of
-// modules.conf is how a machine reports that its image predates a
-// feature the cluster now declares.
+// liken/cluster/features.go gives each feature its kind. init only
+// reports a Bundled or Embedded feature Active, because k3s.go turns
+// it on when it renders the k3s drop-in: a Bundled feature is left off
+// the disable list, and an Embedded feature's own disable key is left
+// out. A Vendored
+// feature ships in the image and is unused until a Cluster enables
+// it: kernel modules listed in /etc/liken/features/<slug>/modules.conf,
+// and sometimes manifests and a file that init writes for this
+// machine. A Workload feature is a set of manifests that k3s applies.
 
 import (
 	"errors"
@@ -36,21 +25,15 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// These are package variables rather than constants, so tests can
-// point the actuation at trees of their own making.
+// Tests point these at temporary directories.
 var (
 	featuresDir = "/etc/liken/features"
-	// Every manifest liken writes for k3s to apply goes here, in the
-	// subdirectory of k3s's auto-deploy directory that belongs to
-	// liken alone. k3s stages the manifests of its own bundled
-	// components at the top of that directory, and the teardown of a
-	// component that a boot disables reads that component's file at
-	// startup, so those files must stay where k3s put them: liken
-	// writes and removes nothing outside this subdirectory
-	// (init/k3s.go seeds it). k3s walks the whole tree, and an addon
-	// takes its name from the file name and not from the directory
-	// that holds it, so a manifest here reaches the cluster under the
-	// same name it would have at the top.
+	// liken writes its manifests into a subdirectory of k3s's
+	// auto-deploy directory, because k3s writes the manifests of its
+	// own components at the top, and reads a disabled component's file
+	// there at startup to remove that component. k3s applies the whole
+	// tree and names each addon after its file name, so the
+	// subdirectory does not change the addon names.
 	k3sManifestsDir = "/var/lib/rancher/" + likenManifestsRel
 	iscsiDir        = "/etc/iscsi"
 )
@@ -71,27 +54,22 @@ func actuateFeatures(clusterDoc *cluster.Cluster, machineName string) []machine.
 		}
 		switch {
 		case def == nil:
-			// A slug that this binary's vocabulary does not include.
-			// The parser deliberately lets it through (features.go in
-			// the cluster package explains why a strict vocabulary
-			// would disable a downgraded machine), so the report
-			// happens here, naming both plausible causes: this image
-			// predates the feature, or a hand-written seed misspelled
-			// it.
+			// The parser accepts a slug that this image does not
+			// define, so that a machine on an older release than the
+			// Cluster still boots. The feature is reported Missing
+			// here instead.
 			status = machine.FeatureStatus{
 				Name:  slug,
 				State: machine.FeatureMissing,
 				Message: fmt.Sprintf(
-					"this image's vocabulary has no %q feature; upgrade to a release that carries it, or fix the name if it is a misspelling (this image offers: %s)",
+					"this image has no %q feature. Upgrade to a release that has it, or correct the name if it is misspelled (this image has: %s)",
 					slug, strings.Join(cluster.FeatureSlugs(), ", ")),
 			}
 		case paramsErr != nil:
-			// A parameter this binary's vocabulary does not include,
-			// on a slug it does. The parser lets it through for the
-			// same downgrade reason as an unknown slug, and the same
-			// two causes apply, so the report happens here too. The
-			// feature fails whole, rather than actuating the part of
-			// the declaration this image understands.
+			// The parser also accepts a parameter that this image does
+			// not define, for the same reason. The whole feature fails,
+			// so that the machine does not run a part of what the
+			// Cluster asked for.
 			status = machine.FeatureStatus{
 				Name:    slug,
 				State:   machine.FeatureFailed,
@@ -116,32 +94,27 @@ func actuateFeatures(clusterDoc *cluster.Cluster, machineName string) []machine.
 	return statuses
 }
 
-// actuateVendoredFeature makes one declared payload real: it loads
-// the payload's modules, runs its boot hook, and seeds its workload
-// manifests. Any step can fail without stopping the boot, because a
-// machine missing a feature is degraded, not down. The status
-// carries the story, and the message names the fix.
+// actuateVendoredFeature loads a vendored feature's kernel modules,
+// runs its boot hook, and copies its manifests for k3s. A failed step
+// returns a Missing or Failed status and does not stop the boot,
+// because a machine without the feature can still serve the rest of
+// the cluster.
 func actuateVendoredFeature(moduleBase, slug, machineName string) machine.FeatureStatus {
 	status := machine.FeatureStatus{Name: slug, State: machine.FeatureActive}
 	dir := filepath.Join(featuresDir, slug)
 
-	// The payload-shipped check. Every image that carries a vendored
-	// feature stages its module list here, so the absence of the
-	// file means the image itself is older than the feature. Nothing
-	// on this machine can repair that; the fix is a release that
-	// ships the payload.
+	// Every image that has a vendored feature has its modules.conf, so
+	// a missing file means that the image is older than the feature.
 	modulesConf := filepath.Join(dir, "modules.conf")
 	if _, err := os.Stat(modulesConf); errors.Is(err, fs.ErrNotExist) {
 		status.State = machine.FeatureMissing
 		status.Message = fmt.Sprintf(
-			"this image predates the %s feature; upgrade to a release whose image carries it", slug)
+			"this image does not have the %s feature. Upgrade to a release that has it", slug)
 		return status
 	}
 
-	// The feature's modules load through the same pipeline as the
-	// spec's declared modules, and any verdict short of healthy
-	// fails the whole feature: a storage client whose transport is
-	// missing is not partly active.
+	// The feature fails when any one module does not load, because a
+	// storage client without its transport module does not work.
 	names, err := readModuleList(modulesConf)
 	if err != nil {
 		status.State = machine.FeatureFailed
@@ -157,8 +130,6 @@ func actuateVendoredFeature(moduleBase, slug, machineName string) machine.Featur
 		return status
 	}
 
-	// The feature's boot hook, for the few files that only the
-	// booting machine can write.
 	if hook := featureBootHooks[slug]; hook != nil {
 		if err := hook(machineName); err != nil {
 			status.State = machine.FeatureFailed
@@ -167,16 +138,6 @@ func actuateVendoredFeature(moduleBase, slug, machineName string) machine.Featur
 		}
 	}
 
-	// The feature's workload, if it has one, joins the manifests k3s
-	// applies at startup. seedClusterState already reset liken's
-	// subdirectory to exactly the image's own manifests when
-	// clusterState mounted, so this pass adds only what this boot's
-	// cluster document declares, and a retracted feature's manifest
-	// simply never reappears. The code copies the manifests on every
-	// machine, not just leaders, on purpose: only a leader's k3s
-	// reads the directory, an extra file on a follower has no
-	// effect, and contents that varied by role would be one more
-	// thing to reason about during a promotion.
 	if err := seedFeatureManifests(slug); err != nil {
 		status.State = machine.FeatureFailed
 		status.Message = err.Error()
@@ -185,13 +146,11 @@ func actuateVendoredFeature(moduleBase, slug, machineName string) machine.Featur
 	return status
 }
 
-// actuateWorkloadFeature makes one workload feature real. There is
-// no payload gate like the vendored features' modules.conf check: an
-// image whose vocabulary contains the slug also carries its manifests,
-// because one build produces both. The flux feature also proves its
-// configuration first, so a declaration that cannot sync reports the
-// missing parameter instead of seeding workloads that would only
-// fail in pods.
+// actuateWorkloadFeature copies a workload feature's manifests for
+// k3s. An image that defines the slug always has its manifests, so
+// there is no modules.conf check. For flux it first renders the sync
+// objects from the parameters, so a Cluster with a missing parameter
+// reports Failed instead of starting Flux with nothing to sync.
 func actuateWorkloadFeature(clusterDoc *cluster.Cluster, slug string) machine.FeatureStatus {
 	status := machine.FeatureStatus{Name: slug, State: machine.FeatureActive}
 	if slug == cluster.FeatureFlux {
@@ -213,32 +172,26 @@ func actuateWorkloadFeature(clusterDoc *cluster.Cluster, slug string) machine.Fe
 	return status
 }
 
-// seedFluxSync renders the flux feature's two sync objects from the
-// declared parameters and seeds them beside the feature's manifests.
-// These are the objects `flux bootstrap` would otherwise commit to
-// the repository. Here they stay liken's forever: they re-render on
-// every boot from the Cluster document, so editing the declaration
-// is a real act, and the repository should not carry its own copies,
-// or git and liken would fight over them. A repository that already
-// carries them, such as one liken adopts, declares prune: "false",
-// because the Kustomization would otherwise appear in its own
-// inventory and delete everything the repository applied on the first
-// build that stops producing it. The engine itself takes the opposite
-// arrangement, planted once by the cluster operator and owned by the
-// repository from then on (cluster-operator/flux.go).
+// seedFluxSync writes the flux-system GitRepository and Kustomization
+// that `flux bootstrap` would commit to the repository. init writes
+// them from the Cluster on every boot, so the Cluster is the place to
+// change them, and a copy in the repository and this file would
+// overwrite each other. A repository that already has its own
+// flux-system Kustomization must set prune to "false". Otherwise the
+// Kustomization lists itself in its own inventory, and the first
+// build that stops producing it deletes everything that the
+// repository applied. The Flux controllers are the other way around:
+// liken/cluster-operator/flux.go creates them once, and the
+// repository owns them after that.
 func seedFluxSync(cfg *cluster.FluxConfig) error {
-	// Flux spells sync paths relative to the repository root. The
-	// default "." becomes "./", and a declared path gains the "./"
-	// prefix the convention expects.
+	// Flux writes sync paths relative to the repository root with a
+	// "./" prefix.
 	path := "./"
 	if cfg.Path != "." {
 		path = "./" + strings.TrimPrefix(cfg.Path, "./")
 	}
-	// The rendered values are quoted with %q, which is JSON string
-	// quoting, and JSON strings are valid YAML scalars. This keeps a
-	// hostile-looking branch name or path from becoming YAML
-	// structure. prune is the exception: it is a YAML boolean, and %t
-	// renders it as true or false.
+	// %q writes a JSON string, which is a valid YAML scalar, so YAML
+	// syntax in a URL, branch, or path cannot change the document.
 	rendered := fmt.Sprintf(`# Rendered by liken from the Cluster document's flux declaration.
 # liken re-renders these two objects on every boot, so a copy in git
 # would fight this one. A repository that carries its own copies must
@@ -275,25 +228,21 @@ spec:
 	return os.WriteFile(filepath.Join(k3sManifestsDir, "flux-sync.yaml"), []byte(rendered), 0o644)
 }
 
-// featureBootHooks are the per-feature boot-time contributions, keyed
-// by slug. The iscsi hook writes the initiator's identity. A feature
-// with no boot-time file simply has no entry here.
+// featureBootHooks maps a feature's slug to a function that writes
+// the files that the feature needs for this machine at boot.
 var featureBootHooks = map[string]func(machineName string) error{
 	"iscsi": writeInitiatorName,
 }
 
-// writeInitiatorName gives the machine its iSCSI identity: the name
-// this initiator presents when it logs in to a target, which storage
-// arrays use in their access lists. The name derives from the
-// machine name, so it stays the same on every boot with nothing to
-// persist, and a reinstalled machine comes back as itself. The
-// iqn.2026-07.sh.liken prefix follows the iSCSI naming convention: a
-// date when the naming authority (the liken.sh domain) was
-// registered, then the authority written in reverse, so that names
-// under it can never collide with another owner's names. Both halves
-// of the initiator read this file: the host's iscsiadm, which CSI
-// drivers run through a chroot, directly, and the iscsid DaemonSet
-// through its /etc/iscsi hostPath.
+// writeInitiatorName writes the iSCSI initiator name that this
+// machine sends when it logs in to a target, and that storage arrays
+// put in their access lists. It is made from the machine name, so a
+// reinstalled machine gets the same name with nothing stored. The
+// prefix is an iSCSI qualified name (RFC 3720): "iqn.", a year and
+// month when the owner held the domain, then the domain liken.sh
+// reversed. The host's iscsiadm, which CSI drivers run through a
+// chroot, reads the file, and so does the iscsid DaemonSet through
+// its hostPath mount of /etc/iscsi.
 func writeInitiatorName(machineName string) error {
 	if err := os.MkdirAll(iscsiDir, 0o755); err != nil {
 		return err
@@ -302,27 +251,27 @@ func writeInitiatorName(machineName string) error {
 	return os.WriteFile(filepath.Join(iscsiDir, "initiatorname.iscsi"), []byte(name), 0o600)
 }
 
-// renderedFeatureManifests names the files a feature's actuation
-// renders into the auto-deploy directory, beyond the manifests
-// copied verbatim from the image. Retraction needs these names,
-// because a glob over the image's manifests cannot see a rendered
-// file.
+// renderedFeatureManifests lists the files that init renders for a
+// feature in addition to the image's manifests. The code that removes
+// a feature's manifests reads it, because these files are not in the
+// image.
 var renderedFeatureManifests = map[string][]string{
 	cluster.FeatureFlux: {"flux-sync.yaml"},
 }
 
-// featureManifestPaths lists one feature's workload manifests as the
-// image ships them. This is the single place that spells out the
-// layout (featuresDir/<slug>/manifests/*.yaml), so seeding and
-// retraction can never disagree about where a feature's workloads
-// live. A feature with no manifests directory has no workload, which
-// is fine; nfs takes exactly that shape.
+// featureManifestPaths returns the paths of a feature's manifests in
+// the image. The result is empty for a feature with no workload.
 func featureManifestPaths(slug string) ([]string, error) {
 	return filepath.Glob(filepath.Join(featuresDir, slug, "manifests", "*.yaml"))
 }
 
-// seedFeatureManifests copies a feature's workload manifests into
-// k3s's auto-deploy directory.
+// seedFeatureManifests copies a feature's manifests into liken's
+// auto-deploy subdirectory. It never removes one. At boot,
+// seedClusterState has already reset the subdirectory to the image's
+// own manifests, and on the restart path retractFeatureManifests
+// removes those of a feature that the Cluster no longer enables. Every
+// machine gets the copies, although only a leader's k3s reads them, so
+// a machine that becomes a leader already has them.
 func seedFeatureManifests(slug string) error {
 	manifests, err := featureManifestPaths(slug)
 	if err != nil {

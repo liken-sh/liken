@@ -1,30 +1,27 @@
 package main
 
-// Patching GRUB's boot sectors: what grub-bios-setup does, done by
-// hand, in the same way that this repo writes partition tables and
-// filesystems by hand. This lets the machine verify and heal its own
-// boot sectors instead of depending on a rescue boot and a person
-// running dd.
+// This file writes GRUB's BIOS boot sectors in Go, which is the work of
+// grub-bios-setup. Init writes partition tables and filesystems itself
+// in the same way. With this code, a machine can check its own boot
+// sectors and rewrite them when they are wrong, with no rescue boot and
+// no person running dd.
 //
-// BIOS boot is a chain of disk addresses set at install time. The
-// firmware loads sector 0 and jumps into it. Those 440 bytes
-// (boot.img) hold just enough code to load one more sector: the
-// first sector of the core image, whose address is patched into
-// boot.img at a fixed offset. That first sector, which GRUB calls
-// diskboot, ends with a blocklist: the disk address and length of
-// the rest of the core image, patched in the same way. Only from
-// that point does GRUB have real filesystem drivers, and only then
-// does it stop needing literal sector numbers.
+// BIOS boot is a chain of disk addresses that the installer fills in.
+// The firmware loads sector 0 and runs it. Its 440 bytes of code
+// (boot.img) load one more sector, the first sector of the core
+// image, at an address that is patched into boot.img at a fixed
+// offset. That first sector (diskboot in GRUB's source) ends with a
+// blocklist, which is the start sector and sector count of the rest
+// of the core image, patched in the same way. After that GRUB has its
+// own filesystem drivers and needs no more sector numbers.
 //
-// liken keeps every one of those addresses derivable. The core image
-// lives at the start of the biosBoot partition, contiguous, so the
-// whole chain is a pure function of boot.img, core.img, and the
-// partition's first sector. This is what makes healing reliable: any
-// boot can recompute the expected bytes from the proven slot's
-// artifacts and compare them against the disk. When a Linode image
-// deploy zeroes the MBR, which has happened twice, this code repairs
-// it at the next opportunity instead of leaving the machine unable to
-// boot.
+// The core image is stored contiguously at the start of the biosBoot
+// partition, so every address in the chain follows from boot.img,
+// core.img, and the first sector of the partition. Because of that,
+// any boot can compute the bytes that belong on the disk from the
+// proven slot's files and compare them with the disk. A Linode image
+// deploy can zero the MBR, and this code then rewrites it at the next
+// boot, so the machine can boot again.
 
 import (
 	"bytes"
@@ -35,20 +32,21 @@ import (
 	"github.com/liken-sh/liken/liken/disks"
 )
 
-// The offsets that grub-bios-setup patches, fixed by boot.img's layout:
+// These are the offsets that grub-bios-setup patches. The first two
+// are in boot.img:
 //
 //	0x5c  GRUB_BOOT_MACHINE_KERNEL_SECTOR: the 64-bit LBA of the
 //	      core image's first sector
 //	0x66  GRUB_BOOT_MACHINE_DRIVE_CHECK: a workaround for BIOSes
-//	      that pass a garbage boot drive in DL. On hard disks,
-//	      grub-bios-setup disables the check by overwriting the two
+//	      that pass a wrong boot drive in DL. On hard disks,
+//	      grub-bios-setup disables the check by overwriting its two
 //	      instruction bytes with NOPs.
 //
-// And the offsets in diskboot, fixed by the last 12 bytes of the core
-// image's first sector: the blocklist entry that names where the rest
-// of the image lives (start sector, sector count), and the real-mode
-// segment it loads at (0x820, compiled in, asserted here and never
-// written).
+// The rest are in the last 12 bytes of the core image's first sector
+// (diskboot): the start sector and sector count of the rest of the
+// image, and the real-mode segment that it loads at. The segment
+// (0x820) is part of the compiled code, so this code checks it and
+// never writes it.
 const (
 	grubKernelSectorOffset = 0x5c
 	grubDriveCheckOffset   = 0x66
@@ -59,54 +57,54 @@ const (
 	mbrBootCodeBytes       = 440
 )
 
-// grubBootSectors is one machine's expected boot chain: the bytes
-// that belong at LBA 0 and at the biosBoot partition, computed from a
-// release's artifacts and the partition's location. Installing and
-// healing perform the same operation on this value: write what
-// should be there.
+// grubBootSectors holds the bytes that belong at LBA 0 and in the
+// biosBoot partition of one machine, computed from the release's
+// artifacts and the partition's location. An install and a repair
+// both write this value to the disk.
 type grubBootSectors struct {
 	mbr     []byte // the 440 boot-code bytes for sector 0
 	core    []byte // the patched core image for the partition
 	coreLBA uint64 // the partition's first sector
 }
 
-// planGRUBBootSectors patches copies of the release's grub-boot.img
-// and grub-core.img for a machine whose biosBoot partition starts at
-// coreLBA. This function validates everything, so a write can only
-// ever put a coherent chain on disk.
+// planGRUBBootSectors patches copies of grub-boot.img and
+// grub-core.img with the location of part, the machine's biosBoot
+// partition. It refuses images of the wrong size, a core image that
+// does not fit in the partition, and a core image with the wrong load
+// segment, so write never puts a broken chain on the disk.
 func planGRUBBootSectors(bootImg, coreImg []byte, part *slotPartition) (*grubBootSectors, error) {
 	if len(bootImg) != disks.SectorSize {
-		return nil, fmt.Errorf("grub-boot.img is %d bytes; boot.img is one %d-byte sector", len(bootImg), disks.SectorSize)
+		return nil, fmt.Errorf("grub-boot.img is %d bytes, want one %d-byte sector", len(bootImg), disks.SectorSize)
 	}
 	if len(coreImg) < disks.SectorSize {
-		return nil, fmt.Errorf("grub-core.img is %d bytes, not even one sector; it cannot carry a blocklist", len(coreImg))
+		return nil, fmt.Errorf("grub-core.img is %d bytes, less than one %d-byte sector", len(coreImg), disks.SectorSize)
 	}
 	coreSectors := (uint64(len(coreImg)) + disks.SectorSize - 1) / disks.SectorSize
 	if available := part.lastLBA - part.firstLBA + 1; coreSectors > available {
-		return nil, fmt.Errorf("grub-core.img needs %d sectors but the biosBoot partition holds %d", coreSectors, available)
+		return nil, fmt.Errorf("grub-core.img needs %d sectors and the biosBoot partition has %d", coreSectors, available)
 	}
 
 	mbr := bytes.Clone(bootImg[:mbrBootCodeBytes])
 	binary.LittleEndian.PutUint64(mbr[grubKernelSectorOffset:], part.firstLBA)
-	// Two NOPs disable the buggy-BIOS drive check, as grub-bios-setup
-	// does for any hard disk.
+	// Two NOPs disable the drive check, as grub-bios-setup does on
+	// hard disks.
 	mbr[grubDriveCheckOffset], mbr[grubDriveCheckOffset+1] = 0x90, 0x90
 
 	core := bytes.Clone(coreImg)
 	if seg := binary.LittleEndian.Uint16(core[grubBlocklistSegment:]); seg != grubLoadSegment {
-		return nil, fmt.Errorf("grub-core.img's load segment is %#x, want %#x; this is not an i386-pc core image", seg, grubLoadSegment)
+		return nil, fmt.Errorf("the load segment of grub-core.img is %#x, want %#x, so it is not an i386-pc core image", seg, grubLoadSegment)
 	}
-	// The blocklist: the rest of the image follows its first sector
-	// without gaps. The partition guarantees this.
+	// The blocklist is one entry, because the rest of the image
+	// follows its first sector in the partition without gaps.
 	binary.LittleEndian.PutUint64(core[grubBlocklistStart:], part.firstLBA+1)
 	binary.LittleEndian.PutUint16(core[grubBlocklistLength:], uint16(coreSectors-1))
 
 	return &grubBootSectors{mbr: mbr, core: core, coreLBA: part.firstLBA}, nil
 }
 
-// inPlace reports whether the disk already carries this chain. This
-// is the comparison half of healing, and it is cheap enough to run on
-// every boot (440 bytes plus the core image).
+// inPlace reports whether the disk already has these bytes in sector
+// 0 and in the core image area. It reads only 440 bytes and the core
+// image, so it can run on every boot.
 func (s *grubBootSectors) inPlace(disk io.ReaderAt) (bool, error) {
 	mbr := make([]byte, mbrBootCodeBytes)
 	if _, err := disk.ReadAt(mbr, 0); err != nil {
@@ -122,11 +120,11 @@ func (s *grubBootSectors) inPlace(disk io.ReaderAt) (bool, error) {
 	return bytes.Equal(core, s.core), nil
 }
 
-// write puts the chain on disk: the core image first and synced, then
-// the MBR's boot code last. This order makes a torn write safe. The
-// MBR points at the partition's first sector, which never moves, so
-// an old MBR over a new core image still boots. A new MBR over a
-// half-written core image would jump into garbage instead.
+// write writes and syncs the core image before the boot code in the
+// MBR. The boot code holds only the partition's first sector, which
+// does not move, so an old MBR still boots the new core image. A new
+// MBR written before the core image would run a half-written core
+// image after a power loss.
 func (s *grubBootSectors) write(disk disks.Device) error {
 	if _, err := disk.WriteAt(s.core, int64(s.coreLBA)*disks.SectorSize); err != nil {
 		return fmt.Errorf("writing the core image: %w", err)
@@ -134,9 +132,9 @@ func (s *grubBootSectors) write(disk disks.Device) error {
 	if err := disk.Sync(); err != nil {
 		return err
 	}
-	// This writes only the 440 boot-code bytes. Everything after them
-	// in sector 0 (the disk signature, the protective MBR entry, the
-	// boot signature) belongs to the partition table's writer.
+	// Only the 440 bytes of boot code. The rest of sector 0 (the disk
+	// signature, the protective MBR entry, and the boot signature)
+	// belongs to the code that writes the partition table.
 	if _, err := disk.WriteAt(s.mbr, 0); err != nil {
 		return fmt.Errorf("writing the boot code: %w", err)
 	}

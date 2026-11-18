@@ -12,8 +12,8 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// registriesTempPath points the renderer at a temporary directory
-// for one test.
+// registriesTempPath makes the renderer write to a temporary
+// directory for one test.
 func registriesTempPath(t *testing.T) string {
 	t.Helper()
 	original := registriesConfigPath
@@ -53,16 +53,16 @@ func TestWriteRegistriesConfigRendersMirrorsAndCredentials(t *testing.T) {
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading registries.yaml: %v", err)
 	}
 	for _, want := range []string{"docker.io", "http://10.10.0.100:5000", "10.10.0.100:5000", "username: liken", "password: hunter2"} {
 		if !strings.Contains(string(raw), want) {
-			t.Errorf("registries.yaml should contain %q:\n%s", want, raw)
+			t.Errorf("registries.yaml is\n%s\nwant it to contain %q", raw, want)
 		}
 	}
 	if !slices.Equal(status.Mirrors, []string{"docker.io"}) ||
 		!slices.Equal(status.CredentialedHosts, []string{"10.10.0.100:5000"}) || status.Embedded {
-		t.Errorf("status should describe the rendering: %+v", status)
+		t.Errorf("status is %+v, want mirror docker.io and credentialed host 10.10.0.100:5000", status)
 	}
 }
 
@@ -71,10 +71,10 @@ func TestWriteRegistriesConfigIsOwnerOnly(t *testing.T) {
 	writeRegistriesConfig(mirroredCluster(false), labCredentials(), machine.RegistryCredentialsStore(t.TempDir()), machine.ManifestSourceProven)
 	info, err := os.Stat(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the mode of registries.yaml: %v", err)
 	}
 	if info.Mode().Perm() != 0o600 {
-		t.Errorf("registries.yaml embeds passwords and must be owner-only, got %v", info.Mode().Perm())
+		t.Errorf("registries.yaml has mode %v, want 0600 because it contains passwords", info.Mode().Perm())
 	}
 }
 
@@ -83,10 +83,10 @@ func TestWriteRegistriesConfigEmbeddedAddsTheWildcard(t *testing.T) {
 	status := writeRegistriesConfig(mirroredCluster(true), nil, machine.RegistryCredentialsStore(t.TempDir()), "")
 	raw, _ := os.ReadFile(path)
 	if !strings.Contains(string(raw), `"*"`) && !strings.Contains(string(raw), "'*'") {
-		t.Errorf("embedded should add the wildcard mirror entry:\n%s", raw)
+		t.Errorf("registries.yaml is\n%s\nwant a \"*\" mirror entry because the embedded registry is on", raw)
 	}
 	if !status.Embedded || !slices.Equal(status.Mirrors, []string{"*", "docker.io"}) {
-		t.Errorf("got %+v", status)
+		t.Errorf("status is %+v, want Embedded and mirrors \"*\" and docker.io", status)
 	}
 }
 
@@ -97,46 +97,45 @@ func TestWriteRegistriesConfigEmbeddedKeepsADeclaredWildcard(t *testing.T) {
 	writeRegistriesConfig(clusterDoc, nil, machine.RegistryCredentialsStore(t.TempDir()), "")
 	raw, _ := os.ReadFile(path)
 	if strings.Count(string(raw), "*") != 1 {
-		t.Errorf("a declared wildcard must not be duplicated or overwritten:\n%s", raw)
+		t.Errorf("registries.yaml is\n%s\nwant exactly one \"*\" entry, the declared one", raw)
 	}
 	if !strings.Contains(string(raw), "http://10.10.0.100:5000") {
-		t.Errorf("the declared wildcard's endpoints must survive:\n%s", raw)
+		t.Errorf("registries.yaml is\n%s\nwant the endpoints of the declared \"*\" entry", raw)
 	}
 }
 
 func TestWriteRegistriesConfigCredentialsAloneStillRender(t *testing.T) {
-	// Credentials without mirrors covers the Docker Hub rate-limit
-	// case: no mirror anywhere, but authenticated pulls go straight
-	// to the registry. This produces a valid registries.yaml with
-	// only a configs section.
+	// Credentials with no mirrors are for Docker Hub's pull rate
+	// limit. Pulls go straight to the registry, authenticated, and
+	// registries.yaml has only a configs section.
 	path := registriesTempPath(t)
 	status := writeRegistriesConfig(nil, labCredentials(), machine.RegistryCredentialsStore(t.TempDir()), machine.ManifestSourceProven)
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading registries.yaml: %v", err)
 	}
 	if strings.Contains(string(raw), "mirrors") {
-		t.Errorf("no mirrors were declared:\n%s", raw)
+		t.Errorf("registries.yaml is\n%s\nwant no mirrors section because none is declared", raw)
 	}
 	if len(status.CredentialedHosts) != 1 {
-		t.Errorf("got %+v", status)
+		t.Errorf("status is %+v, want one credentialed host", status)
 	}
 }
 
 func TestWriteRegistriesConfigNothingDeclaredRemovesTheFile(t *testing.T) {
 	path := registriesTempPath(t)
-	// A previous rendering already exists. This is the
-	// live-retraction case, where the restart path re-renders the
-	// file with nothing declared.
+	// An earlier rendering exists, and the restart path renders again
+	// with nothing declared, as when the last mirror is removed from a
+	// running machine.
 	if err := os.WriteFile(path, []byte("mirrors: {}\n"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the earlier registries.yaml: %v", err)
 	}
 	status := writeRegistriesConfig(nil, nil, machine.RegistryCredentialsStore(t.TempDir()), "")
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Error("a retraction must take the old rendering with it")
+		t.Error("the earlier registries.yaml still exists, want it removed because nothing is declared")
 	}
 	if status.Embedded || status.Mirrors != nil || status.CredentialedHosts != nil {
-		t.Errorf("nothing declared renders nothing: %+v", status)
+		t.Errorf("status is %+v, want an empty status because nothing is declared", status)
 	}
 }
 
@@ -151,7 +150,7 @@ func TestWriteRegistriesConfigDeterministicBytes(t *testing.T) {
 	writeRegistriesConfig(clusterDoc, labCredentials(), store, machine.ManifestSourceProven)
 	second, _ := os.ReadFile(path)
 	if string(first) != string(second) {
-		t.Errorf("the same inputs must render the same bytes:\n%s\n%s", first, second)
+		t.Errorf("two renderings of the same inputs differ:\n%s\n%s\nwant identical bytes", first, second)
 	}
 }
 
@@ -160,26 +159,25 @@ func TestWriteRegistriesConfigPromotesStagedCredentialsOnSuccess(t *testing.T) {
 	store := machine.RegistryCredentialsStore(t.TempDir())
 	raw, _, err := machine.RenderRegistryCredentials(labCredentials().Hosts)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the credentials: %v", err)
 	}
 	if err := store.WriteStaged(raw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged credentials: %v", err)
 	}
 
 	writeRegistriesConfig(mirroredCluster(false), labCredentials(), store, machine.ManifestSourceStaged)
 
 	if staged, _ := store.LoadStaged(); staged != nil {
-		t.Error("promotion should consume the staged document")
+		t.Error("the staged document still exists after the write, want it promoted")
 	}
 	if proven, _ := store.LoadProven(); string(proven) != string(raw) {
-		t.Errorf("the applied credentials become proven: %q", proven)
+		t.Errorf("the proven credentials are %q, want the credentials that were applied", proven)
 	}
 }
 
 func TestWriteRegistriesConfigFailedWriteLeavesStagedInPlace(t *testing.T) {
-	// The render target is not writable, so the actuation never
-	// happens. The staged credentials must remain, so the next boot
-	// can retry.
+	// The file cannot be written, so the credentials stay staged and
+	// the next boot retries.
 	original := registriesConfigPath
 	registriesConfigPath = filepath.Join(t.TempDir(), "no-such-dir", "registries.yaml")
 	t.Cleanup(func() { registriesConfigPath = original })
@@ -187,13 +185,13 @@ func TestWriteRegistriesConfigFailedWriteLeavesStagedInPlace(t *testing.T) {
 	store := machine.RegistryCredentialsStore(t.TempDir())
 	raw, _, _ := machine.RenderRegistryCredentials(labCredentials().Hosts)
 	if err := store.WriteStaged(raw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged credentials: %v", err)
 	}
 
 	writeRegistriesConfig(mirroredCluster(false), labCredentials(), store, machine.ManifestSourceStaged)
 
 	if staged, _ := store.LoadStaged(); staged == nil {
-		t.Error("a failed write must not promote")
+		t.Error("the staged document is gone after a failed write, want it kept")
 	}
 }
 
@@ -203,19 +201,19 @@ func TestChooseRegistryCredentialsPrefersStaged(t *testing.T) {
 	provenRaw, _, _ := machine.RenderRegistryCredentials(nil)
 	stagedRaw, stagedHash, _ := machine.RenderRegistryCredentials(labCredentials().Hosts)
 	if err := store.WriteProven(provenRaw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the proven credentials: %v", err)
 	}
 	if err := store.WriteStaged(stagedRaw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged credentials: %v", err)
 	}
 
 	boot := machine.BootStatus{}
 	creds := chooseRegistryCredentials(root, true, &boot)
 	if creds == nil || len(creds.Hosts) != 1 {
-		t.Fatalf("staged should win: %+v", creds)
+		t.Fatalf("the chosen credentials are %+v, want the one staged host", creds)
 	}
 	if boot.CredentialsSource != machine.ManifestSourceStaged || boot.CredentialsHash != stagedHash {
-		t.Errorf("the boot record should name the staged copy: %+v", boot)
+		t.Errorf("the boot record is %+v, want the staged source and hash", boot)
 	}
 }
 
@@ -224,22 +222,22 @@ func TestChooseRegistryCredentialsRejectsAGarbageStagedDocument(t *testing.T) {
 	store := machine.RegistryCredentialsStore(root)
 	provenRaw, provenHash, _ := machine.RenderRegistryCredentials(labCredentials().Hosts)
 	if err := store.WriteProven(provenRaw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the proven credentials: %v", err)
 	}
 	if err := store.WriteStaged([]byte("kind: Nonsense\n")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged credentials: %v", err)
 	}
 
 	boot := machine.BootStatus{}
 	creds := chooseRegistryCredentials(root, true, &boot)
 	if creds == nil || boot.CredentialsSource != machine.ManifestSourceProven || boot.CredentialsHash != provenHash {
-		t.Errorf("a garbage staged document falls back to proven: %+v %+v", creds, boot)
+		t.Errorf("credentials are %+v and the boot record is %+v, want the proven credentials after a staged document that does not parse", creds, boot)
 	}
 	if boot.CredentialsRejection == nil {
-		t.Error("the rejection must be recorded for the facts")
+		t.Error("the boot record has no rejection, want one for the staged document that does not parse")
 	}
 	if staged, _ := store.LoadStaged(); staged != nil {
-		t.Error("the garbage document should be quarantined, not left staged")
+		t.Error("the staged document that does not parse is still staged, want it rejected")
 	}
 }
 
@@ -247,7 +245,7 @@ func TestChooseRegistryCredentialsNothingAnywhereIsNil(t *testing.T) {
 	boot := machine.BootStatus{}
 	creds := chooseRegistryCredentials(t.TempDir(), true, &boot)
 	if creds != nil || boot.CredentialsSource != "" || boot.CredentialsHash != "" {
-		t.Errorf("a machine that never had credentials has none: %+v %+v", creds, boot)
+		t.Errorf("credentials are %+v and the boot record is %+v, want none because the machine never had credentials", creds, boot)
 	}
 }
 
@@ -256,28 +254,28 @@ func TestChooseRegistryCredentialsMemoryBackedReadsNothing(t *testing.T) {
 	store := machine.RegistryCredentialsStore(root)
 	raw, _, _ := machine.RenderRegistryCredentials(labCredentials().Hosts)
 	if err := store.WriteStaged(raw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged credentials: %v", err)
 	}
 	boot := machine.BootStatus{}
 	if creds := chooseRegistryCredentials(root, false, &boot); creds != nil {
-		t.Error("a memory-backed machine has no durable store to read")
+		t.Error("a memory-backed machine chose credentials, want none because it has no durable store")
 	}
 }
 
-func TestChooseRegistryCredentialsRepublishesAStandingRejection(t *testing.T) {
+func TestChooseRegistryCredentialsReportsAnEarlierRejectionAgain(t *testing.T) {
 	root := t.TempDir()
 	store := machine.RegistryCredentialsStore(root)
 	if err := store.WriteStaged([]byte("garbage")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged credentials: %v", err)
 	}
 	if err := store.Reject(machine.Rejection{Hash: "abc", Reason: "would not parse"}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("recording the rejection: %v", err)
 	}
 
 	boot := machine.BootStatus{}
 	chooseRegistryCredentials(root, true, &boot)
 	if boot.CredentialsRejection == nil || boot.CredentialsRejection.Hash != "abc" {
-		t.Errorf("the standing rejection must republish every boot: %+v", boot.CredentialsRejection)
+		t.Errorf("the boot record has rejection %+v, want the earlier rejection abc because the store keeps it across boots", boot.CredentialsRejection)
 	}
 }
 
@@ -285,25 +283,25 @@ func TestChooseRegistryCredentialsToleratesUnreadableStoreFiles(t *testing.T) {
 	root := t.TempDir()
 	store := machine.RegistryCredentialsStore(root)
 	if err := store.WriteStaged([]byte("staged")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged credentials: %v", err)
 	}
 	if err := store.WriteProven([]byte("proven")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the proven credentials: %v", err)
 	}
 	sealed, err := filepath.Glob(filepath.Join(root, "*", "*.yaml"))
 	if err != nil || len(sealed) == 0 {
-		t.Fatalf("expected store files to seal: %v, %v", sealed, err)
+		t.Fatalf("finding the store files: %v, %v, want at least one file", sealed, err)
 	}
 	for _, path := range sealed {
 		if err := os.Chmod(path, 0o000); err != nil {
-			t.Fatal(err)
+			t.Fatalf("making the store file unreadable: %v", err)
 		}
 		t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
 	}
 
 	boot := machine.BootStatus{}
 	if creds := chooseRegistryCredentials(root, true, &boot); creds != nil {
-		t.Errorf("unreadable stores mean anonymous pulls: %+v", creds)
+		t.Errorf("credentials are %+v, want none because the store files are unreadable", creds)
 	}
 }
 
@@ -311,14 +309,14 @@ func TestChooseRegistryCredentialsFallsThroughACorruptProvenDocument(t *testing.
 	root := t.TempDir()
 	store := machine.RegistryCredentialsStore(root)
 	if err := store.WriteProven([]byte("not a credentials document")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the proven credentials: %v", err)
 	}
 
 	boot := machine.BootStatus{}
 	if creds := chooseRegistryCredentials(root, true, &boot); creds != nil {
-		t.Errorf("a corrupt proven document means anonymous pulls, not a crash: %+v", creds)
+		t.Errorf("credentials are %+v, want none because the proven document does not parse", creds)
 	}
 	if boot.CredentialsSource != "" {
-		t.Errorf("nothing was chosen: %+v", boot)
+		t.Errorf("the boot record is %+v, want no source because no credentials were chosen", boot)
 	}
 }

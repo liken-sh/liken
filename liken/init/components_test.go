@@ -1,11 +1,7 @@
 package main
 
-// Tests for the machine plane's contract with its components: a
-// finished component stays finished, the code restarts a failed or
-// panicking component, and shutdown is prompt for a well-behaved
-// component and bounded for a stuck one. Each test runs in a synctest
-// bubble, so the restart pacing runs at its real delays on the fake
-// clock, and a test checks each delay.
+// Each test runs in a synctest bubble, so the real restart delays
+// pass on the fake clock and a test can measure them.
 
 import (
 	"context"
@@ -15,8 +11,8 @@ import (
 	"time"
 )
 
-// testPlane builds a machine plane that shuts down when the test ends,
-// so no component goroutine outlives the bubble.
+// testPlane returns a machine plane that shuts down when the test
+// ends, so that no component goroutine outlives the bubble.
 func testPlane(t *testing.T) *machinePlane {
 	t.Helper()
 	p := newMachinePlane()
@@ -24,8 +20,8 @@ func testPlane(t *testing.T) *machinePlane {
 	return p
 }
 
-// runTimes waits until the plane has done all it can by the given time
-// from now, and answers the time of each run the component recorded.
+// runTimes waits for the duration by, then returns the start time of
+// each component run that was sent on ran.
 func runTimes(ran chan time.Time, by time.Duration) []time.Time {
 	time.Sleep(by)
 	synctest.Wait()
@@ -51,8 +47,9 @@ func TestAComponentThatFinishesIsNotRestarted(t *testing.T) {
 	})
 }
 
-// A failed component restarts after a delay that doubles each time,
-// from twice the initial backoff, plus up to half again of jitter.
+// The first restart comes after twice componentBackoff, because the
+// delay doubles before the first wait, and each delay has up to 50%
+// jitter.
 func TestAComponentThatFailsIsRestarted(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p := testPlane(t)
@@ -106,7 +103,7 @@ func TestShutdownStopsAWellBehavedComponent(t *testing.T) {
 		select {
 		case <-stopped:
 		default:
-			t.Fatal("the component never saw the cancellation")
+			t.Fatal("the component did not receive the cancellation, want its context cancelled")
 		}
 		if elapsed := time.Since(begin); elapsed != 0 {
 			t.Errorf("the shutdown took %s, want no wait for a component that stops", elapsed)
@@ -130,7 +127,7 @@ func TestShutdownInterruptsARestartBackoff(t *testing.T) {
 		p.shutdown(10 * time.Second)
 
 		if elapsed := time.Since(begin); elapsed != 0 {
-			t.Errorf("the shutdown took %s; it waited out a backoff instead of interrupting it", elapsed)
+			t.Errorf("the shutdown took %s, want no wait for the restart delay", elapsed)
 		}
 	})
 }
@@ -140,7 +137,7 @@ func TestShutdownIsBoundedWhenAComponentIsStuck(t *testing.T) {
 		p := newMachinePlane()
 		forever := make(chan struct{})
 		p.start("stuck", func(ctx context.Context) error {
-			<-forever // ignores ctx, the misbehavior under test
+			<-forever // ignores ctx on purpose
 			return nil
 		})
 
@@ -154,11 +151,11 @@ func TestShutdownIsBoundedWhenAComponentIsStuck(t *testing.T) {
 	})
 }
 
-func TestSleepUnlessCancelledHearsTheShutdown(t *testing.T) {
+func TestSleepUnlessCancelledReturnsFalseWhenCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if sleepUnlessCancelled(ctx, time.Hour) {
-		t.Error("a cancelled context must interrupt the sleep")
+		t.Error("the sleep returned true, want false after the context was cancelled")
 	}
 }
 
@@ -166,7 +163,7 @@ func TestSleepUnlessCancelledWakesNormally(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		begin := time.Now()
 		if !sleepUnlessCancelled(t.Context(), time.Hour) {
-			t.Error("an undisturbed sleep reports true")
+			t.Error("the sleep returned false, want true when the context is not cancelled")
 		}
 		if elapsed := time.Since(begin); elapsed != time.Hour {
 			t.Errorf("the sleep took %s, want an hour", elapsed)

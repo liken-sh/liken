@@ -1,12 +1,11 @@
 package main
 
-// How a module gets its parameters on a machine with no modprobe and
-// no modprobe.d: init builds the parameter string from the spec and
-// hands it to finit_module in the one call that loads the module.
-// The driver reads it at probe and never again, which is why a
-// parameter change on a loaded module needs a boot. The only place
-// the result can be read afterward is /sys/module, and the readback
-// here is what status.modules[].parameters reports.
+// A liken machine has no modprobe or modprobe.d, so init builds the
+// parameter string from spec.moduleParameters and passes it to
+// finit_module in the call that loads the module. The kernel applies
+// parameters only at that load, so a changed parameter of a loaded
+// module takes effect at the next reboot. status.modules[].parameters
+// reports the values that /sys/module reads back.
 
 import (
 	"fmt"
@@ -17,36 +16,32 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// sysModuleDir is the kernel's own registry of what is loaded,
-// builtins included. It is a variable so a test can fabricate one
-// out of directories.
+// sysModuleDir lists the loaded modules and the built-in ones.
 var sysModuleDir = "/sys/module"
 
-// The CRD caps a readback value at 1024 bytes, and apiextensions
-// refuses the whole status write when one value runs over, so the
-// clamp below is what keeps one chatty parameter from freezing a
-// machine's entire status.
+// The CRD limits a readback value to 1024 bytes, and the API server
+// refuses the whole status write when one value is longer. Some
+// values are longer, such as acpi.debug_level, so readModuleParameters
+// truncates them.
 const moduleParameterValueMax = 1024
 
-// The longest key admission accepts: a 64-byte module name, the dot,
-// and a 64-byte parameter name. A longer key would fail as a file
-// name in the boot record, partway through the write.
+// The longest key that the CRD accepts: a 64-byte module name, a dot,
+// and a 64-byte parameter name. Each key becomes a file name in the
+// boot record.
 const moduleParameterKeyMax = 129
 
-// usableModuleParameters drops the declarations the machine cannot
-// act on: an empty value, which the facts tree would treat as a
-// removed file, and an over-long key, which would abort the boot
-// record with ENAMETOOLONG. Admission refuses both, but a manifest
-// carried in on a stick never met admission, so this is the last
-// guard before the kernel. Each drop prints its reason.
+// usableModuleParameters drops each parameter that the CRD would
+// refuse, because a manifest on an install stick never passes
+// admission. It returns nil when none remain. The boot record writes
+// no file for an empty value, so the parameter would be lost from it.
 func usableModuleParameters(parameters map[string]string) map[string]string {
 	usable := map[string]string{}
 	for key, value := range parameters {
 		switch {
 		case value == "":
-			fmt.Fprintf(os.Stderr, "liken: modules: %s declares no value; a parameter needs one\n", key)
+			fmt.Fprintf(os.Stderr, "liken: modules: parameter %s has no value and is not passed to the module\n", key)
 		case len(key) > moduleParameterKeyMax:
-			fmt.Fprintf(os.Stderr, "liken: modules: %.64s... is longer than %d bytes; skipping it\n",
+			fmt.Fprintf(os.Stderr, "liken: modules: parameter name %.64s... is longer than %d bytes and is not passed to the module\n",
 				key, moduleParameterKeyMax)
 		default:
 			usable[key] = value
@@ -58,35 +53,30 @@ func usableModuleParameters(parameters map[string]string) map[string]string {
 	return usable
 }
 
-// sysModuleName is the spelling /sys/module uses: underscores,
-// whatever the module's file name used. The kernel treats - and _ in
-// a module name interchangeably and normalizes to _ when it
-// registers the module.
+// sysModuleName returns the module name as /sys/module spells it. The
+// kernel treats - and _ in a module name as the same character and
+// registers the name with _.
 func sysModuleName(name string) string {
 	return strings.ReplaceAll(name, "-", "_")
 }
 
-// moduleIsResident answers whether the kernel already holds a
-// module. The declared pass asks before it loads, because asking
-// after answers too late: finit_module returns EEXIST for a resident
-// module and drops the parameter string without a trace, and the
-// status must be able to say that happened.
+// moduleIsResident reports whether the module is loaded or built into
+// the kernel. init checks it before a load, because finit_module
+// returns EEXIST for a loaded module and does not apply the parameter
+// string.
 func moduleIsResident(dir, name string) bool {
 	info, err := os.Stat(filepath.Join(dir, sysModuleName(name)))
 	return err == nil && info.IsDir()
 }
 
-// readModuleParameters reads back the declared parameter names for
-// one module, and only those; the kernel's directory also lists
-// every parameter the declaration never mentioned. A declared name
-// whose file cannot be read is left absent. Absence usually means
-// the name is wrong, because the kernel accepts an unknown parameter
-// name and warns only in its log; it can also mean the parameter is
-// real but offers nothing to read, since a driver may register a
-// parameter with no sysfs file at all (libata.force does) or with a
-// write-only mode. The value kept is the kernel's own rendering, not
-// the string that was passed: a bool comes back as Y or N, an array
-// with its own separators.
+// readModuleParameters reads the current value of each parameter that
+// the spec declares for one module, from
+// <dir>/<module>/parameters/<name>. It leaves out a parameter whose
+// file cannot be read. Usually the name is wrong, because the kernel
+// loads a module with an unknown parameter and only logs a warning. A
+// driver can also register a parameter with no sysfs file, such as
+// libata.force, or with a write-only mode. The values are the kernel's
+// own rendering, so a bool reads back as Y or N.
 func readModuleParameters(dir, name string, declared map[string]string) map[string]string {
 	names := machine.ModuleParameterNames(name, declared)
 	if len(names) == 0 {
@@ -100,10 +90,6 @@ func readModuleParameters(dir, name string, declared map[string]string) map[stri
 			continue
 		}
 		value := strings.TrimSuffix(string(raw), "\n")
-		// Some parameters print a whole legend on read;
-		// acpi.debug_level answers 1313 bytes. The schema takes
-		// 1024, and one oversize value would fail the whole status
-		// write, so the value is cut and the cut is silent.
 		if len(value) > moduleParameterValueMax {
 			value = value[:moduleParameterValueMax]
 		}

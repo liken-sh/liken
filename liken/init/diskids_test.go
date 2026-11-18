@@ -1,12 +1,7 @@
 package main
 
-// Tests for by-id name computation, run against a fake sysfs: a
-// device tree under a fake /sys/devices, and a symlink from the fake
-// /sys/block that stands in for the one the kernel makes. The
-// transport tests only need the resolved path to pass through a
-// segment naming the bus (ataN, nvme, usbN, virtioN), because that is
-// all diskTransport reads, so the fixture keeps the rest of the path
-// short.
+// diskTransport looks only for a bus directory such as ata3 or nvme
+// in the resolved path, so the fake device paths leave out the rest.
 
 import (
 	"os"
@@ -15,31 +10,26 @@ import (
 	"testing"
 )
 
-// fakeDisk builds a device directory under a fake /sys/devices and
-// symlinks the fake /sys/block/<name> to it, the way the kernel links
-// a real disk's block entry to its place in the device tree. It
-// returns the device directory, so a test can write the sysfs
-// attributes the disk publishes there.
+// fakeDisk creates a device directory and links sys/<name> to it, as
+// the kernel links /sys/block. It returns the device directory.
 func fakeDisk(t *testing.T, sys, name string, pathSegments ...string) string {
 	t.Helper()
 	devicesRoot := filepath.Join(t.TempDir(), "devices")
 	deviceDir := filepath.Join(append([]string{devicesRoot}, pathSegments...)...)
 	if err := os.MkdirAll(filepath.Join(deviceDir, "device"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the device directory: %v", err)
 	}
 	if err := os.Symlink(deviceDir, filepath.Join(sys, name)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("linking the disk into sys: %v", err)
 	}
 	return deviceDir
 }
 
-// writeSysfsBytes writes a binary sysfs attribute, such as a vital
-// product data page, whose content is not a text line and may embed
-// NUL bytes.
+// writeSysfsBytes writes a binary attribute such as a VPD page.
 func writeSysfsBytes(t *testing.T, dir, name string, value []byte) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), value, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the sysfs attribute %s: %v", name, err)
 	}
 }
 
@@ -52,7 +42,7 @@ func TestDiskIDNamesSATADiskWithWWN(t *testing.T) {
 	names := diskIDNames("sda")
 	want := []string{"wwn-0x5002538d40a45c88", "scsi-35002538d40a45c88"}
 	if !equalNames(names, want) {
-		t.Errorf("got %v, want %v", names, want)
+		t.Errorf("the names are %v, want %v", names, want)
 	}
 }
 
@@ -67,7 +57,7 @@ func TestDiskIDNamesNVME(t *testing.T) {
 	names := diskIDNames("nvme0n1")
 	want := []string{"nvme-Samsung_SSD_980_500GB_S5GXNX0T123456", "nvme-eui.0025385b21406566"}
 	if !equalNames(names, want) {
-		t.Errorf("got %v, want %v", names, want)
+		t.Errorf("the names are %v, want %v", names, want)
 	}
 }
 
@@ -79,18 +69,15 @@ func TestDiskIDNamesVirtioSerial(t *testing.T) {
 	names := diskIDNames("vda")
 	want := []string{"virtio-liken-a"}
 	if !equalNames(names, want) {
-		t.Errorf("got %v, want %v", names, want)
+		t.Errorf("the names are %v, want %v", names, want)
 	}
 }
 
 func TestDiskIDNamesUSB(t *testing.T) {
 	sys, _ := fakeMachine(t)
-	// The USB device sits above the interface, the host, the target,
-	// and the LUN in the device tree. Its own directory, not any of
-	// theirs, carries manufacturer, product, and serial.
 	usbDevice := filepath.Join(t.TempDir(), "devices", "pci0000:00", "0000:00:14.0", "usb1", "1-4")
 	if err := os.MkdirAll(usbDevice, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the USB device directory: %v", err)
 	}
 	writeSysfs(t, usbDevice, "idVendor", "0781\n")
 	writeSysfs(t, usbDevice, "manufacturer", "SanDisk\n")
@@ -99,23 +86,21 @@ func TestDiskIDNamesUSB(t *testing.T) {
 
 	dir := filepath.Join(usbDevice, "1-4:1.0", "host6", "target6:0:0", "6:0:0:0", "block", "sdb")
 	if err := os.MkdirAll(filepath.Join(dir, "device"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the disk directory: %v", err)
 	}
 	if err := os.Symlink(dir, filepath.Join(sys, "sdb")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("linking sdb into sys: %v", err)
 	}
 
 	names := diskIDNames("sdb")
 	want := []string{"usb-SanDisk_Cruzer_Blade_4C530001-0:0"}
 	if !equalNames(names, want) {
-		t.Errorf("got %v, want %v", names, want)
+		t.Errorf("the names are %v, want %v", names, want)
 	}
 }
 
-// The mmc name must match the name udev gives the same disk, byte
-// for byte, including the 0x the kernel prints in front of the
-// card's serial. A card missing either attribute gets no by-id name
-// at all, because half a name would match nothing.
+// A card without a name or a serial gets no by-id name, because a
+// partial name would not match udev's.
 func TestDiskIDNamesMMC(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -138,7 +123,7 @@ func TestDiskIDNamesMMC(t *testing.T) {
 			writeSysfs(t, filepath.Join(dir, "device"), "serial", tc.serial+"\n")
 
 			if names := diskIDNames("mmcblk0"); !equalNames(names, tc.want) {
-				t.Errorf("got %v, want %v", names, tc.want)
+				t.Errorf("the names are %v, want %v", names, tc.want)
 			}
 		})
 	}
@@ -150,7 +135,7 @@ func TestDiskIDNamesSATAWithoutWWNHasNone(t *testing.T) {
 		"target2:0:0", "2:0:0:0", "block", "sda")
 
 	if names := diskIDNames("sda"); names != nil {
-		t.Errorf("a SATA disk with no WWN got %v, want no by-id names", names)
+		t.Errorf("a SATA disk with no WWN has the names %v, want none", names)
 	}
 }
 
@@ -164,7 +149,7 @@ func TestDiskIDNamesSATAWithATAIdentity(t *testing.T) {
 	names := diskIDNames("sda")
 	want := []string{"ata-QEMU_HARDDISK_liken-node-1-state"}
 	if !equalNames(names, want) {
-		t.Errorf("got %v, want %v", names, want)
+		t.Errorf("the names are %v, want %v", names, want)
 	}
 }
 
@@ -183,16 +168,12 @@ func TestDiskIDNamesSATAWithWWNAndATAIdentity(t *testing.T) {
 		"ata-QEMU_HARDDISK_liken-node-1-state",
 	}
 	if !equalNames(names, want) {
-		t.Errorf("got %v, want %v", names, want)
+		t.Errorf("the names are %v, want %v", names, want)
 	}
 }
 
-// vpd89Page builds a fake SCSI vital product data page 0x89, the same
-// page libata answers with the drive's ATA IDENTIFY DEVICE block. The
-// model and serial arguments are the plain, unswapped strings the
-// test reads back; this helper pads and byte-swaps each one
-// itself, so a test that reads the resulting page proves the
-// production code's swap, rather than assuming it.
+// vpd89Page pads and byte-swaps model and serial itself, so the tests
+// check the swap in ataIdentifyString.
 func vpd89Page(t *testing.T, model, serial string) []byte {
 	t.Helper()
 	page := make([]byte, 572)
@@ -203,8 +184,6 @@ func vpd89Page(t *testing.T, model, serial string) []byte {
 	return page
 }
 
-// padField right-pads s with spaces to width, the way a fixed-width
-// ATA IDENTIFY field pads a shorter string.
 func padField(s string, width int) string {
 	if len(s) >= width {
 		return s[:width]
@@ -212,10 +191,6 @@ func padField(s string, width int) string {
 	return s + strings.Repeat(" ", width-len(s))
 }
 
-// swapBytePairs swaps every adjacent pair of bytes in s, the
-// transform an ATA IDENTIFY string needs in both directions: the
-// drive stores each string byte-swapped within its 16-bit words, and
-// this helper writes a test fixture the same way.
 func swapBytePairs(s string) []byte {
 	b := []byte(s)
 	for i := 0; i+1 < len(b); i += 2 {
@@ -234,7 +209,7 @@ func TestDiskIDNamesSATAShortVPD89HasNoATAName(t *testing.T) {
 	names := diskIDNames("sda")
 	want := []string{"wwn-0x5002538d40a45c88", "scsi-35002538d40a45c88"}
 	if !equalNames(names, want) {
-		t.Errorf("got %v, want %v", names, want)
+		t.Errorf("the names are %v, want %v", names, want)
 	}
 }
 
@@ -246,7 +221,7 @@ func TestDiskIDNamesSATABlankModelHasNoATAName(t *testing.T) {
 		vpd89Page(t, strings.Repeat(" ", 40), "liken-node-1-state"))
 
 	if names := diskIDNames("sda"); names != nil {
-		t.Errorf("a page with an all-space model got %v, want no by-id names", names)
+		t.Errorf("a page with an all-space model has the names %v, want none", names)
 	}
 }
 
@@ -254,34 +229,34 @@ func TestScsiVPD80Serial(t *testing.T) {
 	dir := t.TempDir()
 	page := []byte{0x00, 0x80, 0x00, 0x08, 'S', '3', 'Z', '1', ' ', ' ', ' ', ' '}
 	if err := os.MkdirAll(filepath.Join(dir, "device"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the device directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "device", "vpd_pg80"), page, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing vpd_pg80: %v", err)
 	}
 
 	if got := scsiVPD80Serial(dir); got != "S3Z1" {
-		t.Errorf("got %q, want S3Z1", got)
+		t.Errorf("the serial is %q, want S3Z1", got)
 	}
 }
 
 func TestScsiVPD80SerialAbsent(t *testing.T) {
 	if got := scsiVPD80Serial(t.TempDir()); got != "" {
-		t.Errorf("a disk with no vpd_pg80 page reported %q, want empty", got)
+		t.Errorf("a disk with no vpd_pg80 page has the serial %q, want empty", got)
 	}
 }
 
 func TestScsiVPD89ATAIdentity(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "device"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the device directory: %v", err)
 	}
 	writeSysfsBytes(t, filepath.Join(dir, "device"), "vpd_pg89",
 		vpd89Page(t, "QEMU HARDDISK", "liken-node-1-state"))
 
 	model, serial := scsiVPD89ATAIdentity(dir)
 	if model != "QEMU HARDDISK" || serial != "liken-node-1-state" {
-		t.Errorf("got model %q serial %q, want %q %q",
+		t.Errorf("the model is %q and the serial is %q, want %q and %q",
 			model, serial, "QEMU HARDDISK", "liken-node-1-state")
 	}
 }
@@ -289,25 +264,24 @@ func TestScsiVPD89ATAIdentity(t *testing.T) {
 func TestScsiVPD89ATAIdentityAbsent(t *testing.T) {
 	model, serial := scsiVPD89ATAIdentity(t.TempDir())
 	if model != "" || serial != "" {
-		t.Errorf("a disk with no vpd_pg89 page reported %q %q, want empty", model, serial)
+		t.Errorf("a disk with no vpd_pg89 page has the model %q and the serial %q, want both empty", model, serial)
 	}
 }
 
 func TestSanitizeIDPart(t *testing.T) {
 	if got := sanitizeIDPart("WDC WD40EFRX-68N"); got != "WDC_WD40EFRX-68N" {
-		t.Errorf("got %q, want WDC_WD40EFRX-68N", got)
+		t.Errorf("the string is %q, want WDC_WD40EFRX-68N", got)
 	}
 }
 
 func TestSanitizeIDPartReplacesSlashAndNUL(t *testing.T) {
 	if got := sanitizeIDPart("abc/def\x00ghi"); got != "abc_def_ghi" {
-		t.Errorf("got %q, want abc_def_ghi", got)
+		t.Errorf("the string is %q, want abc_def_ghi", got)
 	}
 }
 
-// equalNames compares two name lists in order, the same order
-// diskIDNames promises its callers: wwn, scsi, then the names
-// specific to the disk's transport.
+// equalNames compares in order, because the order of diskIDNames is
+// part of its result.
 func equalNames(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

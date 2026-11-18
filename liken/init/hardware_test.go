@@ -13,8 +13,8 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// stick is the recurring unclaimed device in these tests: the lab's
-// QEMU USB stick, waiting for the usb_storage driver.
+// stick is an unclaimed QEMU USB disk whose candidate drivers are
+// usb_storage and uas.
 var stick = machine.UnclaimedDevice{
 	Modalias:   "usb:v46F4p0001d0100dc00dsc00dp00ic08isc06ip50in00",
 	Bus:        "usb",
@@ -24,10 +24,9 @@ var stick = machine.UnclaimedDevice{
 	Message:    "declare usb_storage or uas in spec.modules",
 }
 
-// fixtureModuleTree points the soft-dependency reader at a tree of the
-// test's making and restores the real tree when the test ends. Without
-// it, the advice would read the host's own module tree, and a test's
-// expectation would depend on the machine that runs it.
+// fixtureModuleTree makes the advice read soft dependencies from base
+// until the test ends. Without it, the result would depend on the
+// modules of the machine that runs the test.
 func fixtureModuleTree(t *testing.T, base string) {
 	t.Helper()
 	old := softdepBase
@@ -35,17 +34,17 @@ func fixtureModuleTree(t *testing.T, base string) {
 	t.Cleanup(func() { softdepBase = old })
 }
 
-func TestTransitionsNarrateANewGap(t *testing.T) {
+func TestTransitionsReportANewUnclaimedDevice(t *testing.T) {
 	fixtureModuleTree(t, t.TempDir())
 	lines := hardwareTransitions(nil, []machine.UnclaimedDevice{stick}, nil)
 	want := "liken: hardware: unclaimed usb mass-storage device QEMU QEMU USB HARDDRIVE: declare usb_storage or uas in spec.modules"
 	if len(lines) != 1 || lines[0] != want {
-		t.Errorf("lines = %q, want [%q]", lines, want)
+		t.Errorf("the console lines are %q, want [%q]", lines, want)
 	}
 }
 
-// nic is an unclaimed Realtek NIC: the case that needs realtek loaded
-// before r8169, a soft dependency modules.dep does not record.
+// nic is an unclaimed Realtek NIC. Its driver r8169 has a soft
+// dependency on realtek, which modules.dep does not record.
 var nic = machine.UnclaimedDevice{
 	Modalias:   "pci:v000010ECd00008168sv00sd00bc02sc00i00",
 	Bus:        "pci",
@@ -63,31 +62,31 @@ func TestTransitionsNameTheSoftdepChain(t *testing.T) {
 	lines := hardwareTransitions(nil, []machine.UnclaimedDevice{nic}, nil)
 	want := "liken: hardware: unclaimed pci ethernet device RTL8111/8168/8411 PCI Express Gigabit Ethernet Controller: declare realtek, then r8169 in spec.modules"
 	if len(lines) != 1 || lines[0] != want {
-		t.Errorf("lines = %q, want [%q]", lines, want)
+		t.Errorf("the console lines are %q, want [%q]", lines, want)
 	}
 }
 
-func TestTransitionsNarrateAClaim(t *testing.T) {
+func TestTransitionsReportADeviceThatGotADriver(t *testing.T) {
 	devices := []hardware.Device{{Bus: "usb", Modalias: stick.Modalias, Driver: "usb-storage"}}
 	lines := hardwareTransitions([]machine.UnclaimedDevice{stick}, nil, devices)
 	want := "liken: hardware: QEMU QEMU USB HARDDRIVE is now driven by usb-storage"
 	if len(lines) != 1 || lines[0] != want {
-		t.Errorf("lines = %q, want [%q]", lines, want)
+		t.Errorf("the console lines are %q, want [%q]", lines, want)
 	}
 }
 
-func TestTransitionsNarrateARemoval(t *testing.T) {
+func TestTransitionsReportARemovedDevice(t *testing.T) {
 	lines := hardwareTransitions([]machine.UnclaimedDevice{stick}, nil, nil)
 	want := "liken: hardware: QEMU QEMU USB HARDDRIVE was removed"
 	if len(lines) != 1 || lines[0] != want {
-		t.Errorf("lines = %q, want [%q]", lines, want)
+		t.Errorf("the console lines are %q, want [%q]", lines, want)
 	}
 }
 
 func TestTransitionsAreQuietWhenNothingChanged(t *testing.T) {
 	lines := hardwareTransitions([]machine.UnclaimedDevice{stick}, []machine.UnclaimedDevice{stick}, nil)
 	if lines != nil {
-		t.Errorf("lines = %q, want none", lines)
+		t.Errorf("the console lines are %q, want none", lines)
 	}
 }
 
@@ -114,8 +113,8 @@ func TestListenerStoppedTellsAClosedChannelFromAnOpenOne(t *testing.T) {
 	}
 }
 
-// useListener stands listen in for the kernel's uevent socket for the
-// rest of the test, and restores the real socket when the test ends.
+// useListener replaces the uevent socket with listen until the test
+// ends.
 func useListener(t *testing.T, listen func(context.Context) (<-chan struct{}, error)) {
 	t.Helper()
 	saved := listenForUevents
@@ -123,25 +122,24 @@ func useListener(t *testing.T, listen func(context.Context) (<-chan struct{}, er
 	listenForUevents = listen
 }
 
-// closedListener is a uevent listener that has already stopped: its
-// channel is closed.
+// closedListener is a uevent listener whose channel is already
+// closed.
 func closedListener(context.Context) (<-chan struct{}, error) {
 	stopped := make(chan struct{})
 	close(stopped)
 	return stopped, nil
 }
 
-// stoppedListener makes every component's uevent listener one that has
-// already stopped.
+// stoppedListener makes every component's uevent listener closedListener.
 func stoppedListener(t *testing.T) {
 	t.Helper()
 	useListener(t, closedListener)
 }
 
-// The hardware watch walks sysfs as soon as its listener opens, before
-// it waits, so a disk that arrived while a stopped listener was being
-// replaced still reaches the facts. Then it returns errUeventsStopped,
-// and the machine plane starts it again.
+// The hardware watch walks as soon as its listener opens, before it
+// waits for a uevent, so a disk that arrived while no listener was
+// open still reaches the facts. When the listener has stopped, the
+// watch then returns errUeventsStopped.
 func TestTheHardwareWatchWalksBeforeItWaitsAndEndsWhenItsListenerStops(t *testing.T) {
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 8<<30, nil)
@@ -155,13 +153,12 @@ func TestTheHardwareWatchWalksBeforeItWaitsAndEndsWhenItsListenerStops(t *testin
 
 	facts, _ := tree.Read()
 	if !errors.Is(err, errUeventsStopped) || facts == nil || len(facts.Hardware.BlockDevices) != 1 {
-		t.Errorf("the watch answered %v and published %+v; want errUeventsStopped after it published vda", err, facts)
+		t.Errorf("the watch returned %v and published %+v, want errUeventsStopped after it published vda", err, facts)
 	}
 }
 
-// Each of init's other uevent components ends with errUeventsStopped
-// when its listener stops, so the machine plane starts it again with a
-// new listener, instead of spinning on the closed channel.
+// The disk links watch and the serio watch return errUeventsStopped
+// when their listener stops, and do not loop on the closed channel.
 func TestTheUeventComponentsEndWhenTheirListenerStops(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -177,13 +174,12 @@ func TestTheUeventComponentsEndWhenTheirListenerStops(t *testing.T) {
 			fakeMachine(t)
 			stoppedListener(t)
 			if err := c.component(t)(t.Context()); !errors.Is(err, errUeventsStopped) {
-				t.Errorf("the component answered %v, want errUeventsStopped", err)
+				t.Errorf("the component returned %v, want errUeventsStopped", err)
 			}
 		})
 	}
 }
 
-// errNoSocket stands in for a uevent socket that the kernel refused.
 var errNoSocket = errors.New("no uevent socket")
 
 // failedListener is a uevent listener whose socket did not open.
@@ -191,29 +187,24 @@ func failedListener(context.Context) (<-chan struct{}, error) {
 	return nil, errNoSocket
 }
 
-// The hardware watch returns the listener's error, so the machine plane
-// reports the fault and starts the watch again.
 func TestTheHardwareWatchEndsWhenItsListenerCannotOpen(t *testing.T) {
 	useListener(t, failedListener)
 
 	err := watchHardware(&hardware.Catalog{}, machine.FactsTree{Dir: t.TempDir()}, nil, nil)(t.Context())
 
 	if !errors.Is(err, errNoSocket) {
-		t.Errorf("the watch answered %v, want the listener's error", err)
+		t.Errorf("the watch returned %v, want the listener's error", err)
 	}
 }
 
-// A uevent makes the hardware watch walk sysfs again once the burst
-// settles, and republish the disk inventory when a disk changed. A
-// virtual disk that grew keeps its name, so only a comparison of every
-// field finds the change. The unclaimed NIC is the same in both walks,
-// and the watch still publishes the disk. When the context ends, the
-// watch returns nil.
+// The disk grows and keeps its name, and the unclaimed NIC does not
+// change, so the watch must compare more than disk names to publish
+// the new size.
 func TestTheHardwareWatchRepublishesADiskThatChangedAfterAUevent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sys, dev := fakeMachine(t)
 		addDisk(t, sys, dev, "vda", 8<<30, nil)
-		root := fakeBus(t)
+		root := fakeSysfs(t)
 		addPCIDevice(t, root, "0000:00:1f.6", "0x020000", nicModalias)
 		catalog, base := fixtureCatalog(t, map[string]string{nicModalias: "r8169"})
 		fixtureModuleTree(t, base)
@@ -233,7 +224,7 @@ func TestTheHardwareWatchRepublishesADiskThatChangedAfterAUevent(t *testing.T) {
 		cancel()
 
 		if err := <-done; err != nil {
-			t.Errorf("the watch answered %v after its context ended, want nil", err)
+			t.Errorf("the watch returned %v after its context ended, want nil", err)
 		}
 		if facts == nil || len(facts.Hardware.BlockDevices) != 1 || facts.Hardware.BlockDevices[0].SizeBytes != 16<<30 {
 			t.Errorf("the watch published %+v, want vda at 16 GiB", facts)
@@ -241,8 +232,6 @@ func TestTheHardwareWatchRepublishesADiskThatChangedAfterAUevent(t *testing.T) {
 	})
 }
 
-// The hardware watch republishes the disk inventory when a disk
-// changed in any field, including a disk that kept its name.
 func TestBlockDeviceEqualComparesEveryField(t *testing.T) {
 	disk := machine.BlockDevice{Name: "vda", SizeBytes: 8 << 30, Model: "QEMU HARDDISK", Serial: "lab", StableNames: []string{"virtio-lab"}}
 	cases := []struct {
@@ -263,8 +252,6 @@ func TestBlockDeviceEqualComparesEveryField(t *testing.T) {
 	}
 }
 
-// The hardware watch republishes the unclaimed list when an entry
-// changed in any field, including its candidate drivers.
 func TestUnclaimedEqualComparesEveryField(t *testing.T) {
 	withOneCandidate := stick
 	withOneCandidate.Candidates = []string{"usb_storage"}
@@ -285,11 +272,11 @@ func TestUnclaimedEqualComparesEveryField(t *testing.T) {
 	}
 }
 
-// An entry that leaves the unclaimed list is narrated by what made it
-// leave. A serial-line adapter already had its driver, so it leaves
-// when a spec.serio entry declares it. A device the catalog could not
-// name is narrated by its modalias.
-func TestTransitionsNarrateAnEntryThatLeft(t *testing.T) {
+// The line for an entry that left the list depends on why it left. A
+// serial-line adapter already had its driver, so it leaves when a
+// spec.serio entry declares it. A device with no name in the catalog
+// is shown by its modalias.
+func TestTransitionsReportWhyAnEntryLeftTheList(t *testing.T) {
 	adapter := machine.UnclaimedDevice{Modalias: "usb:v2548p1002", Bus: "usb", Name: "Pulse-Eight CEC adapter"}
 	unnamed := machine.UnclaimedDevice{Modalias: "pci:v00001234d00005678", Bus: "pci", Candidates: []string{"mystery"}}
 	cases := []struct {
@@ -305,25 +292,22 @@ func TestTransitionsNarrateAnEntryThatLeft(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			lines := hardwareTransitions([]machine.UnclaimedDevice{c.before}, nil, c.devices)
 			if len(lines) != 1 || lines[0] != c.want {
-				t.Errorf("lines = %q, want [%q]", lines, c.want)
+				t.Errorf("the console lines are %q, want [%q]", lines, c.want)
 			}
 		})
 	}
 }
 
-// modaliases lists the fingerprint of each unclaimed entry, in order.
 func modaliases(unclaimed []machine.UnclaimedDevice) []string {
-	var fingerprints []string
+	var aliases []string
 	for _, u := range unclaimed {
-		fingerprints = append(fingerprints, u.Modalias)
+		aliases = append(aliases, u.Modalias)
 	}
-	return fingerprints
+	return aliases
 }
 
-// The boot-time walk reports nothing on an image with no catalog, and
-// otherwise reports each device that no driver claims.
 func TestDiscoverUnclaimedNeedsACatalog(t *testing.T) {
-	root := fakeBus(t)
+	root := fakeSysfs(t)
 	addPCIDevice(t, root, "0000:00:1f.6", "0x020000", nicModalias)
 	catalog, _ := fixtureCatalog(t, map[string]string{nicModalias: "r8169"})
 	cases := []struct {
@@ -337,7 +321,7 @@ func TestDiscoverUnclaimedNeedsACatalog(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := modaliases(discoverUnclaimed(c.catalog)); !slices.Equal(got, c.want) {
-				t.Errorf("discoverUnclaimed found %q, want %q", got, c.want)
+				t.Errorf("discoverUnclaimed returned %q, want %q", got, c.want)
 			}
 		})
 	}

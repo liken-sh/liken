@@ -1,10 +1,8 @@
 package main
 
-// Tests for locating the system image. Slot selection is pure logic
-// over discovered partitions, and the RAM path is just a file check,
-// so both are tested against fixtures. The slot mount goes through the
-// recorder in mounttable_test.go. The loop device is tested only under
-// QEMU.
+// The slot search and the RAM image check run against fixtures, and
+// the slot mount goes through fakeStorageMounts. loopMount has no test
+// here, because it needs root and a loop device.
 
 import (
 	"os"
@@ -25,60 +23,54 @@ func TestSlotDeviceFindsTheNamedSlot(t *testing.T) {
 		{name: "sda3", disk: "sda", partName: "liken:machineState"},
 	}
 	if got, err := slotDevice(parts, "A"); err != nil || got != "/dev/sda1" {
-		t.Errorf("slot A: %q, %v", got, err)
+		t.Errorf("slotDevice(A) returned %q and %v, want /dev/sda1", got, err)
 	}
 	if got, err := slotDevice(parts, "B"); err != nil || got != "/dev/sda2" {
-		t.Errorf("slot B: %q, %v", got, err)
+		t.Errorf("slotDevice(B) returned %q and %v, want /dev/sda2", got, err)
 	}
 }
 
 func TestSlotDeviceMatchesByNameNotPosition(t *testing.T) {
-	// A disk may enumerate at a different position between boots. The
-	// GPT name is the identity, the same way storage recognition
-	// treats it.
+	// A disk can get a different device name on each boot, so the
+	// GPT name identifies the slot.
 	parts := []partition{
 		{name: "vdc7", disk: "vdc", partName: "liken:systemA"},
 	}
 	if got, err := slotDevice(parts, "A"); err != nil || got != "/dev/vdc7" {
-		t.Errorf("got %q, %v", got, err)
+		t.Errorf("slotDevice(A) returned %q and %v, want /dev/vdc7", got, err)
 	}
 }
 
 func TestSlotDeviceRefusesAmbiguity(t *testing.T) {
-	// Two partitions that claim one slot's name is exactly the state
-	// that a torn claim can leave behind. Recognition refuses to
-	// guess in that case.
+	// An interrupted storage claim can leave two partitions with one
+	// slot's name. slotDevice returns an error instead of choosing.
 	parts := []partition{
 		{name: "sda1", disk: "sda", partName: "liken:systemA"},
 		{name: "sdb1", disk: "sdb", partName: "liken:systemA"},
 	}
-	if _, err := slotDevice(parts, "A"); err == nil || !strings.Contains(err.Error(), "refusing to guess") {
-		t.Errorf("ambiguity must be refused: %v", err)
+	if _, err := slotDevice(parts, "A"); err == nil || !strings.Contains(err.Error(), "two partitions have the GPT name liken:systemA") {
+		t.Errorf("slotDevice error is %v, want two partitions with the name liken:systemA", err)
 	}
 }
 
 func TestSlotDeviceReportsAMissingSlot(t *testing.T) {
 	if _, err := slotDevice(nil, "A"); err == nil || !strings.Contains(err.Error(), "liken:systemA") {
-		t.Errorf("a missing slot names what it looked for: %v", err)
+		t.Errorf("slotDevice error is %v, want it to name liken:systemA", err)
 	}
 }
 
-// The slot wait tests run in synctest bubbles with the boot's own
-// poll and deadline. A wait's sleeps pass on the fake clock, so a test
-// checks the exact time a wait took.
+// The slot wait tests run in synctest bubbles with the boot's real
+// poll interval and deadline. The sleeps pass on the fake clock, so
+// each test can check how long the wait took.
 
-// mmc card detection runs on a workqueue after the host controller
-// registers, so on an eMMC machine the slot partition appears tens
-// of milliseconds after init first looks for it. liken.slot= on the
-// command line means the boot loader already read this slot, so the
-// partition is on this
-// machine and waiting for it is always correct.
+// A partition that appears after the first search, as on an eMMC
+// machine, is found at the next poll.
 func TestAwaitSlotDeviceWaitsForALateSlot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sys, dev := fakeMachine(t)
 		addDisk(t, sys, dev, "mmcblk0", 58<<30, nil)
-		// The partition is built out of the way first, so the goroutine that
-		// publishes it does one rename and reports one error.
+		// Build the partition in another directory and rename it into
+		// place, so that no search sees it half written.
 		addPartition(t, sys, "staged", "mmcblk0p1", "liken:systemA", 1<<30)
 		addPartitionNode(t, dev, "mmcblk0p1")
 
@@ -92,7 +84,7 @@ func TestAwaitSlotDeviceWaitsForALateSlot(t *testing.T) {
 		begin := time.Now()
 		got, err := awaitSlotDevice("A")
 		if err := <-published; err != nil {
-			t.Fatal(err)
+			t.Fatalf("publishing the device: %v", err)
 		}
 		if err != nil || got != dev+"/mmcblk0p1" {
 			t.Errorf("got %q, %v, want %s/mmcblk0p1", got, err, dev)
@@ -103,10 +95,6 @@ func TestAwaitSlotDeviceWaitsForALateSlot(t *testing.T) {
 	})
 }
 
-// The kernel publishes a partition's sysfs entry before devtmpfs
-// creates its node, so a poll landing in that window sees a
-// partition it cannot mount. The wait must keep waiting for the
-// node too.
 func TestAwaitSlotDeviceWaitsForTheDeviceNode(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sys, dev := fakeMachine(t)
@@ -126,7 +114,7 @@ func TestAwaitSlotDeviceWaitsForTheDeviceNode(t *testing.T) {
 			t.Errorf("the wait returned after %s, want the first poll after the node existed, at %s", elapsed, slotPoll)
 		}
 		if err := <-published; err != nil {
-			t.Fatal(err)
+			t.Fatalf("publishing the device: %v", err)
 		}
 		if err != nil || got != dev+"/mmcblk0p1" {
 			t.Errorf("got %q, %v, want %s/mmcblk0p1", got, err, dev)
@@ -134,8 +122,7 @@ func TestAwaitSlotDeviceWaitsForTheDeviceNode(t *testing.T) {
 	})
 }
 
-// A node that never appears reports the node it waited for, not
-// the partition, because the partition is right there in sysfs.
+// When the node never appears, the error names the node.
 func TestAwaitSlotDeviceReportsAMissingNodeAtTheDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sys, dev := fakeMachine(t)
@@ -145,7 +132,7 @@ func TestAwaitSlotDeviceReportsAMissingNodeAtTheDeadline(t *testing.T) {
 		begin := time.Now()
 		if _, err := awaitSlotDevice("A"); err == nil ||
 			!strings.Contains(err.Error(), dev+"/mmcblk0p1") {
-			t.Errorf("a node that never appears names itself: %v", err)
+			t.Errorf("error is %v, want it to name %s/mmcblk0p1", err, dev)
 		}
 		if elapsed := time.Since(begin); elapsed != slotDeadline {
 			t.Errorf("the wait gave up after %s, want the deadline, %s", elapsed, slotDeadline)
@@ -153,8 +140,6 @@ func TestAwaitSlotDeviceReportsAMissingNodeAtTheDeadline(t *testing.T) {
 	})
 }
 
-// A slot that is already there costs the boot nothing: the first
-// search finds it, with no sleep before it.
 func TestAwaitSlotDeviceReturnsAtOnceWhenTheSlotIsPresent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sys, dev := fakeMachine(t)
@@ -165,7 +150,7 @@ func TestAwaitSlotDeviceReturnsAtOnceWhenTheSlotIsPresent(t *testing.T) {
 		begin := time.Now()
 		got, err := awaitSlotDevice("A")
 		if elapsed := time.Since(begin); elapsed != 0 {
-			t.Errorf("a slot already present took %s; the first search must not wait", elapsed)
+			t.Errorf("a slot already present took %s, want no wait", elapsed)
 		}
 		if err != nil || got != dev+"/sda1" {
 			t.Errorf("got %q, %v, want %s/sda1", got, err, dev)
@@ -173,9 +158,6 @@ func TestAwaitSlotDeviceReturnsAtOnceWhenTheSlotIsPresent(t *testing.T) {
 	})
 }
 
-// Waiting cannot fix an ambiguity: a partition that attaches later
-// cannot un-name the two that already carry the slot's name, so the
-// refusal stands as soon as the search sees it.
 func TestAwaitSlotDeviceRefusesAmbiguityAtOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sys, dev := fakeMachine(t)
@@ -187,17 +169,14 @@ func TestAwaitSlotDeviceRefusesAmbiguityAtOnce(t *testing.T) {
 		begin := time.Now()
 		_, err := awaitSlotDevice("A")
 		if elapsed := time.Since(begin); elapsed != 0 {
-			t.Errorf("the refusal took %s; an ambiguity must not wait out the deadline", elapsed)
+			t.Errorf("the ambiguity error took %s, want it at once", elapsed)
 		}
-		if err == nil || !strings.Contains(err.Error(), "refusing to guess") {
-			t.Errorf("ambiguity must be refused: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "two partitions have the GPT name liken:systemA") {
+			t.Errorf("error is %v, want two partitions with the name liken:systemA", err)
 		}
 	})
 }
 
-// At the deadline the search reports what it looked for, and the
-// boot continues on rootfs, exactly as it did before the wait
-// existed.
 func TestAwaitSlotDeviceReportsAMissingSlotAtTheDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sys, dev := fakeMachine(t)
@@ -205,8 +184,8 @@ func TestAwaitSlotDeviceReportsAMissingSlotAtTheDeadline(t *testing.T) {
 
 		begin := time.Now()
 		if _, err := awaitSlotDevice("A"); err == nil ||
-			!strings.Contains(err.Error(), "no partition carries liken:systemA") {
-			t.Errorf("a slot that never appears reports what it looked for: %v", err)
+			!strings.Contains(err.Error(), "liken:systemA") {
+			t.Errorf("error is %v, want it to name liken:systemA", err)
 		}
 		if elapsed := time.Since(begin); elapsed != slotDeadline {
 			t.Errorf("the wait gave up after %s, want the deadline, %s", elapsed, slotDeadline)
@@ -215,12 +194,10 @@ func TestAwaitSlotDeviceReportsAMissingSlotAtTheDeadline(t *testing.T) {
 }
 
 func TestFindSystemImagePrefersTheRAMImage(t *testing.T) {
-	// If the loader delivers the image into rootfs, the boot mounts
-	// the image from there. It needs no disk or slot parameter.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "liken.sqfs")
 	if err := os.WriteFile(path, []byte("squash"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the RAM image: %v", err)
 	}
 	old := ramImage
 	ramImage = path
@@ -228,7 +205,7 @@ func TestFindSystemImagePrefersTheRAMImage(t *testing.T) {
 
 	got, err := findSystemImage("", filepath.Join(dir, "slot"))
 	if err != nil || got != path {
-		t.Errorf("got %q, %v", got, err)
+		t.Errorf("findSystemImage returned %q and %v, want %q", got, err, path)
 	}
 }
 
@@ -239,33 +216,30 @@ func TestFindSystemImageNeedsAnImageOrASlot(t *testing.T) {
 
 	if _, err := findSystemImage("", t.TempDir()); err == nil ||
 		!strings.Contains(err.Error(), "liken.slot") {
-		t.Errorf("a boot with neither image nor slot must say so: %v", err)
+		t.Errorf("error is %v, want it to mention liken.slot", err)
 	}
 }
 
 func TestFindSystemImageSearchesTheSlotByName(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// With no RAM image, the search checks the machine's real
-		// partitions. On the machine that runs this test, none of the
-		// partitions carry liken GPT names, so the error names the slot
-		// that the search looked for.
-		//
-		// The slot never appears in this test, and the bubble passes the
-		// boot's whole deadline on the fake clock.
+		// With no RAM image, the search reads the real partitions of
+		// the machine that runs the test. None has a liken GPT name, so
+		// the search runs to the deadline on the fake clock and the
+		// error names the slot it looked for.
 		old := ramImage
 		ramImage = filepath.Join(t.TempDir(), "absent.sqfs")
 		t.Cleanup(func() { ramImage = old })
 
 		if _, err := findSystemImage("A", t.TempDir()); err == nil ||
 			!strings.Contains(err.Error(), "liken:systemA") {
-			t.Errorf("the slot search must report what it looked for: %v", err)
+			t.Errorf("error is %v, want it to name liken:systemA", err)
 		}
 	})
 }
 
-// slotBDisk builds a machine whose disk carries slot B as vda1, with a
-// clean FAT32 volume on the partition's node, and no RAM image. It
-// returns the partition's device path.
+// slotBDisk builds a machine with slot B on vda1, a clean FAT32
+// volume on its device node, and no RAM image. It returns the
+// partition's device path.
 func slotBDisk(t *testing.T) string {
 	t.Helper()
 	sys, dev := fakeMachine(t)
@@ -277,11 +251,10 @@ func slotBDisk(t *testing.T) string {
 	return fatVolumeAt(t, filepath.Join(dev, "vda1"), false)
 }
 
-// The early boot mounts the slot for writing, and that mount sets the
-// volume's mark. So the boot must read the mark before it mounts the
-// slot, or every boot would report an unclean stop. The image is then
-// the file on the mounted slot.
-func TestFindSystemImageReadsTheSlotsMarkBeforeMountingIt(t *testing.T) {
+// The read-write mount of the slot sets the FAT dirty bit, so
+// findSystemImage must read the bit before the mount. Otherwise every
+// boot reads the bit that its own mount set and reports an unclean stop.
+func TestFindSystemImageReadsTheSlotsDirtyBitBeforeMountingIt(t *testing.T) {
 	device := slotBDisk(t)
 	mounts := fakeStorageMounts(t)
 	t.Setenv(bootedSlotStopEnv, "")
@@ -289,7 +262,7 @@ func TestFindSystemImageReadsTheSlotsMarkBeforeMountingIt(t *testing.T) {
 
 	got, err := findSystemImage("B", slotMount)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("finding the system image: %v", err)
 	}
 
 	if want := filepath.Join(slotMount, slotImageName); got != want {
@@ -299,8 +272,8 @@ func TestFindSystemImageReadsTheSlotsMarkBeforeMountingIt(t *testing.T) {
 	if !slices.Equal(mounts.mounts, want) {
 		t.Errorf("mounts = %+v, want %+v", mounts.mounts, want)
 	}
-	if mark := os.Getenv(bootedSlotStopEnv); mark != stopMarkClean {
-		t.Errorf("recorded mark = %q, want %q, read before the mount set it", mark, stopMarkClean)
+	if mark := os.Getenv(bootedSlotStopEnv); mark != lastStopClean {
+		t.Errorf("recorded mark = %q, want %q, read before the mount set it", mark, lastStopClean)
 	}
 }
 
@@ -312,29 +285,28 @@ func TestFindSystemImageReportsASlotThatWillNotMount(t *testing.T) {
 
 	_, err := findSystemImage("B", filepath.Join(t.TempDir(), "slot"))
 	if err == nil || !strings.Contains(err.Error(), "mounting slot B") {
-		t.Errorf("the error must name the slot that did not mount: %v", err)
+		t.Errorf("error is %v, want it to name slot B", err)
 	}
 }
 
 func TestLoadBootModulesReportsAMissingIndex(t *testing.T) {
-	// A boot archive without its depmod index has a build bug. The
-	// loader reports the error, and the boot continues. It may still
-	// fail later, at the mounts that needed the missing modules.
+	// A boot archive without modules.dep is a build defect. The loader
+	// prints the error and returns.
 	old := bootModulesDir
 	bootModulesDir = t.TempDir()
 	t.Cleanup(func() { bootModulesDir = old })
 
-	loadBootModules("overlay") // must not panic; it reports the error on stderr
+	loadBootModules("overlay")
 }
 
 func TestLoadBootModulesReportsAModuleItCannotLoad(t *testing.T) {
-	// The index may name a file that the archive does not carry. Or
-	// the test may simply not run as root. Either way, the loader
-	// reports each failure per module and keeps going.
+	// modules.dep can list a file that the archive does not have, and
+	// a test process that is not root cannot load modules. In both
+	// cases the loader prints one error for each module and continues.
 	dir := t.TempDir()
 	dep := "kernel/fs/overlayfs/overlay.ko.zst:\n"
 	if err := os.WriteFile(filepath.Join(dir, "modules.dep"), []byte(dep), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing modules.dep: %v", err)
 	}
 	old := bootModulesDir
 	bootModulesDir = dir
@@ -344,9 +316,8 @@ func TestLoadBootModulesReportsAModuleItCannotLoad(t *testing.T) {
 }
 
 func TestMaybeSwitchRootIsIdempotent(t *testing.T) {
-	// The re-exec passes the marker. The second run must do nothing,
-	// because the switch already happened and the mount tree is no
-	// longer empty.
+	// After the switch, init runs again with the marker argument. That
+	// second run must do nothing, because the switch already happened.
 	oldArgs := os.Args
 	os.Args = []string{"/liken", switchedMarker}
 	t.Cleanup(func() { os.Args = oldArgs })
@@ -354,11 +325,11 @@ func TestMaybeSwitchRootIsIdempotent(t *testing.T) {
 	maybeSwitchRoot() // must return without touching any mounts
 }
 
-// fakeEarlyBoot points the early boot's inputs at fixtures: a command
-// line chosen by the test, a boot module directory with no index,
-// and no RAM image. This only matters for a non-root test process.
-// In that case, every mount attempt fails with EPERM, which is
-// exactly the degraded path that these tests exercise.
+// fakeEarlyBoot points the early boot at fixtures: a command line
+// chosen by the test, a boot module directory with no modules.dep, and
+// no RAM image. It skips the test as root, because the mounts would
+// succeed on the real machine. Without root, every mount fails with
+// EPERM, which is the failure path these tests exercise.
 func fakeEarlyBoot(t *testing.T, cmdline string) {
 	t.Helper()
 	if os.Geteuid() == 0 {
@@ -367,7 +338,7 @@ func fakeEarlyBoot(t *testing.T, cmdline string) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cmdline")
 	if err := os.WriteFile(path, []byte(cmdline), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the command line: %v", err)
 	}
 	oldCmdline, oldModules, oldImage, oldArgs := cmdlinePath, bootModulesDir, ramImage, os.Args
 	cmdlinePath, bootModulesDir, ramImage = path, dir, filepath.Join(dir, "absent.sqfs")
@@ -378,20 +349,18 @@ func fakeEarlyBoot(t *testing.T, cmdline string) {
 }
 
 func TestMaybeSwitchRootStaysPutForInstallBoots(t *testing.T) {
-	// The installer runs from rootfs and then powers off. If it
-	// switched root, its large payload would exceed the overlay's
-	// size limit.
+	// The installer runs from rootfs and then powers off. After a
+	// switch, its large payload would not fit in the size-limited
+	// overlay.
 	fakeEarlyBoot(t, "console=ttyS0 rdinit=/liken liken.install\n")
 	maybeSwitchRoot() // must take the install branch and return
 }
 
 func TestMaybeSwitchRootDegradesWhenTheSwitchFails(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// A failed switch leaves a degraded machine, not a dead one. The
-		// error is reported, and the boot continues from rootfs.
-		//
-		// The slot never appears in this test either, and the bubble
-		// passes the deadline on the fake clock.
+		// When the switch fails, init prints the error and the boot
+		// continues from rootfs. The slot never appears, so the wait
+		// runs to the deadline on the fake clock.
 		fakeEarlyBoot(t, "console=ttyS0 rdinit=/liken liken.slot=A\n")
 		maybeSwitchRoot() // the switch fails (no privileges) and returns
 	})

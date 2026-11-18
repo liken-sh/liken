@@ -1,7 +1,7 @@
 package main
 
-// Tests for the module index parsing: the file formats depmod leaves
-// behind. Actually loading modules into a kernel is QEMU territory.
+// These tests load no module into a real kernel. A QEMU guest tests
+// that.
 
 import (
 	"errors"
@@ -18,7 +18,7 @@ func writeFile(t *testing.T, name, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the test file: %v", err)
 	}
 	return path
 }
@@ -27,7 +27,7 @@ func writeBytes(t *testing.T, name string, content []byte) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, content, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the test file: %v", err)
 	}
 	return path
 }
@@ -36,17 +36,17 @@ func TestReadModuleListSkipsCommentsAndBlanks(t *testing.T) {
 	path := writeFile(t, "modules.list", "# storage\nvirtio_blk\n\n  ext4  \n")
 	names, err := readModuleList(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the module list: %v", err)
 	}
 	if !slices.Equal(names, []string{"virtio_blk", "ext4"}) {
-		t.Errorf("got %v", names)
+		t.Errorf("the names are %v, want virtio_blk and ext4", names)
 	}
 }
 
 func TestReadModuleListToleratesAMissingFile(t *testing.T) {
 	names, err := readModuleList(filepath.Join(t.TempDir(), "absent"))
 	if names != nil || err != nil {
-		t.Errorf("a missing list means nothing to load: %v, %v", names, err)
+		t.Errorf("a missing list returned %v and error %v, want no names and no error", names, err)
 	}
 }
 
@@ -57,25 +57,23 @@ func TestReadModulesDepParsesTheIndex(t *testing.T) {
 			"not an entry\n")
 	deps, err := readModulesDep(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading modules.dep: %v", err)
 	}
 	overlay := deps["overlay"]
 	if !slices.Equal(overlay, []string{"kernel/fs/overlayfs/overlay.ko.zst", "kernel/a.ko.zst", "kernel/b.ko.zst"}) {
-		t.Errorf("got %v", overlay)
+		t.Errorf("the entry of overlay is %v, want its file then a.ko.zst and b.ko.zst", overlay)
 	}
-	// Module names use "_" and "-" interchangeably; the index keys
-	// normalize to "_" so lookups can too.
 	if _, ok := deps["virtio_blk"]; !ok {
-		t.Errorf("dashes normalize to underscores: %v", deps)
+		t.Errorf("the index is %v, want a virtio_blk key for virtio-blk", deps)
 	}
 }
 
 func TestModuleNameStripsExtensionsAndNormalizes(t *testing.T) {
 	if got := moduleName("kernel/drivers/block/virtio-blk.ko.zst"); got != "virtio_blk" {
-		t.Errorf("got %q", got)
+		t.Errorf("the name is %q, want virtio_blk", got)
 	}
 	if got := moduleName("kernel/fs/ext4.ko"); got != "ext4" {
-		t.Errorf("got %q", got)
+		t.Errorf("the name is %q, want ext4", got)
 	}
 }
 
@@ -84,21 +82,20 @@ func TestReadModulesBuiltinKeysLikeTheDepIndex(t *testing.T) {
 		"kernel/fs/binfmt_misc.ko\nkernel/drivers/char/hw_random/rng-core.ko\n\n")
 	builtin, err := readModulesBuiltin(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading modules.builtin: %v", err)
 	}
 	if !builtin["binfmt_misc"] {
-		t.Errorf("binfmt_misc should be builtin: %v", builtin)
+		t.Errorf("the builtin set is %v, want binfmt_misc in it", builtin)
 	}
 	if !builtin["rng_core"] {
-		t.Errorf("dashes normalize to underscores: %v", builtin)
+		t.Errorf("the builtin set is %v, want rng_core for rng-core", builtin)
 	}
 }
 
-// declaredFixture is the module world a declared-modules test runs
-// against: one shippable module, one builtin, and a loader that fails
-// on demand, so every outcome in the vocabulary is reachable. The pass
-// records the parameter string each load received, so a test reads back
-// what the kernel would have got.
+// declaredFixture returns a modules.dep with nvidia, a
+// modules.builtin with loop, and a declaredPass whose load fails for
+// the module named by failing. The last return value records the
+// parameter string that each load passed.
 func declaredFixture(failing string) (map[string][]string, map[string]bool, declaredPass, map[string]string) {
 	deps := map[string][]string{"nvidia": {"kernel/nvidia.ko.zst"}}
 	builtin := map[string]bool{"loop": true}
@@ -112,7 +109,7 @@ func declaredFixture(failing string) (map[string][]string, map[string]bool, decl
 			}
 			return nil
 		},
-		readback: func(string) map[string]string { return nil },
+		readParameters: func(string) map[string]string { return nil },
 	}
 	return deps, builtin, pass, passed
 }
@@ -123,11 +120,11 @@ func TestDeclaredModuleOutcomes(t *testing.T) {
 	states := []machine.ModuleState{machine.ModuleLoaded, machine.ModuleBuiltin, machine.ModuleMissing}
 	for i, want := range states {
 		if statuses[i].State != want {
-			t.Errorf("%s: got %s, want %s", statuses[i].Name, statuses[i].State, want)
+			t.Errorf("%s is %s, want %s", statuses[i].Name, statuses[i].State, want)
 		}
 	}
 	if statuses[2].Message == "" {
-		t.Error("a missing module's message must name the fix")
+		t.Error("the message of a missing module is empty, want a message that names the fix")
 	}
 }
 
@@ -135,10 +132,10 @@ func TestDeclaredModuleOutcomesReportsKernelRefusals(t *testing.T) {
 	deps, builtin, pass, _ := declaredFixture("nvidia")
 	statuses := declaredModuleOutcomes([]string{"nvidia"}, deps, builtin, nil, pass)
 	if statuses[0].State != machine.ModuleFailed {
-		t.Errorf("got %s", statuses[0].State)
+		t.Errorf("the state is %s, want Failed", statuses[0].State)
 	}
 	if statuses[0].Message != "finit_module: no such device" {
-		t.Errorf("message: got %q", statuses[0].Message)
+		t.Errorf("the message is %q, want the error of the load", statuses[0].Message)
 	}
 }
 
@@ -147,7 +144,7 @@ func TestDeclaredModuleOutcomesNormalizesDashes(t *testing.T) {
 	deps := map[string][]string{"rng_core": {"kernel/rng-core.ko.zst"}}
 	statuses := declaredModuleOutcomes([]string{"rng-core"}, deps, builtin, nil, pass)
 	if statuses[0].State != machine.ModuleLoaded {
-		t.Errorf("got %s", statuses[0].State)
+		t.Errorf("the state is %s, want Loaded", statuses[0].State)
 	}
 }
 
@@ -155,45 +152,44 @@ func TestLoadDeclaredModulesFromAFabricatedTree(t *testing.T) {
 	base := t.TempDir()
 	deps := "kernel/drivers/gpu/nvidia.ko.zst:\n"
 	if err := os.WriteFile(filepath.Join(base, "modules.dep"), []byte(deps), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing modules.dep: %v", err)
 	}
 	builtin := "kernel/block/loop.ko\n"
 	if err := os.WriteFile(filepath.Join(base, "modules.builtin"), []byte(builtin), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing modules.builtin: %v", err)
 	}
-	// nvidia is indexed but its file does not exist here, so the
-	// load itself fails: this reaches the Failed path without a real
-	// kernel involved.
+	// modules.dep lists nvidia, but the tree has no file for it, so
+	// the load fails without a kernel.
 	statuses := loadDeclaredModulesFrom(base, []string{"nvidia", "loop", "nbd"}, nil)
 	states := []machine.ModuleState{machine.ModuleFailed, machine.ModuleBuiltin, machine.ModuleMissing}
 	for i, want := range states {
 		if statuses[i].State != want {
-			t.Errorf("%s: got %s, want %s", statuses[i].Name, statuses[i].State, want)
+			t.Errorf("%s is %s, want %s", statuses[i].Name, statuses[i].State, want)
 		}
 	}
 }
 
 func TestLoadDeclaredModulesWithNothingDeclared(t *testing.T) {
 	if statuses := loadDeclaredModules(nil, nil); statuses != nil {
-		t.Errorf("nothing declared means nothing to report: %v", statuses)
+		t.Errorf("with no declared modules the statuses are %v, want nil", statuses)
 	}
 }
 
 func TestLoadDeclaredModulesFromAMissingTree(t *testing.T) {
 	statuses := loadDeclaredModulesFrom(filepath.Join(t.TempDir(), "absent"), []string{"nvidia"}, nil)
 	if len(statuses) != 1 || statuses[0].State != machine.ModuleMissing {
-		t.Errorf("an unreadable index reads as nothing shipped: %v", statuses)
+		t.Errorf("with no modules.dep the statuses are %v, want one Missing status", statuses)
 	}
 }
 
-func TestKernelReleaseAsksTheKernel(t *testing.T) {
+func TestKernelReleaseIsNotEmpty(t *testing.T) {
 	if release := kernelRelease(); release == "" {
-		t.Error("uname always has a release string")
+		t.Error("the kernel release is empty, want the uname release string")
 	}
 }
 
-// fakeModulesConf points the fixed-list pass at a list of the test's
-// making, restoring the real path when the test ends.
+// fakeModulesConf makes loadModules read the list at path, and
+// restores modulesConf when the test ends.
 func fakeModulesConf(t *testing.T, path string) {
 	t.Helper()
 	old := modulesConf
@@ -214,7 +210,7 @@ func TestLoadModulesWithAnEmptyListLoadsNothing(t *testing.T) {
 func TestLoadModulesReportsAnUnreadableList(t *testing.T) {
 	path := writeFile(t, "modules.conf", "overlay\n")
 	if err := os.Chmod(path, 0o000); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the list unreadable: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
 	fakeModulesConf(t, path)
@@ -222,43 +218,38 @@ func TestLoadModulesReportsAnUnreadableList(t *testing.T) {
 }
 
 func TestLoadModuleReportsAMissingModuleFile(t *testing.T) {
-	// The index promises a file that the tree does not hold. The open
-	// fails as an ordinary error, and nothing counts as loaded.
 	base := t.TempDir()
 	deps := map[string][]string{"overlay": {"kernel/fs/overlayfs/overlay.ko.zst"}}
 	n, err := loadModule(base, "overlay", "", deps, map[string]bool{})
 	if err == nil || n != 0 {
-		t.Errorf("a missing file is an error and loads nothing: %d, %v", n, err)
+		t.Errorf("loading a module with no file loaded %d files with error %v, want 0 files and an error", n, err)
 	}
 }
 
 func TestLoadModuleReportsAKernelRefusal(t *testing.T) {
-	// The file exists, but the kernel refuses it (here, because an
-	// ordinary process may not load modules; on a real boot, because
-	// the bytes are not a module). Either way, this is the same
-	// branch: finit_module's error, wrapped with the file's name.
+	// finit_module fails, because the test runs unprivileged or
+	// because the file is not a module.
 	base := t.TempDir()
 	rel := "kernel/fake.ko.zst"
 	if err := os.MkdirAll(filepath.Join(base, "kernel"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the kernel directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(base, rel), []byte("not a module"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the fake module: %v", err)
 	}
 	deps := map[string][]string{"fake": {rel}}
 	n, err := loadModule(base, "fake", "", deps, map[string]bool{})
 	if err == nil || !strings.Contains(err.Error(), "finit_module") || n != 0 {
-		t.Errorf("expected the kernel's refusal to surface: %d, %v", n, err)
+		t.Errorf("loading a file that is not a module loaded %d files with error %v, want 0 files and a finit_module error", n, err)
 	}
 }
 
 func TestLoadModuleSkipsFilesAlreadyLoaded(t *testing.T) {
-	// A dependency that another chain already fed to the kernel is
-	// skipped entirely: no open, no syscall, no count.
+	// The file does not exist, so an open would fail.
 	deps := map[string][]string{"overlay": {"kernel/fs/overlayfs/overlay.ko.zst"}}
 	loaded := map[string]bool{"kernel/fs/overlayfs/overlay.ko.zst": true}
 	n, err := loadModule(t.TempDir(), "overlay", "", deps, loaded)
 	if err != nil || n != 0 {
-		t.Errorf("an already-loaded chain is a no-op: %d, %v", n, err)
+		t.Errorf("loading a chain that is already loaded loaded %d files with error %v, want 0 files and no error", n, err)
 	}
 }

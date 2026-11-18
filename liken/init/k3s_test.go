@@ -1,10 +1,10 @@
 package main
 
-// Tests for the cluster-derived k3s configuration: role, node
-// address, and the drop-in's contents. k3s's on-disk state (the
-// clusterState seeds, a demoted leader's datastore) is
-// k3s_state_test.go's side of the split. Starting k3s itself runs
-// only under QEMU. The derivations are pinned here.
+// Tests for the k3s configuration that init derives from the cluster:
+// the role, the node address, and the contents of the drop-in. The
+// state that init prepares on disk (the clusterState seed files and a
+// demoted leader's datastore) is tested in k3s_state_test.go. Starting
+// k3s itself is only tested under QEMU.
 
 import (
 	"net"
@@ -19,13 +19,13 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// conn builds a connection with just enough shape for derivation
-// tests: an interface name and its address in CIDR form.
+// conn builds a connection with an interface name and an address given
+// in CIDR form, which is all that the address derivation reads.
 func conn(t *testing.T, ifname, cidr string) *connection {
 	t.Helper()
 	ip, subnet, err := net.ParseCIDR(cidr)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing %q: %v", cidr, err)
 	}
 	return &connection{ifname: ifname, addr: &net.IPNet{IP: ip, Mask: subnet.Mask}}
 }
@@ -54,28 +54,28 @@ func TestNodeAddressPicksTheClusterFacingInterface(t *testing.T) {
 	}
 	ip, ifname := nodeAddress(labCluster(), conns)
 	if ip != "10.10.0.2" || ifname != "eth1" {
-		t.Errorf("got %s on %s, want 10.10.0.2 on eth1", ip, ifname)
+		t.Errorf("the node address is %s on %s, want 10.10.0.2 on eth1", ip, ifname)
 	}
 }
 
-func TestNodeAddressWithoutAClusterIsUndecided(t *testing.T) {
+func TestNodeAddressWithoutAClusterIsEmpty(t *testing.T) {
 	conns := []*connection{conn(t, "eth0", "10.0.2.15/24")}
 	if ip, ifname := nodeAddress(nil, conns); ip != "" || ifname != "" {
-		t.Errorf("no cluster should mean no derivation, got %s on %s", ip, ifname)
+		t.Errorf("nodeAddress returned %q on %q, want none with no cluster", ip, ifname)
 	}
 }
 
-func TestNodeAddressOutsideTheNodeCIDRIsUndecided(t *testing.T) {
+func TestNodeAddressOutsideTheNodeCIDRIsEmpty(t *testing.T) {
 	conns := []*connection{conn(t, "eth0", "10.0.2.15/24")}
 	if ip, ifname := nodeAddress(labCluster(), conns); ip != "" || ifname != "" {
-		t.Errorf("no address in the nodeCIDR should mean no derivation, got %s on %s", ip, ifname)
+		t.Errorf("nodeAddress returned %q on %q, want none when no address is in the nodeCIDR", ip, ifname)
 	}
 }
 
 func TestLeaderJoinConfigWithOneLeaderStaysAlone(t *testing.T) {
 	clusterInit, joinURL := leaderJoinConfig(labCluster(), "node-1", t.TempDir())
 	if clusterInit || joinURL != "" {
-		t.Errorf("a single leader is sqlite-backed and joins nothing: %v %q", clusterInit, joinURL)
+		t.Errorf("clusterInit is %v and the join URL is %q, want false and none for a single leader, which uses sqlite", clusterInit, joinURL)
 	}
 }
 
@@ -88,7 +88,7 @@ func haCluster() *cluster.Cluster {
 func TestLeaderJoinConfigForTheFoundingLeader(t *testing.T) {
 	clusterInit, joinURL := leaderJoinConfig(haCluster(), "node-1", t.TempDir())
 	if !clusterInit || joinURL != "" {
-		t.Errorf("the founding leader renders cluster-init and joins nothing: %v %q", clusterInit, joinURL)
+		t.Errorf("clusterInit is %v and the join URL is %q, want true and none for the founding leader", clusterInit, joinURL)
 	}
 }
 
@@ -96,23 +96,21 @@ func TestLeaderJoinConfigForAJoiningLeader(t *testing.T) {
 	dir := manifestsDir(t, map[string]string{"node-1": "10.10.0.1/24"})
 	clusterInit, joinURL := leaderJoinConfig(haCluster(), "node-3", dir)
 	if clusterInit || joinURL != "https://10.10.0.1:6443" {
-		t.Errorf("a joining leader points at the founder: %v %q", clusterInit, joinURL)
+		t.Errorf("clusterInit is %v and the join URL is %q, want false and the founder's https://10.10.0.1:6443 for a joining leader", clusterInit, joinURL)
 	}
 }
 
 func TestLeaderJoinConfigFallsBackToTheEndpoint(t *testing.T) {
-	// The founder declares no static address (DHCP). The endpoint is
-	// the one address that the deployment promised is reachable.
+	// The founder has no manifest with a static address, so the joining
+	// leader joins spec.endpoint.
 	clusterInit, joinURL := leaderJoinConfig(haCluster(), "node-3", t.TempDir())
 	if clusterInit || joinURL != "https://10.10.0.1:6443" {
-		t.Errorf("an unresolvable founder falls back to the endpoint: %v %q", clusterInit, joinURL)
+		t.Errorf("clusterInit is %v and the join URL is %q, want false and the endpoint when the founder does not resolve", clusterInit, joinURL)
 	}
 }
 
-// adoptedCluster is an HA cluster whose datastore liken did not
-// create. The endpoint points at the existing (foreign) control
-// plane, and origin: Adopted says that no leader may initialize a
-// new datastore.
+// adoptedCluster is a cluster of several leaders whose datastore liken
+// did not create. The endpoint is the existing control plane.
 func adoptedCluster() *cluster.Cluster {
 	c := haCluster()
 	c.Spec.Origin = cluster.OriginAdopted
@@ -123,7 +121,7 @@ func adoptedCluster() *cluster.Cluster {
 func TestLeaderJoinConfigAdoptedFounderJoinsTheEndpoint(t *testing.T) {
 	clusterInit, joinURL := leaderJoinConfig(adoptedCluster(), "node-1", t.TempDir())
 	if clusterInit || joinURL != "https://10.10.0.250:6443" {
-		t.Errorf("an adopted cluster's founding leader joins the existing datastore, never initializes one: %v %q", clusterInit, joinURL)
+		t.Errorf("clusterInit is %v and the join URL is %q, want false and the existing datastore's endpoint for an adopted cluster's founding leader", clusterInit, joinURL)
 	}
 }
 
@@ -132,7 +130,7 @@ func TestLeaderJoinConfigAdoptedSingleLeaderStillJoins(t *testing.T) {
 	c.Spec.Leaders = []string{"node-1"}
 	clusterInit, joinURL := leaderJoinConfig(c, "node-1", t.TempDir())
 	if clusterInit || joinURL != "https://10.10.0.250:6443" {
-		t.Errorf("adoption is never sqlite: even a lone leader joins the existing datastore: %v %q", clusterInit, joinURL)
+		t.Errorf("clusterInit is %v and the join URL is %q, want false and the existing datastore's endpoint for a lone leader of an adopted cluster", clusterInit, joinURL)
 	}
 }
 
@@ -140,31 +138,31 @@ func TestLeaderJoinConfigAdoptedJoiningLeaderPrefersTheFounder(t *testing.T) {
 	dir := manifestsDir(t, map[string]string{"node-1": "10.10.0.1/24"})
 	clusterInit, joinURL := leaderJoinConfig(adoptedCluster(), "node-3", dir)
 	if clusterInit || joinURL != "https://10.10.0.1:6443" {
-		t.Errorf("an adopted joining leader points at the founder like any other: %v %q", clusterInit, joinURL)
+		t.Errorf("clusterInit is %v and the join URL is %q, want false and the founder's URL for a joining leader of an adopted cluster", clusterInit, joinURL)
 	}
 }
 
 func TestK3sBootConfigForTheFoundingLeader(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: haCluster(), nodeIP: "10.10.0.1", nodeInterface: "eth1", haveToken: true, clusterInit: true})
 	if !strings.Contains(got, "cluster-init: true\n") {
-		t.Errorf("the founding leader migrates to embedded etcd:\n%s", got)
+		t.Errorf("the founding leader's config has no cluster-init: true, want it:\n%s", got)
 	}
 	if strings.Contains(got, "server:") {
-		t.Errorf("the founding leader joins nothing:\n%s", got)
+		t.Errorf("the founding leader's config has a server: key, want none:\n%s", got)
 	}
 }
 
 func TestK3sBootConfigForAJoiningLeader(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: haCluster(), nodeIP: "10.10.0.3", nodeInterface: "eth1", haveToken: true, joinURL: "https://10.10.0.1:6443"})
 	if !strings.Contains(got, "server: https://10.10.0.1:6443\n") {
-		t.Errorf("a joining leader points at the founder:\n%s", got)
+		t.Errorf("the joining leader's config has no server: https://10.10.0.1:6443, want it:\n%s", got)
 	}
 	if strings.Contains(got, "cluster-init") {
-		t.Errorf("only the founding leader renders cluster-init:\n%s", got)
+		t.Errorf("the joining leader's config has cluster-init, want it only on the founding leader:\n%s", got)
 	}
-	// Every leader carries the address plan; they must all agree.
+	// Every leader renders the cluster's CIDRs.
 	if !strings.Contains(got, "cluster-cidr: 10.42.0.0/16\n") {
-		t.Errorf("a joining leader still declares the address plan:\n%s", got)
+		t.Errorf("the joining leader's config has no cluster-cidr, want the cluster's CIDRs on every leader:\n%s", got)
 	}
 }
 
@@ -180,11 +178,11 @@ func TestK3sBootConfigForALeader(t *testing.T) {
 		"flannel-iface: eth1\n",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("leader config should carry %q:\n%s", want, got)
+			t.Errorf("leader config does not contain %q:\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, "server:") {
-		t.Errorf("a leader doesn't join an endpoint:\n%s", got)
+		t.Errorf("the leader's config has a server: key, want none:\n%s", got)
 	}
 }
 
@@ -197,15 +195,13 @@ func TestK3sBootConfigForAFollower(t *testing.T) {
 		"flannel-iface: eth1\n",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("follower config should carry %q:\n%s", want, got)
+			t.Errorf("follower config does not contain %q:\n%s", want, got)
 		}
 	}
-	// The address plan belongs to the control plane to declare. If a
-	// follower told k3s about it, k3s would misread it as unknown
-	// flags.
+	// A k3s agent refuses these keys.
 	for _, reject := range []string{"cluster-cidr", "service-cidr", "cluster-dns", "cluster-domain"} {
 		if strings.Contains(got, reject) {
-			t.Errorf("follower config should not carry %s:\n%s", reject, got)
+			t.Errorf("follower config contains %s, want it absent:\n%s", reject, got)
 		}
 	}
 }
@@ -217,13 +213,9 @@ func TestK3sBootConfigRendersNodeLabels(t *testing.T) {
 	}
 	for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
 		got := k3sBootConfig(k3sBootInputs{role: role, clusterDoc: labCluster(), haveToken: true, nodeLabels: labels})
-		// The + suffix asks k3s to append to the static file's list
-		// instead of replacing it. Without it, the drop-in would erase
-		// liken.sh/machine=true. Keys render sorted, so the drop-in is
-		// deterministic for the same spec.
 		want := "node-label+:\n  - guid.foo/gpu=true\n  - topology.kubernetes.io/zone=closet\n"
 		if !strings.Contains(got, want) {
-			t.Errorf("%s config should append the spec's node labels:\n%s", role, got)
+			t.Errorf("the %s config does not append the spec's node labels, want %q:\n%s", role, want, got)
 		}
 	}
 }
@@ -236,23 +228,16 @@ func TestK3sBootConfigRendersNodeTaints(t *testing.T) {
 	}
 	for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
 		got := k3sBootConfig(k3sBootInputs{role: role, clusterDoc: labCluster(), haveToken: true, nodeTaints: taints})
-		// A taint with no value renders key:Effect, and a taint with
-		// one renders key=value:Effect, which is the grammar the
-		// kubelet parses. Entries render sorted by key and then by
-		// effect, so the drop-in is deterministic for the same spec.
 		want := "node-taint+:\n" +
 			"  - guid.foo/drill:NoExecute\n" +
 			"  - guid.foo/drill:PreferNoSchedule\n" +
 			"  - node-role.kubernetes.io/database=primary:NoSchedule\n"
 		if !strings.Contains(got, want) {
-			t.Errorf("%s config should append the spec's node taints:\n%s", role, got)
+			t.Errorf("the %s config does not append the spec's node taints, want %q:\n%s", role, want, got)
 		}
 	}
 }
 
-// kube-proxy runs on every node, so both roles carry the setting,
-// and the drop-in always states it whole. The static config files
-// name it nowhere, so this drop-in is its only author.
 func TestK3sBootConfigRendersTheNodePortNetworks(t *testing.T) {
 	cases := map[string]struct {
 		cidrs []string
@@ -271,16 +256,15 @@ func TestK3sBootConfigRendersTheNodePortNetworks(t *testing.T) {
 				clusterDoc.Spec.Network.NodePortCIDRs = tc.cidrs
 				got := k3sBootConfig(k3sBootInputs{role: role, clusterDoc: clusterDoc, haveToken: true})
 				if !strings.Contains(got, tc.want) {
-					t.Errorf("%s config should carry %q:\n%s", role, tc.want, got)
+					t.Errorf("%s config does not contain %q:\n%s", role, tc.want, got)
 				}
 			}
 		})
 	}
 }
 
-// imageGCCluster is the lab cluster with an image collection policy
-// that names every field, so a test can watch all four reach the
-// kubelet's configuration file.
+// imageGCCluster is the lab cluster with every image garbage
+// collection field set.
 func imageGCCluster() *cluster.Cluster {
 	c := labCluster()
 	high, low := 70, 60
@@ -293,9 +277,8 @@ func imageGCCluster() *cluster.Cluster {
 	return c
 }
 
-// The configuration file carries only the fields the document names,
-// under the kubelet's own field names, so nothing the cluster left
-// unset gets an author here.
+// A field that the cluster leaves unset is not written, so the kubelet
+// keeps its default.
 func TestKubeletImageGCSettingsRenderOnlyWhatIsNamed(t *testing.T) {
 	high := 70
 	cases := map[string]struct {
@@ -324,14 +307,12 @@ func TestKubeletImageGCSettingsRenderOnlyWhatIsNamed(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			if got := kubeletImageGCSettings(tc.spec); !slices.Equal(got, tc.want) {
-				t.Errorf("got %v, want %v", got, tc.want)
+				t.Errorf("the result is %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-// The file is a KubeletConfiguration document, because the age
-// ceiling has no kubelet flag and exists only in this file.
 func TestKubeletBootConfigIsAKubeletConfiguration(t *testing.T) {
 	got := kubeletBootConfig([]string{"imageMaximumGCAge: 168h"})
 	for _, want := range []string{
@@ -340,23 +321,17 @@ func TestKubeletBootConfigIsAKubeletConfiguration(t *testing.T) {
 		"imageMaximumGCAge: 168h\n",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("the kubelet configuration should carry %q:\n%s", want, got)
+			t.Errorf("the kubelet configuration does not contain %q:\n%s", want, got)
 		}
 	}
 }
 
-// A cluster that names no policy gets no file at all, so the kubelet
-// keeps its whole default policy.
 func TestKubeletBootConfigIsEmptyWhenNothingIsNamed(t *testing.T) {
 	if got := kubeletBootConfig(nil); got != "" {
-		t.Errorf("no named setting means no file:\n%s", got)
+		t.Errorf("kubeletBootConfig(nil) is %q, want empty when no setting is set", got)
 	}
 }
 
-// The kubelet runs on every node, so both roles name the file. k3s
-// passes no image collection flag of its own, and a kubelet flag would
-// beat the file, so the drop-in and the file have one author between
-// them.
 func TestK3sBootConfigNamesTheKubeletConfig(t *testing.T) {
 	for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
 		got := k3sBootConfig(k3sBootInputs{
@@ -365,7 +340,7 @@ func TestK3sBootConfigNamesTheKubeletConfig(t *testing.T) {
 		})
 		want := "kubelet-arg:\n  - config=/etc/rancher/k3s/kubelet.yaml\n"
 		if !strings.Contains(got, want) {
-			t.Errorf("%s config should carry %q:\n%s", role, want, got)
+			t.Errorf("%s config does not contain %q:\n%s", role, want, got)
 		}
 	}
 }
@@ -374,14 +349,13 @@ func TestK3sBootConfigWithoutAKubeletConfigNamesNone(t *testing.T) {
 	for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
 		got := k3sBootConfig(k3sBootInputs{role: role, clusterDoc: labCluster(), haveToken: true})
 		if strings.Contains(got, "kubelet-arg") {
-			t.Errorf("%s: no policy means no kubelet-arg key:\n%s", role, got)
+			t.Errorf("the %s config has a kubelet-arg key, want none with no policy:\n%s", role, got)
 		}
 	}
 }
 
-// debugCluster is the lab cluster with both log level knobs turned
-// away from their defaults, so a test can watch each one reach the
-// file that carries it.
+// debugCluster is the lab cluster with k3s's debug flag and a
+// containerd log level set.
 func debugCluster() *cluster.Cluster {
 	c := labCluster()
 	c.Spec.Runtime.K3s.Debug = true
@@ -389,33 +363,27 @@ func debugCluster() *cluster.Cluster {
 	return c
 }
 
-// A follower's components are as loud as a leader's, so both roles
-// render the key.
 func TestK3sBootConfigRendersTheDebugKey(t *testing.T) {
 	for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
 		got := k3sBootConfig(k3sBootInputs{role: role, clusterDoc: labCluster(), haveToken: true, debug: true})
 		if !strings.Contains(got, "debug: true\n") {
-			t.Errorf("%s config should carry the debug key:\n%s", role, got)
+			t.Errorf("the %s config has no debug: true, want it:\n%s", role, got)
 		}
 	}
 }
 
-// A cluster that leaves debug unset renders the bytes it rendered
-// before the field existed, so the upgrade that added it restarts no
-// machine.
 func TestK3sBootConfigWithoutDebugNamesNone(t *testing.T) {
 	for _, role := range []api.Role{api.RoleLeader, api.RoleFollower} {
 		got := k3sBootConfig(k3sBootInputs{role: role, clusterDoc: labCluster(), haveToken: true})
 		if strings.Contains(got, "debug:") {
-			t.Errorf("%s: an unset field means no debug key:\n%s", role, got)
+			t.Errorf("the %s config has a debug key, want none when the field is unset:\n%s", role, got)
 		}
 	}
 }
 
-// The drop-in carries one table and the version that k3s renders. It
-// restates nothing else from k3s's configuration, and it is not a
-// template, so nothing here can break the file that starts containerd.
-func TestContainerdLogLevelDropInCarriesOnlyTheLevel(t *testing.T) {
+// The drop-in sets only the level, so it cannot break the
+// configuration that k3s renders for containerd.
+func TestContainerdLogLevelDropInSetsOnlyTheLevel(t *testing.T) {
 	got := containerdLogLevelDropIn("warn")
 	for _, want := range []string{
 		"version = 3\n",
@@ -423,32 +391,29 @@ func TestContainerdLogLevelDropInCarriesOnlyTheLevel(t *testing.T) {
 		`level = "warn"`,
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("the drop-in should carry %q:\n%s", want, got)
+			t.Errorf("the drop-in does not contain %q:\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, "{{") {
-		t.Errorf("the drop-in is TOML, not a template:\n%s", got)
+		t.Errorf("the drop-in has template markers {{, want TOML:\n%s", got)
 	}
 }
 
 func TestContainerdLogLevelDropInIsEmptyWhenNoLevelIsNamed(t *testing.T) {
 	if got := containerdLogLevelDropIn(""); got != "" {
-		t.Errorf("no named level means no drop-in:\n%s", got)
+		t.Errorf("containerdLogLevelDropIn(\"\") is %q, want empty when no level is set", got)
 	}
 }
 
-// A machine with no cluster document is a leader of one, and it
-// still states the setting rather than leaving kube-proxy on its own
-// broad default.
+// A machine with no cluster document still renders the setting,
+// because kube-proxy's own default is every local address.
 func TestK3sBootConfigWithNoClusterStillNamesTheNodePortNetworks(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, haveToken: true})
 	if !strings.Contains(got, "nodeport-addresses=primary") {
-		t.Errorf("a machine alone answers NodePorts on its node IP:\n%s", got)
+		t.Errorf("the config has no nodeport-addresses=primary, want it:\n%s", got)
 	}
 }
 
-// A declared list that omits the node network is legal and may even
-// be deliberate, so the boot says so and carries on.
 func TestUnreachableNodePortsWarning(t *testing.T) {
 	cases := map[string]struct {
 		cidrs  []string
@@ -468,7 +433,7 @@ func TestUnreachableNodePortsWarning(t *testing.T) {
 			clusterDoc.Spec.Network.NodePortCIDRs = tc.cidrs
 			got := unreachableNodePortsWarning(clusterDoc, tc.nodeIP)
 			if (got != "") != tc.warns {
-				t.Errorf("warning %q, want warns=%v", got, tc.warns)
+				t.Errorf("the warning is %q, want a warning: %v", got, tc.warns)
 			}
 		})
 	}
@@ -476,46 +441,43 @@ func TestUnreachableNodePortsWarning(t *testing.T) {
 
 func TestUnreachableNodePortsWarningWithNoCluster(t *testing.T) {
 	if got := unreachableNodePortsWarning(nil, "10.10.0.1"); got != "" {
-		t.Errorf("a machine alone declares no list: %q", got)
+		t.Errorf("unreachableNodePortsWarning(nil) is %q, want empty with no cluster", got)
 	}
 }
 
 func TestK3sBootConfigWithoutNodeLabelsRendersNone(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: labCluster(), haveToken: true})
 	if strings.Contains(got, "node-label") {
-		t.Errorf("no declared labels means no node-label key:\n%s", got)
+		t.Errorf("the config has a node-label key, want none with no declared labels:\n%s", got)
 	}
 }
 
 func TestK3sBootConfigWithoutNodeTaintsRendersNone(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: labCluster(), haveToken: true})
 	if strings.Contains(got, "node-taint") {
-		t.Errorf("no declared taints means no node-taint key:\n%s", got)
+		t.Errorf("the config has a node-taint key, want none with no declared taints:\n%s", got)
 	}
 }
 
 func TestK3sBootConfigWithNoClusterIsNearlyEmpty(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, haveToken: true})
 	if !strings.Contains(got, "token-file:") {
-		t.Errorf("even a machine alone holds its token:\n%s", got)
+		t.Errorf("the config has no token-file:, want one even with no cluster document:\n%s", got)
 	}
 	for _, reject := range []string{"cluster-cidr", "node-ip", "server:"} {
 		if strings.Contains(got, reject) {
-			t.Errorf("a machine alone derives no %s:\n%s", reject, got)
+			t.Errorf("the config of a machine with no cluster has %s, want none:\n%s", reject, got)
 		}
 	}
-	// A machine alone still renders the complete disable list: no
-	// cluster document means no opt-ins, and the minimum viable
-	// cluster is the default.
 	if !strings.Contains(got, "disable:\n  - metrics-server\n  - servicelb\n  - traefik\n") {
-		t.Errorf("a machine alone disables everything bundled:\n%s", got)
+		t.Errorf("the config of a machine with no cluster does not disable metrics-server, servicelb, and traefik, want all three disabled:\n%s", got)
 	}
 }
 
 func TestK3sBootConfigDisablesEverythingBundledByDefault(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: labCluster(), haveToken: true})
 	if !strings.Contains(got, "disable:\n  - metrics-server\n  - servicelb\n  - traefik\n") {
-		t.Errorf("a cluster with no features disables everything bundled:\n%s", got)
+		t.Errorf("the config does not disable metrics-server, servicelb, and traefik, want all three disabled with no features:\n%s", got)
 	}
 }
 
@@ -524,10 +486,10 @@ func TestK3sBootConfigLeavesOptedInComponentsOffTheDisableList(t *testing.T) {
 	c.Spec.Features = map[string]*cluster.FeatureConfig{"metrics-server": {}}
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: c, haveToken: true})
 	if !strings.Contains(got, "disable:\n  - servicelb\n  - traefik\n") {
-		t.Errorf("an opt-in leaves the disable list:\n%s", got)
+		t.Errorf("the disable list is not servicelb and traefik, want metrics-server removed from it by its feature:\n%s", got)
 	}
 	if strings.Contains(got, "metrics-server") {
-		t.Errorf("an opted-in component should not appear at all:\n%s", got)
+		t.Errorf("the config names metrics-server, want it absent when its feature is enabled:\n%s", got)
 	}
 }
 
@@ -538,21 +500,17 @@ func TestK3sBootConfigWithEveryFeatureRendersNoDisableList(t *testing.T) {
 	}
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: c, haveToken: true})
 	if strings.Contains(got, "disable") {
-		t.Errorf("all opt-ins means no disable key at all:\n%s", got)
+		t.Errorf("the config has a disable key, want none when every feature is enabled:\n%s", got)
 	}
 }
 
 func TestK3sBootConfigDisablesTheHelmControllerByDefault(t *testing.T) {
-	// Both shapes of "no opt-ins": a machine alone and a cluster
-	// document with no features. The Helm controller lives inside the
-	// k3s server process, so its key is its own, not a disable-list
-	// entry.
 	for name, in := range map[string]k3sBootInputs{
 		"no cluster":  {role: api.RoleLeader, haveToken: true},
 		"no features": {role: api.RoleLeader, clusterDoc: labCluster(), haveToken: true},
 	} {
 		if got := k3sBootConfig(in); !strings.Contains(got, "disable-helm-controller: true\n") {
-			t.Errorf("%s: the helm controller is an opt-in:\n%s", name, got)
+			t.Errorf("%s: the config has no disable-helm-controller: true, want it when neither helm nor traefik is enabled:\n%s", name, got)
 		}
 	}
 }
@@ -562,7 +520,7 @@ func TestK3sBootConfigHelmFeatureKeepsTheHelmController(t *testing.T) {
 	c.Spec.Features = map[string]*cluster.FeatureConfig{"helm": {}}
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: c, haveToken: true})
 	if strings.Contains(got, "disable-helm-controller") {
-		t.Errorf("declaring helm keeps the controller:\n%s", got)
+		t.Errorf("the config has disable-helm-controller, want none when helm is enabled:\n%s", got)
 	}
 }
 
@@ -571,7 +529,7 @@ func TestK3sBootConfigTraefikImpliesTheHelmController(t *testing.T) {
 	c.Spec.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: c, haveToken: true})
 	if strings.Contains(got, "disable-helm-controller") {
-		t.Errorf("traefik requires helm, so the controller stays:\n%s", got)
+		t.Errorf("the config has disable-helm-controller, want none because traefik needs helm:\n%s", got)
 	}
 }
 
@@ -581,7 +539,7 @@ func TestK3sBootConfigDisablesTheCloudControllerByDefault(t *testing.T) {
 		"no features": {role: api.RoleLeader, clusterDoc: labCluster(), haveToken: true},
 	} {
 		if got := k3sBootConfig(in); !strings.Contains(got, "disable-cloud-controller: true\n") {
-			t.Errorf("%s: the embedded cloud controller runs only for servicelb:\n%s", name, got)
+			t.Errorf("%s: the config has no disable-cloud-controller: true, want it unless servicelb is enabled:\n%s", name, got)
 		}
 	}
 }
@@ -589,7 +547,7 @@ func TestK3sBootConfigDisablesTheCloudControllerByDefault(t *testing.T) {
 func TestK3sBootConfigDisablesNetworkPolicyByDefault(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: labCluster(), haveToken: true})
 	if !strings.Contains(got, "disable-network-policy: true\n") {
-		t.Errorf("network policy enforcement is an opt-in:\n%s", got)
+		t.Errorf("the config has no disable-network-policy: true, want it unless network-policy is enabled:\n%s", got)
 	}
 }
 
@@ -598,7 +556,7 @@ func TestK3sBootConfigNetworkPolicyFeatureKeepsTheController(t *testing.T) {
 	c.Spec.Features = map[string]*cluster.FeatureConfig{"network-policy": {}}
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: c, haveToken: true})
 	if strings.Contains(got, "disable-network-policy") {
-		t.Errorf("declaring network-policy keeps the controller:\n%s", got)
+		t.Errorf("the config has disable-network-policy, want none when network-policy is enabled:\n%s", got)
 	}
 }
 
@@ -607,14 +565,14 @@ func TestK3sBootConfigServiceLBKeepsTheCloudController(t *testing.T) {
 	c.Spec.Features = map[string]*cluster.FeatureConfig{"servicelb": {}}
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: c, haveToken: true})
 	if strings.Contains(got, "disable-cloud-controller") {
-		t.Errorf("servicelb runs inside the cloud controller, so it must stay:\n%s", got)
+		t.Errorf("the config has disable-cloud-controller, want none because servicelb runs in the cloud controller:\n%s", got)
 	}
 }
 
 func TestK3sBootConfigFollowersNeverRenderTheDisableList(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleFollower, clusterDoc: labCluster(), haveToken: true})
 	if strings.Contains(got, "disable") {
-		t.Errorf("disable is a server-side key an agent would refuse:\n%s", got)
+		t.Errorf("the follower's config has a disable key, want none because k3s agent refuses it:\n%s", got)
 	}
 }
 
@@ -623,14 +581,14 @@ func TestK3sBootConfigEmbeddedRegistryOnLeaders(t *testing.T) {
 	c.Spec.Registries.Embedded = true
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: c, haveToken: true})
 	if !strings.Contains(got, "embedded-registry: true\n") {
-		t.Errorf("an embedded opt-in renders the server key:\n%s", got)
+		t.Errorf("the config has no embedded-registry: true, want it when the feature is enabled:\n%s", got)
 	}
 }
 
 func TestK3sBootConfigEmbeddedRegistryOffByDefault(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: labCluster(), haveToken: true})
 	if strings.Contains(got, "embedded-registry") {
-		t.Errorf("the embedded registry is an opt-in:\n%s", got)
+		t.Errorf("the config has embedded-registry, want none unless the feature is enabled:\n%s", got)
 	}
 }
 
@@ -639,21 +597,20 @@ func TestK3sBootConfigFollowersNeverRenderEmbeddedRegistry(t *testing.T) {
 	c.Spec.Registries.Embedded = true
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleFollower, clusterDoc: c, haveToken: true})
 	if strings.Contains(got, "embedded-registry") {
-		t.Errorf("embedded-registry is a server-side key an agent would refuse:\n%s", got)
+		t.Errorf("the follower's config has embedded-registry, want none because k3s agent refuses it:\n%s", got)
 	}
 }
 
 func TestK3sBootConfigWithoutAToken(t *testing.T) {
 	got := k3sBootConfig(k3sBootInputs{role: api.RoleLeader, clusterDoc: labCluster(), nodeIP: "10.10.0.1", nodeInterface: "eth1"})
 	if strings.Contains(got, "token-file") {
-		t.Errorf("no token file means no token-file entry:\n%s", got)
+		t.Errorf("the config has a token-file key, want none with no token file:\n%s", got)
 	}
 }
 
-// fakeK3sConfigs points the drop-in writers at a temporary directory
-// that substitutes for /etc/rancher/k3s, and the token path at a
-// temporary file (present or not). It restores the real paths when
-// the test ends.
+// fakeK3sConfigs points every path that writeK3sBootConfig writes or
+// reads at a temporary directory. The token file exists only when
+// withToken is true.
 func fakeK3sConfigs(t *testing.T, withToken bool) (serverDropIns, agentDropIns string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -671,14 +628,12 @@ func fakeK3sConfigs(t *testing.T, withToken bool) (serverDropIns, agentDropIns s
 	})
 	if withToken {
 		if err := os.WriteFile(tokenPath, []byte("K10abc::server:secret\n"), 0o600); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the token file: %v", err)
 		}
 	}
 	return k3sServerConfig + ".d", k3sAgentConfig + ".d"
 }
 
-// bootMachine builds the winning manifest as writeK3sBootConfig
-// receives it: a name, and whatever spec fields the boot renders.
 func bootMachine(name string, labels map[string]string) *machine.Machine {
 	return &machine.Machine{
 		Metadata: api.ObjectMeta{Name: name},
@@ -692,19 +647,19 @@ func TestWriteK3sBootConfigForALeader(t *testing.T) {
 
 	role, err := writeK3sBootConfig(labCluster(), bootMachine("node-1", map[string]string{"guid.foo/gpu": "true"}), conns)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot config of node-1: %v", err)
 	}
 	if role != api.RoleLeader {
-		t.Errorf("node-1 is in spec.leaders: %s", role)
+		t.Errorf("the role is %s, want leader for node-1, which spec.leaders lists", role)
 	}
 	raw, err := os.ReadFile(filepath.Join(serverDropIns, "boot.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the leader boot.yaml: %v", err)
 	}
 	content := string(raw)
 	for _, want := range []string{"token-file:", "cluster-cidr: 10.42.0.0/16", "node-ip: 10.10.0.1", "flannel-iface: eth1", "node-label+:\n  - guid.foo/gpu=true"} {
 		if !strings.Contains(content, want) {
-			t.Errorf("the leader drop-in should carry %q:\n%s", want, content)
+			t.Errorf("the leader drop-in does not contain %q:\n%s", want, content)
 		}
 	}
 }
@@ -716,17 +671,17 @@ func TestWriteK3sBootConfigForAFollower(t *testing.T) {
 
 	role, err := writeK3sBootConfig(clusterDoc, bootMachine("node-2", nil), conns)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot config of node-2: %v", err)
 	}
 	if role != api.RoleFollower {
-		t.Errorf("node-2 is not in spec.leaders: %s", role)
+		t.Errorf("the role is %s, want follower for node-2, which spec.leaders does not list", role)
 	}
 	raw, err := os.ReadFile(filepath.Join(agentDropIns, "boot.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the follower boot.yaml: %v", err)
 	}
 	if !strings.Contains(string(raw), "server: https://10.10.0.1:6443") {
-		t.Errorf("a follower points at the endpoint:\n%s", raw)
+		t.Errorf("the follower's config has no server: https://10.10.0.1:6443, want the endpoint:\n%s", raw)
 	}
 }
 
@@ -735,19 +690,17 @@ func TestWriteK3sBootConfigRefusesAFollowerWithoutAnEndpoint(t *testing.T) {
 	clusterDoc := labCluster()
 	clusterDoc.Spec.Endpoint = ""
 	if _, err := writeK3sBootConfig(clusterDoc, bootMachine("node-2", nil), nil); err == nil {
-		t.Error("a follower with nowhere to join must refuse")
+		t.Error("no error for a follower of a cluster with no endpoint, want one")
 	}
 }
 
 func TestWriteK3sBootConfigRefusesAFollowerWithoutAToken(t *testing.T) {
 	fakeK3sConfigs(t, false)
 	if _, err := writeK3sBootConfig(labCluster(), bootMachine("node-2", nil), nil); err == nil {
-		t.Error("a follower with no join token can never register")
+		t.Error("no error for a follower with no join token, want one")
 	}
 }
 
-// Both roles write the same file and name it the same way, because
-// the kubelet runs on every node of the cluster.
 func TestWriteK3sBootConfigWritesTheKubeletConfig(t *testing.T) {
 	cases := map[string]struct {
 		name string
@@ -763,10 +716,10 @@ func TestWriteK3sBootConfigWritesTheKubeletConfig(t *testing.T) {
 
 			role, err := writeK3sBootConfig(imageGCCluster(), bootMachine(tc.name, nil), conns)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing the boot config: %v", err)
 			}
 			if role != tc.role {
-				t.Fatalf("got role %s, want %s", role, tc.role)
+				t.Fatalf("the role is %s, want %s", role, tc.role)
 			}
 			base := k3sServerConfig
 			if role == api.RoleFollower {
@@ -774,15 +727,15 @@ func TestWriteK3sBootConfigWritesTheKubeletConfig(t *testing.T) {
 			}
 			dropIn, err := os.ReadFile(filepath.Join(base+".d", "boot.yaml"))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading boot.yaml: %v", err)
 			}
 			want := "kubelet-arg:\n  - config=" + k3sKubeletConfig + "\n"
 			if !strings.Contains(string(dropIn), want) {
-				t.Errorf("the drop-in should name the kubelet's file:\n%s", dropIn)
+				t.Errorf("the drop-in does not name the kubelet's file, want %q:\n%s", want, dropIn)
 			}
 			written, err := os.ReadFile(k3sKubeletConfig)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the kubelet configuration: %v", err)
 			}
 			for _, line := range []string{
 				"kind: KubeletConfiguration\n",
@@ -792,80 +745,70 @@ func TestWriteK3sBootConfigWritesTheKubeletConfig(t *testing.T) {
 				"imageMaximumGCAge: 168h\n",
 			} {
 				if !strings.Contains(string(written), line) {
-					t.Errorf("the kubelet configuration should carry %q:\n%s", line, written)
+					t.Errorf("the kubelet configuration does not contain %q, want it:\n%s", line, written)
 				}
 			}
 		})
 	}
 }
 
-// A cluster that names no policy renders exactly what it rendered
-// before the section existed: no file, and no key in the drop-in. This
-// is what keeps an upgrade from restarting k3s on every machine of
-// every cluster that never asked for a policy.
 func TestWriteK3sBootConfigWithoutAPolicyWritesNoKubeletConfig(t *testing.T) {
 	serverDropIns, _ := fakeK3sConfigs(t, true)
 	conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
 
 	if _, err := writeK3sBootConfig(labCluster(), bootMachine("node-1", nil), conns); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot config: %v", err)
 	}
 	dropIn, err := os.ReadFile(filepath.Join(serverDropIns, "boot.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading boot.yaml: %v", err)
 	}
 	if strings.Contains(string(dropIn), "kubelet-arg") {
-		t.Errorf("no policy means no kubelet-arg key:\n%s", dropIn)
+		t.Errorf("the drop-in has a kubelet-arg key, want none with no policy:\n%s", dropIn)
 	}
 	if _, err := os.Stat(k3sKubeletConfig); err == nil {
-		t.Error("no policy means no kubelet configuration file")
+		t.Errorf("the kubelet configuration file %s exists, want none with no policy", k3sKubeletConfig)
 	}
 }
 
-// The restart path runs writeK3sBootConfig again without a reboot, so
-// a cluster that retracts the section has to take its file away too.
-// A file left on disk would describe a policy the kubelet no longer
-// runs.
+// The restart path calls writeK3sBootConfig again without a reboot, so
+// the files from the earlier call are still on disk.
 func TestWriteK3sBootConfigRetractsTheKubeletConfig(t *testing.T) {
 	fakeK3sConfigs(t, true)
 	conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
 	machineDoc := bootMachine("node-1", nil)
 
 	if _, err := writeK3sBootConfig(imageGCCluster(), machineDoc, conns); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot config: %v", err)
 	}
 	if _, err := os.Stat(k3sKubeletConfig); err != nil {
 		t.Fatalf("the first boot writes the file: %v", err)
 	}
 
-	// When k3s starts with the config argument, it copies the named
-	// file into the drop-in directory it hands the kubelet, and that
-	// directory persists on clusterState. The test plants that copy the
-	// way k3s leaves it.
+	// Make the copy that k3s makes when it starts with kubelet-arg
+	// config=.
 	if err := os.MkdirAll(filepath.Dir(k3sKubeletConfigCopy), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory of the kubelet configuration copy: %v", err)
 	}
 	content, err := os.ReadFile(k3sKubeletConfig)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the kubelet configuration: %v", err)
 	}
 	if err := os.WriteFile(k3sKubeletConfigCopy, content, 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the kubelet configuration copy: %v", err)
 	}
 
 	if _, err := writeK3sBootConfig(labCluster(), machineDoc, conns); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot config again: %v", err)
 	}
 	if _, err := os.Stat(k3sKubeletConfig); err == nil {
-		t.Error("a retracted section takes its file away")
+		t.Error("the kubelet configuration file still exists after the section was removed, want it deleted")
 	}
 	if _, err := os.Stat(k3sKubeletConfigCopy); err == nil {
-		t.Error("a retracted section takes k3s's copy away too; k3s refreshes the copy only when the argument is present, so a stale copy would keep the policy running forever")
+		t.Error("k3s's copy of the kubelet configuration still exists after the section was removed, want it deleted")
 	}
 }
 
-// containerd runs on every node, so both roles write the drop-in, and
-// the k3s drop-in carries k3s's own debug key beside it.
 func TestWriteK3sBootConfigWritesTheLogLevels(t *testing.T) {
 	cases := map[string]struct {
 		name string
@@ -881,10 +824,10 @@ func TestWriteK3sBootConfigWritesTheLogLevels(t *testing.T) {
 
 			role, err := writeK3sBootConfig(debugCluster(), bootMachine(tc.name, nil), conns)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing the boot config: %v", err)
 			}
 			if role != tc.role {
-				t.Fatalf("got role %s, want %s", role, tc.role)
+				t.Fatalf("the role is %s, want %s", role, tc.role)
 			}
 			base := k3sServerConfig
 			if role == api.RoleFollower {
@@ -892,55 +835,51 @@ func TestWriteK3sBootConfigWritesTheLogLevels(t *testing.T) {
 			}
 			bootDropIn, err := os.ReadFile(filepath.Join(base+".d", "boot.yaml"))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading boot.yaml: %v", err)
 			}
 			if !strings.Contains(string(bootDropIn), "debug: true\n") {
-				t.Errorf("the k3s drop-in should carry k3s's debug key:\n%s", bootDropIn)
+				t.Errorf("the k3s drop-in has no debug: true, want it:\n%s", bootDropIn)
 			}
 			written, err := os.ReadFile(k3sContainerdDropIn)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the containerd drop-in: %v", err)
 			}
 			if !strings.Contains(string(written), `level = "warn"`) {
-				t.Errorf("the containerd drop-in should carry the cluster's level:\n%s", written)
+				t.Errorf("the containerd drop-in has no level = \"warn\", want the cluster's level:\n%s", written)
 			}
 		})
 	}
 }
 
-// A cluster that names neither knob renders what it rendered before
-// the fields existed: no debug key, and no containerd drop-in.
 func TestWriteK3sBootConfigWithoutLevelsWritesNeither(t *testing.T) {
 	serverDropIns, _ := fakeK3sConfigs(t, true)
 	conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
 
 	if _, err := writeK3sBootConfig(labCluster(), bootMachine("node-1", nil), conns); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot config: %v", err)
 	}
 	bootDropIn, err := os.ReadFile(filepath.Join(serverDropIns, "boot.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading boot.yaml: %v", err)
 	}
 	if strings.Contains(string(bootDropIn), "debug:") {
-		t.Errorf("an unset field means no debug key:\n%s", bootDropIn)
+		t.Errorf("the k3s drop-in has a debug key, want none when the field is unset:\n%s", bootDropIn)
 	}
 	if _, err := os.Stat(k3sContainerdDropIn); err == nil {
-		t.Error("no named level means no containerd drop-in")
+		t.Errorf("the containerd drop-in %s exists, want none when no level is set", k3sContainerdDropIn)
 	}
 }
 
-// The drop-in sits on clusterState, and containerd imports whatever the
-// directory holds on every start. A cluster that stops naming a level
-// must have the drop-in removed, or containerd would keep the retracted
-// level. The retraction takes liken's own file and leaves the
-// operator's, because the directory is a place both of them write.
+// The directory is on clusterState and survives reboots, so the file
+// must be deleted when the level is unset. Other files in the directory
+// stay.
 func TestWriteK3sBootConfigRetractsTheContainerdDropIn(t *testing.T) {
 	fakeK3sConfigs(t, true)
 	conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
 	machineDoc := bootMachine("node-1", nil)
 
 	if _, err := writeK3sBootConfig(debugCluster(), machineDoc, conns); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot config: %v", err)
 	}
 	if _, err := os.Stat(k3sContainerdDropIn); err != nil {
 		t.Fatalf("the first boot writes the drop-in: %v", err)
@@ -948,97 +887,95 @@ func TestWriteK3sBootConfigRetractsTheContainerdDropIn(t *testing.T) {
 
 	operators := filepath.Join(filepath.Dir(k3sContainerdDropIn), "20-operator.toml")
 	if err := os.WriteFile(operators, []byte("version = 3\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the operator drop-in: %v", err)
 	}
 
 	if _, err := writeK3sBootConfig(labCluster(), machineDoc, conns); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot config again: %v", err)
 	}
 	if _, err := os.Stat(k3sContainerdDropIn); err == nil {
-		t.Error("a retracted level takes liken's drop-in away")
+		t.Error("the containerd drop-in still exists after the level was removed, want it deleted")
 	}
 	if _, err := os.Stat(operators); err != nil {
-		t.Errorf("a retraction must leave every other file in the directory: %v", err)
+		t.Errorf("the retraction deleted another file in the directory: %v, want it kept", err)
 	}
 }
 
-func TestNodeAddressReportsAGarbageNodeCIDR(t *testing.T) {
+func TestNodeAddressReportsAnInvalidNodeCIDR(t *testing.T) {
 	c := labCluster()
 	c.Spec.Network.NodeCIDR = "not-a-cidr"
 	conns := []*connection{conn(t, "eth1", "10.10.0.2/24")}
 	if ip, ifname := nodeAddress(c, conns); ip != "" || ifname != "" {
-		t.Errorf("a CIDR that won't parse derives nothing: %s on %s", ip, ifname)
+		t.Errorf("nodeAddress returned %q on %q, want none for a nodeCIDR that does not parse", ip, ifname)
 	}
 }
 
-func TestWriteK3sBootConfigNarratesTheFoundingLeader(t *testing.T) {
+func TestWriteK3sBootConfigPrintsThatThisMachineIsTheFoundingLeader(t *testing.T) {
 	serverDropIns, _ := fakeK3sConfigs(t, true)
 	conns := []*connection{conn(t, "eth1", "10.10.0.1/24")}
 
 	role, err := writeK3sBootConfig(haCluster(), bootMachine("node-1", nil), conns)
 	if err != nil || role != api.RoleLeader {
-		t.Fatalf("the founding leader is a leader: %s, %v", role, err)
+		t.Fatalf("writeK3sBootConfig returned the role %s and %v, want leader for the founding leader", role, err)
 	}
 	raw, err := os.ReadFile(filepath.Join(serverDropIns, "boot.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading boot.yaml: %v", err)
 	}
 	if !strings.Contains(string(raw), "cluster-init: true") {
-		t.Errorf("the founding leader's drop-in initializes etcd:\n%s", raw)
+		t.Errorf("the founding leader's drop-in has no cluster-init: true, want it:\n%s", raw)
 	}
 }
 
-func TestWriteK3sBootConfigNarratesAJoiningLeader(t *testing.T) {
+func TestWriteK3sBootConfigPrintsTheJoinURLOfAJoiningLeader(t *testing.T) {
 	serverDropIns, _ := fakeK3sConfigs(t, true)
-	// The founder declares no resolvable address (the image carries no
-	// manifest for it here), so the join falls back to the endpoint.
+	// No manifest declares the founder's address, so the join uses
+	// spec.endpoint.
 	conns := []*connection{conn(t, "eth1", "10.10.0.3/24")}
 
 	role, err := writeK3sBootConfig(haCluster(), bootMachine("node-3", nil), conns)
 	if err != nil || role != api.RoleLeader {
-		t.Fatalf("a joining leader is a leader: %s, %v", role, err)
+		t.Fatalf("writeK3sBootConfig returned the role %s and %v, want leader for a joining leader", role, err)
 	}
 	raw, err := os.ReadFile(filepath.Join(serverDropIns, "boot.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(raw), "server: https://10.10.0.1:6443") {
-		t.Errorf("a joining leader points at its control plane:\n%s", raw)
+		t.Errorf("the joining leader's drop-in has no server: https://10.10.0.1:6443, want it:\n%s", raw)
 	}
 }
 
 func TestWriteK3sBootConfigWarnsAFollowerOutsideTheNodeCIDR(t *testing.T) {
 	_, agentDropIns := fakeK3sConfigs(t, true)
-	// The follower's one address is outside the cluster's nodeCIDR.
-	// The warning prints, and k3s is left to guess.
+	// The follower's only address is outside the nodeCIDR.
 	conns := []*connection{conn(t, "eth0", "192.168.1.5/24")}
 
 	role, err := writeK3sBootConfig(labCluster(), bootMachine("node-2", nil), conns)
 	if err != nil || role != api.RoleFollower {
-		t.Fatalf("still a follower: %s, %v", role, err)
+		t.Fatalf("writeK3sBootConfig returned the role %s and %v, want follower", role, err)
 	}
 	raw, err := os.ReadFile(filepath.Join(agentDropIns, "boot.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading boot.yaml: %v", err)
 	}
 	if strings.Contains(string(raw), "node-ip") {
-		t.Errorf("no derived address means no node-ip key:\n%s", raw)
+		t.Errorf("the drop-in has a node-ip key, want none when no address is derived:\n%s", raw)
 	}
 }
 
 func TestWriteK3sBootConfigReportsAnUnwritableDropInDir(t *testing.T) {
 	fakeK3sConfigs(t, true)
-	// The config path sits under a plain file, so the drop-in
-	// directory cannot be created.
+	// The drop-in directory's parent is a regular file.
 	blocked := filepath.Join(t.TempDir(), "blocker")
 	if err := os.WriteFile(blocked, nil, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the file that blocks the drop-in directory: %v", err)
 	}
 	old := k3sServerConfig
 	k3sServerConfig = filepath.Join(blocked, "config.yaml")
 	t.Cleanup(func() { k3sServerConfig = old })
 
 	if _, err := writeK3sBootConfig(labCluster(), bootMachine("node-1", nil), nil); err == nil {
-		t.Error("an unwritable drop-in directory must refuse")
+		t.Error("no error when the drop-in directory cannot be written, want one")
 	}
 }

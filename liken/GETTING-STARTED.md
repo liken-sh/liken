@@ -130,7 +130,7 @@ To install, select `install as <name>` for the machine in front of you.
 The machine partitions its blank disks, copies the operating system
 onto them, registers itself with its firmware, then it waits:
 
-    liken: installed to slot A; remove the stick, then press Enter to power off; the next power-on boots from the disk.
+    liken: installed to slot A. Remove the stick, then press Enter to power off. The next power-on boots from the disk.
 
 Remove the stick, then press Enter. The machine powers off. Power it on
 again. From that time, it boots from its own disk. Use the same stick

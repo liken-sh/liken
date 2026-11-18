@@ -17,7 +17,7 @@ func sample(n int, source string, offset, delay time.Duration) timeSync {
 }
 
 // observeAll feeds the filter samples measured while no correction was
-// applied, and answers the last selection.
+// applied, and returns the last selection.
 func observeAll(f *clockFilter, samples ...timeSync) (selected timeSync) {
 	for _, s := range samples {
 		selected = f.observe(s, 0)
@@ -25,9 +25,8 @@ func observeAll(f *clockFilter, samples ...timeSync) (selected timeSync) {
 	return selected
 }
 
-// Over wifi, the samples with a long round trip carry the asymmetric
-// delay, and the one with the shortest round trip is closest to the
-// truth.
+// A sample with a long round trip can have a large error from an
+// asymmetric path, so the shortest round trip wins.
 func TestClockFilterSelectsTheShortestRoundTrip(t *testing.T) {
 	f := &clockFilter{}
 	selected := observeAll(f,
@@ -36,12 +35,11 @@ func TestClockFilterSelectsTheShortestRoundTrip(t *testing.T) {
 		sample(2, "10.0.0.1", 37*time.Millisecond, 45*time.Millisecond),
 	)
 	if selected.offset != -2*time.Millisecond {
-		t.Errorf("got %v", selected.offset)
+		t.Errorf("the selected offset is %v, want -2ms", selected.offset)
 	}
 }
 
-// A sample from more than eight polls ago measured a clock that the
-// slews have corrected since, so it leaves the filter however short
+// A sample more than eight polls old leaves the filter, however short
 // its round trip was.
 func TestClockFilterDropsSamplesOlderThanEightPolls(t *testing.T) {
 	f := &clockFilter{}
@@ -50,7 +48,7 @@ func TestClockFilterDropsSamplesOlderThanEightPolls(t *testing.T) {
 		sample(9, "10.0.0.1", 4*time.Millisecond, 10*time.Millisecond),
 	)
 	if selected.offset != 4*time.Millisecond {
-		t.Errorf("got %v", selected.offset)
+		t.Errorf("the selected offset is %v, want 4ms", selected.offset)
 	}
 }
 
@@ -61,12 +59,12 @@ func TestClockFilterKeepsEightSamples(t *testing.T) {
 		observeAll(f, sample(n, "10.0.0.1", 4*time.Millisecond, 10*time.Millisecond))
 	}
 	if len(f.samples) != 8 {
-		t.Errorf("the filter holds %d samples", len(f.samples))
+		t.Errorf("the filter holds %d samples, want 8", len(f.samples))
 	}
 }
 
-// Two sources have different paths, so one source's samples say
-// nothing about the other's.
+// Two sources have different paths, so a sample from one says nothing
+// about the other.
 func TestClockFilterStartsEmptyWhenTheSourceChanges(t *testing.T) {
 	f := &clockFilter{}
 	selected := observeAll(f,
@@ -74,30 +72,29 @@ func TestClockFilterStartsEmptyWhenTheSourceChanges(t *testing.T) {
 		sample(1, "10.0.0.2", 4*time.Millisecond, 10*time.Millisecond),
 	)
 	if selected.source != "10.0.0.2" || selected.offset != 4*time.Millisecond {
-		t.Errorf("got %+v", selected)
+		t.Errorf("the selection is %+v, want source 10.0.0.2 and offset 4ms", selected)
 	}
 }
 
-// A sample measured the clock before the corrections applied after it.
-// Once the clock has been slewed by a sample's whole offset, that
-// sample says the clock is right, however short its round trip.
+// After the clock has been slewed by a sample's whole offset, that
+// sample's offset is zero.
 func TestClockFilterCorrectsEachSampleForTheSlewsAppliedSinceIt(t *testing.T) {
 	f := &clockFilter{}
 	f.observe(sample(0, "10.0.0.1", 37*time.Millisecond, time.Millisecond), 0)
 	selected := f.observe(sample(1, "10.0.0.1", 9*time.Millisecond, 20*time.Millisecond), 37*time.Millisecond)
 	if selected.delay != time.Millisecond || selected.offset != 0 {
-		t.Errorf("got %+v", selected)
+		t.Errorf("the selection has delay %v and offset %v, want 1ms and 0", selected.delay, selected.offset)
 	}
 }
 
-// Part of a slew still pending is not applied yet, so a sample keeps
-// that part of its offset.
+// The part of a slew that is still pending stays in the sample's
+// offset.
 func TestClockFilterKeepsTheOffsetASlewHasNotAppliedYet(t *testing.T) {
 	f := &clockFilter{}
 	f.observe(sample(0, "10.0.0.1", 100*time.Millisecond, time.Millisecond), 0)
 	selected := f.observe(sample(1, "10.0.0.1", 70*time.Millisecond, 20*time.Millisecond), 30*time.Millisecond)
 	if selected.offset != 70*time.Millisecond {
-		t.Errorf("got %v", selected.offset)
+		t.Errorf("the selected offset is %v, want 70ms", selected.offset)
 	}
 }
 
@@ -118,7 +115,7 @@ func TestClockFilterWeighsAgeAgainstRoundTrip(t *testing.T) {
 				sample(0, "10.0.0.1", time.Millisecond, 0),
 				sample(1, "10.0.0.1", 4*time.Millisecond, tc.newDelay))
 			if selected.offset != tc.want {
-				t.Errorf("got %v", selected.offset)
+				t.Errorf("the selected offset is %v, want %v", selected.offset, tc.want)
 			}
 		})
 	}

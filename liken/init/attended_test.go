@@ -1,10 +1,7 @@
 package main
 
-// Tests for the attended-boot contract: who a terminal message reaches,
-// and when the machine waits for an answer. The real console is a
-// device the kernel opened for PID 1; these tests point consoleDevice
-// at ordinary files, which answer a read at once, so a test can prove
-// the hold's decision without ever risking a hang of its own.
+// The tests point consoleDevice at ordinary files, which return from a
+// read at once, so a test of the wait for a keypress cannot hang.
 
 import (
 	"os"
@@ -13,8 +10,6 @@ import (
 	"testing"
 )
 
-// pointConsoleAt puts the hold's console device at a path of the test's
-// choosing, and restores the real one afterward.
 func pointConsoleAt(t *testing.T, path string) {
 	t.Helper()
 	old := consoleDevice
@@ -22,34 +17,31 @@ func pointConsoleAt(t *testing.T, path string) {
 	t.Cleanup(func() { consoleDevice = old })
 }
 
-// fakeConsole points the hold at a file that stands in for the console
-// device, and returns a reader for what landed on it.
 func fakeConsole(t *testing.T) func() string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "console")
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the fake console: %v", err)
 	}
 	pointConsoleAt(t, path)
 	return func() string {
 		raw, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the fake console: %v", err)
 		}
 		return string(raw)
 	}
 }
 
-// fakeLogStream points init's log stream at a file, the same
-// reassignment redirectToKmsg makes at boot, and returns a reader for
-// it. On a booted machine this stream reaches every console= the
-// command line named.
+// fakeLogStream replaces os.Stderr with a file, as redirectToKmsg does
+// at boot, and returns a function that reads it. On a booted machine
+// this stream reaches every console= device.
 func fakeLogStream(t *testing.T) func() string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "stderr")
 	f, err := os.Create(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the fake log stream: %v", err)
 	}
 	old := os.Stderr
 	os.Stderr = f
@@ -60,17 +52,16 @@ func fakeLogStream(t *testing.T) func() string {
 	return func() string {
 		raw, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the fake log stream: %v", err)
 		}
 		return string(raw)
 	}
 }
 
 func TestHoldInstallerConsoleReachesBothReadersWhenAttended(t *testing.T) {
-	// The standard server console pair: the log copy reaches both
-	// devices through kmsg, and the direct copy reaches the one that
-	// /dev/console opens. A person watching either device sees the
-	// prompt.
+	// A server with two console= devices: the log copy reaches both
+	// through kmsg, and the direct copy reaches the one that
+	// /dev/console opens, so a person at either device sees the prompt.
 	fakeCmdline(t, "console=ttyS0 console=tty0 rdinit=/liken liken.install liken.attended\n")
 	console := fakeConsole(t)
 	logs := fakeLogStream(t)
@@ -78,28 +69,27 @@ func TestHoldInstallerConsoleReachesBothReadersWhenAttended(t *testing.T) {
 	holdInstallerConsole("liken: press Enter to power off", false)
 
 	if !strings.Contains(logs(), "press Enter to power off") {
-		t.Errorf("the ordered copy must go out with the boot's other lines: %q", logs())
+		t.Errorf("the log stream is %q, want the message among the boot's other lines", logs())
 	}
 	if !strings.Contains(console(), "press Enter to power off") {
-		t.Errorf("the direct copy must reach the device that answers: %q", console())
+		t.Errorf("the console is %q, want the message written to it directly", console())
 	}
 }
 
 func TestHoldInstallerConsoleDoesNotWaitOnAnUnattendedInstall(t *testing.T) {
-	// A hand-written or scripted install: an image build, a lab guest,
-	// a PXE server. Nobody can press a key, so the message is reported
-	// and the boot goes on to its power-off.
+	// A scripted install, such as an image build or a PXE boot, has
+	// nobody to press a key, so the message is printed with no wait.
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.install\n")
 	console := fakeConsole(t)
 	logs := fakeLogStream(t)
 
-	holdInstallerConsole("liken: installed to slot A; press Enter to power off", false)
+	holdInstallerConsole("liken: installed to slot A. Press Enter to power off.", false)
 
 	if !strings.Contains(logs(), "installed to slot A") {
-		t.Errorf("an unattended install still reports its ending: %q", logs())
+		t.Errorf("the log stream is %q, want the ending message of the install", logs())
 	}
 	if console() != "" {
-		t.Errorf("no prompt where nobody can answer it: %q", console())
+		t.Errorf("the console is %q, want nothing written to it", console())
 	}
 }
 
@@ -112,7 +102,7 @@ func TestHoldInstallerConsoleGivesUpWhenTheConsoleWillNotOpen(t *testing.T) {
 
 	out := logs()
 	if !strings.Contains(out, "press Enter to power off") || !strings.Contains(out, "opening the console") {
-		t.Errorf("a console that will not open is reported, and the boot goes on: %q", out)
+		t.Errorf("the log stream is %q, want the message and a line about opening the console", out)
 	}
 }
 
@@ -129,7 +119,7 @@ func TestAttendedReadsTheMenusWord(t *testing.T) {
 	for _, c := range cases {
 		fakeCmdline(t, c.cmdline)
 		if got := attended(); got != c.want {
-			t.Errorf("%q: attended is %v", c.cmdline, got)
+			t.Errorf("attended() is %v for %q, want %v", got, c.cmdline, c.want)
 		}
 	}
 }

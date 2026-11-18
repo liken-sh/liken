@@ -1,26 +1,17 @@
 package main
 
-// The on-board components record.
+// The release document on the channel lists the version of each
+// outside component in a release (machine/release.go). A running
+// machine reports those versions without fetching the document,
+// because the image build writes the same list, from the same VERSION
+// pins, into the image as the components record. This file copies the
+// record into the Machine's status.version.
 //
-// A release document lists every outside component, and the
-// upstream version of it that shipped (see machine/release.go). This
-// document lives on the channel, and a running machine should
-// report its own composition with no request to the channel. So the
-// image build writes the same record, from the same VERSION pins,
-// into the image itself. This file folds that record into the
-// version facts that the Machine publishes.
-//
-// The fold works in one direction only, and it does not override
-// a value the machine observed itself. For a component that the
-// running machine already has an observed value for, such as the
-// kernel via uname, the netfilter userspace via iptables, or liken
-// via its own build stamp, this fold keeps that observed value, in
-// the running software's own vocabulary. The record fills in only
-// what nothing else can observe: the boot artifacts, the bundled
-// images, and the data files. If the record is missing, this fold is
-// silent about it, because dev boots that predate the record, and
-// lab images built by hand, are still valid machines. Their version
-// facts are simply sparser.
+// The record fills only the fields that the machine cannot read at
+// runtime: the boot artifacts, the bundled programs, and the data
+// files. The kernel, iptables, and liken versions come from the
+// running machine. When the record is missing, those other fields stay
+// empty.
 
 import (
 	"os"
@@ -31,22 +22,16 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// componentsPath is where the image build stages the record. It is
-// under /usr/share, owned by the squashfs, and deliberately outside
-// /etc/liken, where the deployment layer's files live. The record is
-// a fact about the image, not about any deployment of it. This is a
-// variable so tests can override it.
+// componentsPath is under /usr/share and not /etc/liken, which holds
+// the deployment's files, because the record describes the image.
 var componentsPath = "/usr/share/liken/components.yaml"
 
-// cpuinfoPath is where the kernel reports each CPU's state. This is
-// a variable so tests can override it.
 var cpuinfoPath = "/proc/cpuinfo"
 
-// microcodeRevision reads the running CPUs' microcode revision, for
-// example "0x28". Every core reports the same value once the early
-// loader has run, so the first microcode line answers for the
-// machine. An architecture or hypervisor that reports none leaves
-// the fact empty, and the status omits it.
+// microcodeRevision returns the CPU microcode revision from the first
+// microcode line of /proc/cpuinfo, for example "0x28", because every
+// core runs the same revision after the early loader. It returns ""
+// when cpuinfo has no microcode line, as on some hypervisors.
 func microcodeRevision(path string) string {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -61,17 +46,16 @@ func microcodeRevision(path string) string {
 	return ""
 }
 
-// observedAtRuntime names the components in the record that this fold
-// deliberately skips, because the running machine reports them itself,
-// in the running software's own vocabulary. The versions guard test
-// reads this list, so a component that belongs here is declared here
-// rather than left to a reader to infer from the switch below.
+// observedAtRuntime lists the components whose versions the running
+// machine reads itself, so applyComponentFacts has no case for them.
+// TestEveryRecordedComponentReachesTheVersionStatus reads this list.
 var observedAtRuntime = []string{"liken", "kernel", "xtables"}
 
-// applyComponentFacts folds the record into the version block. It
-// fills only the fields that no runtime probe owns. Every other name
-// the image build writes into the record must appear in the switch
-// below, and the versions guard test is what enforces that.
+// applyComponentFacts copies the record's versions into v. Its switch
+// needs a case for each component that image/build.sh writes and
+// observedAtRuntime does not list.
+// TestEveryRecordedComponentReachesTheVersionStatus fails when one is
+// missing.
 func applyComponentFacts(v *machine.VersionStatus) {
 	raw, err := os.ReadFile(componentsPath)
 	if err != nil {

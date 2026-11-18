@@ -1,10 +1,9 @@
 package main
 
-// The supplicant's control interface is plain text over one UNIX
-// datagram socket. liken carries this small client rather than the
-// wpa_cli program because the whole of what init needs is ATTACH and
-// the events that follow. Those events are the only thing on the
-// machine that can tell a refused passphrase apart from an access
+// A client for wpa_supplicant's control interface, which is plain text
+// over a UNIX datagram socket. init needs only ATTACH and the events
+// that follow it, so it uses this client in place of wpa_cli. The
+// events are the only way to tell a refused passphrase from an access
 // point that never answered.
 
 import (
@@ -20,52 +19,47 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// The size of one message. Upstream's own client reads into a buffer
-// of this size. An event is a short line, but a datagram longer than
-// the buffer loses its tail rather than splitting, which is why the
-// buffer is generous.
+// wpaMessageMax is the size of the buffer that reads one datagram. A
+// longer datagram is truncated. wpa_supplicant's own client uses the
+// same size.
 const wpaMessageMax = 4096
 
-// How long the attach waits for the socket to appear. The supplicant
-// creates its socket after it starts, so the process id comes back
-// before the path exists. This is a race with a starting process on
-// this machine, not a network wait, which is why the allowance is
-// short.
-const wpaSocketPatience = 10 * time.Second
+// wpaSocketTimeout is how long attach waits for the control socket.
+// The supplicant creates the socket a moment after its process starts,
+// so the path can be missing when the start returns.
+const wpaSocketTimeout = 10 * time.Second
 
-// wpaAttached is the name of the event the client puts on its own
-// stream each time an ATTACH succeeds. The supplicant sends no event
-// for what happened while no client was attached, such as an
-// association during a restart, so a reader of the stream reads the
-// whole state again with STATUS when this event arrives.
+// wpaAttached is the name of an event that the client itself puts on
+// the stream each time ATTACH succeeds. The supplicant does not replay
+// what happened while no client was attached, such as an association
+// during a restart, so a reader sends STATUS when it receives this
+// event.
 const wpaAttached = "LIKEN-ATTACHED"
 
 // wpaEvent is one message the supplicant pushed to an attached client.
 type wpaEvent struct {
-	// level is the priority the supplicant stamped on the message,
-	// from its own debug levels. A monitor receives everything at
-	// info and above by default, and info is the level every join
-	// event uses.
+	// level is the message's priority, or -1 when it has none.
 	level int
 
-	// name is the event's own word, for example CTRL-EVENT-CONNECTED.
+	// name is the first word of the message, for example
+	// CTRL-EVENT-CONNECTED.
 	name string
 
-	// fields are the key=value pairs the message carries.
+	// fields are the key=value pairs in the message.
 	fields map[string]string
 
-	// text is the whole message after the priority, for the console.
+	// text is the message without its priority, for console lines.
 	text string
 }
 
-// parseWPAEvent reads one message off the socket.
+// parseWPAEvent parses one message from the socket. It returns false
+// when the message has no text.
 //
-// The wire format, exactly: the supplicant prefixes each message with
-// its priority in angle brackets, and the rest is the event's name
-// and then key=value pairs. The global socket adds an IFNAME= prefix
-// ahead of the priority; the per-interface socket liken uses does
-// not. A value may be quoted, which is how an SSID with a space in it
-// arrives.
+// A message is the priority in angle brackets, then the event name,
+// then key=value pairs. The supplicant's global socket also puts an
+// IFNAME= prefix before the priority. This client uses the
+// per-interface socket, which does not, but the parser accepts both. A
+// value can be in double quotes, such as an SSID with a space in it.
 func parseWPAEvent(message string) (wpaEvent, bool) {
 	text := strings.TrimRight(message, "\r\n")
 	if rest, found := strings.CutPrefix(text, "IFNAME="); found {
@@ -87,18 +81,17 @@ func parseWPAEvent(message string) (wpaEvent, bool) {
 	return wpaEvent{level: level, name: name, fields: parseWPAFields(text), text: text}, true
 }
 
-// parseWPAFields collects the key=value pairs out of one message. A
-// value in double quotes may hold spaces, which is how an SSID arrives,
-// so the scan joins the tokens of such a value back together.
+// parseWPAFields returns the key=value pairs of one message. It splits
+// on spaces, so it joins the tokens of a double-quoted value back
+// together.
 func parseWPAFields(text string) map[string]string {
 	fields := map[string]string{}
 	tokens := strings.Fields(text)
 	for i := 0; i < len(tokens); i++ {
 		key, value, found := strings.Cut(tokens[i], "=")
-		// The connected event wraps its pairs in square brackets and
-		// every other event does not. A key parsed with a bracket
-		// still on it would answer to nothing, so the brackets come
-		// off here.
+		// CTRL-EVENT-CONNECTED wraps its pairs in square brackets
+		// ("[id=0 id_str=]"). Without trimming them the first key would
+		// be "[id", which no caller looks up.
 		key = strings.TrimPrefix(key, "[")
 		value = strings.TrimSuffix(value, "]")
 		if !found || key == "" {
@@ -119,24 +112,23 @@ func parseWPAFields(text string) map[string]string {
 	return fields
 }
 
-// The reasons the supplicant gives for refusing a network, and which
-// of them this boot treats as final. The supplicant emits exactly
-// four. WRONG_KEY is the access point rejecting the handshake, and
-// NO_PSK_AVAILABLE is a configuration with no key in it at all; both
-// are decisions. The other two describe an association that failed,
-// which the next attempt may well complete, so they stay transient.
+// deterministicWPAReasons maps each reason of a
+// CTRL-EVENT-SSID-TEMP-DISABLED event that a retry cannot fix to the
+// message to report. WRONG_KEY means the access point rejected the
+// handshake, and NO_PSK_AVAILABLE means the configuration has no key.
+// The other reasons, such as CONN_FAILED, come from a failed
+// association that a later attempt can complete.
 var deterministicWPAReasons = map[string]string{
-	"WRONG_KEY": "the access point refused the passphrase (WRONG_KEY); " +
-		"until rotation exists, a wrong passphrase is fixed by the install media, not in place",
+	"WRONG_KEY": "the access point refused the passphrase (WRONG_KEY). " +
+		"Correct the passphrase on the install media, because the running machine cannot change it",
 	"NO_PSK_AVAILABLE": "the supplicant has no key for this network (NO_PSK_AVAILABLE)",
 }
 
-// judgeWirelessEvent decides what one event means for the join. It
-// reports the verdict and whether the event settled the question at
-// all. Most events settle nothing: a scan that found nothing and an
-// access point that went away are both states that the next attempt may
-// leave behind.
-func judgeWirelessEvent(event wpaEvent) (machine.WirelessState, string, bool) {
+// classifyWirelessEvent returns the join state that an event proves and
+// the message to report, or false when the event proves nothing. A
+// scan that finds no network and an access point that goes away do not
+// settle the join, because the next attempt can succeed.
+func classifyWirelessEvent(event wpaEvent) (machine.WirelessState, string, bool) {
 	switch event.name {
 	case "CTRL-EVENT-CONNECTED":
 		return machine.WirelessConnected, "", true
@@ -148,10 +140,9 @@ func judgeWirelessEvent(event wpaEvent) (machine.WirelessState, string, bool) {
 	return "", "", false
 }
 
-// describeWirelessEvent renders one event as a console line, or the
-// empty string for an event this boot has nothing to say about. On a
-// machine with no shell, these lines are the whole account of what the
-// radio did.
+// describeWirelessEvent returns a console line for an event, or the
+// empty string for an event that has no line. A machine has no shell,
+// so these lines are the only record of what the radio did.
 func describeWirelessEvent(ifname string, event wpaEvent) string {
 	switch event.name {
 	case "CTRL-EVENT-CONNECTED":
@@ -165,13 +156,14 @@ func describeWirelessEvent(ifname string, event wpaEvent) string {
 	case "CTRL-EVENT-SCAN-RESULTS":
 		return fmt.Sprintf("liken: wireless: %s finished a scan", ifname)
 	case "CTRL-EVENT-NETWORK-NOT-FOUND":
-		// The supplicant sends this event when no access point of
-		// the network is left to try: none answered the scan, or each
-		// one that did is on the list it ignores after a refusal.
+		// The supplicant sends this when it has no access point to try
+		// for the network. Either none answered the scan, or each one
+		// that answered refused the supplicant earlier and is
+		// temporarily ignored.
 		return fmt.Sprintf("liken: wireless: %s has no access point left to try for its network", ifname)
 	case "CTRL-EVENT-AUTH-REJECT":
-		// The access point's address is the first word after the
-		// event's name, with no key of its own.
+		// This event gives the access point's address as the word after
+		// the name, with no bssid= key.
 		bssid := ""
 		if words := strings.Fields(event.text); len(words) > 1 {
 			bssid = words[1]
@@ -185,7 +177,7 @@ func describeWirelessEvent(ifname string, event wpaEvent) string {
 	return ""
 }
 
-// statusText renders the 802.11 status code a refusal carries.
+// statusText describes the 802.11 status code in a rejection event.
 func statusText(event wpaEvent) string {
 	code, err := strconv.Atoi(event.fields["status_code"])
 	if err != nil {
@@ -194,39 +186,34 @@ func statusText(event wpaEvent) string {
 	return machine.StatusCodeText(code)
 }
 
-// wpaControl is an attached client on one supplicant's control
-// socket. The client binds a path of its own because the socket is a
-// datagram socket: the supplicant answers by sending to the address
-// the request arrived from, and an unbound socket has no address to
-// answer to.
+// wpaControl is a client attached to one supplicant's control socket.
+// It binds a socket path of its own, because the supplicant replies to
+// the sender's address and an unbound datagram socket has none.
 type wpaControl struct {
 	socket string
 	local  string
 	out    chan wpaEvent
 
-	// patience is how long attach waits for the socket to appear. It is
-	// a field rather than the constant so a test can drive the restart
-	// loop's re-attach without waiting out a real boot's allowance.
-	patience time.Duration
+	// timeout is how long attach waits for the socket to appear. It is a
+	// field so a test can shorten it.
+	timeout time.Duration
 
 	mu     sync.Mutex
 	conn   *net.UnixConn
 	closed bool
 }
 
-// attachWPAControl opens the supplicant's control socket and asks for
-// the stream of unsolicited events.
+// attachWPAControl connects to the supplicant's control socket and
+// subscribes to its events.
 func attachWPAControl(socket string) (*wpaControl, error) {
 	c := &wpaControl{
 		socket: socket,
 		local:  filepath.Join(filepath.Dir(filepath.Dir(socket)), "client"),
-		// The channel is buffered and a full channel drops. Nothing
-		// reads these events once the boot goes on, but the
-		// supplicant keeps reporting for the life of the machine,
-		// and a blocking send would stall the reader in init for
-		// good.
-		out:      make(chan wpaEvent, 64),
-		patience: wpaSocketPatience,
+		// A send to a full channel drops the event. read sends while
+		// it holds c.mu, so a blocking send to a slow reader would
+		// also block close.
+		out:     make(chan wpaEvent, 64),
+		timeout: wpaSocketTimeout,
 	}
 	if err := c.attach(); err != nil {
 		return nil, err
@@ -234,24 +221,23 @@ func attachWPAControl(socket string) (*wpaControl, error) {
 	return c, nil
 }
 
-// waitForWPASocket waits for the supplicant to create its socket.
-func waitForWPASocket(socket string, patience time.Duration) error {
-	deadline := time.Now().Add(patience)
+func waitForWPASocket(socket string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
 	for {
 		if _, err := os.Stat(socket); err == nil {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the supplicant did not create %s within %s", socket, patience)
+			return fmt.Errorf("the supplicant did not create %s within %s", socket, timeout)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 }
 
-// attach dials the socket, registers this client as a monitor, and
-// starts reading. It is also the repair after a restart: a supplicant
-// that died took its list of monitors with it, so the new process must
-// be asked again.
+// attach connects to the socket, sends ATTACH, and starts reading
+// events. It is also how the client resubscribes after a supplicant
+// restart, because a new supplicant process has no record of the
+// clients that were attached to the old one.
 func (c *wpaControl) attach() error {
 	c.mu.Lock()
 	closed := c.closed
@@ -259,7 +245,7 @@ func (c *wpaControl) attach() error {
 	if closed {
 		return fmt.Errorf("the control client for %s is closed", c.socket)
 	}
-	if err := waitForWPASocket(c.socket, c.patience); err != nil {
+	if err := waitForWPASocket(c.socket, c.timeout); err != nil {
 		return err
 	}
 	_ = os.Remove(c.local)
@@ -278,9 +264,7 @@ func (c *wpaControl) attach() error {
 	c.mu.Lock()
 	old := c.conn
 	c.conn = conn
-	// The attached marker goes out under the lock, because close
-	// closes the channel under the same lock, and a send on a closed
-	// channel panics.
+	// The send is under the lock for the reason that read gives.
 	if !c.closed {
 		select {
 		case c.out <- wpaEvent{name: wpaAttached}:
@@ -295,8 +279,8 @@ func (c *wpaControl) attach() error {
 	return nil
 }
 
-// attachRequest sends ATTACH and reads the answer. The supplicant
-// answers OK or FAIL, each on one line.
+// attachRequest sends ATTACH and checks that the supplicant replies
+// OK. The reply is OK or FAIL on one line.
 func attachRequest(conn *net.UnixConn) error {
 	if _, err := conn.Write([]byte("ATTACH")); err != nil {
 		return fmt.Errorf("sending ATTACH: %w", err)
@@ -304,11 +288,10 @@ func attachRequest(conn *net.UnixConn) error {
 	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return err
 	}
-	// The answer is looked for rather than simply read. The same
-	// socket carries the answers and the events, and this is the one
-	// place where the two could arrive in either order. An answer
-	// never carries the priority prefix and an event always does,
-	// which is how the loop tells them apart.
+	// Replies and events arrive on the same socket, and an event can
+	// come before the reply to ATTACH. A reply has no priority prefix
+	// and an event always has one, so the loop skips messages that
+	// start with "<" or "IFNAME=".
 	buf := make([]byte, wpaMessageMax)
 	for {
 		n, err := conn.Read(buf)
@@ -320,19 +303,19 @@ func attachRequest(conn *net.UnixConn) error {
 			continue
 		}
 		if answer := strings.TrimSpace(message); answer != "OK" {
-			return fmt.Errorf("the supplicant refused ATTACH: %s", answer)
+			return fmt.Errorf("the supplicant refused ATTACH and answered %q", answer)
 		}
 		return conn.SetReadDeadline(time.Time{})
 	}
 }
 
-// read carries one connection's messages onto the event channel, and
-// ends when that connection closes, or when the control does.
+// read parses messages from one connection and sends the events to the
+// channel. It returns when the connection fails or the control closes.
 //
-// Each send goes out under the lock, because close closes the channel
-// under the same lock, and a send on a closed channel panics. A close of
-// the connection does not stop a reader that already holds a message, so
-// the reader also checks that the control is still open.
+// The send is under the lock because close closes the channel under it,
+// and a send on a closed channel panics. Closing the connection does not
+// stop a read that has already returned a message, so read also checks
+// closed after it takes the lock.
 func (c *wpaControl) read(conn *net.UnixConn) {
 	buf := make([]byte, wpaMessageMax)
 	for {
@@ -357,12 +340,14 @@ func (c *wpaControl) read(conn *net.UnixConn) {
 	}
 }
 
-// events is the stream of messages the supplicant pushes.
+// events returns the channel of events from the supplicant. close
+// closes it.
 func (c *wpaControl) events() <-chan wpaEvent {
 	return c.out
 }
 
-// close ends the attachment and the stream with it.
+// close disconnects, removes the client's socket file, and closes the
+// events channel. It is safe to call more than once.
 func (c *wpaControl) close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()

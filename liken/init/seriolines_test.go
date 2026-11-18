@@ -1,11 +1,5 @@
 package main
 
-// The fake machine the serio tests run against: a sysfs with the tty
-// class, the USB bus, and /sys/module, all built in tempdirs, and a
-// fake opener in place of the ttys. The fixture writes the links and
-// files the kernel writes for a CDC ACM adapter, so a test describes
-// an adapter and the fixture owns the layout.
-
 import (
 	"os"
 	"path/filepath"
@@ -16,17 +10,17 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// fakeSerioMachine points sysfs, /dev, and /sys/module at tempdirs,
-// and returns the sysfs root. Because the roots are package variables,
-// tests in this package must not run in parallel.
+// fakeSerioMachine points sysfs, /dev, and /sys/module at temporary
+// directories, and returns the sysfs root. The roots are package
+// variables, so tests in this package must not run in parallel.
 func fakeSerioMachine(t *testing.T) string {
 	t.Helper()
 	sys, dev, modules := t.TempDir(), t.TempDir(), t.TempDir()
 	oldSys, oldDev, oldModules := sysfsRoot, devRoot, sysModuleDir
 	sysfsRoot, devRoot, sysModuleDir = sys, dev, modules
 	t.Cleanup(func() { sysfsRoot, devRoot, sysModuleDir = oldSys, oldDev, oldModules })
-	// A virtual terminal is a tty with no device link. Every machine
-	// has one, and the walk must pass over it.
+	// A virtual terminal is a tty with no device link, and every
+	// machine has one.
 	mkdirs(t, filepath.Join(sys, "devices", "virtual", "tty", "tty0"))
 	mkdirs(t, filepath.Join(sys, "class", "tty"))
 	symlink(t, filepath.Join(sys, "devices", "virtual", "tty", "tty0"), filepath.Join(sys, "class", "tty", "tty0"))
@@ -36,7 +30,7 @@ func fakeSerioMachine(t *testing.T) string {
 func mkdirs(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory: %v", err)
 	}
 }
 
@@ -44,7 +38,7 @@ func symlink(t *testing.T, target, link string) {
 	t.Helper()
 	mkdirs(t, filepath.Dir(link))
 	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the symlink: %v", err)
 	}
 }
 
@@ -56,11 +50,11 @@ func loadSerioModules(t *testing.T, names ...string) {
 	}
 }
 
-// adapter is one fake USB device: its port path on the bus, its
-// identity, and the tty cdc_acm gave it. An empty tty is an adapter
-// whose line driver is not loaded. plug also builds the serio port
-// with its driver bound, the state an attach leads to, unless portless
-// asks for a tty that the kernel has not attached anything under yet.
+// adapter is one fake CDC ACM adapter: its port path on the USB bus,
+// its serial number, and the tty that cdc_acm created for it. An empty
+// tty means that cdc_acm is not loaded. Unless portless is set, plug
+// also builds the serio port with its driver bound, as after a
+// successful attach.
 type adapter struct {
 	port, serial, tty string
 	portless          bool
@@ -103,23 +97,21 @@ func (a adapter) plug(t *testing.T) {
 	}
 }
 
-// unplug removes everything plug built, the way the kernel removes a
-// device's entries when it leaves.
+// unplug removes everything plug built.
 //
-// It moves the tty's directory out of the tree instead of deleting it.
-// The code tells a tty that registers again from the old one by the
-// inode of this directory, and kernfs numbers its inodes in a cycle,
-// so a new registration never gets the old number back. ext4 hands a
-// freed inode to the next file at once, so a deleted directory would
-// make the replugged tty look like the old one, which no real
-// machine does. The directory stays in the test's temporary directory
-// until the test ends, and keeps its inode taken.
+// It moves the tty's directory to another temporary directory instead
+// of deleting it, so its inode stays in use until the test ends.
+// discoverSerialLines uses the inode to tell a tty that registers again
+// apart from the old one. kernfs allocates inode numbers cyclically, so
+// a new registration does not get the old number. A filesystem such as
+// ext4 can give a freed inode to the next new directory, which would
+// make the replugged tty look like the old one.
 func (a adapter) unplug(t *testing.T) {
 	t.Helper()
 	if a.tty != "" {
 		if _, err := os.Stat(a.ttyDir()); err == nil {
 			if err := os.Rename(a.ttyDir(), filepath.Join(t.TempDir(), a.tty)); err != nil {
-				t.Fatal(err)
+				t.Fatalf("moving the tty directory aside: %v", err)
 			}
 		}
 	}
@@ -129,14 +121,15 @@ func (a adapter) unplug(t *testing.T) {
 		a.deviceDir(),
 	} {
 		if err := os.RemoveAll(path); err != nil {
-			t.Fatal(err)
+			t.Fatalf("removing the adapter path: %v", err)
 		}
 	}
 }
 
-// registerPort builds what the kernel registers under the tty once the
-// attach holds: the serio port with its driver bound, the CEC adapter
-// under it, and the remote-control input device with its event node.
+// registerPort builds what the kernel registers under the tty after a
+// successful attach: the serio port with its driver bound, the CEC
+// adapter under it, and the remote-control input device with its
+// event node.
 func (a adapter) registerPort(t *testing.T) {
 	t.Helper()
 	a.registerUnboundPort(t)
@@ -145,7 +138,7 @@ func (a adapter) registerPort(t *testing.T) {
 }
 
 // registerUnboundPort builds the port and its devices with no driver
-// link on the port, the state a driver whose probe failed leaves.
+// link on the port, as when the driver's probe failed.
 func (a adapter) registerUnboundPort(t *testing.T) {
 	t.Helper()
 	port := filepath.Join(a.ttyDir(), "serio0")
@@ -161,9 +154,9 @@ func (a adapter) registerUnboundPort(t *testing.T) {
 	node("rc/rc0/input83/event13", "input", "input/event13")
 }
 
-// fakeTTYs is the opener the registry uses in these tests. Each open
-// takes the next line from lines, or a line that holds its read until
-// the test ends, and records the path it opened.
+// fakeTTYs is the opener that serioRegistry uses in these tests. Each
+// open records the path and returns the next line from lines, or a line
+// whose read blocks until the test ends.
 type fakeTTYs struct {
 	mu    sync.Mutex
 	lines []*fakeLine
@@ -199,8 +192,8 @@ func (f *fakeTTYs) openCount() int {
 	return len(f.opens)
 }
 
-// holdingLine is a line whose read blocks until the test releases it,
-// which is how the kernel ends the port on an unplug.
+// holdingLine is a line whose read blocks until the test closes
+// release, as serport's read blocks until an unplug closes the port.
 func holdingLine() *fakeLine {
 	return &fakeLine{release: make(chan struct{})}
 }
@@ -210,8 +203,6 @@ var pulse8Entry = machine.SerioAttachment{
 	USB:      machine.SerioUSB{Vendor: "2548", Product: "1002"},
 }
 
-// The walk finds each adapter's line by the identity above its tty,
-// and passes over a tty that belongs to no hardware.
 func TestDiscoverSerialLinesReadsTheIdentityAboveEachTTY(t *testing.T) {
 	fakeSerioMachine(t)
 	one := adapter{port: "1-4", serial: "A1", tty: "ttyACM0"}
@@ -231,15 +222,13 @@ func TestDiscoverSerialLinesReadsTheIdentityAboveEachTTY(t *testing.T) {
 		got[i].identity = 0
 	}
 	if !slices.Equal(got, want) {
-		t.Errorf("lines = %+v", got)
+		t.Errorf("the serial lines are %+v, want %+v", got, want)
 	}
 	if len(identities) != 2 || identities[0] {
-		t.Errorf("each tty carries its own identity: %v", identities)
+		t.Errorf("the identities are %v, want two different nonzero values", identities)
 	}
 }
 
-// A tty that registers again under the same name gets a new directory,
-// and the walk reads it as new hardware.
 func TestATTYThatRegistersAgainHasANewIdentity(t *testing.T) {
 	fakeSerioMachine(t)
 	pulse := adapter{port: "1-4", tty: "ttyACM0"}
@@ -250,7 +239,7 @@ func TestATTYThatRegistersAgainHasANewIdentity(t *testing.T) {
 	after := discoverSerialLines()
 
 	if before[0].identity == after[0].identity {
-		t.Errorf("identity %d stayed", after[0].identity)
+		t.Errorf("the tty has identity %d before and after registering again, want a different one", after[0].identity)
 	}
 }
 
@@ -260,7 +249,10 @@ func TestUSBDevicePresentReadsTheBusNotTheLines(t *testing.T) {
 	other := pulse8Entry
 	other.USB.Product = "1001"
 
-	if !usbDevicePresent(pulse8Entry) || usbDevicePresent(other) {
-		t.Error("the bus lists the adapter with no line, and nothing else")
+	if !usbDevicePresent(pulse8Entry) {
+		t.Error("usbDevicePresent is false for the plugged adapter, want true")
+	}
+	if usbDevicePresent(other) {
+		t.Error("usbDevicePresent is true for a product that is not plugged in, want false")
 	}
 }

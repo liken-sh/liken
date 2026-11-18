@@ -10,9 +10,8 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// fakeEFIVars builds a directory that stands in for efivarfs. Each
-// variable is a file of 4 attribute bytes plus payload, exactly the
-// shape the kernel presents.
+// fakeEFIVars returns a directory laid out as efivarfs lays out its
+// files.
 func fakeEFIVars(t *testing.T, vars map[string][]byte) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -20,7 +19,7 @@ func fakeEFIVars(t *testing.T, vars map[string][]byte) string {
 		file := name + "-" + efiGlobalVariable
 		content := append([]byte{0x07, 0, 0, 0}, payload...)
 		if err := os.WriteFile(filepath.Join(dir, file), content, 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the variable file: %v", err)
 		}
 	}
 	return dir
@@ -34,7 +33,7 @@ func u16le(values ...uint16) []byte {
 	return b
 }
 
-func TestFirmwareFactsDecodesTheBootStory(t *testing.T) {
+func TestFirmwareFactsShowsBootEntriesByDescription(t *testing.T) {
 	slotA := encodeLoadOption(loadOption{attributes: loadOptionActive, description: "liken slot A"})
 	slotB := encodeLoadOption(loadOption{attributes: loadOptionActive, description: "liken slot B"})
 	dir := fakeEFIVars(t, map[string][]byte{
@@ -46,43 +45,39 @@ func TestFirmwareFactsDecodesTheBootStory(t *testing.T) {
 
 	fw := firmwareFacts(dir)
 	if fw.Mode != machine.FirmwareUEFI {
-		t.Errorf("mode: got %q", fw.Mode)
+		t.Errorf("mode is %q, want UEFI", fw.Mode)
 	}
 	if fw.BootCurrent != "Boot0000 (liken slot A)" {
-		t.Errorf("bootCurrent: got %q", fw.BootCurrent)
+		t.Errorf("BootCurrent is %q, want %q", fw.BootCurrent, "Boot0000 (liken slot A)")
 	}
 	if fw.BootNext != "" {
-		t.Errorf("bootNext should be absent: got %q", fw.BootNext)
+		t.Errorf("BootNext is %q, want it empty because no BootNext variable exists", fw.BootNext)
 	}
 	want := []string{"Boot0000 (liken slot A)", "Boot0001 (liken slot B)"}
 	if !slices.Equal(fw.BootOrder, want) {
-		t.Errorf("bootOrder: got %v, want %v", fw.BootOrder, want)
+		t.Errorf("BootOrder is %v, want %v", fw.BootOrder, want)
 	}
 }
 
-func TestFirmwareFactsReportsAnArmedBootNext(t *testing.T) {
+func TestFirmwareFactsShowsBootNextByDescription(t *testing.T) {
 	dir := fakeEFIVars(t, map[string][]byte{
 		"BootNext": u16le(1),
 		"Boot0001": encodeLoadOption(loadOption{description: "liken slot B"}),
 	})
 	if got := firmwareFacts(dir).BootNext; got != "Boot0001 (liken slot B)" {
-		t.Errorf("bootNext: got %q", got)
+		t.Errorf("BootNext is %q, want %q", got, "Boot0001 (liken slot B)")
 	}
 }
 
-// assertBootNext pins the proven slot in BootNext on every boot, so a
-// value here no longer means a trial is queued. The report names which
-// kind it found: an entry that repeats the head of the order is the
-// pin, and an entry that aims elsewhere is a trial that never ran.
-func TestFirmwareFactsTellsAPinnedOneShotFromATrial(t *testing.T) {
+func TestFirmwareFactsNotesBootNextThatRepeatsTheFirstBootOrderEntry(t *testing.T) {
 	cases := map[string]struct {
 		next uint16
 		want string
 	}{
-		"the one-shot repeats the standing preference": {
+		"BootNext equals the first BootOrder entry": {
 			next: 1, want: "Boot0001 (liken slot B, pinned at the proven slot)",
 		},
-		"the one-shot aims at the other slot": {next: 0, want: "Boot0000 (liken slot A)"},
+		"BootNext is the other slot": {next: 0, want: "Boot0000 (liken slot A)"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -93,34 +88,31 @@ func TestFirmwareFactsTellsAPinnedOneShotFromATrial(t *testing.T) {
 				"Boot0001":  encodeLoadOption(loadOption{description: "liken slot B"}),
 			})
 			if got := firmwareFacts(dir).BootNext; got != c.want {
-				t.Errorf("bootNext: got %q, want %q", got, c.want)
+				t.Errorf("BootNext is %q, want %q", got, c.want)
 			}
 		})
 	}
 }
 
-func TestFirmwareFactsNamesUndecodableEntriesHonestly(t *testing.T) {
-	// An entry in the order whose variable is missing or corrupted
-	// still shows its ID, so nothing in the order stays hidden.
+func TestFirmwareFactsShowsOnlyTheVariableNameOfAnUndecodableEntry(t *testing.T) {
+	// Boot2001 does not exist.
 	dir := fakeEFIVars(t, map[string][]byte{
 		"BootOrder": u16le(0x2001, 0x2002),
-		"Boot2002":  {0xFF}, // too short to even carry attributes
+		"Boot2002":  {0xFF}, // too short to hold the attribute bytes
 	})
 	want := []string{"Boot2001", "Boot2002"}
 	if got := firmwareFacts(dir).BootOrder; !slices.Equal(got, want) {
-		t.Errorf("bootOrder: got %v, want %v", got, want)
+		t.Errorf("BootOrder is %v, want %v", got, want)
 	}
 }
 
 func TestFirmwareFactsOnABIOSMachine(t *testing.T) {
-	// With no variable store at all, the mode says BIOS, and every
-	// other field stays empty.
 	fw := firmwareFacts(filepath.Join(t.TempDir(), "nonexistent"))
 	if fw.Mode != machine.FirmwareBIOS {
-		t.Errorf("mode: got %q", fw.Mode)
+		t.Errorf("mode is %q, want BIOS", fw.Mode)
 	}
 	if fw.BootCurrent != "" || fw.BootNext != "" || fw.BootOrder != nil {
-		t.Errorf("a BIOS machine has no boot variables: %+v", fw)
+		t.Errorf("the facts are %+v, want no boot variables on a BIOS machine", fw)
 	}
 }
 
@@ -128,66 +120,57 @@ func TestReadEFIVarStripsAttributes(t *testing.T) {
 	dir := fakeEFIVars(t, map[string][]byte{"BootCurrent": {0xAA, 0xBB}})
 	b, err := readEFIVar(dir, "BootCurrent")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading BootCurrent: %v", err)
 	}
 	if len(b) != 2 || b[0] != 0xAA || b[1] != 0xBB {
-		t.Errorf("payload: got % X", b)
+		t.Errorf("payload is % X, want AA BB", b)
 	}
 }
 
 func TestWriteEFIVarRoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	if err := writeEFIVar(dir, "BootNext", u16le(3)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing BootNext: %v", err)
 	}
 	b, err := readEFIVar(dir, "BootNext")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading BootNext: %v", err)
 	}
 	if len(b) != 2 || binary.LittleEndian.Uint16(b) != 3 {
-		t.Errorf("payload: got % X", b)
+		t.Errorf("payload is % X, want 03 00", b)
 	}
-	// Overwriting must replace the value, not append to it: this is
-	// how efivarfs behaves.
 	if err := writeEFIVar(dir, "BootNext", u16le(7)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing BootNext again: %v", err)
 	}
 	if b, _ = readEFIVar(dir, "BootNext"); binary.LittleEndian.Uint16(b) != 7 {
-		t.Errorf("overwrite: got % X", b)
+		t.Errorf("payload after the second write is % X, want 07 00", b)
 	}
 }
 
-func TestSetBootEntryFindsItsOwnByDescription(t *testing.T) {
+func TestSetBootEntryReusesTheNumberOfAnEntryWithTheSameDescription(t *testing.T) {
 	dir := fakeEFIVars(t, map[string][]byte{
 		"Boot0000": encodeLoadOption(loadOption{description: "BootManagerMenuApp"}),
 		"Boot0001": encodeLoadOption(loadOption{description: "liken slot A"}),
 	})
-	// Rewriting slot A lands on its existing number, not on a new
-	// one.
 	n, err := setBootEntry(dir, loadOption{description: "liken slot A", filePath: `\vmlinuz`})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting the entry for slot A: %v", err)
 	}
 	if n != 1 {
-		t.Errorf("slot A should overwrite Boot0001, landed on Boot%04X", n)
+		t.Errorf("slot A was written to Boot%04X, want Boot0001", n)
 	}
-	// A new description takes the lowest free number, and skips the
-	// firmware's entries rather than overwriting them.
 	n, err = setBootEntry(dir, loadOption{description: "liken slot B"})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("setting the entry for slot B: %v", err)
 	}
 	if n != 2 {
-		t.Errorf("slot B should land on Boot0002, landed on Boot%04X", n)
+		t.Errorf("slot B was written to Boot%04X, want Boot0002", n)
 	}
 	if got := listBootEntries(dir)[0].description; got != "BootManagerMenuApp" {
-		t.Errorf("the firmware's entry should be untouched: %q", got)
+		t.Errorf("the description of Boot0000 is %q, want it unchanged", got)
 	}
 }
 
-// fakeFirmwareVars points the package's efivars path at a fake store,
-// and restores the real one afterward. reportFirmware and the facts
-// read through this variable.
 func fakeFirmwareVars(t *testing.T, vars map[string][]byte) string {
 	t.Helper()
 	dir := fakeEFIVars(t, vars)
@@ -198,27 +181,24 @@ func fakeFirmwareVars(t *testing.T, vars map[string][]byte) string {
 }
 
 func TestReportFirmwareUEFI(t *testing.T) {
-	// This is what a healthy machine looks like after a boot: slot A
-	// leads the order, and the boot's own assertion pinned the one-shot
-	// at the same entry.
 	fakeFirmwareVars(t, map[string][]byte{
 		"Boot0002":    encodeLoadOption(loadOption{attributes: loadOptionActive, description: "liken slot A"}),
 		"BootCurrent": u16le(0x0002),
 		"BootNext":    u16le(0x0002),
 		"BootOrder":   u16le(0x0002),
 	})
-	// The report prints. What the test checks is that the same
-	// facts decode for status, the other half of console parity.
+	// reportFirmware only prints, so the test checks what it prints
+	// from.
 	reportFirmware()
 	fw := firmwareFacts(efiVarsDir)
 	if fw.Mode != machine.FirmwareUEFI {
-		t.Errorf("a variable store means UEFI: %s", fw.Mode)
+		t.Errorf("mode is %s, want UEFI because a variable store exists", fw.Mode)
 	}
 	if fw.BootCurrent != "Boot0002 (liken slot A)" {
-		t.Errorf("entries decode to their names: %q", fw.BootCurrent)
+		t.Errorf("BootCurrent is %q, want %q", fw.BootCurrent, "Boot0002 (liken slot A)")
 	}
 	if fw.BootNext != "Boot0002 (liken slot A, pinned at the proven slot)" {
-		t.Errorf("BootNext decodes too, and says which kind it is: %q", fw.BootNext)
+		t.Errorf("BootNext is %q, want its description and the pinned note", fw.BootNext)
 	}
 }
 
@@ -228,34 +208,31 @@ func TestReportFirmwareBIOS(t *testing.T) {
 	t.Cleanup(func() { efiVarsDir = old })
 	reportFirmware()
 	if fw := firmwareFacts(efiVarsDir); fw.Mode != machine.FirmwareBIOS {
-		t.Errorf("no store reads as BIOS: %s", fw.Mode)
+		t.Errorf("mode is %s, want BIOS because no variable store exists", fw.Mode)
 	}
 }
 
 func TestReadEFIVarRejectsATruncatedVariable(t *testing.T) {
 	dir := t.TempDir()
-	// Two bytes cannot even hold the attribute word that the kernel
-	// always prepends; such a file is corrupted, not empty.
 	if err := os.WriteFile(filepath.Join(dir, "BootNext-"+efiGlobalVariable), []byte{1, 2}, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the truncated BootNext file: %v", err)
 	}
 	if _, err := readEFIVar(dir, "BootNext"); err == nil {
-		t.Error("a variable shorter than its attributes is an error")
+		t.Error("readEFIVar returned no error, want one for a variable shorter than its attribute word")
 	}
 }
 
-func TestListBootEntriesSkipsWhatItCannotDecode(t *testing.T) {
+func TestListBootEntriesSkipsEntriesThatDoNotDecode(t *testing.T) {
 	dir := fakeEFIVars(t, map[string][]byte{
 		"Boot0007": encodeLoadOption(loadOption{attributes: loadOptionActive, description: "liken slot A"}),
-		"Boot0008": {0x01}, // truncated: not even a whole load-option header
+		"Boot0008": {0x01}, // too short for a load option header
 	})
-	// Something else's variable, not a Boot#### entry at all.
 	if err := os.WriteFile(filepath.Join(dir, "SecureBoot-"+efiGlobalVariable), []byte{7, 0, 0, 0, 1}, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the SecureBoot file: %v", err)
 	}
 	entries := listBootEntries(dir)
 	if len(entries) != 1 || entries[7].description != "liken slot A" {
-		t.Errorf("only decodable Boot entries are listed: %+v", entries)
+		t.Errorf("entries are %+v, want only Boot0007", entries)
 	}
 }
 
@@ -263,15 +240,15 @@ func TestWriteEFIVarReportsARefusedWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "BootNext-"+efiGlobalVariable)
 	if err := os.WriteFile(path, []byte{7, 0, 0, 0, 1, 0}, 0o444); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the BootNext file: %v", err)
 	}
 	if err := writeEFIVar(dir, "BootNext", u16le(3)); err == nil {
-		t.Error("a variable that refuses its write is an error the caller must hear")
+		t.Error("writeEFIVar returned no error, want one for a variable file that refuses the write")
 	}
 }
 
-func TestListBootEntriesWithNoStoreListsNothing(t *testing.T) {
+func TestListBootEntriesReturnsNothingWithoutAVariableStore(t *testing.T) {
 	if entries := listBootEntries(filepath.Join(t.TempDir(), "no-efivars")); len(entries) != 0 {
-		t.Errorf("no store, no entries: %+v", entries)
+		t.Errorf("entries are %+v, want none without a variable store", entries)
 	}
 }

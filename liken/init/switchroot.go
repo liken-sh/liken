@@ -1,57 +1,42 @@
 package main
 
-// This file replaces the kernel's rootfs with the real root: the
-// read-only system image, with a bounded overlay for the runtime's
-// writes.
+// This file moves init from the kernel's rootfs onto the real root:
+// the read-only system image under a tmpfs overlay of fixed size.
 //
-// When the kernel unpacks the initramfs, the kernel does not mount a
-// filesystem to hold the files. The files land in rootfs: the
-// filesystem instance that the kernel creates as the root of the
-// mount tree, before any userspace process exists. rootfs is the
-// bottom of the mount stack by construction. The kernel can never
-// unmount rootfs, and pivot_root refuses to operate on it, because
-// either action would leave the mount tree with no root at all.
-// rootfs is also RAM with no bound and no accounting: it appears as
-// device "rootfs" in the mount table, and nothing can measure its
-// size. So an OS that stays on rootfs pays for itself in memory
-// forever, and kubelet's node ephemeral-storage accounting reports
-// nothing for it.
+// The kernel unpacks the initramfs into rootfs, the filesystem at the
+// root of the mount tree. The kernel cannot unmount rootfs, and
+// pivot_root refuses to run on it. rootfs is RAM with no size limit,
+// and nothing reports how much of it is in use, so kubelet's
+// ephemeral-storage accounting reports nothing for it. An OS that
+// stays on rootfs keeps its whole image in RAM until it reboots.
 //
-// liken's root lives elsewhere. The system image, which rootimage.go
-// finds and loop-mounts, is the lower, read-only layer of an overlay
-// filesystem. A small, fixed-size tmpfs is the upper, writable layer.
-// The OS costs page cache instead of a permanent copy of itself.
-// Everything that grows with use lives on a disk role, not under /.
+// So the real root is an overlay. Its lower layer is the system image,
+// which rootimage.go finds and loop-mounts read-only. Its upper layer
+// is a tmpfs of writesSize. The image's files then use page cache,
+// which the kernel can free, in place of a permanent copy in RAM.
 //
-// rootfs holds only what the boot loader delivered beyond the OS
-// itself: the boot archive (this program and the early kernel
-// modules) and the deployment layer. Before the switch, this code
-// carries the layer's files onto the overlay: manifests, identity,
-// declared modules, and their index. This preserves the initramfs
-// contract that later archives override earlier ones, so the layer's
-// files win over the image's files.
+// rootfs also holds the deployment layer: the manifests, the
+// identity, the declared modules, and their index. init copies these
+// files onto the overlay, where they replace the image's copies, as a
+// later initramfs archive replaces the files of an earlier one.
 //
-// The procedure takes its name from the util-linux tool that
-// performs it on conventional systems (switch_root):
+// The steps follow util-linux's switch_root:
 //
-//  1. mount the system image and the overlay above it,
-//  2. carry rootfs's extra files (the layer) onto the overlay,
-//  3. delete the originals, and return their RAM to the kernel,
+//  1. mount the system image and the overlay on it,
+//  2. copy the deployment layer from rootfs onto the overlay,
+//  3. delete the files on rootfs so the kernel frees their RAM,
 //  4. move the mounts into the new root, move the new root onto /,
 //     and chroot into it,
-//  5. re-exec init from the new root.
+//  5. exec init again from the new root.
 //
-// The re-exec is required. The running program is the last thing
-// pinning the old root in memory: the kernel maps its executable
-// from rootfs, so those pages cannot be freed until a different
-// program runs in their place. exec replaces the process image while
-// it keeps PID 1. The second "hello from userspace" message on the
-// console is the same program, restarting from the new root.
+// The exec is needed because the running init is mapped from rootfs,
+// and the kernel cannot free those pages until another program
+// replaces it. exec keeps PID 1. So "hello from userspace" shows
+// twice on the console.
 //
-// An install boot (liken.install) skips this entire procedure. The
-// installer runs from rootfs, copies the release payload it carried
-// to disk, and powers off. None of this work needs the overlay, and
-// the payload is far bigger than the overlay's size bound.
+// An install boot (liken.install) and a hardware report boot
+// (liken.report) stay on rootfs. The installer's release payload is
+// far bigger than writesSize.
 
 import (
 	"fmt"
@@ -65,48 +50,38 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// switchedMarker is how init tells its post-switch run apart from
-// its first run: the re-exec passes switchedMarker as an argument.
-// The kernel also hands unrecognized non-key=value boot parameters to
-// init as arguments, but nothing on liken's command line starts with
-// dashes.
+// switchedMarker is the argument that tells init it runs a second
+// time, after the switch. The kernel also passes a boot parameter that
+// is not key=value to init as an argument, but no parameter on liken's
+// command line starts with dashes.
 const switchedMarker = "--switched"
 
 const newRoot = "/newroot"
 
-// stagingDir is where the boot's mounts assemble before the switch.
-// It is a tmpfs holding the overlay's upper and work directories,
-// with the system image mounted beneath it, and the slot too, when
-// this boot is a slot boot. One MS_MOVE operation carries the whole
-// subtree into the new root at bootMountsDir, so the running system
-// can see what it booted from.
+// stagingDir is a tmpfs with the overlay's upper and work directories,
+// the system image's mount, and the slot's mount when the image comes
+// from a slot. One MS_MOVE moves all of it to bootMountsDir in the new
+// root, where the running system can read what it booted from.
 const stagingDir = "/liken-boot"
 
-// bootMountsDir is the staging tree's location inside the new root.
-// It is deliberately not /var/lib/liken/boot, which is where the
-// bootHome role mounts on a BIOS machine. A mount there would cover
-// this tree and leave the running system unable to name the slot it
-// booted from or the image it is running.
+// bootMountsDir is not /var/lib/liken/boot, because the bootHome role
+// mounts there on a BIOS machine and would hide the slot and the image.
 const bootMountsDir = "/var/lib/liken/boot-mounts"
 
-// writesSize bounds the overlay's upper layer, which is the root
-// filesystem's entire write budget. The runtime's writes under / are
-// small and fixed: k3s config drop-ins, resolv.conf, and the layer's
-// seed files. Everything that grows with use belongs to a disk role.
-// This budget size is deliberate. If something fills the budget, that
-// is a bug report about something writing to / that should not write
-// there, not a reason to raise the budget.
+// writesSize limits everything the running system writes under /:
+// k3s config drop-ins, resolv.conf, and the deployment layer. Data that
+// grows with use belongs on a disk role. When this tmpfs fills, the fix
+// is in the program that writes under /, not a larger size.
 const writesSize = "128m"
 
-// maybeSwitchRoot runs once, before init touches anything else. The
-// switch must happen while the mount tree is empty, because moving
-// one mount is simple and moving many is not, and it must happen
-// before any child process exists. The liken.* boot parameters that
-// maybeSwitchRoot needs live in /proc/cmdline and nowhere else. The
-// kernel treats any parameter with a dot in its name as a module
-// parameter, and passes it to init neither as an argument nor in the
-// environment. So this function mounts /proc here, before anything
-// else, and detaches /proc again before the switch.
+// maybeSwitchRoot runs first in init, and does nothing after the
+// switch. It must run before init mounts anything else, because the
+// switch moves only the staging tree into the new root, and before
+// init starts any process. It mounts /proc to read the liken.*
+// parameters from /proc/cmdline: the kernel treats a parameter with a
+// dot in its name as a module parameter, and passes it to init neither
+// as an argument nor in the environment. /proc is unmounted again on
+// every path, and mountEssentials mounts it later.
 func maybeSwitchRoot() {
 	if slices.Contains(os.Args[1:], switchedMarker) {
 		return
@@ -117,40 +92,28 @@ func maybeSwitchRoot() {
 		}
 	}
 
-	// The boot archive's few modules load on every first run, not
-	// only on runs that switch root. An install boot stays on rootfs,
-	// but still mounts FAT slots, and vfat's encoding table is one of
-	// these modules.
+	// Install and report boots need these modules too: an install boot
+	// mounts FAT slots, and vfat's encoding table is one of them.
 	if names, err := readModuleList(filepath.Join(bootModulesDir, "boot-modules.conf")); err == nil {
 		loadBootModules(names...)
 	} else {
-		fmt.Fprintf(os.Stderr, "liken: boot modules: %v\n", err)
+		fmt.Fprintf(os.Stderr, "liken: reading the boot module list: %v\n", err)
 	}
 
 	if bootParam(installParam) || bootParam(reportParam) {
-		// The installer and the hardware report both run from rootfs.
-		// The installer copies its payload to disk and powers off; the
-		// report reads hardware, mounts the payload's module tree to
-		// load drivers, and reboots. Neither needs the overlay, and the
-		// payload is far bigger than the overlay's size bound.
-		fmt.Println("liken: install or report boot; staying on rootfs")
+		fmt.Println("liken: install or report boot, so init stays on rootfs")
 		_ = unix.Unmount("/proc", unix.MNT_DETACH)
 		return
 	}
 	if err := switchRoot(); err != nil {
-		// A machine still on rootfs is degraded but alive, and the
-		// console works either way. Continue, and let the report show
-		// the state of the machine.
-		fmt.Fprintf(os.Stderr, "liken: switch_root: %v (continuing on rootfs)\n", err)
+		// The machine still works on rootfs, without the size limit.
+		fmt.Fprintf(os.Stderr, "liken: switching root: %v, continuing on rootfs\n", err)
 		_ = unix.Unmount("/proc", unix.MNT_DETACH)
 	}
 }
 
 func switchRoot() error {
-	// Mount devices first. The loop device and the slot's partition
-	// both live in devtmpfs, the kernel's own device catalog. The new
-	// root gets a fresh mount of the same catalog later
-	// (mountEssentials); this mount is detached before the switch.
+	// The loop device and the slot's partition need device nodes.
 	if err := os.MkdirAll("/dev", 0o755); err != nil {
 		return err
 	}
@@ -158,10 +121,7 @@ func switchRoot() error {
 		return fmt.Errorf("mounting devtmpfs: %w", err)
 	}
 
-	// Slot recognition walks /sys/block for the GPT names that the
-	// kernel read, so sysfs joins the early mounts. Like /dev and
-	// /proc, this mount is detached before the switch, and remounted
-	// fresh in the new root.
+	// findSystemImage reads the GPT partition names under /sys/block.
 	if err := os.MkdirAll("/sys", 0o755); err != nil {
 		return err
 	}
@@ -169,15 +129,12 @@ func switchRoot() error {
 		return fmt.Errorf("mounting sysfs: %w", err)
 	}
 
-	// This is the staging tmpfs: the overlay's writable layer, and the
-	// parent of every mount that this boot assembles. Its size is the
-	// bound on what the running system can ever write under /.
 	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
 		return err
 	}
 	if err := unix.Mount("tmpfs", stagingDir, "tmpfs",
 		unix.MS_NOSUID, "mode=0755,size="+writesSize); err != nil {
-		return fmt.Errorf("mounting the writes tmpfs: %w", err)
+		return fmt.Errorf("mounting the tmpfs for the overlay's writes: %w", err)
 	}
 	for _, dir := range []string{"upper", "work", "system"} {
 		if err := os.MkdirAll(filepath.Join(stagingDir, dir), 0o755); err != nil {
@@ -204,25 +161,20 @@ func switchRoot() error {
 		return fmt.Errorf("mounting the overlay: %w", err)
 	}
 
-	// Carry the boot loader's extra files — the deployment layer —
-	// onto the overlay. This excludes everything that the boot archive
-	// itself brought: the system image already carries init, and the
-	// boot module tree stays off the real root deliberately, so its
-	// partial index can never override the image's complete index.
-	if err := carryTree("/", newRoot, []string{
+	// The system image has its own init. The boot archive's module tree
+	// stays off the real root, so its partial modules.dep cannot replace
+	// the image's complete one.
+	if err := copyTree("/", newRoot, []string{
 		newRoot, "/dev", "/proc", "/sys", stagingDir,
 		"/liken", ramImage, bootModulesDir,
 	}); err != nil {
-		return fmt.Errorf("carrying the layer: %w", err)
+		return fmt.Errorf("copying the deployment layer onto the overlay: %w", err)
 	}
 
-	// Delete the originals while they are still reachable by a path.
-	// After the move below, the old root has no path at all. This
-	// step is what actually reclaims the RAM. Skipping this step
-	// would leave the machine carrying the layer twice. A
-	// RAM-delivered system image is the one exception: the loop
-	// device pins it in memory, deleted or not, for as long as the
-	// image stays mounted.
+	// Delete rootfs's files now, because after the move below no path
+	// reaches the old root. Otherwise the deployment layer stays in RAM
+	// twice. A system image that came in RAM (ramImage) stays in RAM
+	// anyway, because its loop device keeps the deleted file open.
 	entries, err := os.ReadDir("/")
 	if err != nil {
 		return err
@@ -234,14 +186,10 @@ func switchRoot() error {
 			continue
 		}
 		if err := os.RemoveAll(path); err != nil {
-			return fmt.Errorf("clearing old root: %w", err)
+			return fmt.Errorf("deleting the files of rootfs: %w", err)
 		}
 	}
 
-	// The staging tree moves into the new root in one piece. The
-	// system image and slot mounts move along with it as child
-	// mounts, so the running system can see the mounts it booted from
-	// at a real path.
 	target := filepath.Join(newRoot, bootMountsDir)
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return err
@@ -250,22 +198,16 @@ func switchRoot() error {
 		return fmt.Errorf("moving boot mounts into the new root: %w", err)
 	}
 
-	// Whatever the kernel put at /dev belongs to the old root. The
-	// /proc mount, used only for reading boot parameters, is no
-	// longer needed. Detach both mounts, so nothing pins the old tree
-	// once it moves. The new root gets fresh mounts of /dev and /proc
-	// (mountEssentials). The console keeps working throughout,
-	// because this program opened its stdio descriptors before any of
-	// this.
+	// A mount left on the old root keeps it in use. mountEssentials
+	// mounts these again in the new root. The console keeps working
+	// because init's stdio descriptors are already open.
 	_ = unix.Unmount("/dev", unix.MNT_DETACH)
 	_ = unix.Unmount("/proc", unix.MNT_DETACH)
 	_ = unix.Unmount("/sys", unix.MNT_DETACH)
 
-	// Now the move and the chroot. MS_MOVE attaches the overlay onto
-	// /. This is legal where pivot_root is not, because nothing has
-	// to be unmounted. chroot(".") changes what this process treats
-	// as "/". Order matters here: chdir runs first, so "." names the
-	// new root throughout.
+	// pivot_root refuses to run when / is rootfs, so move the overlay
+	// onto / and chroot into it. The chdir makes "." the new root for
+	// both calls.
 	if err := os.Chdir(newRoot); err != nil {
 		return err
 	}
@@ -273,7 +215,7 @@ func switchRoot() error {
 		return fmt.Errorf("moving the overlay onto /: %w", err)
 	}
 	if err := unix.Chroot("."); err != nil {
-		return fmt.Errorf("chroot: %w", err)
+		return fmt.Errorf("changing root into the overlay: %w", err)
 	}
 	if err := os.Chdir("/"); err != nil {
 		return err
@@ -283,17 +225,13 @@ func switchRoot() error {
 	return unix.Exec("/liken", []string{"/liken", switchedMarker}, os.Environ())
 }
 
-// carryTree replicates the filesystem tree at src into dst. It
-// copies directories, symlinks, and regular files, and keeps their
-// permissions intact, while it skips the subtrees named in skip.
-// Directories, symlinks, and regular files are the complete contents
-// of an initramfs that liken's image build produces. Any other file
-// type is unexpected, and fails the carry. carryTree overwrites
-// existing files in dst, because dst is the overlay, whose lower
-// layer already carries the system's own copy of anything the
-// deployment layer overrides. The depmod index is the most important
-// example.
-func carryTree(src, dst string, skip []string) error {
+// copyTree copies the tree under src into dst, except the paths in
+// skip. An initramfs that liken builds has only directories, symlinks,
+// and regular files, so any other type is an error. It replaces a file
+// that dst already has, because the overlay's lower layer has the
+// image's copy of each file that the deployment layer replaces, such
+// as modules.dep.
+func copyTree(src, dst string, skip []string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -314,9 +252,7 @@ func carryTree(src, dst string, skip []string) error {
 		}
 		switch {
 		case d.IsDir():
-			// The overlay's lower layer already has most directories.
-			// Creating a directory again must not fail. An existing
-			// directory keeps the image's permissions.
+			// An existing directory keeps the image's permissions.
 			if err := os.Mkdir(target, 0o755); err != nil {
 				if os.IsExist(err) {
 					return nil
@@ -336,7 +272,7 @@ func carryTree(src, dst string, skip []string) error {
 		case d.Type().IsRegular():
 			return copyFile(path, target, info.Mode().Perm())
 		default:
-			return fmt.Errorf("%s: unexpected file type %s", path, d.Type())
+			return fmt.Errorf("%s has file type %s, and an initramfs holds only directories, symlinks, and regular files", path, d.Type())
 		}
 	})
 }
@@ -355,6 +291,8 @@ func copyFile(src, dst string, perm fs.FileMode) error {
 		out.Close()
 		return err
 	}
+	// OpenFile applies the umask, and leaves the mode of a file that
+	// exists, so set the mode here.
 	if err := out.Chmod(perm); err != nil {
 		out.Close()
 		return err

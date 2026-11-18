@@ -1,42 +1,31 @@
 package main
 
-// Reinstalling over a disk that already carries a liken install.
+// A reinstall writes a new liken install over a disk that already has
+// one.
 //
-// The installer only ever claims a blank disk (claim.go), which is
-// the right rule: it means liken never destroys data it did not put
-// there. The cost of that rule is that a disk liken itself wrote can
-// only be reinstalled after something outside liken blanks it, and a
-// fresh machine has no such thing: no shell, no second OS, and, until
-// its own install succeeds, no network. liken.reinstall is the escape
-// hatch. It is liken.install, plus one thing first: it blanks the
-// disks this machine's manifest declares, so the claim that follows
-// finds them blank.
+// The installer claims only a blank disk (claim.go), so liken never
+// destroys data it did not write. The cost is that a disk that liken
+// wrote cannot be reinstalled until something else blanks it, and a
+// fresh machine has no shell, no second OS, and no network until its
+// install succeeds. A liken.reinstall boot blanks the disks that the
+// machine's manifest declares, and then installs as liken.install does.
 //
-// A person asks for this by picking the stick's "wipe and reinstall
-// as <name>" entry, over a manifest that declares these exact disks.
-// Picking it is the confirmation, and it is as explicit as a person
-// can be at a console with no other tools.
+// A person asks for this by choosing the stick's "wipe and reinstall
+// as <name>" menu entry, for a manifest that declares these disks.
+// Choosing it is the confirmation, because the console has no other
+// way to ask.
 //
-// A declared disk may name a stable identity under /dev/disk/by-id/
-// or /dev/disk/by-path/ instead of a kernel path, so the wipe
-// resolves it through resolveDeclaredDisk, the same computation the
-// claim uses. A name that matches two disks wipes neither: guessing
-// which one the manifest meant risks the disk the manifest did not
-// mean.
+// A declared disk can be a name under /dev/disk/by-id/ or
+// /dev/disk/by-path/. The wipe resolves it as the claim does. When a
+// name matches two disks, the wipe blanks neither, because a wrong
+// guess would erase a disk that the manifest does not declare.
 //
-// Blanking a disk's table is not the whole erasure, and on its own it
-// would not be one. Partitions start a megabyte in, so their file
-// systems survive the wipe, and a claim that writes the same layout
-// back puts them at the same offsets again. The erasure is completed
-// by the rule in storage.go: a partition this boot created always
-// gets a new file system. Nothing of the previous install survives a
-// reinstall, on any disk the manifest declares.
-//
-// The reclaim runs after loadModules (so a real controller's driver
-// has created the device nodes) and before settleStorage (so nothing
-// claims or mounts a disk this boot is about to erase). It does not
-// power off: the boot goes on to install, the same as a plain
-// install boot.
+// Blanking the partition table does not erase the file systems.
+// Partitions start a megabyte into the disk, so a claim that writes
+// the same layout puts the old file systems back at the same offsets.
+// The rule in storage.go completes the erasure: a partition that this
+// boot created always gets a new file system. So nothing of the
+// previous install survives on any declared disk.
 
 import (
 	"fmt"
@@ -55,32 +44,30 @@ const (
 	reinstallParam = "liken.reinstall"
 )
 
-// installing reports whether this boot's one job is to put liken on
-// the machine's own disk, by either door: a plain install onto blank
-// disks, or a reinstall that blanks them first.
+// installing reports whether this boot installs liken onto the
+// machine's disks, either onto blank disks (liken.install) or after
+// blanking them (liken.reinstall).
 func installing() bool {
 	return bootParam(installParam) || bootParam(reinstallParam)
 }
 
-// wipeRegion is how much is zeroed at each end of a disk. isBlank
-// reads only the first 2 KiB (the MBR, the GPT header, and the ext4
-// magic), and a claim rewrites the whole GPT anyway, so a megabyte at
-// the front already reclaims the disk. The same megabyte at the back
-// removes the GPT's backup header, which lives in the last sectors,
-// so no tool later reports a torn table.
+// wipeRegion is how many bytes blankDisk zeroes at each end of a
+// disk. isBlank reads only the first 2 KiB, and a claim rewrites the
+// whole GPT, so the front region is enough to reclaim the disk. The
+// back region covers the GPT's backup header in the last sectors, so
+// no tool later reports a damaged table.
 const wipeRegion = 1 << 20
 
-// reclaimManifestDisks blanks every disk the seed manifest declares.
-// It reads the seed directly, by the same liken.machine= identity the
-// installer uses, because the disks it must reclaim are exactly the
-// ones the install that follows will claim. A disk that fails to
-// reclaim is left to the ordinary claim, which refuses a disk it
-// cannot recognize and stops the boot with its own message; this
-// function does not power off on its own.
+// reclaimManifestDisks blanks every disk that the seed manifest
+// declares. It loads the seed with the same liken.machine= name that
+// the installer uses, so it reclaims the disks that the install will
+// claim. When a disk cannot be reclaimed, this function only logs it.
+// The claim that follows then refuses the disk it does not recognize
+// and stops the boot with its own message.
 func reclaimManifestDisks() {
 	seed, err := loadSeed(machine.MachineManifestDir, bootParamValue("liken.machine"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: reinstall: cannot read the seed manifest to find its disks: %v\n", err)
+		fmt.Fprintf(os.Stderr, "liken: reinstall: reading the seed manifest for its disks: %v\n", err)
 		return
 	}
 
@@ -93,7 +80,7 @@ func reclaimManifestDisks() {
 		}
 	}
 	if len(devices) == 0 {
-		fmt.Fprintln(os.Stderr, "liken: reinstall: the manifest declares no disks to reclaim")
+		fmt.Fprintln(os.Stderr, "liken: reinstall: the seed manifest declares no disks to reclaim")
 		return
 	}
 
@@ -104,21 +91,17 @@ func reclaimManifestDisks() {
 			continue
 		}
 		if err := blankDisk(node); err != nil {
-			fmt.Fprintf(os.Stderr, "liken: reinstall: %s: %v\n", device, err)
+			fmt.Fprintf(os.Stderr, "liken: reinstall: blanking %s: %v\n", device, err)
 			continue
 		}
 		fmt.Printf("liken: reinstall: reclaimed %s\n", device)
 	}
 }
 
-// awaitDevice waits, boundedly, for a declared device to attach, and
-// resolves it to the kernel node that a wipe can open. A reinstall
-// hits the same probe race an install does, so it waits the same way
-// (resolve.go). A device the manifest names is expected to exist, so
-// its continued absence at the deadline is an error, not a silent
-// skip. It resolves the declared string rather than opening it
-// directly, because a stable name is not a device node a wipe can
-// open.
+// awaitDevice waits up to declaredDiskDeadline for a declared disk to
+// attach, as an install does (resolve.go), and returns the kernel
+// device node that blankDisk opens. The manifest declares the disk, so
+// a disk that is still missing at the deadline is an error.
 func awaitDevice(declared string) (string, error) {
 	disk, err := awaitDeclaredDisk(declared,
 		fmt.Sprintf("liken: reinstall: waiting for %s to attach", declared))
@@ -126,27 +109,21 @@ func awaitDevice(declared string) (string, error) {
 	case err != nil:
 		return "", err
 	case disk == nil:
-		return "", fmt.Errorf("%s did not attach within %s", declared, declaredDiskDeadline)
+		return "", fmt.Errorf("disk %s did not attach within %s", declared, declaredDiskDeadline)
 	}
 	return devicePath(*disk), nil
 }
 
-// blankDisk makes a disk blank in the two ways that matter: on the
-// platters and in the kernel's memory of them. It zeros the first and
-// last megabyte (the front carries every signature isBlank inspects;
-// the back carries the GPT's backup header), then asks the kernel to
-// re-read the table. The re-read is not cosmetic. The kernel scanned
-// this disk's old table at boot, so its partition nodes and their
-// cached GPT labels still name the previous install's roles; without
-// the re-read, storage still finds a machineState partition to mount
-// and a proven manifest inside it, and reinstalls the machine into
-// the boot it was trying to replace. After the re-read of a zeroed
-// table, the disk has no partitions, and the claim that follows sees
-// a blank disk. A disk shorter than two wipe regions is blanked in
-// one pass from the front, which still covers every signature.
-// blankDisk takes the resolved kernel node, never the declared
-// string: a stable name under /dev/disk/ is not a node this function
-// can open.
+// blankDisk zeroes the first and last wipeRegion bytes of the disk at
+// the kernel device node, then asks the kernel to re-read the
+// partition table. The kernel scanned the old table at boot, and its
+// partition nodes still carry the old GPT labels. Without the re-read,
+// storage would find the old machineState partition, mount it, and
+// load its proven manifest, so the machine would boot the install
+// that it should replace. After the re-read of a zeroed table, the
+// disk has no partitions and the claim finds a blank disk. A disk
+// smaller than two wipeRegions is zeroed only at the front, which
+// still covers every signature that isBlank reads.
 func blankDisk(device string) error {
 	f, err := os.OpenFile(device, os.O_RDWR, 0)
 	if err != nil {
@@ -156,17 +133,17 @@ func blankDisk(device string) error {
 
 	zeros := make([]byte, wipeRegion)
 	if _, err := f.WriteAt(zeros, 0); err != nil {
-		return fmt.Errorf("zeroing the front: %w", err)
+		return fmt.Errorf("zeroing the start of the disk: %w", err)
 	}
 
 	if d := diskByPath(device); d != nil && d.SizeBytes >= 2*wipeRegion {
 		if _, err := f.WriteAt(zeros, int64(d.SizeBytes)-wipeRegion); err != nil {
-			return fmt.Errorf("zeroing the back: %w", err)
+			return fmt.Errorf("zeroing the end of the disk: %w", err)
 		}
 	}
 
 	if err := f.Sync(); err != nil {
-		return fmt.Errorf("flushing: %w", err)
+		return fmt.Errorf("flushing the disk: %w", err)
 	}
 	if _, err := unix.IoctlRetInt(int(f.Fd()), unix.BLKRRPART); err != nil {
 		return fmt.Errorf("re-reading the partition table: %w", err)

@@ -1,51 +1,36 @@
 package main
 
-// The hardware report boot: a boot that changes nothing.
+// A hardware report boot describes the machine's hardware and changes
+// nothing on its disks.
 //
-// A new machine asks a question the lab cannot answer: which drivers,
-// which interface names, which disk paths does this hardware need in
-// its manifest? The lab cannot answer it because the vendored kernel
-// builds the paravirtual drivers in, so a lab guest never loads the
-// storage or network module that every real controller needs. The
-// report boot answers the question on the real machine, before the
-// first install.
+// A new machine needs a manifest that names its drivers, interface
+// names, and disk paths. The lab guests cannot show them, because the
+// kernel builds the virtio drivers in, and real controllers and NICs
+// need modules. So before the first install, a person picks "liken
+// hardware report" from the install stick's menu. That entry boots with
+// liken.report and no liken.machine=, and the report does these steps:
 //
-// A person picks "liken hardware report" from the installation stick's
-// menu. The boot carries liken.report on its command line, and no
-// liken.machine= identity, because it describes the hardware, not a
-// machine in the deployment. It does the smallest amount of work that
-// produces a real answer:
+//  1. It mounts the payload's system image (liken.sqfs on the stick),
+//     because boot.cpio has only the boot modules, and the report needs
+//     the full module tree, its alias table, and its softdeps.
+//  2. It loads drivers for the storage, network, and USB mass-storage
+//     devices that have none. Names such as eth0 exist only after a
+//     driver binds.
+//  3. It reads the disks and the interfaces.
+//  4. It writes a proposed manifest to the stick, prints it and its
+//     warnings, and reboots. On an attended boot it waits for Enter
+//     first.
 //
-//  1. It mounts the payload's system image to reach the full module
-//     tree. The install medium carries the whole OS as liken.sqfs, and
-//     that image holds every driver, the alias table, and the softdep
-//     information. The report reads all three from there.
-//  2. It loads the drivers this hardware names, from that tree, for
-//     the storage and network devices only. Loading a module changes
-//     only RAM, so the report keeps its promise to change nothing on
-//     any disk. The names it needs are real only after the drivers
-//     bind: eth0 does not exist until r8169 loads.
-//  3. It observes what appeared: every disk that can hold a role, and
-//     every interface with its link brought up long enough to see the
-//     carrier.
-//  4. It writes a proposed manifest to the stick, prints it, states
-//     what would stop that manifest from installing, and reboots when
-//     the person presses Enter.
+// The proposal is meant to install after the person renames the
+// machine and checks the sizes. It sizes the storage roles to the
+// measured disks. It leaves storage drivers out of spec.modules,
+// because declared modules load after the boot claims disks, and warns
+// that the image's boot modules must include them. It declares only the
+// ports with a carrier, because each declared port adds a DHCP wait to
+// every boot.
 //
-// The proposal makes a promise, and the promise is the whole point of
-// the boot: a person renames the machine, checks the sizes, and
-// installs. So the report never proposes something that cannot work.
-// It sizes the roles against the disks it measured. It leaves a
-// storage driver out of spec.modules, because the declared modules
-// load long after the boot claims disks, and says what image would
-// carry the driver instead. It declares the ports with a cable in
-// them, and leaves the dark ones as comments, because every declared
-// port costs the boot a DHCP wait.
-//
-// The report never claims, formats, or writes to any of the machine's
-// own disks. It runs before storage settles for exactly this reason:
-// nothing downstream of it, not the storage reconciliation and not the
-// installer, must ever run on a report boot.
+// main runs the report before settleStorage, so the report never
+// claims, formats, or writes a disk of the machine.
 
 import (
 	"context"
@@ -62,64 +47,50 @@ import (
 	"github.com/liken-sh/liken/liken/hardware"
 )
 
-// stickCeiling bounds the one wait the report makes for the
-// installation stick's disk to appear. It is generous because the
-// whole report depends on the answer: the stick is where the proposal
-// goes, and it is the one disk no role may land on.
+// stickCeiling is how long the report waits for the install stick's
+// disk to appear. The report writes the proposal to the stick, and no
+// role may use the stick's disk.
 const stickCeiling = 15 * time.Second
 
-// reportParam makes a boot describe the hardware and change nothing. It
-// follows installParam and reinstallParam (reinstall.go), but it is its
-// own word because it is the one menu entry that never touches a disk.
+// reportParam is the kernel command-line word that selects the report
+// boot. Unlike installParam and reinstallParam (reinstall.go), it never
+// writes to a disk of the machine.
 const reportParam = "liken.report"
 
 // stickInstallPartition is the GPT partition name that image/stick.go
-// writes on the installation stick. The report finds the stick by this
-// name to write its proposal there, the same way storage roles are
-// found by the names written into their partitions.
+// writes on the install stick. The report finds the stick by this name.
 const stickInstallPartition = "liken:install"
 
 // hardwareReportName is the proposal's file name at the root of the
-// stick's filesystem. A person pulls the stick, reads this file, edits
-// it, and uses it as the machine's manifest.
+// stick's filesystem. A person edits this file and uses it as the
+// machine's manifest.
 const hardwareReportName = "hardware-report.yaml"
 
 // reportImageMount is where the report loop-mounts the payload's system
-// image to reach its module tree. reportStickMount is where it mounts
-// the stick's filesystem to write the proposal. They are variables so a
-// test can point the report at directories of its own making.
+// image, and reportStickMount is where it mounts the stick's
+// filesystem. Tests set them to temporary directories.
 var (
 	reportImageMount = "/liken-report-image"
 	reportStickMount = "/liken-report-stick"
 )
 
-// reporting reports whether this boot's one job is to describe the
-// hardware and reboot.
 func reporting() bool {
 	return bootParam(reportParam)
 }
 
-// runHardwareReport is the whole report boot. It gathers the hardware,
-// composes the proposal, writes it to the stick, prints it, and reboots
-// when the person acknowledges. Like every install-menu terminal state,
-// it ends at a held console, because a person picked this entry and is
-// present by construction. It never returns.
+// runHardwareReport gathers the hardware, writes the proposal to the
+// stick, prints it, and reboots. It never returns.
 func runHardwareReport() {
 	report, stick := gatherHardwareReport()
 	proposal := composeHardwareReport(report)
 
 	writeErr := writeReportToStick(stick, proposal)
 
-	// The console print is the proposal's second copy, and its only copy
-	// when the stick write fails. It goes out after the write attempt,
-	// so the held message below can tell the person the truth about the
-	// file.
+	// The printed proposal is the only copy when the stick write fails.
 	fmt.Println(proposal)
 
-	// The warnings come after the proposal, immediately above the
-	// prompt, because they are the lines a person must act on and the
-	// proposal above them is long. A machine with nothing wrong prints
-	// none of them.
+	// The proposal is long, so the warnings print after it, next to the
+	// prompt, where the person sees them.
 	for _, line := range reportWarnings(report) {
 		fmt.Println(line)
 	}
@@ -131,45 +102,34 @@ func runHardwareReport() {
 	endReport()
 }
 
-// endReport ends the report boot. It is a package variable so a test
-// can run the whole report boot and see it end, because the real
-// ending reboots the machine and never returns.
+// endReport ends the report boot. Tests replace it because the real
+// one reboots the machine.
 var endReport = rebootAfterReport
 
-// reportPrompt is the held console's last line. It tells the person
-// whether the proposal reached the stick, because a person who pulls
-// the stick on a failed write leaves with no copy of the report.
+// reportPrompt returns the last console line, which says whether the
+// proposal reached the stick.
 func reportPrompt(writeErr error) string {
 	if writeErr != nil {
 		return fmt.Sprintf(
-			"liken: writing %s to the stick FAILED; the text above is the only copy; press Enter to reboot.",
+			"liken: writing %s to the stick failed, so the text above is the only copy. Press Enter to reboot.",
 			hardwareReportName)
 	}
 	return fmt.Sprintf(
-		"liken: this report was written to the stick as %s; press Enter to reboot.",
+		"liken: wrote this report to the stick as %s. Press Enter to reboot.",
 		hardwareReportName)
 }
 
-// gatherHardwareReport does the observation: it mounts the module tree,
-// loads the drivers this hardware names, and reads back the disks and
-// interfaces that appeared. It returns the stick it resolved along
-// with the report, because the write of the proposal must go to that
-// same stick and no other.
-//
-// It degrades rather than fails. A machine whose payload will not
-// mount still gets a report of the disks and interfaces the boot-path
-// drivers bound, which is more use to a person than a blank screen.
-// The degraded path settles and waits exactly as the full path does:
-// the hardware takes the same seconds to appear whether or not the
-// report has a module tree to read, and a walk that runs a second into
-// the boot sees a machine with no SATA disks on it.
+// gatherHardwareReport loads the drivers the hardware needs and reads
+// the disks and interfaces that appear. It also returns the stick, so
+// the caller writes the proposal to it. When the payload image does not
+// mount, the report has only the disks and interfaces that the boot
+// modules' drivers bound.
 func gatherHardwareReport() (hardwareReport, installStick) {
 	uefi := firmwareIsUEFI()
 
-	// Let the boot-path buses finish probing before the first walk. On
-	// real hardware, storage settles in the middle of a SATA link's
-	// training or a USB device's negotiation, and a disk that has not
-	// appeared yet is indistinguishable from one that is not there.
+	// A SATA link can still be training, or a USB device still
+	// enumerating, when the boot starts, and a disk that has not
+	// appeared yet looks absent.
 	quiesceHardware()
 
 	var recommendations, claimable []moduleRecommendation
@@ -180,40 +140,30 @@ func gatherHardwareReport() (hardwareReport, installStick) {
 		defer unmount()
 		catalog, err := hardware.LoadCatalog(base, pciIDs)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "liken: report: no hardware catalog, so no driver recommendations: %v\n", err)
+			fmt.Fprintf(os.Stderr, "liken: report: the proposal has no driver recommendations because the hardware catalog did not load: %v\n", err)
 		} else {
 			recommendations = recommendModules(catalog, base)
-			// The claimable list is read from the same catalog before
-			// any load, and it is never loaded. It describes the
-			// machine as the person found it.
+			// Read before the loads below, so the list has the devices
+			// that had no driver at boot.
 			claimable = recommendClaimable(catalog, base)
-			// Load the full ordered chains from the payload's tree. The
-			// declared-module loader loads each name in order and prints
-			// the outcome, exactly as a from-disk boot loads spec.modules.
-			// The interfaces and disks these drivers create are real only
-			// after this returns and the probe settles again.
+			// The disks and interfaces of these drivers appear only after
+			// the loads finish and probing settles again.
 			loadDeclaredModulesFrom(base, dedupChains(recommendations), nil)
 			quiesceHardware()
 		}
 	}
 
-	// The installation stick is itself a disk, and it must not appear
-	// in the proposal: it leaves the machine with the person, so a role
-	// laid onto it would vanish with them, and a later "wipe and
-	// reinstall" would blank it. The stick is findable only here, after
-	// the loads above, because its own controller driver (usb-storage,
-	// or uas) is usually among them: before they load, the stick has no
-	// block device to find. For the same reason, the driver that exists
-	// only to reach the stick must not be recommended into the
-	// manifest, though it stayed loaded so the report can write its
-	// file.
+	// The proposal must not give the stick a role, because the person
+	// removes the stick after the install, and a reinstall would wipe
+	// it. The stick has no block device until usb-storage or uas loads,
+	// so it can be found only here. The report keeps that driver loaded
+	// to write the file, but leaves it out of the recommendations.
 	stick := awaitInstallStick()
 	recommendations = withoutStickRecommendations(recommendations, stick.Disk)
 
-	// Which disks the loads above brought into existence is knowable
-	// only here, with the recommendations and the disks in hand
-	// together. It is the fact that determines whether this machine can
-	// install from a stock image at all.
+	// A disk that appeared only because the report loaded its driver is
+	// invisible to an install unless the image's boot modules include
+	// that driver. The proposal warns about each such disk.
 	measured, cards := readReportDisks(stick)
 	disks := markDisksBehindDrivers(measured, recommendations)
 
@@ -228,12 +178,9 @@ func gatherHardwareReport() (hardwareReport, installStick) {
 	}, stick
 }
 
-// mountPayloadModules loop-mounts the payload's system image and returns
-// the paths into it that the report reads: the kernel's module tree and
-// the PCI naming database. The install medium carries the whole OS as
-// liken.sqfs beside the release document, and that image holds the full
-// module tree that the boot archive deliberately does not. The mount is
-// read-only, so it too changes nothing.
+// mountPayloadModules loop-mounts the payload's system image and
+// returns the paths of its kernel module tree and its PCI names
+// database.
 func mountPayloadModules() (base, pciIDs string, unmount func(), err error) {
 	image := filepath.Join(releasePayloadDir, slotImageName)
 	if err := mountReportImage(image, reportImageMount); err != nil {
@@ -245,42 +192,32 @@ func mountPayloadModules() (base, pciIDs string, unmount func(), err error) {
 	return base, pciIDs, unmount, nil
 }
 
-// mountReportImage loop-mounts the payload's system image. It is a
-// package variable so a test can stand in for the mount, because a
-// loop device needs privileges a test does not have.
+// mountReportImage loop-mounts the payload's system image. Tests
+// replace it because a loop mount needs privileges.
 var mountReportImage = loopMount
 
-// recommendModules turns the machine's unclaimed devices into ordered
-// driver recommendations. For each undriven device it takes the kernel
-// build's preferred candidate and expands its soft dependencies, so a
-// NIC that needs its PHY library first reads as [realtek, r8169]. The
-// evidence it keeps beside each chain is the device in words and its
-// modalias fingerprint, so the proposal can say what each driver
-// claims. It also keeps each device's place in sysfs, so the report
-// can later tell a recommendation that serves the machine from one
-// that serves only the installation stick, and tell which disks exist
-// only because of a load.
-//
-// Unclaimed reports one entry per device, not one per fingerprint, so
-// a board with two identical NICs offers the same recommendation
-// twice. One chain covers both cards, and the recommendation keeps
-// both sysfs paths, so the fingerprint is what this loop keeps once.
+// recommendModules returns a driver recommendation for each storage,
+// network, and USB mass-storage device that has no driver.
 func recommendModules(catalog *hardware.Catalog, base string) []moduleRecommendation {
 	return recommendFor(catalog, base, reportableClass)
 }
 
-// recommendClaimable is the same walk over the same undriven devices,
-// for the kinds the report will not load: the hardware a workload
-// could claim once a module drives it. A GPU is the case that named
-// this. The install does not need it, so the report neither loads it
-// nor declares it, but a person who does not know to ask for it never
-// learns their machine has it.
+// recommendClaimable returns a recommendation for each device with no
+// driver that a workload could claim once a driver binds, such as a
+// GPU. The report does not load these drivers. The proposal lists them
+// so the person learns what the machine has.
 func recommendClaimable(catalog *hardware.Catalog, base string) []moduleRecommendation {
 	return recommendFor(catalog, base, claimableClass)
 }
 
-// recommendFor turns the undriven devices of the kinds a caller
-// selects into ordered driver recommendations.
+// recommendFor returns one recommendation for each modalias of a
+// device with no driver whose class want accepts. Chain is the first
+// candidate in modules.alias order with its soft dependencies, so a NIC
+// that needs its PHY library first gets [realtek, r8169]. SysfsDirs
+// lists every device with the modalias, so two identical NICs give one
+// recommendation with both paths. Later steps read SysfsDirs to find
+// the recommendations that serve only the stick and the disks that
+// exist only because of a load.
 func recommendFor(catalog *hardware.Catalog, base string, want func(string) bool) []moduleRecommendation {
 	devices := hardware.DiscoverDevices(sysfsRoot, catalog.PCI)
 	seen := map[string]bool{}
@@ -306,25 +243,16 @@ func recommendFor(catalog *hardware.Catalog, base string, want func(string) bool
 	return recommendations
 }
 
-// reportableClass selects which undriven devices the report loads a
-// driver for. The answer is storage and network, and nothing else:
-// PCI base class 01, PCI subclass 0805 (the SD and eMMC host
-// controllers, which the class word already reads as storage), base
-// class 02, and the USB mass-storage class, which is how the report
-// reaches the installation stick it writes to. These are the devices
-// a machine must have to install itself and to join a
-// cluster.
+// reportableClass reports whether the report loads a driver for a
+// device of this class. A machine needs storage and network to install
+// and join a cluster, and the report needs USB mass storage to reach
+// the stick. Storage includes PCI subclass 0805, the SD and eMMC host
+// controllers.
 //
-// The limit is not tidiness. Loading a driver changes the running
-// machine, and some drivers change the one part of it the person is
-// using. A display driver takes over the framebuffer console, so the
-// proposal and the prompt that follows it would scroll away on a
-// screen that just switched modes. A driver for an SMBus bridge or a
-// sound card changes nothing a manifest cares about, and advice to
-// declare one on a headless node is advice to load a driver for no
-// reason. The devices this filter drops still appear in the running
-// node's unclaimed-hardware report, where they are information rather
-// than instruction.
+// The report loads no other driver, because a driver can change the
+// running machine. A display driver takes over the framebuffer console
+// and switches its mode while the person reads the proposal. An
+// installed machine lists these devices in status.hardware.unclaimed.
 func reportableClass(class string) bool {
 	switch class {
 	case "storage", "network", "mass-storage":
@@ -333,16 +261,11 @@ func reportableClass(class string) bool {
 	return false
 }
 
-// claimableClass selects which undriven devices the report names as
-// hardware a workload could claim. This list loads nothing, so it can
-// be generous where reportableClass cannot.
-//
-// It leaves out the two kinds the section above already covers, and
-// the kinds that never hand a device node to a pod: a bridge, a memory
-// controller, and the system devices are the machine's own plumbing,
-// and a claim on one would deliver nothing. Everything else that a
-// module could drive stays in, because whether it is worth driving is
-// the operator's judgement and not the report's.
+// claimableClass reports whether the report lists a device of this
+// class as claimable. It accepts every class except the ones that
+// reportableClass accepts and the ones whose drivers give a pod no
+// device: bridges, memory controllers, and system devices. The person
+// decides which of the listed drivers to load.
 func claimableClass(class string) bool {
 	switch class {
 	case "", "storage", "network", "mass-storage", "bridge", "memory", "system":
@@ -351,13 +274,11 @@ func claimableClass(class string) bool {
 	return true
 }
 
-// observeInterfaces brings every real interface admin-up and reads back
-// its link state. Admin-up is required before the kernel trains the link
-// and detects the carrier, and it changes only kernel state in RAM, so
-// the report keeps its promise here too. The report waits a few seconds
-// after raising the links, because copper autonegotiation takes that
-// long, and a carrier read before the link trains would report every
-// port dark.
+// observeInterfaces sets every physical interface up and returns its
+// name, MAC address, and link state. The kernel detects the carrier
+// only on an interface that is up. It waits 3 seconds for copper
+// autonegotiation to finish, because an earlier read reports every
+// port as down.
 func observeInterfaces() []reportInterface {
 	links, err := listLinks()
 	if err != nil {
@@ -368,8 +289,7 @@ func observeInterfaces() []reportInterface {
 	var raised []netlink.Link
 	for _, link := range links {
 		attrs := link.Attrs()
-		// Loopback is not hardware, and a link with no MAC is a virtual
-		// device the report has nothing to say about.
+		// Skip loopback and virtual devices, which have no MAC address.
 		if attrs.Flags&net.FlagLoopback != 0 || len(attrs.HardwareAddr) == 0 {
 			continue
 		}
@@ -394,18 +314,15 @@ func observeInterfaces() []reportInterface {
 	return interfaces
 }
 
-// listLinks and raiseLink list the machine's interfaces and bring one
-// admin-up. They are package variables so a test can hand the report
-// interfaces of its own, because raising a real link needs privileges a
-// test does not have.
+// listLinks and raiseLink list the machine's interfaces and set one
+// up. Tests replace them because netlink calls need privileges.
 var (
 	listLinks = netlink.LinkList
 	raiseLink = netlink.LinkSetUp
 )
 
-// linkState reads the kernel's word for an interface's link: up, down,
-// or unknown. operstate is the kernel's own summary of the carrier, in
-// the form a person reads most easily.
+// linkState returns the interface's operstate from sysfs, or "unknown"
+// when sysfs has no value.
 func linkState(name string) string {
 	if state := sysfsString(filepath.Join(sysfsRoot, "class/net", name), "operstate"); state != "" {
 		return state
@@ -413,38 +330,31 @@ func linkState(name string) string {
 	return "unknown"
 }
 
-// quiesceHardware waits for the bus probe to go quiet, so a walk of
-// sysfs reads a settled machine rather than one mid-enumeration. It
-// reuses the boot's own settle helper over the kernel's uevent socket:
-// each device that arrives or binds a driver announces itself, and the
-// wait ends once a full second passes with no such announcement, or a
-// ceiling passes either way. Without the socket it falls back to a fixed
-// pause, so a probe still has a moment to finish, and so does a listener
-// that stops during the wait, because settle returns at once when its
-// channel closes.
+// quiesceHardware waits until device probing is done: 1 second with no
+// uevent, or 10 seconds in total. When the uevent socket does not open,
+// or its listener stops during the wait, which makes Settle return at
+// once, it sleeps for quiescePause instead.
 func quiesceHardware() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	uevents, err := listenForUevents(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: report: no uevent socket, pausing instead: %v\n", err)
+		fmt.Fprintf(os.Stderr, "liken: report: the uevent socket did not open, so the report pauses instead of waiting for uevents: %v\n", err)
 		time.Sleep(quiescePause)
 		return
 	}
 	hardware.Settle(ctx, uevents, time.Second, 10*time.Second)
 	if listenerStopped(uevents) {
-		fmt.Fprintln(os.Stderr, "liken: report: the uevent listener stopped, pausing instead")
+		fmt.Fprintln(os.Stderr, "liken: report: the uevent listener stopped, so the report pauses instead of waiting for uevents")
 		time.Sleep(quiescePause)
 	}
 }
 
-// quiescePause is how long the report waits for a probe to finish when
-// it cannot hear the probe's uevents.
 const quiescePause = 3 * time.Second
 
-// listenerStopped answers whether a uevent channel is closed. A wake
-// still pending on an open channel is consumed, which costs nothing,
-// because the caller is done waiting.
+// listenerStopped reports whether the uevent channel is closed. On an
+// open channel it discards a pending uevent, which the caller no longer
+// needs.
 func listenerStopped(uevents <-chan struct{}) bool {
 	select {
 	case _, ok := <-uevents:
@@ -454,22 +364,18 @@ func listenerStopped(uevents <-chan struct{}) bool {
 	}
 }
 
-// writeReportToStick writes the proposal to the root of the
-// installation stick's filesystem. The stick is the one the report
-// already resolved, so the file lands on the same disk the proposal
-// says it excluded. The stick carries a FAT volume; the report mounts
-// it read-write only for this write, writes durably (FAT has no
-// journal, so the sync before the rename is what makes the file
-// whole), syncs, and unmounts, so the filesystem is clean when the
-// person pulls the stick.
+// writeReportToStick writes the proposal to the root of the stick's FAT
+// volume. FAT has no journal, so the file is synced before its rename,
+// and the volume is synced and unmounted, so the filesystem is clean
+// when the person removes the stick.
 func writeReportToStick(stick installStick, proposal string) error {
 	device := stick.Partition
 	if device == "" {
 		if stick.ambiguous() {
-			return fmt.Errorf("more than one disk carries %s (%s); refusing to guess which is the stick",
+			return fmt.Errorf("more than one disk has a partition named %s (%s), so the report cannot tell which disk is the stick",
 				stickInstallPartition, strings.Join(stick.Candidates, ", "))
 		}
-		return fmt.Errorf("no installation stick found (no partition named %s)", stickInstallPartition)
+		return fmt.Errorf("no disk has a partition named %s, so the report found no install stick", stickInstallPartition)
 	}
 
 	if err := os.MkdirAll(reportStickMount, 0o755); err != nil {
@@ -482,18 +388,15 @@ func writeReportToStick(stick installStick, proposal string) error {
 	writeErr := writeFileDurably(filepath.Join(reportStickMount, hardwareReportName), []byte(proposal))
 	unix.Sync()
 
-	// A plain unmount flushes and detaches the filesystem cleanly. If it
-	// is busy, a lazy detach at least releases it, so a later boot does
-	// not find a stale mount.
+	// A lazy detach releases a mount that is still busy.
 	if err := unmountStick(reportStickMount, 0); err != nil {
 		_ = unmountStick(reportStickMount, unix.MNT_DETACH)
 	}
 	return writeErr
 }
 
-// mountStick and unmountStick mount and unmount the stick's FAT volume.
-// They are package variables so a test can stand in for the mount,
-// because a mount needs privileges a test does not have.
+// mountStick and unmountStick mount and unmount the stick's FAT
+// volume. Tests replace them because mounting needs privileges.
 var (
 	mountStick = func(device, target string) error {
 		return unix.Mount(device, target, "vfat", 0, "")
@@ -501,17 +404,16 @@ var (
 	unmountStick = unix.Unmount
 )
 
-// rebootAfterReport restarts the machine. A report boot has no k3s and
-// no role mounts to tear down, so this is the plain restart syscall
-// after a sync, not the supervisor's full shutdown. The report reboots
-// rather than powers off, because the machine's next boot is the person
-// walking the install once they have edited the manifest. Like every
-// terminal path in init, it never lets PID 1 exit.
+// rebootAfterReport restarts the machine with the reboot syscall. A
+// report boot runs no k3s and mounts no roles, so it skips the
+// supervisor's shutdown. It reboots instead of powering off because the
+// next boot is the install. If the syscall fails it sleeps forever,
+// because PID 1 must not exit.
 func rebootAfterReport() {
 	syncLogs()
 	unix.Sync()
 	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: report: reboot failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "liken: report: the reboot call returned an error: %v\n", err)
 	}
 	for {
 		time.Sleep(time.Hour)

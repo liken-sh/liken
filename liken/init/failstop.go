@@ -1,37 +1,22 @@
 package main
 
-// The boot's half of the fail-stop record.
+// failBoot prints its reason and powers the machine off. On a boot from
+// disk nobody reads the console. k3s has not started, so no log relay
+// sends the message off the machine, and the power-off erases the
+// kernel ring buffer. The machine then refuses again at every power-on
+// and leaves no trace of the reason.
 //
-// failBoot prints the reason for a refusal and powers the machine off.
-// On an install boot that is enough: a person picked the entry and is
-// reading the console. On a boot from disk nobody is reading anything.
-// The message goes to the kernel ring buffer, k3s never starts, so no
-// log relay carries it off the machine, and the power-off erases the
-// ring buffer. The machine then repeats the same few seconds at every
-// power-on, and the only way to learn which of failBoot's call sites
-// fired is to read init's source.
+// So recordFailStop writes the reason to machineState before the
+// power-off, and reportFailStop reads it on the next boot for
+// status.lastFailStop. machine/failstop.go defines the record.
 //
-// This file closes that gap. recordFailStop writes the reason to
-// machineState before the power-off, and reportFailStop reads it back
-// on the next boot: to the console for a person at the serial port,
-// and into status.lastFailStop for everyone else. machine/failstop.go
-// owns the record itself.
-//
-// What a refusal can record follows from where the record lives, and
-// the two fail-stops differ. An identity refusal always records,
-// because storage has settled by the time the boot reads a cluster
-// document. A storage refusal records only when it happens after
-// machineState mounts.
-//
-// That excludes the most likely storage failure of all. settleStorage
-// waits for every declared disk to attach before it mounts anything,
-// so a disk that never appears stops the boot while the record still
-// has nowhere to go. A machine whose state disk is fine and whose pod
-// disk is dead therefore powers off with nothing written down, even
-// though the partition that would hold the record is right there.
-// Closing that gap means mounting machineState on the way out of a
-// failed wait, which is a change to the settling order and not to this
-// file.
+// A refusal leaves a record only when machineState is mounted from a
+// partition. An identity refusal happens after settleStorage, so it is
+// recorded whenever the manifest declares machineState. A storage
+// refusal is recorded only when it happens after machineState mounts.
+// reconcileStorage waits for every declared disk and plans every role
+// before it mounts any, so a disk that never attaches stops the boot
+// with no record, even when the state disk is fine.
 
 import (
 	"fmt"
@@ -42,23 +27,18 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// failStopReasonCap bounds the recorded reason, matching the maxLength
-// that the CRD sets on status.lastFailStop.reason. The cut happens
-// once, here, before the write, so the record on disk and the field in
-// the cluster carry exactly the same words.
+// failStopReasonCap is the maxLength that the CRD sets on
+// status.lastFailStop.reason. recordFailStop cuts the reason to it
+// before writing, so the file and the status field hold the same text.
 const failStopReasonCap = 1024
 
-// recordFailStop writes this boot's refusal to machineState, when
-// there is a mounted machineState to write to. A failure to record is
-// reported and no more: the machine is already stopping, and losing
-// the record must not stand in the way of the power-off.
+// recordFailStop writes this boot's refusal to machineState when
+// machineState is mounted. A write error is printed and otherwise
+// ignored, because the machine must still power off.
 //
-// An install boot records nothing, for two reasons. A person picked
-// that entry and is reading the console, which is the audience the
-// record exists to replace. And the installer must leave nothing on a
-// machine it did not finish installing: a record written from the
-// stick would be read back by the first successful boot and reported
-// as that machine's own history.
+// An install boot records nothing. A person reads its console, and the
+// first boot of the installed machine would otherwise report the
+// installer's refusal as its own.
 func recordFailStop(stateDir, reason string, now time.Time) {
 	if installing() {
 		return
@@ -72,15 +52,14 @@ func recordFailStop(stateDir, reason string, now time.Time) {
 		fmt.Fprintf(os.Stderr, "liken: fail-stop: recording the refusal: %v\n", err)
 		return
 	}
-	fmt.Fprintln(os.Stderr, "liken: fail-stop: recorded the reason; the next boot reports it as status.lastFailStop")
+	fmt.Fprintln(os.Stderr, "liken: fail-stop: recorded the reason, and the next boot reports it as status.lastFailStop")
 }
 
-// reportFailStop reads the standing record and puts it on the console.
-// It runs on every boot, refused or not, and it never removes the
-// record: the field answers when this machine last refused to boot,
-// which stays true until the next refusal overwrites it. Deriving the
-// answer from the file on every boot is what makes the field
-// reconstructible after somebody erases the Machine's status.
+// reportFailStop reads the record, prints it on the console, and
+// returns it, or returns nil when there is none or it cannot be read.
+// It never deletes the record, so every boot reports the last refusal
+// until a later one replaces it, and status.lastFailStop comes back
+// when the Machine's status is erased.
 func reportFailStop(stateDir string) *machine.FailStop {
 	record, err := machine.ReadFailStop(stateDir)
 	if err != nil {
@@ -90,15 +69,13 @@ func reportFailStop(stateDir string) *machine.FailStop {
 	if record == nil {
 		return nil
 	}
-	// Console parity: the fact prints where an operator at the serial
-	// port can see it, in the same words status carries.
 	fmt.Printf("liken: fail-stop: this machine last refused to boot at %s: %s\n",
 		record.Time.UTC().Format(time.RFC3339), record.Reason)
 	return record
 }
 
-// capReason cuts a reason to the cap on a rune boundary, so a
-// truncated message stays valid UTF-8 and the API server accepts it.
+// capReason cuts a reason to failStopReasonCap bytes on a rune
+// boundary. The API server rejects a status that is not valid UTF-8.
 func capReason(reason string) string {
 	if len(reason) <= failStopReasonCap {
 		return reason

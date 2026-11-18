@@ -1,48 +1,41 @@
 package main
 
-// Composing the hardware report's proposal.
+// This file writes the hardware report's proposal: a complete Machine
+// manifest for a new machine, with the evidence for each line in
+// comments beside it. A person renames the machine, checks the sizes,
+// and installs from it, so the proposal declares only what an install
+// can use:
 //
-// The report boot answers the question that comes before a new
-// machine's first install: what does this hardware need in its
-// manifest? It answers with a whole Machine manifest, ready to edit,
-// with the evidence for every line written beside it as a comment.
-// This file turns the facts the boot gathered into that document.
+//   - A storage driver is not declared in spec.modules (see
+//     storageClass). The proposal warns about it instead.
+//   - A role is not given a size that its disk cannot hold
+//     (reportlayout.go does that arithmetic).
+//   - A network port with no carrier is listed as a comment, not
+//     declared.
 //
-// The proposal makes a promise: a person renames the machine, checks
-// the sizes, and installs. Everything here serves that promise. A
-// driver that the install cannot load in time is not declared. The
-// proposal names it in a warning instead. A size that a disk cannot
-// hold is not written at all (reportlayout.go does that arithmetic).
-// A port with no cable is evidence, not a declaration.
-//
-// The composition is a pure function. It takes the enumerated hardware
-// as a plain value and returns the proposal text. Nothing here touches
-// sysfs, netlink, or a disk, so a test drives the whole document from
-// fabricated hardware, and the boot flow in report.go owns the messy
-// half: mounting the module tree, loading drivers, and observing what
-// appears.
+// composeHardwareReport is a pure function of a hardwareReport value.
+// It reads no sysfs, netlink, or disk, so a test can build the whole
+// document from made-up hardware. report.go loads the drivers, reads
+// the hardware, and fills in the hardwareReport.
 
 import (
 	"fmt"
 	"strings"
 )
 
-// reportDisk is one disk as the report observed it: its kernel name
-// and device path this boot, its size, its model when the bus
-// publishes one, and the transport that carries it (sata, nvme, usb,
-// virtio). The transport is evidence a person reads to recognize the
-// disk. StableName is the disk's own by-id name, when it has one; the
-// proposal declares a role by this name in preference to the device
-// path, because the path is only a hint that matters on the boot that
-// claims the disk, and the next boot can hand that same path to a
-// different disk.
+// reportDisk is one disk that the report found: its kernel name, device
+// path, size, model when the bus reports one, and transport (sata,
+// nvme, usb, virtio). A person uses the model and transport to
+// recognize the disk.
 //
-// The last two fields carry what the report learned about the disk's
-// place in an install, rather than about the disk itself.
-// BehindModules names the drivers that had to load before this disk
-// existed, which means an install from a stock image never sees it.
-// MaybeStick marks a disk that could be the installation stick, on a
-// machine where the report could not tell which one is.
+// StableName is the disk's /dev/disk/by-id name, when it has one. The
+// proposal declares a role by this name instead of Path, because the
+// kernel can assign the same Path to a different disk on a later boot.
+//
+// BehindModules lists the drivers that had to load before this disk
+// appeared. An install from a stock image does not load them, so it
+// does not find the disk. MaybeStick is true when more than one disk has
+// an installation partition and this disk could be the stick.
 type reportDisk struct {
 	Name          string
 	Path          string
@@ -54,11 +47,8 @@ type reportDisk struct {
 	MaybeStick    bool
 }
 
-// deviceName is the value a proposal declares for this disk: its
-// stable name when it has one, its kernel device path otherwise. Only
-// a by-id name qualifies as a stable name here; a by-path name
-// belongs to the disk's port, not the disk, so it is never proposed
-// as the disk's identity.
+// deviceName returns the value a proposal declares for this disk: its
+// stable name when it has one, its kernel device path otherwise.
 func (d reportDisk) deviceName() string {
 	if d.StableName != "" {
 		return d.StableName
@@ -66,30 +56,26 @@ func (d reportDisk) deviceName() string {
 	return d.Path
 }
 
-// reportInterface is one network interface as the report observed it,
-// after it loaded the recommended drivers and brought the link
-// admin-up. The name is real only because a driver bound the card:
-// eth0 does not exist until its driver registers it. Link is the
-// kernel's own word for the carrier, which a person reads to tell a
-// connected port from a dark one.
+// reportInterface is one network interface as the report found it
+// after it loaded the recommended drivers and set the link up. Link is
+// the kernel's operstate for the interface, which shows whether a
+// cable is connected.
 type reportInterface struct {
 	Name string
 	MAC  string
 	Link string
 }
 
-// moduleRecommendation pairs one unclaimed device with the ordered
-// driver chain that would bind it. Chain is the softdep-expanded list,
-// in load order, so a NIC that needs its PHY library first reads as
-// [realtek, r8169], not r8169 alone. Device names the hardware in
-// words, so the proposal's comment can say which device each driver
-// claims. Class is the device's kind, which determines whether the chain
-// can be declared at all: a network driver loads in time to serve the
-// machine, and a storage driver does not. SysfsDirs is where the
-// devices behind this fingerprint sit in sysfs; the composition
-// ignores it, and the report boot uses it to tell a driver that
-// serves the machine from one that serves only the installation
-// stick, and to tell which disks appeared only because of a load.
+// moduleRecommendation pairs one device that has no driver with the
+// drivers that would bind it. Chain lists them in load order with
+// their softdeps expanded, so a NIC that needs its PHY library first
+// is [realtek, r8169] and not just r8169. Device describes the
+// hardware in words for the proposal's comments. Class is the
+// device's class, which storageClass reads. SysfsDirs lists the sysfs
+// directories of the matching devices. This file does not read it.
+// report.go uses it to tell which drivers bind the machine's own
+// devices and which bind only the install stick, and which disks
+// appeared only because a driver loaded.
 type moduleRecommendation struct {
 	Device    string
 	Class     string
@@ -97,54 +83,47 @@ type moduleRecommendation struct {
 	SysfsDirs []string
 }
 
-// storageClass reports whether this recommendation drives storage.
-// Such a chain never belongs in spec.modules. The declared modules
-// load after storage settles, and storage settles by claiming and
-// mounting the disks the manifest names, so a disk behind one of
-// these drivers does not exist yet at the only moment it matters.
-// The fix is an image that carries the driver in its boot modules,
-// not a line in the manifest.
+// storageClass reports whether this recommendation is a storage driver.
+// A storage driver cannot go in spec.modules, because init loads the
+// declared modules after it has claimed and mounted the disks that
+// the manifest names. A disk behind that driver does not exist yet
+// when init looks for it, so the driver has to be in the image's boot
+// modules.
 func (r moduleRecommendation) storageClass() bool {
 	return r.Class == "storage" || r.Class == "mass-storage"
 }
 
-// hardwareReport is everything the report enumerated, in the form the
-// composition consumes. It is a plain value on purpose: the boot fills
-// it from real hardware, and a test fills it by hand, and both reach
-// the same document through composeHardwareReport.
+// hardwareReport is all the hardware the report found, as the input of
+// composeHardwareReport. report.go fills it from the machine, and a
+// test fills it by hand.
 type hardwareReport struct {
-	// UEFI records whether UEFI firmware booted this machine. A UEFI
-	// machine keeps its boot entries in firmware and needs no
-	// biosBoot/bootHome roles; a BIOS machine needs liken to supply
-	// those roles, so the proposal declares them.
+	// UEFI is true when UEFI firmware booted this machine. A UEFI
+	// machine keeps its boot entries in firmware and needs no biosBoot
+	// or bootHome role. A BIOS machine needs both, so the proposal
+	// declares them.
 	UEFI bool
-	// StickPath is the installation stick's own device path, when the
-	// report found it among the disks. The stick leaves the machine
-	// with the person, so it never appears in Disks and no role may
-	// land on it; the proposal names it so a person counting their
-	// disks finds every one accounted for.
+	// StickPath is the device path of the install stick, when the
+	// report identified it. The stick is not in Disks and gets no
+	// role, because the person removes it after the install. The
+	// proposal still lists it, so the person can match every disk in
+	// the machine to a line.
 	StickPath       string
 	Recommendations []moduleRecommendation
-	// Claimable is the hardware this machine has and does not drive,
-	// beyond the disks and network ports the install needs. The report
-	// never loads these drivers, and the proposal never declares them:
-	// it names them in comments, because whether this machine should
-	// drive its GPU is the operator's decision, and they cannot make it
-	// if nothing tells them the GPU is there.
+	// Claimable is the hardware with no driver, other than storage and
+	// network devices. The report does not load these drivers, and the
+	// proposal lists them only as comments (see composeClaimable).
 	Claimable []moduleRecommendation
 	Disks     []reportDisk
-	// Cards is every memory card the report found in a slot. A card
-	// leaves the machine with the person, so it never appears in
-	// Disks and no role may land on it. The proposal still names it,
-	// so a person counting their disks finds every one accounted
-	// for.
+	// Cards is every memory card that the report found in a slot. Like
+	// the stick, a card is not in Disks and gets no role, and the
+	// proposal still lists it.
 	Cards      []reportDisk
 	Interfaces []reportInterface
 }
 
 const reportHeader = `# A proposed Machine manifest, written by the liken hardware report.
 #
-# This machine booted the report entry from the installation stick. The
+# This machine booted the report entry from the install stick. The
 # report loaded the drivers this hardware names, watched which disks and
 # interfaces appeared, and wrote its findings here. It changed nothing
 # on the machine.
@@ -155,10 +134,9 @@ const reportHeader = `# A proposed Machine manifest, written by the liken hardwa
 # the evidence the report gathered; delete them once you have read them.
 `
 
-// composeHardwareReport renders the whole proposal from the enumerated
-// hardware. The result is a valid Machine manifest whose roles fit the
-// disks this machine has, so a person can install from it after only
-// renaming the machine and checking the sizes.
+// composeHardwareReport renders the proposal for r. The result is a
+// valid Machine manifest whose storage roles fit the disks that r
+// lists.
 func composeHardwareReport(r hardwareReport) string {
 	var b strings.Builder
 	b.WriteString(reportHeader)
@@ -166,7 +144,7 @@ func composeHardwareReport(r hardwareReport) string {
 	b.WriteString("kind: Machine\n")
 	b.WriteString("metadata:\n")
 	b.WriteString("  # The name this machine has in your deployment. Boot entries\n")
-	b.WriteString("  # carry it as liken.machine=, so it must match a name the\n")
+	b.WriteString("  # pass it as liken.machine=, so it must match a name the\n")
 	b.WriteString("  # stick's menu offers.\n")
 	b.WriteString("  name: CHANGE-ME\n")
 	b.WriteString("spec:\n")
@@ -176,13 +154,11 @@ func composeHardwareReport(r hardwareReport) string {
 	return b.String()
 }
 
-// composeModules writes the spec.modules section: the drivers the
-// report recommends, in load order, with one comment for each device
-// that named them. The declared list is the deduplicated union of the
-// chains a manifest can actually load, because a module named twice
-// would ask the loader to load it twice. Storage chains are held back
-// from the list and stated as a warning instead, for the reason
-// storageClass explains.
+// composeModules writes the spec.modules section, with a comment for
+// each device that needs a driver. The declared list is the chains of
+// the recommendations, in order, with each module once. A storage
+// chain is left out of the list and gets a warning instead, for the
+// reason given at storageClass.
 func composeModules(b *strings.Builder, recs, claimable []moduleRecommendation) {
 	b.WriteString("  # Extra kernel modules this machine's hardware requires, beyond\n")
 	b.WriteString("  # the drivers the OS already loads. Each comment names a device\n")
@@ -206,7 +182,7 @@ func composeModules(b *strings.Builder, recs, claimable []moduleRecommendation) 
 	}
 	for _, rec := range bootPath {
 		writeComment(b, "  ", fmt.Sprintf(
-			"WARNING: %s is a storage controller, and spec.modules cannot supply its driver. The declared modules load after storage settles, so a disk behind %s does not exist on the boot that claims disks. Build a liken image whose image/boot-modules.conf names %s, and install this machine from that image.",
+			"WARNING: %s is a storage controller, and spec.modules cannot load its driver in time. init loads the declared modules after it claims the disks, so a disk behind %s does not exist when the disks are claimed. Build a liken image whose image/boot-modules.conf names %s, and install this machine from that image.",
 			rec.Device, strings.Join(rec.Chain, " and "), strings.Join(rec.Chain, " and ")))
 	}
 
@@ -214,7 +190,7 @@ func composeModules(b *strings.Builder, recs, claimable []moduleRecommendation) 
 		b.WriteString("  # This report found no unclaimed storage or network device\n")
 		b.WriteString("  # whose driver a manifest can load. If an interface you\n")
 		b.WriteString("  # expect is missing below, its controller may need a driver\n")
-		b.WriteString("  # this image does not carry.\n")
+		b.WriteString("  # this image does not include.\n")
 		b.WriteString("  modules: []\n")
 		composeClaimable(b, claimable)
 		return
@@ -226,19 +202,14 @@ func composeModules(b *strings.Builder, recs, claimable []moduleRecommendation) 
 	composeClaimable(b, claimable)
 }
 
-// composeClaimable writes the hardware this machine has and does not
-// drive, as lines a person uncomments.
+// composeClaimable lists the hardware that has no driver as commented
+// module lines that a person can uncomment.
 //
-// The report loads storage and network drivers and no others, because
-// loading a driver changes the machine while a person stands in front
-// of it, and a display driver changes the very screen they are
-// reading. That limit is about loading, not about knowing. This
-// machine's GPU is often the reason someone bought it, and a proposal
-// that says nothing about it asks a person to already know what to ask
-// for.
-//
-// The lines stay commented, so the proposal installs exactly as it
-// reads, and driving this hardware stays a decision somebody makes.
+// The report loads only storage and network drivers, because another
+// driver can change the machine while the person uses it: a display
+// driver changes the screen that shows the report. The proposal still
+// lists the hardware, so a person learns that the machine has a GPU
+// and can choose to load its driver.
 func composeClaimable(b *strings.Builder, claimable []moduleRecommendation) {
 	if len(claimable) == 0 {
 		return
@@ -258,17 +229,16 @@ func composeClaimable(b *strings.Builder, claimable []moduleRecommendation) {
 }
 
 // composeNetwork writes the spec.network section from the interfaces
-// the report observed. The names are the real kernel names, because the
-// report loaded the drivers before it read them.
+// that the report found. The names are the kernel's names, because the
+// report loaded the drivers before it listed the interfaces.
 //
-// Only the ports with a carrier are declared, and the dark ports are
-// written as commented-out entries with the link state the report
-// read. The reason is the cost of a declaration: init configures each
-// declared interface in turn, and waits up to thirty seconds for a
-// DHCP lease on each one, so a declared port with no cable in it
-// delays every boot of the machine by that much. The evidence for
-// every port is still here, so a person who moves a cable uncomments
-// one line instead of running the report again.
+// Only ports with a carrier are declared. The others are written as
+// commented entries with their link state. init configures the
+// declared interfaces one after another and waits up to 30 seconds
+// for a DHCP lease on each (acquireLease), so a declared port with no
+// cable adds that wait to every boot. A person who connects a cable
+// later uncomments one line and does not need to run the report
+// again.
 func composeNetwork(b *strings.Builder, ifaces []reportInterface) {
 	b.WriteString("  # The network interfaces this report saw once the drivers above\n")
 	b.WriteString("  # were loaded and each link was brought up. A name is real only\n")
@@ -280,14 +250,14 @@ func composeNetwork(b *strings.Builder, ifaces []reportInterface) {
 		return
 	}
 
-	var connected, dark []reportInterface
+	var connected, unconnected []reportInterface
 	for _, ifc := range ifaces {
-		// The kernel reports "down" only when a driver tracks the
-		// carrier and the carrier is absent. A driver that does not
-		// track the carrier reports "unknown", and a port the report
-		// cannot judge is declared rather than hidden.
+		// The kernel reports "down" only when the driver tracks the
+		// carrier and finds none. A driver that does not track it
+		// reports "unknown", and the report declares such a port
+		// because it cannot tell that the port is unused.
 		if ifc.Link == "down" || ifc.Link == "lowerlayerdown" {
-			dark = append(dark, ifc)
+			unconnected = append(unconnected, ifc)
 			continue
 		}
 		connected = append(connected, ifc)
@@ -295,13 +265,13 @@ func composeNetwork(b *strings.Builder, ifaces []reportInterface) {
 
 	if len(connected) == 0 {
 		writeComment(b, "  ", "No port had a carrier when this report ran. This proposal declares no interface, so liken configures the first port it finds. Connect the cable you will use and run the report again, or declare the port yourself from the names below.")
-		writeDarkInterfaces(b, dark)
+		writeUnconnectedInterfaces(b, unconnected)
 		b.WriteString("  network: {}\n")
 		return
 	}
 
-	if len(dark) > 0 {
-		writeComment(b, "  ", "Only the ports with a carrier are declared here. liken waits up to thirty seconds for a DHCP lease on each declared interface, one after another, so a declared port with no cable delays every boot by that much. The dark ports follow the declared ones as comments; uncomment a port after you connect its cable.")
+	if len(unconnected) > 0 {
+		writeComment(b, "  ", "Only the ports with a carrier are declared here. liken waits up to thirty seconds for a DHCP lease on each declared interface, one after another, so a declared port with no cable delays every boot by that much. The ports with no carrier follow the declared ones as comments. Uncomment a port after you connect its cable.")
 	}
 	b.WriteString("  network:\n")
 	b.WriteString("    interfaces:\n")
@@ -313,51 +283,45 @@ func composeNetwork(b *strings.Builder, ifaces []reportInterface) {
 		}
 		fmt.Fprintf(b, "      - name: %s\n", ifc.Name)
 	}
-	for _, ifc := range dark {
+	for _, ifc := range unconnected {
 		fmt.Fprintf(b, "      # MAC %s, link %s\n", ifc.MAC, ifc.Link)
 		fmt.Fprintf(b, "      #- name: %s\n", ifc.Name)
 	}
 }
 
-// writeDarkInterfaces lists the ports a person could declare, as
-// comments, for the machine where no port had a carrier at all.
-func writeDarkInterfaces(b *strings.Builder, dark []reportInterface) {
-	for _, ifc := range dark {
+// writeUnconnectedInterfaces lists the ports as comments, for a
+// machine where no port had a carrier.
+func writeUnconnectedInterfaces(b *strings.Builder, unconnected []reportInterface) {
+	for _, ifc := range unconnected {
 		fmt.Fprintf(b, "  #   - name: %s   # MAC %s, link %s\n", ifc.Name, ifc.MAC, ifc.Link)
 	}
 }
 
-// composeStorage writes the spec.storage section. It first lists every
-// disk the report saw as comments, the evidence a person matches
-// against the machine in front of them, then writes the layout the
-// planner fitted onto those disks, with the planner's notes above it.
-// Those notes carry what the sizes alone cannot say: which role the
-// machine sizes for itself because containerd's images live in it,
-// which role is the operator's to choose, and what the planner had to
-// give up on a small disk.
+// composeStorage writes the spec.storage section: every disk as a
+// comment, then the planner's notes, then the roles from
+// planStorageLayout. The notes say which role holds containerd's
+// images, which sizes the person should choose, and which role the
+// planner left out because a disk was too small.
 func composeStorage(b *strings.Builder, r hardwareReport) {
 	b.WriteString("  # The disks this report saw. A role below names a disk by its\n")
 	b.WriteString("  # stable name when it has one, because that name belongs to\n")
-	b.WriteString("  # the disk itself and survives a port move; the kernel path\n")
-	b.WriteString("  # appears only when the disk offers no such identity, and the\n")
-	b.WriteString("  # next boot can hand that same path to a different disk.\n")
-	b.WriteString("  # Either way, the value matters only on the boot that claims\n")
-	b.WriteString("  # the disk; after that, liken finds each role by the name it\n")
-	b.WriteString("  # writes into the GPT.\n")
+	b.WriteString("  # the disk itself and does not change when the disk moves to\n")
+	b.WriteString("  # another port. A role names the kernel path only when the disk\n")
+	b.WriteString("  # has no stable name, and the next boot can give that path to\n")
+	b.WriteString("  # a different disk. The value matters only on the boot that\n")
+	b.WriteString("  # claims the disk. After that, liken finds each role by the\n")
+	b.WriteString("  # name that it writes into the GPT.\n")
 	for _, d := range r.Disks {
 		fmt.Fprintf(b, "  #   %s  %s  %s  (%s)%s%s\n",
 			d.Path, gib(d.SizeBytes), orUnknown(d.Model), orUnknown(d.Transport), stableNameField(d), diskCaveat(d))
 	}
 	if r.StickPath != "" {
-		fmt.Fprintf(b, "  #   (%s is the installation stick; it leaves with you,\n", r.StickPath)
-		b.WriteString("  #   so it is not listed and no role may live on it)\n")
+		fmt.Fprintf(b, "  #   (%s is the install stick. You take it away,\n", r.StickPath)
+		b.WriteString("  #   so it is not listed and no role may be on it)\n")
 	}
-	// A card in a slot leaves with the person the same way the stick
-	// does, so the report says it saw the card and says why it
-	// proposes nothing onto it.
 	for _, c := range r.Cards {
-		fmt.Fprintf(b, "  #   (%s is a %s memory card in a slot; a card leaves with\n", c.Path, gib(c.SizeBytes))
-		b.WriteString("  #   you, so no role is proposed on it. Declare it yourself if\n")
+		fmt.Fprintf(b, "  #   (%s is a %s memory card in a card slot. You can take\n", c.Path, gib(c.SizeBytes))
+		b.WriteString("  #   it away, so no role is proposed on it. Declare it yourself if\n")
 		b.WriteString("  #   this card stays in this machine.)\n")
 	}
 	for _, warning := range storageWarnings(r) {
@@ -386,10 +350,10 @@ func composeStorage(b *strings.Builder, r hardwareReport) {
 	}
 }
 
-// stableNameField is the fragment a disk's evidence line adds when
-// the disk offers a stable name: the same name a role's device: value
-// uses, placed beside the model so a person can match the name in the
-// roles below to the disk they are holding.
+// stableNameField returns the stable name to append to a disk's
+// evidence line, or "" when the disk has none. It is the same name
+// that a role's device field uses, so a person can match the roles to
+// the disks.
 func stableNameField(d reportDisk) string {
 	if d.StableName == "" {
 		return ""
@@ -397,23 +361,22 @@ func stableNameField(d reportDisk) string {
 	return "  " + d.StableName
 }
 
-// diskCaveat is the short note that the report appends to a disk's
-// evidence line when the disk is not an ordinary target for a role.
+// diskCaveat returns the note to append to a disk's evidence line when
+// the disk is a poor target for a role, or "" otherwise.
 func diskCaveat(d reportDisk) string {
 	switch {
 	case d.MaybeStick:
-		return "  <- this disk may be the installation stick"
+		return "  <- this disk may be the install stick"
 	case len(d.BehindModules) > 0:
 		return "  <- needs " + strings.Join(d.BehindModules, " and ") + " in the image's boot modules"
 	}
 	return ""
 }
 
-// storageWarnings states, in the proposal itself, the two facts that
-// make a proposal uninstallable as written: a disk this boot could
-// see but an install cannot, and a stick the report could not
-// identify. Both are the operator's to resolve, and neither is
-// visible from the manifest alone.
+// storageWarnings returns a warning for each problem that keeps the
+// proposal from installing as written and that the manifest does not
+// show: disks that appeared only after the report loaded a driver, and
+// disks that might be the install stick.
 func storageWarnings(r hardwareReport) []string {
 	var warnings []string
 	var behind, maybe []string
@@ -432,16 +395,17 @@ func storageWarnings(r hardwareReport) []string {
 	}
 	if len(maybe) > 0 {
 		warnings = append(warnings, fmt.Sprintf(
-			"WARNING: more than one disk carries an installation partition, so this report cannot tell which disk is the stick you booted from. It placed no role on %s. Remove the other stick and run this report again, or name the disks yourself.",
+			"WARNING: more than one disk has an installation partition, so this report cannot tell which disk is the stick you booted from. It placed no role on %s. Remove the other stick and run this report again, or name the disks yourself.",
 			strings.Join(maybe, " or ")))
 	}
 	return warnings
 }
 
-// reportWarnings is the same news for the console. A person reads the
-// proposal on screen once and takes the file away, so the facts that
-// make the file uninstallable have to reach them at the machine, not
-// only in the text they scroll past.
+// reportWarnings returns the same warnings as console lines, plus a
+// warning for each storage driver and one when no disk can hold an
+// install. A person who reads the proposal on screen can scroll past
+// the comments in it, so the console repeats the problems that stop
+// an install.
 func reportWarnings(r hardwareReport) []string {
 	var lines []string
 	for _, warning := range storageWarnings(r) {
@@ -450,20 +414,19 @@ func reportWarnings(r hardwareReport) []string {
 	for _, rec := range r.Recommendations {
 		if rec.storageClass() {
 			lines = append(lines, fmt.Sprintf(
-				"liken: report: WARNING: %s needs %s, and spec.modules cannot supply a storage driver; build an image whose image/boot-modules.conf names it.",
+				"liken: report: WARNING: %s needs %s, and spec.modules cannot load a storage driver before the disks are claimed. Build an image whose image/boot-modules.conf lists it.",
 				rec.Device, strings.Join(rec.Chain, " and ")))
 		}
 	}
 	if len(planStorageLayout(r.Disks, r.UEFI).Roles) == 0 {
-		lines = append(lines, "liken: report: WARNING: no disk here can hold a liken install; the proposal declares no storage.")
+		lines = append(lines, "liken: report: WARNING: no disk here can hold a liken install, so the proposal declares no storage.")
 	}
 	return lines
 }
 
 // writeRole renders one storage role. An empty size means the role
 // takes the rest of its disk, which the spec allows for one role per
-// disk. A comment, when present, follows the value on the same line,
-// so a person reads the reason beside the number.
+// disk. A non-empty comment follows the size on the same line.
 func writeRole(b *strings.Builder, name, device, size, comment string) {
 	fmt.Fprintf(b, "    %s:\n", name)
 	fmt.Fprintf(b, "      device: %s\n", device)
@@ -477,8 +440,8 @@ func writeRole(b *strings.Builder, name, device, size, comment string) {
 	}
 }
 
-// writeComment renders one sentence of prose as YAML comment lines,
-// wrapped so the file reads on a console as well as in an editor.
+// writeComment writes text as YAML comment lines, wrapped at 64
+// characters after the indent so that they fit on the console.
 func writeComment(b *strings.Builder, indent, text string) {
 	const width = 64
 	line := ""
@@ -498,10 +461,8 @@ func writeComment(b *strings.Builder, indent, text string) {
 	}
 }
 
-// dedupChains flattens the recommendations into one ordered module
-// list, each name once, in first-seen order. This is the list a person
-// writes into spec.modules: the loader loads it in order, and a
-// duplicate would only ask it to load the same file twice.
+// dedupChains joins the chains of recs into one module list in order,
+// keeping the first occurrence of each module name.
 func dedupChains(recs []moduleRecommendation) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -517,9 +478,8 @@ func dedupChains(recs []moduleRecommendation) []string {
 	return out
 }
 
-// orUnknown returns the value, or "unknown" when the bus published
-// nothing. A blank in the evidence would read as a mistake in the
-// report rather than as an absent attribute.
+// orUnknown returns value, or "unknown" when the bus reported nothing,
+// so that a missing attribute does not leave a gap in the disk line.
 func orUnknown(value string) string {
 	if value == "" {
 		return "unknown"

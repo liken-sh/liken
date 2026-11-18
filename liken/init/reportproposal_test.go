@@ -1,14 +1,8 @@
 package main
 
-// Tests for the hardware report's proposal composition. The
-// composition is a pure function, so these tests drive the whole
-// document from fabricated hardware, with no sysfs, no netlink, and no
-// disk.
-//
-// The proposal's promise is that a person can install from it after
-// renaming the machine, so the checks here go past "it parses". A
-// proposal must also survive the arithmetic the install runs over it,
-// which is what mustFit (reportlayout_test.go) applies.
+// These tests build the proposal from made-up hardware. Besides
+// checking that it parses, they check that its storage roles fit the
+// disks they name, using mustFit (reportlayout_test.go).
 
 import (
 	"slices"
@@ -18,10 +12,10 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// sampleReport is a two-disk BIOS machine with one Realtek NIC that
-// names its PHY library to load first. It exercises every branch that
-// matters: a softdep-expanded chain, a durable disk distinct from the
-// system disk, and the BIOS boot roles.
+// sampleReport is a BIOS machine with two disks and one Realtek NIC
+// whose driver chain loads a PHY library first. It covers a chain with
+// a softdep, a second disk for the durable roles, and the BIOS boot
+// roles.
 func sampleReport() hardwareReport {
 	return hardwareReport{
 		UEFI: false,
@@ -40,26 +34,25 @@ func sampleReport() hardwareReport {
 	}
 }
 
-// parseProposal parses the proposal back into a Machine and fails the
-// test if it does not parse. Every proposal must be a real manifest.
+// parseProposal parses the proposal into a Machine and fails the test
+// when it does not parse.
 func parseProposal(t *testing.T, r hardwareReport) *machine.Machine {
 	t.Helper()
 	text := composeHardwareReport(r)
 	m, err := machine.Parse([]byte(text))
 	if err != nil {
-		t.Fatalf("the proposal must be a valid Machine manifest: %v\n%s", err, text)
+		t.Fatalf("machine.Parse refused the proposal: %v, want a valid Machine manifest:\n%s", err, text)
 	}
 	return m
 }
 
-// mustInstall is the whole promise in one call: the proposal parses,
-// its roles satisfy the spec's own rules, and every role fits the disk
-// it names when the installer lays the partitions down.
+// mustInstall checks that the proposal parses, that its storage passes
+// the spec's validation, and that every role fits the disk it names.
 func mustInstall(t *testing.T, r hardwareReport) *machine.Machine {
 	t.Helper()
 	m := parseProposal(t, r)
 	if err := m.Spec.Storage.Validate(); err != nil {
-		t.Fatalf("the proposed storage must validate: %v", err)
+		t.Fatalf("the proposed storage does not validate: %v, want a valid storage spec", err)
 	}
 	mustFit(t, planStorageLayout(r.Disks, r.UEFI), r.Disks)
 	return m
@@ -68,23 +61,21 @@ func mustInstall(t *testing.T, r hardwareReport) *machine.Machine {
 func TestProposalParsesAndItsRolesFitTheDisks(t *testing.T) {
 	m := mustInstall(t, sampleReport())
 	if m.APIVersion != "liken.sh/v1alpha1" {
-		t.Errorf("apiVersion: %q", m.APIVersion)
+		t.Errorf("apiVersion is %q, want liken.sh/v1alpha1", m.APIVersion)
 	}
 	if m.Kind != "Machine" {
-		t.Errorf("kind: %q", m.Kind)
+		t.Errorf("kind is %q, want Machine", m.Kind)
 	}
 }
 
 func TestProposalModulesAreTheSoftdepExpandedUnion(t *testing.T) {
 	m := parseProposal(t, sampleReport())
 	if !slices.Equal(m.Spec.Modules, []string{"realtek", "r8169"}) {
-		t.Errorf("spec.modules must be the full ordered chain: %v", m.Spec.Modules)
+		t.Errorf("spec.modules is %v, want the whole chain in load order, [realtek r8169]", m.Spec.Modules)
 	}
 }
 
 func TestProposalDeduplicatesSharedSoftdeps(t *testing.T) {
-	// Two devices whose chains share a name must not declare that name
-	// twice: the loader would only load the same file again.
 	r := sampleReport()
 	r.Recommendations = []moduleRecommendation{
 		{Device: "nic one", Class: "network", Chain: []string{"realtek", "r8169"}},
@@ -92,26 +83,24 @@ func TestProposalDeduplicatesSharedSoftdeps(t *testing.T) {
 	}
 	m := parseProposal(t, r)
 	if !slices.Equal(m.Spec.Modules, []string{"realtek", "r8169", "r8125"}) {
-		t.Errorf("shared softdeps must appear once, in order: %v", m.Spec.Modules)
+		t.Errorf("spec.modules is %v, want [realtek r8169 r8125], with each shared soft dependency once", m.Spec.Modules)
 	}
 }
 
-func TestProposalCarriesTheModuleEvidence(t *testing.T) {
+func TestProposalCommentsNameTheDeviceAndLoadOrder(t *testing.T) {
 	text := composeHardwareReport(sampleReport())
-	// The device that named the drivers, and the ordered chain, must
-	// both appear as a comment beside the module list.
 	if !strings.Contains(text, "Realtek RTL8168") {
-		t.Errorf("the module evidence must name the device:\n%s", text)
+		t.Errorf("the module evidence does not name the device Realtek RTL8168, want it:\n%s", text)
 	}
 	if !strings.Contains(text, "realtek, then r8169") {
-		t.Errorf("the module evidence must show the load order:\n%s", text)
+		t.Errorf("the module evidence does not show the load order \"realtek, then r8169\", want it:\n%s", text)
 	}
 }
 
-// storageDriverReport is a machine whose only disk hangs off an HBA
-// whose driver the report loaded: the case where the proposal cannot
-// keep its promise, and has to say so instead of hiding the reason in
-// a module list that would never work.
+// storageDriverReport is sampleReport plus a storage controller whose
+// driver the report loaded. The first disk appeared only after that
+// driver loaded. The proposal cannot declare the driver, so it has to
+// warn.
 func storageDriverReport() hardwareReport {
 	r := sampleReport()
 	r.Recommendations = append(r.Recommendations, moduleRecommendation{
@@ -126,18 +115,18 @@ func storageDriverReport() hardwareReport {
 func TestProposalNeverDeclaresAStorageDriver(t *testing.T) {
 	m := parseProposal(t, storageDriverReport())
 	if slices.Contains(m.Spec.Modules, "megaraid_sas") {
-		t.Errorf("a storage driver cannot load in time to matter: %v", m.Spec.Modules)
+		t.Errorf("spec.modules is %v, want no megaraid_sas, because a storage driver in spec.modules loads too late", m.Spec.Modules)
 	}
 	if !slices.Contains(m.Spec.Modules, "r8169") {
-		t.Errorf("the network driver must still be declared: %v", m.Spec.Modules)
+		t.Errorf("spec.modules is %v, want it to keep the network driver r8169", m.Spec.Modules)
 	}
 }
 
-func TestProposalSaysWhichDisksAnInstallCannotReach(t *testing.T) {
+func TestProposalWarnsAboutDisksBehindADriver(t *testing.T) {
 	text := composeHardwareReport(storageDriverReport())
 	for _, want := range []string{"megaraid_sas", "boot-modules.conf", "/dev/sda"} {
 		if !strings.Contains(text, want) {
-			t.Errorf("the proposal must explain the unreachable disk (%q):\n%s", want, text)
+			t.Errorf("the report does not contain %q, want it to explain the disk that the boot cannot reach:\n%s", want, text)
 		}
 	}
 }
@@ -145,21 +134,21 @@ func TestProposalSaysWhichDisksAnInstallCannotReach(t *testing.T) {
 func TestWarningsReachTheConsole(t *testing.T) {
 	lines := strings.Join(reportWarnings(storageDriverReport()), "\n")
 	if !strings.Contains(lines, "megaraid_sas") || !strings.Contains(lines, "boot-modules.conf") {
-		t.Errorf("the console must carry the unreachable disk's fix:\n%s", lines)
+		t.Errorf("the console lines have no fix for the unreachable disk, want one:\n%s", lines)
 	}
 	if len(reportWarnings(sampleReport())) != 0 {
-		t.Error("a machine with nothing wrong warns about nothing")
+		t.Errorf("reportWarnings returned %v, want none for a machine with nothing wrong", reportWarnings(sampleReport()))
 	}
 }
 
 func TestProposalPrefersTheDiskAnInstallCanReach(t *testing.T) {
 	m := mustInstall(t, storageDriverReport())
 	if m.Spec.Storage.SystemA.Device != "/dev/sdb" {
-		t.Errorf("the system slots belong on the reachable disk: %q", m.Spec.Storage.SystemA.Device)
+		t.Errorf("systemA's device is %q, want /dev/sdb, the disk that the boot can reach", m.Spec.Storage.SystemA.Device)
 	}
 }
 
-func TestProposalCarriesTheDiskEvidence(t *testing.T) {
+func TestProposalCommentsListEachDisk(t *testing.T) {
 	text := composeHardwareReport(sampleReport())
 	for _, want := range []string{
 		"/dev/sda", "20.0 GiB", "QEMU HARDDISK", "(sata)",
@@ -176,7 +165,7 @@ func TestProposalDiskEvidenceListsTheStableNameBesideTheModel(t *testing.T) {
 	r.Disks[0].StableName = "/dev/disk/by-id/wwn-0x5002538d40a45c88"
 	text := composeHardwareReport(r)
 	if !strings.Contains(text, "QEMU HARDDISK  (sata)  /dev/disk/by-id/wwn-0x5002538d40a45c88") {
-		t.Errorf("a disk's stable name must sit beside its model, so a person can match the two:\n%s", text)
+		t.Errorf("the report does not show the disk's stable name beside its model, want both on one line:\n%s", text)
 	}
 }
 
@@ -185,14 +174,14 @@ func TestProposalWritesTheStableNameAsTheDevice(t *testing.T) {
 	r.Disks[0].StableName = "/dev/disk/by-id/wwn-0x5002538d40a45c88"
 	m := parseProposal(t, r)
 	if m.Spec.Storage.SystemA.Device != "/dev/disk/by-id/wwn-0x5002538d40a45c88" {
-		t.Errorf("a disk with a stable name must be declared by it: %q", m.Spec.Storage.SystemA.Device)
+		t.Errorf("systemA's device is %q, want the disk's stable name /dev/disk/by-id/wwn-0x5002538d40a45c88", m.Spec.Storage.SystemA.Device)
 	}
 }
 
 func TestProposalWritesTheKernelPathWhenNoStableNameExists(t *testing.T) {
 	m := parseProposal(t, sampleReport())
 	if m.Spec.Storage.SystemA.Device != "/dev/sda" {
-		t.Errorf("a disk with no stable name must be declared by its kernel path: %q", m.Spec.Storage.SystemA.Device)
+		t.Errorf("systemA's device is %q, want the kernel path /dev/sda for a disk with no stable name", m.Spec.Storage.SystemA.Device)
 	}
 }
 
@@ -200,11 +189,11 @@ func TestProposalNamesTheExcludedStick(t *testing.T) {
 	r := sampleReport()
 	r.StickPath = "/dev/sdc"
 	text := composeHardwareReport(r)
-	if !strings.Contains(text, "/dev/sdc is the installation stick") {
-		t.Errorf("the proposal must account for the excluded stick:\n%s", text)
+	if !strings.Contains(text, "/dev/sdc is the install stick") {
+		t.Errorf("the report does not say \"/dev/sdc is the install stick\", want it to explain the excluded disk:\n%s", text)
 	}
 	if strings.Contains(text, "device: /dev/sdc") {
-		t.Errorf("no role may land on the stick:\n%s", text)
+		t.Errorf("the proposal places a role on the stick /dev/sdc, want none:\n%s", text)
 	}
 }
 
@@ -213,58 +202,58 @@ func TestProposalPlacesNoRoleOnADiskThatMightBeTheStick(t *testing.T) {
 	r.Disks[1].MaybeStick = true
 	text := composeHardwareReport(r)
 	if strings.Contains(text, "device: /dev/sdb") {
-		t.Errorf("a disk that might be the stick must carry no role:\n%s", text)
+		t.Errorf("a disk that might be the stick has a role, want none:\n%s", text)
 	}
 	if !strings.Contains(text, "cannot tell which disk is the stick") {
-		t.Errorf("the proposal must say why the disk is unused:\n%s", text)
+		t.Errorf("the report does not say why the disk is unused, want \"cannot tell which disk is the stick\":\n%s", text)
 	}
 	mustInstall(t, r)
 }
 
 func TestProposalPlacesDurableRolesOnTheSecondDisk(t *testing.T) {
 	m := mustInstall(t, sampleReport())
-	// The system slots land on the first disk, and the durable roles on
-	// the second, so cluster state outlives a reinstall of the system
+	// The system roles go on the first disk and the durable roles on
+	// the second, so cluster state survives a reinstall of the system
 	// disk.
 	if m.Spec.Storage.SystemA.Device != "/dev/sda" {
-		t.Errorf("systemA device: %q", m.Spec.Storage.SystemA.Device)
+		t.Errorf("the systemA device is %q, want /dev/sda", m.Spec.Storage.SystemA.Device)
 	}
 	if m.Spec.Storage.ClusterState.Device != "/dev/sdb" {
-		t.Errorf("clusterState device: %q", m.Spec.Storage.ClusterState.Device)
+		t.Errorf("the clusterState device is %q, want /dev/sdb", m.Spec.Storage.ClusterState.Device)
 	}
 	if m.Spec.Storage.PodEphemeral.Size != "" {
-		t.Errorf("the remainder role must omit its size: %q", m.Spec.Storage.PodEphemeral.Size)
+		t.Errorf("podEphemeral's size is %q, want none for the role that takes the rest of the disk", m.Spec.Storage.PodEphemeral.Size)
 	}
 }
 
 func TestProposalDeclaresBIOSRolesOnlyForBIOS(t *testing.T) {
 	bios := parseProposal(t, sampleReport())
 	if bios.Spec.Storage.BIOSBoot == nil || bios.Spec.Storage.BootHome == nil {
-		t.Error("a BIOS machine's proposal must declare biosBoot and bootHome")
+		t.Errorf("biosBoot is %+v and bootHome is %+v, want both declared on a BIOS machine", bios.Spec.Storage.BIOSBoot, bios.Spec.Storage.BootHome)
 	}
 
 	uefiReport := sampleReport()
 	uefiReport.UEFI = true
 	uefi := parseProposal(t, uefiReport)
 	if uefi.Spec.Storage.BIOSBoot != nil || uefi.Spec.Storage.BootHome != nil {
-		t.Error("a UEFI machine's proposal must not declare the GRUB roles")
+		t.Errorf("biosBoot is %+v and bootHome is %+v, want neither on a UEFI machine", uefi.Spec.Storage.BIOSBoot, uefi.Spec.Storage.BootHome)
 	}
 }
 
 func TestProposalNamesTheConnectedInterface(t *testing.T) {
 	m := parseProposal(t, sampleReport())
 	if len(m.Spec.Network.Interfaces) != 1 || m.Spec.Network.Interfaces[0].Name != "eth0" {
-		t.Errorf("the proposal must name the observed interface: %v", m.Spec.Network.Interfaces)
+		t.Errorf("the interfaces are %v, want only the observed eth0", m.Spec.Network.Interfaces)
 	}
 	text := composeHardwareReport(sampleReport())
 	if !strings.Contains(text, "52:54:00:12:34:56") || !strings.Contains(text, "link up") {
-		t.Errorf("the interface evidence must carry the MAC and link:\n%s", text)
+		t.Errorf("the interface evidence has no MAC address or link state, want both:\n%s", text)
 	}
 }
 
-func TestProposalLeavesDarkPortsUndeclared(t *testing.T) {
-	// Three of the four ports on this board have no cable. Declaring
-	// them would add thirty seconds of DHCP wait each, to every boot.
+func TestProposalLeavesUnconnectedPortsUndeclared(t *testing.T) {
+	// Two ports have no cable. Declaring them would add a DHCP wait of
+	// up to 30 seconds each to every boot.
 	r := sampleReport()
 	r.Interfaces = []reportInterface{
 		{Name: "eth0", MAC: "52:54:00:00:00:01", Link: "up"},
@@ -278,20 +267,20 @@ func TestProposalLeavesDarkPortsUndeclared(t *testing.T) {
 	for _, ifc := range m.Spec.Network.Interfaces {
 		names = append(names, ifc.Name)
 	}
-	// eth3's driver does not track the carrier, so the report cannot
-	// call the port dark, and declares it.
+	// eth3's driver does not track the carrier, so its link state is
+	// "unknown" and the report declares it.
 	if !slices.Equal(names, []string{"eth0", "eth3"}) {
-		t.Errorf("only the ports that could carry traffic may be declared: %v", names)
+		t.Errorf("the declared ports are %v, want eth0 and eth3", names)
 	}
 
 	text := composeHardwareReport(r)
 	for _, want := range []string{"#- name: eth1", "#- name: eth2", "52:54:00:00:00:02"} {
 		if !strings.Contains(text, want) {
-			t.Errorf("a dark port must stay as evidence (%q):\n%s", want, text)
+			t.Errorf("the proposal has no %q, want each port with no carrier listed as evidence:\n%s", want, text)
 		}
 	}
 	if !strings.Contains(text, "thirty seconds") {
-		t.Errorf("the proposal must say what a declared dark port costs:\n%s", text)
+		t.Errorf("the proposal does not say how a declared port with no carrier delays the boot, want it to:\n%s", text)
 	}
 }
 
@@ -300,26 +289,24 @@ func TestProposalWithNoCarrierAnywhereDeclaresNoInterface(t *testing.T) {
 	r.Interfaces = []reportInterface{{Name: "eth0", MAC: "52:54:00:00:00:01", Link: "down"}}
 	m := parseProposal(t, r)
 	if len(m.Spec.Network.Interfaces) != 0 {
-		t.Errorf("no carrier means no declaration: %v", m.Spec.Network.Interfaces)
+		t.Errorf("the interfaces are %v, want none when no port has a carrier", m.Spec.Network.Interfaces)
 	}
 	if !strings.Contains(composeHardwareReport(r), "- name: eth0") {
-		t.Error("the port a person could declare must still be named")
+		t.Errorf("the report does not list \"- name: eth0\", want the port named so a person can declare it:\n%s", composeHardwareReport(r))
 	}
 }
 
 func TestProposalHandlesEmptyHardware(t *testing.T) {
-	// A report that found nothing (the lab's -kernel path, before any
-	// module loads) must still produce a manifest that parses.
 	m := parseProposal(t, hardwareReport{UEFI: true})
 	if len(m.Spec.Modules) != 0 {
-		t.Errorf("no recommendations means no modules: %v", m.Spec.Modules)
+		t.Errorf("spec.modules is %v, want none with no recommendations", m.Spec.Modules)
 	}
 	text := composeHardwareReport(hardwareReport{UEFI: true})
 	if !strings.Contains(text, "modules: []") {
-		t.Errorf("an empty module list must render explicitly:\n%s", text)
+		t.Errorf("the report has no \"modules: []\", want the empty list written out:\n%s", text)
 	}
 	if !strings.Contains(text, "storage: {}") {
-		t.Errorf("no disk means no storage section:\n%s", text)
+		t.Errorf("the report has no \"storage: {}\", want it with no disk:\n%s", text)
 	}
 }
 
@@ -328,16 +315,16 @@ func TestProposalPutsEveryRoleOnOneDiskWhenThereIsOnlyOne(t *testing.T) {
 	r.Disks = r.Disks[:1]
 	m := mustInstall(t, r)
 	if m.Spec.Storage.ClusterState.Device != "/dev/sda" {
-		t.Errorf("with one disk, every role lands on it: %q", m.Spec.Storage.ClusterState.Device)
+		t.Errorf("clusterState is on %q, want /dev/sda, the only disk", m.Spec.Storage.ClusterState.Device)
 	}
 }
 
 func TestProposalSizesTheRolesToASmallDisk(t *testing.T) {
-	// The parity drill's own disks: 2 GiB and 4 GiB. Only the second
-	// can hold liken's roles, so the 2 GiB disk carries the cluster's
-	// data, and it is under the floor an image store needs. The
-	// proposal names no clusterState there rather than a size that
-	// installs and then fails on a pull.
+	// Only the 4 GiB disk can hold the system roles, which leaves the
+	// 2 GiB disk for clusterState. That disk is too small for
+	// containerd's image store, so the proposal declares no
+	// clusterState. A smaller clusterState would install, then fail
+	// when an image pull filled it.
 	r := sampleReport()
 	r.UEFI = true
 	r.Disks = []reportDisk{
@@ -347,32 +334,31 @@ func TestProposalSizesTheRolesToASmallDisk(t *testing.T) {
 	m := mustInstall(t, r)
 
 	if m.Spec.Storage.SystemA.Device != "/dev/sdb" {
-		t.Errorf("the system slots must land on the disk that can hold them: %q", m.Spec.Storage.SystemA.Device)
+		t.Errorf("systemA is on %q, want /dev/sdb, the only disk that can hold the system roles", m.Spec.Storage.SystemA.Device)
 	}
 	if m.Spec.Storage.ClusterState != nil {
-		t.Errorf("no disk here can hold an image store: %+v", m.Spec.Storage.ClusterState)
+		t.Errorf("clusterState is %+v, want none because no disk can hold an image store", m.Spec.Storage.ClusterState)
 	}
 	if text := composeHardwareReport(r); !strings.Contains(text, "image store") {
-		t.Errorf("the proposal must say why clusterState is missing:\n%s", text)
+		t.Errorf("the report does not mention the image store, want it to say why clusterState is missing:\n%s", text)
 	}
 }
 
-func TestProposalTeachesWhatEachDurableRoleHolds(t *testing.T) {
-	// A person reading the proposal has to know which size is theirs to
-	// choose. clusterState follows the images the node runs; podStorage
-	// is the volume pool, and it carries the "size to" marker the
-	// header tells them to edit.
+func TestProposalExplainsWhatEachDurableRoleHolds(t *testing.T) {
+	// clusterState's size depends on the images the node runs.
+	// podStorage holds the volumes, and has the "size to" marker that
+	// the header tells the person to edit.
 	text := composeHardwareReport(sampleReport())
 	for _, want := range []string{
 		"size: 6Gi",
 		"size: 4Gi  # size to your workloads' volumes",
 	} {
 		if !strings.Contains(text, want) {
-			t.Errorf("the proposal must carry %q:\n%s", want, text)
+			t.Errorf("the proposal has no %q, want it:\n%s", want, text)
 		}
 	}
-	// The notes are wrapped into comment lines, so a sentence a person
-	// reads across two lines is one the test must read the same way.
+	// The notes are wrapped across comment lines, so check them with
+	// the wrapping removed.
 	prose := unwrapped(text)
 	for _, want := range []string{
 		"containerd's image store",
@@ -380,14 +366,14 @@ func TestProposalTeachesWhatEachDurableRoleHolds(t *testing.T) {
 		"clusterState cannot grow later",
 	} {
 		if !strings.Contains(prose, want) {
-			t.Errorf("the proposal must teach %q:\n%s", want, text)
+			t.Errorf("the report does not contain %q, want the note that explains clusterState:\n%s", want, text)
 		}
 	}
 }
 
-// unwrapped turns the proposal's wrapped comment lines back into one
-// run of words, so a test can assert on a sentence without pinning
-// where the wrapper broke it.
+// unwrapped joins the words of the proposal's comment lines into one
+// string, so that a test does not depend on where writeComment broke
+// a line.
 func unwrapped(text string) string {
 	var words []string
 	for line := range strings.Lines(text) {
@@ -396,8 +382,8 @@ func unwrapped(text string) string {
 	return strings.Join(words, " ")
 }
 
-// withGPU is the testbed: a machine whose integrated GPU nothing
-// drives, because an install needs no display.
+// withGPU is sampleReport plus an integrated GPU with no driver
+// loaded.
 func withGPU() hardwareReport {
 	r := sampleReport()
 	r.Claimable = []moduleRecommendation{{
@@ -411,27 +397,24 @@ func withGPU() hardwareReport {
 func TestProposalNamesHardwareAWorkloadCouldClaim(t *testing.T) {
 	text := composeHardwareReport(withGPU())
 	if !strings.Contains(text, "#- i915") {
-		t.Errorf("the proposal must name the driver that would make the GPU claimable:\n%s", text)
+		t.Errorf("the report has no \"#- i915\", want the driver that would make the GPU claimable:\n%s", text)
 	}
 	if !strings.Contains(unwrapped(text), "UHD Graphics") {
-		t.Errorf("the proposal must say which device the driver is for:\n%s", text)
+		t.Errorf("the report does not name UHD Graphics, want the device that the driver is for:\n%s", text)
 	}
 }
 
 func TestProposalLeavesClaimableHardwareUndeclared(t *testing.T) {
-	// The line stays commented, so the proposal installs exactly as it
-	// reads. Driving a GPU is a decision a person makes, and the report
-	// changes nothing on the machine it describes.
 	m := mustInstall(t, withGPU())
 	if slices.Contains(m.Spec.Modules, "i915") {
-		t.Errorf("claimable hardware must not reach spec.modules: %v", m.Spec.Modules)
+		t.Errorf("spec.modules is %v, want no i915, because a claimable device's driver is commented out", m.Spec.Modules)
 	}
 }
 
 func TestProposalWithNoClaimableHardwareSaysNothing(t *testing.T) {
 	text := composeHardwareReport(sampleReport())
 	if strings.Contains(text, "hardware that nothing drives") {
-		t.Errorf("a machine with nothing to claim gets no section:\n%s", text)
+		t.Errorf("the report has a \"hardware that nothing drives\" section, want none for a machine with nothing to claim:\n%s", text)
 	}
 }
 
@@ -440,10 +423,10 @@ func TestProposalRefusesToLayOutADiskThatIsTooSmall(t *testing.T) {
 	r.Disks = []reportDisk{{Name: "sda", Path: "/dev/sda", SizeBytes: 2 << 30, Transport: "sata"}}
 	m := parseProposal(t, r)
 	if m.Spec.Storage.SystemA != nil {
-		t.Errorf("a layout that cannot exist must not be written: %+v", m.Spec.Storage)
+		t.Errorf("the storage is %+v, want no systemA when no layout fits", m.Spec.Storage)
 	}
 	text := composeHardwareReport(r)
 	if !strings.Contains(text, "No disk here can hold") {
-		t.Errorf("the proposal must say the disk is too small:\n%s", text)
+		t.Errorf("the report does not say \"No disk here can hold\", want it to say the disk is too small:\n%s", text)
 	}
 }

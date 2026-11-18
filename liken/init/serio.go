@@ -1,36 +1,31 @@
 package main
 
-// The serio watch: the machine-plane component that keeps every
-// spec.serio attachment in place (machine/serio.go says what an
-// attachment is, and serioattach.go how one is held).
+// The serio watch is the machine-plane component that attaches each
+// serial-line adapter that spec.serio declares, so the kernel creates
+// its CEC and input devices. machine/serio.go defines an attachment,
+// and serioattach.go defines the holder that keeps one attached.
 //
-// The watch has the shape of the disk links watch. It walks sysfs once
-// at start, and again after every settled burst of uevents. Each walk
-// lists the ttys under /sys/class/tty, reads the USB identity above
-// each one, and compares it with the declared entries. A matched tty
-// with no holder gets one. An unplug needs no handling of its own: the
-// kernel hangs up the tty, serport ends the read, the holder ends, and
-// the next walk no longer lists the tty. The plug that follows sends
-// uevents, and the walk after them starts a new holder. A refusal is
-// kept for the USB port it happened on and retried after a bounded
-// backoff (serioretry.go), so an adapter that resets comes back by
-// itself.
+// Each walk lists the ttys under /sys/class/tty, reads the USB
+// identity of the device behind each one, and compares it with the
+// declared entries. It starts a holder for each matching tty that has
+// none.
 //
-// The attachment belongs on the machine plane for the reason module
-// loading does. It is what makes the hardware appear, and no pod can
-// do it: the machine operator's DRA driver delivers only the nodes
-// that exist when a container starts, so a pod that attached the line
-// would never receive the nodes it created, and TIOCSETD to serport
-// needs CAP_SYS_ADMIN.
+// An unplug needs no separate handling. The kernel hangs up the tty,
+// serport's read ends, the holder ends, and the next walk no longer
+// lists the tty. The uevents of the next plug start a walk, which
+// starts a new holder. serioretry.go retries a refused attachment.
 //
-// The holders live in a registry that outlives the component, the same
-// as the reaper's. A restart of the component starts a new uevent
-// listener and a new walk, and the holders stay in their reads
-// through the restart. The holders do not stop at shutdown either.
-// They write to no disk, so the quiesce has nothing to wait for, and
-// the reboot system call ends them. The port stays in place for as
-// long as any pod runs.
-
+// The attachment runs in init, like module loading, because no pod can
+// do it. The TIOCSETD ioctl that selects serport needs CAP_SYS_ADMIN.
+// The DRA driver of the machine operator also hands a container only
+// the device nodes that exist when the container starts, so a pod that
+// attached the line would never receive the nodes that the attachment
+// creates.
+//
+// The registry is a package variable, so the holders keep reading
+// across a restart of the component. Holders do not stop at shutdown.
+// They write to no disk, so the reboot system call ends them, and the
+// attachment stays in place while any pod runs.
 import (
 	"context"
 	"fmt"
@@ -42,28 +37,27 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// serioQuiet is how long a walk waits for a burst of uevents to stop.
-// An adapter's plug announces the USB device, its interfaces, and the
-// tty, and an attach announces the port, the CEC adapter, and the
-// input device. A pod holding the adapter waits for the result, so the
-// wait is short, like the disk links watch's.
+// serioQuiet is how long the uevents must stay quiet before a walk
+// runs. Plugging in an adapter sends uevents for the USB device, its
+// interfaces, and the tty, and attaching it sends uevents for the
+// port, the CEC adapter, and the input device. A pod that needs the
+// adapter waits for the walk, so the time is short.
 const serioQuiet = 250 * time.Millisecond
 
-// serioSettleTimeout bounds the wait for a new holder's four attach
-// calls. On a healthy adapter they take microseconds, but the kernel
-// lets them wait longer: cdc_acm's control transfers each time out
+// serioSettleTimeout is the longest a walk waits for a new holder to
+// finish its attach calls. Each control transfer of cdc_acm times out
 // after 5 seconds, and TIOCSETD waits up to 5 seconds for the line
-// discipline's lock. The bound sits above the sum of those waits, so
-// a slow adapter settles inside it. The walk holds no lock while it
-// waits, so the hardware watch and the module loader never wait
-// behind it.
+// discipline's lock, so the timeout is above the sum of those waits.
+// The walk holds no lock while it waits, so the hardware watch and the
+// module loader do not wait for it.
 const serioSettleTimeout = 15 * time.Second
 
-// serioRegistry is the state that outlives the component: the
-// declared entries, the holders, and what the last walk reported.
-// Only the walk and the declaration touch the maps, both under mu. A
-// holder never touches the registry. It reports through its own
-// channels (serioattach.go).
+// serioRegistry holds the declared entries, the holders, the refusals
+// that walks record, and the ports that a walk saw without a driver.
+// mu guards the maps, and only walks and declare use them. A holder
+// does not lock the registry. It reports through its own channels
+// (serioattach.go). A send on nudge wakes the watch. declare sends
+// when it changes the list, and a holder sends when it ends.
 type serioRegistry struct {
 	mu       sync.Mutex
 	declared []machine.SerioAttachment
@@ -74,10 +68,11 @@ type serioRegistry struct {
 	open     openLine
 	now      func() time.Time
 
-	// printed is the report the console last showed, and published is
-	// the report the facts tree last took. They differ only after a
-	// failed write, which the next walk retries. Only the component's
-	// goroutine touches them, and the plane never runs two of it.
+	// printed is the last report that was printed to the console, and
+	// published is the last report that was written to the facts tree.
+	// They differ after a failed write, which the next walk tries
+	// again. Only the component's goroutine uses them, because the
+	// machine plane never runs two copies of a component.
 	printed, published []machine.SerioStatus
 }
 
@@ -92,13 +87,14 @@ func newSerioRegistry(open openLine) *serioRegistry {
 	}
 }
 
-// serioAttachments is the boot's one registry, package-level for the
-// same reason the machine plane is.
+// serioAttachments is the registry that init uses. It is a package
+// variable so that the boot, the module loader, and the hardware watch
+// share it.
 var serioAttachments = newSerioRegistry(openTTY)
 
-// declare replaces the declared list and wakes the walk. The boot
-// declares the manifest's list, and the module loader declares the
-// list a live load applied.
+// declare replaces the declared list, clears the recorded refusals,
+// and wakes the watch. The boot declares the list from the manifest.
+// The module loader declares the list from a live load.
 func (r *serioRegistry) declare(entries []machine.SerioAttachment) {
 	r.mu.Lock()
 	r.declared = slices.Clone(entries)
@@ -110,17 +106,17 @@ func (r *serioRegistry) declare(entries []machine.SerioAttachment) {
 	}
 }
 
-// declaredEntries returns a copy of the declared list, for the
-// hardware watch's unclaimed report.
+// declaredEntries returns a copy of the declared list. The hardware
+// watch uses it to decide which serial-line adapters are still
+// unclaimed.
 func (r *serioRegistry) declaredEntries() []machine.SerioAttachment {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return slices.Clone(r.declared)
 }
 
-// watchSerio is the component. It publishes the first walk at once,
-// so an adapter that is plugged in at boot attaches without waiting
-// for a uevent.
+// watchSerio returns the component. It walks as soon as it starts, so
+// an adapter that is already plugged in attaches without a uevent.
 func watchSerio(r *serioRegistry, tree machine.FactsTree) func(context.Context) error {
 	return func(ctx context.Context) error {
 		uevents, err := listenForUevents(ctx)
@@ -149,13 +145,15 @@ func watchSerio(r *serioRegistry, tree machine.FactsTree) func(context.Context) 
 	}
 }
 
-// waitForSerioWork returns when the next walk is due: after a burst of
-// uevents settles, after a holder's nudge and the uevents that follow
-// it settle, or when a refusal's backoff runs out. A holder ends when
-// the kernel hangs up its tty, which comes before the kernel removes
-// the tty, so a walk at the nudge itself would read a tty that is
-// about to leave and report a refusal for one walk. It answers false
-// when the uevent listener stopped.
+// waitForSerioWork returns when a walk is due: after a burst of
+// uevents settles, after a nudge and the uevents that follow it
+// settle, or when retry fires. It returns false when the uevent
+// listener stopped.
+//
+// It waits for uevents to settle after a nudge, because a holder ends
+// when the kernel hangs up its tty, and the kernel removes the tty
+// after that. A walk in between would still list the tty and report a
+// refusal that the next walk then clears.
 func waitForSerioWork(ctx context.Context, uevents, nudge <-chan struct{}, retry <-chan time.Time) bool {
 	select {
 	case <-ctx.Done():
@@ -171,8 +169,8 @@ func waitForSerioWork(ctx context.Context, uevents, nudge <-chan struct{}, retry
 	return true
 }
 
-// publish runs one walk, prints each status that changed, and
-// rewrites serio/ in the facts tree when the report changed.
+// publish runs one walk, prints each status that is new, and writes
+// serio/ in the facts tree when the report changed.
 func (r *serioRegistry) publish(tree machine.FactsTree) {
 	statuses := r.walk()
 	for _, s := range statuses {
@@ -189,10 +187,10 @@ func (r *serioRegistry) publish(tree machine.FactsTree) {
 	}
 }
 
-// walk compares the declared entries with the serial lines sysfs
-// shows now, starts a holder for each matched line that has none, and
-// returns the report. It waits for the holders it started without the
-// registry's lock, and takes the lock again to record their outcomes.
+// walk compares the declared entries with the serial lines in sysfs,
+// starts a holder for each matching line that has none, and returns
+// the report. It waits for the new holders without holding the
+// registry's lock, then locks again to record how they finished.
 func (r *serioRegistry) walk() []machine.SerioStatus {
 	statuses, started := r.plan()
 	if len(started) == 0 {
@@ -214,8 +212,8 @@ func (r *serioRegistry) walk() []machine.SerioStatus {
 	return statuses
 }
 
-// startedHolder is a holder a walk started, and the place in the
-// report its outcome fills.
+// startedHolder is a holder that a walk started, and the index of its
+// entry in the report.
 type startedHolder struct {
 	index    int
 	protocol machine.SerioProtocol
@@ -223,9 +221,9 @@ type startedHolder struct {
 	holder   *serioHolder
 }
 
-// plan is the part of a walk that runs under the lock: it reads the
-// lines, prunes the holders, and reports every entry, starting a
-// holder where one is due.
+// plan is the part of a walk that holds the lock. It reads the serial
+// lines, removes ended holders, builds the report for every entry, and
+// starts a holder for each line that needs one.
 func (r *serioRegistry) plan() ([]machine.SerioStatus, []startedHolder) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -235,10 +233,10 @@ func (r *serioRegistry) plan() ([]machine.SerioStatus, []startedHolder) {
 	lines := discoverSerialLines()
 	r.prune()
 	r.pruneUnbound(lines)
-	// The most specific entry wins. Entries that name a serial take
-	// their lines first, so an entry without one, declared earlier,
-	// cannot hold a line that a specific entry names. The report keeps
-	// the declaration order.
+	// Entries with a serial choose their lines first. Otherwise an
+	// entry without a serial, declared earlier, could take a line that
+	// a more specific entry matches. The report keeps declaration
+	// order.
 	taken := map[string]bool{}
 	byEntry := make([][]machine.SerioStatus, len(r.declared))
 	started := make([][]startedHolder, len(r.declared))
@@ -249,8 +247,9 @@ func (r *serioRegistry) plan() ([]machine.SerioStatus, []startedHolder) {
 			}
 		}
 	}
-	// Each entry numbered its started holders within its own report,
-	// so the offsets move them to their places in the whole report.
+	// Each entry numbered its holders within its own statuses, so add
+	// the statuses of the entries before it to get the index in the
+	// whole report.
 	var all []startedHolder
 	offset := 0
 	for i := range byEntry {

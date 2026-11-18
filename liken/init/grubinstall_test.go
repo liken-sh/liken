@@ -1,11 +1,9 @@
 package main
 
-// Tests for the boot-sector patcher. The offsets under test are
-// grub-bios-setup's own offsets (grub-core/boot/i386/pc/{boot,diskboot}.S
-// fix them permanently). The grub domain's introduction proved the
-// arithmetic end to end by booting a hand-patched disk under SeaBIOS.
-// These tests pin the same arithmetic against synthetic images where
-// every byte is known.
+// These tests check the patched offsets and sector arithmetic against
+// synthetic images in which every byte is known. The offsets are the
+// ones that grub-bios-setup uses, from boot.S and diskboot.S in
+// grub-core/boot/i386/pc.
 
 import (
 	"bytes"
@@ -18,9 +16,8 @@ import (
 	"github.com/liken-sh/liken/liken/disks"
 )
 
-// testGRUBImages builds a recognizable fake boot.img and core.img:
-// patterned bytes, with the load segment set where diskboot expects
-// it.
+// testGRUBImages returns a fake boot.img and core.img, each filled
+// with one repeated byte, with the load segment where diskboot has it.
 func testGRUBImages(coreBytes int) ([]byte, []byte) {
 	bootImg := bytes.Repeat([]byte{0xB0}, disks.SectorSize)
 	coreImg := bytes.Repeat([]byte{0xC0}, coreBytes)
@@ -36,38 +33,38 @@ func TestPlanGRUBBootSectorsPatchesTheChain(t *testing.T) {
 	bootImg, coreImg := testGRUBImages(1_200) // three sectors, one partial
 	plan, err := planGRUBBootSectors(bootImg, coreImg, testBIOSBootPartition())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the boot sectors: %v", err)
 	}
 
 	if len(plan.mbr) != 440 {
-		t.Fatalf("the MBR half is %d bytes, want 440", len(plan.mbr))
+		t.Fatalf("the MBR boot code is %d bytes, want 440", len(plan.mbr))
 	}
 	if got := binary.LittleEndian.Uint64(plan.mbr[grubKernelSectorOffset:]); got != 2_048 {
-		t.Errorf("kernel sector: got %d, want the partition's first LBA", got)
+		t.Errorf("the kernel sector is %d, want the first LBA of the partition (2048)", got)
 	}
 	if plan.mbr[grubDriveCheckOffset] != 0x90 || plan.mbr[grubDriveCheckOffset+1] != 0x90 {
-		t.Error("the drive check should be disabled with NOPs")
+		t.Errorf("the drive check bytes are % x, want 90 90, the NOPs that disable it", plan.mbr[grubDriveCheckOffset:grubDriveCheckOffset+2])
 	}
-	// Everything not deliberately patched is boot.img's own bytes.
+	// Bytes that are not patched are copied from boot.img.
 	if plan.mbr[0] != 0xB0 || plan.mbr[439] != 0xB0 {
-		t.Error("unpatched boot code bytes must come through unchanged")
+		t.Error("the boot code bytes that planGRUBBootSectors does not patch differ from boot.img, want them copied")
 	}
 
 	if got := binary.LittleEndian.Uint64(plan.core[grubBlocklistStart:]); got != 2_049 {
-		t.Errorf("blocklist start: got %d, want the sector after diskboot", got)
+		t.Errorf("the blocklist start is %d, want 2049, the sector after diskboot", got)
 	}
-	// 1200 bytes is 3 sectors. The blocklist counts the sectors after
-	// the first.
+	// 1200 bytes is 3 sectors, and the blocklist counts the sectors
+	// after the first.
 	if got := binary.LittleEndian.Uint16(plan.core[grubBlocklistLength:]); got != 2 {
-		t.Errorf("blocklist length: got %d, want 2", got)
+		t.Errorf("the blocklist length is %d, want 2", got)
 	}
 	if got := binary.LittleEndian.Uint16(plan.core[grubBlocklistSegment:]); got != grubLoadSegment {
-		t.Errorf("the load segment is compiled in and must not change: %#x", got)
+		t.Errorf("the load segment is %#x, want %#x, as in the input", got, grubLoadSegment)
 	}
-	// The inputs were not changed. Healing recomputes from the slot's
-	// original artifacts every time.
+	// The function patches copies, because it runs again from the
+	// same artifacts on every boot.
 	if bootImg[grubKernelSectorOffset] != 0xB0 || coreImg[grubBlocklistStart] != 0xC0 {
-		t.Error("the release's artifact bytes must not be modified in place")
+		t.Error("planGRUBBootSectors changed the bytes of its input images, want them unchanged")
 	}
 }
 
@@ -76,79 +73,78 @@ func TestPlanGRUBBootSectorsRefusesBadInputs(t *testing.T) {
 	part := testBIOSBootPartition()
 
 	if _, err := planGRUBBootSectors(bootImg[:100], coreImg, part); err == nil {
-		t.Error("a boot.img that isn't one sector must be refused")
+		t.Error("planGRUBBootSectors accepted a boot.img that is not one sector, want an error")
 	}
 	if _, err := planGRUBBootSectors(bootImg, coreImg[:100], part); err == nil {
-		t.Error("a core image below one sector must be refused")
+		t.Error("planGRUBBootSectors accepted a core image smaller than one sector, want an error")
 	}
 
 	wrongSegment := bytes.Clone(coreImg)
 	binary.LittleEndian.PutUint16(wrongSegment[grubBlocklistSegment:], 0x7c0)
 	if _, err := planGRUBBootSectors(bootImg, wrongSegment, part); err == nil {
-		t.Error("a core image without the i386-pc load segment must be refused")
+		t.Error("planGRUBBootSectors accepted a core image without the i386-pc load segment, want an error")
 	}
 
 	tiny := &slotPartition{firstLBA: 2_048, lastLBA: 2_049}
 	_, err := planGRUBBootSectors(bootImg, coreImg, tiny)
 	if err == nil || !strings.Contains(err.Error(), "sectors") {
-		t.Errorf("a core image that outgrows its partition must be refused: %v", err)
+		t.Errorf("the error for a core image larger than its partition is %v, want one that mentions sectors", err)
 	}
 }
 
-func TestGRUBBootSectorsVerifyAndHeal(t *testing.T) {
+func TestGRUBBootSectorsAreDetectedAndRewrittenAfterTheBootCodeIsZeroed(t *testing.T) {
 	bootImg, coreImg := testGRUBImages(1_200)
 	part := testBIOSBootPartition()
 	plan, err := planGRUBBootSectors(bootImg, coreImg, part)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the boot sectors: %v", err)
 	}
 
 	disk, err := os.Create(filepath.Join(t.TempDir(), "disk"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the disk file: %v", err)
 	}
 	defer disk.Close()
 	if err := disk.Truncate(8 << 20); err != nil {
-		t.Fatal(err)
+		t.Fatalf("sizing the disk file: %v", err)
 	}
-	// Sector 0's tail belongs to the partition table. This test plants
-	// a sentinel value there to prove that the boot-code write does
-	// not touch it.
+	// The rest of sector 0 belongs to the partition table. The test
+	// fills it with a known value to check that write leaves it alone.
 	sentinel := bytes.Repeat([]byte{0xEE}, disks.SectorSize-440)
 	if _, err := disk.WriteAt(sentinel, 440); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the disk file: %v", err)
 	}
 
 	if ok, err := plan.inPlace(disk); err != nil || ok {
-		t.Fatalf("a blank disk must not verify: %v %v", ok, err)
+		t.Fatalf("inPlace on a blank disk returns %v, %v, want false and no error", ok, err)
 	}
 	if err := plan.write(disk); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot sectors: %v", err)
 	}
 	if ok, err := plan.inPlace(disk); err != nil || !ok {
-		t.Fatalf("a freshly written chain must verify: %v %v", ok, err)
+		t.Fatalf("inPlace after write returns %v, %v, want true and no error", ok, err)
 	}
 
 	tail := make([]byte, disks.SectorSize-440)
 	if _, err := disk.ReadAt(tail, 440); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the disk file: %v", err)
 	}
 	if !bytes.Equal(tail, sentinel) {
-		t.Error("the write must not touch sector 0 past the boot code")
+		t.Error("write changed the bytes of sector 0 after the boot code, want them unchanged")
 	}
 
-	// The Linode failure: the boot code is zeroed out from under the
-	// machine. Healing only notices this and writes the chain again.
+	// A Linode image deploy zeroes the boot code. inPlace must see
+	// that, and write must restore it.
 	if _, err := disk.WriteAt(make([]byte, 440), 0); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the disk file: %v", err)
 	}
 	if ok, _ := plan.inPlace(disk); ok {
-		t.Fatal("a zeroed MBR must not verify")
+		t.Fatal("inPlace is true for a zeroed MBR, want false")
 	}
 	if err := plan.write(disk); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot sectors: %v", err)
 	}
 	if ok, _ := plan.inPlace(disk); !ok {
-		t.Error("healing must restore the chain")
+		t.Error("inPlace is false after write on a zeroed MBR, want true")
 	}
 }

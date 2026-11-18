@@ -1,13 +1,7 @@
 package main
 
-// Tests for the report boot's disk-side helpers: resolving the
-// installation stick once, keeping it and the devices that cannot hold
-// a role out of the walk, telling which disks exist only because a
-// driver loaded, and telling a recommendation that serves the machine
-// from one that serves only the stick. The helpers read the same fake
-// /sys/block and /dev that the storage tests build (disks_test.go),
-// because the report recognizes the stick exactly the way storage
-// recognizes a role: by the name written into the GPT.
+// These tests read the fake /sys/block and /dev that disks_test.go
+// builds.
 
 import (
 	"os"
@@ -26,13 +20,13 @@ func TestResolveInstallStickFindsTheStickByPartitionName(t *testing.T) {
 
 	found := resolveInstallStick()
 	if found.Disk != "sdb" || found.Path != dev+"/sdb" {
-		t.Errorf("the stick's disk: %+v", found)
+		t.Errorf("the stick is %+v, want disk sdb at %s/sdb", found, dev)
 	}
 	if found.Partition != dev+"/sdb1" {
-		t.Errorf("the volume to write to: %q", found.Partition)
+		t.Errorf("the partition is %q, want %q", found.Partition, dev+"/sdb1")
 	}
 	if found.ambiguous() {
-		t.Error("one stick is not ambiguous")
+		t.Error("one install stick is ambiguous, want not ambiguous")
 	}
 }
 
@@ -45,10 +39,10 @@ func TestResolveInstallStickReportsAnAmbiguousStick(t *testing.T) {
 
 	found := resolveInstallStick()
 	if found.Disk != "" || found.Partition != "" {
-		t.Errorf("two sticks must resolve to none: %+v", found)
+		t.Errorf("two install sticks resolved to %+v, want no disk and no partition", found)
 	}
 	if !found.ambiguous() || len(found.Candidates) != 2 {
-		t.Errorf("both disks must stay named as candidates: %+v", found)
+		t.Errorf("the candidates are %+v, want both install sticks", found)
 	}
 }
 
@@ -58,7 +52,7 @@ func TestResolveInstallStickWithNoStick(t *testing.T) {
 
 	found := resolveInstallStick()
 	if found.Disk != "" || found.ambiguous() || len(found.Candidates) != 0 {
-		t.Errorf("no stick must exclude nothing: %+v", found)
+		t.Errorf("with no install stick the result is %+v, want no disk, not ambiguous, no candidates", found)
 	}
 }
 
@@ -68,7 +62,7 @@ func TestAwaitInstallStickEndsTheMomentTheStickExists(t *testing.T) {
 	addPartition(t, sys, "sdb", "sdb1", "liken:install", 1<<30)
 
 	if found := awaitInstallStick(); found.Disk != "sdb" {
-		t.Errorf("an already-present stick must be found at once: %+v", found)
+		t.Errorf("the stick is %+v, want disk sdb", found)
 	}
 }
 
@@ -79,10 +73,10 @@ func TestAwaitInstallStickGivesUpAtTheCeiling(t *testing.T) {
 		start := time.Now()
 		found := awaitInstallStick()
 		if found.Disk != "" {
-			t.Errorf("no stick must resolve to none: %+v", found)
+			t.Errorf("with no install stick the result is %+v, want no disk", found)
 		}
-		// The wait looks every 200ms, and gives up on the first look past
-		// its ceiling.
+		// The wait polls every 200ms and stops at the first poll after
+		// the ceiling.
 		if elapsed := time.Since(start); elapsed != stickCeiling+200*time.Millisecond {
 			t.Errorf("the wait stopped after %s, want the first look past its ceiling of %s", elapsed, stickCeiling)
 		}
@@ -98,13 +92,13 @@ func TestReadReportDisksExcludesTheStick(t *testing.T) {
 
 	disks, _ := readReportDisks(resolveInstallStick())
 	if len(disks) != 1 {
-		t.Fatalf("disks: %v", disks)
+		t.Fatalf("the report has %d disks, want 1: %v", len(disks), disks)
 	}
 	if disks[0].Path != dev+"/sda" || disks[0].Model != "REAL DISK" {
-		t.Errorf("the kept disk: %+v", disks[0])
+		t.Errorf("the disk is %+v, want the path %s/sda and the model REAL DISK", disks[0], dev)
 	}
 	if disks[0].SizeBytes != 500<<30 || disks[0].Name != "sda" {
-		t.Errorf("the kept disk's identity: %+v", disks[0])
+		t.Errorf("the disk is %+v, want size 500 GiB and name sda", disks[0])
 	}
 }
 
@@ -118,44 +112,38 @@ func TestReadReportDisksMarksEveryDiskThatMightBeTheStick(t *testing.T) {
 
 	disks, _ := readReportDisks(resolveInstallStick())
 	if len(disks) != 3 {
-		t.Fatalf("an unresolved stick hides no disk: %v", disks)
+		t.Fatalf("the report has %d disks, want 3: %v", len(disks), disks)
 	}
 	marked := map[string]bool{}
 	for _, d := range disks {
 		marked[d.Name] = d.MaybeStick
 	}
 	if marked["sda"] || !marked["sdb"] || !marked["sdc"] {
-		t.Errorf("only the candidates may be marked: %v", marked)
+		t.Errorf("the disks marked MaybeStick are %v, want only sdb and sdc", marked)
 	}
 }
 
 func TestReadReportDisksSkipsDevicesThatCannotHoldARole(t *testing.T) {
 	sys, dev := fakeMachine(t)
-	// A DVD drive with a disc in it: real storage with a real size, and
-	// no place for a partition table liken writes.
+	// A DVD drive with a disc has a size, but it cannot hold a
+	// partition table.
 	addDisk(t, sys, dev, "sr0", 4<<30, nil)
 	writeSysfs(t, filepath.Join(sys, "sr0", "device"), "type", "5\n")
-	// A card reader with no card: the device exists, the medium does
-	// not, so the kernel reports zero sectors.
+	// A card reader with no card reports zero sectors.
 	addDisk(t, sys, dev, "mmcblk0", 0, nil)
-	// A write-protected medium takes no role either.
+	// A write-protected medium cannot take a role.
 	addDisk(t, sys, dev, "sdz", 8<<30, nil)
 	writeSysfs(t, filepath.Join(sys, "sdz"), "ro", "1\n")
-	// A small SATA DOM is a legitimate boot disk, and must survive
-	// every one of the checks above.
+	// A small SATA DOM is a valid boot disk and passes every check.
 	addDisk(t, sys, dev, "sda", 8<<30, nil)
 	writeSysfs(t, filepath.Join(sys, "sda", "device"), "type", "0\n")
 
 	disks, _ := readReportDisks(installStick{})
 	if len(disks) != 1 || disks[0].Name != "sda" {
-		t.Errorf("only the disk that can hold a role belongs in the report: %+v", disks)
+		t.Errorf("the report has %+v, want only sda", disks)
 	}
 }
 
-// An SD card in a slot leaves with the person, like the install
-// stick, so no role may land on it and it enters no proposal. The
-// kernel's own word for what the card is decides: the mmc bus
-// writes MMC for an eMMC module and SD for a card in a slot.
 func TestReadReportDisksExcludesAnSDCard(t *testing.T) {
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "mmcblk0", 64<<30, nil)
@@ -164,24 +152,23 @@ func TestReadReportDisksExcludesAnSDCard(t *testing.T) {
 
 	disks, cards := readReportDisks(installStick{})
 	if len(disks) != 1 || disks[0].Name != "nvme0n1" {
-		t.Errorf("only the machine's own disk belongs in the report: %+v", disks)
+		t.Errorf("the report has %+v, want only nvme0n1", disks)
 	}
 	if len(cards) != 1 || cards[0].Path != dev+"/mmcblk0" {
-		t.Errorf("the card must be named as seen and not proposed: %+v", cards)
+		t.Errorf("the cards are %+v, want only mmcblk0", cards)
 	}
 	layout := planStorageLayout(disks, true)
 	for _, role := range layout.Roles {
 		if role.Device != dev+"/nvme0n1" {
-			t.Errorf("role %s landed on %s, not the nvme disk", role.Name, role.Device)
+			t.Errorf("role %s is on %s, want %s", role.Name, role.Device, dev+"/nvme0n1")
 		}
 	}
 	if len(layout.Roles) == 0 {
-		t.Error("the nvme disk must still carry the machine's roles")
+		t.Error("the layout has no roles, want roles on nvme0n1")
 	}
 }
 
-// An eMMC module is soldered to the board and is the only disk
-// some machines have, so it stays a candidate.
+// Some machines have an eMMC module as their only disk.
 func TestReadReportDisksProposesAnEMMCCard(t *testing.T) {
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "mmcblk0", 64<<30, nil)
@@ -189,14 +176,14 @@ func TestReadReportDisksProposesAnEMMCCard(t *testing.T) {
 
 	disks, cards := readReportDisks(installStick{})
 	if len(disks) != 1 || disks[0].Name != "mmcblk0" {
-		t.Errorf("an eMMC module is the machine's own disk: %+v", disks)
+		t.Errorf("the report has %+v, want only mmcblk0", disks)
 	}
 	if len(cards) != 0 {
-		t.Errorf("an eMMC module is not a card in a slot: %+v", cards)
+		t.Errorf("the cards are %+v, want none", cards)
 	}
 }
 
-func TestReadReportDisksCarriesTheFirstByIDName(t *testing.T) {
+func TestReadReportDisksRecordsTheFirstByIDName(t *testing.T) {
 	sys, _ := fakeMachine(t)
 	dir := fakeDisk(t, sys, "sda", "pci0000:00", "0000:00:1f.2", "ata3", "host2",
 		"target2:0:0", "2:0:0:0", "block", "sda")
@@ -205,7 +192,7 @@ func TestReadReportDisksCarriesTheFirstByIDName(t *testing.T) {
 
 	disks, _ := readReportDisks(installStick{})
 	if len(disks) != 1 || disks[0].StableName != "/dev/disk/by-id/wwn-0x5002538d40a45c88" {
-		t.Errorf("a disk with a wwn must carry its by-id name as the stable name: %+v", disks)
+		t.Errorf("the report has %+v, want the stable name /dev/disk/by-id/wwn-0x5002538d40a45c88", disks)
 	}
 }
 
@@ -215,48 +202,42 @@ func TestReadReportDisksWithOnlyAByPathNameHasNoStableName(t *testing.T) {
 		"target2:0:0", "2:0:0:0", "block", "sda")
 	writeSysfs(t, dir, "size", "16777216\n")
 
-	// This disk offers no wwid, so its only stable name is a by-path
-	// name, which names the port and not the disk. The report must not
-	// propose it as the disk's identity.
+	// With no wwid, the disk's only stable name is a by-path name.
 	disks, _ := readReportDisks(installStick{})
 	if len(disks) != 1 || disks[0].StableName != "" {
-		t.Errorf("a by-path name is not an identity, and must not become the stable name: %+v", disks)
+		t.Errorf("the report has %+v, want one disk with no stable name", disks)
 	}
 }
 
 func TestDiskTransportReadsTheBusFromTheDeviceTree(t *testing.T) {
 	sys, _ := fakeMachine(t)
-	// A SATA disk's sysfs entry is a symlink whose target path passes
-	// through the ata layer; the helper reads the bus from that
-	// resolved path.
 	target := filepath.Join(sys, "devices", "pci0000:00", "ata2", "host1", "block", "sdx")
 	if err := os.MkdirAll(target, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the device tree: %v", err)
 	}
 	if err := os.Symlink(target, filepath.Join(sys, "sdx")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the device tree: %v", err)
 	}
 
 	if got := diskTransport("sdx"); got != "sata" {
-		t.Errorf("transport: %q", got)
+		t.Errorf("the transport of sdx is %q, want sata", got)
 	}
 	if got := diskTransport("absent"); got != "" {
-		t.Errorf("an absent disk has no transport: %q", got)
+		t.Errorf("the transport of a disk that is not there is %q, want none", got)
 	}
 }
 
-// hbaTree builds a disk that hangs off one PCI function, the shape
-// both the unreachable-disk check and the stick check judge: a
-// /sys/block entry that resolves under the controller's directory.
+// hbaTree builds a disk below one PCI function: a /sys/block entry
+// that resolves to a path under the controller's directory.
 func hbaTree(t *testing.T, sys, controller, disk string) (diskName, controllerDir string) {
 	t.Helper()
 	controllerDir = filepath.Join(sys, "devices", "pci0000:00", controller)
 	target := filepath.Join(controllerDir, "host0", "target0:0:0", "block", disk)
 	if err := os.MkdirAll(target, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the device tree: %v", err)
 	}
 	if err := os.Symlink(target, filepath.Join(sys, disk)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the device tree: %v", err)
 	}
 	return disk, controllerDir
 }
@@ -266,7 +247,7 @@ func TestMarkDisksBehindDriversNamesTheChainThatReachedThem(t *testing.T) {
 	name, controller := hbaTree(t, sys, "0000:03:00.0", "sda")
 	elsewhere := filepath.Join(sys, "devices", "pci0000:00", "0000:00:1f.2")
 	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the device tree: %v", err)
 	}
 	onboard, _ := hbaTree(t, sys, "0000:00:17.0", "sdb")
 
@@ -278,25 +259,24 @@ func TestMarkDisksBehindDriversNamesTheChainThatReachedThem(t *testing.T) {
 
 	marked := markDisksBehindDrivers(disks, recs)
 	if len(marked[0].BehindModules) != 1 || marked[0].BehindModules[0] != "mpt3sas" {
-		t.Errorf("the disk below the loaded controller must name its chain: %+v", marked[0])
+		t.Errorf("the disk behind the controller has BehindModules %+v, want [mpt3sas]", marked[0])
 	}
 	if len(marked[1].BehindModules) != 0 {
-		t.Errorf("a disk the boot path already reached is not behind anything: %+v", marked[1])
+		t.Errorf("the disk on the boot path has BehindModules %+v, want none", marked[1])
 	}
 }
 
-// stickTree builds the shape withoutStickRecommendations judges: a
-// stick disk whose /sys/block entry resolves under a USB device's
-// directory, and the sysfs directory of that USB device.
+// stickTree builds a stick disk whose /sys/block entry resolves under
+// a USB device's directory, and returns the disk and that directory.
 func stickTree(t *testing.T, sys string) (stickName, usbDevice string) {
 	t.Helper()
 	usbDevice = filepath.Join(sys, "devices", "usb2", "2-1", "2-1:1.0")
 	disk := filepath.Join(usbDevice, "host8", "block", "sdd")
 	if err := os.MkdirAll(disk, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the device tree: %v", err)
 	}
 	if err := os.Symlink(disk, filepath.Join(sys, "sdd")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the device tree: %v", err)
 	}
 	return "sdd", usbDevice
 }
@@ -306,7 +286,7 @@ func TestWithoutStickRecommendationsDropsOnlyTheSticksDriver(t *testing.T) {
 	stickName, usbDevice := stickTree(t, sys)
 	elsewhere := filepath.Join(sys, "devices", "pci0000:00", "00:03.0")
 	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("building the device tree: %v", err)
 	}
 
 	recs := []moduleRecommendation{
@@ -316,7 +296,7 @@ func TestWithoutStickRecommendationsDropsOnlyTheSticksDriver(t *testing.T) {
 
 	kept := withoutStickRecommendations(recs, stickName)
 	if len(kept) != 1 || kept[0].Device != "a NIC" {
-		t.Errorf("only the stick's driver may drop: %+v", kept)
+		t.Errorf("the kept recommendations are %+v, want only the NIC", kept)
 	}
 }
 
@@ -326,7 +306,7 @@ func TestWithoutStickRecommendationsKeepsEverythingWithoutAStick(t *testing.T) {
 	}
 
 	if kept := withoutStickRecommendations(recs, ""); len(kept) != 1 {
-		t.Errorf("no stick must drop nothing: %+v", kept)
+		t.Errorf("with no stick the kept recommendations are %+v, want all 1", kept)
 	}
 }
 
@@ -337,6 +317,6 @@ func TestWithoutStickRecommendationsKeepsEverythingWhenTheStickIsUnreadable(t *t
 	}
 
 	if kept := withoutStickRecommendations(recs, "ghost"); len(kept) != 1 {
-		t.Errorf("an unresolvable stick must drop nothing: %+v", kept)
+		t.Errorf("with an unreadable stick the kept recommendations are %+v, want all 1", kept)
 	}
 }

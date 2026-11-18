@@ -1,8 +1,5 @@
 package main
 
-// This file tests the proving watch: what a proving boot does when
-// the operator promotes the release it is trying.
-
 import (
 	"slices"
 	"testing"
@@ -11,15 +8,12 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// The boot publishes the firmware's facts before the promotion, and
-// the promotion rewrites BootOrder and BootNext. The Machine's
-// status.firmware must report the firmware as the promotion left it,
-// not as the boot found it.
+// The boot publishes the firmware facts before the promotion rewrites
+// BootOrder and BootNext, so the watch must publish them again.
 func TestThePromotionRepublishesTheFirmwareFacts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		root := t.TempDir()
-		// The trial boot of slot B: the firmware consumed the one-shot,
-		// and the install's order still puts slot A first.
+		// A trial boot of slot B, with BootOrder still on slot A first.
 		dir := fakeFirmwareVars(t, map[string][]byte{
 			"Boot0002":    encodeLoadOption(loadOption{attributes: loadOptionActive, description: "liken slot A"}),
 			"Boot0003":    encodeLoadOption(loadOption{attributes: loadOptionActive, description: "liken slot B"}),
@@ -35,14 +29,14 @@ func TestThePromotionRepublishesTheFirmwareFacts(t *testing.T) {
 
 		facts, err := tree.Read()
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the firmware facts: %v", err)
 		}
 		wantOrder := []string{"Boot0003 (liken slot B)", "Boot0002 (liken slot A)"}
 		if !slices.Equal(facts.Firmware.BootOrder, wantOrder) {
-			t.Errorf("status.firmware.bootOrder must lead with the promoted slot: %q", facts.Firmware.BootOrder)
+			t.Errorf("status.firmware.bootOrder is %q, want the promoted slot first", facts.Firmware.BootOrder)
 		}
 		if want := "Boot0003 (liken slot B, pinned at the proven slot)"; facts.Firmware.BootNext != want {
-			t.Errorf("status.firmware.bootNext must report the pin at the promoted slot: %q", facts.Firmware.BootNext)
+			t.Errorf("status.firmware.bootNext is %q, want %q", facts.Firmware.BootNext, want)
 		}
 	})
 }

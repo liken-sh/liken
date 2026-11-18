@@ -1,10 +1,9 @@
 package main
 
-// Tests for the peek at machineState: the read-only look that finds
-// the staged and proven manifests before storage reconciliation runs,
-// and the quarantine of a staged manifest that cannot boot. A test
-// process cannot mount ext4, so a directory stands in for the mounted
-// partition, and `machineStateMounts` records each mount and unmount.
+// Before storage reconciliation runs, loadManifestCandidates mounts
+// machineState read-only to read the staged and proven manifests. A
+// test process cannot mount ext4, so a directory takes the place of the
+// mounted partition.
 
 import (
 	"os"
@@ -18,9 +17,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// machineStateMounts records what the peek mounted. The peek point is
-// a directory that already holds the partition's files, so a mount
-// only records its flags.
+// machineStateMounts records the flags of each mount and counts the
+// mounts still in place. The mount point already holds the partition's
+// files, so a mount does nothing else.
 type machineStateMounts struct {
 	mu         sync.Mutex
 	flags      []uintptr
@@ -51,16 +50,15 @@ func (m *machineStateMounts) unmount(target string, flags int) error {
 }
 
 // machineStateDisk builds a machine with one disk whose first
-// partition is named machineState and carries an ext4 superblock. It
-// returns the manifest store on that partition, for the test to fill,
-// and the record of mounts.
+// partition is an ext4 machineState. It returns the manifest store on
+// that partition, for the test to fill, and the mount recorder.
 func machineStateDisk(t *testing.T) (machine.ManifestStore, *machineStateMounts) {
 	t.Helper()
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 2<<30, nil)
 	addPartition(t, sys, "vda", "vda1", "liken:machineState", 1<<30)
 	if err := os.WriteFile(filepath.Join(dev, "vda1"), ext4DeviceWithUUID(make([]byte, 16)), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the machineState device: %v", err)
 	}
 
 	mounts := &machineStateMounts{}
@@ -71,7 +69,7 @@ func machineStateDisk(t *testing.T) (machine.ManifestStore, *machineStateMounts)
 	manifestPeekPoint = filepath.Join(t.TempDir(), "peek")
 	mountFilesystem, unmountFilesystem = mounts.mount, mounts.unmount
 	if err := os.MkdirAll(filepath.Join(manifestPeekPoint, "manifests"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the manifests directory: %v", err)
 	}
 	return machine.MachineManifests(manifestPeekPoint), mounts
 }
@@ -89,41 +87,40 @@ spec:
 
 const provenNode1 = "kind: Machine\nmetadata:\n  name: node-1\n"
 
-// The peek finds both manifests through a read-only mount, and leaves
-// nothing mounted. A mount that stays in place would make the kernel
-// refuse to re-read this disk's partition table when storage grows a
-// partition minutes later.
+// The mount must not stay in place, because the kernel refuses to
+// re-read the partition table of a disk with a mounted partition, and
+// storage grows partitions later in the boot.
 func TestLoadManifestCandidatesPeeksReadOnlyAndUnmounts(t *testing.T) {
 	store, mounts := machineStateDisk(t)
 	if err := store.WriteStaged([]byte(stagedWithMachineState)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged manifest: %v", err)
 	}
 	if err := store.WriteProven([]byte(provenNode1)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the proven manifest: %v", err)
 	}
 
 	c, err := loadManifestCandidates()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the manifest candidates: %v", err)
 	}
 	if c.staged == nil || c.staged.hash != machine.ManifestHash([]byte(stagedWithMachineState)) {
-		t.Errorf("the staged manifest is a candidate with its own hash: %+v", c.staged)
+		t.Errorf("the staged candidate is %+v, want one with the hash of the staged manifest", c.staged)
 	}
 	if c.proven == nil || c.proven.hash != machine.ManifestHash([]byte(provenNode1)) {
-		t.Errorf("the proven manifest is a candidate with its own hash: %+v", c.proven)
+		t.Errorf("the proven candidate is %+v, want one with the hash of the proven manifest", c.proven)
 	}
 	if len(mounts.flags) != 1 || mounts.flags[0] != unix.MS_RDONLY {
-		t.Errorf("the peek mounts once, read-only: %v", mounts.flags)
+		t.Errorf("the mount flags are %v, want one read-only mount", mounts.flags)
 	}
 	if mounts.mounted != 0 {
-		t.Errorf("the peek leaves nothing mounted: %d mounts remain", mounts.mounted)
+		t.Errorf("%d mounts remain after the peek, want none", mounts.mounted)
 	}
 }
 
-// A staged manifest that would fail every boot the same way is
-// rejected without a trial. The rejection is recorded on the partition
-// with its reason and the staged copy moves aside, so the next boot
-// does not try it again. The proven manifest still carries this boot.
+// A staged manifest that would fail every boot is rejected without a
+// trial boot. The rejection is recorded on the partition and the staged
+// copy is moved aside, so the next boot does not try it again. This
+// boot uses the proven manifest.
 func TestLoadManifestCandidatesRejectsAStagedManifestThatCannotBoot(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -137,112 +134,106 @@ func TestLoadManifestCandidatesRejectsAStagedManifestThatCannotBoot(t *testing.T
 		t.Run(one.name, func(t *testing.T) {
 			store, mounts := machineStateDisk(t)
 			if err := store.WriteStaged([]byte(one.staged)); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing the staged manifest: %v", err)
 			}
 			if err := store.WriteProven([]byte(provenNode1)); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing the proven manifest: %v", err)
 			}
 
 			c, err := loadManifestCandidates()
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("loading the manifest candidates: %v", err)
 			}
 
 			if c.staged != nil || c.proven == nil {
-				t.Errorf("only the proven manifest is a candidate: staged %+v, proven %+v", c.staged, c.proven)
+				t.Errorf("the candidates are staged %+v and proven %+v, want only the proven one", c.staged, c.proven)
 			}
 			if c.rejection == nil || !strings.Contains(c.rejection.Reason, one.reason) {
-				t.Errorf("this boot's facts carry the rejection: %+v", c.rejection)
+				t.Errorf("the rejection in this boot's facts is %+v, want a reason containing %q", c.rejection, one.reason)
 			}
 			recorded, _ := store.LoadRejection()
 			if recorded == nil || recorded.Reason != c.rejection.Reason {
-				t.Errorf("the rejection is recorded on the partition: %+v", recorded)
+				t.Errorf("the rejection recorded on the partition is %+v, want the reason of this boot's rejection", recorded)
 			}
 			if staged, _ := store.LoadStaged(); staged != nil {
-				t.Errorf("the rejected manifest moves aside: %q", staged)
+				t.Errorf("the staged manifest is %q after the rejection, want none", staged)
 			}
 			if len(mounts.flags) != 2 || mounts.flags[1] != 0 || mounts.mounted != 0 {
-				t.Errorf("only the rejection mounts read-write, and nothing stays mounted: %v, %d", mounts.flags, mounts.mounted)
+				t.Errorf("the mount flags are %v with %d mounts remaining, want a read-only peek, a read-write mount for the rejection, and none remaining", mounts.flags, mounts.mounted)
 			}
 		})
 	}
 }
 
-// A staged manifest that cannot be read is rejected the same way, with
-// the read error as its reason.
 func TestLoadManifestCandidatesRejectsAnUnreadableStagedManifest(t *testing.T) {
 	store, _ := machineStateDisk(t)
 	if err := os.Mkdir(filepath.Join(manifestPeekPoint, "manifests", "staged.yaml"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the staged.yaml directory: %v", err)
 	}
 
 	c, err := loadManifestCandidates()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the manifest candidates: %v", err)
 	}
 
 	if c.staged != nil || c.rejection == nil || !strings.Contains(c.rejection.Reason, "unreadable") {
-		t.Errorf("an unreadable staged manifest is rejected: staged %+v, rejection %+v", c.staged, c.rejection)
+		t.Errorf("staged candidate %+v and rejection %+v, want no candidate and a rejection with the reason \"unreadable\"", c.staged, c.rejection)
 	}
 	if recorded, _ := store.LoadRejection(); recorded == nil {
-		t.Error("the rejection is recorded on the partition")
+		t.Error("the partition has no recorded rejection, want one")
 	}
 }
 
-// An unreadable proven manifest leaves no proven candidate, and the
-// peek still succeeds. The file exists only for recovery, so a damaged
-// copy must not stop the boot.
+// The proven manifest is only for recovery, so a damaged copy must not
+// stop the boot.
 func TestLoadManifestCandidatesSkipsAnUnreadableProvenManifest(t *testing.T) {
 	machineStateDisk(t)
 	if err := os.Mkdir(filepath.Join(manifestPeekPoint, "manifests", "proven.yaml"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the proven.yaml directory: %v", err)
 	}
 
 	c, err := loadManifestCandidates()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the manifest candidates: %v", err)
 	}
 	if c.proven != nil {
-		t.Errorf("an unreadable proven manifest is no candidate: %+v", c.proven)
+		t.Errorf("the proven candidate is %+v, want none because the manifest is unreadable", c.proven)
 	}
 }
 
-// A rejection from an earlier boot stands until a promotion clears it.
-// The peek reads it, so each boot's facts report it again.
-func TestLoadManifestCandidatesCarriesAStandingRejection(t *testing.T) {
+// A rejection from an earlier boot stays on the partition until a
+// promotion clears it, so each boot reports it again in its facts.
+func TestLoadManifestCandidatesReturnsAnEarlierRejection(t *testing.T) {
 	store, _ := machineStateDisk(t)
 	if err := store.WriteStaged([]byte(provenNode1)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged manifest: %v", err)
 	}
 	if err := store.Reject(machine.Rejection{Reason: "storage failed to reconcile"}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("recording the rejection: %v", err)
 	}
 
 	c, err := loadManifestCandidates()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the manifest candidates: %v", err)
 	}
 	if c.rejection == nil || c.rejection.Reason != "storage failed to reconcile" {
-		t.Errorf("the standing rejection is reported again: %+v", c.rejection)
+		t.Errorf("the rejection in this boot's facts is %+v, want the reason of the earlier boot", c.rejection)
 	}
 }
 
-// A partition that will not mount stops the peek with an error that
-// names the device, because the boot cannot tell which manifest is
-// this machine's own.
 func TestLoadManifestCandidatesReportsAFailedMount(t *testing.T) {
 	_, mounts := machineStateDisk(t)
 	mounts.mountErr = unix.EIO
 
 	_, err := loadManifestCandidates()
 	if err == nil || !strings.Contains(err.Error(), "vda1") {
-		t.Errorf("the error names the device: %v", err)
+		t.Errorf("the error is %v, want one that names vda1", err)
 	}
 }
 
-// A rejection that cannot mount the partition is still reported for
-// this boot. Only the durable record is lost, so the next boot rejects
-// the same manifest again.
+// When the partition will not mount to record a rejection, the
+// rejection still reaches this boot's facts. The staged manifest stays
+// in place, so the next boot rejects it again.
 func TestRejectStagedReportsTheRejectionWhenTheRecordFails(t *testing.T) {
 	_, mounts := machineStateDisk(t)
 	mounts.mountErr = unix.EIO
@@ -250,33 +241,32 @@ func TestRejectStagedReportsTheRejectionWhenTheRecordFails(t *testing.T) {
 	rejection := rejectStaged(&partition{name: "vda1"}, []byte(provenNode1), "no machineState role")
 
 	if rejection == nil || rejection.Reason != "no machineState role" {
-		t.Errorf("the rejection comes back for this boot's facts: %+v", rejection)
+		t.Errorf("rejectStaged returned %+v, want a rejection with the reason \"no machineState role\"", rejection)
 	}
 }
 
-// A peek whose unmount fails still returns what it read, and a
-// rejection whose unmount fails is still recorded. The failure is
-// reported on the console, and a later rewrite of this disk's
-// partition table fails with `EBUSY` and names the problem.
+// A failed unmount is printed on the console and does not stop the
+// read or the rejection. A later rewrite of the disk's partition table
+// then fails with EBUSY.
 func TestLoadManifestCandidatesContinuesPastAFailedUnmount(t *testing.T) {
 	store, mounts := machineStateDisk(t)
 	mounts.unmountErr = unix.EBUSY
 	if err := store.WriteStaged([]byte(provenNode1)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged manifest: %v", err)
 	}
 	if err := store.WriteProven([]byte(provenNode1)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the proven manifest: %v", err)
 	}
 
 	c, err := loadManifestCandidates()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("loading the manifest candidates: %v", err)
 	}
 
 	if c.proven == nil {
-		t.Error("the proven manifest is still a candidate")
+		t.Error("there is no proven candidate, want one despite the failed unmount")
 	}
 	if recorded, _ := store.LoadRejection(); recorded == nil {
-		t.Error("the rejection of the staged manifest is still recorded")
+		t.Error("the partition has no recorded rejection, want one despite the failed unmount")
 	}
 }

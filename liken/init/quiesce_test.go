@@ -6,11 +6,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The mount table of a lab machine at the moment it reboots, trimmed
-// to the shapes that matter. It carries every case quiesceDisks has to
-// judge: the staging tmpfs, the booting slot under two mounts, the
-// read-only squashfs that is the running root, the role filesystems,
-// the kernel's own filesystems, and containerd's leftover overlays.
+// The mount table of a lab machine as it reboots, cut down to one line
+// of each kind: the boot-mounts tmpfs, the booting slot at two paths,
+// the read-only squashfs of the running root, the role filesystems,
+// the kernel's filesystems, and a containerd overlay that outlived its
+// container.
 const shutdownMountTable = `tmpfs /var/lib/liken/boot-mounts tmpfs rw,nosuid,relatime,size=131072k,mode=755,inode64 0 0
 /dev/vdc3 /var/lib/liken/boot-mounts/slot vfat rw,relatime,fmask=0022,dmask=0022 0 0
 /dev/loop0 /var/lib/liken/boot-mounts/system squashfs ro,relatime,errors=continue 0 0
@@ -34,9 +34,8 @@ func TestWritableDiskMountsPicksOnlyWritableDisks(t *testing.T) {
 	for _, m := range writableDiskMounts(shutdownMountTable) {
 		targets = append(targets, m.target)
 	}
-	// Newest first, so a stacked mount comes off before the mount it
-	// covers. Every entry names a block device that is mounted
-	// read-write; nothing virtual and nothing already read-only.
+	// Reverse table order, so a mount is remounted before the mount
+	// it covers. Only read-write mounts of block devices are listed.
 	want := []string{
 		"/var/log/pods",
 		"/var/lib/kubelet",
@@ -46,29 +45,28 @@ func TestWritableDiskMountsPicksOnlyWritableDisks(t *testing.T) {
 		"/var/lib/liken/boot-mounts/slot",
 	}
 	if len(targets) != len(want) {
-		t.Fatalf("got %v, want %v", targets, want)
+		t.Fatalf("the targets are %v, want %v", targets, want)
 	}
 	for i := range want {
 		if targets[i] != want[i] {
-			t.Errorf("position %d: got %q, want %q", i, targets[i], want[i])
+			t.Errorf("target %d is %q, want %q", i, targets[i], want[i])
 		}
 	}
 }
 
 func TestWritableDiskMountsSkipsTheReadOnlyRootImage(t *testing.T) {
-	// The squashfs that carries the running system is already
-	// read-only, so it has no clean record to write.
+	// The squashfs of the running root is already read-only, so it
+	// needs no remount.
 	for _, m := range writableDiskMounts(shutdownMountTable) {
 		if m.target == "/var/lib/liken/boot-mounts/system" {
-			t.Fatal("the read-only root image must not be remounted")
+			t.Fatal("writableDiskMounts lists the read-only root image, want it left out")
 		}
 	}
 }
 
 func TestWritableDiskMountsCoversBothMountsOfTheBootingSlot(t *testing.T) {
-	// The booting slot answers to two paths. Either one reaches the
-	// superblock, and the loop device that holds the running root
-	// keeps the slot busy, so the list must not drop either.
+	// The booting slot is mounted at two paths, and the list keeps
+	// both.
 	var count int
 	for _, m := range writableDiskMounts(shutdownMountTable) {
 		if m.target == "/var/lib/liken/system/a" || m.target == "/var/lib/liken/boot-mounts/slot" {
@@ -76,39 +74,37 @@ func TestWritableDiskMountsCoversBothMountsOfTheBootingSlot(t *testing.T) {
 		}
 	}
 	if count != 2 {
-		t.Errorf("got %d mounts of the booting slot, want 2", count)
+		t.Errorf("the list has %d mounts of the booting slot, want 2", count)
 	}
 }
 
 func TestWritableDiskMountsKeepsMountFlags(t *testing.T) {
-	// A remount replaces the flag word, so a flag the caller does not
-	// name is dropped. The slots are nosuid, nodev, and noexec, and
-	// they must stay that way for the rest of the shutdown.
+	// A remount clears every flag it does not pass. The slots are
+	// nosuid, nodev, and noexec, and must stay so for the rest of the
+	// shutdown.
 	for _, m := range writableDiskMounts(shutdownMountTable) {
 		if m.target != "/var/lib/liken/system/a" {
 			continue
 		}
 		want := uintptr(unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC | unix.MS_RELATIME)
 		if m.flags != want {
-			t.Errorf("got flags %#x, want %#x", m.flags, want)
+			t.Errorf("the flags are %#x, want %#x", m.flags, want)
 		}
 		return
 	}
-	t.Fatal("the booting slot's role mount is missing from the list")
+	t.Fatal("writableDiskMounts does not list the booting slot's role mount, want it listed")
 }
 
 func TestWritableDiskMountsDecodesEscapedPaths(t *testing.T) {
-	// The kernel escapes a space, a tab, a newline, and a backslash in
-	// a mount path as octal, so a path has to be decoded before it can
-	// be used in a syscall.
+	// The kernel writes a space in a mount path as \040.
 	table := `/dev/sda1 /mnt/two\040words ext4 rw,relatime 0 0
 `
 	got := writableDiskMounts(table)
 	if len(got) != 1 {
-		t.Fatalf("got %d mounts, want 1", len(got))
+		t.Fatalf("the list has %d mounts, want 1", len(got))
 	}
 	if got[0].target != "/mnt/two words" {
-		t.Errorf("got %q, want %q", got[0].target, "/mnt/two words")
+		t.Errorf("the target is %q, want %q", got[0].target, "/mnt/two words")
 	}
 }
 
@@ -117,6 +113,6 @@ func TestWritableDiskMountsIgnoresShortAndEmptyLines(t *testing.T) {
 	table := "\n/dev/sda1 /mnt\n\n/dev/sdb1 /other ext4 rw 0 0\n"
 	got := writableDiskMounts(table)
 	if len(got) != 1 || got[0].target != "/other" {
-		t.Errorf("got %v, want one mount of /other", got)
+		t.Errorf("the list is %v, want one mount of /other", got)
 	}
 }

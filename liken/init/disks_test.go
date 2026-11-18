@@ -1,11 +1,9 @@
 package main
 
-// Tests for disk discovery, run against a fake machine: a sysfs tree
-// and a /dev directory built in tempdirs. The fixtures here write the
-// same files the kernel would write: a `device` entry marking real
-// storage, a `size` in 512-byte sectors, and a `uevent` of KEY=value
-// lines. This is the point of the tests: discovery only ever reads
-// small text files, and these tests show exactly which ones.
+// Tests for disk discovery against a fake machine: a sysfs tree and a
+// /dev directory in temporary directories, with the files the kernel
+// writes (a `device` entry, a `size` in 512-byte sectors, and a
+// `uevent` of KEY=value lines).
 
 import (
 	"fmt"
@@ -16,10 +14,9 @@ import (
 	"github.com/liken-sh/liken/liken/disks"
 )
 
-// fakeMachine points discovery at an empty fake /sys/block and /dev,
-// and restores the real paths when the test ends. Because sysBlock
-// and devRoot are package variables, tests in this package must not
-// run in parallel.
+// fakeMachine points discovery at an empty fake /sys/block and /dev
+// until the test ends. It sets package variables, so a test that calls
+// it must not run in parallel.
 func fakeMachine(t *testing.T) (sys string, dev string) {
 	t.Helper()
 	sys, dev = t.TempDir(), t.TempDir()
@@ -29,29 +26,29 @@ func fakeMachine(t *testing.T) (sys string, dev string) {
 	return sys, dev
 }
 
-// addDisk gives the fake machine one disk: the sysfs entries that
-// mark real storage, and the device file under the fake /dev whose
-// contents stand in for the first bytes of the disk.
+// addDisk adds a disk to the fake machine: its sysfs entries, and a
+// file under the fake /dev that holds the first bytes of the disk.
 func addDisk(t *testing.T, sys, dev, name string, sizeBytes uint64, contents []byte) {
 	t.Helper()
 	dir := filepath.Join(sys, name)
 	if err := os.MkdirAll(filepath.Join(dir, "device"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the fake disk directory: %v", err)
 	}
 	writeSysfs(t, dir, "size", fmt.Sprintf("%d\n", sizeBytes/disks.SectorSize))
 	if contents != nil {
 		if err := os.WriteFile(filepath.Join(dev, name), contents, 0o600); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the fake disk node: %v", err)
 		}
 	}
 }
 
-// addPartition gives a fake disk one partition, named or not.
+// addPartition adds a partition to a fake disk, with a PARTNAME in its
+// uevent when partName is not empty.
 func addPartition(t *testing.T, sys, disk, name, partName string, sizeBytes uint64) {
 	t.Helper()
 	dir := filepath.Join(sys, disk, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the fake partition directory: %v", err)
 	}
 	writeSysfs(t, dir, "partition", "1\n")
 	writeSysfs(t, dir, "size", fmt.Sprintf("%d\n", sizeBytes/disks.SectorSize))
@@ -62,34 +59,32 @@ func addPartition(t *testing.T, sys, disk, name, partName string, sizeBytes uint
 	writeSysfs(t, dir, "uevent", uevent)
 }
 
-// addPartitionNode gives a fake partition the /dev node devtmpfs
-// creates for it. On a real machine the node is a separate step
-// from the sysfs entry, so it is a separate step here too.
+// addPartitionNode creates the /dev node of a fake partition. On a
+// real machine devtmpfs creates it after the sysfs entry appears.
 func addPartitionNode(t *testing.T, dev, name string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dev, name), nil, 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the fake partition node: %v", err)
 	}
 }
 
 func writeSysfs(t *testing.T, dir, name, value string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(value), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the sysfs file: %v", err)
 	}
 }
 
 func TestDiscoverBlockDevicesReadsSysfs(t *testing.T) {
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 2<<30, nil)
-	// SCSI-style identity on the bus device, padded the way the wire
-	// format pads it. The trimming is part of what the test checks.
+	// A SCSI model is on the bus device, padded with spaces.
 	writeSysfs(t, filepath.Join(sys, "vda", "device"), "model", "QEMU HARDDISK   \n")
-	// virtio-style identity: a serial directly on the disk.
+	// A virtio serial is on the disk itself.
 	writeSysfs(t, filepath.Join(sys, "vda"), "serial", "liken-lab-state\n")
 	// A loop device has no `device` entry, so it is not storage.
 	if err := os.MkdirAll(filepath.Join(sys, "loop0"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the fake loop0 directory: %v", err)
 	}
 
 	disks := discoverBlockDevices()
@@ -98,21 +93,19 @@ func TestDiscoverBlockDevicesReadsSysfs(t *testing.T) {
 	}
 	d := disks[0]
 	if d.Name != "vda" || d.SizeBytes != 2<<30 {
-		t.Errorf("got %+v", d)
+		t.Errorf("the disk is %+v, want vda with 2 GiB", d)
 	}
 	if d.Model != "QEMU HARDDISK" {
-		t.Errorf("model should be trimmed of padding: %q", d.Model)
+		t.Errorf("the model is %q, want QEMU HARDDISK without padding", d.Model)
 	}
 	if d.Serial != "liken-lab-state" {
-		t.Errorf("serial: %q", d.Serial)
+		t.Errorf("the serial is %q, want liken-lab-state", d.Serial)
 	}
 }
 
-// addMMCCard gives the fake machine the block devices an eMMC module
-// presents. The `device` link is what tells them apart: the card's data area
-// hangs off the mmc card device, and each hardware area hangs off the data
-// area's own block device, because the mmc block driver makes them children of
-// that disk.
+// addMMCCard adds the block devices of an eMMC card. The data area's
+// `device` link leads to the mmc card, and each other area's link
+// leads to the data area.
 func addMMCCard(t *testing.T, sys string) {
 	t.Helper()
 	root := t.TempDir()
@@ -121,11 +114,11 @@ func addMMCCard(t *testing.T, sys string) {
 		"mmc_host", "mmc0", "mmc0:0001")
 	for _, dir := range []string{blockClass, filepath.Join(root, "bus", "mmc"), card} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the fake sysfs directory: %v", err)
 		}
 	}
 	if err := os.Symlink(filepath.Join(root, "bus", "mmc"), filepath.Join(card, "subsystem")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("linking the card subsystem: %v", err)
 	}
 	writeSysfs(t, card, "name", "SEM64G\n")
 	writeSysfs(t, card, "serial", "0x4a2b5c8e\n")
@@ -137,29 +130,25 @@ func addMMCCard(t *testing.T, sys string) {
 	addMMCArea(t, sys, blockClass, "mmcblk0rpmb", data, 512<<10)
 }
 
-// addMMCArea adds one mmc block device to the fake machine: its size, the
-// `subsystem` link every block device carries, and the `device` link to its
-// parent. It returns the directory it made.
+// addMMCArea adds one mmc block device with its size, a `subsystem`
+// link, and a `device` link to parent. It returns the device's
+// directory.
 func addMMCArea(t *testing.T, sys, blockClass, name, parent string, sizeBytes uint64) string {
 	t.Helper()
 	dir := filepath.Join(sys, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the fake disk directory: %v", err)
 	}
 	writeSysfs(t, dir, "size", fmt.Sprintf("%d\n", sizeBytes/disks.SectorSize))
 	if err := os.Symlink(blockClass, filepath.Join(dir, "subsystem")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("linking the disk subsystem: %v", err)
 	}
 	if err := os.Symlink(parent, filepath.Join(dir, "device")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("linking the disk device: %v", err)
 	}
 	return dir
 }
 
-// The card's data area is the only entry that may survive the walk.
-// The boot and general-purpose areas hold what a board's firmware
-// reads before Linux runs, and RPMB is an authenticated mailbox, so
-// a role placed on any of them would be destroyed or unreachable.
 func TestDiscoverBlockDevicesSkipsMMCHardwareAreas(t *testing.T) {
 	sys, _ := fakeMachine(t)
 	addMMCCard(t, sys)
@@ -169,13 +158,11 @@ func TestDiscoverBlockDevicesSkipsMMCHardwareAreas(t *testing.T) {
 		t.Fatalf("discovered %d disks, want only the card's data area: %v", len(found), found)
 	}
 	if found[0].Name != "mmcblk0" || found[0].SizeBytes != 58<<30 {
-		t.Errorf("got %+v, want the mmcblk0 data area", found[0])
+		t.Errorf("the disk is %+v, want the mmcblk0 data area", found[0])
 	}
 }
 
-// The skip keys on a sysfs shape only the mmc block driver builds,
-// so a machine with any other kind of disk walks exactly as it did
-// before. This test is that claim, pinned.
+// The mmc check must not skip disks on other buses.
 func TestDiscoverBlockDevicesKeepsEveryOtherDisk(t *testing.T) {
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "nvme0n1", 512<<30, nil)
@@ -187,7 +174,7 @@ func TestDiscoverBlockDevicesKeepsEveryOtherDisk(t *testing.T) {
 		names = append(names, d.Name)
 	}
 	if !equalNames(names, []string{"nvme0n1", "sda", "vda"}) {
-		t.Errorf("got %v, want every disk the walk found before", names)
+		t.Errorf("the disks are %v, want nvme0n1, sda, and vda", names)
 	}
 }
 
@@ -198,7 +185,7 @@ func TestDiscoverBlockDevicesToleratesMalformedSizes(t *testing.T) {
 
 	disks := discoverBlockDevices()
 	if len(disks) != 1 || disks[0].SizeBytes != 0 {
-		t.Errorf("a malformed size should read as zero, not fail discovery: %v", disks)
+		t.Errorf("the disks are %v, want one disk with size 0 because the size file is malformed", disks)
 	}
 }
 
@@ -207,10 +194,9 @@ func TestDiscoverPartitionsParsesUevent(t *testing.T) {
 	addDisk(t, sys, dev, "vda", 2<<30, nil)
 	addPartition(t, sys, "vda", "vda1", "liken:clusterState", 1<<30)
 	addPartition(t, sys, "vda", "vda2", "", 1<<20)
-	// A disk's sysfs directory holds much more than partitions. Only
-	// entries with a `partition` file count as partitions.
+	// Only entries with a `partition` file are partitions.
 	if err := os.MkdirAll(filepath.Join(sys, "vda", "queue"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the fake queue directory: %v", err)
 	}
 
 	parts := discoverPartitions()
@@ -218,16 +204,14 @@ func TestDiscoverPartitionsParsesUevent(t *testing.T) {
 		t.Fatalf("discovered %d partitions, want 2: %v", len(parts), parts)
 	}
 	if parts[0].name != "vda1" || parts[0].partName != "liken:clusterState" || parts[0].sizeBytes != 1<<30 {
-		t.Errorf("vda1: %+v", parts[0])
+		t.Errorf("vda1 is %+v, want partName liken:clusterState and 1 GiB", parts[0])
 	}
 	if parts[1].name != "vda2" || parts[1].partName != "" {
-		t.Errorf("an unnamed partition should read as empty, not error: %+v", parts[1])
+		t.Errorf("vda2 is %+v, want an empty partName", parts[1])
 	}
 }
 
-func TestReportBlockDevicesNarratesTheInventory(t *testing.T) {
-	// The report prints the same inventory the facts publish; both
-	// read the same fake sysfs, and this test checks that parity.
+func TestReportBlockDevicesPrintsDisks(t *testing.T) {
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "vda", 2<<30, nil)
 	writeSysfs(t, filepath.Join(sys, "vda"), "serial", "liken-lab-state\n")
@@ -240,16 +224,13 @@ func TestDiscoverBlockDevicesReadsSCSIModels(t *testing.T) {
 	writeSysfs(t, filepath.Join(sys, "sda", "device"), "model", "Samsung SSD 990 \n")
 	disks := discoverBlockDevices()
 	if len(disks) != 1 || disks[0].Model != "Samsung SSD 990" {
-		t.Errorf("the padded model string trims: %+v", disks)
+		t.Errorf("the disks are %+v, want the model Samsung SSD 990 without padding", disks)
 	}
 	reportBlockDevices()
 }
 
 func TestDiscoverBlockDevicesTrimsNULPaddedSerials(t *testing.T) {
-	// An iSCSI LUN reports its serial from a fixed-width buffer and
-	// pads the remainder with NUL. The padding is the transport's, not
-	// the disk's, and a NUL that reaches the Machine status is a byte
-	// no reader of the API expects.
+	// An iSCSI LUN can report its serial padded with NUL bytes.
 	sys, dev := fakeMachine(t)
 	addDisk(t, sys, dev, "sda", 8<<30, nil)
 	writeSysfs(t, filepath.Join(sys, "sda", "device"), "serial",
@@ -260,7 +241,7 @@ func TestDiscoverBlockDevicesTrimsNULPaddedSerials(t *testing.T) {
 		t.Fatalf("discovered %d disks, want 1: %v", len(found), found)
 	}
 	if found[0].Serial != "64117ed8-bf4f-4164-8bd4-cd6d70d854e5" {
-		t.Errorf("the NUL padding trims: %q", found[0].Serial)
+		t.Errorf("the serial is %q, want it without NUL padding", found[0].Serial)
 	}
 }
 
@@ -280,7 +261,7 @@ func TestDiscoverBlockDevicesFillsStableNames(t *testing.T) {
 		"/dev/disk/by-path/pci-0000:00:1f.2-ata-3",
 	}
 	if !equalNames(disks[0].StableNames, want) {
-		t.Errorf("got %v, want %v", disks[0].StableNames, want)
+		t.Errorf("the stable names are %v, want %v", disks[0].StableNames, want)
 	}
 	reportBlockDevices()
 }
@@ -291,7 +272,7 @@ func TestDiscoverBlockDevicesWithNoIdentityHasNoStableNames(t *testing.T) {
 
 	disks := discoverBlockDevices()
 	if len(disks) != 1 || disks[0].StableNames != nil {
-		t.Errorf("a disk with no identifying attributes got %v, want no stable names", disks[0].StableNames)
+		t.Errorf("the stable names are %v, want none for a disk with no identifying attributes", disks[0].StableNames)
 	}
 }
 
@@ -300,12 +281,12 @@ func TestDiscoverBlockDevicesFillsSerialFromVPD80(t *testing.T) {
 	addDisk(t, sys, dev, "sda", 8<<30, nil)
 	page := []byte{0x00, 0x80, 0x00, 0x08, 'S', '3', 'Z', '1', ' ', ' ', ' ', ' '}
 	if err := os.WriteFile(filepath.Join(sys, "sda", "device", "vpd_pg80"), page, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the vpd_pg80 page: %v", err)
 	}
 
 	disks := discoverBlockDevices()
 	if len(disks) != 1 || disks[0].Serial != "S3Z1" {
-		t.Errorf("a SATA disk with no plain serial attribute got %+v, want serial S3Z1", disks)
+		t.Errorf("the disks are %+v, want serial S3Z1 for a SATA disk with no serial attribute", disks)
 	}
 }
 
@@ -313,13 +294,11 @@ func TestDiscoverBlockDevicesWithNoSysfsReportsNothing(t *testing.T) {
 	fakeMachine(t)
 	sysBlock = filepath.Join(t.TempDir(), "no-sys-block")
 	if disks := discoverBlockDevices(); disks != nil {
-		t.Errorf("an unreadable /sys/block discovers nothing: %v", disks)
+		t.Errorf("the disks are %v, want none when /sys/block cannot be read", disks)
 	}
 }
 
 func TestReportBlockDevicesWithNoDisks(t *testing.T) {
 	fakeMachine(t)
-	// A machine with no storage at all still reports that fact. The
-	// world report must never stay silent about a whole section.
 	reportBlockDevices()
 }

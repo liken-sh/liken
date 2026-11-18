@@ -1,29 +1,24 @@
 package main
 
-// The cluster document's boot-time selection.
+// Init chooses the Cluster document at boot.
 //
-// The Cluster manifest goes through the same lifecycle as the Machine
-// manifest (staged, proven, seed), but its selection is simpler,
-// because the boot needs the two documents at different moments. The
-// Machine manifest drives storage reconciliation, so init must read
-// it before the boot properly mounts any filesystem. The boot needs
-// the Cluster document only after storage settles, because role
-// derivation, k3s configuration, and time sources consume it. By the
-// time the boot reads it, machineState is an ordinary mounted
-// filesystem, and the code can read the store in place.
+// The Cluster document has a staged, a proven, and a seed copy, as the
+// Machine manifest does, and init chooses among them the same way.
+// init chooses the Machine manifest before it mounts any filesystem,
+// because that manifest declares the storage. It chooses the Cluster
+// document after storage is up, because only role derivation, the k3s
+// configuration, and the time sources read it. By then machineState is
+// mounted, so init reads the store in place.
 //
-// The code vets a staged document before it tries the document, the
-// same as with the Machine manifest. A staged document that will not
-// parse, or is not a Cluster, will fail every future boot the same
-// way. So the code rejects it without trying it, and the boot falls
-// back to proven, then to seed. Init cannot prove a staged cluster
-// document, because its failure modes appear downstream: a bad
-// endpoint means the follower never joins, and that failure reaches
-// init only as a k3s that never starts. Promotion therefore belongs
-// to the operator. The operator's own existence as a pod is the proof
-// that the join worked. The operator's half of the lifecycle, and the
-// attempted marker, are described in cluster.go on the operator
-// side.
+// A staged document that does not parse, or is not a Cluster, would
+// fail every boot the same way, so init rejects it without a trial boot
+// and falls back to proven, then to the seed. init cannot tell whether
+// a staged document that parses works. A wrong endpoint, for example,
+// shows only as a follower that never joins, which init cannot tell
+// apart from a k3s that never starts. So machine-operator promotes the
+// staged document when it runs as a pod under it, because that proves
+// the machine joined. machine-operator/cluster.go has the operator's
+// half, and machine/staging.go defines the attempted marker.
 
 import (
 	"errors"
@@ -35,51 +30,48 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// checkSeedCluster parses the image's cluster document and reports why
-// it cannot be used. An install boot calls this before it touches a
-// disk, because the install copies these exact bytes into both slots,
-// and chooseCluster below treats a seed that will not parse as fatal
-// on every boot that follows. Catching it here turns a machine that
-// powers off forever into a sentence on the installer's console.
-//
-// Finding no document is a valid answer, the same as it is below: a
-// machine alone is its own cluster. A document that exists and cannot
-// be read is not, because the install would copy an unreadable file
-// and the next boot would fail on it.
+// checkSeedCluster returns an error when the image's Cluster document
+// exists and cannot be read or parsed. An install boot calls it before
+// it touches a disk, because the install copies the document into both
+// slots, and chooseCluster fails every later boot on a seed that does
+// not parse. A missing document is valid, because a machine with no
+// Cluster document is its own cluster.
 func checkSeedCluster(seedPath string) error {
 	raw, err := os.ReadFile(seedPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("%w: %s: %v", errIdentity, seedPath, err)
+		return fmt.Errorf("%w: reading %s: %v", errIdentity, seedPath, err)
 	}
 	if _, err := cluster.ParseCluster(raw); err != nil {
-		return fmt.Errorf("%w: %s: %v", errIdentity, seedPath, err)
+		return fmt.Errorf("%w: parsing %s: %v", errIdentity, seedPath, err)
 	}
 	return nil
 }
 
-// chooseCluster returns the cluster document this boot runs under,
-// both parsed and as its exact bytes, and records the choice in the
-// boot record. The code publishes the exact bytes to /run for the
-// operator's drift detection. The preference order is staged
-// (vetted), then proven, then the image's seed. A memory-backed
-// machine has no durable store, so it reads only the seed, every
-// boot. Finding no document anywhere is a valid answer, because a
-// machine alone is its own cluster. A seed that exists but will not
-// parse is an error the caller treats as fatal, because a machine
-// that cannot tell its role must not guess it.
+// chooseCluster returns the Cluster document this boot runs under, both
+// parsed and as its exact bytes, and records the choice in the boot
+// record. The caller publishes the bytes to /run so the operator can
+// detect drift. It prefers a staged document that parses and has not
+// had its trial boot, then proven, then the image's seed. A
+// memory-backed machine has no durable store and reads only the seed.
+// When no document exists, it
+// returns nil, because a machine with no Cluster document is its own
+// cluster. A seed that exists but does not parse is an error, and the
+// caller treats it as fatal because the machine cannot work out its
+// role without it.
 func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootStatus) (*cluster.Cluster, []byte, error) {
 	if durable {
 		store := machine.ClusterManifests(stateRoot)
 
-		// The code republishes the standing rejection into the boot
-		// record every boot (rejectStagedDocument explains why).
+		// The rejection record stays on disk after its document is
+		// quarantined, so each boot reports it again in the boot
+		// record.
 		boot.ClusterRejection, _ = store.LoadRejection()
 
 		if raw, err := store.LoadStaged(); err != nil {
-			fmt.Fprintf(os.Stderr, "liken: cluster: the staged document is unreadable: %v\n", err)
+			fmt.Fprintf(os.Stderr, "liken: cluster: reading the staged document: %v\n", err)
 		} else if raw != nil {
 			hash := machine.ManifestHash(raw)
 			attempted, _ := store.LoadAttempted()
@@ -89,11 +81,10 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 				boot.ClusterRejection = rejectStagedDocument("cluster", "document", store.Reject,
 					raw, fmt.Sprintf("the staged cluster document does not parse: %v", perr))
 			case attempted == hash:
-				// A previous boot ran this exact document, and nobody
-				// promoted it. The machine never joined its cluster
-				// under the document, and the operator that would
-				// have carried the proof never ran. A staged document
-				// gets exactly one trial boot.
+				// An earlier boot already tried this document and the
+				// operator never promoted it, so the machine did not
+				// join its cluster under it. A staged document gets one
+				// trial boot.
 				boot.ClusterRejection = rejectStagedDocument("cluster", "document", store.Reject,
 					raw, "the last boot ran this staged cluster document and never joined the cluster under it")
 			default:
@@ -102,21 +93,20 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 				}
 				boot.ClusterManifestSource = machine.ManifestSourceStaged
 				boot.ClusterManifestHash = hash
-				fmt.Printf("liken: cluster: booting under the Staged document (%.12s); the operator's first pass is the proof\n", hash)
+				fmt.Printf("liken: cluster: booting under the staged document %.12s, which the operator's first pass proves\n", hash)
 				return c, raw, nil
 			}
 		}
 
 		if raw, err := store.LoadProven(); err != nil {
-			fmt.Fprintf(os.Stderr, "liken: cluster: the proven document is unreadable: %v\n", err)
+			fmt.Fprintf(os.Stderr, "liken: cluster: reading the proven document: %v\n", err)
 		} else if raw != nil {
 			c, perr := cluster.ParseCluster(raw)
 			if perr != nil {
-				// A proven document that will not parse is a
-				// corrupted last-known-good copy. The code reports it
-				// and falls through to the seed, rather than failing
-				// the boot over a recovery file.
-				fmt.Fprintf(os.Stderr, "liken: cluster: the proven document is unreadable: %v\n", perr)
+				// A proven document that does not parse is a damaged
+				// copy. Fall back to the seed instead of failing the
+				// boot over a recovery file.
+				fmt.Fprintf(os.Stderr, "liken: cluster: parsing the proven document: %v\n", perr)
 			} else {
 				boot.ClusterManifestSource = machine.ManifestSourceProven
 				boot.ClusterManifestHash = machine.ManifestHash(raw)
@@ -134,7 +124,7 @@ func chooseCluster(stateRoot, seedPath string, durable bool, boot *machine.BootS
 	}
 	c, err := cluster.ParseCluster(raw)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", seedPath, err)
+		return nil, nil, fmt.Errorf("parsing %s: %w", seedPath, err)
 	}
 	boot.ClusterManifestSource = machine.ManifestSourceSeed
 	boot.ClusterManifestHash = machine.ManifestHash(raw)

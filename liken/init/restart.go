@@ -3,33 +3,30 @@ package main
 // The restart path applies staged restart-class changes without a
 // reboot.
 //
-// A reboot applies staged documents by re-running the whole boot
-// process. The restart path does the same work, but only for the
-// parts k3s reads at process start: the boot drop-in, registries.yaml,
-// and the feature actuation. Init re-renders these from the staged
-// documents while k3s still runs. Only after that does init restart
-// the child process (see supervisor.go). Downtime is therefore one
-// graceful stop and start, and every container stays running under
-// its shim.
+// A reboot applies staged documents by running the whole boot again.
+// The restart path redoes only what k3s reads when its process
+// starts: the boot drop-in, registries.yaml, and feature actuation.
+// Init renders these from the staged documents while k3s still runs,
+// and then the supervisor restarts the k3s process (supervisor.go).
+// k3s is down for one graceful stop and start, and every container
+// keeps running under its shim.
 //
-// The staged stores determine what to apply. The intent file only
-// signals that new work exists. So a duplicate intent is harmless:
-// if a pass finds nothing new to apply, it returns false and does
-// not disturb k3s. Both the boot path and the restart path use the
-// same classifier (see cluster/changes.go). If a staged document's
-// changes need a reboot, the restart path leaves it staged for the
-// reboot path. It never applies part of that document here.
+// A restart intent only signals that something may be staged. What
+// apply applies comes from the staged stores, so a duplicate intent
+// finds nothing new, apply returns false, and k3s keeps running. The
+// restart path
+// and the boot path classify changes with the same code
+// (cluster/changes.go). A staged document that needs a reboot stays
+// staged for the boot path, and the restart path applies none of it.
 //
-// Promotion needs no extra step. The proof that a cluster document
-// works has always been the operator seeing the machine serve
-// correctly under it. The restart path writes the attempted marker
-// and publishes new facts that name the staged document. This is the
-// same state a proving boot leaves. The operator's next check
-// promotes the document. If k3s does not come back, the next real
-// boot finds the attempted marker matching the staged document and
-// rejects it with a fallback. This is the one-trial rule, and it
-// applies the same way here. Credentials promote at actuation time,
-// the same as at boot (see registries.go).
+// A restart does not promote the cluster document. The operator
+// promotes it after the machine serves correctly under it. Until then
+// the restart path leaves what a trial boot leaves: the attempted
+// marker, and facts that name the staged document. If k3s does not
+// come back and the machine reboots, the next boot finds the attempted
+// marker and rejects the document, so a document gets one attempt
+// either way. Credentials are promoted when they are applied, as at
+// boot (registries.go).
 
 import (
 	"fmt"
@@ -41,43 +38,35 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// restartState holds everything the restart path needs. main gathers
-// most of this during the boot. The struct also holds the current
-// documents, which each successful apply updates. The function
-// fields are seams for tests: tests use them to check the decisions
-// and file effects, without a kernel to load modules into and
-// without a network to get addresses from.
+// restartState is filled by main during boot. Tests replace the
+// function fields, so they run without a kernel to load modules into
+// or a network to get addresses from.
 type restartState struct {
 	root  string
 	m     *machine.Machine
 	conns []*connection
 	tree  machine.FactsTree
 
-	// restarts counts the in-place k3s restarts this boot performed. The
-	// restart path is the only writer of boot/restarts, so it holds the
-	// count itself and starts it at zero: a fresh boot has done none.
+	// restarts counts the k3s restarts since boot, for the
+	// boot/restarts fact. It is in memory, so each boot starts at zero.
 	restarts int
 
-	// What k3s runs now: the choices from the boot, updated by each
-	// applied restart.
+	// The documents k3s runs under now. Boot sets them, and each
+	// applied restart replaces them.
 	clusterDoc  *cluster.Cluster
 	clusterRaw  []byte
 	creds       *machine.RegistryCredentials
 	credsSource machine.ManifestSource
 
-	// The seeded files of retracted janitor-teardown features, queued
-	// by retractFeatureManifests for removal in the window where k3s
-	// is down (removeOfflineRetractions).
-	offlineRetractions []string
+	// Paths of manifest files of retracted TeardownJanitor features,
+	// which removeQueuedRetractions deletes while k3s is stopped.
+	queuedRetractions []string
 
 	writeBootConfig  func(*cluster.Cluster, *machine.Machine, []*connection) (api.Role, error)
 	actuateFeatures  func(*cluster.Cluster, string) []machine.FeatureStatus
 	renderRegistries func(*cluster.Cluster, *machine.RegistryCredentials, machine.ManifestStore, machine.ManifestSource) machine.RegistriesStatus
 }
 
-// newRestartState creates a restartState with the real
-// implementations. Tests build the struct directly, with seams of
-// their own.
 func newRestartState(root string, m *machine.Machine, conns []*connection, tree machine.FactsTree,
 	clusterDoc *cluster.Cluster, clusterRaw []byte, creds *machine.RegistryCredentials,
 	credsSource machine.ManifestSource) *restartState {
@@ -90,29 +79,28 @@ func newRestartState(root string, m *machine.Machine, conns []*connection, tree 
 	}
 }
 
-// apply is the supervisor's applyRestart callback. It loads whatever
-// is staged, checks it, runs the restart-class rendering, and
-// reports whether the restart is worth doing. Everything here runs
-// while k3s still serves.
+// apply is the supervisor's applyRestart callback. It loads and
+// checks the staged documents and renders their restart-class parts
+// while k3s is still running. It returns whether k3s needs to restart.
 func (s *restartState) apply(intent machine.RestartIntent) bool {
 	fmt.Printf("liken: restart requested: %s\n", intent.Reason)
 
 	stagedCluster, stagedRaw, clusterHash := s.stagedClusterDocument()
 	stagedCreds, stagedCredsRaw := s.stagedCredentials()
 	if stagedCluster == nil && stagedCreds == nil {
-		fmt.Println("liken: restart: nothing staged that a restart could apply; k3s keeps running")
+		fmt.Println("liken: restart: the staged documents hold nothing that a restart applies, so k3s keeps running")
 		return false
 	}
 
-	// The cluster document part: re-render the boot drop-in and
-	// re-run feature actuation under the staged document.
+	// clusterDoc is the document that feature actuation and the
+	// registries render under: the staged one when its boot drop-in
+	// renders, the current one otherwise.
 	clusterDoc, clusterRaw := s.clusterDoc, s.clusterRaw
 	applyingCluster := stagedCluster != nil
 	if applyingCluster {
 		if _, err := s.writeBootConfig(stagedCluster, s.m, s.conns); err != nil {
-			// A document that fails to render would also fail the
-			// next boot. Quarantine it now, and keep serving the
-			// current document.
+			// The next boot would fail to render this document too, so
+			// reject it now and keep running the current one.
 			rejectStagedDocument("cluster", "document", machine.ClusterManifests(s.root).Reject,
 				stagedRaw, fmt.Sprintf("the staged cluster document does not render a k3s configuration: %v", err))
 			applyingCluster = false
@@ -124,9 +112,9 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 		}
 	}
 
-	// The credentials part runs whether or not the cluster document
-	// changed. writeRegistriesConfig promotes staged credentials
-	// after it writes the file.
+	// Credentials apply even when the cluster document does not.
+	// writeRegistriesConfig promotes staged credentials after it
+	// writes the file.
 	creds, credsSource := s.creds, s.credsSource
 	if stagedCreds != nil {
 		creds, credsSource = stagedCreds, machine.ManifestSourceStaged
@@ -141,13 +129,11 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 	}
 	registries := s.renderRegistries(clusterDoc, creds, machine.RegistryCredentialsStore(s.root), credsSource)
 
-	// The facts update before the restart. They name the staged
-	// documents, so the operator reads what this restart applied. The
-	// write order is a commit protocol: features/ and registries/ land
-	// first, then the restart counter, and boot/clusterManifest lands
-	// last, because the operator's promotion keys on that record
-	// (machine-operator/cluster.go). The boot cluster manifest
-	// publication carries the exact bytes the operator compares against.
+	// boot/clusterManifest is written last, because the operator
+	// promotes the cluster document when it reads that record
+	// (machine-operator/cluster.go). The other facts must already
+	// describe the document by then. publishBootClusterManifest writes
+	// the exact bytes that the operator compares against.
 	s.restarts++
 	s.tree.WriteFeatures(featureStatuses)
 	s.tree.WriteRegistries(registries)
@@ -161,28 +147,27 @@ func (s *restartState) apply(intent machine.RestartIntent) bool {
 		publishBootClusterManifest(clusterRaw)
 	}
 
-	// The applied documents are now current. A duplicate intent finds
-	// nothing staged, because credentials are promoted, or finds an
-	// attempted marker that matches staged, because the operator has
-	// not yet promoted the cluster document. Either way, the
-	// duplicate intent applies nothing.
+	// After this, a duplicate intent applies nothing: the applied
+	// credentials are promoted, and the cluster document, which stays
+	// staged until the operator promotes it, matches its attempted
+	// marker.
 	s.clusterDoc, s.clusterRaw = clusterDoc, clusterRaw
 	s.creds, s.credsSource = creds, credsSource
 	return true
 }
 
 // stagedClusterDocument loads and checks the staged cluster document.
-// It returns nil when there is nothing for a restart to apply:
+// It returns nil when a restart has nothing to apply:
 //
-//   - There is no staged file.
-//   - A document was already attempted, by this restart or by a
-//     previous boot. The operator's promotion, or the next boot's
-//     rejection, will settle it.
-//   - A document fails to parse. This function quarantines it.
-//   - A document's changes are reboot-class. This function leaves it
-//     staged for the reboot path, because the operator asked for a
-//     reboot. This check also stops a racing restart intent from
-//     applying part of the document.
+//   - No document is staged.
+//   - The staged document was already attempted, by an earlier
+//     restart or boot. The operator promotes it, or the next boot
+//     rejects it.
+//   - The document does not parse. This function rejects it.
+//   - There is no current document to compare it with.
+//   - The document has changes that need a reboot. It stays staged
+//     for the boot path, so a restart intent that arrives beside the
+//     reboot request does not apply part of it.
 func (s *restartState) stagedClusterDocument() (*cluster.Cluster, []byte, string) {
 	store := machine.ClusterManifests(s.root)
 	raw, err := store.LoadStaged()
@@ -203,17 +188,16 @@ func (s *restartState) stagedClusterDocument() (*cluster.Cluster, []byte, string
 		return nil, nil, ""
 	}
 	if !cluster.RestartApplies(s.clusterDoc.Spec, staged.Spec) {
-		fmt.Println("liken: restart: the staged cluster document needs a reboot; leaving it for one")
+		fmt.Println("liken: restart: the staged cluster document needs a reboot to apply, so it stays staged")
 		return nil, nil, ""
 	}
 	return staged, raw, hash
 }
 
-// stagedCredentials loads and checks the staged credentials document.
-// It returns nil when nothing is staged. Credentials promote at
-// actuation, so a staged file always means unapplied work. If a
-// document fails to parse, this function quarantines it, the same as
-// at boot.
+// stagedCredentials loads the staged credentials document. It returns
+// nil when none is staged, and it rejects a document that does not
+// parse, as the boot path does. Applying credentials promotes them, so
+// a staged document has never been applied.
 func (s *restartState) stagedCredentials() (*machine.RegistryCredentials, []byte) {
 	store := machine.RegistryCredentialsStore(s.root)
 	raw, err := store.LoadStaged()
@@ -229,27 +213,20 @@ func (s *restartState) stagedCredentials() (*machine.RegistryCredentials, []byte
 	return creds, raw
 }
 
-// retractFeatureManifests removes the seeded manifests of features
-// that the new document no longer declares, so that nothing seeds
-// them again. Removing a manifest is not a deletion. k3s's deploy
-// controller walks the files that are there and applies them, and
-// nothing reconciles an addon against a source file that has gone,
-// so the addon and every object it created stay in the cluster. The
-// cluster operator's janitor is what deletes a retracted feature's
-// workloads, on this path and on the boot path alike
+// retractFeatureManifests deletes, from k3s's auto-deploy directory,
+// the manifest files of each feature that old enables and new does
+// not. Deleting a file does not delete what k3s deployed from it,
+// because k3s's deploy controller applies the files that exist and
+// does not reconcile an Addon whose file is gone. The cluster
+// operator's janitor deletes a retracted feature's workloads
 // (cluster-operator/janitor.go).
 //
-// A janitor-teardown feature's files are queued rather than removed,
-// and removeOfflineRetractions removes them once k3s has stopped.
-// Given the paragraph above, that ordering guards against nothing
-// k3s does: no pass acts on a removed file whether k3s is up or
-// down. The queue stays because it costs one list, and the failure
-// it rules out reaches the whole fleet. If a deletion did cascade
-// from the sync objects while the flux controllers still ran, the
-// engine's own deletion finalizer would prune everything the
-// repository ever applied, the fleet's own documents included. The
-// janitor tears flux down in an order that stops the controllers
-// first, and the queue keeps the file removal outside that order.
+// For a TeardownJanitor feature, the files are queued instead, and
+// removeQueuedRetractions deletes them after k3s stops. This is a
+// precaution for flux. If k3s ever deleted flux's sync objects while
+// the flux controllers ran, flux's finalizer would prune everything
+// the repository applied, the fleet's own documents included. The
+// janitor stops the controllers before it deletes flux's objects.
 func (s *restartState) retractFeatureManifests(old, new *cluster.Cluster) {
 	declared := map[string]bool{}
 	for _, slug := range new.EnabledFeatures() {
@@ -272,28 +249,26 @@ func (s *restartState) retractFeatureManifests(old, new *cluster.Cluster) {
 		def := cluster.FeatureBySlug(slug)
 		if def != nil && def.Teardown == cluster.TeardownJanitor {
 			for _, file := range files {
-				s.offlineRetractions = append(s.offlineRetractions, filepath.Join(k3sManifestsDir, file))
+				s.queuedRetractions = append(s.queuedRetractions, filepath.Join(k3sManifestsDir, file))
 			}
 			continue
 		}
 		for _, file := range files {
 			if err := os.Remove(filepath.Join(k3sManifestsDir, file)); err == nil {
-				fmt.Printf("liken: restart: retracted %s; the janitor deletes its workload\n", file)
+				fmt.Printf("liken: restart: removed %s, and the janitor deletes its workload\n", file)
 			}
 		}
 	}
 }
 
-// removeOfflineRetractions removes the files that
-// retractFeatureManifests queued, in the window where k3s is down.
-// The supervisor calls it right after each restart's stop. The files
-// go while k3s is stopped, so no addon pass runs against the
-// removal; the cluster operator's janitor owns that teardown.
-func (s *restartState) removeOfflineRetractions() {
-	for _, path := range s.offlineRetractions {
+// removeQueuedRetractions deletes the files that
+// retractFeatureManifests queued. The supervisor calls it after it
+// stops k3s for a restart and before it starts k3s again.
+func (s *restartState) removeQueuedRetractions() {
+	for _, path := range s.queuedRetractions {
 		if err := os.Remove(path); err == nil {
-			fmt.Printf("liken: restart: retracted %s while k3s is down; the janitor tears its objects down\n", filepath.Base(path))
+			fmt.Printf("liken: restart: removed %s while k3s is stopped, and the janitor deletes its objects\n", filepath.Base(path))
 		}
 	}
-	s.offlineRetractions = nil
+	s.queuedRetractions = nil
 }

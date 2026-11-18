@@ -146,7 +146,7 @@ ports, records the devices that appear, and writes a proposed manifest
 to the stick as `hardware-report.yaml`. It prints the full proposal,
 then it holds:
 
-    liken: this report was written to the stick as hardware-report.yaml; press Enter to reboot.
+    liken: wrote this report to the stick as hardware-report.yaml. Press Enter to reboot.
 
 The report loads storage drivers and network drivers only. A machine
 needs these two types of driver to install itself and to join a
@@ -208,7 +208,7 @@ Select `install as <name>` for the machine in front of you. The machine
 partitions its blank disks, copies the operating system onto them,
 registers itself with its firmware, then it waits:
 
-    liken: installed to slot A; remove the stick, then press Enter to power off; the next power-on boots from the disk.
+    liken: installed to slot A. Remove the stick, then press Enter to power off. The next power-on boots from the disk.
 
 Remove the stick before you press Enter. The stick is first in the boot
 order. If you power on the machine with the stick connected, the menu

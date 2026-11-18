@@ -10,25 +10,16 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// The property that matters is not what init holds. It is what a child
-// inherits, because init starts k3s and k3s starts everything else.
+// These tests read the limits of a child process, not of the test
+// process, because the two can differ. At startup the Go runtime
+// raises its own soft RLIMIT_NOFILE to one below the hard limit and
+// saves the original value, and os/exec gives every child that
+// original. syscall.Setrlimit clears the saved value, so the child
+// gets the new limit, but a call that bypasses it leaves the child
+// with the original.
 //
-// The two can differ. Go's runtime raises its own soft RLIMIT_NOFILE
-// to just under the hard limit at startup and remembers the original,
-// and os/exec restores that original in every child it starts, so that
-// a program using select(2) is not handed a descriptor it cannot
-// represent. A limit applied through the wrong call leaves that memory
-// in place: /proc/1/limits would show the raised ceiling while every
-// process below init kept the old one. These tests are what stands
-// between liken and that failure, so they read a child's limits and
-// never init's own.
-//
-// The child must not be a Go program. A Go child runs the same startup
-// adjustment and reports its own raised soft limit rather than the one
-// it inherited, which is the same reason an untuned liken machine
-// reads 4095 instead of 1024. So the child here is cat, reading
-// /proc/self/limits, which is also the file an operator reads to
-// confirm this on a real machine.
+// The child is cat, because a Go child would raise its own soft limit
+// at startup and report that.
 
 // childLimits runs cat on /proc/self/limits and returns the soft and
 // hard values the child inherited for one row of that table.
@@ -48,39 +39,37 @@ func childLimits(t *testing.T, row string) (soft, hard string) {
 		}
 		fields := strings.Fields(strings.TrimPrefix(line, row))
 		if len(fields) < 2 {
-			t.Fatalf("cannot read %q from %q", row, line)
+			t.Fatalf("the %q row of /proc/self/limits is %q, want a soft and a hard value", row, line)
 		}
 		return fields[0], fields[1]
 	}
-	t.Fatalf("no %q row in the child's limits", row)
+	t.Fatalf("/proc/self/limits of a child has no %q row", row)
 	return "", ""
 }
 
-// keepRlimit restores a limit when the test ends, so one test's
-// setting cannot leak into another's. A test may lower a soft limit
-// and raise it again, but an unprivileged process can never raise a
-// hard limit it lowered. So every test here leaves the hard limit
-// where it found it, and this helper's restore is guaranteed to work.
+// keepRlimit restores a limit when the test ends. An unprivileged
+// process cannot raise a hard limit that it lowered, so the tests never
+// lower the hard limit.
 func keepRlimit(t *testing.T, resource string) unix.Rlimit {
 	t.Helper()
 	n, err := machine.RlimitResource(resource)
 	if err != nil {
-		t.Fatalf("resolving %s: %v", resource, err)
+		t.Fatalf("finding the resource of %s: %v", resource, err)
 	}
 	var saved unix.Rlimit
 	if err := unix.Getrlimit(n, &saved); err != nil {
-		t.Fatalf("reading %s: %v", resource, err)
+		t.Fatalf("reading the %s limit: %v", resource, err)
 	}
 	t.Cleanup(func() {
 		if err := unix.Setrlimit(n, &saved); err != nil {
-			t.Errorf("restoring %s: %v", resource, err)
+			t.Errorf("restoring the %s limit: %v", resource, err)
 		}
 	})
 	return saved
 }
 
-// hardNofile returns this test process's hard limit as a string, so a
-// test can set a soft limit against it without ever lowering it.
+// hardNofile returns the test process's nofile limits, and the hard
+// limit written as a spec value.
 func hardNofile(t *testing.T) (unix.Rlimit, string) {
 	t.Helper()
 	saved := keepRlimit(t, "nofile")
@@ -100,16 +89,15 @@ func TestAChildInheritsTheSoftLimitInitApplied(t *testing.T) {
 
 	gotSoft, gotHard := childLimits(t, "Max open files")
 	if gotSoft != "256" {
-		t.Errorf("a child inherited a soft nofile of %s, want 256; "+
-			"the limit did not survive exec, so k3s would not have received it", gotSoft)
+		t.Errorf("a child inherited a soft nofile of %s, want 256, because k3s must receive the limit through exec", gotSoft)
 	}
 	if gotHard != hard {
 		t.Errorf("a child inherited a hard nofile of %s, want %s", gotHard, hard)
 	}
 }
 
-// The hard limit is the half that failed in the field: ClickHouse
-// raised its own soft limit to the hard limit and still ran out.
+// A program that raises its own soft limit can raise it only to the
+// hard limit, so the hard limit must reach the child too.
 func TestAChildInheritsAHardLimitEqualToItsSoftLimit(t *testing.T) {
 	_, hard := hardNofile(t)
 
@@ -121,8 +109,6 @@ func TestAChildInheritsAHardLimitEqualToItsSoftLimit(t *testing.T) {
 	}
 }
 
-// A misspelled resource must not stop the boot, and it must not stop
-// the entries beside it from applying.
 func TestApplyRlimitsSkipsABadEntryAndKeepsGoing(t *testing.T) {
 	_, hard := hardNofile(t)
 
@@ -133,7 +119,7 @@ func TestApplyRlimitsSkipsABadEntryAndKeepsGoing(t *testing.T) {
 	})
 
 	if gotSoft, _ := childLimits(t, "Max open files"); gotSoft != "256" {
-		t.Errorf("soft nofile = %s, want 256; a bad entry beside it stopped it applying", gotSoft)
+		t.Errorf("soft nofile = %s, want 256, because a bad entry must not stop the other entries", gotSoft)
 	}
 }
 
@@ -144,16 +130,14 @@ func TestReadRlimitsReportsWhatTheKernelHolds(t *testing.T) {
 
 	held := readRlimits(map[string]string{"nofile": "256:" + hard})
 	if want := "256:" + hard; held["nofile"] != want {
-		t.Errorf("readRlimits reported nofile %q, want %q", held["nofile"], want)
+		t.Errorf("readRlimits nofile = %q, want %q", held["nofile"], want)
 	}
 }
 
-// A name that never applied is absent from the report, so the map is
-// the list of limits that hold rather than the list somebody wanted.
 func TestReadRlimitsLeavesOutAnUnknownName(t *testing.T) {
 	held := readRlimits(map[string]string{"nofiles": "1048576"})
 	if _, present := held["nofiles"]; present {
-		t.Errorf("readRlimits reported a name the kernel has no limit for: %v", held)
+		t.Errorf("readRlimits = %v, want no entry for nofiles because it is not a resource", held)
 	}
 }
 
@@ -163,8 +147,8 @@ func TestReadRlimitsReportsNothingForNoLimits(t *testing.T) {
 	}
 }
 
-// The two sets init passes overlap, because a spec overrides an entry
-// in the defaults table. The report names each resource once.
+// The defaults and spec.rlimits overlap when the spec overrides a
+// default, and the result lists each resource once.
 func TestReadRlimitsMergesTheTwoSets(t *testing.T) {
 	keepRlimit(t, "nofile")
 
@@ -173,6 +157,6 @@ func TestReadRlimitsMergesTheTwoSets(t *testing.T) {
 		map[string]string{"nofile": "256:512"},
 	)
 	if len(held) != 2 {
-		t.Errorf("readRlimits reported %d limits, want 2: %v", len(held), held)
+		t.Errorf("readRlimits returned %d limits, want 2: %v", len(held), held)
 	}
 }

@@ -1,8 +1,5 @@
 package main
 
-// The on-board components record: how the image's build-time facts
-// become status.version fields.
-
 import (
 	"fmt"
 	"os"
@@ -16,33 +13,29 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// buildScript is the image build, read from the repository rather than
-// from a built image, so the guard below runs on any checkout.
+// The tests read the image build from the repository, not from a
+// built image, so they run on any checkout.
 const buildScript = "../image/build.sh"
 
-// componentsLoop finds the one line of the image build that lists every
-// component the record names. That list is the authority: a person who
-// vendors a new component adds its name there, and the guard below
-// fails until the fold reports it.
+// componentsLoop matches the line of the image build that lists every
+// component in the record.
 var componentsLoop = regexp.MustCompile(`(?m)^\s*for component in ([^;]+); do$`)
 
-// recordedComponents reads the component names out of the image build.
 func recordedComponents(t *testing.T) []string {
 	t.Helper()
 	raw, err := os.ReadFile(buildScript)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the image build script: %v", err)
 	}
 	match := componentsLoop.FindSubmatch(raw)
 	if match == nil {
-		t.Fatalf("%s no longer holds a `for component in ...` list; the guard below reads that list as the authority on what the record names", buildScript)
+		t.Fatalf("%s has no `for component in ...` line, which the test reads to list the components of the record", buildScript)
 	}
 	return strings.Fields(string(match[1]))
 }
 
-// versionFields reports every string in a VersionStatus, so the guard
-// can ask whether a component's version landed anywhere at all without
-// naming the field it should have landed in.
+// versionFields returns every field of a VersionStatus, so a test can
+// find a version without knowing which field holds it.
 func versionFields(v machine.VersionStatus) []string {
 	value := reflect.ValueOf(v)
 	fields := make([]string, 0, value.NumField())
@@ -53,11 +46,8 @@ func versionFields(v machine.VersionStatus) []string {
 }
 
 func TestEveryRecordedComponentReachesTheVersionStatus(t *testing.T) {
-	// This is the mechanical half of the rule that every vendored
-	// component reports its version in Machine status. It feeds the
-	// fold a record holding every name the image build writes, each
-	// with a version of its own, and then checks that each version
-	// arrived somewhere in the block.
+	// Each component gets a distinct version, so each must appear in
+	// some field.
 	names := recordedComponents(t)
 	var record strings.Builder
 	record.WriteString("components:\n")
@@ -77,37 +67,36 @@ func TestEveryRecordedComponentReachesTheVersionStatus(t *testing.T) {
 		if slices.Contains(arrived, "pin-"+name) {
 			continue
 		}
-		t.Errorf("the image build ships %[1]q in the components record, and no status.version field reports it. "+
+		t.Errorf("the image build writes %[1]q to the components record, and no status.version field reports it. "+
 			"Add a field to machine.VersionStatus, a case for %[1]q to applyComponentFacts, the matching "+
 			"writeFact and readFact lines in machine/factswrite.go and machine/factsread.go, and the property "+
-			"under status.version in machine/manifests/machines-crd.yaml. If the running machine reports %[1]q "+
-			"in its own vocabulary instead, add the name to observedAtRuntime in init/versions.go.", name)
+			"under status.version in machine/manifests/machines-crd.yaml. If init reads the version of %[1]q "+
+			"from the running machine instead, add the name to observedAtRuntime in init/versions.go.", name)
 	}
 }
 
 func TestObservedComponentsAreNamesTheRecordHolds(t *testing.T) {
-	// The skip list must name real components. A stale entry there
-	// would silently exempt nothing, and would hide the next
-	// component that needs a field.
+	// An entry that the build does not write would exempt nothing,
+	// and it would hide the next component of that name that needs a
+	// field.
 	names := recordedComponents(t)
 	for _, name := range observedAtRuntime {
 		if name == "liken" {
 			continue // liken is the machine's own version, not a vendored one
 		}
 		if !slices.Contains(names, name) {
-			t.Errorf("observedAtRuntime names %q, which the image build no longer ships in the components record", name)
+			t.Errorf("observedAtRuntime lists %q, which the image build does not write to the components record, want only names that it writes", name)
 		}
 	}
 }
 
-// componentsFile writes a components record in the same form that
-// image/build.sh stages one. It also points componentsPath at the
-// new file for the test.
+// componentsFile writes a components record and points
+// componentsPath at it.
 func componentsFile(t *testing.T, content string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "components.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the components record: %v", err)
 	}
 	orig := componentsPath
 	componentsPath = path
@@ -158,11 +147,8 @@ components:
 }
 
 func TestComponentFactsNeverOverrideObservedFacts(t *testing.T) {
-	// The record also carries kernel and xtables pins, because the
-	// release document lists every component. But the running
-	// machine reports those itself, in its own vocabulary: uname's
-	// release string and iptables' version-and-variant, not the
-	// vendor pins.
+	// The machine reads the kernel version from uname and the
+	// iptables version from iptables -V, not from the record.
 	componentsFile(t, `
 components:
   - name: kernel
@@ -183,10 +169,10 @@ components:
 	applyComponentFacts(&v)
 
 	if v.Kernel != "7.1.2-070102-generic" || v.Xtables != "v1.8.11 (legacy)" || v.Liken != "2026.07.18-002" {
-		t.Errorf("observed facts were overridden: %+v", v)
+		t.Errorf("version = %+v, want kernel, xtables, and liken unchanged by the record", v)
 	}
 	if v.K3s != "v1.36.2+k3s1" {
-		t.Errorf("k3s = %q", v.K3s)
+		t.Errorf("k3s = %q, want v1.36.2+k3s1", v.K3s)
 	}
 }
 
@@ -204,9 +190,6 @@ func TestComponentFactsTolerateAMissingRecord(t *testing.T) {
 }
 
 func TestComponentFactsIgnoreUnknownComponents(t *testing.T) {
-	// This record comes from a build that names a component
-	// this init does not recognize. The known fields still fill in,
-	// and the unrecognized component is simply not reported.
 	componentsFile(t, `
 components:
   - name: quantum-flux
@@ -219,6 +202,6 @@ components:
 	applyComponentFacts(&v)
 
 	if v.Grub != "2.12-1ubuntu7.3" {
-		t.Errorf("grub = %q", v.Grub)
+		t.Errorf("grub = %q, want 2.12-1ubuntu7.3", v.Grub)
 	}
 }

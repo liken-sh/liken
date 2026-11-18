@@ -1,16 +1,12 @@
 package main
 
-// The bound that status publishes for the clock's offset.
-//
-// Status holds a bound, such as "±5ms", and not the exact offset,
-// because each status write costs a raft round on every leader and
-// the exact offset moves on every poll (machine/clock.go has the
-// bounds and what each one means). A clock whose offset stays near the
-// line between two bounds would still cross it on many polls, so the
-// bound moves with hysteresis. A worse bound publishes at once,
-// because a clock that got worse is the news a person needs. A better
-// bound publishes only after three polls in a row inside it, the same
-// three polls after which a silent source counts as gone.
+// Status publishes a bound on the clock offset, such as "±5ms", and not
+// the exact offset, because the exact offset changes on every poll and
+// each status write is a write to the cluster's etcd, which every
+// leader replicates. The bounds are listed in machine/clock.go. An
+// offset near the edge between two bounds would still flip between
+// them, so a worse bound is published at once and a better one only
+// after boundStreak polls in a row measure it.
 
 import (
 	"strings"
@@ -18,24 +14,23 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// boundStreak is how many polls in a row must measure a better bound
-// before status publishes it.
+// boundStreak matches machine.ClockStaleAfter, which treats a time
+// source that misses three polls as gone.
 const boundStreak = 3
 
-// boundHold counts the polls in a row that measured a better bound
-// than the published one, and the worst bound among them.
-type boundHold struct {
+// betterBoundStreak counts the polls in a row that measured a better
+// bound than the published one, and keeps the worst bound among them.
+type betterBoundStreak struct {
 	better int
 	worst  machine.OffsetBound
 }
 
-// next takes one poll's bound and answers the bound to publish, and
-// whether it differs from the published one. A published bound that
-// does not parse, such as an empty one after a boot step, is replaced
-// by the first poll, because there is no claim to protect. A streak
-// publishes the worst bound it measured, because that is the bound
-// that every poll in it fits inside.
-func (h *boundHold) next(published string, fresh machine.OffsetBound) (string, bool) {
+// next returns the bound to publish after a poll that measured fresh,
+// and whether it differs from published. A published bound that does
+// not parse, such as an empty one, is replaced at once. A finished
+// streak publishes its worst bound, because every poll in it fits
+// inside that bound.
+func (h *betterBoundStreak) next(published string, fresh machine.OffsetBound) (string, bool) {
 	current, ok := machine.ParseOffsetBound(published)
 	switch {
 	case !ok || fresh > current:
@@ -56,16 +51,16 @@ func (h *boundHold) next(published string, fresh machine.OffsetBound) (string, b
 	return h.worst.String(), true
 }
 
-// reset forgets a streak, for a publish that changed the standing
-// another way.
-func (h *boundHold) reset() {
+// reset restarts the streak. The caller calls it after it publishes a
+// new status for another reason.
+func (h *betterBoundStreak) reset() {
 	h.better = 0
 }
 
-// consoleBound spells a bound for a console line. init's console lines
-// go through /dev/kmsg, and the kernel escapes every byte outside
-// printable ASCII when a reader reads it, so "±5ms" would reach the
-// log relay as "\xc2\xb15ms". An empty bound reads "unknown".
+// consoleBound writes a bound in ASCII for a console line, and
+// "unknown" for an empty one. init writes console lines to /dev/kmsg,
+// and the kernel escapes bytes outside printable ASCII when it is read,
+// so "±5ms" would reach the log as "\xc2\xb15ms".
 func consoleBound(bound string) string {
 	if bound == "" {
 		return "unknown"

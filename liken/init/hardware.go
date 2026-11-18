@@ -1,16 +1,14 @@
 package main
 
-// Hardware observation: the boot-time walk and the live watch that
-// keep the unclaimed-device report correct.
+// Init walks the devices at boot, and then watches uevents, to report
+// each device that has no driver.
 //
-// This approach comes from milestone 11: drivers are declared
-// (spec.modules) and never auto-loaded, so a surprise device is an
-// inert, reported fact. The kernel does everything else. A resident
-// driver binds hot-plugged hardware without any userspace help. This
-// leaves exactly one job here: notice undriven devices and report
-// them, to the console and to the facts tree, where the operator
-// lifts them into the Machine's status. One watcher produces both
-// outputs, and the same watcher will one day feed ResourceSlices too.
+// Init loads only the drivers that spec.modules declares. A device
+// whose driver is not declared stays unbound, and init reports it
+// on the console and in the facts tree, where the operator copies it
+// into the Machine's status. The kernel binds a device to a driver
+// that is already loaded, including a device that is plugged in later,
+// so init does not need to bind anything.
 
 import (
 	"context"
@@ -25,32 +23,31 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// The observation's inputs are variables, so tests can point them
-// into fabricated trees. pciIDsPath is where the image stages
-// hwdata's database. When this file is absent, devices show numeric
-// names instead.
+// sysfsRoot and pciIDsPath are variables so that tests can point them
+// at a fake tree. Without the hwdata PCI ID database at pciIDsPath, a
+// device shows its numeric IDs and no name.
 var (
 	sysfsRoot  = "/sys"
 	pciIDsPath = "/usr/share/hwdata/pci.ids"
 )
 
-// loadHardwareCatalog loads the lookup tables once per boot. A nil
-// catalog (an image without the full alias table) disables the
-// report rather than the boot. The machine still runs; it just
-// cannot name the devices that it is not driving.
+// loadHardwareCatalog loads the module alias table and the PCI ID
+// database once per boot. When the load fails, it returns nil. The
+// machine still boots, but it does not report unclaimed devices.
 func loadHardwareCatalog() *hardware.Catalog {
 	moduleDir := filepath.Join("/lib/modules", kernelRelease())
 	catalog, err := hardware.LoadCatalog(moduleDir, pciIDsPath)
 	if err != nil {
-		fmt.Printf("liken: hardware: no unclaimed-device reporting: %v\n", err)
+		fmt.Printf("liken: hardware: unclaimed devices will not be reported: loading the hardware catalog: %v\n", err)
 		return nil
 	}
 	return catalog
 }
 
-// discoverUnclaimed is the boot-time walk, nil-safe for images with
-// no catalog. The declared serio entries decide whether a serial-line
-// adapter still needs one (hardware/unclaimedserio.go).
+// discoverUnclaimed walks sysfs once and returns the devices that no
+// driver is bound to. It returns nil when catalog is nil. A serial-line
+// adapter counts as unclaimed until a spec.serio entry declares it
+// (hardware/unclaimedserio.go).
 func discoverUnclaimed(catalog *hardware.Catalog) []machine.UnclaimedDevice {
 	if catalog == nil {
 		return nil
@@ -58,29 +55,18 @@ func discoverUnclaimed(catalog *hardware.Catalog) []machine.UnclaimedDevice {
 	return catalog.Discover(sysfsRoot, serioAttachments.declaredEntries())
 }
 
-// watchHardware is the machine-plane component that keeps the report
-// current. It waits on the kernel's uevent socket, and when the
-// hardware changes, it re-walks sysfs, reports the difference to the
-// console, and republishes the facts. The uevent only signals that
-// something changed; the walk re-reads the whole truth, so a missed
-// or coalesced event costs nothing. The watch owns
-// hardware/blockDevices/ and hardware/unclaimed/, so it is the only
-// writer of those subtrees.
+// watchHardware returns the machine-plane component that keeps the
+// unclaimed-device list and the disk list current. After each uevent
+// it walks sysfs again, prints each change to the console, and writes
+// both lists to the facts tree when either one changed. The walk reads
+// the whole state, so a missed or merged uevent loses nothing. After
+// the boot, this watch is the only writer of hardware/blockDevices/
+// and hardware/unclaimed/.
 //
-// lastDisks is the boot's own disk snapshot, passed in rather than
-// read back. The disk inventory has the same failure mode the watch
-// exists to prevent: a boot-time snapshot goes stale the moment
-// hardware moves. This inventory can even race the boot. A disk behind
-// a just-loaded driver (a USB stick binding at boot) can finish its
-// SCSI probe after the facts were first published, and the probe's own
-// uevents bring the inventory current moments later. The baseline is
-// the boot's snapshot, so a disk that appeared between the boot's walk
-// and this watch's start still reads as a change worth publishing.
+// last and lastDisks are the lists that the boot published. The first
+// walk compares with them, so it publishes a disk whose SCSI probe
+// finished after the boot read the disks. catalog must not be nil.
 func watchHardware(catalog *hardware.Catalog, tree machine.FactsTree, last []machine.UnclaimedDevice, lastDisks []machine.BlockDevice) func(ctx context.Context) error {
-	// walk reads sysfs and publishes what changed since the last walk.
-	// The listener opens first and the walk runs right after, so a
-	// change made before the listener opened, including one made while
-	// a stopped listener was being replaced, still reaches the facts.
 	walk := func() {
 		devices := hardware.DiscoverDevices(sysfsRoot, catalog.PCI)
 		unclaimed := catalog.Unclaimed(devices, serioAttachments.declaredEntries())
@@ -95,6 +81,9 @@ func watchHardware(catalog *hardware.Catalog, tree machine.FactsTree, last []mac
 		last, lastDisks = unclaimed, disks
 	}
 	return func(ctx context.Context) error {
+		// Open the listener before the first walk, so a device that
+		// changes during the walk still sends a uevent that the loop
+		// receives.
 		uevents, err := listenForUevents(ctx)
 		if err != nil {
 			return err
@@ -109,30 +98,26 @@ func watchHardware(catalog *hardware.Catalog, tree machine.FactsTree, last []mac
 					return errUeventsStopped
 				}
 			}
-			// One plugged-in device produces a burst of uevents (the lab
-			// measured eleven for one USB stick). This code waits for
-			// the burst to finish rather than walking once per event.
+			// Plugging in one device sends a burst of uevents. Wait for
+			// the burst to settle, so that one device causes one walk.
 			hardware.Settle(ctx, uevents, time.Second, 5*time.Second)
 		}
 	}
 }
 
-// listenForUevents opens the kernel's uevent socket. It is a package
-// variable so a test can hand a component a listener that has stopped,
-// or one whose wakes the test sends, because a test cannot make the
-// kernel stop the real socket or send it a uevent.
+// listenForUevents is a variable so that a test can supply a listener
+// that it stops or wakes.
 var listenForUevents = hardware.ListenForUevents
 
-// errUeventsStopped ends a component whose uevent listener stopped.
-// The machine plane starts the component again, which opens a new
-// listener and walks sysfs again before it waits, so a change made
-// while nothing listened is still reported.
+// errUeventsStopped is what a component returns when its uevent
+// listener stops. The machine plane starts the component again, and
+// the new run walks once before it waits, so it reports a change made
+// while no listener was open.
 var errUeventsStopped = errors.New("the uevent listener stopped")
 
-// hardwareTransitions describes what changed between two walks, in
-// the same style as the rest of the boot's console report. An entry
-// that appeared is a new gap. An entry that left either got its
-// driver (this reports which driver) or was unplugged.
+// hardwareTransitions returns one console line for each device that
+// entered or left the unclaimed list between two walks. A device that
+// left either got a driver, which the line names, or was unplugged.
 func hardwareTransitions(before, after []machine.UnclaimedDevice, devices []hardware.Device) []string {
 	base := moduleBase()
 	var lines []string
@@ -151,9 +136,9 @@ func hardwareTransitions(before, after []machine.UnclaimedDevice, devices []hard
 				driver = d.Driver
 			}
 		}
-		// An entry with no candidates is a serial-line adapter that
-		// already had its driver. It leaves the list when a
-		// spec.serio entry declares it, not when a driver binds.
+		// An unclaimed serial-line adapter is already bound to its
+		// driver and has no candidate drivers. So when such an entry
+		// leaves the list, a spec.serio entry declared it.
 		if driver != "" && len(u.Candidates) == 0 {
 			lines = append(lines, fmt.Sprintf("liken: hardware: %s is now declared in spec.serio", nameOrModalias(u)))
 		} else if driver != "" {
@@ -165,8 +150,6 @@ func hardwareTransitions(before, after []machine.UnclaimedDevice, devices []hard
 	return lines
 }
 
-// describeUnclaimed renders one entry for a console line: bus and
-// class when known, then the best name available.
 func describeUnclaimed(u machine.UnclaimedDevice) string {
 	description := u.Bus
 	if u.Class != "" {
@@ -175,9 +158,9 @@ func describeUnclaimed(u machine.UnclaimedDevice) string {
 	return description + " device " + nameOrModalias(u)
 }
 
-// softdepBase points the soft-dependency reader at a module tree.
-// Empty means the running kernel's own tree; tests set it to a
-// fixture so their advice does not depend on the host's modules.
+// softdepBase is the module tree that unclaimedAdvice reads soft
+// dependencies from. When it is empty, the tree of the running kernel
+// is used. Tests set it to a fixture tree.
 var softdepBase = ""
 
 func moduleBase() string {
@@ -187,21 +170,14 @@ func moduleBase() string {
 	return filepath.Join("/lib/modules", kernelRelease())
 }
 
-// unclaimedAdvice states the fix for one unclaimed device, and
-// improves the stock advice with the soft dependencies the loader does
-// not read. The catalog already named the candidate drivers and said
-// to declare them in spec.modules. A candidate can name another
-// module to load before it (r8169 names realtek), which modules.dep
-// never records, so the plain advice would send a person to declare a
-// driver that then binds to the wrong thing. This walks each
-// candidate's soft dependency chain and names the full ordered list,
-// so the advice reads "declare realtek, then r8169 in spec.modules".
-//
-// When no candidate gains a soft dependency, the catalog's own message
-// stands unchanged. That keeps the wording for the case the catalog
-// alone already handles, including the composed image that carries no
-// candidate at all, where the fix is a different image and there is
-// nothing to expand.
+// unclaimedAdvice returns the console advice for one unclaimed device.
+// A candidate driver can have a soft dependency, a module that must
+// load before it, such as realtek before r8169. modules.dep does not
+// record soft dependencies, so a person who declares only r8169 gets a
+// driver that does not work. So the advice lists each candidate with
+// its soft dependencies in load order: "declare realtek, then r8169 in
+// spec.modules". When no candidate has a soft dependency, including a
+// device with no candidates, it returns the catalog's message.
 func unclaimedAdvice(base string, u machine.UnclaimedDevice) string {
 	expanded := false
 	choices := make([]string, 0, len(u.Candidates))
@@ -233,10 +209,8 @@ func unclaimedEqual(a, b machine.UnclaimedDevice) bool {
 		slices.Equal(a.Candidates, b.Candidates)
 }
 
-// blockDeviceEqual compares two disk inventory entries field for
-// field. StableNames is a slice, so BlockDevice cannot use slices.Equal
-// directly; this function is its stand-in, the same role
-// unclaimedEqual plays for UnclaimedDevice above.
+// blockDeviceEqual compares every field of two disks. BlockDevice has
+// a slice field, so == does not compile for it.
 func blockDeviceEqual(a, b machine.BlockDevice) bool {
 	return a.Name == b.Name && a.SizeBytes == b.SizeBytes &&
 		a.Model == b.Model && a.Serial == b.Serial &&

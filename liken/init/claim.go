@@ -1,48 +1,33 @@
 package main
 
-// Claiming a blank disk.
+// When a declared storage role has no partition yet, init claims a
+// blank disk for it: it writes a GPT and sets each partition's name to
+// the role's PartitionName. Later boots find the partition by that
+// name (storage.go), and grow.go resizes it.
 //
-// Claiming happens once in a disk's life; it is one half of storage
-// reconciliation. storage.go owns the other half, which runs on every
-// boot: recognition and mounting. grow.go owns growth. A machine's
-// first boot finds declared roles with no partitions to recognize.
-// Claiming is how those partitions come to exist: a blank disk gets a
-// GPT, and each role's name is written into its partition entry. That
-// name is the identity every later boot recognizes.
+// Claiming runs on every boot. It is safe for these reasons:
 //
-// Two properties make claiming safe to attempt on every boot:
+//   - init claims only a blank disk (isBlank). A disk with a partition
+//     table or a filesystem can hold someone's data, so planClaim
+//     refuses it with an error.
 //
-//   - Only a blank disk may be claimed. Blank means no partition
-//     table and no filesystem signature at all (isBlank below): a
-//     disk that nothing, including liken, ever wrote to. The code
-//     refuses anything else and states the reason on the console,
-//     because a disk someone else formatted holds someone else's
-//     data.
+//   - init writes nothing until it has planned the table of every disk
+//     in memory. A spec that does not fit fails while every disk is
+//     unchanged, so the boot can still fall back to the proven
+//     manifest after it rejects a staged one.
 //
-//   - Nothing is written until the code has validated every disk's
-//     plan. planClaim lays out a claim entirely in memory first, so a
-//     spec that cannot fit fails before the first byte lands on any
-//     disk. The boot can then fall back to a different spec (the
-//     proven manifest, after it rejects a staged one) against disks
-//     that are exactly as it expects them.
+//   - The partition name is written before any filesystem. When a boot
+//     stops between partitioning and mkfs, the next boot recognizes
+//     the partition and makes its filesystem (needsFilesystem in
+//     storage.go).
 //
-// Claiming can also resume after an interruption. The role's name
-// goes into the partition table first, before any filesystem exists.
-// So a boot that dies between partitioning and mkfs leaves partitions
-// that the next boot recognizes by name and finishes formatting
-// (mountRole's half of the task, in storage.go).
+// A new partition holds whatever bytes the disk held before, and those
+// can include an old filesystem's superblock. So storage.go makes a new
+// filesystem on each partition that the same boot created.
 //
-// A claim reports which roles it created, because a partition created
-// this boot always gets a new filesystem. The bytes under a new
-// partition belong to whatever held the disk before liken claimed it.
-//
-// A role's spec names its disk by the declared device string, not by
-// a device path guaranteed to work here directly: it may hold a
-// stable name under /dev/disk/by-id/ or /dev/disk/by-path/ as well as
-// a kernel name. reconcileStorage resolves the declared string to a
-// disk before it ever reaches planClaim (resolve.go), by identity,
-// through the same sysfs computation the by-id and by-path link trees
-// use, rather than by reading /dev/disk/ itself.
+// A role's device can be a kernel name or a stable name under
+// /dev/disk/by-id/ or /dev/disk/by-path/, and resolve.go finds the disk
+// for either.
 
 import (
 	"fmt"
@@ -54,10 +39,8 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// isBlank reports whether a disk carries nothing recognizable: no MBR
-// or GPT, no ext4 filesystem written straight to the device. Claiming
-// is allowed only when a disk is blank. A disk something else
-// formatted fails one of these checks, and the code leaves it alone.
+// isBlank reports whether the device has no MBR, no GPT, and no ext4
+// filesystem written directly to it.
 func isBlank(devPath string) (bool, error) {
 	f, err := os.Open(devPath)
 	if err != nil {
@@ -65,9 +48,8 @@ func isBlank(devPath string) (bool, error) {
 	}
 	defer f.Close()
 
-	// 2048 bytes covers all three signatures: the MBR's 0x55AA at
-	// byte 510, GPT's "EFI PART" at byte 512, and ext4's magic at
-	// byte 1080.
+	// The MBR's 0x55AA is at byte 510, GPT's "EFI PART" at byte 512,
+	// and ext4's magic at byte 1080.
 	head := make([]byte, 2048)
 	if _, err := f.ReadAt(head, 0); err != nil {
 		return false, err
@@ -83,9 +65,8 @@ func isBlank(devPath string) (bool, error) {
 	return true, nil
 }
 
-// A claimPlan is one blank disk's pending partition table. The code
-// validates and lays it out up front, and writes it only after every
-// disk's plan has succeeded.
+// A claimPlan is the partition table that applyClaim writes to one
+// blank disk.
 type claimPlan struct {
 	device       string
 	totalSectors uint64
@@ -93,44 +74,33 @@ type claimPlan struct {
 	roles        []machine.DeclaredRole
 }
 
-// planAllClaims lays out a claim for every disk that a still-missing
-// role points at. It groups every declared role, found or not, by the
-// disk its device resolves to (its kernel device path, from
-// resolve.go), not by the declared string, because one disk can be
-// declared two ways at once: its kernel name for one role, and its
-// stable name for another. A found role joins this grouping too,
-// because a disk that already carries one declared role's partition
-// is not a blank disk, whichever other role's device also names it;
-// only a group with no found role in it is a candidate to claim.
+// planAllClaims returns a claimPlan for each disk that a missing role
+// declares. It groups the roles by the disk that their device resolves
+// to, because two roles can name one disk by its kernel name and by a
+// stable name. When a disk has both a found role and a missing role,
+// planAllClaims returns an error: liken wrote that disk's table, and
+// something has changed it since.
 //
-// A found role's own device does not have to resolve at all.
-// Recognition finds a role's partition by the name written on it,
-// never by the device the spec declares, so a stale or ambiguous
-// device on an already-satisfied role changes nothing that is about
-// to be written; this function only resolves it on the chance that it
-// names a disk that another, still-missing role also names, one that
-// recognition has not yet found. A still-missing role is different:
-// its device is the only way to find the disk it names, so a device
-// that resolves to no disk, or to two, fails reconciliation at once,
-// before any group forms.
+// A found role's device only has to resolve when it names the same
+// disk as a missing role, because recognition finds the partition by
+// its name. A found role whose device does not resolve is skipped.
+// A missing role's device must resolve to exactly one disk, or
+// planAllClaims returns an error.
 func planAllClaims(roles []machine.DeclaredRole, found map[machine.StorageRoleName]partition) ([]claimPlan, error) {
 	type group struct {
 		disk  *machine.BlockDevice
-		roles []machine.DeclaredRole // the still-missing roles that declare this disk
-		found *machine.DeclaredRole  // set when a found role also declares this disk
+		roles []machine.DeclaredRole // missing roles that declare this disk
+		found *machine.DeclaredRole  // a found role that declares this disk
 	}
 	groups := map[string]*group{}
 	var order []string
 
 	for _, role := range roles {
 		_, isFound := found[role.Name]
-		// A found role's disk resolves without waiting: its partition
-		// is already recognized, nothing here is about to write to
-		// it, and a stale device hint on it must not cost the boot
-		// the whole deadline. A still-missing role names the disk the
-		// claim is about to format, and an install boot reaches this
-		// moments after the boot archive loads its controller
-		// drivers, so that one waits for the disk to attach.
+		// Only a missing role waits for its disk to attach, because on
+		// an install boot the controller drivers have just loaded. A
+		// found role with a stale device would otherwise make every
+		// boot wait for the whole attach deadline.
 		disk, err := resolveDeclaredDisk(role.Device)
 		if !isFound && err == nil && disk == nil {
 			disk, err = awaitDeclaredDisk(role.Device,
@@ -167,14 +137,10 @@ func planAllClaims(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 	for _, key := range order {
 		g := groups[key]
 		if len(g.roles) == 0 {
-			continue // every role naming this disk is already recognized
+			continue
 		}
-		// A disk where the code recognizes one role but others still
-		// need claiming is a disk whose table liken wrote, and
-		// something later changed. It is not blank, so the code
-		// cannot claim it, and it is not safe to repair automatically.
 		if g.found != nil {
-			return nil, fmt.Errorf("disk %s already carries %s but is missing other declared roles; refusing to modify it",
+			return nil, fmt.Errorf("disk %s already has the partition %s but not the other roles declared on it, so init does not change the disk",
 				key, g.found.PartitionName())
 		}
 		if err := oneSizelessRole(key, g.roles); err != nil {
@@ -189,16 +155,11 @@ func planAllClaims(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 	return claims, nil
 }
 
-// oneSizelessRole enforces, within one disk's group of still-missing
-// roles, the rule Validate already enforces on the literal spelling:
-// only one role may take the rest of a disk. Validate cannot see this
-// same violation when two roles spell one disk two different ways,
-// because it groups by the declared string, and each spelling looks
-// like a different disk to that check. This check runs against the
-// resolved group instead, so a disk declared two ways still gets only
-// one remainder. Without it, planPartitions would silently keep only
-// the last sizeless role it saw and drop the other from the table
-// entirely, and a disk would be claimed for a spec it cannot satisfy.
+// oneSizelessRole returns an error when two roles on one disk both
+// omit their size. StorageSpec.Validate makes the same check by the
+// declared device string, so it misses two names for one disk.
+// Without this check, planPartitions would give the rest of the disk
+// to the last sizeless role and leave the other out of the table.
 func oneSizelessRole(disk string, roles []machine.DeclaredRole) error {
 	var remainder *machine.DeclaredRole
 	for _, role := range roles {
@@ -206,7 +167,7 @@ func oneSizelessRole(disk string, roles []machine.DeclaredRole) error {
 			continue
 		}
 		if remainder != nil {
-			return fmt.Errorf("storage roles %s and %s both omit their size on %s; only one role per disk may omit its size",
+			return fmt.Errorf("storage roles %s and %s both omit their size on %s, and only one role on a disk may omit its size",
 				remainder.Name, role.Name, disk)
 		}
 		remainder = &role
@@ -214,16 +175,11 @@ func oneSizelessRole(disk string, roles []machine.DeclaredRole) error {
 	return nil
 }
 
-// planClaim validates that a resolved, blank disk may be claimed for
-// the still-missing roles that name it, and lays out its table.
-// planAllClaims is the only caller: it has already resolved the
-// declared device string to the disk it names, checked that no other
-// declared role already carries a recognized partition on this disk,
-// and confirmed that at most one of these roles is sizeless. Sized
-// roles come first, at their exact sizes, in canonical order. The
-// remainder role, if any, takes whatever space is left. planClaim
-// writes nothing.
-func planClaim(declared string, disk *machine.BlockDevice, mine []machine.DeclaredRole) (claimPlan, error) {
+// planClaim checks that the disk is blank and returns the table for
+// the roles. It writes nothing. The caller must already have checked
+// that no found role is on the disk and that at most one role omits
+// its size.
+func planClaim(declared string, disk *machine.BlockDevice, roles []machine.DeclaredRole) (claimPlan, error) {
 	if disk == nil {
 		return claimPlan{}, fmt.Errorf("declared device %s is not attached", declared)
 	}
@@ -233,18 +189,18 @@ func planClaim(declared string, disk *machine.BlockDevice, mine []machine.Declar
 		return claimPlan{}, fmt.Errorf("examining %s: %w", device, err)
 	}
 	if !blank {
-		return claimPlan{}, fmt.Errorf("%s carries a partition table or filesystem liken doesn't recognize; refusing to touch it (wipe it yourself if it's expendable)", device)
+		return claimPlan{}, fmt.Errorf("%s has a partition table or filesystem that liken does not recognize, so init does not change it. If its data is not needed, erase the disk yourself", device)
 	}
 
 	totalSectors := disk.SizeBytes / disks.SectorSize
-	parts, err := planPartitions(device, mine, totalSectors)
+	parts, err := planPartitions(device, roles, totalSectors)
 	if err != nil {
 		return claimPlan{}, err
 	}
-	return claimPlan{device: device, totalSectors: totalSectors, parts: parts, roles: mine}, nil
+	return claimPlan{device: device, totalSectors: totalSectors, parts: parts, roles: roles}, nil
 }
 
-// applyClaim writes one planned table and waits for the kernel to
+// applyClaim writes the plan's table and waits for the kernel to
 // show its partitions.
 func applyClaim(plan claimPlan) error {
 	fmt.Printf("liken: storage: claiming %s (%s) for %d role(s)\n",
@@ -255,17 +211,16 @@ func applyClaim(plan claimPlan) error {
 	return waitForPartitions(plan.parts)
 }
 
-// planPartitions lays out a claimed disk's table. Sized roles pack
-// from the front, in canonical order, and each partition start
-// aligns to 1MiB. The single, validated, sizeless role takes the
-// rest of the disk. The device name appears only in error messages;
-// the layout math works purely in sectors.
-func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uint64) ([]disks.Partition, error) {
+// planPartitions lays out the table. The roles with a size go first,
+// in the order of roles, each one starting on a 1 MiB boundary. The
+// role with no size takes the rest of the disk. device is used only
+// in error messages.
+func planPartitions(device string, roles []machine.DeclaredRole, totalSectors uint64) ([]disks.Partition, error) {
 	lastUsable := disks.LastUsableLBA(totalSectors)
 	var parts []disks.Partition
 	next := uint64(disks.PartitionAlignment)
 	var remainder *machine.DeclaredRole
-	for _, role := range mine {
+	for _, role := range roles {
 		if role.Size == "" {
 			remainder = &role
 			continue
@@ -275,7 +230,7 @@ func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uin
 		p := disks.Partition{Name: role.PartitionName(), FirstLBA: next, LastLBA: next + sectors - 1,
 			TypeGUID: partitionTypeFor(role.Name)}
 		if p.LastLBA > lastUsable {
-			return nil, fmt.Errorf("disk %s is too small: %s requires %s at sector %d but the disk's usable space ends at %d",
+			return nil, fmt.Errorf("disk %s is too small: %s needs %s starting at sector %d, and the usable space of the disk ends at sector %d",
 				device, role.Name, role.Size, p.FirstLBA, lastUsable)
 		}
 		parts = append(parts, p)
@@ -291,21 +246,15 @@ func planPartitions(device string, mine []machine.DeclaredRole, totalSectors uin
 	return parts, nil
 }
 
-// partitionPatience bounds the wait for a new table's partitions to
-// appear at their planned sizes, after a claim or a growth writes the
-// table.
-const partitionPatience = 5 * time.Second
+const partitionWaitTimeout = 5 * time.Second
 
-// waitForPartitions gives the kernel a moment to show the devices for
-// a table just written. BLKRRPART works synchronously, but the
-// devtmpfs nodes and sysfs entries appear slightly later. Each
-// partition must appear at its planned size. This lets the same wait
-// serve growth as well as claiming: a partition still showing its old
-// geometry is as wrong as one that has not appeared. If the deadline
-// passes, the error names each partition that did not appear as
-// expected.
+// waitForPartitions waits up to partitionWaitTimeout until sysfs shows
+// each partition in parts with its planned size, because the entries
+// can appear after the BLKRRPART ioctl that rereads the table returns.
+// The size check lets grow.go use the same wait, because a
+// grown partition keeps its name.
 func waitForPartitions(parts []disks.Partition) error {
-	deadline := time.Now().Add(partitionPatience)
+	deadline := time.Now().Add(partitionWaitTimeout)
 	for {
 		visible := map[string]uint64{}
 		for _, p := range discoverPartitions() {
@@ -326,8 +275,8 @@ func waitForPartitions(parts []disks.Partition) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("partitions never appeared after their table was written: %s",
-				strings.Join(missing, ", "))
+			return fmt.Errorf("after %s, sysfs does not show the planned partitions that the table has: %s",
+				partitionWaitTimeout, strings.Join(missing, ", "))
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

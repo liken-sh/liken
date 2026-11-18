@@ -1,41 +1,33 @@
 package main
 
-// init's own log lines go to /dev/kmsg, the kernel's log buffer,
-// instead of straight to the serial console. The kernel echoes every
-// buffered record to the console anyway, with its printk timestamps
-// added, which the raw writes never had. So the console reads as it
-// always did. What changes is that init's lines now also exist
-// somewhere else too: as structured records in the ring buffer,
-// interleaved with the kernel's own records in true order, where the
-// liken-logs relay can read them into the cluster. Records written
-// through /dev/kmsg carry syslog facility 1, where the kernel's
-// records carry facility 0. So the two streams separate by a field,
-// instead of by guessing from prefixes.
+// init writes its log lines to /dev/kmsg, the kernel's log buffer,
+// and not straight to the serial console. The kernel echoes each record
+// to the console with a printk timestamp, so the console still shows
+// every line. The records are also in the ring buffer, in order with
+// the kernel's own, where the liken-logs relay reads them into the
+// cluster. A record written through /dev/kmsg has syslog facility 1 and
+// a kernel record has facility 0, so the relay tells them apart by that
+// field and not by the text of the line.
 //
-// The mechanism reassigns the os.Stdout and os.Stderr package
-// variables, which every fmt.Printf in this program reads at each
-// call. This gives one change point, with no call sites touched. The
-// variables point at the write ends of two pipes, and a goroutine
-// per pipe carries complete lines into /dev/kmsg. The underlying
-// file descriptors 1 and 2 are deliberately left alone, still aimed
-// at the console the kernel opened for init: the Go runtime writes
-// panic reports to fd 2 directly, and a panic in PID 1 must reach
-// the console even when everything built here has stopped working.
+// The redirect replaces os.Stdout and os.Stderr, which fmt.Printf reads
+// on each call, so no call site changes. They become the write ends of
+// two pipes, and one goroutine for each pipe copies complete lines into
+// /dev/kmsg. File descriptors 1 and 2 stay on the console that the
+// kernel opened for init, because the Go runtime writes a panic report
+// to fd 2 directly, and a panic in PID 1 must reach the console even
+// when the redirect has failed.
 //
-// The pipes create this program's sharpest remaining risk. If a
-// drainer goroutine ever died, its pipe would fill, and the next
-// fmt.Printf would block forever, blocking PID 1. That is why the
-// drainers are not machine-plane components: a component restart
-// waits out a backoff, and the plane logs failures to os.Stderr,
-// which would deadlock into the dead drainer's own pipe. For the
-// same reason, each drainer's loop does nothing but split lines and
-// write them, and any failure inside falls back to writing the
-// console directly, rather than returning.
+// If a drain goroutine stopped, its pipe would fill and the next
+// fmt.Printf would block PID 1 forever. So the drain goroutines are not
+// machine-plane components. The plane waits out a backoff before it
+// restarts a component, and it logs the failure to os.Stderr, which
+// would block on the stopped goroutine's own pipe. Each drain loop only
+// splits lines and writes them, and when a write fails it writes the
+// line to the console directly and continues.
 //
-// A few lines per exec print before /dev exists and cannot go to
-// kmsg: the hello line, the PID-1 refusal, and switch_root's
-// messages. These lines stay console-only and are not shipped
-// anywhere else, because there is nowhere else for them to go yet.
+// Some lines print before /dev is mounted, so they go to the console
+// only: the hello line, the PID-1 refusal, and the output of
+// switch_root.
 
 import (
 	"bytes"
@@ -47,84 +39,72 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// console is the raw serial console: file descriptor 1, exactly as
-// the kernel opened it, captured before any reassignment. Output
-// from child processes, for example k3s and mke2fs, writes here
-// directly, and bypasses kmsg. At the volume k3s produces, the
-// 256KiB ring buffer would fill and discard the kernel's own records
-// within seconds. Also, the code already tails k3s's output into the
-// cluster from its log file, so sending it through kmsg too would
-// ship every line twice.
+// console is file descriptor 1 as the kernel opened it, saved before
+// the redirect replaces os.Stdout. The output of child processes such
+// as k3s and mke2fs goes here and not to /dev/kmsg. k3s writes enough
+// to overwrite the kernel's records in the 256KiB ring buffer within
+// seconds, and init already copies k3s's log file into the cluster.
 var console io.Writer = os.Stdout
 
 const (
-	// Syslog priorities for init's two streams: the userspace
-	// facility shifted past the three severity bits, plus info for
-	// stdout and warning for stderr. The facility and severity
-	// numbers form the wire contract with the log relays, so they
-	// live in the machine package that both binaries import.
+	// Syslog priorities: facility user, with severity info for stdout
+	// and warning for stderr. The log relays filter on these values,
+	// so the machine package defines them for both binaries.
 	kmsgInfo    = machine.FacilityUser<<3 | machine.SeverityInfo
 	kmsgWarning = machine.FacilityUser<<3 | machine.SeverityWarning
 
-	// The kernel rejects /dev/kmsg writes longer than about 1KB
-	// (LOG_LINE_MAX) with EINVAL; it does not truncate them. 800
-	// bytes of payload leaves room for the priority prefix and the
-	// continuation marks around split chunks.
+	// The kernel refuses a /dev/kmsg write longer than about 1KB with
+	// EINVAL and does not truncate it. 800 bytes leaves room for the
+	// priority prefix and the "..." marks of a split line.
 	kmsgPayloadLimit = 800
 )
 
-// The three kernel files the redirect writes. They are variables only
-// so that a test can point the redirect at files it reads back.
+// Tests point these paths at files they can read back.
 var (
 	printkDevkmsgPath = "/proc/sys/kernel/printk_devkmsg"
 	printkPath        = "/proc/sys/kernel/printk"
 	kmsgPath          = "/dev/kmsg"
 )
 
-// redirectToKmsg points init's own output at /dev/kmsg. It runs
-// after mountEssentials, because it needs /proc/sys and /dev/kmsg,
-// and before the first machine-plane component starts, so the
-// package variables are reassigned while main is still the only
-// goroutine that reads them. Any failure stops the whole redirect
-// and leaves the direct console writes in place: a machine that
-// cannot buffer its logs still reports its boot on the console.
+// redirectToKmsg sends init's own output to /dev/kmsg. main calls it
+// after mountEssentials, which mounts /proc and /dev, and before the
+// first machine-plane component starts, so no other goroutine reads
+// os.Stdout or os.Stderr while it replaces them. When a step fails, it
+// returns and leaves the output on the console.
 func redirectToKmsg() {
-	// The kernel rate-limits userspace kmsg writes by default, to a
-	// small burst every few seconds, which would silently discard
-	// most of the boot report. This sysctl turns rate-limiting off
-	// for the whole machine. It must run first, and it is required,
-	// not a tuning option: without it, the redirect would lose lines
-	// that the console used to show.
+	// By default the kernel rate-limits userspace writes to /dev/kmsg
+	// to a small burst every few seconds, which would drop most of the
+	// boot report. "on" turns the limit off for the whole machine.
+	// Without it the redirect would lose lines, so a failure here stops
+	// the redirect.
 	if err := os.WriteFile(printkDevkmsgPath, []byte("on\n"), 0); err != nil {
-		fmt.Printf("liken: logs stay on the console: printk_devkmsg: %v\n", err)
+		fmt.Printf("liken: init output stays on the console: writing printk_devkmsg: %v\n", err)
 		return
 	}
-	// Assert that the console echoes severity-6 records: writing a
-	// single number to this file sets console_loglevel, and 7 means
-	// everything below debug prints. The kernel's default config
-	// already sets 7; this guards against a quiet= setting in a
-	// future config. This is best effort, because the echo is a
-	// convenience while the buffer is the record of truth.
+	// One number written to this file sets console_loglevel. At 7 the
+	// console echoes every record except debug, so it shows init's info
+	// records. A failure does not stop the redirect, because the ring
+	// buffer still receives every record.
 	if err := os.WriteFile(printkPath, []byte("7"), 0); err != nil {
-		fmt.Printf("liken: setting console loglevel: %v\n", err)
+		fmt.Printf("liken: setting the console log level: %v\n", err)
 	}
 
 	kmsg, err := os.OpenFile(kmsgPath, os.O_WRONLY, 0)
 	if err != nil {
-		fmt.Printf("liken: logs stay on the console: /dev/kmsg: %v\n", err)
+		fmt.Printf("liken: init output stays on the console: opening /dev/kmsg: %v\n", err)
 		return
 	}
 
 	outR, outW, err := os.Pipe()
 	if err != nil {
-		fmt.Printf("liken: logs stay on the console: pipe: %v\n", err)
+		fmt.Printf("liken: init output stays on the console: creating a pipe: %v\n", err)
 		return
 	}
 	errR, errW, err := os.Pipe()
 	if err != nil {
 		outR.Close()
 		outW.Close()
-		fmt.Printf("liken: logs stay on the console: pipe: %v\n", err)
+		fmt.Printf("liken: init output stays on the console: creating a pipe: %v\n", err)
 		return
 	}
 
@@ -132,16 +112,13 @@ func redirectToKmsg() {
 	go drainToKmsg(errR, kmsg, kmsgWarning)
 	os.Stdout = outW
 	os.Stderr = errW
-	fmt.Println("liken: init logs via /dev/kmsg from here on (earlier lines were console-only)")
+	fmt.Println("liken: init now writes its output to /dev/kmsg, and earlier lines went only to the console")
 }
 
-// drainToKmsg carries one stream from its pipe into the kernel's
-// buffer, one record per line. The loop must never end while the
-// machine runs; the write end is os.Stdout or os.Stderr, and the
-// code never closes it. The loop must never let a failure stop it
-// either. emitKmsgLine absorbs everything, so the only exit is a
-// read error, and a read error can only mean the process is dying
-// anyway.
+// drainToKmsg copies one pipe into the kernel log, one record per
+// line. It returns only on a read error. Nothing closes the write end,
+// which is os.Stdout or os.Stderr, and emitKmsgLine handles every
+// write failure, so the loop runs as long as init does.
 func drainToKmsg(r io.Reader, kmsg io.Writer, priority int) {
 	var buf bytes.Buffer
 	chunk := make([]byte, 4096)
@@ -152,8 +129,8 @@ func drainToKmsg(r io.Reader, kmsg io.Writer, priority int) {
 			for {
 				line, rerr := buf.ReadBytes('\n')
 				if rerr != nil {
-					// No newline yet. Put the fragment back and
-					// wait for the rest.
+					// Keep a line with no newline until the rest
+					// arrives.
 					buf.Write(line)
 					break
 				}
@@ -166,10 +143,9 @@ func drainToKmsg(r io.Reader, kmsg io.Writer, priority int) {
 	}
 }
 
-// emitKmsgLine writes one line as one or more kmsg records, and
-// cannot fail. A write error, or anything worse, sends the line to
-// the raw console instead, because losing a log line is acceptable
-// only after both destinations have refused it.
+// emitKmsgLine writes one line as one or more kmsg records. When a
+// write returns an error or panics, it writes the line to the console
+// instead.
 func emitKmsgLine(kmsg io.Writer, priority int, line []byte) {
 	defer func() {
 		if recover() != nil {
@@ -183,13 +159,11 @@ func emitKmsgLine(kmsg io.Writer, priority int, line []byte) {
 	}
 }
 
-// splitKmsgLine cuts a line into pieces the kernel will accept as
-// records, and marks the cuts. A piece that continues gets a
-// trailing " ...", and a piece that continues another piece gets a
-// leading "... ". This lets a reader of any one record tell that it
-// is looking at a fragment. Most lines fit in one untouched piece;
-// the lines that do not fit are things like the kernel command line
-// echo in the world report.
+// splitKmsgLine cuts a line into pieces of at most limit bytes, plus
+// a trailing " ..." on each piece that has more after it and a leading
+// "... " on each piece after the first. The marks show a reader of one
+// record that it is part of a longer line, such as the kernel command
+// line in the boot report.
 func splitKmsgLine(line []byte, limit int) [][]byte {
 	if len(line) <= limit {
 		return [][]byte{line}
@@ -210,14 +184,11 @@ func splitKmsgLine(line []byte, limit int) [][]byte {
 	return parts
 }
 
-// syncLogs pauses long enough for the drainers to move the last
-// lines out of the pipes and into the kernel's buffer. The shutdown
-// paths call it just before rebooting or powering off, so the final
-// lines, usually the explanation of why the machine is going down,
-// reach the kernel's buffer instead of being lost in a pipe. The
-// pipes drain in microseconds, so 50ms is a generous bound. When the
-// redirect never happened, the pause costs nothing that matters next
-// to a reboot.
+// syncLogs gives the drain goroutines time to copy the last lines into
+// the kernel log. The shutdown paths call it just before a reboot or
+// power-off, so the last lines, which usually give the reason for the
+// shutdown, are not lost in a pipe. A pipe drains in microseconds, so
+// 50ms is enough.
 func syncLogs() {
 	time.Sleep(50 * time.Millisecond)
 }

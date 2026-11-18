@@ -1,37 +1,17 @@
 package main
 
-// Stable identity names for local disks, computed from firmware
-// values rather than kernel-assigned letters.
+// This file builds the same /dev/disk/by-id names that udev would,
+// from the sysfs files udev reads, because liken does not run udev
+// (disklinks.go). The names come from the WWN, model, and serial in
+// the drive's firmware. An image write or a whole-disk clone does not
+// change them, so a Machine spec can name a disk by them. A kernel
+// name such as sda depends on probe order, and an image write replaces
+// a filesystem label.
 //
-// A WWN (a world-unique ID number), a model string, and a serial
-// number are values a disk's own controller reports over the wire.
-// They live in the drive's firmware, not on its platters or its
-// flash, so an image written onto a disk, or a whole disk cloned onto
-// another, carries none of them: the copy still answers with its own
-// controller's identity. That is what makes these values fit for
-// naming a disk in a Machine spec. A kernel letter names a slot in
-// probe order, which depends on which disk answered first, and a
-// filesystem label is data on the disk, which an image write
-// replaces.
-//
-// disklinks.go states why liken reads these values itself instead of
-// running udev: everything udev publishes comes from files sysfs
-// already exposes, so liken reads the same files. This holds here
-// too. udev's by-id rules build several names from a disk's wwid,
-// model, and serial attributes, in the sysfs directories this file
-// reads.
-//
-// The ata-<model>_<serial> name a SATA disk answers to does not come
-// from the model attribute sysfs publishes for it. That attribute
-// holds the 16-byte SCSI INQUIRY string libata's SCSI translation
-// layer reports, truncated to fit a field SCSI defines, not the
-// 40-byte model string udev's ata_id helper decodes straight from the
-// drive's own ATA IDENTIFY DEVICE data. A name built from the shorter
-// string would not match the name udev gives the same disk. libata
-// answers SCSI vital product data page 0x89, "ATA Information", by
-// embedding the entire 512-byte IDENTIFY block in the response, so
-// this file reads that page instead. The bytes are the same IDENTIFY
-// data udev's helper asks the drive for with an ioctl.
+// For a SATA disk, the sysfs model attribute is the 16-byte SCSI
+// INQUIRY model from libata, but udev's ata_id takes the 40-byte model
+// from ATA IDENTIFY DEVICE. So the ata- name reads IDENTIFY from VPD
+// page 0x89, where libata exposes the whole 512-byte block.
 
 import (
 	"fmt"
@@ -41,26 +21,17 @@ import (
 	"strings"
 )
 
-// diskIDNames lists the by-id names one disk answers to, in a fixed
-// order: the WWN-derived names first, then the name specific to the
-// disk's transport. The order is not significant to a reader of the
-// names, but a fixed order keeps the tests, and any future diff of
-// them, readable.
+// diskIDNames returns the WWN names first, then the transport's name.
 func diskIDNames(name string) []string {
 	dir := filepath.Join(sysBlock, name)
 	var names []string
 
-	// NVMe publishes its own wwid at the block level; SCSI and SATA
-	// disks publish it on the bus device underneath. Either location
-	// can hold a NAA-format World Wide Name, the SCSI standard's
-	// world-unique disk identifier, encoded as hex.
+	// NVMe has wwid on the block device, and SCSI and SATA have it on
+	// the device under it.
 	wwid := sysfsString(dir, "wwid", "device/wwid")
 	if hex, ok := strings.CutPrefix(wwid, "naa."); ok {
 		hex = sanitizeIDPart(hex)
-		// udev publishes both a wwn- name (its own convention) and a
-		// scsi-3 name (the SCSI standard's own prefix for a NAA
-		// identifier) for the same value, and other software looks
-		// for either, so liken computes both.
+		// udev creates both links for a NAA WWN.
 		names = append(names, "wwn-0x"+hex, "scsi-3"+hex)
 	}
 
@@ -73,10 +44,8 @@ func diskIDNames(name string) []string {
 		model := sysfsString(dir, "device/model")
 		serial := sysfsString(dir, "serial", "device/serial")
 		if serial == "" {
-			// A drive that answers SCSI inquiries under NVMe's SCSI
-			// translation layer, or that a virtualized controller
-			// exposes without a plain serial attribute, still answers
-			// vital product data page 0x80 with its serial.
+			// Some drives have no serial attribute but report the
+			// serial in VPD page 0x80.
 			serial = scsiVPD80Serial(dir)
 		}
 		if model != "" && serial != "" {
@@ -86,22 +55,16 @@ func diskIDNames(name string) []string {
 			names = append(names, "nvme-eui."+sanitizeIDPart(hex))
 		}
 	case "mmc":
-		// An mmc card carries its product name and serial in its CID
-		// register, which the card's own controller answers with, so
-		// the name survives an image write the way the ata- names do.
-		// The kernel publishes the serial as 0x-prefixed hex, and the
-		// prefix stays in the name: udev's by-id rule substitutes the
-		// attribute exactly as sysfs prints it, and real machines
-		// carry links like mmc-SA16G_0xbee5b555. A name without the
-		// prefix would not match the name udev gives the same disk.
+		// The name and serial come from the card's CID register. The
+		// kernel prints the serial with a 0x prefix, and udev's name
+		// keeps it.
 		card := sysfsString(dir, "device/name")
 		serial := sysfsString(dir, "device/serial")
 		if card != "" && serial != "" {
 			names = append(names, "mmc-"+sanitizeIDPart(card)+"_"+sanitizeIDPart(serial))
 		}
 	case "virtio":
-		// virtio-blk publishes only a serial, directly on the disk,
-		// because a virtual disk has no model or vendor to report.
+		// A virtio-blk disk has a serial but no model or vendor.
 		if serial := sysfsString(dir, "serial"); serial != "" {
 			names = append(names, "virtio-"+sanitizeIDPart(serial))
 		}
@@ -114,9 +77,8 @@ func diskIDNames(name string) []string {
 	return names
 }
 
-// usbIDName builds the by-id name for a disk that reaches liken over
-// USB, from the manufacturer, product, and serial the USB device
-// itself publishes, and the SCSI LUN usb-storage assigned it.
+// usbIDName returns "" when the USB device has no manufacturer,
+// product, or serial.
 func usbIDName(dir string) string {
 	real, err := filepath.EvalSymlinks(dir)
 	if err != nil {
@@ -137,12 +99,9 @@ func usbIDName(dir string) string {
 		scsiLUN(real))
 }
 
-// usbDeviceDir walks a resolved sysfs path upward to the directory
-// that names the USB device itself, as against the interface, the
-// SCSI host, or the target beneath it that also sit on this path.
-// idVendor exists only on the device's own directory, because only
-// the device, not the things usb-storage attaches beneath it, has a
-// USB vendor ID to report.
+// usbDeviceDir returns the nearest parent of a resolved sysfs path
+// that has idVendor. Of the USB device, interface, SCSI host, and
+// target directories on the path, only the USB device has it.
 func usbDeviceDir(path string) string {
 	for dir := path; dir != "/" && dir != "."; dir = filepath.Dir(dir) {
 		if _, err := os.Stat(filepath.Join(dir, "idVendor")); err == nil {
@@ -152,19 +111,11 @@ func usbDeviceDir(path string) string {
 	return ""
 }
 
-// hctlPattern matches a SCSI address segment in a sysfs path: host,
-// channel, target, and LUN, each a plain number, the way the kernel
-// names a SCSI device's directory.
+// hctlPattern matches a SCSI host:channel:target:lun directory.
 var hctlPattern = regexp.MustCompile(`/(\d+):(\d+):(\d+):(\d+)(/|$)`)
 
-// scsiLUN reads the LUN out of the h:c:t:l segment in a resolved
-// sysfs path. usb-storage presents a USB mass-storage device to the
-// kernel as a virtual SCSI host, and addresses each LUN under it as
-// host:channel:target:lun, the way any SCSI host does; the final
-// field is the LUN a multi-LUN device, such as a card reader with
-// several slots, uses to tell its LUNs apart. A path with no such
-// segment names LUN 0, the only LUN a device with no LUN addressing
-// at all ever uses.
+// scsiLUN tells apart the disks of one USB device with several LUNs,
+// such as a card reader with several slots.
 func scsiLUN(path string) string {
 	if m := hctlPattern.FindStringSubmatch(path); m != nil {
 		return m[4]
@@ -172,14 +123,9 @@ func scsiLUN(path string) string {
 	return "0"
 }
 
-// scsiVPD80Serial reads a disk's serial out of vital product data
-// page 0x80, a binary SCSI page that every SCSI target, and every
-// SATA disk through libata's SCSI translation, answers to. The page
-// is four header bytes (peripheral qualifier and type, the page
-// code, then the ASCII payload's length as a two-byte big-endian
-// count) followed by the serial itself. diskIDNames reads this page
-// as a fallback, for a disk whose driver does not also mirror the
-// serial into a plain sysfs attribute.
+// scsiVPD80Serial reads the serial from VPD page 0x80: a four-byte
+// header whose last two bytes are the big-endian length, then the
+// serial.
 func scsiVPD80Serial(dir string) string {
 	raw, err := os.ReadFile(filepath.Join(dir, "device", "vpd_pg80"))
 	if err != nil || len(raw) < 4 {
@@ -192,17 +138,9 @@ func scsiVPD80Serial(dir string) string {
 	return strings.Trim(string(raw[4:4+length]), "\x00 \t\n\r\v\f")
 }
 
-// scsiVPD89ATAIdentity reads a SATA disk's model and serial out of
-// vital product data page 0x89, "ATA Information", which libata
-// answers by embedding the drive's full 512-byte ATA IDENTIFY DEVICE
-// block after a 60-byte header. A page shorter than 572 bytes carries
-// no complete IDENTIFY block, so this function reports neither field.
-//
-// IDENTIFY packs each string byte-swapped within its 16-bit words: a
-// drive that reports "QEMU HARDDISK" stores it as "EQUMH RADDSI K".
-// The serial sits at words 10-19 of the block, the model at words
-// 27-46; both are ASCII, space-padded to their field width, so this
-// function swaps each field's bytes back and trims the padding.
+// scsiVPD89ATAIdentity reads VPD page 0x89: a 60-byte header, then
+// the 512-byte IDENTIFY DEVICE block. In IDENTIFY, the serial is words
+// 10-19 and the model is words 27-46.
 func scsiVPD89ATAIdentity(dir string) (model, serial string) {
 	raw, err := os.ReadFile(filepath.Join(dir, "device", "vpd_pg89"))
 	if err != nil || len(raw) < 572 {
@@ -214,10 +152,9 @@ func scsiVPD89ATAIdentity(dir string) (model, serial string) {
 	return model, serial
 }
 
-// ataIdentifyString decodes one fixed-width string out of an ATA
-// IDENTIFY DEVICE block: it swaps every adjacent byte pair back into
-// reading order, then trims the spaces and NUL bytes the drive pads
-// the field with.
+// ataIdentifyString undoes the byte swap of IDENTIFY, which stores
+// each 16-bit word of a string with its two bytes reversed, so that
+// "QEMU HARDDISK" reads "EQUMH RADDSI K".
 func ataIdentifyString(field []byte) string {
 	swapped := make([]byte, len(field))
 	for i := 0; i+1 < len(field); i += 2 {
@@ -226,18 +163,11 @@ func ataIdentifyString(field []byte) string {
 	return strings.Trim(string(swapped), "\x00 \t\n\r\v\f")
 }
 
-// idCharset is every byte udev leaves alone when it builds a by-id
-// name out of a firmware string. udev's own replace_whitespace and
-// blacklist rules keep a name shell-safe and safe as a single path
-// segment: a value must not smuggle a slash into the file name it
-// becomes, or whitespace that would need quoting to reference again.
+// idCharset is the set of bytes that udev keeps in a by-id name. udev
+// replaces every other byte, such as a slash or a space, so that the
+// name is one safe path segment.
 const idCharset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789#+.:=@_-"
 
-// sanitizeIDPart makes one firmware string, such as a model or
-// serial, safe to fold into a by-id name. Every byte outside
-// idCharset, including the spaces a fixed-width SCSI field pads out
-// with and the NUL bytes some firmware pads with instead, becomes an
-// underscore.
 func sanitizeIDPart(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))

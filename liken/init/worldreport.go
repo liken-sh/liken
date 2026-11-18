@@ -1,7 +1,7 @@
 package main
 
-// The essential mounts and the world report: the first things init
-// sets up, and how init reports what it did.
+// This file makes the first mounts of the boot, and prints a report of
+// the machine's state to the console.
 
 import (
 	"fmt"
@@ -11,10 +11,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// This code declares the essential filesystems as a table, rather
-// than as a sequence of calls. The table is data, and the world
-// report below prints what actually got mounted, so a reader can
-// compare the two easily.
 type mount struct {
 	source string
 	target string
@@ -23,68 +19,55 @@ type mount struct {
 }
 
 var essentials = []mount{
-	// /proc is two things at once: a directory per running process,
-	// and the kernel's interface for settings and information, such
-	// as /proc/sys and /proc/cmdline. Almost every tool that
-	// inspects the system reads /proc, including the world report
-	// below, and k3s does not start without it.
+	// /proc has a directory for each process and the kernel's
+	// settings and information, such as /proc/sys and /proc/cmdline.
+	// worldReport reads it, and k3s does not start without it.
 	{"proc", "/proc", "proc", unix.MS_NOSUID | unix.MS_NOEXEC | unix.MS_NODEV},
 
-	// /sys exposes the kernel's object model as a filesystem: every
-	// device, driver, and bus. cgroup2 mounts beneath /sys later;
-	// Kubernetes uses cgroup2 to account for and limit every
-	// container.
+	// /sys exposes every device, driver, and bus of the kernel. The
+	// cgroup2 filesystem is mounted under /sys later, and Kubernetes
+	// uses it to account for and limit the resources of containers.
 	{"sysfs", "/sys", "sysfs", unix.MS_NOSUID | unix.MS_NOEXEC | unix.MS_NODEV},
 
-	// devtmpfs is the kernel's own device catalog. When this mount
-	// happens, a device node appears for every device the kernel has
-	// registered, and the kernel maintains these nodes itself. On a
-	// machine with known hardware, devtmpfs replaces the entire udev
-	// system.
+	// devtmpfs has a device node for each device the kernel has
+	// registered, and the kernel keeps the nodes current itself. With
+	// devtmpfs, a machine does not need udev.
 	{"devtmpfs", "/dev", "devtmpfs", unix.MS_NOSUID},
 
-	// /run is the standard location for runtime state: sockets, PIDs,
-	// and locks. containerd and k3s use hardcoded paths under it, and
-	// so do the facts tree and the supplicant's generated
-	// configuration.
+	// /run holds runtime state such as sockets, PID files, and locks.
+	// containerd and k3s have fixed paths under it, and so do
+	// /run/liken/facts and wpa_supplicant's files in
+	// /run/liken/wireless.
 	//
-	// This mount is an essential rather than one of the mounts that
-	// prepareForK3s makes. A wireless interface comes up long before
-	// k3s does, and its generated configuration and control socket
-	// live under /run. A tmpfs mounted over /run later would hide
-	// both from the supplicant restart that has to read them again.
+	// It is mounted here and not in prepareForK3s because a wireless
+	// interface comes up long before k3s starts. A tmpfs mounted over
+	// /run later would hide wpa_supplicant's configuration and control
+	// socket from a restart of wpa_supplicant.
 	{"tmpfs", "/run", "tmpfs", unix.MS_NOSUID | unix.MS_NODEV},
 }
 
+// mountEssentials prints a failed mount and goes on. A machine with
+// some mounts missing can still print the world report, but if init
+// exited, the kernel would panic and the console would show no report.
 func mountEssentials() {
 	for _, m := range essentials {
-		// The initramfs root is plain RAM and is freely writable, so
-		// init creates its own mountpoints. The image does not need
-		// to ship empty directories.
+		// The initramfs root is writable RAM, so init creates the
+		// mount points and the image ships no empty directories.
 		if err := os.MkdirAll(m.target, 0o755); err != nil {
-			fmt.Fprintf(os.Stderr, "liken: mkdir %s: %v\n", m.target, err)
+			fmt.Fprintf(os.Stderr, "liken: creating mount point %s: %v\n", m.target, err)
 			continue
 		}
-		// init reports failures but does not treat them as fatal. A
-		// partial environment that can still print its report is far
-		// more useful than a kernel panic, because the console is
-		// where debugging happens.
 		if err := unix.Mount(m.source, m.target, m.fstype, m.flags, ""); err != nil {
-			fmt.Fprintf(os.Stderr, "liken: mount %s on %s: %v\n", m.fstype, m.target, err)
+			fmt.Fprintf(os.Stderr, "liken: mounting %s on %s: %v\n", m.fstype, m.target, err)
 		}
 	}
 }
 
-// The world report is liken's substitute for an interactive shell.
-// init answers, on the console at every boot, the same questions an
-// operator would otherwise answer by exploring a shell prompt. When
-// something goes wrong, the usual first step is to extend the report
-// to answer the new question.
+// worldReport prints the kernel, firmware, command line, mounts, /dev
+// entry count, and block devices to the console at every boot. The
+// image has no interactive shell, so this output is what a person would
+// otherwise read with commands at a shell prompt.
 func worldReport() {
-	// Uname fills fixed-size byte arrays, rather than returning
-	// strings, because it is a thin wrapper over the raw syscall,
-	// and the kernel ABI uses fixed-size buffers. ByteSliceToString
-	// finds the NUL terminator in each array.
 	var u unix.Utsname
 	if err := unix.Uname(&u); err == nil {
 		fmt.Printf("liken: kernel %s (%s)\n",
@@ -94,16 +77,15 @@ func worldReport() {
 
 	reportFirmware()
 
-	// The kernel command line is how the outside world sets
-	// parameters for a boot. It is where rdinit= points at init, and
-	// it is the way to pass any fact a machine needs before it
-	// has a filesystem.
+	// The kernel command line holds rdinit=, which selects init, and
+	// the other values that a machine needs before it has a
+	// filesystem.
 	if cmdline, err := os.ReadFile(cmdlinePath); err == nil {
 		fmt.Printf("liken: cmdline: %s\n", strings.TrimSpace(string(cmdline)))
 	}
 
-	// /proc/self/mounts is the kernel's authoritative mount table.
-	// If mountEssentials succeeded, its results appear here.
+	// /proc/self/mounts lists what is actually mounted, which shows
+	// whether mountEssentials succeeded.
 	if mounts, err := os.ReadFile("/proc/self/mounts"); err == nil {
 		fmt.Print("liken: mounts:\n")
 		for line := range strings.SplitSeq(strings.TrimSpace(string(mounts)), "\n") {
@@ -111,8 +93,6 @@ func worldReport() {
 		}
 	}
 
-	// A populated /dev shows that devtmpfs created the device nodes,
-	// with no udev involved.
 	if entries, err := os.ReadDir("/dev"); err == nil {
 		fmt.Printf("liken: /dev has %d entries\n", len(entries))
 	}

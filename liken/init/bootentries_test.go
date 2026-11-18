@@ -1,7 +1,7 @@
 package main
 
-// Tests for the firmware boot entries: what a slot's entry says, and
-// how a boot puts back an entry that the firmware lost.
+// Tests for the firmware boot entries: what a slot's entry contains,
+// and how a boot writes back an entry that the firmware lost.
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ func TestConsoleArgs(t *testing.T) {
 	got := consoleArgs()
 	want := []string{"console=ttyS0", "console=tty0"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("every console= argument is copied, nothing else: %v", got)
+		t.Errorf("consoleArgs is %v, want %v", got, want)
 	}
 }
 
@@ -31,27 +31,27 @@ func TestWriteSlotBootEntry(t *testing.T) {
 	}
 	option, ok := listBootEntries(dir)[number]
 	if !ok {
-		t.Fatalf("the entry decodes back out of the store")
+		t.Fatalf("listBootEntries has no entry %d after writeSlotBootEntry, want it", number)
 	}
 	if option.description != "liken slot A" {
-		t.Errorf("description: got %q", option.description)
+		t.Errorf("description is %q, want %q", option.description, "liken slot A")
 	}
 	if option.filePath != `\vmlinuz` {
-		t.Errorf("file path: got %q", option.filePath)
+		t.Errorf("file path is %q, want %q", option.filePath, `\vmlinuz`)
 	}
 	wantArgs := `console=ttyS0 rdinit=/liken initrd=\microcode.cpio initrd=\boot.cpio initrd=\deployment.cpio liken.machine=node-1 liken.slot=A panic=10`
 	if !bytes.Equal(option.optionalData, encodeUTF16Z(wantArgs)) {
-		t.Errorf("the baked command line is assembled from scratch: % x", option.optionalData)
+		t.Errorf("optional data is % x, want the UTF-16 of %q", option.optionalData, wantArgs)
 	}
 	if option.hardDrive == nil || option.hardDrive.partitionNumber != 1 ||
 		option.hardDrive.sectors != 2048 {
-		t.Errorf("the entry pins the partition: %+v", option.hardDrive)
+		t.Errorf("hard drive node is %+v, want partition 1 with 2048 sectors", option.hardDrive)
 	}
 }
 
-// The install is the first boot's only protection on a firmware that
-// drops a BootOrder write. Slot A leads the order and the one-shot is
-// pinned to the same entry.
+// On a firmware that drops a BootOrder write, BootNext is the only
+// thing that protects the first boot. Slot A leads BootOrder, and
+// BootNext points at the same entry.
 func TestRegisterSlotEntriesPinTheFirstBoot(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken\n")
 	dir := fakeFirmwareVars(t, map[string][]byte{})
@@ -64,20 +64,17 @@ func TestRegisterSlotEntriesPinTheFirstBoot(t *testing.T) {
 
 	entryA, ok := findSlotEntry(dir, "A")
 	if !ok {
-		t.Fatal("the install writes slot A's entry")
+		t.Fatal("registerSlotEntries wrote no entry for slot A, want one")
 	}
 	if order := readBootOrder(dir); len(order) == 0 || order[0] != entryA {
-		t.Errorf("slot A leads the order: %v", order)
+		t.Errorf("BootOrder is %v, want slot A's entry %d first", order, entryA)
 	}
 	next, err := readEFIVar(dir, "BootNext")
 	if err != nil || bootNextEntry(next) != int32(entryA) {
-		t.Errorf("the one-shot is pinned to slot A's entry: % x, %v", next, err)
+		t.Errorf("BootNext is % x (error %v), want slot A's entry %d", next, err, entryA)
 	}
 }
 
-// A firmware may store a variable wider than the two bytes BootNext
-// needs. Comparing the raw bytes would rewrite NVRAM on every boot and
-// warn about a firmware that is holding the value correctly.
 func TestAssertBootNextAcceptsAWiderVariable(t *testing.T) {
 	dir := fakeEFIVars(t, map[string][]byte{"BootNext": {0x03, 0x00, 0x00, 0x00}})
 	path := filepath.Join(dir, "BootNext-"+efiGlobalVariable)
@@ -93,54 +90,51 @@ func TestAssertBootNextAcceptsAWiderVariable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !after.ModTime().Equal(before.ModTime()) {
-		t.Error("the firmware already names this entry, however wide it stores it")
+		t.Error("assertBootNext rewrote a BootNext that already names the entry, want no write")
 	}
 }
 
-// A firmware whose variables reset to defaults holds no entries at
-// all. The boot that the fallback loader started puts both of them
-// back.
-func TestHealBootEntriesWritesBothSlotsFromNothing(t *testing.T) {
+// A firmware that resets its variables to defaults has no entries. The
+// boot that the fallback loader started writes both entries again.
+func TestRepairBootEntriesWritesBothSlotsFromNothing(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A\n")
 	installedDisk(t)
 	dir := fakeEFIVars(t, map[string][]byte{})
 
-	healBootEntries(dir, "node-1", "A", true)
+	repairBootEntries(dir, "node-1", "A", true)
 
 	entryA, ok := findSlotEntry(dir, "A")
 	if !ok {
-		t.Fatal("slot A's entry is back")
+		t.Fatal("repairBootEntries wrote no entry for slot A, want one")
 	}
 	entryB, ok := findSlotEntry(dir, "B")
 	if !ok {
-		t.Fatal("slot B's entry is back, so the fallback is real")
+		t.Fatal("repairBootEntries wrote no entry for slot B, want one")
 	}
 	order := readBootOrder(dir)
 	if len(order) != 2 || order[0] != entryA || order[1] != entryB {
-		t.Errorf("both slots lead the order, the proven slot first: %v", order)
+		t.Errorf("BootOrder is %v, want [%d %d]", order, entryA, entryB)
 	}
 	option := listBootEntries(dir)[entryA]
 	if option.hardDrive == nil || option.hardDrive.partitionNumber != 1 {
-		t.Errorf("the entry pins the slot it found on this disk: %+v", option.hardDrive)
+		t.Errorf("hard drive node is %+v, want partition 1", option.hardDrive)
 	}
 }
 
-func TestHealBootEntriesLeadsWithTheProvenSlot(t *testing.T) {
+func TestRepairBootEntriesLeadsWithTheProvenSlot(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=B\n")
 	installedDisk(t)
 	dir := fakeEFIVars(t, map[string][]byte{})
 
-	healBootEntries(dir, "node-1", "B", true)
+	repairBootEntries(dir, "node-1", "B", true)
 
 	entryB, _ := findSlotEntry(dir, "B")
 	if order := readBootOrder(dir); len(order) == 0 || order[0] != entryB {
-		t.Errorf("slot B is proven, so slot B leads: %v", order)
+		t.Errorf("BootOrder is %v, want slot B's entry %d first", order, entryB)
 	}
 }
 
-// A firmware's own entries stay reachable. They are just never
-// preferred.
-func TestHealBootEntriesKeepsTheFirmwaresOwnEntries(t *testing.T) {
+func TestRepairBootEntriesKeepsTheFirmwaresOwnEntries(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 liken.machine=node-1\n")
 	installedDisk(t)
 	foreign := encodeLoadOption(loadOption{
@@ -153,22 +147,19 @@ func TestHealBootEntriesKeepsTheFirmwaresOwnEntries(t *testing.T) {
 		"BootOrder": {0x00, 0x00},
 	})
 
-	healBootEntries(dir, "node-1", "A", true)
+	repairBootEntries(dir, "node-1", "A", true)
 
 	order := readBootOrder(dir)
 	if len(order) != 3 || order[2] != 0 {
-		t.Errorf("the firmware's shell keeps its place behind both slots: %v", order)
+		t.Errorf("BootOrder is %v, want both slot entries first and 0 last", order)
 	}
 }
 
-// NVRAM accepts a limited number of writes, and this runs on every
-// boot and before every reboot. An entry that already agrees costs
-// none of them.
-func TestHealBootEntriesWritesNothingWhenNothingDrifted(t *testing.T) {
+func TestRepairBootEntriesWritesNothingWhenNothingDrifted(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 liken.machine=node-1\n")
 	installedDisk(t)
 	dir := fakeEFIVars(t, map[string][]byte{})
-	healBootEntries(dir, "node-1", "A", true)
+	repairBootEntries(dir, "node-1", "A", true)
 	entryA, _ := findSlotEntry(dir, "A")
 	path := filepath.Join(dir, bootEntryID(entryA)+"-"+efiGlobalVariable)
 	before, err := os.Stat(path)
@@ -176,62 +167,60 @@ func TestHealBootEntriesWritesNothingWhenNothingDrifted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	healBootEntries(dir, "node-1", "A", true)
+	repairBootEntries(dir, "node-1", "A", true)
 
 	after, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !after.ModTime().Equal(before.ModTime()) {
-		t.Error("the entry already agreed, so no variable needed writing")
+		t.Error("repairBootEntries rewrote an entry that already matched, want no write")
 	}
 }
 
-// An entry that survived but no longer describes this machine is
-// rewritten under the number the firmware already gave it.
-func TestHealBootEntriesRewritesADriftedEntry(t *testing.T) {
+func TestRepairBootEntriesRewritesADriftedEntry(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 liken.machine=node-1\n")
 	installedDisk(t)
 	dir := fakeEFIVars(t, map[string][]byte{})
-	healBootEntries(dir, "node-2", "A", true)
+	repairBootEntries(dir, "node-2", "A", true)
 	stale, _ := findSlotEntry(dir, "A")
 
-	healBootEntries(dir, "node-1", "A", true)
+	repairBootEntries(dir, "node-1", "A", true)
 
 	current, ok := findSlotEntry(dir, "A")
 	if !ok || current != stale {
-		t.Fatalf("the entry keeps its number: was %d, now %d", stale, current)
+		t.Fatalf("slot A's entry is %d (found %v), want %d", current, ok, stale)
 	}
 	option := listBootEntries(dir)[current]
 	want := encodeUTF16Z(strings.Join(slotKernelArgs("node-1", "A"), " "))
 	if !bytes.Equal(option.optionalData, want) {
-		t.Errorf("the command line names this machine: % x", option.optionalData)
+		t.Errorf("optional data is % x, want % x", option.optionalData, want)
 	}
 }
 
-// A machine whose slots cannot be read gets no guesses. This is the
-// same rule the installer follows.
-func TestHealBootEntriesRefusesAMachineWithNoSlots(t *testing.T) {
+// A disk with no slot partitions gives no GPT data to render an entry
+// from, so no entry is written.
+func TestRepairBootEntriesRefusesAMachineWithNoSlots(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 liken.machine=node-1\n")
 	fakeMachine(t)
 	dir := fakeEFIVars(t, map[string][]byte{})
 
-	healBootEntries(dir, "node-1", "A", true)
+	repairBootEntries(dir, "node-1", "A", true)
 
 	if _, ok := findSlotEntry(dir, "A"); ok {
-		t.Error("no partition carries a slot, so there is nothing correct to write")
+		t.Error("repairBootEntries wrote an entry for a disk with no slot partitions, want none")
 	}
 }
 
-func TestHealBootEntriesRefusesAnAnonymousMachine(t *testing.T) {
+func TestRepairBootEntriesRefusesAnAnonymousMachine(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0\n")
 	installedDisk(t)
 	dir := fakeEFIVars(t, map[string][]byte{})
 
-	healBootEntries(dir, "", "A", true)
+	repairBootEntries(dir, "", "A", true)
 
 	if _, ok := findSlotEntry(dir, "A"); ok {
-		t.Error("an entry carries identity, so an anonymous entry would be wrong on every later boot")
+		t.Error("repairBootEntries wrote an entry with no machine name, want none")
 	}
 }
 
@@ -244,15 +233,13 @@ func TestSlotOrder(t *testing.T) {
 	for preferred, want := range cases {
 		got := slotOrder(preferred)
 		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
-			t.Errorf("preferred %q: got %v, want %v", preferred, got, want)
+			t.Errorf("slotOrder(%q) is %v, want %v", preferred, got, want)
 		}
 	}
 }
 
-// Some firmware clones a boot option it did not write, so two entries
-// can answer to one slot. Every reader must pick the same one, because
-// fallbackLeads compares its number against the head of BootOrder and
-// armProvingBoot refuses a trial when they disagree.
+// findSlotEntry explains why a firmware's copy of an entry must lose
+// to the original.
 func TestFindSlotEntryTakesTheLowestOfTwoEntriesForOneSlot(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 liken.machine=node-1\n")
 	ours := encodeLoadOption(loadOption{
@@ -265,17 +252,18 @@ func TestFindSlotEntryTakesTheLowestOfTwoEntriesForOneSlot(t *testing.T) {
 		description: "liken slot B",
 		filePath:    `\vmlinuz`,
 		// The firmware's copy differs only in the device path, which
-		// the decoder reports through hardDrive.
+		// the decoder returns in hardDrive.
 		hardDrive: &hardDriveNode{partitionNumber: 2, firstLBA: 4096, sectors: 2048},
 	})
 	dir := fakeEFIVars(t, map[string][]byte{"Boot0003": ours, "Boot0004": clone})
 
-	// Map iteration is randomized, so a wrong implementation passes
-	// sometimes. Ask enough times that it cannot.
+	// listBootEntries returns a map, and Go randomizes map iteration,
+	// so an implementation that takes the first match passes some
+	// runs. Repeating the lookup makes that unlikely.
 	for range 20 {
 		number, ok := findSlotEntry(dir, "B")
 		if !ok || number != 3 {
-			t.Fatalf("the lowest matching entry wins every time: got %d, %v", number, ok)
+			t.Fatalf("findSlotEntry is %d (found %v), want 3", number, ok)
 		}
 	}
 }

@@ -1,11 +1,5 @@
 package main
 
-// Tests for how storage mounts each role and takes the mounts down
-// again. The mount syscalls are replaced by the recorder in
-// mounttable_test.go, so these tests check which device lands on which
-// path with which flags, and what the code does around each mount. The
-// file systems are plain files under a fake /dev.
-
 import (
 	"io/fs"
 	"os"
@@ -19,25 +13,21 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// keepMachineStateWritable saves the flag that says machineState is on
-// disk, starts the test with the given value, and restores the flag
-// afterward.
-func keepMachineStateWritable(t *testing.T, value bool) {
+// setMachineStateWritable sets machineStateWritable for one test.
+func setMachineStateWritable(t *testing.T, value bool) {
 	t.Helper()
 	old := machineStateWritable
 	machineStateWritable = value
 	t.Cleanup(func() { machineStateWritable = old })
 }
 
-// Teardown must take off whatever a failed reconcile left mounted, so
-// that the next attempt starts from the RAM root. It works in reverse
-// canonical order, so a mount stacked on a role's file system comes off
-// before that file system does. biosBoot is never mounted and is not in
-// the list. machineState comes off with the rest, so the fail-stop
-// record has nowhere durable to go until a later attempt mounts it.
+// Teardown unmounts in reverse of the mount order, so a mount on top of
+// a role's file system comes off before that file system. biosBoot is
+// never mounted. After teardown, failBoot writes no record until a
+// later attempt mounts machineState again.
 func TestTeardownStorageUnmountsEveryRoleInReverseOrder(t *testing.T) {
 	mounts := fakeStorageMounts(t)
-	keepMachineStateWritable(t, true)
+	setMachineStateWritable(t, true)
 
 	capturedStdout(t, teardownStorage)
 
@@ -57,20 +47,20 @@ func TestTeardownStorageUnmountsEveryRoleInReverseOrder(t *testing.T) {
 		t.Errorf("unmounted %v, want %v", got, want)
 	}
 	if machineStateWritable {
-		t.Error("after teardown, machineState is no longer on disk")
+		t.Error("machineStateWritable is true after teardown, want false")
 	}
 }
 
-// The reboot path detaches lazily, because a container that was just
-// killed can still hold a mount namespace open for a moment, and a
-// plain unmount would fail on it.
+// The reboot path passes MNT_DETACH, because a container that was just
+// killed can still keep a mount namespace open, and a plain unmount
+// would fail with EBUSY.
 func TestUnmountRoleMountsPassesTheCallersFlags(t *testing.T) {
 	mounts := fakeStorageMounts(t)
 
 	capturedStdout(t, func() { unmountRoleMounts(unix.MNT_DETACH, false) })
 
 	if len(mounts.unmounts) == 0 {
-		t.Fatal("nothing was unmounted")
+		t.Fatal("unmountRoleMounts unmounted nothing, want each role mount unmounted")
 	}
 	for _, u := range mounts.unmounts {
 		if u.flags != unix.MNT_DETACH {
@@ -79,10 +69,9 @@ func TestUnmountRoleMountsPassesTheCallersFlags(t *testing.T) {
 	}
 }
 
-// The console tells one story about what came apart. A path that was
-// never mounted answers EINVAL or ENOENT, which means there was nothing
-// to do, so it prints nothing. A real failure prints only when the
-// caller asked for errors, because the reboot path expects some.
+// EINVAL and ENOENT mean there was nothing to unmount, so detachMount
+// prints nothing for them. It prints any other failure only when the
+// caller asks, because the reboot path expects some failures.
 func TestDetachMountReportsOnlyRealFailures(t *testing.T) {
 	const target = "/var/lib/rancher"
 	cases := []struct {
@@ -116,23 +105,21 @@ func TestDetachMountReportsOnlyRealFailures(t *testing.T) {
 	}
 }
 
-// ext4Device writes the start of an ext4 file system to a partition's
-// node under the fake /dev: a superblock that records the given count
-// of 4 KiB blocks. It returns the partition as discovery would report
-// it, sized to exactly fill the file system, so nothing needs to grow.
+// ext4Device writes an ext4 superblock with the given number of 4 KiB
+// blocks to a partition under the fake /dev. It returns the partition
+// sized to exactly fit the file system, so nothing grows.
 func ext4Device(t *testing.T, dev, name string, role machine.StorageRoleName, blocks uint32) partition {
 	t.Helper()
 	image := make([]byte, 2048)
 	copy(image[ext4SuperblockOffset:], superblock(blocks, 2, 0, 0))
 	if err := os.WriteFile(filepath.Join(dev, name), image, 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the partition device: %v", err)
 	}
 	return partition{name: name, disk: "vda", partName: "liken:" + string(role), sizeBytes: uint64(blocks) * 4096}
 }
 
-// A recognized data role keeps its file system and mounts it as ext4
-// with the role's flags. Only machineState's mount makes the fail-stop
-// record durable, so only that role sets the flag that says so.
+// Only the machineState role sets machineStateWritable, because failBoot
+// writes its record only to that partition.
 func TestMountRoleMountsARecognizedExt4Role(t *testing.T) {
 	cases := []struct {
 		role         machine.StorageRoleName
@@ -148,14 +135,14 @@ func TestMountRoleMountsARecognizedExt4Role(t *testing.T) {
 		t.Run(string(c.role), func(t *testing.T) {
 			_, dev := fakeMachine(t)
 			mounts := fakeStorageMounts(t)
-			keepMachineStateWritable(t, false)
+			setMachineStateWritable(t, false)
 			target := fakeRoleMountPath(t, c.role)
 			p := ext4Device(t, dev, "vda1", c.role, 100)
 
 			var err error
 			capturedStdout(t, func() { err = mountRole(declared(c.role, "/dev/vda", ""), p, false) })
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("mounting the role: %v", err)
 			}
 
 			want := []storageMount{{source: dev + "/vda1", target: target, fstype: "ext4", flags: c.flags}}
@@ -169,10 +156,9 @@ func TestMountRoleMountsARecognizedExt4Role(t *testing.T) {
 	}
 }
 
-// A new ext4 root is mode 0755 and writable only by root. /tmp must be
-// writable by every user, with the sticky bit, so the mount applies the
-// role's mode to the mounted root. The sticky bit lets only a file's
-// owner delete or rename it, so one user cannot replace another's file.
+// The root of a new ext4 file system is mode 0755, so the mount sets
+// /tmp to 1777: writable by every user, and with the sticky bit, so
+// only a file's owner can delete or rename it.
 func TestMountRoleOpensTmpToEveryUser(t *testing.T) {
 	_, dev := fakeMachine(t)
 	fakeStorageMounts(t)
@@ -182,16 +168,15 @@ func TestMountRoleOpensTmpToEveryUser(t *testing.T) {
 	var err error
 	capturedStdout(t, func() { err = mountRole(declared(machine.MachineEphemeralRole, "/dev/vda", ""), p, false) })
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("mounting the role: %v", err)
 	}
 	if got, want := modeOf(t, target), fs.ModeSticky|0o777; got != want {
 		t.Errorf("mode of /tmp = %v, want %v", got, want)
 	}
 }
 
-// A slot that already carries FAT32 keeps it, and mounts with the slot
-// flags: nothing runs from a slot, so it allows no executables, no
-// device files, and no suid bit.
+// No program runs from a slot, so the slot flags allow no executables,
+// no device files, and no setuid.
 func TestMountRoleMountsARecognizedSlotAsFAT(t *testing.T) {
 	_, dev := fakeMachine(t)
 	mounts := fakeStorageMounts(t)
@@ -202,7 +187,7 @@ func TestMountRoleMountsARecognizedSlotAsFAT(t *testing.T) {
 	var err error
 	capturedStdout(t, func() { err = mountRole(declared(machine.SystemBRole, "/dev/vda", ""), p, false) })
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("mounting the role: %v", err)
 	}
 	want := []storageMount{{source: dev + "/vda3", target: target, fstype: "vfat", flags: slotMountFlags}}
 	if !slices.Equal(mounts.mounts, want) {
@@ -210,25 +195,24 @@ func TestMountRoleMountsARecognizedSlotAsFAT(t *testing.T) {
 	}
 }
 
-// volumeLabel reads the label field of a FAT32 boot sector.
 func volumeLabel(t *testing.T, path string) string {
 	t.Helper()
 	f, err := os.Open(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("opening the volume: %v", err)
 	}
 	defer f.Close()
 	label := make([]byte, 11)
 	if _, err := f.ReadAt(label, 71); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the volume label: %v", err)
 	}
 	return strings.TrimSpace(string(label))
 }
 
-// A partition this boot created gets a new file system, even when the
-// bytes underneath still hold an old one. A reinstall writes the same
-// layout at the same offsets, and keeping the old volume would carry
-// the previous install into the new one.
+// A partition that this boot created is formatted even when it still
+// holds an old file system. A reinstall writes the same layout at the
+// same offsets, so the old file system would bring the previous
+// install's data into the new one.
 func TestMountRoleFormatsASlotThisBootCreated(t *testing.T) {
 	_, dev := fakeMachine(t)
 	fakeStorageMounts(t)
@@ -239,30 +223,29 @@ func TestMountRoleFormatsASlotThisBootCreated(t *testing.T) {
 	var err error
 	capturedStdout(t, func() { err = mountRole(declared(machine.SystemBRole, "/dev/vda", ""), p, true) })
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("mounting the role: %v", err)
 	}
 	if got := volumeLabel(t, device); got != "LIKEN-SYS-B" {
-		t.Errorf("label = %q, want the new slot's label LIKEN-SYS-B", got)
+		t.Errorf("the volume label is %q, want LIKEN-SYS-B because this boot formatted the slot", got)
 	}
 }
 
-// A role that will not mount stops the boot, and the error names the
-// device and the role so the console says which one. A failed
-// machineState mount must leave the fail-stop record pointed at RAM.
+// When the machineState mount fails, machineStateWritable stays false,
+// so failBoot writes no record.
 func TestMountRoleReportsAMountThatFails(t *testing.T) {
 	_, dev := fakeMachine(t)
 	mounts := fakeStorageMounts(t)
 	mounts.mountErr = unix.EPERM
-	keepMachineStateWritable(t, false)
+	setMachineStateWritable(t, false)
 	fakeRoleMountPath(t, machine.MachineStateRole)
 	p := ext4Device(t, dev, "vda1", machine.MachineStateRole, 100)
 
 	err := mountRole(declared(machine.MachineStateRole, "/dev/vda", ""), p, false)
 
 	if err == nil || !strings.Contains(err.Error(), dev+"/vda1") || !strings.Contains(err.Error(), "machineState") {
-		t.Errorf("the error must name the device and the role: %v", err)
+		t.Errorf("the error is %v, want one that names the device %s/vda1 and the role machineState", err, dev)
 	}
 	if machineStateWritable {
-		t.Error("a machineState that did not mount is not writable")
+		t.Error("machineStateWritable is true after the mount failed, want false")
 	}
 }

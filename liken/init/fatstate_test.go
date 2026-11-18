@@ -3,11 +3,11 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -16,130 +16,122 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// bootedSlot points the boot parameters at a slot and puts the mark
-// that the initramfs recorded for it into the environment. An empty
-// mark stands for a boot whose initramfs recorded nothing.
-func bootedSlot(t *testing.T, slot, mark string) {
+// bootedSlot sets the liken.slot boot parameter to slot and
+// bootedSlotStopEnv to recorded. An empty recorded leaves the variable
+// unset, as when the initramfs mounted no slot.
+func bootedSlot(t *testing.T, slot, recorded string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "cmdline")
 	if err := os.WriteFile(path, []byte("liken.slot="+slot+"\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the cmdline file: %v", err)
 	}
 	old := cmdlinePath
 	cmdlinePath = path
 	t.Cleanup(func() { cmdlinePath = old })
-	if mark == "" {
+	if recorded == "" {
 		t.Setenv(bootedSlotStopEnv, "")
 		os.Unsetenv(bootedSlotStopEnv)
 		return
 	}
-	t.Setenv(bootedSlotStopEnv, mark)
+	t.Setenv(bootedSlotStopEnv, recorded)
 }
 
-// cleanVolume writes a freshly formatted FAT32 volume, which carries no
-// mark, and returns its path.
+// cleanVolume returns the path of a new FAT32 image with the dirty bit
+// clear.
 func cleanVolume(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "volume.img")
 	f, err := os.Create(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the volume image: %v", err)
 	}
 	defer f.Close()
 	if err := f.Truncate(64 << 20); err != nil {
-		t.Fatal(err)
+		t.Fatalf("sizing the volume image: %v", err)
 	}
 	if err := disks.FormatFAT32(f, 64<<20, "TEST", 0x12345678); err != nil {
-		t.Fatal(err)
+		t.Fatalf("formatting the volume image: %v", err)
 	}
 	return path
 }
 
-func TestFATStopMarkTakesTheBootedSlotsAnswerFromTheInitramfs(t *testing.T) {
-	// The volume itself is clean, because this test runs against a file
-	// that no kernel has mounted. On a machine it would read as marked,
-	// since the initramfs mounted it for writing to reach the system
-	// image. Either way the recorded answer is the one that counts.
-	bootedSlot(t, "A", stopMarkUnclean)
-	unclean, err := fatStopMark(machine.SystemARole, cleanVolume(t))
+func TestFATDirtyAtBootUsesTheInitramfsReadingForTheBootedSlot(t *testing.T) {
+	// The image is clean and the recorded value is unclean, so the result
+	// shows which of the two was read.
+	bootedSlot(t, "A", lastStopUnclean)
+	unclean, err := fatDirtyAtBoot(machine.SystemARole, cleanVolume(t))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the dirty bit of the booted slot: %v", err)
 	}
 	if !unclean {
-		t.Error("the booted slot must report what the initramfs read, not what the device says now")
+		t.Error("fatDirtyAtBoot reported the device's state, want the unclean state that the initramfs recorded")
 	}
 }
 
-func TestFATStopMarkReportsACleanBootedSlot(t *testing.T) {
-	bootedSlot(t, "A", stopMarkClean)
-	unclean, err := fatStopMark(machine.SystemARole, cleanVolume(t))
+func TestFATDirtyAtBootReportsACleanBootedSlot(t *testing.T) {
+	bootedSlot(t, "A", lastStopClean)
+	unclean, err := fatDirtyAtBoot(machine.SystemARole, cleanVolume(t))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the dirty bit of the booted slot: %v", err)
 	}
 	if unclean {
-		t.Error("a slot the initramfs found released must not report an unclean stop")
+		t.Error("fatDirtyAtBoot reported an unclean stop, want clean as the initramfs recorded")
 	}
 }
 
-func TestFATStopMarkReadsTheIdleSlotFromItsDevice(t *testing.T) {
-	// The other slot is untouched this boot, so its device still holds
-	// the answer, and the recorded one belongs to a different volume.
-	bootedSlot(t, "A", stopMarkUnclean)
-	unclean, err := fatStopMark(machine.SystemBRole, cleanVolume(t))
+func TestFATDirtyAtBootReadsTheOtherSlotFromItsDevice(t *testing.T) {
+	bootedSlot(t, "A", lastStopUnclean)
+	unclean, err := fatDirtyAtBoot(machine.SystemBRole, cleanVolume(t))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the dirty bit of the other slot: %v", err)
 	}
 	if unclean {
-		t.Error("the idle slot must be read from its own device")
+		t.Error("fatDirtyAtBoot reported an unclean stop for the other slot, want clean as its device says")
 	}
 }
 
-func TestFATStopMarkReadsTheBootHomeFromItsDevice(t *testing.T) {
-	bootedSlot(t, "A", stopMarkUnclean)
-	unclean, err := fatStopMark(machine.BootHomeRole, cleanVolume(t))
+func TestFATDirtyAtBootReadsTheBootHomeFromItsDevice(t *testing.T) {
+	bootedSlot(t, "A", lastStopUnclean)
+	unclean, err := fatDirtyAtBoot(machine.BootHomeRole, cleanVolume(t))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the dirty bit of the boot home: %v", err)
 	}
 	if unclean {
-		t.Error("the boot home must be read from its own device")
+		t.Error("fatDirtyAtBoot reported an unclean stop for the boot home, want clean as its device says")
 	}
 }
 
-func TestFATStopMarkFallsBackToTheDeviceWhenNothingWasRecorded(t *testing.T) {
-	// A boot that takes the system image from RAM mounts no slot in the
-	// initramfs, so it records nothing, and the device is still right.
+func TestFATDirtyAtBootReadsTheDeviceWhenNothingWasRecorded(t *testing.T) {
 	bootedSlot(t, "A", "")
-	unclean, err := fatStopMark(machine.SystemARole, cleanVolume(t))
+	unclean, err := fatDirtyAtBoot(machine.SystemARole, cleanVolume(t))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the dirty bit with nothing recorded: %v", err)
 	}
 	if unclean {
-		t.Error("with nothing recorded, the device's answer must stand")
+		t.Error("fatDirtyAtBoot reported an unclean stop with nothing recorded, want clean as the device says")
 	}
 }
 
-func TestRecordBootedSlotStopKeepsWhatTheDeviceSays(t *testing.T) {
+func TestRecordBootedSlotStopRecordsTheDevicesDirtyBit(t *testing.T) {
 	t.Setenv(bootedSlotStopEnv, "")
 	recordBootedSlotStop(cleanVolume(t))
-	if got := os.Getenv(bootedSlotStopEnv); got != stopMarkClean {
-		t.Errorf("got %q, want %q", got, stopMarkClean)
+	if got := os.Getenv(bootedSlotStopEnv); got != lastStopClean {
+		t.Errorf("%s is %q, want %q", bootedSlotStopEnv, got, lastStopClean)
 	}
 }
 
-func TestRecordBootedSlotStopKeepsNothingItCannotRead(t *testing.T) {
-	// Recording a guess here would put a made-up fact into status. An
-	// unreadable device is left to the read that comes later.
+func TestRecordBootedSlotStopRecordsNothingForAnUnreadableDevice(t *testing.T) {
 	t.Setenv(bootedSlotStopEnv, "")
 	os.Unsetenv(bootedSlotStopEnv)
 	recordBootedSlotStop(filepath.Join(t.TempDir(), "absent"))
 	if got, ok := os.LookupEnv(bootedSlotStopEnv); ok {
-		t.Errorf("got %q, want nothing recorded", got)
+		t.Errorf("%s is %q, want it unset", bootedSlotStopEnv, got)
 	}
 }
 
-// slotWith builds a directory that looks like a mounted slot: a
-// release document, and one artifact for each name given. An artifact
-// whose content is passed as nil is left off the slot entirely.
+// slotWith returns a directory laid out like a mounted slot: a
+// release.yaml that lists each artifact with its digest, and a file for
+// each artifact whose content is not nil.
 func slotWith(t *testing.T, artifacts map[string][]byte) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -152,12 +144,12 @@ func slotWith(t *testing.T, artifacts map[string][]byte) string {
 			continue
 		}
 		if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the artifact: %v", err)
 		}
 	}
 	doc := "apiVersion: liken.sh/v1alpha1\nkind: Release\nmetadata:\n  name: 2026.07.26-001\nartifacts:\n" + entries
 	if err := os.WriteFile(filepath.Join(dir, "release.yaml"), []byte(doc), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing release.yaml: %v", err)
 	}
 	return dir
 }
@@ -165,94 +157,84 @@ func slotWith(t *testing.T, artifacts map[string][]byte) string {
 func TestVerifySlotContentsAcceptsAnIntactSlot(t *testing.T) {
 	slot := slotWith(t, map[string][]byte{"vmlinuz": []byte("kernel bytes")})
 	if err := verifySlotContents(slot); err != nil {
-		t.Errorf("an intact slot must verify, got %v", err)
+		t.Errorf("verifySlotContents returned %v for an intact slot, want nil", err)
 	}
 }
 
 func TestVerifySlotContentsRejectsAChangedArtifact(t *testing.T) {
-	// This is the case the mark exists to warn about: the file is
-	// there and the right size, but the bytes are not the ones the
-	// release names. Clearing the mark here would be a lie.
+	// The size matches and only the digest differs.
 	slot := slotWith(t, map[string][]byte{"vmlinuz": []byte("kernel bytes")})
 	if err := os.WriteFile(filepath.Join(slot, "vmlinuz"), []byte("kernel bytez"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("changing the artifact: %v", err)
 	}
 	if err := verifySlotContents(slot); err == nil {
-		t.Error("a slot whose artifact does not match its digest must not verify")
+		t.Error("verifySlotContents returned nil for an artifact that does not match its digest, want an error")
 	}
 }
 
 func TestVerifySlotContentsRejectsATruncatedArtifact(t *testing.T) {
 	slot := slotWith(t, map[string][]byte{"liken.sqfs": []byte("a whole system image")})
 	if err := os.WriteFile(filepath.Join(slot, "liken.sqfs"), []byte("a whole"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("truncating the artifact: %v", err)
 	}
 	if err := verifySlotContents(slot); err == nil {
-		t.Error("a truncated artifact must not verify")
+		t.Error("verifySlotContents returned nil for a truncated artifact, want an error")
 	}
 }
 
 func TestVerifySlotContentsRejectsAMissingArtifact(t *testing.T) {
 	slot := slotWith(t, map[string][]byte{"vmlinuz": []byte("kernel bytes")})
 	if err := os.Remove(filepath.Join(slot, "vmlinuz")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the artifact: %v", err)
 	}
 	if err := verifySlotContents(slot); err == nil {
-		t.Error("a slot missing an artifact must not verify")
+		t.Error("verifySlotContents returned nil for a missing artifact, want an error")
 	}
 }
 
 func TestVerifySlotContentsRejectsASlotWithNoReleaseDocument(t *testing.T) {
-	// A slot liken has never written cannot be vouched for, so it
-	// keeps its mark.
 	if err := verifySlotContents(t.TempDir()); err == nil {
-		t.Error("a slot with no release document must not verify")
+		t.Error("verifySlotContents returned nil for a slot with no release.yaml, want an error")
 	}
 }
 
 func TestVerifySlotContentsRejectsAnUnreadableReleaseDocument(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "release.yaml"), []byte("{{ not yaml"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing release.yaml: %v", err)
 	}
 	if err := verifySlotContents(dir); err == nil {
-		t.Error("a slot whose release document does not parse must not verify")
+		t.Error("verifySlotContents returned nil for a release.yaml that does not parse, want an error")
 	}
 }
 
-// A slot this boot claimed and formatted has no earlier stop to report.
-// Its new boot sector carries no mark, and a read of it would only
-// waste a device open, so the answer is no without asking the device.
 func TestReadFATStopReportsNothingForAVolumeThisBootCreated(t *testing.T) {
 	bootedSlot(t, "A", "")
-	dev := markedVolume(t)
+	dev := dirtyVolume(t)
 	if readFATStop(machine.SystemBRole, dev, true) {
-		t.Error("a volume this boot created must not report an unclean stop")
+		t.Error("readFATStop returned true for a volume this boot created, want false")
 	}
-	if !isMarked(t, dev) {
-		t.Error("readFATStop must not touch a volume it was told is new")
+	if !isDirty(t, dev) {
+		t.Error("readFATStop cleared the dirty bit of a volume this boot created, want it left set")
 	}
 }
 
-// A boot must continue when one boot sector cannot be read, because
-// storage reconciliation fails for a real reason a moment later if the
-// volume is truly gone. So an unreadable mark counts as no mark.
-func TestReadFATStopTreatsAnUnreadableMarkAsClean(t *testing.T) {
+func TestReadFATStopTreatsAnUnreadableBootSectorAsClean(t *testing.T) {
 	bootedSlot(t, "A", "")
 	if readFATStop(machine.SystemBRole, filepath.Join(t.TempDir(), "absent"), false) {
-		t.Error("a mark that cannot be read must not be reported as unclean")
+		t.Error("readFATStop returned true for a dirty bit it could not read, want false")
 	}
 }
 
 func TestReadFATStopReportsACleanVolume(t *testing.T) {
 	bootedSlot(t, "A", "")
 	if readFATStop(machine.BootHomeRole, cleanVolume(t), false) {
-		t.Error("a released volume must not report an unclean stop")
+		t.Error("readFATStop returned true for a volume with a clear dirty bit, want false")
 	}
 }
 
-// fakeFATCheckMount points the slot check at a temporary directory, so
-// the check can make its mount point without root.
+// fakeFATCheckMount points fatCheckMount at a temporary directory and
+// returns it.
 func fakeFATCheckMount(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "fat-check")
@@ -262,79 +244,72 @@ func fakeFATCheckMount(t *testing.T) string {
 	return dir
 }
 
-// tamperedSlot is a slot whose kernel no longer matches the digest its
-// release document names.
+// tamperedSlot is a slot whose kernel does not match the digest in its
+// release document.
 func tamperedSlot(t *testing.T) string {
 	t.Helper()
 	slot := slotWith(t, map[string][]byte{"vmlinuz": []byte("kernel bytes")})
 	if err := os.WriteFile(filepath.Join(slot, "vmlinuz"), []byte("kernel bytez"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("changing the artifact: %v", err)
 	}
 	return slot
 }
 
-// The status always reports the unclean stop, because it describes the
-// stop that already happened. The mark comes off only where liken can
-// vouch for the volume: an idle slot whose every artifact matches its
-// release document, and the boot home, which this boot rewrites. The
-// booted slot is in use and keeps its mark, and so does a slot whose
-// contents do not check out, so the warning still means something.
-func TestReadFATStopClearsTheMarkOnlyWhereLikenCanVouch(t *testing.T) {
+// readFATStop reports every unclean stop, and clears the bit only for
+// the boot home and for the other slot when its artifacts match.
+func TestReadFATStopClearsTheDirtyBitOnlyAfterVerifying(t *testing.T) {
 	cases := []struct {
-		name       string
-		role       machine.StorageRoleName
-		slot       func(t *testing.T) string
-		wantMarked bool
+		name      string
+		role      machine.StorageRoleName
+		slot      func(t *testing.T) string
+		wantDirty bool
 	}{
 		{"the booted slot", machine.SystemARole, nil, true},
-		{"an idle slot that matches its release", machine.SystemBRole, func(t *testing.T) string {
+		{"the other slot when it matches its release", machine.SystemBRole, func(t *testing.T) string {
 			return slotWith(t, map[string][]byte{"vmlinuz": []byte("kernel bytes")})
 		}, false},
-		{"an idle slot with a changed artifact", machine.SystemBRole, tamperedSlot, true},
-		{"an idle slot with no release document", machine.SystemBRole, func(t *testing.T) string {
+		{"the other slot with a changed artifact", machine.SystemBRole, tamperedSlot, true},
+		{"the other slot with no release document", machine.SystemBRole, func(t *testing.T) string {
 			return t.TempDir()
 		}, true},
 		{"the boot home", machine.BootHomeRole, nil, false},
-		{"a role with nothing to vouch for it", machine.MachineStateRole, nil, true},
+		{"a role that cannot be verified", machine.MachineStateRole, nil, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			bootedSlot(t, "A", stopMarkUnclean)
+			bootedSlot(t, "A", lastStopUnclean)
 			mounts := fakeStorageMounts(t)
 			fakeFATCheckMount(t)
-			dev := markedVolume(t)
+			dev := dirtyVolume(t)
 			if c.slot != nil {
 				mounts.contents[dev] = c.slot(t)
 			}
 
 			if !readFATStop(c.role, dev, false) {
-				t.Error("the unclean stop must reach status whether or not the mark is cleared")
+				t.Error("readFATStop returned false for an unclean stop, want true whether or not the dirty bit is cleared")
 			}
-			if got := isMarked(t, dev); got != c.wantMarked {
-				t.Errorf("marked after the boot read it = %v, want %v", got, c.wantMarked)
+			if got := isDirty(t, dev); got != c.wantDirty {
+				t.Errorf("the dirty bit is set = %v after readFATStop, want %v", got, c.wantDirty)
 			}
 		})
 	}
 }
 
-// The check must not set the mark it is about to clear, so it mounts
-// the slot read-only, and it must release the slot before the caller
-// writes the boot sector underneath it.
 func TestCheckSlotArtifactsReadsTheSlotReadOnlyAndReleasesIt(t *testing.T) {
 	mounts := fakeStorageMounts(t)
 	check := fakeFATCheckMount(t)
-	dev := markedVolume(t)
+	dev := dirtyVolume(t)
 	mounts.contents[dev] = slotWith(t, map[string][]byte{"vmlinuz": []byte("kernel bytes")})
 
 	if err := checkSlotArtifacts(dev); err != nil {
-		t.Fatal(err)
+		t.Fatalf("checking the slot: %v", err)
 	}
 	want := []storageMount{{source: dev, target: check, fstype: "vfat", flags: unix.MS_RDONLY}}
 	if !slices.Equal(mounts.mounts, want) {
 		t.Errorf("mounts = %+v, want %+v", mounts.mounts, want)
 	}
 	if !slices.Equal(mounts.unmountedPaths(), []string{check}) {
-		t.Errorf("the check must release the slot: %+v", mounts.unmounts)
+		t.Errorf("unmounts = %+v, want only %s", mounts.unmounts, check)
 	}
 }
 
@@ -344,25 +319,22 @@ func TestCheckSlotArtifactsReportsASlotItCannotMount(t *testing.T) {
 	mounts.mountErr = unix.EINVAL
 
 	err := checkSlotArtifacts("/dev/vdz9")
-	if err == nil || !strings.Contains(err.Error(), "/dev/vdz9") {
-		t.Errorf("the error must name the slot it could not mount: %v", err)
+	if !errors.Is(err, unix.EINVAL) {
+		t.Errorf("checkSlotArtifacts returned %v, want an error that wraps unix.EINVAL", err)
 	}
 }
 
-// A slot that is still mounted cannot have its boot sector written
-// safely, so a failed release fails the check even when the contents
-// matched. The check then detaches the mount lazily so it does not
-// stay in the way.
+// A failed unmount fails the check even when the contents match.
 func TestCheckSlotArtifactsFailsWhenTheSlotWillNotRelease(t *testing.T) {
 	mounts := fakeStorageMounts(t)
 	check := fakeFATCheckMount(t)
-	dev := markedVolume(t)
+	dev := dirtyVolume(t)
 	mounts.contents[dev] = slotWith(t, map[string][]byte{"vmlinuz": []byte("kernel bytes")})
 	mounts.unmountErrs[check] = unix.EBUSY
 
 	err := checkSlotArtifacts(dev)
-	if err == nil || !strings.Contains(err.Error(), "releasing") {
-		t.Errorf("a slot that will not release must fail the check: %v", err)
+	if !errors.Is(err, unix.EBUSY) {
+		t.Errorf("checkSlotArtifacts returned %v, want an error that wraps unix.EBUSY", err)
 	}
 	want := []storageUnmount{{target: check, flags: 0}, {target: check, flags: unix.MNT_DETACH}}
 	if !slices.Equal(mounts.unmounts, want) {
@@ -370,8 +342,6 @@ func TestCheckSlotArtifactsFailsWhenTheSlotWillNotRelease(t *testing.T) {
 	}
 }
 
-// The booted slot is the one volume that is in use, so the boot must
-// tell it apart from the idle slot by the kernel command line.
 func TestBootedSlotRoleReadsTheSlotParameter(t *testing.T) {
 	cases := []struct {
 		cmdline string
@@ -385,7 +355,7 @@ func TestBootedSlotRoleReadsTheSlotParameter(t *testing.T) {
 		t.Run(c.cmdline, func(t *testing.T) {
 			fakeCmdline(t, c.cmdline)
 			if got := bootedSlotRole(); got != c.want {
-				t.Errorf("got %q, want %q", got, c.want)
+				t.Errorf("bootedSlotRole() = %q, want %q", got, c.want)
 			}
 		})
 	}

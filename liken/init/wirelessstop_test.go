@@ -1,9 +1,9 @@
 package main
 
-// A supplicant is stopped on purpose, never left to the shutdown's
-// kill(-1), and the stop has to end even when the process or its loop
-// does not cooperate. These tests hold each stop to its bound on the
-// fake clock of a synctest bubble.
+// The shutdown stops each wpa_supplicant before reboot.go sends SIGTERM
+// and SIGKILL to every process with kill(-1), so the supplicant can
+// deauthenticate. Each stop has a time limit, so a supplicant or a
+// supervision loop that does not respond cannot hold up the shutdown.
 
 import (
 	"context"
@@ -16,21 +16,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// wirelessSignalled is a supplicant that records each signal it gets
-// and dies on the fatal one, with the death reported on died the way
-// the reaper reports it.
+// wirelessSignalled is a fake supplicant process. It records each
+// signal it receives, and exits on the fatal one by sending a status on
+// died, as the reaper does.
 type wirelessSignalled struct {
 	fatal os.Signal
 	sent  []os.Signal
 	died  chan unix.WaitStatus
 }
 
-// wirelessDiesOn builds the stand-in process.
 func wirelessDiesOn(fatal os.Signal) *wirelessSignalled {
 	return &wirelessSignalled{fatal: fatal, died: make(chan unix.WaitStatus, 1)}
 }
 
-// handle is the process as the supervision code holds it.
 func (w *wirelessSignalled) handle() runningSupplicant {
 	return runningSupplicant{pid: 1_000_100, signal: func(sig os.Signal) error {
 		w.sent = append(w.sent, sig)
@@ -41,8 +39,8 @@ func (w *wirelessSignalled) handle() runningSupplicant {
 	}}
 }
 
-// A supplicant that ignores SIGTERM must get SIGKILL after five
-// seconds, or the shutdown would wait on it forever.
+// A supplicant that ignores SIGTERM must receive SIGKILL after five
+// seconds, or the shutdown would wait for it forever.
 func TestStopSupplicantKillsAProcessThatIgnoresSIGTERM(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		proc := wirelessDiesOn(unix.SIGKILL)
@@ -59,9 +57,10 @@ func TestStopSupplicantKillsAProcessThatIgnoresSIGTERM(t *testing.T) {
 	})
 }
 
-// wirelessReopensSupplicants empties the supplicant list and reopens
-// its latch when the test ends, so the next test can register again.
-func wirelessReopensSupplicants(t *testing.T) {
+// clearSupplicantsAfterTest clears the supplicant list and
+// supplicantsStopping when the test ends, so the next test can register
+// supplicants.
+func clearSupplicantsAfterTest(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
 		supplicantsMu.Lock()
@@ -71,13 +70,13 @@ func wirelessReopensSupplicants(t *testing.T) {
 	})
 }
 
-// wirelessLoop is a registered supervision loop. A cooperative loop
-// ends when it is told to stop; a stuck one never ends.
+// wirelessLoop registers a supervision loop. A cooperative loop ends
+// when it is told to stop, and a stuck one never ends.
 func wirelessLoop(t *testing.T, ifname string, cooperative bool) *supplicantProcess {
 	t.Helper()
 	p := &supplicantProcess{ifname: ifname, stop: make(chan struct{}), done: make(chan struct{})}
 	if !registerSupplicant(p) {
-		t.Fatalf("the list refused %s before any shutdown", ifname)
+		t.Fatalf("registerSupplicant refused %s before any shutdown, want it registered", ifname)
 	}
 	if cooperative {
 		go func() {
@@ -90,11 +89,11 @@ func wirelessLoop(t *testing.T, ifname string, cooperative bool) *supplicantProc
 
 // The shutdown must tell every loop to stop, wait at most ten seconds
 // for a loop that does not end, and then refuse every later
-// supplicant, so a radio that settles during a reboot leaves no
-// process behind.
+// registration. Otherwise a radio that appears during a reboot would
+// start a supplicant that nothing stops.
 func TestStopSupplicantsEndsEveryLoopWithinItsBound(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		wirelessReopensSupplicants(t)
+		clearSupplicantsAfterTest(t)
 		quick := wirelessLoop(t, "wlan0", true)
 		stuck := wirelessLoop(t, "wlan1", false)
 
@@ -108,22 +107,21 @@ func TestStopSupplicantsEndsEveryLoopWithinItsBound(t *testing.T) {
 			select {
 			case <-p.stop:
 			default:
-				t.Errorf("the loop on %s was never told to stop", p.ifname)
+				t.Errorf("the loop on %s was not told to stop, want its stop channel closed", p.ifname)
 			}
 		}
 		late := &supplicantProcess{ifname: "wlan2", stop: make(chan struct{}), done: make(chan struct{})}
 		if registerSupplicant(late) {
-			t.Error("a supplicant registered after the shutdown")
+			t.Error("registering a supplicant after the shutdown returned true, want false")
 		}
 		if got := len(trackedSupplicants()); got != 0 {
-			t.Errorf("the list still holds %d loops", got)
+			t.Errorf("the list has %d loops after the shutdown, want 0", got)
 		}
 	})
 }
 
-// wirelessDetachedLoop is a loop whose event stream is detached, and
-// whose supplicant never creates its socket, so each attach waits out
-// its one-second patience and fails.
+// wirelessDetachedLoop returns a loop whose supplicant never creates
+// its control socket, so each attach waits for the timeout and then fails.
 func wirelessDetachedLoop(t *testing.T) *supplicantProcess {
 	t.Helper()
 	return &supplicantProcess{
@@ -131,18 +129,19 @@ func wirelessDetachedLoop(t *testing.T) *supplicantProcess {
 		stop:   make(chan struct{}), done: make(chan struct{}),
 		backoff: 10 * time.Second, maxBackoff: 30 * time.Second,
 		control: &wpaControl{
-			socket:   t.TempDir() + "/ctrl/wlan0",
-			local:    t.TempDir() + "/client",
-			out:      make(chan wpaEvent, 8),
-			patience: time.Second,
+			socket:  t.TempDir() + "/ctrl/wlan0",
+			local:   t.TempDir() + "/client",
+			out:     make(chan wpaEvent, 8),
+			timeout: time.Second,
 		},
 	}
 }
 
-// While the loop retries a detached event stream, a death, a stop, or
-// a cancelled plane must each end the wait at once, and only the stop
-// and the cancel may signal the process, because a process that died
-// on its own has nothing left to signal.
+// While the loop retries attaching the event stream, the process
+// dying, the loop being told to stop, and the context being cancelled
+// must each end the wait immediately. Only the stop and the
+// cancellation send a signal, because a process that already died has
+// nothing to signal.
 func TestWatchEndsAReattachWhenTheProcessDiesOrTheLoopEnds(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -173,7 +172,7 @@ func TestWatchEndsAReattachWhenTheProcessDiesOrTheLoopEnds(t *testing.T) {
 			signals: []os.Signal{unix.SIGTERM},
 		},
 		{
-			name:    "the plane is cancelled",
+			name:    "the context is cancelled",
 			end:     func(_ *supplicantProcess, cancel context.CancelFunc, _ chan unix.WaitStatus) { cancel() },
 			want:    supplicantEnded,
 			signals: []os.Signal{unix.SIGTERM},
@@ -202,19 +201,20 @@ func TestWatchEndsAReattachWhenTheProcessDiesOrTheLoopEnds(t *testing.T) {
 				if !slices.Equal(proc.sent, tc.signals) {
 					t.Errorf("signals %v, want %v", proc.sent, tc.signals)
 				}
-				// The watch abandons an attach that is still out, and
-				// that attach ends only when its patience runs out. The
-				// bubble must see it end before the test returns.
-				time.Sleep(2 * p.control.patience)
+				// The watch returns without waiting for an attach that is
+				// still running, and that attach ends only when the timeout
+				// runs out. synctest requires every goroutine of the
+				// bubble to end before the test returns.
+				time.Sleep(2 * p.control.timeout)
 			})
 		})
 	}
 }
 
-// A cancelled plane must stop a supplicant whose event stream is
-// attached, the same as a stop from the shutdown, so the supplicant
-// deauthenticates instead of meeting kill(-1).
-func TestWatchStopsAnAttachedSupplicantWhenThePlaneIsCancelled(t *testing.T) {
+// Cancelling the context must send SIGTERM to a supplicant whose event
+// stream is attached, as the shutdown does, so the supplicant
+// deauthenticates before kill(-1).
+func TestWatchStopsAnAttachedSupplicantWhenTheContextIsCancelled(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p := wirelessDetachedLoop(t)
 		proc := wirelessDiesOn(unix.SIGTERM)

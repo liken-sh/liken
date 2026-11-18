@@ -1,17 +1,18 @@
 package main
 
-// Interface bring-up runs in two passes: wired interfaces settle in
-// line, and radios settle behind the boot
-// (plans/completed/64-the-boot-does-not-wait-for-radios.md). The split
-// exists because of one hard fact about the kernel: raising a link
-// holds the rtnl lock while the driver's open routine runs, and a
-// wedged driver never returns, holds the lock forever, and cannot be
-// killed. On 2026-08-26 exactly that took a machine down. Its wired
-// path was healthy, but the boot waited on the radio, so nothing that
-// could act ever started, and every following boot repeated the wait.
-// No timeout can contain a stuck kernel thread. What the boot controls
-// is what it risks before the machine can act, so the radios go last,
-// and on a machine that does not need them, they go in the background.
+// Interface bring-up runs in two passes. Pass one brings up the wired
+// interfaces and finishes before the boot goes on. Pass two brings up
+// the radios. It runs in the background when a wired interface has a
+// route to the cluster and, when the cluster declares a nodeCIDR, a
+// wired interface has an address inside it (backgroundable).
+//
+// Raising a link holds the kernel's rtnl lock while the driver's open
+// routine runs. A wedged driver never returns from that routine, so it
+// holds the lock forever, and no timeout can kill a kernel thread. If
+// the boot waited for such a radio, nothing that could repair the
+// machine would start, and every later boot would wait the same way.
+// So the boot raises radios last, and waits for one only when it has
+// no other path to the cluster.
 
 import (
 	"context"
@@ -27,18 +28,13 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// How long the boot waits for a raise to return. A healthy radio
-// raises in under two seconds, most of it firmware load. A raise
-// still out at ten seconds is a kernel thread that is not coming
-// back, and the wait exists only so the boot can say so; waiting
-// longer would report the same thing later.
-const raisePatience = 10 * time.Second
+// raiseTimeout is how long a raise may take before init reports the
+// radio as stuck. Waiting longer does not help, because a raise that
+// has not returned by then is a kernel thread that is not coming back.
+const raiseTimeout = 10 * time.Second
 
-// interfacePasses is the pass split with its moving parts as
-// function values, so a test can run the whole split, the route
-// question included, with no kernel, no radio, and no supplicant.
-// The seams follow startSupplicant and parkConsole: the real boot
-// binds the real functions once, in bootPasses below.
+// interfacePasses has the steps of the two passes as functions, so a
+// test can run both passes with no kernel, no radio, and no supplicant.
 type interfacePasses struct {
 	wired     func(machine.InterfaceSpec) (*connection, error)
 	radio     func(machine.InterfaceSpec) (*connection, error)
@@ -47,14 +43,13 @@ type interfacePasses struct {
 	readdress func([]*connection, []machine.InterfaceSpec, *radio) []*connection
 }
 
-// bootPasses binds the passes a real boot runs.
 func bootPasses(present []interfaceIdentity) interfacePasses {
 	return interfacePasses{
 		wired: func(ifc machine.InterfaceSpec) (*connection, error) {
 			return bringUpInterface(ifc, present)
 		},
 		radio: func(ifc machine.InterfaceSpec) (*connection, error) {
-			return bringUpRadio(ifc, present, raisePatience)
+			return bringUpRadio(ifc, present, raiseTimeout)
 		},
 		route:     routeVia,
 		ciphers:   loadWirelessCiphers,
@@ -62,25 +57,25 @@ func bootPasses(present []interfaceIdentity) interfacePasses {
 	}
 }
 
-// radioPass is what pass two hands the rest of the boot: the
-// connection list as status should report it now, and a channel that
-// delivers each radio's settled connection as it lands.
+// radioPass is the state of a pass two that runs in the background.
+// conns is the connection list that watchRadios publishes to status.
+// Each radio sends its final connection on settled once, and
+// watchRadios replaces that radio's entry in conns with it.
 type radioPass struct {
 	conns   []*connection
 	settled chan *connection
 
-	// pending counts the radios that have not answered yet. Every
-	// radio sends exactly one verdict, so the handler that drains the
-	// channel knows when its work is over.
+	// pending is the number of radios that have not sent on settled.
+	// watchRadios stops reading the channel when it reaches zero.
 	pending int
 }
 
-// run is the whole bring-up: pass one in spec order, then the gate
-// below decides where pass two goes. A machine that can already
-// reach its cluster backgrounds the radios and boots; a machine
-// whose only declared path is a radio waits for it in the
-// foreground, park included, because it has nothing to do without
-// it.
+// run brings up the wired interfaces first and then the radios, and
+// returns the connections in spec order. When backgroundable reports
+// that the boot can go on without the radios, run starts them in the
+// background and returns a radioPass. Otherwise it brings them up
+// before it returns, because the machine has nothing to do without the
+// network.
 func (p interfacePasses) run(interfaces []machine.InterfaceSpec, clusterDoc *cluster.Cluster) ([]*connection, *radioPass) {
 	var conns []*connection
 	var radios []machine.InterfaceSpec
@@ -100,8 +95,8 @@ func (p interfacePasses) run(interfaces []machine.InterfaceSpec, clusterDoc *clu
 		return conns, nil
 	}
 
-	// The ciphers load before any supplicant starts, and only on a
-	// boot that a declared radio brought this far (ciphers.go).
+	// The supplicant needs the wireless cipher modules. A machine with
+	// no radio never loads them.
 	p.ciphers()
 
 	if p.backgroundable(conns, clusterDoc) {
@@ -110,18 +105,15 @@ func (p interfacePasses) run(interfaces []machine.InterfaceSpec, clusterDoc *clu
 	return p.foreground(interfaces, conns, radios, clusterDoc.EndpointOrEmpty()), nil
 }
 
-// backgroundable answers whether the boot may go on without its
-// radios. Two things must hold: pass one gives a route toward the
-// cluster's endpoint, and pass one holds the address k3s will start
-// with. nodeAddress (k3s.go) picks that address, so the gate asks it
-// rather than restating the rule.
+// backgroundable reports whether the boot can go on without its
+// radios. It can when the wired interfaces have a route toward the
+// cluster's endpoint and, when the cluster declares a nodeCIDR, one of
+// them has an address inside it.
 //
-// The second condition exists because k3s registers with the node
-// address at start and never re-reads it. A machine whose nodeCIDR
-// only the radio can answer must wait for the radio, or k3s starts
-// with no node IP and the Node and the status disagree about the
-// machine's address. A cluster that declares no nodeCIDR has no
-// address rule to check, so the route question decides alone.
+// k3s reads the node address once, when it starts. If only the radio
+// had an address inside the nodeCIDR, k3s would start with no node IP,
+// and the Node and the Machine status would disagree about the
+// machine's address.
 func (p interfacePasses) backgroundable(conns []*connection, clusterDoc *cluster.Cluster) bool {
 	if routed, _ := routeToward(conns, clusterDoc.EndpointOrEmpty(), p.route); !routed {
 		return false
@@ -133,10 +125,10 @@ func (p interfacePasses) backgroundable(conns []*connection, clusterDoc *cluster
 	return ip != ""
 }
 
-// background starts pass two behind the boot. The machine can
-// already act, so nothing after this line waits on a radio, and the
-// worst a wedged driver can do is what it does anyway; the operator
-// it cannot stop is the recovery path.
+// background starts pass two in the machine plane (components.go) and
+// returns at once, with a pendingRadio connection in place of each
+// radio. Nothing after this waits for a radio, so a wedged driver
+// cannot stop the boot or the operator that repairs the machine.
 func (p interfacePasses) background(interfaces []machine.InterfaceSpec, conns []*connection,
 	radios []machine.InterfaceSpec) ([]*connection, *radioPass) {
 	for _, ifc := range radios {
@@ -145,29 +137,27 @@ func (p interfacePasses) background(interfaces []machine.InterfaceSpec, conns []
 	conns = inSpecOrder(interfaces, conns)
 
 	pass := &radioPass{settled: make(chan *connection, len(radios)), pending: len(radios)}
-	// The pass copies the list before the boot goes on with it. The
-	// verdict handler replaces entries in its own copy, so no reader
-	// of the boot's list ever sees a connection change under it.
+	// The pass has its own copy of the list, because watchRadios
+	// replaces entries in it while the boot reads conns.
 	pass.conns = append([]*connection(nil), conns...)
 
 	plane.start("the wireless bring-up", p.joinRadios(pass, radios))
 	return conns, pass
 }
 
-// joinRadios is the component behind the boot: every declared radio,
-// one at a time, each joined at most once.
+// joinRadios returns the machine plane component that brings up each
+// radio in turn and sends each result on pass.settled.
 //
-// The radios are serial because a raise holds the kernel's rtnl lock
-// while the driver runs. Two raises at once means the second waits on
-// the first inside the kernel, where no deadline reaches it, so the
-// first wedge would take every other radio's report with it. After a
-// wedge the rest are not attempted at all, and each says so.
+// The radios come up one at a time because a raise holds the rtnl
+// lock. A second raise would block inside the kernel behind a wedged
+// first one, where no deadline reaches it, and its result would never
+// arrive. So after one raise is stuck, joinRadios tries no other radio
+// and sends a notAttemptedRadio connection for each.
 //
-// The claim flags exist because the machine plane restarts a
-// component whose function returns an error, and a panic inside a
-// join becomes exactly that. Each radio is claimed before its join
-// runs, so a restarted component joins none of them again, starts no
-// second supplicant, and sends no second verdict.
+// The machine plane runs a component again after it returns an error
+// or panics. The claimed flags make a second run skip each radio that
+// an earlier run started, so it starts no second supplicant and sends
+// no second result.
 func (p interfacePasses) joinRadios(pass *radioPass, radios []machine.InterfaceSpec) func(context.Context) error {
 	claimed := make([]atomic.Bool, len(radios))
 	return func(context.Context) error {
@@ -191,9 +181,6 @@ func (p interfacePasses) joinRadios(pass *radioPass, radios []machine.InterfaceS
 	}
 }
 
-// foreground runs pass two in the boot path, for the machine whose
-// only declared path is its radio. This is the one machine the radio
-// is allowed to hold, and the park rule is unchanged from plan 62.
 func (p interfacePasses) foreground(interfaces []machine.InterfaceSpec, conns []*connection,
 	radios []machine.InterfaceSpec, endpoint string) []*connection {
 	for _, ifc := range radios {
@@ -201,26 +188,23 @@ func (p interfacePasses) foreground(interfaces []machine.InterfaceSpec, conns []
 	}
 	conns = inSpecOrder(interfaces, conns)
 
-	// The park (plans/completed/62-wifi.md). Every interface has settled by
-	// this line, so the decision has everything it needs. The hold
-	// ends on a join event rather than a keypress, and the
-	// addressing that follows is the same addressing a radio that
-	// joined on the first try would have taken.
-	if failed, reason := parkDecision(conns, endpoint, p.route); failed != nil {
-		park(failed, reason)
+	// When a radio failed in a way that retrying will not fix and no
+	// interface has a route to the cluster, waitForRadio blocks until the
+	// supplicant reports a join or its control socket closes. When the
+	// radio has no supplicant, waitForRadio never returns. If the radio
+	// joined, readdress gives it an address.
+	if failed, reason := radioToWaitFor(conns, endpoint, p.route); failed != nil {
+		waitForRadio(failed, reason)
 		conns = p.readdress(conns, radios, failed)
 	}
 	return conns
 }
 
-// inSpecOrder puts the connections back into the order the spec
-// declared, whichever pass produced each one. The order is not
-// cosmetic: resolv.conf keeps the first three nameservers in
-// interface order, and the facts summarize the first addressed
-// interface, so a radio the spec named first must appear first.
-//
-// A wired interface that failed its bring-up has no connection, so
-// it simply has no place in the result; the map lookup skips it.
+// inSpecOrder sorts the connections into the order of the spec, so a
+// radio that the spec lists first comes first. The order matters
+// because resolv.conf keeps only the first three nameservers, and the
+// Machine status summarizes the first interface with an address when
+// no interface has the node address.
 func inSpecOrder(interfaces []machine.InterfaceSpec, conns []*connection) []*connection {
 	byName := make(map[string]*connection, len(conns))
 	for _, conn := range conns {
@@ -235,9 +219,8 @@ func inSpecOrder(interfaces []machine.InterfaceSpec, conns []*connection) []*con
 	return ordered
 }
 
-// joinOne is one radio's whole bring-up. It returns a connection in
-// every case, because a radio that failed is a report the status
-// must carry, never a missing interface.
+// joinOne brings up one radio. It returns a connection even when the
+// bring-up fails, so status shows the failure.
 func (p interfacePasses) joinOne(ifc machine.InterfaceSpec) *connection {
 	conn, err := p.radio(ifc)
 	if err != nil {
@@ -247,22 +230,18 @@ func (p interfacePasses) joinOne(ifc machine.InterfaceSpec) *connection {
 	return conn
 }
 
-// pendingRadio is the connection status reports while pass two still
-// works on the radio: associating, no address yet. The verdict
-// replaces it.
+// pendingRadio is the connection that status shows for a radio until
+// pass two sends its result.
 func pendingRadio(ifc machine.InterfaceSpec) *connection {
 	return &connection{ifname: ifc.Name, radio: &radio{
 		ifname: ifc.Name, ssid: ifc.Wireless.SSID, state: machine.WirelessAssociating,
 	}}
 }
 
-// failedRadio is the connection for a radio whose bring-up errored
-// before the join could say anything better, for example a port the
-// machine does not have. The interface still owes status a reason,
-// and NoCarrier with the error's text is the closest true statement.
-// A radio that joined and then failed its addressing never comes
-// here; it keeps its Connected verdict with the error as its
-// message.
+// failedRadio is the connection for a radio whose bring-up returned
+// an error before the join, for example because the machine has no
+// such interface. A radio that joined and then failed to get an
+// address stays Connected, and bringUpRadio returns no error for it.
 func failedRadio(ifc machine.InterfaceSpec, err error) *connection {
 	return &connection{ifname: ifc.Name, radio: &radio{
 		ifname: ifc.Name, ssid: ifc.Wireless.SSID,
@@ -270,31 +249,30 @@ func failedRadio(ifc machine.InterfaceSpec, err error) *connection {
 	}}
 }
 
-// notAttemptedRadio is the verdict for a radio the pass never tried,
-// because an earlier radio's raise did not return. The state is
-// NoCarrier, not NotRaised: NotRaised means this radio's own raise
-// is still out, and a radio nothing touched must not claim that.
-// The message names the interface actually at fault.
+// notAttemptedRadio is the connection for a radio that joinRadios
+// skipped because an earlier radio's raise did not return. Its state
+// is NoCarrier and not NotRaised, because NotRaised means that this
+// radio's own raise is still running.
 func notAttemptedRadio(ifc machine.InterfaceSpec, stuck string) *connection {
 	return &connection{ifname: ifc.Name, radio: &radio{
 		ifname: ifc.Name, ssid: ifc.Wireless.SSID,
 		state: machine.WirelessNoCarrier,
-		message: fmt.Sprintf("not attempted; raising %s is stuck holding the netlink lock every interface needs",
+		message: fmt.Sprintf("not attempted, because raising %s has not returned and can still hold the kernel rtnl lock that every interface needs",
 			stuck),
 	}}
 }
 
-// joinRadio is the 802.11 session, a variable holding the real join
-// below it, so a test can drive the addressing that follows a join
-// with no radio and no supplicant. It is the seam startSupplicant
-// and parkConsole already are.
+// joinRadio joins the radio to its network. It is a variable so that
+// a test can run the addressing that follows a join with no radio and
+// no supplicant.
 var joinRadio = joinWireless
 
-// bringUpRadio is the wireless half of bringUpInterface, moved here
-// so the raise can run under a deadline: raise, join, then address
-// exactly as a wired port would.
-func bringUpRadio(ifc machine.InterfaceSpec, present []interfaceIdentity, patience time.Duration) (*connection, error) {
-	link, err := raiseUnderDeadline(ifc, present, patience)
+// bringUpRadio raises the link under a deadline, joins the network,
+// and then addresses the interface the way bringUpInterface addresses
+// a wired one. A raise that does not return within the timeout gives a
+// connection in the NotRaised state, not an error.
+func bringUpRadio(ifc machine.InterfaceSpec, present []interfaceIdentity, timeout time.Duration) (*connection, error) {
+	link, err := raiseUnderDeadline(ifc, present, timeout)
 	if err != nil {
 		var stuck raiseStuck
 		if !errors.As(err, &stuck) {
@@ -307,25 +285,19 @@ func bringUpRadio(ifc machine.InterfaceSpec, present []interfaceIdentity, patien
 		}}, nil
 	}
 
-	// The join comes before the addressing because an unassociated
-	// radio carries no frames: a DHCP exchange on it would only wait
-	// out its own deadline. Once the radio associates, the interface
-	// behaves exactly like an ethernet port, which is why the same
-	// two addressing paths run below with nothing added.
+	// A radio that is not associated sends no frames, so DHCP before
+	// the join would only wait until its own deadline.
 	r := joinRadio(ifc, machine.MachineStateDir)
 	if r.state != machine.WirelessConnected {
-		// A failed join still yields a connection. The interface
-		// exists, the status must carry the reason it has no
-		// address, and the park decision reads these same
-		// connections to learn what settled.
+		// A failed join still returns a connection, so that status
+		// shows why the interface has no address and radioToWaitFor
+		// can read the radio's state.
 		return &connection{ifname: ifc.Name, mac: link.Attrs().HardwareAddr, radio: r}, nil
 	}
 	conn, err := addressInterface(link, ifc)
 	if err != nil {
-		// The join happened, so Connected stands; reporting
-		// NoCarrier here would blame the radio for a DHCP failure.
-		// The address error is the message, and the missing address
-		// on the interface says the rest.
+		// The radio did join, so its state stays Connected. NoCarrier
+		// would blame the radio for an addressing failure.
 		fmt.Fprintf(os.Stderr, "liken: network: %s: %v\n", ifc.Name, err)
 		r.message = err.Error()
 		return &connection{ifname: ifc.Name, mac: link.Attrs().HardwareAddr, radio: r}, nil
@@ -334,44 +306,41 @@ func bringUpRadio(ifc machine.InterfaceSpec, present []interfaceIdentity, patien
 	return conn, nil
 }
 
-// raiseStuck is a raise that never returned, kept apart from a
-// refusal the kernel gave. A refusal is an answer; this is the
-// absence of one, and it gets its own wireless state because no
-// supplicant event will ever follow it.
+// raiseStuck is the error for a raise that has not returned within
+// the timeout. bringUpRadio turns it into the NotRaised state, not
+// NoCarrier, because no supplicant event will ever follow it.
 type raiseStuck struct {
-	ifname   string
-	patience time.Duration
+	ifname  string
+	timeout time.Duration
 }
 
-// The message states only what init observed: the call has not come
-// back. Which lock the stuck thread holds is not observable from
-// here, and a guess would land in status as a fact.
+// The message says only what init observed, that the call has not
+// returned. init cannot see which lock the stuck thread holds, and a
+// guess would appear in status as a fact.
 func (s raiseStuck) Error() string {
-	return fmt.Sprintf("raising %s did not return in %s; the netlink call is still out and nothing can cancel it",
-		s.ifname, s.patience)
+	return fmt.Sprintf("raising %s did not return in %s. The netlink call is still running, and it cannot be canceled",
+		s.ifname, s.timeout)
 }
 
-// raiseUnderDeadline opens one link and raises it, and stops waiting
-// after the patience runs out. The goroutine is abandoned then, not
-// cancelled, because nothing can cancel a thread that is stuck inside
-// the kernel; the report is the whole remedy. A raise that returns
-// after the deadline lands its answer in a buffered channel that
-// nothing reads again, which is the cheapest true accounting of it.
+// raiseUnderDeadline looks up one link and raises it. When that has
+// not finished within the timeout, it returns a raiseStuck error and
+// leaves the goroutine running, because nothing can cancel a thread
+// that is stuck in the kernel. If the call returns later, its result
+// goes to a buffered channel that nobody reads.
 //
-// The link lookup runs inside the deadline too, because it is also a
-// netlink call: once an earlier raise wedges the kernel's rtnl lock,
-// the lookup blocks the same way the raise does, and a deadline that
-// covered only the raise would hang before reaching it.
+// The link lookup is a netlink call too, so it runs under the same
+// deadline. After an earlier raise wedges the rtnl lock, the lookup
+// blocks, and a deadline around only the raise would never start.
 func raiseUnderDeadline(ifc machine.InterfaceSpec, present []interfaceIdentity,
-	patience time.Duration) (netlink.Link, error) {
+	timeout time.Duration) (netlink.Link, error) {
 	type raised struct {
 		link netlink.Link
 		err  error
 	}
 	done := make(chan raised, 1)
-	// The seams bind before the goroutine starts, because the
-	// goroutine can outlive this function and a test must not have
-	// its stand-ins swapped out mid-raise.
+	// Read the variables before the goroutine starts. The goroutine
+	// can outlive this function, and a test may replace the
+	// variables after it returns.
 	byName, setUp := linkByName, linkSetUp
 	go func() {
 		if err := requirePort(ifc.Name, present); err != nil {
@@ -393,7 +362,7 @@ func raiseUnderDeadline(ifc machine.InterfaceSpec, present []interfaceIdentity,
 	select {
 	case out := <-done:
 		return out.link, out.err
-	case <-time.After(patience):
-		return nil, raiseStuck{ifname: ifc.Name, patience: patience}
+	case <-time.After(timeout):
+		return nil, raiseStuck{ifname: ifc.Name, timeout: timeout}
 	}
 }

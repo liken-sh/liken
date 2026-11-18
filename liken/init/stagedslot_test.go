@@ -1,8 +1,5 @@
 package main
 
-// Tests that the reboot path arms a trial only of a slot that holds
-// exactly the release its staged record names.
-
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,10 +12,10 @@ import (
 )
 
 // slotHoldingRelease writes a release's artifacts and then its
-// document onto a temporary directory, the way the operator's fetcher
-// leaves a slot, and mounts it as the slot given. It answers the
-// slot's directory and the digest of the document, which is the
-// digest a staged record of the release names.
+// document to a temporary directory, in the order the operator's
+// fetcher writes them, and makes that directory the mount of the
+// given slot. It returns the directory and the digest of the
+// document, which is the digest that a staged record names.
 func slotHoldingRelease(t *testing.T, slot, version string) (string, string) {
 	t.Helper()
 	mount := t.TempDir()
@@ -26,13 +23,13 @@ func slotHoldingRelease(t *testing.T, slot, version string) (string, string) {
 	for _, name := range []string{"vmlinuz", "liken.cpio"} {
 		contents := releaseArtifact(name, version)
 		if err := os.WriteFile(filepath.Join(mount, name), contents, 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing %s: %v", name, err)
 		}
 		sum := sha256.Sum256(contents)
 		document += fmt.Sprintf("  - name: %s\n    sha256: %s\n    size: %d\n", name, hex.EncodeToString(sum[:]), len(contents))
 	}
 	if err := os.WriteFile(filepath.Join(mount, "release.yaml"), []byte(document), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing release.yaml: %v", err)
 	}
 
 	role := map[string]machine.StorageRoleName{"A": machine.SystemARole, "B": machine.SystemBRole}[slot]
@@ -46,13 +43,12 @@ func slotHoldingRelease(t *testing.T, slot, version string) (string, string) {
 	return mount, "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// The bytes of one artifact of a release.
 func releaseArtifact(name, version string) []byte {
 	return []byte("pretend " + name + " " + version)
 }
 
-// A trial arms over a slot that holds what its record names, and
-// refuses every slot that the record does not describe.
+// armProvingBoot arms a trial boot only when the slot holds exactly
+// the release that its staged record names.
 func TestArmProvingBootChecksTheSlotAgainstTheRecord(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -63,12 +59,12 @@ func TestArmProvingBootChecksTheSlotAgainstTheRecord(t *testing.T) {
 		{name: "another release's document", slot: func(t *testing.T, mount string) {
 			other, _ := slotHoldingRelease(t, "A", "0.3.0")
 			if err := copyFile(filepath.Join(other, "release.yaml"), filepath.Join(mount, "release.yaml"), 0o644); err != nil {
-				t.Fatal(err)
+				t.Fatalf("copying the other release's document: %v", err)
 			}
 		}},
 		{name: "the document of the release beside another release's kernel", slot: func(t *testing.T, mount string) {
 			if err := os.WriteFile(filepath.Join(mount, "vmlinuz"), releaseArtifact("vmlinuz", "0.3.0"), 0o644); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing the other release's kernel: %v", err)
 			}
 		}},
 		{name: "no document, in the middle of a download", slot: func(t *testing.T, mount string) {

@@ -12,64 +12,41 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// Reading a module's soft dependencies.
+// Soft dependencies, read to recommend the modules that a person lists
+// in spec.modules for a device.
 //
-// A hard dependency is a symbol one module needs from another, and
-// depmod records every one of them in modules.dep, ordered so that
-// loading right-to-left satisfies them. A soft dependency is a weaker
-// thing: a hint that one module names another to load before it, so
-// that a device probes to the right driver. The lab's Realtek NIC is
-// the case that taught this. The r8169 driver asks, through a "pre"
-// soft dependency, for the realtek PHY library to load ahead of it.
-// Without realtek the NIC still binds, but to a generic PHY, and the
-// link does not come up the same way.
+// A soft dependency is a module that should load before or after
+// another, though neither uses the other's symbols. r8169 has a "pre"
+// soft dependency on the realtek PHY module. Without realtek, the
+// network card binds to the generic PHY driver, and the link does not
+// come up correctly.
 //
-// depmod does not index soft dependencies. modules.dep, modules.alias,
-// and the rest say nothing about them. Each module carries its own
-// soft dependencies inside its compiled object, in the .modinfo
-// section, as strings of the form "softdep=pre: realtek". modprobe
-// reads them there, and so does liken. (modprobe also reads softdep
-// lines from modprobe.d files, which liken does not ship, so a
-// module's own .modinfo is the whole source here.)
+// modules.dep and modules.alias do not list soft dependencies. Each
+// module records them in the .modinfo section of its ELF file, as
+// strings such as "softdep=pre: realtek". liken ships no modprobe.d,
+// so .modinfo is the only source.
 //
-// This knowledge never reaches the module loader. The loader stays
-// explicit: it loads what a manifest declares, in the declared order,
-// and a soft dependency the manifest did not name does not load. liken
-// has no udev for the same reason. The manifest is the whole truth
-// about what a machine runs. Soft dependencies inform the advice a
-// person reads before they write the manifest, so a recommendation can
-// name realtek and r8169 together, but they never change what the
-// loader does with the manifest it is handed.
-//
-// Only "pre" soft dependencies matter here. liken loads a driver so
-// that a device appears, and a "pre" dependency changes which driver
-// binds, so it changes that outcome. A "post" dependency loads after
-// the module and does not change whether the device appears, so the
-// recommendation ignores it.
+// The module loader ignores soft dependencies and loads only what the
+// manifest lists, in its order, so the manifest describes everything a
+// machine loads. Only "pre" soft dependencies are read, because a
+// "post" module loads after the device already works.
 
-// busCompanions names the modules that a driver needs beside it, which
-// no index in the module tree can name.
+// busCompanions maps a driver to modules that must load after it and
+// that neither modules.alias nor a soft dependency lists. These
+// modules bind to a device that the driver creates, so no modalias of
+// the hardware matches them. usbhid creates a HID device from a USB
+// interface, and hid-generic binds to it. Without hid-generic, a USB
+// keyboard does not work.
 //
-// A recommendation starts from modules.alias, which maps a device's
-// fingerprint to the drivers that claim that fingerprint. Some drivers
-// claim nothing there, because they bind over a bus that another
-// driver creates: usbhid turns a USB interface into a HID device, and
-// hid-generic then binds that HID device. No modalias points at
-// hid-generic, and no soft dependency names it, so a report that reads
-// only the index recommends a keyboard's transport and stops one
-// module short of a working keyboard.
-//
-// The table is the place to record each of these pairs as hardware
-// proves them. It stays short on purpose: an entry here is a claim
-// that the index cannot express, not a shortcut around reading it.
+// Add an entry only for a pair that real hardware has shown the
+// module index cannot find.
 var busCompanions = map[string][]string{
 	"usbhid": {"hid_generic"},
 }
 
-// driverChain is the full ordered list a person declares to make one
-// driver work: its soft dependencies, the driver, and any companion
-// that binds over the bus the driver creates. The companions come last
-// because they bind to what the driver produces.
+// driverChain returns the modules to list in spec.modules, in load
+// order, for one driver: softdepChain followed by the busCompanions of
+// each module in it.
 func driverChain(base, name string) []string {
 	chain := softdepChain(base, name)
 	for _, module := range chain {
@@ -82,14 +59,9 @@ func driverChain(base, name string) []string {
 	return chain
 }
 
-// softdepChain expands one module name into the ordered list of
-// modules to declare so the kernel binds the intended driver: the
-// module's "pre" soft dependencies first, resolved recursively because
-// a soft dependency can carry its own, then the module itself. The
-// report boot and the unclaimed-hardware advice both call this to turn
-// a single recommended driver into the full list a person writes into
-// spec.modules. A tree with no readable index yields the name alone,
-// which is the honest answer when nothing can be resolved.
+// softdepChain returns name preceded by its "pre" soft dependencies and
+// theirs, in load order. Without a readable modules.dep, it returns
+// only name.
 func softdepChain(base, name string) []string {
 	deps, err := readModulesDep(filepath.Join(base, "modules.dep"))
 	if err != nil {
@@ -100,12 +72,9 @@ func softdepChain(base, name string) []string {
 	})
 }
 
-// expandSoftdeps walks the "pre" soft-dependency graph depth-first and
-// returns the names in load order, each name once. The seen set is the
-// cycle guard. Soft dependencies are only a hint, and nothing stops a
-// module from naming one that names it back, so the walk records every
-// name it enters and never enters one twice. A name already placed by
-// an earlier branch is not placed again.
+// expandSoftdeps returns each name once, dependencies before the
+// module that needs them. Two modules can list each other as soft
+// dependencies, so the walk skips a name it has already visited.
 func expandSoftdeps(name string, pre func(string) []string) []string {
 	return appendSoftdeps(name, pre, map[string]bool{}, nil)
 }
@@ -122,10 +91,9 @@ func appendSoftdeps(name string, pre func(string) []string, seen map[string]bool
 	return append(out, name)
 }
 
-// modulePreSoftdeps returns the "pre" soft dependencies that a single
-// module names in its .modinfo, without recursing. It finds the
-// module's file through modules.dep, whose first field on each line is
-// the module's own path, then reads the strings from that file.
+// modulePreSoftdeps returns the "pre" soft dependencies of one module,
+// without recursing, or nil when the module or its file is missing.
+// The first field of a module's entry in modules.dep is its file path.
 func modulePreSoftdeps(base string, deps map[string][]string, name string) []string {
 	entry, ok := deps[strings.ReplaceAll(name, "-", "_")]
 	if !ok || len(entry) == 0 {
@@ -138,13 +106,8 @@ func modulePreSoftdeps(base string, deps map[string][]string, name string) []str
 	return parseSoftdepPre(modinfo)
 }
 
-// readModinfo returns the raw bytes of a module's .modinfo section.
-// The module files are compiled objects, so the soft-dependency
-// strings live in an ELF section, not in any index. liken's modules
-// are zstd-compressed exactly as Ubuntu shipped them, and the kernel
-// normally decompresses them itself during finit_module. Reading the
-// section back in userspace has no such help, so this decompresses the
-// file first when its name says it carries a zstd frame.
+// readModinfo returns the .modinfo section of a module file, and
+// decompresses a .ko.zst file first.
 func readModinfo(path string) ([]byte, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -159,8 +122,6 @@ func readModinfo(path string) ([]byte, error) {
 	return elfSection(raw, ".modinfo")
 }
 
-// elfSection returns one named section's bytes from an ELF image held
-// in memory.
 func elfSection(image []byte, name string) ([]byte, error) {
 	f, err := elf.NewFile(bytes.NewReader(image))
 	if err != nil {
@@ -169,12 +130,11 @@ func elfSection(image []byte, name string) ([]byte, error) {
 	defer f.Close()
 	section := f.Section(name)
 	if section == nil {
-		return nil, fmt.Errorf("no %s section", name)
+		return nil, fmt.Errorf("the module has no %s section", name)
 	}
 	return section.Data()
 }
 
-// zstdDecode decompresses a whole zstd frame held in memory.
 func zstdDecode(data []byte) ([]byte, error) {
 	reader, err := zstd.NewReader(nil)
 	if err != nil {
@@ -184,12 +144,10 @@ func zstdDecode(data []byte) ([]byte, error) {
 	return reader.DecodeAll(data, nil)
 }
 
-// parseSoftdepPre reads the "pre" soft dependencies out of a .modinfo
-// section. The section is a run of NUL-separated "key=value" strings.
-// A soft dependency is a "softdep" key whose value lists names under
-// "pre:" and "post:" markers, for example "pre: realtek post: foo".
-// This collects the names under "pre:", in order, across every softdep
-// string, and drops the "post:" names for the reason stated above.
+// parseSoftdepPre returns the names after "pre:" in each softdep entry
+// of a .modinfo section, in order. The section holds NUL-separated
+// "key=value" strings, and a softdep value looks like
+// "pre: realtek post: foo".
 func parseSoftdepPre(modinfo []byte) []string {
 	var pre []string
 	for entry := range bytes.SplitSeq(modinfo, []byte{0}) {

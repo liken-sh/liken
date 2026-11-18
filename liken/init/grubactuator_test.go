@@ -1,10 +1,5 @@
 package main
 
-// Tests for the GRUB dialect of the boot actuator. These tests use a
-// temporary directory as the boot home and the fake machine's disks.
-// They cover arming, readback, the proven assertion, and the healing
-// that re-derives the on-disk boot chain from a slot's artifacts.
-
 import (
 	"bytes"
 	"encoding/binary"
@@ -17,23 +12,21 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// installedGRUBHome builds a boot home the way the installer leaves
-// it: a grub directory that holds an environment block with the
-// given variables. It returns the actuator that points at this boot
-// home.
+// installedGRUBHome creates a boot home with a grubenv that has vars,
+// and returns an actuator for it.
 func installedGRUBHome(t *testing.T, vars map[string]string) grubActuator {
 	t.Helper()
 	home := fakeBootHomeMount(t)
 	grubDir := filepath.Join(home, "grub")
 	if err := os.MkdirAll(grubDir, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the grub directory: %v", err)
 	}
 	env, err := renderGRUBEnv(vars)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the GRUB environment block: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(grubDir, "grubenv"), env, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing grubenv: %v", err)
 	}
 	return grubActuator{grubDir: grubDir, machineName: "node-1"}
 }
@@ -43,20 +36,20 @@ func TestGRUBActuatorArmsTheTrial(t *testing.T) {
 
 	armed, err := act.armTrial("B")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("arming the trial: %v", err)
 	}
 	if !strings.Contains(armed, "try_slot=B") {
-		t.Errorf("the description names what was armed: %q", armed)
+		t.Errorf("armTrial returned %q, want a description with try_slot=B", armed)
 	}
 	env, err := readGRUBEnv(act.envPath())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the GRUB environment block: %v", err)
 	}
 	if env["try_slot"] != "B" {
-		t.Errorf("try_slot is the one-shot: %v", env)
+		t.Errorf("the environment block is %v, want try_slot=B", env)
 	}
 	if env["default_slot"] != "A" {
-		t.Errorf("arming a trial must not move the standing preference: %v", env)
+		t.Errorf("the environment block is %v, want default_slot=A unchanged", env)
 	}
 }
 
@@ -64,24 +57,22 @@ func TestGRUBActuatorRefusesToArmWithoutAnEnvBlock(t *testing.T) {
 	home := fakeBootHomeMount(t)
 	act := grubActuator{grubDir: filepath.Join(home, "grub")}
 	if err := act.canArmTrial("B"); err == nil {
-		t.Error("no environment block means no safe way to arm a one-shot")
+		t.Error("canArmTrial returned nil with no environment block, want an error")
 	}
 }
 
 func TestGRUBActuatorReadsTheFallbackBack(t *testing.T) {
 	act := installedGRUBHome(t, map[string]string{"default_slot": "A", "try_slot": ""})
 	if !act.fallbackLeads("A") {
-		t.Error("default_slot=A is the standing preference")
+		t.Error("fallbackLeads(\"A\") is false, want true with default_slot=A")
 	}
 	if act.fallbackLeads("B") {
-		t.Error("slot B does not lead; a verified fallback must not claim it does")
+		t.Error("fallbackLeads(\"B\") is true, want false with default_slot=A")
 	}
 }
 
 func TestGRUBActuatorAssertProvenFlipsTheDefaultAndClearsTheTrial(t *testing.T) {
-	// The disk fixture keeps the healing half of assertProven silent:
-	// the slot carries no artifacts, so only the environment block
-	// changes.
+	// The slot has no GRUB artifacts, so only grubenv changes.
 	installedBIOSDisk(t)
 	fakeSlotAMount(t)
 	act := installedGRUBHome(t, map[string]string{"default_slot": "A", "try_slot": "B"})
@@ -90,13 +81,13 @@ func TestGRUBActuatorAssertProvenFlipsTheDefaultAndClearsTheTrial(t *testing.T) 
 
 	env, err := readGRUBEnv(act.envPath())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the GRUB environment block: %v", err)
 	}
 	if env["default_slot"] != "B" {
-		t.Errorf("promotion moves the standing preference: %v", env)
+		t.Errorf("the environment block is %v, want default_slot=B", env)
 	}
 	if env["try_slot"] != "" {
-		t.Errorf("a stale one-shot must not survive the assertion: %v", env)
+		t.Errorf("the environment block is %v, want try_slot cleared", env)
 	}
 }
 
@@ -108,21 +99,21 @@ func TestGRUBActuatorAssertProvenIsIdempotent(t *testing.T) {
 	act.assertProven("A")
 	before, err := os.ReadFile(act.envPath())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading grubenv after the first assertProven: %v", err)
 	}
 	act.assertProven("A")
 	after, err := os.ReadFile(act.envPath())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading grubenv after the second assertProven: %v", err)
 	}
 	if !bytes.Equal(before, after) {
-		t.Error("an assertion that changes nothing must write nothing")
+		t.Error("the second assertProven rewrote grubenv, want it unchanged")
 	}
 }
 
-// grubArtifactsOnSlot puts the GRUB pair on a slot mount the way a
-// verified release lays them down. It returns the mount and the two
-// images (in the same shapes that fakePayload uses).
+// grubArtifactsOnSlot writes grub-boot.img and grub-core.img into the
+// mount of slot A, in the same shapes as fakePayload, and returns the
+// mount and the two images.
 func grubArtifactsOnSlot(t *testing.T) (mount string, bootImg, coreImg []byte) {
 	t.Helper()
 	mount = fakeSlotAMount(t)
@@ -130,19 +121,17 @@ func grubArtifactsOnSlot(t *testing.T) (mount string, bootImg, coreImg []byte) {
 	coreImg = bytes.Repeat([]byte{0xC0}, 3*disks.SectorSize)
 	binary.LittleEndian.PutUint16(coreImg[grubBlocklistSegment:], grubLoadSegment)
 	if err := os.WriteFile(filepath.Join(mount, "grub-boot.img"), bootImg, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing grub-boot.img: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(mount, "grub-core.img"), coreImg, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing grub-core.img: %v", err)
 	}
 	return mount, bootImg, coreImg
 }
 
-func TestGRUBActuatorHealsTheBootSectors(t *testing.T) {
-	// The installed BIOS disk's boot sectors start as zeroes. This is
-	// exactly what a host leaves behind when it rewrites the MBR under
-	// a running machine. Asserting the proven slot must put the whole
-	// chain back from the slot's own artifacts.
+func TestGRUBActuatorRepairsTheBootSectors(t *testing.T) {
+	// The boot sectors of the fake disk start as zeroes, as a host
+	// leaves them when it rewrites the MBR of a running machine.
 	_, dev := installedBIOSDisk(t)
 	grubArtifactsOnSlot(t)
 	act := installedGRUBHome(t, map[string]string{"default_slot": "A", "try_slot": ""})
@@ -151,35 +140,35 @@ func TestGRUBActuatorHealsTheBootSectors(t *testing.T) {
 
 	disk, err := os.ReadFile(filepath.Join(dev, "vdc"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the disk: %v", err)
 	}
 	if disk[0] != 0xB0 {
-		t.Error("the MBR boot code comes from grub-boot.img")
+		t.Error("the first byte of the MBR is not 0xB0, want the boot code of grub-boot.img")
 	}
 	if got := binary.LittleEndian.Uint64(disk[grubKernelSectorOffset:]); got != 2048 {
-		t.Errorf("the patched MBR points at the biosBoot partition: %d", got)
+		t.Errorf("the patched MBR points at sector %d, want 2048, the biosBoot partition", got)
 	}
 	if disk[446+4] != 0xEE || disk[510] != 0x55 || disk[511] != 0xAA {
-		t.Error("healing the boot code must not disturb the protective MBR")
+		t.Error("the protective MBR changed, want it unchanged")
 	}
 	core := disk[2048*disks.SectorSize:]
 	if core[0] != 0xC0 {
-		t.Error("the core image comes from grub-core.img")
+		t.Error("the first byte of the core image is not 0xC0, want the contents of grub-core.img")
 	}
 	if got := binary.LittleEndian.Uint64(core[grubBlocklistStart:]); got != 2049 {
-		t.Errorf("the core's blocklist points at its own continuation: %d", got)
+		t.Errorf("the blocklist of the core image starts at sector %d, want 2049, its continuation", got)
 	}
 
 	cfg, err := os.ReadFile(filepath.Join(act.grubDir, "grub.cfg"))
 	if err != nil {
-		t.Fatal("healing renders grub.cfg too:", err)
+		t.Fatalf("reading grub.cfg: %v", err)
 	}
 	if !strings.Contains(string(cfg), "liken.machine=node-1") {
-		t.Error("the healed config carries this machine's identity")
+		t.Error("grub.cfg has no liken.machine=node-1, want the machine name rendered into it")
 	}
 }
 
-func TestGRUBActuatorHealingIsQuietWhenTheChainAgrees(t *testing.T) {
+func TestGRUBActuatorRepairIsQuietWhenTheChainAgrees(t *testing.T) {
 	_, dev := installedBIOSDisk(t)
 	grubArtifactsOnSlot(t)
 	act := installedGRUBHome(t, map[string]string{"default_slot": "A", "try_slot": ""})
@@ -187,22 +176,21 @@ func TestGRUBActuatorHealingIsQuietWhenTheChainAgrees(t *testing.T) {
 	act.assertProven("A")
 	before, err := os.ReadFile(filepath.Join(dev, "vdc"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the disk before the repair: %v", err)
 	}
 	act.assertProven("A")
 	after, err := os.ReadFile(filepath.Join(dev, "vdc"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the disk after the repair: %v", err)
 	}
 	if !bytes.Equal(before, after) {
-		t.Error("a healthy chain must not be rewritten")
+		t.Error("the disk changed, want a matching boot chain left unwritten")
 	}
 }
 
-func TestGRUBActuatorHealingSkipsASlotWithoutTheArtifacts(t *testing.T) {
-	// A proven release from before liken carried GRUB artifacts says
-	// nothing about the boot sectors. The chain that booted the
-	// machine must stay untouched.
+func TestGRUBActuatorRepairSkipsASlotWithoutTheArtifacts(t *testing.T) {
+	// A release from before liken shipped GRUB artifacts has nothing
+	// to compare the boot sectors with.
 	_, dev := installedBIOSDisk(t)
 	fakeSlotAMount(t)
 	act := installedGRUBHome(t, map[string]string{"default_slot": "A", "try_slot": ""})
@@ -211,24 +199,24 @@ func TestGRUBActuatorHealingSkipsASlotWithoutTheArtifacts(t *testing.T) {
 
 	disk, err := os.ReadFile(filepath.Join(dev, "vdc"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the disk: %v", err)
 	}
 	if disk[0] != 0 {
-		t.Error("no artifacts, no opinion: the boot code must stay as it was")
+		t.Error("the boot code changed, want it unchanged when the slot has no GRUB artifacts")
 	}
 }
 
-func TestChooseBootActuatorSpeaksEachDialect(t *testing.T) {
-	fakeBIOSRegime(t)
+func TestChooseBootActuatorChoosesGRUBOnlyWhenGrubenvExists(t *testing.T) {
+	fakeBIOSFirmware(t)
 	act := installedGRUBHome(t, map[string]string{"default_slot": "A"})
 	if _, ok := chooseBootActuator().(grubActuator); !ok {
-		t.Error("a BIOS machine with an installed environment block speaks GRUB")
+		t.Error("chooseBootActuator did not return a grubActuator, want one for a BIOS machine with an environment block")
 	}
 	if err := os.Remove(act.envPath()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing grubenv: %v", err)
 	}
 	if _, ok := chooseBootActuator().(noActuator); !ok {
-		t.Error("a BIOS machine without an environment block has no dialect")
+		t.Error("chooseBootActuator did not return a noActuator, want one for a BIOS machine with no environment block")
 	}
 }
 
@@ -236,100 +224,97 @@ func TestChooseBootActuatorPrefersUEFI(t *testing.T) {
 	fakeFirmware(t, map[string][]byte{})
 	installedGRUBHome(t, map[string]string{"default_slot": "A"})
 	if _, ok := chooseBootActuator().(efiActuator); !ok {
-		t.Error("a UEFI machine speaks to its firmware even when a boot home is present")
+		t.Error("chooseBootActuator did not return an efiActuator, want one for a UEFI machine even with a boot home")
 	}
 }
 
 func TestBIOSFirmwareFactsReadTheGRUBEnvironment(t *testing.T) {
-	fakeBIOSRegime(t)
+	fakeBIOSFirmware(t)
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A panic=10")
 	installedGRUBHome(t, map[string]string{"default_slot": "A", "try_slot": "B"})
 
 	fw := biosFirmwareFacts()
 
 	if fw.Mode != machine.FirmwareBIOS {
-		t.Errorf("the mode is BIOS: %v", fw.Mode)
+		t.Errorf("the mode is %v, want BIOS", fw.Mode)
 	}
 	if !strings.Contains(fw.BootCurrent, "liken slot A") {
-		t.Errorf("BootCurrent names the running slot: %q", fw.BootCurrent)
+		t.Errorf("BootCurrent is %q, want it to name slot A, the running slot", fw.BootCurrent)
 	}
 	if !strings.Contains(fw.BootNext, "liken slot B") {
-		t.Errorf("an armed try_slot reports as the one-shot: %q", fw.BootNext)
+		t.Errorf("BootNext is %q, want it to name slot B, the armed try_slot", fw.BootNext)
 	}
 	if len(fw.BootOrder) != 1 || !strings.Contains(fw.BootOrder[0], "liken slot A") {
-		t.Errorf("default_slot is the standing preference: %v", fw.BootOrder)
+		t.Errorf("BootOrder is %v, want it to name slot A, default_slot", fw.BootOrder)
 	}
 }
 
 func TestBIOSFirmwareFactsWithoutAGRUBHome(t *testing.T) {
-	// A -kernel lab boot: BIOS mode, no boot home, and no facts
-	// beyond the mode itself.
-	fakeBIOSRegime(t)
+	// A QEMU machine booted with -kernel has BIOS mode and no boot
+	// home.
+	fakeBIOSFirmware(t)
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-1")
 	fakeBootHomeMount(t)
 
 	fw := biosFirmwareFacts()
 
 	if fw.Mode != machine.FirmwareBIOS || fw.BootCurrent != "" || fw.BootNext != "" || len(fw.BootOrder) != 0 {
-		t.Errorf("no environment block, no facts to report: %+v", fw)
+		t.Errorf("the firmware status is %+v, want BIOS mode with no other facts when grubenv is missing", fw)
 	}
 }
 
 func TestGRUBActuatorCanArmWithAnEnvBlock(t *testing.T) {
 	act := installedGRUBHome(t, map[string]string{"default_slot": "A"})
 	if err := act.canArmTrial("B"); err != nil {
-		t.Errorf("an installed environment block can carry a one-shot: %v", err)
+		t.Errorf("canArmTrial returned %v, want nil with an installed environment block", err)
 	}
 }
 
-// Without an environment block, GRUB has nowhere to read a one-shot
-// from, so arming must fail rather than report a trial that will never
-// run.
+// Without grubenv, GRUB has no try_slot to read, so arming must fail
+// and not report a trial that will never run.
 func TestGRUBActuatorArmTrialFailsWithoutAnEnvBlock(t *testing.T) {
 	home := fakeBootHomeMount(t)
 	act := grubActuator{grubDir: filepath.Join(home, "grub")}
 	if _, err := act.armTrial("B"); err == nil {
-		t.Error("arming with no environment block must fail")
+		t.Error("armTrial returned nil with no environment block, want an error")
 	}
 	if _, err := os.Stat(act.envPath()); err == nil {
-		t.Error("a failed arm must not create an environment block")
+		t.Error("armTrial created grubenv, want none")
 	}
 }
 
-// The environment block and the boot chain are separate assertions. A
-// torn block must not stop the boot sectors from healing, because a
-// machine whose MBR was zeroed never boots again otherwise.
-func TestGRUBActuatorHealsTheBootSectorsDespiteATornEnvBlock(t *testing.T) {
+// A grubenv that does not parse must not stop the boot sectors from
+// being repaired.
+func TestGRUBActuatorRepairsTheBootSectorsDespiteATornEnvBlock(t *testing.T) {
 	_, dev := installedBIOSDisk(t)
 	grubArtifactsOnSlot(t)
 	act := installedGRUBHome(t, map[string]string{"default_slot": "A"})
 	torn := bytes.Repeat([]byte{0xFF}, 1024)
 	if err := os.WriteFile(act.envPath(), torn, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the torn grubenv: %v", err)
 	}
 
 	act.assertProven("A")
 
 	disk, err := os.ReadFile(filepath.Join(dev, "vdc"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the disk: %v", err)
 	}
 	if disk[0] != 0xB0 {
-		t.Error("the boot sectors must heal even when the environment block is torn")
+		t.Error("the first byte of the MBR is not 0xB0, want the boot sectors rewritten despite the torn environment block")
 	}
 	env, err := os.ReadFile(act.envPath())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading grubenv: %v", err)
 	}
 	if !bytes.Equal(env, torn) {
-		t.Error("a block that does not parse must not be rewritten from a guess")
+		t.Error("grubenv changed, want a block that does not parse left as it was")
 	}
 }
 
-// Healing writes the boot sectors only from artifacts it can trust and
-// a disk it can read. Each case here leaves a question healing cannot
-// answer, and the boot sectors and grub.cfg must stay as they were.
-func TestGRUBActuatorHealingLeavesTheChainAloneWhenItCannotPlan(t *testing.T) {
+// In each case the repair cannot plan the boot sectors, so it must
+// write neither them nor grub.cfg.
+func TestGRUBActuatorRepairLeavesTheChainAloneWhenItCannotPlan(t *testing.T) {
 	cases := []struct {
 		name   string
 		slot   string
@@ -338,17 +323,17 @@ func TestGRUBActuatorHealingLeavesTheChainAloneWhenItCannotPlan(t *testing.T) {
 		{"a slot letter that names no slot", "C", func(*testing.T, string, string) {}},
 		{"a slot with no core image", "A", func(t *testing.T, _, slotMount string) {
 			if err := os.Remove(filepath.Join(slotMount, "grub-core.img")); err != nil {
-				t.Fatal(err)
+				t.Fatalf("removing grub-core.img: %v", err)
 			}
 		}},
 		{"a core image for another platform", "A", func(t *testing.T, _, slotMount string) {
 			if err := os.WriteFile(filepath.Join(slotMount, "grub-core.img"), make([]byte, 3*disks.SectorSize), 0o644); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing grub-core.img: %v", err)
 			}
 		}},
 		{"a disk with no biosBoot partition", "A", func(t *testing.T, sys, _ string) {
 			if err := os.RemoveAll(filepath.Join(sys, "vdc", "vdc1")); err != nil {
-				t.Fatal(err)
+				t.Fatalf("removing the biosBoot partition: %v", err)
 			}
 		}},
 	}
@@ -360,50 +345,47 @@ func TestGRUBActuatorHealingLeavesTheChainAloneWhenItCannotPlan(t *testing.T) {
 			c.damage(t, sys, slotMount)
 			before, err := os.ReadFile(filepath.Join(dev, "vdc"))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the disk before the repair: %v", err)
 			}
 
-			act.healBootChain(c.slot)
+			act.repairBootChain(c.slot)
 
 			after, err := os.ReadFile(filepath.Join(dev, "vdc"))
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("reading the disk after the repair: %v", err)
 			}
 			if !bytes.Equal(before, after) {
-				t.Error("the boot sectors must stay as they were")
+				t.Error("the disk changed, want the boot sectors unchanged")
 			}
 			if _, err := os.Stat(filepath.Join(act.grubDir, "grub.cfg")); err == nil {
-				t.Error("grub.cfg must not be written when healing stops early")
+				t.Error("grub.cfg exists, want none when the repair stops early")
 			}
 		})
 	}
 }
 
-// grub.cfg carries the machine's name. Without a name there is nothing
-// correct to render, so healing fixes the boot sectors and leaves
-// grub.cfg alone rather than write an anonymous one.
-func TestGRUBActuatorHealingLeavesGrubCfgAloneWithoutAMachineName(t *testing.T) {
+// Without a machine name the repair fixes the boot sectors and does
+// not write grub.cfg.
+func TestGRUBActuatorRepairLeavesGrubCfgAloneWithoutAMachineName(t *testing.T) {
 	_, dev := installedBIOSDisk(t)
 	grubArtifactsOnSlot(t)
 	act := installedGRUBHome(t, map[string]string{"default_slot": "A"})
 	act.machineName = ""
 
-	act.healBootChain("A")
+	act.repairBootChain("A")
 
 	disk, err := os.ReadFile(filepath.Join(dev, "vdc"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the disk: %v", err)
 	}
 	if disk[0] != 0xB0 {
-		t.Error("the boot sectors heal without a machine name")
+		t.Error("the first byte of the MBR is not 0xB0, want the boot sectors rewritten with no machine name")
 	}
 	if _, err := os.Stat(filepath.Join(act.grubDir, "grub.cfg")); err == nil {
-		t.Error("grub.cfg must not be rendered without a machine name")
+		t.Error("grub.cfg exists, want none when the machine name is empty")
 	}
 }
 
-// Healing reads the proven slot's artifacts from the slot's mount
-// point, the same one storage reconciliation mounts it on.
 func TestSlotMountPathFollowsTheRoleMounts(t *testing.T) {
 	slotA := fakeSlotAMount(t)
 	slotB := fakeRoleMountPath(t, machine.SystemBRole)
@@ -418,7 +400,7 @@ func TestSlotMountPathFollowsTheRoleMounts(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.slot, func(t *testing.T) {
 			if got := slotMountPath(c.slot); got != c.want {
-				t.Errorf("got %q, want %q", got, c.want)
+				t.Errorf("slotMountPath(%q) = %q, want %q", c.slot, got, c.want)
 			}
 		})
 	}

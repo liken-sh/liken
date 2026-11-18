@@ -1,14 +1,8 @@
 package main
 
-// This file tests the network functions that produce the same
-// output for the same input. The calls that raise links, add
-// addresses and routes, and run the DHCP exchange are tested against
-// a stand-in kernel in networkbringup_test.go.
-//
-// Checking a manifest's names against the ports a machine has is the
-// reason those functions take a plain list of ports instead of
-// netlink links: the check is where the mistakes are, so it is tested
-// here, on every machine, with no kernel in the way.
+// Tests of the network functions that depend only on their arguments.
+// networkbringup_test.go tests the netlink and DHCP calls against a
+// fake kernel.
 
 import (
 	"net"
@@ -23,8 +17,7 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// twoPorts is a machine with two ports, which the kernel numbered in
-// the order it probed them.
+// twoPorts is a machine with two ports, eth0 and eth1.
 func twoPorts() []interfaceIdentity {
 	return []interfaceIdentity{
 		{name: "eth0", mac: net.HardwareAddr{0xe0, 0x51, 0xd8, 0xaa, 0xbb, 0x01}},
@@ -34,42 +27,33 @@ func twoPorts() []interfaceIdentity {
 
 func TestRequirePortAcceptsAPortTheMachineHas(t *testing.T) {
 	if err := requirePort("eth1", twoPorts()); err != nil {
-		t.Error(err)
+		t.Errorf("requirePort(eth1) = %v, want nil", err)
 	}
 }
 
 func TestRequirePortListsThePortsTheMachineHasWhenNoneMatches(t *testing.T) {
-	// Nobody can see this machine. It has no shell and no SSH, so
-	// the console message is the whole diagnosis. A message that
-	// names the ports the machine really has turns a drive to the
-	// site into an edit of the manifest.
 	err := requirePort("enp3s0", twoPorts())
 	if err == nil {
-		t.Fatal("expected an error for a name no port answers to")
+		t.Fatal("requirePort(enp3s0) = nil, want an error because no port has that name")
 	}
 	for _, want := range []string{"enp3s0", "eth0, eth1"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the error must carry %q: %v", want, err)
+			t.Errorf("the error is %q, want it to contain %q", err, want)
 		}
 	}
 }
 
 func TestRequirePortOnAMachineWithNoPortsSaysSo(t *testing.T) {
-	// An empty listing must still read as a sentence, because it is
-	// the answer to "which ports does this machine have".
 	err := requirePort("eth0", nil)
 	if err == nil {
-		t.Fatal("expected an error on a machine with no ports")
+		t.Fatal("requirePort on a machine with no ports = nil, want an error")
 	}
 	if !strings.Contains(err.Error(), "no network interface at all") {
-		t.Errorf("got %v", err)
+		t.Errorf("the error is %q, want it to contain \"no network interface at all\"", err)
 	}
 }
 
 func TestPresentInterfacesLeavesOutLoopback(t *testing.T) {
-	// Loopback is not hardware, the boot has already raised it, and
-	// leaving it out keeps it out of the listing that tells a person
-	// what their machine has.
 	links := []netlink.Link{
 		&netlink.Device{LinkAttrs: netlink.LinkAttrs{Name: "lo", Flags: net.FlagLoopback}},
 		&netlink.Device{LinkAttrs: netlink.LinkAttrs{
@@ -79,44 +63,40 @@ func TestPresentInterfacesLeavesOutLoopback(t *testing.T) {
 	}
 	present := presentInterfaces(links)
 	if len(present) != 1 || present[0].name != "eth0" {
-		t.Fatalf("got %v", present)
+		t.Fatalf("presentInterfaces = %v, want only eth0", present)
 	}
 }
 
-func TestPickInterfaceTakesTheFirstPortWithAnAddress(t *testing.T) {
-	// This is the zero-configuration default, for the one machine
-	// with one port where there is nothing to choose between. A link
-	// with no hardware address is a virtual device, not a card.
+func TestPickInterfaceTakesTheFirstPortWithAHardwareAddress(t *testing.T) {
 	present := []interfaceIdentity{
 		{name: "dummy0"},
 		{name: "eth0", mac: net.HardwareAddr{0xe0, 0x51, 0xd8, 0xaa, 0xbb, 0x01}},
 	}
 	got, err := pickInterface(present)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("pickInterface: %v", err)
 	}
 	if got != "eth0" {
-		t.Errorf("got %q", got)
+		t.Errorf("pickInterface = %q, want eth0", got)
 	}
 }
 
 func TestPickInterfaceFindsNothingOnAMachineWithNoCard(t *testing.T) {
 	if _, err := pickInterface(nil); err == nil {
-		t.Error("expected an error when no link carries a hardware address")
+		t.Error("pickInterface(nil) returned no error, want one because no link has a hardware address")
 	}
 }
 
 func TestJoinIPsReadsAsAList(t *testing.T) {
 	ips := []net.IP{net.ParseIP("10.0.2.3"), net.ParseIP("10.0.2.4")}
 	if got := joinIPs(ips); got != "10.0.2.3, 10.0.2.4" {
-		t.Errorf("got %q", got)
+		t.Errorf("joinIPs = %q, want \"10.0.2.3, 10.0.2.4\"", got)
 	}
 }
 
-func TestConnectionReportNarratesEachMethod(t *testing.T) {
-	// The report prints the same facts that interfaceFacts publishes.
-	// Testing both methods confirms that the report prints every
-	// field.
+func TestConnectionReportPrintsEachMethod(t *testing.T) {
+	// The test checks no output. It runs the DHCP branch and the static
+	// branch of report, so a panic in either one fails it.
 	_, subnet, _ := net.ParseCIDR("10.0.2.0/24")
 	dhcp := &connection{
 		ifname:      "eth0",
@@ -140,12 +120,6 @@ func TestConnectionReportNarratesEachMethod(t *testing.T) {
 }
 
 func TestResolvConfCapsAtThreeNameservers(t *testing.T) {
-	// Since the 1980s, glibc has read at most three nameservers.
-	// Every other resolver stack follows the same limit. kubelet
-	// logs a warning at each sync when a node offers more than
-	// three. Linode's DHCP service hands out its whole regional
-	// fleet of resolvers, eighteen in total, but the machine keeps
-	// only three.
 	conns := []*connection{{nameservers: []net.IP{
 		net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2"),
 		net.ParseIP("10.0.0.3"), net.ParseIP("10.0.0.4"),
@@ -153,88 +127,85 @@ func TestResolvConfCapsAtThreeNameservers(t *testing.T) {
 	}}}
 	want := "nameserver 10.0.0.1\nnameserver 10.0.0.2\nnameserver 10.0.0.3\n"
 	if got := resolvConf(conns); got != want {
-		t.Errorf("got:\n%s", got)
+		t.Errorf("resolvConf =\n%swant\n%s", got, want)
 	}
 }
 
 func TestResolvConfKeepsInterfaceOrder(t *testing.T) {
-	// Interface order is priority order. The uplink's lease
-	// nameservers come before a later interface's manifest
-	// declarations.
+	// Interface order is priority order, so the nameservers of the
+	// first interface come first.
 	conns := []*connection{
 		{nameservers: []net.IP{net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2")}},
 		{nameservers: []net.IP{net.ParseIP("10.1.0.1")}},
 	}
 	want := "nameserver 10.0.0.1\nnameserver 10.0.0.2\nnameserver 10.1.0.1\n"
 	if got := resolvConf(conns); got != want {
-		t.Errorf("got:\n%s", got)
+		t.Errorf("resolvConf =\n%swant\n%s", got, want)
 	}
 }
 
 func TestResolvConfDropsDuplicates(t *testing.T) {
-	// Listing the same resolver on two interfaces adds no value the
-	// second time. With only three slots available, a duplicate
-	// takes the place of a real nameserver.
+	// A duplicate would use one of the three places without adding a
+	// resolver.
 	conns := []*connection{
 		{nameservers: []net.IP{net.ParseIP("10.0.0.1")}},
 		{nameservers: []net.IP{net.ParseIP("10.0.0.1"), net.ParseIP("10.1.0.1")}},
 	}
 	want := "nameserver 10.0.0.1\nnameserver 10.1.0.1\n"
 	if got := resolvConf(conns); got != want {
-		t.Errorf("got:\n%s", got)
+		t.Errorf("resolvConf =\n%swant\n%s", got, want)
 	}
 }
 
 func TestResolvConfWithNoNameserversIsEmpty(t *testing.T) {
 	if got := resolvConf([]*connection{{}}); got != "" {
-		t.Errorf("no nameservers must render nothing, got %q", got)
+		t.Errorf("resolvConf = %q, want an empty string because there are no nameservers", got)
 	}
 }
 
 func TestWritingResolvConfReplacesTheWholeFileAtOnce(t *testing.T) {
-	// A radio that settles late rewrites this file while every
-	// resolver on the machine reads it. A write in place would leave a
-	// reader with a truncated file, so the write must be a rename: the
-	// old file keeps serving until the new one replaces it whole.
-	path := aimResolvConf(t)
+	// A different file at the path after the rewrite shows that the
+	// write renamed a new file into place and did not truncate the old
+	// one.
+	path := useResolvConf(t)
 	first := withNameserver(addressed("eth0", "10.10.0.5/24"), "10.10.0.1")
 	if err := writeResolvConf([]*connection{first}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing resolv.conf the first time: %v", err)
 	}
 	before, err := os.Stat(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the file after the first write: %v", err)
 	}
 
 	second := withNameserver(joinedRadio("wlan0", "homenet", "192.168.1.20/24"), "192.168.1.1")
 	if err := writeResolvConf([]*connection{first, second}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing resolv.conf the second time: %v", err)
 	}
 	after, err := os.Stat(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the file after the second write: %v", err)
 	}
 
 	if os.SameFile(before, after) {
-		t.Error("the rewrite kept the same file, so a reader could see it half written")
+		t.Error("the second write reused the first file, want a new file renamed into place so that no reader sees a half-written one")
 	}
 	if mode := after.Mode().Perm(); mode != 0o644 {
-		t.Errorf("every resolver reads this file: mode %o", mode)
+		t.Errorf("resolv.conf has mode %o, want 644 because every process reads it", mode)
 	}
 	rendered, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading resolv.conf: %v", err)
 	}
 	want := "nameserver 10.10.0.1\nnameserver 192.168.1.1\n"
 	if string(rendered) != want {
-		t.Errorf("got %q, want %q", rendered, want)
+		t.Errorf("resolv.conf is %q, want %q", rendered, want)
 	}
 
 	entries, err := os.ReadDir(filepath.Dir(path))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listing the directory of resolv.conf: %v", err)
 	}
 	if len(entries) != 1 {
-		t.Errorf("the write left a temp file behind: %d entries", len(entries))
+		t.Errorf("the directory has %d entries, want only resolv.conf", len(entries))
 	}
 }

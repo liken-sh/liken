@@ -1,10 +1,7 @@
 package main
 
-// Tests for the report boot's own steps: the wait for the probe, the
-// look at each network port, the gathering of the whole report, and the
-// messages a person reads at the end. The steps that act on the
-// machine (the loop mount, raising a link, the stick's mount, and the
-// reboot) need root, so each test stands in for the one it reaches.
+// The loop mount, raising a link, the stick's mount, and the reboot
+// need root, so these tests replace each of them with a fake.
 
 import (
 	"context"
@@ -23,9 +20,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The report boot runs only when the command line carries
-// liken.report, because it is the one menu entry that never touches a
-// disk.
 func TestReportingReadsTheCommandLine(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -45,17 +39,15 @@ func TestReportingReadsTheCommandLine(t *testing.T) {
 	}
 }
 
-// quietListener is a uevent listener whose channel stays open and never
-// signals: a machine whose probe has already finished.
+// quietListener returns a uevent channel that stays open and never
+// sends, like a machine whose probe has finished.
 func quietListener(context.Context) (<-chan struct{}, error) {
 	return make(chan struct{}), nil
 }
 
-// The report waits for the bus probe to go quiet before it walks sysfs.
-// With a live listener it waits for one quiet second. When it cannot
-// hear the probe, because the socket did not open or the listener
-// stopped, it pauses for quiescePause, so a probe still has time to
-// finish.
+// With a working listener, quiesceHardware waits for one second with no
+// uevent. When the socket does not open or the listener stops, it
+// sleeps for quiescePause.
 func TestQuiesceHardwareWaitsForTheProbe(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -80,9 +72,9 @@ func TestQuiesceHardwareWaitsForTheProbe(t *testing.T) {
 	}
 }
 
-// fakeNetlink stands in for the kernel's list of interfaces. It answers
-// the list with links, or with listErr, and records the name of each
-// link the report raises. A raise of a name in refuse fails.
+// fakeNetlink replaces listLinks and raiseLink. listLinks returns links
+// and listErr. raiseLink records each name in raised, and fails for the
+// name in refuse.
 type fakeNetlink struct {
 	links   []netlink.Link
 	listErr error
@@ -90,8 +82,7 @@ type fakeNetlink struct {
 	raised  []string
 }
 
-// useLinks hands the report the fake's interfaces in place of the
-// machine's own for the rest of the test.
+// useLinks installs f until the test ends.
 func useLinks(t *testing.T, f *fakeNetlink) {
 	t.Helper()
 	savedList, savedRaise := listLinks, raiseLink
@@ -111,13 +102,13 @@ func port(t *testing.T, name, mac string) netlink.Link {
 	t.Helper()
 	addr, err := net.ParseMAC(mac)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the MAC address %q: %v", mac, err)
 	}
 	return &netlink.Device{LinkAttrs: netlink.LinkAttrs{Name: name, HardwareAddr: addr}}
 }
 
-// loopback is the kernel's loopback interface. It carries an all-zero
-// MAC address, so only its flag tells it apart from hardware.
+// loopback has an all-zero MAC address, so only its flag tells it apart
+// from hardware.
 var loopback = &netlink.Device{LinkAttrs: netlink.LinkAttrs{
 	Name: "lo", Flags: net.FlagLoopback, HardwareAddr: make(net.HardwareAddr, 6),
 }}
@@ -125,26 +116,23 @@ var loopback = &netlink.Device{LinkAttrs: netlink.LinkAttrs{
 // tunnel is a virtual interface with no MAC address.
 var tunnel = &netlink.Device{LinkAttrs: netlink.LinkAttrs{Name: "wg0"}}
 
-// operstate writes the kernel's link state for one interface into the
-// fake sysfs tree.
+// operstate writes an interface's operstate into the fake sysfs tree.
 func operstate(t *testing.T, root, name, state string) {
 	t.Helper()
 	dir := filepath.Join(root, "class", "net", name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the sysfs directory of %s: %v", name, err)
 	}
 	writeSysfs(t, dir, "operstate", state+"\n")
 }
 
-// The report raises every hardware port and waits three seconds for
-// copper autonegotiation before it reads the carrier, because a carrier
-// read before the link trains reports every port dark. Loopback and a
-// virtual interface are not hardware, so the report leaves them alone.
-// A port that refuses to come up is still reported, and a port whose
-// state the kernel does not publish reads as unknown.
+// observeInterfaces raises every port with a MAC address, skips
+// loopback and wg0, and waits three seconds for autonegotiation before
+// it reads operstate. eth1 fails to come up and has no operstate, and
+// it is still reported, as unknown.
 func TestObserveInterfacesRaisesAndReadsEveryHardwarePort(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		root := fakeBus(t)
+		root := fakeSysfs(t)
 		operstate(t, root, "eth0", "up")
 		links := &fakeNetlink{
 			links:  []netlink.Link{loopback, port(t, "eth0", "52:54:00:12:34:56"), tunnel, port(t, "eth1", "52:54:00:12:34:57")},
@@ -172,9 +160,8 @@ func TestObserveInterfacesRaisesAndReadsEveryHardwarePort(t *testing.T) {
 	})
 }
 
-// The report waits for links to train only when it raised one. A
-// machine with no hardware port, or a list the kernel refused, reports
-// no interface and costs the boot no wait.
+// With no port to raise, observeInterfaces returns nothing and does not
+// wait.
 func TestObserveInterfacesWaitsOnlyForARaisedPort(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -186,7 +173,7 @@ func TestObserveInterfacesWaitsOnlyForARaisedPort(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				fakeBus(t)
+				fakeSysfs(t)
 				useLinks(t, c.links)
 				started := time.Now()
 				got := observeInterfaces()
@@ -198,9 +185,9 @@ func TestObserveInterfacesWaitsOnlyForARaisedPort(t *testing.T) {
 	}
 }
 
-// useImageMount stands mount in for the loop mount of the payload's
-// system image, and points the report's mount point at a temporary
-// directory, for the rest of the test. It returns that directory.
+// useImageMount replaces the loop mount of the payload's system image
+// with mount, and points reportImageMount at a temporary directory,
+// until the test ends. It returns that directory.
 func useImageMount(t *testing.T, mount func(image, target string) error) string {
 	t.Helper()
 	savedMount, savedTarget := mountReportImage, reportImageMount
@@ -210,10 +197,9 @@ func useImageMount(t *testing.T, mount func(image, target string) error) string 
 	return reportImageMount
 }
 
-// reportMachine builds the machine every gather test reports on: UEFI
-// firmware, one 500 GiB disk, the installation stick, one cabled
-// port, and a display controller that a workload could claim. The
-// probe is already quiet. It returns the fake sysfs root and /dev.
+// reportMachine builds a fake machine with UEFI firmware, a 500 GiB
+// disk, the install stick, a port with a carrier, and a display
+// controller with no driver. It returns the fake sysfs root and /dev.
 func reportMachine(t *testing.T) (root, dev string) {
 	t.Helper()
 	sys, dev := fakeMachine(t)
@@ -221,7 +207,7 @@ func reportMachine(t *testing.T) (root, dev string) {
 	writeSysfs(t, filepath.Join(sys, "sda", "device"), "model", "REAL DISK\n")
 	addDisk(t, sys, dev, "sdb", 1<<30, nil)
 	addPartition(t, sys, "sdb", "sdb1", stickInstallPartition, 1<<30)
-	root = fakeBus(t)
+	root = fakeSysfs(t)
 	addPCIDevice(t, root, "0000:00:02.0", "0x030000", displayModalias)
 	operstate(t, root, "eth0", "up")
 	useLinks(t, &fakeNetlink{links: []netlink.Link{loopback, port(t, "eth0", "52:54:00:12:34:56")}})
@@ -232,8 +218,8 @@ func reportMachine(t *testing.T) (root, dev string) {
 	return root, dev
 }
 
-// reportSummary renders the facts of a report that the gather tests
-// check, one field per word, so a test compares one string.
+// reportSummary formats the report fields that the gather tests check
+// as one line, so a test compares one string.
 func reportSummary(r hardwareReport) string {
 	var disks, interfaces, claimable []string
 	for _, d := range r.Disks {
@@ -250,14 +236,14 @@ func reportSummary(r hardwareReport) string {
 		strings.Join(interfaces, ","), strings.Join(claimable, ","))
 }
 
-// failedMount is a loop mount that the kernel refused.
+// failedMount is a loop mount that fails.
 func failedMount(image, target string) error {
 	return fmt.Errorf("attaching %s: operation not permitted", image)
 }
 
-// payloadMount is a loop mount that succeeds onto a module tree the
-// test wrote at the mount point: an alias table that names a driver
-// for the display controller.
+// payloadMount is a loop mount that succeeds. It writes a
+// modules.alias at the mount point that maps the display controller to
+// the bochs driver.
 func payloadMount(image, target string) error {
 	tree := filepath.Join(target, "lib", "modules", kernelRelease())
 	if err := os.MkdirAll(tree, 0o755); err != nil {
@@ -266,13 +252,10 @@ func payloadMount(image, target string) error {
 	return os.WriteFile(filepath.Join(tree, "modules.alias"), []byte("alias "+displayModalias+" bochs\n"), 0o644)
 }
 
-// The report describes the disks and ports a machine has, with the
-// stick left out of the disks, whether or not the payload's system
-// image mounts. The module tree in that image is what names the drivers
-// for undriven hardware, so only a report whose image mounted lists the
-// display controller as hardware a workload could claim. A machine
-// whose payload does not mount still gets a report of what the boot
-// path's drivers bound.
+// The report lists the disks, without the stick, and the ports, whether
+// or not the payload's system image mounts. Only the image's
+// modules.alias maps the display controller to a driver, so the
+// controller is claimable only when the image mounts.
 func TestGatherHardwareReportDescribesTheMachine(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -309,10 +292,10 @@ func TestGatherHardwareReportDescribesTheMachine(t *testing.T) {
 	}
 }
 
-// fakeStickMount stands in for the stick's FAT volume. The mount point
-// is a temporary directory, a mount answers mountErr, and an unmount
-// with no flags answers busyErr, the way a volume that something still
-// holds refuses a plain unmount. It records the flags of each unmount.
+// fakeStickMount replaces the stick's FAT volume with a temporary
+// directory. A mount returns mountErr, and an unmount with no flags
+// returns busyErr, as a plain unmount of a busy volume fails. unmounts
+// records the flags of each unmount.
 type fakeStickMount struct {
 	dir      string
 	mountErr error
@@ -320,8 +303,7 @@ type fakeStickMount struct {
 	unmounts []int
 }
 
-// useStickMount hands the report the fake volume in place of the stick's
-// own for the rest of the test.
+// useStickMount installs f until the test ends.
 func useStickMount(t *testing.T, f *fakeStickMount) {
 	t.Helper()
 	savedMount, savedUnmount, savedTarget := mountStick, unmountStick, reportStickMount
@@ -338,14 +320,14 @@ func useStickMount(t *testing.T, f *fakeStickMount) {
 	}
 }
 
-// readProposal reads the proposal the report left on the fake volume,
-// or the empty string when it left none.
+// readProposal returns the proposal on the fake volume, or "" when
+// there is none.
 func readProposal(f *fakeStickMount) string {
 	raw, _ := os.ReadFile(filepath.Join(f.dir, hardwareReportName))
 	return string(raw)
 }
 
-// errorText is an error's message, or the empty string for no error.
+// errorText returns err's message, or "" for a nil error.
 func errorText(err error) string {
 	if err == nil {
 		return ""
@@ -353,14 +335,10 @@ func errorText(err error) string {
 	return err.Error()
 }
 
-// The report writes the proposal to the root of the stick's volume and
-// unmounts the volume, so the filesystem is clean when the person pulls
-// the stick. A busy volume gets a lazy detach, so a later boot does not
-// find a stale mount. The report writes only to a stick it resolved to
-// exactly one disk: with no stick, or with two disks that each carry the
-// stick's partition name, it refuses before it mounts anything. A volume
-// that does not mount gets no file and no unmount. Each error tells the
-// person why the file is not on the stick.
+// writeReportToStick writes the proposal and unmounts the volume, with
+// a lazy detach when the volume is busy. With no stick, or with more
+// than one disk that has the stick's partition name, it fails before it
+// mounts anything.
 func TestWriteReportToStickLeavesTheProposalOnACleanVolume(t *testing.T) {
 	stick := installStick{Disk: "sdb", Partition: "/dev/sdb1"}
 	cases := []struct {
@@ -376,9 +354,9 @@ func TestWriteReportToStickLeavesTheProposalOnACleanVolume(t *testing.T) {
 		{"a stick that does not mount", stick, &fakeStickMount{mountErr: unix.EINVAL},
 			"mounting the stick /dev/sdb1: invalid argument", "", nil},
 		{"no stick", installStick{}, &fakeStickMount{},
-			"no installation stick found (no partition named liken:install)", "", nil},
+			"no disk has a partition named liken:install, so the report found no install stick", "", nil},
 		{"two sticks", installStick{Candidates: []string{"sdb", "sdc"}}, &fakeStickMount{},
-			"more than one disk carries liken:install (sdb, sdc); refusing to guess which is the stick", "", nil},
+			"more than one disk has a partition named liken:install (sdb, sdc), so the report cannot tell which disk is the stick", "", nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -387,7 +365,7 @@ func TestWriteReportToStickLeavesTheProposalOnACleanVolume(t *testing.T) {
 			err := writeReportToStick(c.stick, "kind: Machine\n")
 
 			if got := errorText(err); got != c.wantErr {
-				t.Errorf("the write answered %q, want %q", got, c.wantErr)
+				t.Errorf("the write returned %q, want %q", got, c.wantErr)
 			}
 			if got := readProposal(c.mount); got != c.wantFile {
 				t.Errorf("the stick holds %q, want %q", got, c.wantFile)
@@ -399,8 +377,8 @@ func TestWriteReportToStickLeavesTheProposalOnACleanVolume(t *testing.T) {
 	}
 }
 
-// useEnding stands in for the reboot that ends the report boot, for the
-// rest of the test, and returns how many times the boot ended.
+// useEnding replaces endReport until the test ends, and returns a
+// count of its calls.
 func useEnding(t *testing.T) *int {
 	t.Helper()
 	saved := endReport
@@ -410,11 +388,8 @@ func useEnding(t *testing.T) *int {
 	return &endings
 }
 
-// The report boot gathers the machine, writes the proposal to the stick,
-// and ends with a reboot. The proposal names the machine's disk and its
-// cabled port. A stick that does not mount gets no file, and the boot
-// still ends, because the console holds the only copy and the person
-// reads it there.
+// When the stick does not mount, the report boot still ends, because
+// the proposal is printed on the console.
 func TestRunHardwareReportWritesTheProposalAndEnds(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -447,9 +422,6 @@ func TestRunHardwareReportWritesTheProposalAndEnds(t *testing.T) {
 	}
 }
 
-// The held console's last line tells the person whether the proposal
-// reached the stick. After a failed write it says the console holds the
-// only copy, so the person copies it before pulling the stick.
 func TestReportPromptTellsThePersonWhereTheReportIs(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -457,9 +429,9 @@ func TestReportPromptTellsThePersonWhereTheReportIs(t *testing.T) {
 		want     string
 	}{
 		{"a written report", nil,
-			"liken: this report was written to the stick as hardware-report.yaml; press Enter to reboot."},
+			"liken: wrote this report to the stick as hardware-report.yaml. Press Enter to reboot."},
 		{"a failed write", errors.New("mounting the stick: permission denied"),
-			"liken: writing hardware-report.yaml to the stick FAILED; the text above is the only copy; press Enter to reboot."},
+			"liken: writing hardware-report.yaml to the stick failed, so the text above is the only copy. Press Enter to reboot."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

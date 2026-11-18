@@ -1,9 +1,9 @@
 package main
 
-// Tests for reconcileStorage as a whole on a disk whose roles are
-// already claimed, and for the bounded wait for declared disks. The
-// mount syscalls are replaced by the recorder in mounttable_test.go,
-// and the partitions are plain files under a fake /dev.
+// Tests of reconcileStorage on a disk whose roles already exist, and of
+// the wait for declared disks to attach. The partitions are plain files
+// under a fake /dev, and fakeStorageMounts in mounttable_test.go
+// records the mount calls.
 
 import (
 	"os"
@@ -16,10 +16,10 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// bootRolesDisk builds the disk of a BIOS machine whose boot roles are
-// claimed: biosBoot as vda1, the boot home as vda2, and slot A as vda3.
-// The boot home's volume still carries the mark of a stop that did not
-// release it, and slot A's volume is clean. It returns the fake /dev.
+// bootRolesDisk builds the disk of a BIOS machine whose boot roles
+// already exist: biosBoot as vda1, the boot home as vda2, and slot A as
+// vda3. The boot home's FAT volume has its dirty bit set,
+// and slot A's is clean. It returns the fake /dev directory.
 func bootRolesDisk(t *testing.T) string {
 	t.Helper()
 	sys, dev := fakeMachine(t)
@@ -32,17 +32,16 @@ func bootRolesDisk(t *testing.T) string {
 	return dev
 }
 
-// A boot that recognizes every declared role claims nothing and grows
-// nothing. It mounts each FAT role at its path and leaves the raw
-// biosBoot partition unmounted, and the status records where each role
-// landed. The boot home's unclean stop reaches status, because a fact
-// that only the serial console printed is invisible to an operator.
-// The booted slot reports what the initramfs read before it mounted the
-// slot.
-func TestReconcileStorageRecordsWhereEachRecognizedRoleLanded(t *testing.T) {
+// When every declared role already exists, reconcileStorage creates
+// and grows nothing. It mounts each FAT role, leaves the raw biosBoot
+// partition unmounted, and records each role's device in the status.
+// The boot home's unclean unmount goes into the status, because
+// otherwise only the serial console shows it. The booted slot's stop
+// state comes from bootedSlotStopEnv, which bootedSlot sets to clean.
+func TestReconcileStorageRecordsTheDeviceOfEachExistingRole(t *testing.T) {
 	dev := bootRolesDisk(t)
 	mounts := fakeStorageMounts(t)
-	bootedSlot(t, "A", stopMarkClean)
+	bootedSlot(t, "A", lastStopClean)
 	home := fakeRoleMountPath(t, machine.BootHomeRole)
 	slotA := fakeRoleMountPath(t, machine.SystemARole)
 	disk := filepath.Join(dev, "vda")
@@ -56,7 +55,7 @@ func TestReconcileStorageRecordsWhereEachRecognizedRoleLanded(t *testing.T) {
 	var err error
 	capturedStdout(t, func() { status, err = reconcileStorage(spec) })
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconcileStorage: %v", err)
 	}
 
 	want := machine.AllRolesInMemory()
@@ -78,15 +77,14 @@ func TestReconcileStorageRecordsWhereEachRecognizedRoleLanded(t *testing.T) {
 	}
 }
 
-// A declared disk can attach seconds after storage first looks,
-// because a SATA link trains and a USB device negotiates after their
-// drivers load. The wait must end at the first poll after the disk
-// appears, not at its 30-second deadline.
+// A SATA or USB disk can attach seconds after its driver loads. The
+// wait must end at the first poll after the disk appears, not at the
+// 30-second deadline.
 func TestAwaitStorageDevicesWaitsForALateDisk(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sys, dev := fakeMachine(t)
-		// The disk is built out of the way first, so the goroutine that
-		// attaches it does one rename and reports one error.
+		// Build the disk in another directory, so that attaching it is
+		// one rename.
 		staged := t.TempDir()
 		addDisk(t, staged, dev, "vdb", 1<<30, nil)
 		attached := make(chan error, 1)
@@ -101,7 +99,7 @@ func TestAwaitStorageDevicesWaitsForALateDisk(t *testing.T) {
 		elapsed := time.Since(begin)
 
 		if err := <-attached; err != nil {
-			t.Fatal(err)
+			t.Fatalf("attaching the disk: %v", err)
 		}
 		if elapsed != 2*time.Second {
 			t.Errorf("the wait took %s, want the first poll after the disk attached, at 2s", elapsed)
@@ -109,9 +107,9 @@ func TestAwaitStorageDevicesWaitsForALateDisk(t *testing.T) {
 	})
 }
 
-// A disk that never attaches must not hold the boot forever. At the
-// deadline the wait ends, and the ordinary errors of planning report
-// what is missing.
+// A disk that never attaches must not block the boot. At the deadline
+// awaitStorageDevices returns, and reconcileStorage then reports the
+// missing disk.
 func TestAwaitStorageDevicesGivesUpAtTheDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		_, dev := fakeMachine(t)
@@ -125,7 +123,7 @@ func TestAwaitStorageDevicesGivesUpAtTheDeadline(t *testing.T) {
 			t.Errorf("the wait took %s, want its 30s deadline", elapsed)
 		}
 		if got := stderr(); got != "liken: storage: the declared disks did not all attach within 30s\n" {
-			t.Errorf("the console must say the disks did not attach: %q", got)
+			t.Errorf("the console shows %q, want the line that says the declared disks did not attach", got)
 		}
 	})
 }

@@ -139,7 +139,7 @@ describes the report and the held console messages fully.
 Select `install as <name>`. The machine installs itself and waits at the
 console:
 
-    liken: installed to slot A; remove the stick, then press Enter to power off; the next power-on boots from the disk.
+    liken: installed to slot A. Remove the stick, then press Enter to power off. The next power-on boots from the disk.
 
 Remove the stick, then press Enter. The machine powers off. Power it on
 again, and it boots from its own disk.

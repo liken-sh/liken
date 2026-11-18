@@ -1,8 +1,8 @@
 package main
 
-// Tests for the ext4 superblock parser. Hand-built superblocks pin
-// the offsets in ext4.go's comment. The resize ioctl itself needs a
-// mounted filesystem, so it belongs to the QEMU harness.
+// The resize ioctl needs a mounted filesystem, so only the QEMU
+// harness exercises it. These tests cover the superblock parser with
+// hand-built superblocks.
 
 import (
 	"encoding/binary"
@@ -13,7 +13,8 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// superblock builds 1024 bytes with the fields growth reads.
+// superblock returns a 1024-byte superblock with the fields that
+// parseExt4Superblock reads.
 func superblock(blocksLo uint32, logBlockSize uint32, incompat uint32, blocksHi uint32) []byte {
 	sb := make([]byte, 1024)
 	binary.LittleEndian.PutUint32(sb[4:], blocksLo)
@@ -37,21 +38,19 @@ func TestParseExt4Superblock(t *testing.T) {
 			ext4Geometry{blockSize: 1_024, blockCount: 65_536},
 		},
 		{
-			// The common case on real disks: 4 KiB blocks.
 			"4KiB-blocks",
 			superblock(262_144, 2, 0, 0),
 			ext4Geometry{blockSize: 4_096, blockCount: 262_144},
 		},
 		{
-			// With the 64bit feature, the count's high bits live in a
-			// second field, and the code must assemble them.
+			// With the 64bit feature, the high bits of the count are
+			// in a second field.
 			"64bit-count",
 			superblock(1, 2, 0x80, 1),
 			ext4Geometry{blockSize: 4_096, blockCount: 1<<32 | 1},
 		},
 		{
-			// Without the feature, those same bytes belong to other
-			// fields, and the code must ignore them.
+			// Without the feature, those bytes belong to other fields.
 			"high-bits-ignored-without-64bit",
 			superblock(100, 2, 0, 1),
 			ext4Geometry{blockSize: 4_096, blockCount: 100},
@@ -61,10 +60,10 @@ func TestParseExt4Superblock(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			got, err := parseExt4Superblock(c.sb)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("parsing the superblock: %v", err)
 			}
 			if got != c.want {
-				t.Errorf("got %+v, want %+v", got, c.want)
+				t.Errorf("geometry is %+v, want %+v", got, c.want)
 			}
 		})
 	}
@@ -74,25 +73,24 @@ func TestParseExt4SuperblockRejectsBadMagic(t *testing.T) {
 	sb := superblock(100, 2, 0, 0)
 	sb[56] = 0x00
 	if _, err := parseExt4Superblock(sb); err == nil {
-		t.Error("expected an error without the ext4 magic")
+		t.Error("parseExt4Superblock returned no error without the ext4 magic, want one")
 	}
 }
 
 func TestParseExt4SuperblockRejectsAbsurdBlockSizes(t *testing.T) {
 	if _, err := parseExt4Superblock(superblock(100, 7, 0, 0)); err == nil {
-		t.Error("expected an error for a block size exponent past ext4's ceiling")
+		t.Error("parseExt4Superblock returned no error for a block size exponent above ext4's limit, want one")
 	}
 }
 
 func TestParseExt4SuperblockRejectsTruncation(t *testing.T) {
 	if _, err := parseExt4Superblock(make([]byte, 100)); err == nil {
-		t.Error("expected an error for a truncated superblock")
+		t.Error("parseExt4Superblock returned no error for a truncated superblock, want one")
 	}
 }
 
 func TestReadExt4GeometryFromADevice(t *testing.T) {
-	// A device node is only something to ReadAt; a file stands in
-	// for it here.
+	// A regular file stands in for the device node.
 	dev := filepath.Join(t.TempDir(), "vda1")
 	image := make([]byte, 2048)
 	sb := image[ext4SuperblockOffset:]
@@ -100,38 +98,36 @@ func TestReadExt4GeometryFromADevice(t *testing.T) {
 	sb[4] = 100                 // s_blocks_count_lo
 	sb[24] = 2                  // s_log_block_size: 1024 << 2 = 4096
 	if err := os.WriteFile(dev, image, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the device file: %v", err)
 	}
 	g, err := readExt4Geometry(dev)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the geometry: %v", err)
 	}
 	if g.blockSize != 4096 || g.blockCount != 100 {
-		t.Errorf("got %+v", g)
+		t.Errorf("geometry is %+v, want blockSize 4096 and blockCount 100", g)
 	}
 }
 
 func TestReadExt4GeometryReportsMissingDevices(t *testing.T) {
 	if _, err := readExt4Geometry(filepath.Join(t.TempDir(), "absent")); err == nil {
-		t.Error("a missing device is an error, not empty geometry")
+		t.Error("readExt4Geometry returned no error for a missing device, want one")
 	}
 }
 
 func TestReadExt4GeometryReportsTruncatedDevices(t *testing.T) {
 	dev := filepath.Join(t.TempDir(), "tiny")
 	if err := os.WriteFile(dev, make([]byte, 512), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the device file: %v", err)
 	}
 	if _, err := readExt4Geometry(dev); err == nil {
-		t.Error("a device too small for a superblock is an error")
+		t.Error("readExt4Geometry returned no error for a device too small for a superblock, want one")
 	}
 }
 
 func TestMaybeGrowFilesystemLeavesAFullFilesystemAlone(t *testing.T) {
-	// The superblock says 100 blocks of 4096 bytes; the partition is
-	// exactly that size, so there is nothing to grow and no ioctl to
-	// make. (An actual grow needs a mounted filesystem, so it belongs
-	// to the QEMU drill.)
+	// The superblock records 100 blocks of 4096 bytes and the partition
+	// is that size, so there is nothing to grow and no ioctl is made.
 	sys, dev := fakeMachine(t)
 	_ = sys
 	image := make([]byte, 2048)
@@ -140,12 +136,12 @@ func TestMaybeGrowFilesystemLeavesAFullFilesystemAlone(t *testing.T) {
 	sb[4] = 100
 	sb[24] = 2
 	if err := os.WriteFile(filepath.Join(dev, "vda1"), image, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the device file: %v", err)
 	}
 	role := declared(machine.MachineStateRole, "/dev/vda", "")
 	p := partition{name: "vda1", disk: "vda", sizeBytes: 100 * 4096}
 	if err := maybeGrowFilesystem(role, p, t.TempDir()); err != nil {
-		t.Errorf("a filesystem already filling its partition needs nothing: %v", err)
+		t.Errorf("a filesystem that fills its partition returned %v, want nil", err)
 	}
 }
 
@@ -154,6 +150,6 @@ func TestMaybeGrowFilesystemReportsAnUnreadableDevice(t *testing.T) {
 	role := declared(machine.MachineStateRole, "/dev/vda", "")
 	p := partition{name: "vda1", disk: "vda", sizeBytes: 1 << 30}
 	if err := maybeGrowFilesystem(role, p, t.TempDir()); err == nil {
-		t.Error("no device, no geometry: the error must surface")
+		t.Error("maybeGrowFilesystem returned no error when the device cannot be read, want one")
 	}
 }

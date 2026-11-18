@@ -1,36 +1,28 @@
 package main
 
-// Holding one serio attachment: the five system calls that attach a
-// serial line to the kernel's serio layer, and the goroutine that
-// keeps the last of them blocked for the life of the boot.
+// This file attaches a serial line to the kernel's serio layer and
+// keeps it attached. It makes the same system calls as the inputattach
+// program, in the same order: open the tty, set raw mode at the
+// device's baud rate, set serport's line discipline with TIOCSETD, set
+// the serio type with SPIOCSTYPE, and read. serport registers the
+// serio port when the read starts and unregisters it when the read
+// returns (serport_ldisc_read in drivers/input/serio/serport.c). So the
+// port, and every device that its driver creates, exists only while
+// the read stays blocked.
 //
-// The calls are the ones inputattach runs, in its order. The program
-// opens the tty, sets the line to the device's speed in raw mode,
-// sets serport's line discipline with TIOCSETD, states the serio type
-// with SPIOCSTYPE, and reads. serport registers the serio port inside
-// that read, and unregisters it when the read returns
-// (drivers/input/serio/serport.c, serport_ldisc_read). So the port,
-// and every device its driver creates, exists exactly as long as one
-// read blocks.
+// Init is PID 1 and reaps every orphaned process, so it receives
+// SIGCHLD often. A signal delivered to the reading thread interrupts
+// the read, and serport unregisters the port. Pods that hold the CEC
+// adapter lose it, as if it were unplugged, and a new read registers a
+// new port. So each holder locks its goroutine to one OS thread and
+// blocks signals on that thread before its first call. The kernel
+// delivers a signal sent to the process to a thread that does not
+// block it, so the rest of init still receives SIGCHLD.
 //
-// PID 1 makes that read harder to hold than it is for inputattach.
-// Init reaps every orphaned process on the machine, so SIGCHLD arrives
-// often, and a signal that lands on the reading thread wakes the
-// kernel's wait. serport's read then unregisters the port and returns
-// zero, so a signal ends the port the same way an unplug does, and the
-// CEC adapter disappears under every pod that holds it. A read that
-// ran again would register a new port, not keep the old one. So each
-// holder locks its goroutine to one OS thread and
-// blocks signals on that thread before the first call. The kernel
-// delivers a process-directed signal to a thread that does not block
-// it, so the rest of init still receives SIGCHLD.
-//
-// A holder must never take PID 1 down. The machine plane's recover
-// does not cover a goroutine a component starts, so the holder
-// recovers its own panics and reports them as a status fact. It
-// shares no map with any other goroutine: it writes only its own
-// fields, each before it closes the channel that publishes them. Every
-// error from the five calls is a status fact, never a failure of init.
+// The machine plane recovers a panic in a component's own goroutine,
+// but not in a goroutine that the component starts. So the holder
+// recovers its own panics, and the registry reports them in the
+// entry's status. Neither a panic nor an error from a call stops init.
 
 import (
 	"fmt"
@@ -43,10 +35,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// serialLine is the syscall boundary of one attachment: the four calls
-// made on an open tty. seriotty.go is the real one, and the tests
-// supply a fake, because an attachment needs a serial line, serport,
-// and CAP_SYS_ADMIN, and a test host has none of the three.
+// serialLine is the system calls on one open tty, implemented in
+// seriotty.go. The tests use a fake, because an attachment needs a
+// serial line, serport, and CAP_SYS_ADMIN.
 type serialLine interface {
 	setTermios(t *unix.Termios) error
 	setLineDiscipline(discipline int) error
@@ -55,17 +46,15 @@ type serialLine interface {
 	close() error
 }
 
-// openLine opens a tty for an attachment.
 type openLine func(path string) (serialLine, error)
 
-// nMouse is the line discipline number that serport registers. The
-// kernel's name for it is N_MOUSE, from the serial mice that serport
-// was first written for.
+// nMouse is the number of serport's line discipline. The kernel calls
+// it N_MOUSE.
 const nMouse = 2
 
-// termiosSpeed returns the termios speed bits for a table's baud rate.
-// The table names 9600 only, because both USB-CEC adapters speak it.
-// It is a switch and not a map, so a holder reads no map at all.
+// termiosSpeed supports only 9600 baud, the rate of the USB-CEC
+// adapters. It is a switch and not a map so that a holder reads no
+// map that another goroutine can write.
 func termiosSpeed(baud int) (uint32, bool) {
 	switch baud {
 	case 9600:
@@ -74,15 +63,13 @@ func termiosSpeed(baud int) (uint32, bool) {
 	return 0, false
 }
 
-// serioTermios builds the line settings inputattach's setline writes:
-// 8 data bits, the receiver on, a hangup on the last close, no modem
-// control, no break and no parity errors in the input, no output or
-// local processing, and a read that returns after one byte. The speed
-// goes in both directions.
+// serioTermios returns the line settings of inputattach's setline:
+// raw mode, 8 data bits, no modem control, and a read that returns
+// after one byte.
 func serioTermios(baud int) (*unix.Termios, error) {
 	speed, ok := termiosSpeed(baud)
 	if !ok {
-		return nil, fmt.Errorf("TCSETS: no termios speed for %d baud", baud)
+		return nil, fmt.Errorf("no termios speed for %d baud", baud)
 	}
 	t := &unix.Termios{
 		Cflag:  unix.CS8 | unix.CREAD | unix.HUPCL | unix.CLOCAL | speed,
@@ -95,15 +82,14 @@ func serioTermios(baud int) (*unix.Termios, error) {
 	return t, nil
 }
 
-// attachSerio runs the first four calls: it opens the tty, sets the
-// line, sets the discipline, and states the serio type. It returns the
-// open line, ready for the read that creates the port. Each error
-// names its call and carries the kernel's text word for word, and a
-// line that fails after it opened is closed again.
+// attachSerio makes every call but the read, and returns the open line
+// ready for it. Each error names the failed step and its ioctl and
+// keeps the kernel's error text, because the error becomes the entry's
+// status message. When a call fails after the open, it closes the line.
 func attachSerio(open openLine, path string, p machine.SerioProtocol) (serialLine, error) {
 	line, err := open(path)
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, fmt.Errorf("opening %s: %w", path, err)
 	}
 	if err := setUpLine(line, p); err != nil {
 		line.close()
@@ -118,24 +104,23 @@ func setUpLine(line serialLine, p machine.SerioProtocol) error {
 		return err
 	}
 	if err := line.setTermios(t); err != nil {
-		return fmt.Errorf("TCSETS: %w", err)
+		return fmt.Errorf("setting the line speed and mode (TCSETS): %w", err)
 	}
 	if err := line.setLineDiscipline(nMouse); err != nil {
-		return fmt.Errorf("TIOCSETD: %w", err)
+		return fmt.Errorf("setting the serport line discipline (TIOCSETD): %w", err)
 	}
-	// SPIOCSTYPE carries the type in the low byte, then an id byte and
-	// an extra byte. The CEC adapters use neither, so both are zero.
+	// SPIOCSTYPE takes the type in the low byte, then an id byte and an
+	// extra byte. The CEC adapters use neither, so both are zero.
 	if err := line.setSerioType(uint64(p.Type)); err != nil {
-		return fmt.Errorf("SPIOCSTYPE: %w", err)
+		return fmt.Errorf("setting the serio type (SPIOCSTYPE): %w", err)
 	}
 	return nil
 }
 
-// holdRead is the fifth call. serport's read blocks until the port
-// ends and then returns zero bytes, so a nil return means the port is
-// gone. inputattach repeats the read on EINTR and EAGAIN, and so does
-// this loop. The loop allocates nothing of its own and compares errno
-// values directly.
+// holdRead makes the read that keeps the port registered. serport's
+// read returns zero bytes when the port ends, so a nil return means the
+// port is gone. Like inputattach, holdRead reads again after EINTR or
+// EAGAIN.
 func holdRead(line serialLine) error {
 	for {
 		err := line.read()
@@ -146,25 +131,23 @@ func holdRead(line serialLine) error {
 	}
 }
 
-// faultSignals are the signals the kernel raises on the thread that
-// faults. The holder leaves them open. When a thread faults with its
-// fault signal blocked, the kernel resets the signal to its default
-// action, which ends the process, and for PID 1 that is a kernel
-// panic. With the signal open, Go's handler turns a nil dereference
-// into a panic that the holder's recover catches.
+// faultSignals are the signals that the kernel sends to a thread that
+// faults, and the holder leaves them unblocked. When a fault signal is
+// blocked, the kernel resets it to its default action, which ends the
+// process, and the kernel panics when PID 1 ends. When it is unblocked,
+// Go's handler turns a nil dereference into a panic that the holder's
+// recover catches.
 var faultSignals = []unix.Signal{
 	unix.SIGSEGV, unix.SIGBUS, unix.SIGFPE, unix.SIGILL, unix.SIGTRAP, unix.SIGSYS,
 }
 
-// holderSignalMask is every signal except the fault signals. The mask
-// includes the real-time signal that the Go runtime sends to every
-// thread for a setuid-family call (runtime.doAllThreadsSyscall). That
-// call stops the world, signals each thread, and spins until each one
-// answers, and a holder's thread never answers, so the call would
-// freeze all of PID 1. The rule is that init never makes a
-// setuid-family call: syscall.Setuid, Setgid, Setgroups, and their
-// relatives. Init runs as root for its whole life and needs none of
-// them.
+// holderSignalMask is every signal except the fault signals. It also
+// blocks the real-time signal that the Go runtime sends to every thread
+// for syscall.Setuid, Setgid, Setgroups, and the related calls
+// (runtime.doAllThreadsSyscall). The runtime stops the world and waits
+// until every thread handles that signal, and a holder's thread never
+// does, so one of those calls would hang all of PID 1. Init runs as
+// root, so it must never make them.
 func holderSignalMask() unix.Sigset_t {
 	var set unix.Sigset_t
 	for i := range set.Val {
@@ -178,32 +161,29 @@ func holderSignalMask() unix.Sigset_t {
 	return set
 }
 
-// sigsetHas reports whether a signal is in a set.
 func sigsetHas(set *unix.Sigset_t, sig unix.Signal) bool {
 	width := int(unsafe.Sizeof(set.Val[0])) * 8
 	bit := int(sig) - 1
 	return set.Val[bit/width]&(1<<(bit%width)) != 0
 }
 
-// serioHolder is one goroutine that holds one attachment. The walk
-// that starts it reads its outcome through two channels. settled
-// closes when the four attach calls finish, after attachErr is
-// written, and a nil attachErr means the holder is in its read. done
-// closes when the goroutine ends, after endErr is written.
+// serioHolder is one goroutine that keeps one serial line attached.
+// The goroutine writes attachErr before it closes settled, and endErr
+// before it closes done, so a reader that has seen the channel close
+// can read the error without a lock. A nil attachErr means the attach
+// succeeded and the holder went on to its read.
 //
-// The registry keeps the last three fields beside the holder, under
-// its own lock. The goroutine never reads or writes them.
+// The registry sets and reads the other fields under its own lock, and
+// the goroutine never uses them.
 type serioHolder struct {
 	settled   chan struct{}
 	attachErr error
 	done      chan struct{}
 	endErr    error
 
-	// identity is the inode of the tty's sysfs directory when the
-	// holder started, usbPath is the sysfs path of the USB device
-	// above the tty, started is when it started, and failures is the
-	// count of failures in a row on that USB port before it
-	// (serioretry.go).
+	// identity and usbPath come from the tty's serialLineInfo when the
+	// holder started. failures counts the failures in a row on the USB
+	// port before this holder (serioretry.go).
 	identity uint64
 	usbPath  string
 	started  time.Time
@@ -211,9 +191,8 @@ type serioHolder struct {
 }
 
 // startSerioHolder starts the goroutine that attaches the tty at path
-// and holds the read. nudge is the walk's wake channel: the holder
-// sends on it when it ends, so the walk reports the end without
-// waiting for the next uevent.
+// and makes the read. When the holder ends, it sends on nudge, so the
+// registry runs a walk without waiting for a uevent.
 func startSerioHolder(open openLine, path string, p machine.SerioProtocol, nudge chan<- struct{}) *serioHolder {
 	h := &serioHolder{settled: make(chan struct{}), done: make(chan struct{})}
 	go h.run(open, path, p, nudge)
@@ -225,11 +204,11 @@ func (h *serioHolder) run(open openLine, path string, p machine.SerioProtocol, n
 	var line serialLine
 	defer func() {
 		if r := recover(); r != nil {
-			err := fmt.Errorf("the holder panicked: %v", r)
+			err := fmt.Errorf("the line holder panicked: %v", r)
 			if attached {
 				h.endErr = err
 				// A panic in the read leaves the tty open with serport's
-				// discipline on it. Closing it lets a later holder open
+				// discipline set. Closing it lets a later holder open
 				// the line again.
 				closeAfterPanic(line)
 			} else {
@@ -247,11 +226,9 @@ func (h *serioHolder) run(open openLine, path string, p machine.SerioProtocol, n
 	}()
 
 	// The goroutine never unlocks its thread. When a goroutine ends
-	// while it holds its lock, the Go runtime ends the thread with it,
-	// so the blocked mask leaves with the thread and never reaches a
-	// goroutine that expects signals. On the process's main thread the
-	// runtime parks the thread for good instead, which keeps the mask
-	// out of every other goroutine the same way.
+	// while locked to a thread, the Go runtime ends the thread, or parks
+	// it for good when it is the main thread. So no other goroutine runs
+	// with the blocked signals.
 	runtime.LockOSThread()
 	mask := holderSignalMask()
 	if err := unix.PthreadSigmask(unix.SIG_SETMASK, &mask, nil); err != nil {
@@ -267,16 +244,16 @@ func (h *serioHolder) run(open openLine, path string, p machine.SerioProtocol, n
 	close(h.settled)
 	attached = true
 	h.endErr = holdRead(line)
-	// The recover path closes line when it is set, so the final close
-	// clears it first and a panic in the close cannot close twice.
+	// The recover closes line when it is set, so clear it first, or a
+	// panic in this close would close the line twice.
 	last := line
 	line = nil
 	last.close()
 }
 
-// closeAfterPanic closes a line inside the holder's recovery. A second
-// panic there would escape the recover that is already running and
-// end PID 1, so the close carries a recover of its own.
+// closeAfterPanic closes a line inside the holder's recover. It
+// recovers its own panic, because a panic there would escape the
+// holder's recover and end PID 1.
 func closeAfterPanic(line serialLine) {
 	defer func() { _ = recover() }()
 	if line != nil {

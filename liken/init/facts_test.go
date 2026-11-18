@@ -1,11 +1,5 @@
 package main
 
-// Tests for the facts: the derivations that are pure over their
-// inputs, for example how connections become network status, and the
-// boot's write-once publication into the facts tree, aimed at a tempdir
-// through the package's seams. Only the real boot ever writes under
-// /run.
-
 import (
 	"net"
 	"os"
@@ -21,9 +15,8 @@ import (
 
 var factsNow = time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 
-// fullConn builds a connection the way DHCP or static assignment
-// would build one. k3s_test's conn covers derivations that need only
-// an address; these tests need every field filled in.
+// fullConn builds a connection with every field that DHCP or a static
+// address sets. conn in k3s_test.go sets only the address.
 func fullConn(t *testing.T, ifname, cidr string, method machine.AddressMethod) *connection {
 	t.Helper()
 	c := conn(t, ifname, cidr)
@@ -38,10 +31,7 @@ func fullConn(t *testing.T, ifname, cidr string, method machine.AddressMethod) *
 	return c
 }
 
-// The facts carry the image collection policy init rendered, so the
-// Machine's status says the same thing the console printed and the
-// kubelet's configuration file holds.
-func TestRuntimeFactsCarryTheImageGCPolicy(t *testing.T) {
+func TestRuntimeFactsReportTheImageGCPolicy(t *testing.T) {
 	got := runtimeFacts(imageGCCluster(), 1<<30).Kubelet.ImageGC
 	want := machine.ImageGCStatus{
 		HighThresholdPercent: 70, LowThresholdPercent: 60,
@@ -52,8 +42,7 @@ func TestRuntimeFactsCarryTheImageGCPolicy(t *testing.T) {
 	}
 }
 
-// A cluster that names no policy reports none, so an absent field in
-// status reads as the kubelet's own default.
+// An absent status field means the kubelet's default applies.
 func TestRuntimeFactsWithoutAPolicyReportNone(t *testing.T) {
 	for name, clusterDoc := range map[string]*cluster.Cluster{
 		"no cluster": nil,
@@ -65,21 +54,17 @@ func TestRuntimeFactsWithoutAPolicyReportNone(t *testing.T) {
 	}
 }
 
-// The facts carry both log levels, so the Machine's status says the
-// same thing the console printed, the k3s drop-in holds, and the
-// containerd drop-in gives containerd.
-func TestRuntimeFactsCarryTheLogLevels(t *testing.T) {
+func TestRuntimeFactsReportTheLogLevels(t *testing.T) {
 	got := runtimeFacts(debugCluster(), 1<<30)
 	if !got.K3s.Debug {
-		t.Error("the k3s debug flag should reach the facts")
+		t.Error("K3s.Debug is false, want the cluster's debug flag, true")
 	}
 	if got.Containerd.LogLevel != "warn" {
 		t.Errorf("got containerd level %q, want warn", got.Containerd.LogLevel)
 	}
 }
 
-// A cluster that names no level reports none, so an absent field in
-// status reads as the default that each reader supplies for itself.
+// An absent status field means each program's own default applies.
 func TestRuntimeFactsWithoutLevelsReportNone(t *testing.T) {
 	for name, clusterDoc := range map[string]*cluster.Cluster{
 		"no cluster": nil,
@@ -87,7 +72,7 @@ func TestRuntimeFactsWithoutLevelsReportNone(t *testing.T) {
 	} {
 		got := runtimeFacts(clusterDoc, 1<<30)
 		if got.K3s.Debug {
-			t.Errorf("%s: an unset field is not debug logging", name)
+			t.Errorf("%s: K3s.Debug is true, want false when the field is unset", name)
 		}
 		if got.Containerd != (machine.ContainerdRuntimeStatus{}) {
 			t.Errorf("%s: got %+v, want an empty block", name, got.Containerd)
@@ -98,7 +83,7 @@ func TestRuntimeFactsWithoutLevelsReportNone(t *testing.T) {
 func TestNetworkFactsWithNoConnections(t *testing.T) {
 	status := networkFacts(nil, nil)
 	if status.Interface != "" || len(status.Interfaces) != 0 {
-		t.Errorf("no connections means no facts: %+v", status)
+		t.Errorf("the status is %+v, want empty with no connections", status)
 	}
 }
 
@@ -109,13 +94,13 @@ func TestNetworkFactsSummarizesTheClusterFacingInterface(t *testing.T) {
 	}
 	status := networkFacts(labCluster(), conns)
 	if status.Interface != "eth1" {
-		t.Errorf("the nodeCIDR identifies the primary interface, got %s", status.Interface)
+		t.Errorf("the primary interface is %s, want eth1, whose address is in the nodeCIDR", status.Interface)
 	}
 	if len(status.Interfaces) != 2 {
-		t.Errorf("every interface is reported: %+v", status.Interfaces)
+		t.Errorf("the interfaces are %+v, want both connections", status.Interfaces)
 	}
 	if status.Addresses[0] != "10.10.0.2/24" {
-		t.Errorf("got %v", status.Addresses)
+		t.Errorf("the addresses are %v, want 10.10.0.2/24 first", status.Addresses)
 	}
 }
 
@@ -125,29 +110,28 @@ func TestNetworkFactsFallsBackToTheFirstConnection(t *testing.T) {
 	}
 	status := networkFacts(nil, conns)
 	if status.Interface != "eth0" {
-		t.Errorf("with no cluster the first connection is primary, got %s", status.Interface)
+		t.Errorf("the primary interface is %s, want the first connection, eth0, with no cluster", status.Interface)
 	}
 	if status.Gateway != "10.0.2.2" || status.Nameservers[0] != "10.0.2.3" {
-		t.Errorf("the summary carries the lease's answers: %+v", status)
+		t.Errorf("the summary is %+v, want the lease's gateway and nameserver", status)
 	}
 }
 
 func TestInterfaceFactsForALease(t *testing.T) {
 	got := interfaceFacts(fullConn(t, "eth0", "10.0.2.15/24", machine.MethodDHCP))
 	if got.Method != machine.MethodDHCP {
-		t.Errorf("got %s", got.Method)
+		t.Errorf("the method is %s, want %s", got.Method, machine.MethodDHCP)
 	}
 	if got.LeaseExpires == nil || !got.LeaseExpires.Equal(factsNow.Add(time.Hour)) {
-		t.Errorf("a lease has an expiry: %v", got.LeaseExpires)
+		t.Errorf("the lease expires at %v, want an hour after the ACK", got.LeaseExpires)
 	}
 }
 
-func TestALeaseExpiryStaysWhereTheACKPutIt(t *testing.T) {
+// The radio watch rewrites the whole network subtree. If the expiry
+// came from the clock, a machine with a radio would report a wired
+// lease that never runs out.
+func TestALeaseExpiryDoesNotMoveWithTheClock(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// A background radio rewrites the whole network subtree whenever
-		// it settles. That rewrite must repeat every wired lease's expiry,
-		// not derive a new one from the clock, or a machine with a radio
-		// would report a lease that never runs out.
 		conns := []*connection{fullConn(t, "eth0", "10.0.2.15/24", machine.MethodDHCP)}
 
 		first := networkFacts(nil, conns)
@@ -155,13 +139,13 @@ func TestALeaseExpiryStaysWhereTheACKPutIt(t *testing.T) {
 		second := networkFacts(nil, conns)
 
 		if first.LeaseExpires == nil || second.LeaseExpires == nil {
-			t.Fatalf("a lease has an expiry: %v, %v", first.LeaseExpires, second.LeaseExpires)
+			t.Fatalf("the lease expiries are %v and %v, want both set", first.LeaseExpires, second.LeaseExpires)
 		}
 		if !first.LeaseExpires.Equal(*second.LeaseExpires) {
-			t.Errorf("the expiry moved from %v to %v", first.LeaseExpires, second.LeaseExpires)
+			t.Errorf("the expiry is %v on the first call and %v on the second, want the same on both", first.LeaseExpires, second.LeaseExpires)
 		}
 		if !first.LeaseExpires.Equal(factsNow.Add(time.Hour)) {
-			t.Errorf("the expiry is the one the ACK fixed, got %v", first.LeaseExpires)
+			t.Errorf("the expiry is %v, want the one that the ACK set, an hour after it", first.LeaseExpires)
 		}
 	})
 }
@@ -169,18 +153,16 @@ func TestALeaseExpiryStaysWhereTheACKPutIt(t *testing.T) {
 func TestInterfaceFactsForAStaticAddress(t *testing.T) {
 	got := interfaceFacts(fullConn(t, "eth1", "10.10.0.2/24", machine.MethodStatic))
 	if got.Method != machine.MethodStatic {
-		t.Errorf("got %s", got.Method)
+		t.Errorf("the method is %s, want %s", got.Method, machine.MethodStatic)
 	}
 	if got.LeaseExpires != nil {
-		t.Error("a static address never expires")
+		t.Errorf("the lease expires at %v, want no expiry for a static address", got.LeaseExpires)
 	}
 }
 
-// fakeFactsMachine assembles every seam publishBootFacts probes: an
-// empty fake sysfs and /dev, an empty fake firmware store, a tempdir
-// facts tree and boot manifest, and an xtables probe that names no real
-// binary. This leaves the version's xtables unreported, the same as it
-// would be on an image without iptables.
+// fakeFactsMachine replaces everything that publishBootFacts reads or
+// writes: sysfs, /dev, the EFI variables, the facts tree, the boot
+// manifest, and iptables, which does not exist, so Xtables stays empty.
 func fakeFactsMachine(t *testing.T) (tree machine.FactsTree, manifestDest string) {
 	t.Helper()
 	fakeMachine(t)
@@ -194,14 +176,11 @@ func fakeFactsMachine(t *testing.T) (tree machine.FactsTree, manifestDest string
 	return factsTree, bootManifestPath
 }
 
-func TestPublishBootFactsPublishesTheBootStory(t *testing.T) {
+func TestPublishBootFactsWritesTheBootFacts(t *testing.T) {
 	tree, manifestDest := fakeFactsMachine(t)
 	raw := []byte("kind: Machine\nmetadata:\n  name: node-1\n")
 
-	// publishBootFacts reads the command line from the kernel rather
-	// than taking it as an argument, so the test supplies one. Without
-	// this the tree would carry whatever booted the machine running
-	// the tests.
+	// publishBootFacts reads the kernel command line itself.
 	const cmdline = "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A panic=10"
 	fakeCmdline(t, cmdline+"\n")
 
@@ -219,33 +198,31 @@ func TestPublishBootFactsPublishesTheBootStory(t *testing.T) {
 
 	facts, err := tree.Read()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the facts tree: %v", err)
 	}
 	if facts.Role != api.RoleLeader || facts.Boot.Slot != "A" {
-		t.Errorf("the tree carries the boot's identity: %+v", facts)
+		t.Errorf("the facts are %+v, want role leader on slot A", facts)
 	}
-	// Console parity: init prints this line to the console, so a
-	// reader with no console has to find it here.
 	if facts.Boot.CommandLine != cmdline {
-		t.Errorf("the tree carries the whole command line: %q", facts.Boot.CommandLine)
+		t.Errorf("the command line in the tree is %q, want the whole command line", facts.Boot.CommandLine)
 	}
 	if facts.Network.Interface != "eth1" {
-		t.Errorf("the network summary names the cluster-facing interface: %+v", facts.Network)
+		t.Errorf("the network summary is %+v, want eth1, the interface that faces the cluster", facts.Network)
 	}
 	if facts.Time.State != machine.TimeFreeRunning {
-		t.Errorf("no sources and no sync reads as free-running: %+v", facts.Time)
+		t.Errorf("the time status is %+v, want FreeRunning with no sources and no sync", facts.Time)
 	}
 	if facts.Version.Kernel == "" || facts.Hardware.CPUs == 0 || facts.Boot.Time == nil {
-		t.Errorf("the machine's own answers are asked, not pinned: %+v", facts)
+		t.Errorf("the facts are %+v, want the kernel, the CPU count, and the boot time read from the machine", facts)
 	}
-	// cat parity: role is one file, the API word plus one newline.
+	// A scalar fact is its value and a newline, so cat prints it.
 	roleFile, err := os.ReadFile(filepath.Join(tree.Dir, "role"))
 	if err != nil || string(roleFile) != "leader\n" {
-		t.Errorf("the role file reads as one word: %q, %v", roleFile, err)
+		t.Errorf("the role file is %q with error %v, want \"leader\\n\"", roleFile, err)
 	}
 	published, err := os.ReadFile(manifestDest)
 	if err != nil || string(published) != string(raw) {
-		t.Errorf("the boot manifest is the choice's exact bytes: %q, %v", published, err)
+		t.Errorf("the boot manifest is %q with error %v, want the choice's exact bytes", published, err)
 	}
 }
 
@@ -253,24 +230,23 @@ func TestPublishBootFactsSurvivesAnUnwritableTree(t *testing.T) {
 	fakeFactsMachine(t)
 	sealed := t.TempDir()
 	if err := os.Chmod(sealed, 0o555); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the directory read-only: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(sealed, 0o755) })
 	factsTree = machine.FactsTree{Dir: filepath.Join(sealed, "facts")}
 
-	// A boot must never stop on a facts write. Every write fails against
-	// the read-only tree, and the call still returns.
+	// Every write fails, and publishBootFacts must still return.
 	publishBootFacts(factsTree, bootFacts{
 		role:    api.RoleFollower,
 		storage: machine.AllRolesInMemory(),
 		time:    timeStatus(nil, nil),
 	})
 	if _, err := factsTree.Read(); err == nil {
-		t.Error("the sealed tree has no root to read")
+		t.Error("factsTree.Read returned no error on the sealed tree, want one, because the tree has no root")
 	}
 }
 
-func TestPublishBootFactsCarriesLastCrash(t *testing.T) {
+func TestPublishBootFactsIncludesTheLastCrash(t *testing.T) {
 	tree, _ := fakeFactsMachine(t)
 	when := time.Date(2026, 7, 23, 4, 12, 9, 0, time.UTC)
 
@@ -287,17 +263,16 @@ func TestPublishBootFactsCarriesLastCrash(t *testing.T) {
 
 	facts, err := tree.Read()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the facts tree: %v", err)
 	}
 	if facts.LastCrash == nil || facts.LastCrash.Reason != machine.CrashPanic {
-		t.Fatalf("the crash stub rides the facts tree: %+v", facts.LastCrash)
+		t.Fatalf("the crash record is %+v, want a Panic record in the facts tree", facts.LastCrash)
 	}
 	if !facts.LastCrash.Time.Equal(when) || facts.LastCrash.Records != "/sys/fs/pstore" {
-		t.Errorf("the stub round-trips whole: %+v", facts.LastCrash)
+		t.Errorf("the crash record is %+v, want its time and records path read back", facts.LastCrash)
 	}
-	// cat parity: the reason is its own file under lastCrash/.
 	reason, err := os.ReadFile(filepath.Join(tree.Dir, "lastCrash", "reason"))
 	if err != nil || string(reason) != "Panic\n" {
-		t.Errorf("the crash reason is one file: %q, %v", reason, err)
+		t.Errorf("lastCrash/reason is %q with error %v, want \"Panic\\n\"", reason, err)
 	}
 }

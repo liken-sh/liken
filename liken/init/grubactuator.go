@@ -1,29 +1,21 @@
 package main
 
-// The GRUB dialect of the boot actuator (actuator.go describes the
-// interface and explains why it exists).
+// grubActuator is the bootActuator (actuator.go) of a BIOS machine.
 //
-// BIOS firmware holds no boot variables, so a BIOS machine keeps its
-// boot preferences where GRUB can read them: the environment block on
-// the boot home (grubenv.go describes the format). This dialect maps
-// one to one onto the UEFI dialect. try_slot is the one-shot trial
-// (grub.cfg consumes it before it loads a single kernel byte, in the
-// same way that firmware consumes BootNext). default_slot is the
-// standing preference, and it corresponds to the first entry in
-// BootOrder.
+// BIOS firmware stores no boot variables, so a BIOS machine keeps its
+// boot preferences in the GRUB environment block on the boot home
+// (grubenv.go). try_slot is the one-shot trial: grub.cfg reads and
+// clears it before it loads the kernel, as UEFI firmware does with
+// BootNext. grub.cfg boots default_slot when try_slot is empty, as
+// UEFI firmware boots the first entry of BootOrder.
 //
-// Both dialects heal, for the same reason and by different means. A
-// BIOS machine's boot path lives on the disk itself: the MBR's boot
-// code, GRUB's core image, and the config on the boot home. Cloud hosts
-// are known to rewrite MBRs under running machines (Linode's boot-mode
-// changes do exactly that). A UEFI machine's boot path lives in NVRAM,
-// which a firmware update or a dead battery resets to defaults
-// (efiactuator.go). So, when this dialect asserts the proven slot, it
-// also re-derives every byte of the boot chain from the proven slot's
-// own artifacts, and it puts back whatever disagrees. This healing runs
-// on every boot and on the way down before every reboot, because a boot
-// path that is zeroed while the machine runs must be healed before the
-// reboot. Otherwise, the machine would never come back.
+// A BIOS machine's boot path is on its disk: the MBR boot code, GRUB's
+// core image, and grub.cfg on the boot home. Some cloud hosts rewrite
+// the MBR of a running machine, for example when you change a Linode's
+// boot mode. So assertProven, which runs on every boot and before every
+// reboot, also repairs the boot path (repairBootChain). Without that, a
+// machine whose MBR was zeroed while it ran would not boot again after
+// its next reboot.
 
 import (
 	"bytes"
@@ -35,12 +27,11 @@ import (
 )
 
 type grubActuator struct {
-	// grubDir is the boot home's grub directory. It holds grub.cfg
+	// grubDir is the boot home's grub directory, which has grub.cfg
 	// and grubenv.
 	grubDir string
-	// machineName is rendered into grub.cfg when this code heals
-	// grub.cfg. This value comes from the kernel command line, where
-	// GRUB's own config put it.
+	// machineName is the liken.machine= value of the kernel command
+	// line. repairBootChain renders it into grub.cfg.
 	machineName string
 }
 
@@ -48,7 +39,7 @@ func (a grubActuator) envPath() string { return filepath.Join(a.grubDir, "gruben
 
 func (a grubActuator) canArmTrial(slot string) error {
 	if _, err := readGRUBEnv(a.envPath()); err != nil {
-		return fmt.Errorf("the GRUB environment block is not usable: %w", err)
+		return fmt.Errorf("reading the GRUB environment block: %w", err)
 	}
 	return nil
 }
@@ -65,77 +56,72 @@ func (a grubActuator) fallbackLeads(slot string) bool {
 	return err == nil && env["default_slot"] == slot
 }
 
-// assertProven brings the whole GRUB boot path into agreement with
-// the store. The environment block prefers the proven slot, and the
-// boot chain on disk matches the proven slot's own artifacts.
-// handOver refuses: GRUB's one-shot, try_slot, chooses between the two
-// slots and nothing else, so no requester has a boot to hand it to.
+// handOver returns errNoOneShot, because GRUB has no one-shot boot
+// entry that the program that requested the reboot can set
+// (handover.go). try_slot selects only a liken slot.
 func (a grubActuator) handOver(slot string) error { return errNoOneShot }
 
-// dropOneShot does nothing: try_slot is liken's own, and no requester
-// sets it.
+// dropOneShot does nothing, because only init sets try_slot.
 func (a grubActuator) dropOneShot() {}
 
+// assertProven sets default_slot to the proven slot and then repairs
+// the boot chain on disk from that slot's artifacts.
 func (a grubActuator) assertProven(slot string) {
 	env, err := readGRUBEnv(a.envPath())
 	switch {
 	case err != nil:
 		fmt.Fprintf(os.Stderr, "liken: system: reading the GRUB environment block: %v\n", err)
 	case env["default_slot"] != slot || env["try_slot"] != "":
-		// This call clears a leftover try_slot along with the
-		// preference write. A one-shot trial that was armed for a
-		// release since withdrawn must not run on a later reboot.
+		// Clear try_slot too, so a trial armed for a release that was
+		// withdrawn does not run on a later reboot.
 		if err := updateGRUBEnv(a.envPath(), map[string]string{"default_slot": slot, "try_slot": ""}); err != nil {
-			fmt.Fprintf(os.Stderr, "liken: system: asserting default_slot in the GRUB environment block: %v\n", err)
+			fmt.Fprintf(os.Stderr, "liken: system: writing default_slot to the GRUB environment block: %v\n", err)
 		} else if readback, err := readGRUBEnv(a.envPath()); err != nil || readback["default_slot"] != slot {
-			// This code trusts the readback, not the write, in the
-			// same way that the UEFI dialect trusts the readback of
-			// BootOrder.
-			fmt.Fprintln(os.Stderr, "liken: system: the GRUB environment block was written but reads back unchanged")
+			// Check the value read back, not the result of the write,
+			// as efiActuator does with BootOrder.
+			fmt.Fprintln(os.Stderr, "liken: system: default_slot in the GRUB environment block does not read back as slot "+slot+" after the write")
 		} else {
-			fmt.Printf("liken: system: the GRUB environment block now prefers slot %s (proven)\n", slot)
+			fmt.Printf("liken: system: default_slot in the GRUB environment block is now slot %s, the proven slot\n", slot)
 		}
 	}
 
-	// The environment block and the boot chain are separate
-	// assertions on purpose. A torn environment block must not stop
-	// the boot sectors from healing, and a problem in the boot
-	// sectors must not stop the environment block assertion.
-	a.healBootChain(slot)
+	// The repair runs even when the environment block could not be
+	// read or written, because a zeroed MBR stops the machine from
+	// booting whatever the block says.
+	a.repairBootChain(slot)
 }
 
-// healBootChain re-derives the on-disk boot chain from the proven
-// slot's artifacts and rewrites whatever disagrees. The comparison
-// runs every time. The write happens only when something drifted, so
-// a healthy machine's console shows no message.
-func (a grubActuator) healBootChain(slot string) {
+// repairBootChain compares the boot sectors and grub.cfg with what the
+// proven slot's artifacts and the machine name give, and rewrites only
+// a part that differs. It prints nothing when all of them match.
+func (a grubActuator) repairBootChain(slot string) {
 	slotMount := slotMountPath(slot)
 	if slotMount == "" {
 		return
 	}
 	bootImg, err := os.ReadFile(filepath.Join(slotMount, "grub-boot.img"))
 	if err != nil {
-		// A proven release from before liken carried GRUB artifacts
-		// cannot say what the boot sectors should hold. The chain
-		// that booted this machine stays as it is.
-		fmt.Printf("liken: system: slot %s carries no grub-boot.img; leaving the boot sectors alone\n", slot)
+		// A release from before liken shipped GRUB artifacts has no
+		// copy of the boot sectors to compare with, so leave the chain
+		// that booted this machine as it is.
+		fmt.Printf("liken: system: slot %s has no grub-boot.img, so init leaves the boot sectors as they are\n", slot)
 		return
 	}
 	coreImg, err := os.ReadFile(filepath.Join(slotMount, "grub-core.img"))
 	if err != nil {
-		fmt.Printf("liken: system: slot %s carries no grub-core.img; leaving the boot sectors alone\n", slot)
+		fmt.Printf("liken: system: slot %s has no grub-core.img, so init leaves the boot sectors as they are\n", slot)
 		return
 	}
 
 	parts := discoverPartitions()
 	biosBoot, err := findSlotPartition(parts, machine.BIOSBootRole)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: system: %v; the boot sectors cannot be checked\n", err)
+		fmt.Fprintf(os.Stderr, "liken: system: %v, so init does not check the boot sectors\n", err)
 		return
 	}
 	diskDev, err := diskDevice(parts, machine.BIOSBootRole)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: system: %v; the boot sectors cannot be checked\n", err)
+		fmt.Fprintf(os.Stderr, "liken: system: %v, so init does not check the boot sectors\n", err)
 		return
 	}
 	plan, err := planGRUBBootSectors(bootImg, coreImg, biosBoot)
@@ -156,16 +142,15 @@ func (a grubActuator) healBootChain(slot string) {
 	}
 	if !ok {
 		if err := plan.write(disk); err != nil {
-			fmt.Fprintf(os.Stderr, "liken: system: healing the boot sectors on %s: %v\n", diskDev, err)
+			fmt.Fprintf(os.Stderr, "liken: system: writing the boot sectors on %s: %v\n", diskDev, err)
 			return
 		}
-		fmt.Printf("liken: system: the boot sectors on %s disagreed with slot %s's artifacts; healed\n", diskDev, slot)
+		fmt.Printf("liken: system: the boot sectors on %s differed from the files of slot %s, so init rewrote them\n", diskDev, slot)
 	}
 
-	// grub.cfg is rendered, not copied, so it heals the same way:
-	// this code re-renders it and compares the result. Without a
-	// machine name, there is nothing correct to render, so this code
-	// leaves the file alone rather than write an anonymous version.
+	// grub.cfg is rendered from the machine name, not copied from the
+	// slot. Without a machine name there is no correct file to render,
+	// so leave it as it is.
 	if a.machineName == "" {
 		return
 	}
@@ -176,16 +161,14 @@ func (a grubActuator) healBootChain(slot string) {
 		return
 	}
 	if err := writeFileDurably(cfgPath, want); err != nil {
-		fmt.Fprintf(os.Stderr, "liken: system: healing grub.cfg: %v\n", err)
+		fmt.Fprintf(os.Stderr, "liken: system: writing grub.cfg: %v\n", err)
 		return
 	}
-	fmt.Println("liken: system: grub.cfg disagreed with this machine's rendering; healed")
+	fmt.Println("liken: system: grub.cfg differed from the one rendered for this machine, so init rewrote it")
 }
 
-// slotMountPath translates a slot letter to its mountpoint. It uses
-// the same table that storage reconciliation uses for mounts, so
-// tests can substitute a temporary directory, the same way tests do
-// for every role.
+// slotMountPath returns the mount point of slot "A" or "B" from
+// roleMounts, and "" for any other value.
 func slotMountPath(slot string) string {
 	switch slot {
 	case "A":
@@ -197,11 +180,9 @@ func slotMountPath(slot string) string {
 }
 
 // biosFirmwareFacts reports a BIOS machine's boot configuration from
-// where that machine actually keeps it: GRUB's environment block and
-// the kernel command line that GRUB composed. The fields deliberately
-// mirror the UEFI report. A fleet listing reads the same way for
-// either firmware type, and each fact names the mechanism it came
-// from.
+// the GRUB environment block and the kernel command line. It fills the
+// same fields as the UEFI report, so a fleet listing reads the same
+// for either firmware, and each value says where it came from.
 func biosFirmwareFacts() machine.FirmwareStatus {
 	fw := machine.FirmwareStatus{Mode: machine.FirmwareBIOS}
 	if slot := bootParamValue("liken.slot"); slot != "" {

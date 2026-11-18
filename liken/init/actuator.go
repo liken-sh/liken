@@ -1,28 +1,18 @@
 package main
 
-// The boot actuator: the firmware interface the upgrade path uses.
+// A bootActuator sets which slot the machine boots, and it is the only
+// part of an upgrade that differs by firmware. An upgrade needs it to
+// boot a trial slot on the next boot only, to boot the proven slot on
+// every boot after that, and to report whether the firmware still
+// prefers the proven slot. The rest of the upgrade is the same on every
+// machine and is in proving.go.
 //
-// Blue-green upgrades need exactly three actions from the code that
-// boots the machine. First, point the next boot, and only the next
-// boot, at a slot on trial. Second, keep every later boot pointed at
-// the proven slot. Third, report whether that standing preference is
-// actually in effect. Everything else about upgrades stays the same
-// on every machine and lives in proving.go: the staged/proven/
-// attempted store, the verdicts, and the order of operations that
-// stops a failing release from causing repeated reboots. Only these
-// three actions differ by firmware. They form the whole interface
-// between the lifecycle and the machine's boot hardware. Each
-// firmware's implementation of the interface is called a dialect.
-//
-// A UEFI machine's firmware holds boot preferences itself, as
-// variables in NVRAM. The UEFI specification defines the interface:
-// BootNext is the one-shot trial, and BootOrder is the standing
-// preference (efiactuator.go). A BIOS machine's firmware holds no
-// boot preferences, so liken stores them where GRUB can read them:
-// the environment block on the boot home (grubactuator.go). A
-// machine chooses this path by declaring the biosBoot and bootHome
-// storage roles. The installed grubenv file is the sign that the
-// GRUB interface is in place.
+// A UEFI machine keeps its boot preferences in NVRAM variables:
+// BootNext for the trial and BootOrder for the proven slot
+// (efiactuator.go). A BIOS machine has no such variables, so liken
+// keeps them in GRUB's environment block on the boot home
+// (grubactuator.go). A BIOS machine has a grubenv file only when its
+// manifest declares the biosBoot and bootHome storage roles.
 
 import (
 	"errors"
@@ -34,94 +24,70 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// firmwareWrites serializes the two firmware writers that can overlap
-// in time: the reboot path and the proving watch. Every other write
-// happens at boot, before the machine plane starts, with nothing to
-// race. The order of the reboot path's writes is load-bearing: it
-// asserts the proven fallback and then arms the trial, and a write
-// landing between or after those two leaves the attempted marker
-// standing for a trial that the firmware will never run, which the
-// next boot reads as a release that ran and fell back.
+// firmwareWrites serializes the reboot path and the proving watch,
+// which can write the firmware's boot settings at the same time. The
+// reboot path sets the proven slot and then arms the trial. When the
+// watch writes between or after those, the firmware can skip the
+// trial while the attempted marker stays set, and the next boot reads
+// that as a release that ran and failed.
 //
-// Every holder releases this lock, including one that panics. The
-// reboot path is reachable from inside a machine-plane component, and
-// the plane restarts a component after a panic. A lock left held by
-// no one would block every later reboot before the reboot syscall,
-// and such a machine looks healthy while it ignores every reboot it
-// is asked to take. Only a power cycle would recover it.
+// Every holder unlocks with defer. The reboot path can run inside a
+// machine-plane component, which the plane restarts after a panic. A
+// lock left held blocks every later reboot, and only a power cycle
+// recovers the machine.
 var firmwareWrites sync.Mutex
 
-// shuttingDown says the reboot path has claimed the firmware. The
-// lock alone cannot say that, because the reboot path releases it
-// after its turn, and the proving watch may still be running for a
-// while after. The reboot path sets this before it takes the lock,
-// and the watch tests it while holding the lock, so a watch that
-// waited out the reboot path's turn sees the flag and leaves the
-// firmware exactly as that turn left it.
+// shuttingDown is set by the reboot path before it takes
+// firmwareWrites, and is never cleared. The proving watch checks it
+// under the lock, so a watch that gets the lock after the reboot path
+// leaves the armed trial alone.
 var shuttingDown atomic.Bool
 
-// bootActuator lists the three actions the proving lifecycle asks of
-// the firmware. Each method performs one of the three actions
-// described above.
 type bootActuator interface {
-	// canArmTrial reports whether armTrial could point a boot at the
-	// given slot. It changes nothing. It exists because of an
-	// ordering rule in armProvingBoot: the code must write the
-	// attempted marker before it arms the trial. A marker with no
-	// trial behind it reads as "tried and fell back" on the next
-	// boot. That is a false rejection of a release that never ran.
-	// The code must find anything knowably wrong before it writes
-	// the marker, and this method is that check.
+	// canArmTrial reports whether armTrial would succeed, and changes
+	// nothing. armProvingBoot writes the attempted marker before it
+	// arms the trial, so it calls canArmTrial first. A marker with no
+	// trial would reject a release that never ran.
 	canArmTrial(slot string) error
 
-	// armTrial makes the next boot, and only the next boot, try the
-	// given slot. The one-shot property makes a trial safe: the boot
-	// that the arming triggers also consumes it. So any reset after
-	// that boot (a panic, a watchdog, a power cut) returns to the
-	// standing preference. On success, armTrial returns a
-	// console-ready description of what it armed, in the firmware's
-	// own terms.
+	// armTrial makes only the next boot use the given slot. That boot
+	// clears the setting, so any later reset, such as a panic, a
+	// watchdog, or a power cut, boots the proven slot. It returns a
+	// description of the setting it wrote, for the console.
 	armTrial(slot string) (string, error)
 
-	// fallbackLeads reports whether the standing boot preference
-	// leads with the given slot. It confirms this by reading the
-	// preference back; it does not trust that an earlier write
-	// worked. A trial is safe only when every reset lands on a
-	// proven slot. The reboot path uses this method to check that
-	// before it arms a trial.
+	// fallbackLeads reports whether the firmware's boot order starts
+	// with the given slot. It reads the firmware, and does not trust an
+	// earlier write. A trial is safe only when every reset after it
+	// boots the proven slot.
 	fallbackLeads(slot string) bool
 
-	// assertProven makes the standing boot preference lead with the
-	// given slot, and corrects any drift. It runs on every boot and
-	// after every promotion. This keeps the store on disk as the
-	// authority; the firmware only ever holds a copy of it. Each
-	// dialect also repairs whatever part of its boot path can be lost
-	// while a machine runs, because a boot path that is damaged now
-	// would stop the next reboot from coming back.
+	// assertProven makes the boot order start with the given slot. It
+	// runs on every boot and after every promotion, because the store
+	// on disk is the source of truth and the firmware has a copy. It
+	// also repairs any part of the boot path that can be damaged while
+	// the machine runs, so that the next reboot comes back.
 	assertProven(slot string)
 
-	// handOver is assertProven for a reboot whose one-shot belongs to
-	// a requester (handover.go): it asserts the given proven slot and
-	// leaves the one-shot as the requester set it. It answers an error,
-	// and leaves the one-shot alone, when the boot after the
-	// requester's might not come back to the proven slot. The caller
-	// then asserts the proven slot as on any reboot.
+	// handOver is assertProven for a reboot whose one-shot boot entry a
+	// Disruption set (handover.go). It leaves that entry in place. It
+	// returns an error when the boot after that one might not return to
+	// the proven slot. When BootNext already points at the other slot,
+	// it returns before it writes anything. When the proven slot has no
+	// fallback loader, it returns the error after it has repaired the
+	// boot entries.
 	handOver(slot string) error
 
-	// dropOneShot removes a one-shot that a refused handover leaves on
-	// a machine whose store names no proven slot. On such a machine
-	// assertProven never runs, so nothing else takes the one shot back,
-	// and the requester's boot would run although init refused it.
+	// dropOneShot removes a Disruption's one-shot entry after init
+	// refuses the handover on a machine with no proven slot. Such a
+	// machine never runs assertProven, so without this the refused
+	// boot would still run.
 	dropOneShot()
 }
 
-// chooseBootActuator picks the firmware interface this machine uses.
-// It applies the same test the installer uses: /sys/firmware/efi
-// exists only when UEFI booted this kernel. A BIOS machine uses
-// GRUB when the boot home carries an installed environment block.
-// Without one, for example on external media, a direct-kernel lab
-// boot, or a machine installed without the GRUB roles, no firmware
-// interface is available.
+// chooseBootActuator returns noActuator on a BIOS machine with no
+// grubenv file: a boot from external media, a direct-kernel QEMU boot,
+// or a machine installed without the GRUB roles.
 func chooseBootActuator() bootActuator {
 	if firmwareIsUEFI() {
 		return efiActuator{dir: efiVarsDir, machineName: bootParamValue("liken.machine"), espLink: machine.ProvenESPLink}
@@ -133,12 +99,8 @@ func chooseBootActuator() bootActuator {
 	return noActuator{}
 }
 
-// noActuator serves a machine with no way to choose its next boot.
-// BIOS firmware holds no boot variables, and a boot from external
-// media or a direct-kernel QEMU boot has no standing preference to
-// manage. Every assertion does nothing, and no trial can ever arm.
-// A machine that cannot guarantee its fallback must stay on the
-// version that works.
+// noActuator arms no trial, because a machine that cannot boot the
+// proven slot after a failed trial must stay on the release it runs.
 type noActuator struct{}
 
 func (noActuator) canArmTrial(slot string) error {
@@ -157,4 +119,4 @@ func (noActuator) handOver(slot string) error { return errNoOneShot }
 
 func (noActuator) dropOneShot() {}
 
-var errNoActuator = errors.New("this machine's firmware holds no boot variables, so init has no way to arm a one-shot trial")
+var errNoActuator = errors.New("this machine has no UEFI boot variables and no grubenv file, so init cannot arm a one-shot trial boot")

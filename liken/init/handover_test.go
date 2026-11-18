@@ -8,12 +8,12 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// requesterEntry is the entry that a requester's BootNext names, such
-// as fwupd's "Linux Firmware Updater".
+// requesterEntry is the boot entry that a requester points BootNext
+// at, such as fwupd's "Linux Firmware Updater".
 const requesterEntry = 0x0009
 
-// keptAtPowerOn sets what this boot found at power-on, as main's call
-// to observeBootOrder does.
+// keptAtPowerOn sets bootOrderKept, which main sets from
+// observeBootOrder at power-on.
 func keptAtPowerOn(t *testing.T, kept *bool) {
 	t.Helper()
 	old := bootOrderKept
@@ -23,10 +23,10 @@ func keptAtPowerOn(t *testing.T, kept *bool) {
 
 func ptr[T any](v T) *T { return &v }
 
-// handoverMachine is a UEFI machine whose store calls slot A proven,
-// whose slots carry their boot files and slot A the fallback loader,
-// and whose firmware leads with slot A, kept it through the last
-// reset, and holds the requester's entry in BootNext.
+// handoverMachine returns a UEFI machine that meets every condition of
+// a handover. The store records slot A as proven, slot A has the
+// fallback loader and leads BootOrder, bootOrderKept is true, and
+// BootNext points at the requester's entry.
 func handoverMachine(t *testing.T) (act efiActuator, root, dir string) {
 	t.Helper()
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A\n")
@@ -45,7 +45,7 @@ func handoverMachine(t *testing.T) (act efiActuator, root, dir string) {
 func setBootNext(t *testing.T, dir string, entry uint16) {
 	t.Helper()
 	if err := writeEFIVar(dir, "BootNext", bootNextPayload(entry)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing BootNext: %v", err)
 	}
 }
 
@@ -58,7 +58,7 @@ func bootNextOf(t *testing.T, dir string) int32 {
 	return bootNextEntry(next)
 }
 
-func TestTheHandoverLeavesTheRequestersBootNext(t *testing.T) {
+func TestHandoverLeavesBootNextAsTheRequesterSetIt(t *testing.T) {
 	act, root, dir := handoverMachine(t)
 
 	assertAndArmForReboot(act, root, "A", "node-1.firmware-bios")
@@ -72,10 +72,9 @@ func TestTheHandoverLeavesTheRequestersBootNext(t *testing.T) {
 	}
 }
 
-// The handover's reboot boots the requester's entry, so it cannot be
-// the trial of a staged release too. The release stays staged, and
-// its own reboot arms its trial later.
-func TestTheHandoverArmsNoTrial(t *testing.T) {
+// A handover reboot boots the requester's entry, so it cannot also be
+// the trial of a staged release.
+func TestHandoverArmsNoTrial(t *testing.T) {
 	act, root, dir := handoverMachine(t)
 	_, hash := stagedRelease(t, root, "0.2.0", "B")
 
@@ -86,17 +85,16 @@ func TestTheHandoverArmsNoTrial(t *testing.T) {
 		t.Errorf("the attempted marker names %s, want no trial armed", attempted)
 	}
 	if staged, _ := store.LoadStaged(); staged == nil || machine.ManifestHash(staged) != hash {
-		t.Error("the staged release must stay staged for a later reboot")
+		t.Error("the staged release is gone or changed, want it kept staged for a later reboot")
 	}
 	if got := bootNextOf(t, dir); got != requesterEntry {
 		t.Errorf("BootNext names %#04x, want the requester's %#04x", got, requesterEntry)
 	}
 }
 
-// A refused handover is an ordinary reboot: the proven slot takes the
-// one shot back, and the requester's next scan finds that its update
-// did not run.
-func TestTheHandoverIsRefused(t *testing.T) {
+// A refused handover is an ordinary reboot, which sets BootNext to the
+// proven slot.
+func TestRefusedHandoverRebootsToTheProvenSlot(t *testing.T) {
 	cases := []struct {
 		name  string
 		setup func(t *testing.T, act *efiActuator, root, dir string)
@@ -111,10 +109,10 @@ func TestTheHandoverIsRefused(t *testing.T) {
 			entry, _ := findSlotEntry(dir, "B")
 			setBootNext(t, dir, entry)
 		}},
-		{"when the proven slot cannot hold the fallback loader", func(t *testing.T, act *efiActuator, _, _ string) {
+		{"when the proven slot has no fallback loader", func(t *testing.T, act *efiActuator, _, _ string) {
 			slotA, _ := fakeSlotMounts(t)
 			if err := os.Remove(defaultLoaderPath(slotA)); err != nil && !os.IsNotExist(err) {
-				t.Fatal(err)
+				t.Fatalf("removing the fallback loader: %v", err)
 			}
 			act.machineName = ""
 		}},
@@ -134,27 +132,27 @@ func TestTheHandoverIsRefused(t *testing.T) {
 	}
 }
 
-func TestTheHandoverIsRefusedWithNoProvenSlot(t *testing.T) {
+func TestHandoverIsRefusedWithNoProvenSlot(t *testing.T) {
 	act, _, dir := handoverMachine(t)
 
 	assertAndArmForReboot(act, t.TempDir(), "A", "node-1.firmware-bios")
 
 	if got := bootNextOf(t, dir); got == requesterEntry {
-		t.Error("a store with no proven release names no slot to come back to, so the handover must be refused")
+		t.Error("BootNext still names the requester's entry, want the handover refused, because the store has no proven slot to return to")
 	}
 }
 
-func TestOnlyUEFIHandsOverTheOneShot(t *testing.T) {
+func TestOnlyUEFIHandsOverBootNext(t *testing.T) {
 	for _, act := range []bootActuator{noActuator{}, grubActuator{grubDir: t.TempDir()}} {
 		if err := act.handOver("A"); err == nil {
-			t.Errorf("%T handed over a one-shot it does not have", act)
+			t.Errorf("%T.handOver returned no error, want one, because it has no one-shot boot entry", act)
 		}
 	}
 }
 
 // At power-on, before init writes anything, the proven slot leads
-// BootOrder exactly when the firmware kept the order that the last
-// shutdown asserted.
+// BootOrder only when the firmware kept the order that the last
+// shutdown wrote.
 func TestObserveBootOrder(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -177,7 +175,7 @@ func TestObserveBootOrder(t *testing.T) {
 			got := observeBootOrder(efiActuator{dir: dir}, root)
 
 			if (got == nil) != (c.want == nil) || got != nil && *got != *c.want {
-				t.Errorf("got %v, want %v", deref(got), deref(c.want))
+				t.Errorf("bootOrderKept is %v, want %v", deref(got), deref(c.want))
 			}
 		})
 	}
@@ -190,13 +188,14 @@ func deref(b *bool) any {
 	return *b
 }
 
-// A requester's pod writes to the ESP that the next boot reads, which
-// is the proven slot's, through one path that follows each promotion.
+// A requester's pod writes its updater and capsule through espLink, so
+// espLink must point at the proven slot's ESP after each promotion.
 func TestTheProvenESPLinkFollowsTheProvenSlot(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A\n")
 	installedDisk(t)
 	slotA, slotB := fakeSlotMounts(t)
-	// The boot links the ESP before anything else creates /run/liken.
+	// The link's directory does not exist yet, as /run/liken does not
+	// when boot creates the link.
 	link := filepath.Join(t.TempDir(), "liken", "proven-esp")
 	act := efiActuator{dir: fakeEFIVars(t, map[string][]byte{}), machineName: "node-1", espLink: link}
 
@@ -209,8 +208,8 @@ func TestTheProvenESPLinkFollowsTheProvenSlot(t *testing.T) {
 	}
 }
 
-// A capsule on the slot that is not proven would apply at a later boot
-// from that slot, a firmware change that nobody asked for.
+// A capsule left on the slot that is not proven would apply when that
+// slot boots later, which is a firmware change that nobody requested.
 func TestCapsulesOnTheOtherSlotAreRemoved(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A\n")
 	installedDisk(t)
@@ -223,19 +222,19 @@ func TestCapsulesOnTheOtherSlotAreRemoved(t *testing.T) {
 	act.assertProven("A")
 
 	if _, err := os.Stat(filepath.Join(slotB, "EFI", "UpdateCapsule")); !os.IsNotExist(err) {
-		t.Errorf("slot B still holds its capsules: %v", err)
+		t.Errorf("slot B still has \\EFI\\UpdateCapsule (%v), want it deleted from the slot that is not proven", err)
 	}
 	if _, err := os.Stat(filepath.Join(slotA, "EFI", "UpdateCapsule", "fwupd-bios.cap")); err != nil {
-		t.Errorf("the proven slot's capsule is the requester's, and stays: %v", err)
+		t.Errorf("the proven slot's capsule is missing: %v, want it kept, because it is the one that the firmware update staged", err)
 	}
 }
 
 func writeNested(t *testing.T, path string, data []byte) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory of %s: %v", path, err)
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing %s: %v", path, err)
 	}
 }

@@ -1,34 +1,25 @@
 package main
 
-// Growing partitions in place.
+// Sizes in the storage spec only grow. Shrinking or moving a partition
+// would mean relocating live data, and liken does not migrate data. To
+// grow a partition, init rewrites the last sector of its table entry,
+// and ext4.go then grows the filesystem inside it.
 //
-// Sizes in the storage spec are grow-only: a role may be declared
-// larger than its partition, never smaller, because growing never
-// moves data. A partition grows by rewriting its table entry's end
-// sector and telling the filesystem inside (ext4.go's half of the
-// job). Shrinking or moving would mean relocating live data, which
-// is a data migration, and liken does not do migrations.
+// A partition can grow only into free space directly after it. When
+// another partition starts in that space, init refuses the spec like
+// any other invalid spec, so the machine never runs with less storage
+// than it declares.
 //
-// Two rules bound what a grow can do:
+// After it changes an entry, init asks the kernel to re-read the
+// table, and the kernel refuses (BLKRRPART returns EBUSY) while any
+// partition of that disk is mounted. So growth runs before init mounts
+// any role.
 //
-//   - A partition can only grow into empty space directly after it.
-//     If another partition starts there, the grow is unsatisfiable,
-//     and an unsatisfiable spec fails reconciliation the same as any
-//     other one. The machine does not quietly run with less than it
-//     declared.
-//
-//   - Every table edit happens while nothing from that disk is
-//     mounted. The kernel refuses to re-read the partition table of
-//     a disk in use (BLKRRPART returns EBUSY), which is why growth
-//     runs after recognition and before the code mounts any role.
-//
-// A disk that was itself grown, for example by the lab's qemu-img
-// resize or a cloud volume expansion, needs its table rewritten even
-// when no partition changes: the backup table belongs at the end of
-// the disk, and the end just moved. Remainder roles, which have no
-// declared size, grow to the new last usable sector when that
-// happens. Their size was always defined as the rest of the disk, so
-// when the disk grows, they grow with it.
+// When the disk itself grew, for example after qemu-img resize or a
+// cloud volume expansion, the table must be rewritten even when no
+// partition grows, because the backup GPT belongs at the last sector
+// of the disk. A role with no declared size extends to the new last
+// usable sector in the same rewrite.
 
 import (
 	"fmt"
@@ -38,19 +29,16 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// A growth is one entry's extension: which table slot, and the new
-// final sector.
+// A growth extends one partition table entry to a new last sector.
 type growth struct {
 	entryIndex int
 	newLastLBA uint64
 }
 
-// planGrowth compares each declared role recognized on this disk
-// against its table entry, and determines what must grow. It is pure;
-// the device name appears only in error messages. rewrite reports
-// whether the table needs rewriting even when no extent changes,
-// which is how a grown disk gets its backup table moved to the new
-// end.
+// planGrowth returns the entries of this disk's table that must grow
+// to match the declared roles. device is used only in error messages.
+// rewrite is also true when no entry grows but the disk did, because
+// the backup table must move to the new last sector.
 func planGrowth(device string, roles []machine.DeclaredRole, t *disks.Table, totalSectors uint64) (edits []growth, rewrite bool, err error) {
 	lastUsable := disks.LastUsableLBA(totalSectors)
 	for _, role := range roles {
@@ -62,14 +50,12 @@ func planGrowth(device string, roles []machine.DeclaredRole, t *disks.Table, tot
 			}
 		}
 		if idx < 0 {
-			continue // this role's partition lives on another disk
+			continue // this role's partition is on another disk
 		}
 		e := t.Entries[idx]
 
 		var target uint64
 		if role.Size == "" {
-			// A remainder role's size is "the rest of the disk", so
-			// growth for it means the disk itself grew.
 			target = lastUsable
 			if target <= e.LastLBA {
 				continue
@@ -78,26 +64,23 @@ func planGrowth(device string, roles []machine.DeclaredRole, t *disks.Table, tot
 			bytes, _ := machine.ParseSize(role.Size) // validated before any disk is touched
 			declared := (bytes + disks.SectorSize - 1) / disks.SectorSize
 			if declared <= e.LastLBA-e.FirstLBA+1 {
-				// Already at or above the declared size: satisfied.
-				// (A shrink that the operator failed to refuse also
-				// lands here, tolerated and never acted on.)
+				// A declared shrink also ends up here. The operator
+				// refuses one, and init ignores any that arrives.
 				continue
 			}
 			target = e.FirstLBA + declared - 1
 			if target > lastUsable {
-				return nil, false, fmt.Errorf("disk %s is too small to grow %s to %s: needs sector %d but the disk's usable space ends at %d",
-					device, role.Name, role.Size, target, lastUsable)
+				return nil, false, fmt.Errorf("growing %s on %s to %s needs sector %d, but the usable space of the disk ends at sector %d",
+					role.Name, device, role.Size, target, lastUsable)
 			}
 		}
 
-		// Growing never moves data, so anything that starts in the
-		// space this partition needs leaves the spec unsatisfiable.
 		for j, other := range t.Entries {
 			if j == idx {
 				continue
 			}
 			if other.FirstLBA > e.LastLBA && other.FirstLBA <= target {
-				return nil, false, fmt.Errorf("cannot grow %s on %s to sector %d: partition %q begins at sector %d, in the way (growing never moves data)",
+				return nil, false, fmt.Errorf("%s on %s cannot grow to sector %d: partition %q begins at sector %d, and growing does not move partitions",
 					role.Name, device, target, other.Name, other.FirstLBA)
 			}
 		}
@@ -106,9 +89,9 @@ func planGrowth(device string, roles []machine.DeclaredRole, t *disks.Table, tot
 	return edits, len(edits) > 0 || t.AlternateLBA != totalSectors-1, nil
 }
 
-// A growPlan is one disk's pending rewrite. The code computes it up
-// front (the plan-everything-then-apply rule in storage.go's
-// header), and applies it only after every disk's plan succeeds.
+// A growPlan is the table rewrite of one disk. reconcileStorage plans
+// every disk before it applies any plan, so an invalid spec changes
+// no disk.
 type growPlan struct {
 	device       string
 	totalSectors uint64
@@ -116,8 +99,9 @@ type growPlan struct {
 	edits        []growth
 }
 
-// planAllGrowth reads each recognized disk's table and plans its
-// growth, and writes nothing.
+// planAllGrowth reads the partition table of each disk that holds a
+// recognized role and returns the rewrite that disk needs. It writes
+// nothing.
 func planAllGrowth(roles []machine.DeclaredRole, found map[machine.StorageRoleName]partition) ([]growPlan, error) {
 	byDisk := map[string][]machine.DeclaredRole{}
 	var order []string
@@ -126,20 +110,15 @@ func planAllGrowth(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 		if !ok {
 			continue
 		}
-		// The boot roles never grow: ext4 grows in place by ioctl, but
-		// FAT's geometry is fixed at format time (the slots, bootHome),
-		// and biosBoot's whole purpose is a layout that the MBR's
-		// literal sector numbers can rely on. Their sizes are settled
-		// on the day they are claimed. The code refuses a spec asking
-		// for more here, at planning time, before it writes anything,
-		// and the refusal follows the usual staged-spec path: the code
-		// rejects the spec, and the boot falls back to the proven
-		// manifest.
+		// The boot roles never grow. The system slots and bootHome are
+		// FAT, which cannot grow in place, and the MBR's boot code
+		// addresses biosBoot by sector number. A spec that grows one
+		// is refused here, before anything is written.
 		if isFixedSizeRole(role.Name) {
 			if role.Size != "" {
 				if bytes, _ := machine.ParseSize(role.Size); bytes > p.sizeBytes {
 					return nil, fmt.Errorf(
-						"%s is %s and can't grow to %s: boot roles are fixed when claimed",
+						"%s is %s and can't grow to %s, because a boot role keeps the size it had when init created it",
 						role.Name, gib(p.sizeBytes), role.Size)
 				}
 			}
@@ -156,13 +135,13 @@ func planAllGrowth(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 		device := devRoot + "/" + diskName
 		disk := diskByPath(device)
 		if disk == nil {
-			return nil, fmt.Errorf("recognized partitions on %s but the disk is not in the inventory", device)
+			return nil, fmt.Errorf("%s holds recognized partitions, but the disk is not in the inventory", device)
 		}
 		totalSectors := disk.SizeBytes / disks.SectorSize
 
 		f, err := os.Open(device)
 		if err != nil {
-			return nil, fmt.Errorf("examining %s: %w", device, err)
+			return nil, err
 		}
 		t, err := disks.ReadGPT(f, totalSectors)
 		f.Close()
@@ -182,21 +161,17 @@ func planAllGrowth(roles []machine.DeclaredRole, found map[machine.StorageRoleNa
 	return plans, nil
 }
 
-// applyGrowth rewrites one disk's table with its planned extensions
-// and waits for the kernel to show the new geometry.
+// applyGrowth writes one disk's planned table and waits until the
+// kernel shows the partitions with their new sizes.
 func applyGrowth(plan growPlan) error {
-	// A plan with no edits is a pure relocation: the disk grew, no
-	// partition's extent changes, and only the backup copy of the
-	// table needs to move to the new end. The kernel's view of the
-	// partitions is already correct, so the code does not ask it to
-	// re-read the table, and it could not ask anyway. On the disk
-	// carrying the running system, the boot slot has been mounted
-	// since early boot found the system image on it, and the kernel
-	// refuses to re-read a disk in use. (This is the normal first
-	// boot after the liken.sh deployment stamps its disk image onto
-	// a slightly larger disk.)
+	// With no edits, only the backup table moves, and the kernel's
+	// view of the partitions is already correct. So init skips the
+	// re-read, which the kernel refuses on the disk of the running
+	// system, because its boot slot is mounted. This happens on the
+	// first boot after a disk image is written onto a disk larger than
+	// the image.
 	if len(plan.edits) == 0 {
-		fmt.Printf("liken: storage: %s grew; relocating its backup partition table to the new end\n", plan.device)
+		fmt.Printf("liken: storage: %s is larger than its partition table records, so init moves the backup table to the last sector\n", plan.device)
 		if err := disks.WriteTableInPlace(plan.device, plan.totalSectors, plan.table); err != nil {
 			return fmt.Errorf("rewriting the partition table on %s: %w", plan.device, err)
 		}

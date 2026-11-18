@@ -1,24 +1,23 @@
 package main
 
-// Tests for the grub.cfg renderer. The config is generated text, so
-// these tests pin the load-bearing lines: the one-shot consumption
-// order, the fallback entry, and the command-line match with what
-// writeSlotBootEntry gives UEFI machines.
+// The tests check the lines of the generated config that decide how
+// the machine boots: when try_slot is cleared, the fallback entry, and
+// a kernel command line that matches writeSlotBootEntry's.
 
 import (
 	"strings"
 	"testing"
 )
 
-func TestGRUBConfigCarriesTheChoreography(t *testing.T) {
+func TestGRUBConfigSelectsTheSlotAndHasAFallbackEntry(t *testing.T) {
 	cfg := renderGRUBConfig("node-1", []string{"console=ttyS0"})
 
-	// The one-shot: this test checks that try_slot is consumed
-	// (cleared and saved) before any menuentry can run a kernel.
+	// try_slot must be cleared and saved before any entry loads a
+	// kernel.
 	saveAt := strings.Index(cfg, "save_env try_slot")
 	entryAt := strings.Index(cfg, "menuentry")
 	if saveAt < 0 || entryAt < 0 || saveAt > entryAt {
-		t.Error("try_slot must be consumed before the first menu entry")
+		t.Errorf("grub.cfg saves try_slot at %d and has its first menuentry at %d, want try_slot cleared before the first menu entry", saveAt, entryAt)
 	}
 	for _, want := range []string{
 		"load_env",
@@ -33,36 +32,35 @@ func TestGRUBConfigCarriesTheChoreography(t *testing.T) {
 		"initrd /microcode.cpio /boot.cpio /deployment.cpio",
 	} {
 		if !strings.Contains(cfg, want) {
-			t.Errorf("the config must contain %q", want)
+			t.Errorf("grub.cfg does not contain %q, want it:\n%s", want, cfg)
 		}
 	}
-	// A torn or fresh environment block still boots slot A.
+	// An empty slot variable boots slot A.
 	if !strings.Contains(cfg, "set slot=A") {
-		t.Error("an empty slot choice must default to A")
+		t.Errorf("grub.cfg has no \"set slot=A\", want slot A when the slot variable is empty:\n%s", cfg)
 	}
 }
 
-func TestGRUBConfigKernelLineMirrorsTheUEFIEntry(t *testing.T) {
+func TestGRUBConfigKernelLineMatchesTheUEFIEntry(t *testing.T) {
 	cfg := renderGRUBConfig("node-1", []string{"console=ttyS0"})
 	want := "linux /vmlinuz console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=$slot panic=10"
 	if !strings.Contains(cfg, want) {
-		t.Errorf("kernel line should mirror writeSlotBootEntry's arguments:\nwant %q\nin:\n%s", want, cfg)
+		t.Errorf("grub.cfg has no kernel line with the arguments of writeSlotBootEntry, want %q:\n%s", want, cfg)
 	}
 }
 
 func TestGRUBConfigSerialConsole(t *testing.T) {
 	cfg := renderGRUBConfig("node-1", []string{"console=ttyS1,57600n8"})
 	if !strings.Contains(cfg, "serial --unit=1 --speed=57600") {
-		t.Errorf("a serial console should configure GRUB's serial terminal:\n%s", cfg)
+		t.Errorf("grub.cfg has no \"serial --unit=1 --speed=57600\", want GRUB's serial terminal set up for the serial console:\n%s", cfg)
 	}
 	if !strings.Contains(cfg, "terminal_output serial console") {
-		t.Error("GRUB's output should reach both the serial and local consoles")
+		t.Errorf("grub.cfg has no \"terminal_output serial console\", want GRUB's output on both the serial and the local console:\n%s", cfg)
 	}
 
-	// No serial console means no serial directives: GRUB's default
-	// output applies.
+	// Without a serial console, GRUB keeps its default output.
 	plain := renderGRUBConfig("node-1", []string{"console=tty0"})
 	if strings.Contains(plain, "serial --unit") {
-		t.Error("a machine without a serial console should not configure one")
+		t.Errorf("grub.cfg has \"serial --unit\", want no serial terminal on a machine with no serial console:\n%s", plain)
 	}
 }

@@ -1,31 +1,37 @@
 package main
 
-// The handover of the one-shot: a reboot whose BootNext belongs to a
-// requester instead of to init.
+// On some reboots, init leaves BootNext as the program that requested
+// the reboot set it.
 //
-// Every reboot path aims BootNext at the proven slot, or at a staged
-// release's trial (proving.go). A UEFI capsule needs the opposite.
-// fwupd sets BootNext to its own updater, the firmware boots the
-// updater once, the updater hands the capsule to the firmware, and the
-// firmware applies it and resets. So a requester that set BootNext in
-// its turn, such as firmware-operator after it staged a capsule, says
-// so with spec.keepBootNext on its Disruption, and machine-operator
-// names the request in the reboot intent. On that reboot init leaves
-// BootNext as it finds it, and arms no trial: a staged release stays
-// staged, and its own reboot arms it later. Everything else that the
-// reboot path asserts still runs, so the slots' entries and BootOrder
-// are healed and the proven slot keeps its fallback loader.
+// On an ordinary reboot, init sets BootNext to the proven slot, or to
+// the slot of a staged release for its trial (proving.go). A UEFI
+// capsule update needs BootNext to stay as the requester set it: fwupd
+// sets BootNext to its updater, the firmware boots the updater once,
+// the updater passes the capsule to the firmware, and the firmware
+// applies it and resets. This file calls that a handover.
 //
-// After the requester's boot, the firmware boots the head of BootOrder,
-// with no one-shot left to steer it. So init hands the one-shot over
-// only when the head of BootOrder is known to bring the machine back:
-// the store names a proven slot, the firmware kept the proven slot at
-// the head of BootOrder through the last reset, BootNext does not name
-// the other slot, and the proven slot holds the fallback loader that a
-// firmware at its defaults finds. A firmware update cannot be undone,
-// so these checks are stricter than a trial's. When one fails, init
-// prints why and reboots as it always does, so the requester's next
-// scan finds that its update did not run.
+// A requester such as firmware-operator sets spec.keepBootNext on its
+// Disruption after it stages a capsule, and machine-operator writes the
+// Disruption's name in the reboot intent. For that reboot, init leaves
+// BootNext alone and arms no trial, so a staged release waits for a
+// later reboot. init still repairs the slots' boot entries and
+// BootOrder, and writes the fallback loader to the proven slot.
+//
+// The firmware consumes BootNext when it boots the updater, so the boot
+// after that follows BootOrder. init accepts the handover only when
+// that boot is certain to reach the proven slot:
+//
+//   - the release store records a proven slot,
+//   - the proven slot led BootOrder at power-on, so the firmware kept
+//     the order through the last reset,
+//   - BootNext does not point at the other slot's entry, and
+//   - the proven slot has the fallback loader at the firmware's default
+//     boot path, for a firmware that has lost its boot entries.
+//
+// A firmware update cannot be undone, so these checks are stricter than
+// the ones for a trial. When a check fails, init prints the reason and
+// does an ordinary reboot, and the requester's next scan finds that its
+// update did not run.
 
 import (
 	"errors"
@@ -33,19 +39,18 @@ import (
 	"os"
 )
 
-// bootOrderKept is what this boot found at power-on, before init wrote
-// anything: true when the proven slot led BootOrder, false when another
-// entry did, and nil when the boot could not tell, as on a machine
-// whose store names no proven slot. main sets it once, from
-// observeBootOrder.
+// bootOrderKept records, from before init wrote anything at power-on,
+// whether the proven slot led BootOrder. It is nil when init could not
+// tell, for example when the store records no proven slot. main sets
+// it once, from observeBootOrder.
 var bootOrderKept *bool
 
-// observeBootOrder reads whether the proven slot leads BootOrder. Every
-// shutdown asserts the proven slot at the head, so at power-on the
-// answer says whether the firmware kept that order through the reset.
-// A mismatch can also mean that a person changed the order in the
-// firmware's menu. Either way, the head of BootOrder is not under
-// init's control, and that is what a handover depends on.
+// observeBootOrder reports whether the proven slot's entry leads
+// BootOrder. Every reboot puts the proven slot first in BootOrder, so
+// at power-on a different first entry means that the firmware did not
+// keep the order through the reset, or that a person changed it in the
+// firmware menu. Then init cannot be sure which entry boots after the
+// requester's boot, so it refuses a handover.
 func observeBootOrder(act bootActuator, stateRoot string) *bool {
 	record := provenRecord(stateRoot)
 	if record == nil {
@@ -53,15 +58,16 @@ func observeBootOrder(act bootActuator, stateRoot string) *bool {
 	}
 	kept := act.fallbackLeads(record.Slot)
 	if !kept {
-		fmt.Printf("liken: system: slot %s, which the store calls proven, did not lead BootOrder at power-on; "+
-			"the firmware did not keep the order that the last shutdown wrote, so no reboot this boot hands BootNext to a requester\n", record.Slot)
+		fmt.Printf("liken: system: slot %s is the proven slot in the store, but it did not lead BootOrder at power-on. "+
+			"The firmware did not keep the order that the last shutdown wrote, so no reboot in this boot leaves BootNext to a requester\n", record.Slot)
 	}
 	return &kept
 }
 
-// handOverOneShot runs the checks that do not depend on the firmware's
-// dialect, and then asks the actuator to assert the proven slot while
-// it leaves BootNext to the requester.
+// handOverOneShot checks the conditions that do not depend on the
+// firmware type, and then calls the actuator's handOver, which writes
+// the proven slot's entries and leaves BootNext as the requester set
+// it. It returns an error when the handover is refused.
 func handOverOneShot(act bootActuator, stateRoot string) error {
 	record := provenRecord(stateRoot)
 	if record == nil {
@@ -69,23 +75,24 @@ func handOverOneShot(act bootActuator, stateRoot string) error {
 	}
 	switch {
 	case bootOrderKept == nil:
-		return errors.New("this boot could not tell whether the firmware keeps BootOrder through a reset")
+		return errors.New("no check at power-on shows whether the firmware keeps BootOrder through a reset")
 	case !*bootOrderKept:
 		return fmt.Errorf("slot %s did not lead BootOrder at power-on, so the firmware may not keep BootOrder through a reset", record.Slot)
 	}
 	return act.handOver(record.Slot)
 }
 
-// errNoProvenSlot is the refusal on a machine whose store names no
-// proven slot. Its reboot pins no slot, so the caller removes the
-// requester's one-shot itself.
-var errNoProvenSlot = errors.New("the store names no proven slot for the boot after the requester's to come back to")
+// errNoProvenSlot is the refusal when the store records no proven slot.
+// Such a reboot writes no slot's entries, so the caller removes the
+// requester's BootNext itself.
+var errNoProvenSlot = errors.New("the store records no proven slot for the boot after the requester's boot to return to")
 
-// errNoOneShot is the refusal of a firmware with no BootNext.
+// errNoOneShot is the refusal of a machine whose firmware has no
+// BootNext.
 var errNoOneShot = errors.New("this machine's firmware has no BootNext to hand over")
 
-// hasSlotLoader reports whether a slot answers the firmware's default
-// boot path.
+// hasSlotLoader reports whether the slot mounted at mount has the
+// loader at the firmware's default boot path.
 func hasSlotLoader(mount string) bool {
 	if mount == "" {
 		return false

@@ -1,8 +1,6 @@
 package main
 
-// Tests for what the serio walk reports for a line whose holder is in
-// its read: the port the kernel registers, the driver that binds it,
-// and a holder that no longer describes the line.
+// Tests for the status of a line whose holder is reading.
 
 import (
 	"strings"
@@ -12,8 +10,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// A holder in its read with no port yet has no CEC device, so the line
-// is not attached until the port is there and its driver bound it.
+// A line is not attached until the kernel has registered its serio
+// port and a driver has bound to it, because the CEC device does not
+// exist before that.
 func TestALineWithNoPortYetIsNotAttached(t *testing.T) {
 	fakeSerioMachine(t)
 	loadSerioModules(t, "serport", "pulse8_cec")
@@ -23,14 +22,13 @@ func TestALineWithNoPortYetIsNotAttached(t *testing.T) {
 
 	want := "attaching: the kernel has not registered a serio port on ttyACM0 yet"
 	if got[0].State != machine.SerioRefused || got[0].Message != want {
-		t.Errorf("walk = %+v", got)
+		t.Errorf("the walk returned %+v, want Refused with message %q", got, want)
 	}
 }
 
-// pulse8_connect talks to the adapter before it binds, so an unbound
-// port is the ordinary state of a probe for a moment. The status blames
-// the driver only after the port stays unbound past the grace, and the
-// walk wakes when the grace ends, because no uevent marks it.
+// The status reports a driver failure only when the port is still
+// unbound after serioBindGrace. No uevent arrives when the grace ends,
+// so the walk must schedule its own wake-up.
 func TestAnUnboundPortIsBlamedOnlyAfterTheGrace(t *testing.T) {
 	fakeSerioMachine(t)
 	loadSerioModules(t, "serport", "pulse8_cec")
@@ -45,19 +43,19 @@ func TestAnUnboundPortIsBlamedOnlyAfterTheGrace(t *testing.T) {
 	failed := walkOnce(r)
 
 	if probing[0].State != machine.SerioRefused || probing[0].Message != "attaching: waiting for pulse8_cec to bind serio0" {
-		t.Errorf("walk in the grace = %+v", probing)
+		t.Errorf("the walk inside the grace returned %+v, want Refused and waiting for pulse8_cec to bind serio0", probing)
 	}
 	if !waking || wait != serioBindGrace {
-		t.Errorf("the walk wakes in %s (%v)", wait, waking)
+		t.Errorf("the next retry is in %s (scheduled %v), want %s", wait, waking, serioBindGrace)
 	}
-	want := "serio0 on ttyACM0 has no driver: pulse8_cec did not bind it; the kernel log names the cause"
+	want := "serio0 on ttyACM0 has no driver because pulse8_cec did not bind it. The kernel log has the reason"
 	if failed[0].Message != want {
-		t.Errorf("walk after the grace = %+v", failed)
+		t.Errorf("the walk after the grace returned %+v, want message %q", failed, want)
 	}
 }
 
-// A holder can end between the prune and the report, and a holder that
-// ended does not hold the port.
+// A holder can end after the walk prunes the holders and before it
+// reports their lines. Its line is refused, not attached.
 func TestAHolderThatEndedIsNotReportedAttached(t *testing.T) {
 	fakeSerioMachine(t)
 	loadSerioModules(t, "serport", "pulse8_cec")
@@ -73,13 +71,12 @@ func TestAHolderThatEndedIsNotReportedAttached(t *testing.T) {
 	got := r.settledStatus(machine.SerioStatus{TTY: "ttyACM0"}, pulse8Protocol, lines[0], r.holders["ttyACM0"])
 
 	if got.State != machine.SerioRefused || !strings.HasPrefix(got.Message, "read:") {
-		t.Errorf("status = %+v", got)
+		t.Errorf("the status is %+v, want Refused with a message that starts with read:", got)
 	}
 }
 
-// A tty that registers again while the old holder is still in its
-// read gets a holder of its own, and the old holder does not describe
-// it.
+// When a tty registers again while the old holder is still reading,
+// the walk opens the new tty with a new holder.
 func TestAHolderOfAnOlderTTYIsStale(t *testing.T) {
 	fakeSerioMachine(t)
 	loadSerioModules(t, "serport", "pulse8_cec")
@@ -94,12 +91,12 @@ func TestAHolderOfAnOlderTTYIsStale(t *testing.T) {
 	got := walkOnce(r)
 
 	if got[0].State != machine.SerioAttached || ttys.openCount() != 2 {
-		t.Errorf("walk = %+v after %d opens", got, ttys.openCount())
+		t.Errorf("the walk returned %+v after %d opens, want Attached after 2", got, ttys.openCount())
 	}
 }
 
 func TestTheBindGraceIsSeconds(t *testing.T) {
 	if serioBindGrace < time.Second || serioBindGrace > 10*time.Second {
-		t.Errorf("grace = %s", serioBindGrace)
+		t.Errorf("serioBindGrace is %s, want between 1s and 10s", serioBindGrace)
 	}
 }

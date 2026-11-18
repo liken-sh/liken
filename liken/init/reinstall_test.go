@@ -1,9 +1,8 @@
 package main
 
-// Tests for resolving a declared device before the reinstall wipe
-// opens it. They reuse the fake sysfs fixtures resolve_test.go
-// exercises the claim path with, because awaitDevice is built
-// directly on resolveDeclaredDisk.
+// Tests for resolving a declared disk before the reinstall wipe opens
+// it. They use the fake sysfs fixtures of resolve_test.go, because
+// awaitDevice calls resolveDeclaredDisk.
 
 import (
 	"path/filepath"
@@ -21,19 +20,19 @@ func TestAwaitDeviceResolvesAStableNameToItsKernelNode(t *testing.T) {
 
 	node, err := awaitDevice("/dev/disk/by-id/wwn-0x5002538d40a45c88")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the stable name: %v", err)
 	}
 	if want := filepath.Join(dev, "sda"); node != want {
-		t.Errorf("got %q, want %q", node, want)
+		t.Errorf("awaitDevice = %q, want %q", node, want)
 	}
 }
 
 func TestAwaitDeviceAmbiguousNameRefusesWithoutWaiting(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// Two disks answer to the same WWN, the way a clone or a disk
-		// moved from another machine would. A third disk attaching cannot
-		// un-match the two that already do, so the wait must give up at
-		// once instead of running out its deadline.
+		// Two disks have the same WWN, as a cloned disk or one moved
+		// from another machine would. A disk that attaches later cannot
+		// remove the match, so the wait must fail at once and not run
+		// to its deadline.
 		sys, _ := fakeMachine(t)
 		for _, name := range []string{"sda", "sdb"} {
 			dir := fakeDisk(t, sys, name, "pci0000:00", "0000:00:1f.2", "ata3", "host2",
@@ -44,16 +43,14 @@ func TestAwaitDeviceAmbiguousNameRefusesWithoutWaiting(t *testing.T) {
 		start := time.Now()
 		_, err := awaitDevice("/dev/disk/by-id/wwn-0x5002538d40a45c88")
 		if elapsed := time.Since(start); elapsed != 0 {
-			t.Errorf("an ambiguous name should end the wait at once, took %s", elapsed)
+			t.Errorf("the wait for an ambiguous name took %s, want it to end at once", elapsed)
 		}
 		if err == nil || !strings.Contains(err.Error(), "refusing to guess") {
-			t.Errorf("expected the ambiguity to surface: %v", err)
+			t.Errorf("the error is %v, want one that reports the ambiguity", err)
 		}
 	})
 }
 
-// The wait runs in a synctest bubble, so its 30-second deadline
-// passes on the fake clock.
 func TestAwaitDeviceReportsTheDeclaredNameAtItsDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fakeMachine(t) // a machine with no disks at all
@@ -64,7 +61,7 @@ func TestAwaitDeviceReportsTheDeclaredNameAtItsDeadline(t *testing.T) {
 			t.Errorf("the wait gave up after %s, want the deadline, %s", elapsed, declaredDiskDeadline)
 		}
 		if err == nil || !strings.Contains(err.Error(), "/dev/disk/by-id/wwn-0xdeadbeef") {
-			t.Errorf("error should name the declared string: %v", err)
+			t.Errorf("the error is %v, want it to name the declared disk", err)
 		}
 	})
 }

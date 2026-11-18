@@ -1,33 +1,23 @@
 package main
 
-// The loader that a firmware with no boot preferences finds by itself.
+// A fallback boot loader on the proven slot, for firmware that has
+// lost its boot entries.
 //
-// bootentries.go writes this machine's boot menu into NVRAM, and that
-// menu is the only place a UEFI machine's kernel command line lives.
-// Some firmware resets its variables to defaults: an update does it, a
-// dead NVRAM battery does it, and the setup menu's own "load defaults"
-// does it. That erases every entry and every command line at once, and
-// leaves a complete installed disk that nothing can start.
+// bootentries.go writes this machine's boot entries into NVRAM, and
+// the kernel command line of an installed machine is only in those
+// entries. A firmware update, a dead NVRAM battery, or "load defaults"
+// in the setup menu erases them, and the firmware then has nothing to
+// start. When nothing else is bootable, UEFI firmware runs
+// \EFI\BOOT\BOOTX64.EFI from a device, as it does for an installation
+// stick. So liken copies systemd-boot, which every release has, to
+// that path on the proven slot, with a Boot Loader Specification entry
+// that has the same command line as the firmware's entry. The machine
+// then boots the proven release, and that boot writes the firmware
+// entries again.
 //
-// The UEFI specification answers this with one fallback. A firmware
-// with nothing to boot searches each device for one fixed path,
-// \EFI\BOOT\BOOTX64.EFI, and runs whatever it finds. This is how an
-// installation stick boots a machine that has never seen it. So liken
-// puts a loader at that path on the slot it has proven, with a Boot
-// Loader Specification entry beside it that carries the same command
-// line the firmware's own entry would have carried. A machine that
-// loses its variables then boots the proven release, and that boot
-// writes the entries again.
-//
-// The loader lives on the proven slot alone. A firmware at its defaults
-// takes the first answer it finds, and the other slot holds either an
-// older release or nothing at all. One answer means such a firmware
-// cannot boot the wrong half of the pair.
-//
-// The program itself is not vendored twice. systemd-bootx64.efi is a
-// release artifact, so every slot already carries the menu that an
-// installation stick boots (the systemd-boot domain explains why liken
-// ships one). Writing the fallback is a copy inside one slot.
+// Only the proven slot gets the loader, because firmware at its
+// defaults runs the first loader it finds, and the other slot has an
+// older release or nothing.
 
 import (
 	"bytes"
@@ -39,19 +29,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// bootMenuName is the boot menu program as a release names it. Both an
-// installation stick and a slot's fallback loader are copies of this
-// one file.
+// bootMenuName is the file name of systemd-boot in a release.
 const bootMenuName = "systemd-bootx64.efi"
 
-// defaultLoaderPath is the one path a firmware with no boot
-// preferences looks for. The UEFI specification fixes this name per
-// architecture, so it is not a choice liken makes.
+// defaultLoaderPath returns the path where UEFI firmware with no boot
+// entries looks for an x86-64 loader.
 func defaultLoaderPath(mount string) string {
 	return filepath.Join(mount, "EFI", "BOOT", "BOOTX64.EFI")
 }
 
-// otherSlot names the other half of the blue-green pair.
 func otherSlot(slot string) string {
 	if slot == "B" {
 		return "A"
@@ -59,20 +45,20 @@ func otherSlot(slot string) string {
 	return "B"
 }
 
-// writeSlotLoader puts the fallback loader on one slot: the loader
-// program at the firmware's default path, the loader's one setting, and
-// one entry that boots this slot. Each file is compared before it is
-// written, so a slot that already agrees costs no writes. A slot is FAT
-// on a real disk, and a rewrite on every boot buys nothing.
+// writeSlotLoader writes the fallback loader to a slot: the program
+// at the firmware's default path, loader.conf, and one entry that
+// boots this slot. It skips a file whose contents already match, so
+// that a boot does not rewrite the FAT filesystem for nothing. It
+// compares contents, not existence, because a power cut can leave a
+// file with its name and no data.
 //
-// A slot with no menu program cannot carry a loader. This returns an
-// error in that case and writes nothing at all, because the caller
-// removes the other slot's loader only after this one succeeds.
+// It writes nothing when the slot has no systemd-boot, and the caller
+// then keeps the other slot's loader.
 func writeSlotLoader(mount, slot, machineName string) error {
 	program, err := os.ReadFile(filepath.Join(mount, bootMenuName))
 	if err != nil {
-		return fmt.Errorf("slot %s carries no %s, so it cannot answer the firmware's default boot path: %w",
-			slot, bootMenuName, err)
+		return fmt.Errorf("reading %s from slot %s: %w",
+			bootMenuName, slot, err)
 	}
 
 	files := map[string][]byte{
@@ -97,40 +83,28 @@ func writeSlotLoader(mount, slot, machineName string) error {
 		if err := flushSlot(mount); err != nil {
 			return err
 		}
-		fmt.Printf("liken: system: slot %s now answers the firmware's default boot path\n", slot)
+		fmt.Printf("liken: system: wrote the fallback loader to slot %s\n", slot)
 	}
 	return nil
 }
 
-// flushSlot forces a slot's directory updates all the way out to the
-// disk. Two calls, because they do different halves of the job, and the
-// installer's power-off path needs the same pair for the same reason.
-//
-// Each file above became durable through a rename, and on FAT a rename
-// is the only record of a file's name, size, and first cluster. The
-// per-file fsync inside writeFileDurably covers the file's own bytes.
-// It does not cover the directory entry that the rename wrote, and an
-// fsync of the directory does not reach it either: a FAT directory's
-// entries live in buffers attached to the block device, not in the
-// directory's own pages. A machine cut off in that state holds a loader
-// entry with the right name, no size, and no data, which is a fallback
-// that a firmware will start and then fail to boot from.
-//
-// unix.Sync walks every mounted filesystem and writes its dirty state
-// back to the drivers. syncDirectory then asks this slot's drive to
-// empty its own write cache.
+// flushSlot writes a slot's directory entries to the disk.
+// writeFileDurably syncs each file's contents, but on FAT the
+// directory entry that its rename writes, with the file's size and
+// first cluster, stays in the block device's buffers. If power is lost
+// then, the file has its name and no data, and the firmware starts a
+// loader that cannot boot. unix.Sync writes those buffers to the
+// drive, and syncDirectory then flushes the drive's write cache.
 func flushSlot(mount string) error {
 	unix.Sync()
 	if err := syncDirectory(mount); err != nil {
-		return fmt.Errorf("flushing slot %s to the disk: %w", mount, err)
+		return fmt.Errorf("flushing the directory entries of %s to the disk: %w", mount, err)
 	}
 	return nil
 }
 
-// removeSlotLoader takes the fallback loader off a slot. Only the
-// loader program goes. Its entry stays, because the program is what a
-// firmware looks for, and an entry with no program beside it boots
-// nothing.
+// removeSlotLoader deletes the loader program from a slot and leaves
+// its entry, which nothing reads without the program.
 func removeSlotLoader(mount string) {
 	path := defaultLoaderPath(mount)
 	if _, err := os.Stat(path); err != nil {
@@ -143,13 +117,12 @@ func removeSlotLoader(mount string) {
 	if err := flushSlot(mount); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: system: %v\n", err)
 	}
-	fmt.Printf("liken: system: %s no longer answers the firmware's default boot path\n", path)
+	fmt.Printf("liken: system: removed the fallback loader at %s\n", path)
 }
 
-// slotLoaderConfText is the loader's one setting. A boot that reaches
-// this loader reached it because the firmware had no preference left to
-// read, and no person is standing at the machine. So it must never
-// wait.
+// slotLoaderConfText returns loader.conf with no menu timeout, because
+// the loader runs only when the firmware has lost its entries, and
+// nobody is at the console to choose.
 func slotLoaderConfText() []byte {
 	return []byte(`# liken wrote this loader on the slot it has proven, for one purpose:
 # a firmware that lost its boot variables finds \EFI\BOOT\BOOTX64.EFI
@@ -159,17 +132,14 @@ timeout 0
 `)
 }
 
-// slotLoaderEntryText renders the entry that boots this slot, in
-// systemd-boot's Boot Loader Specification form. The options line is
-// the command line the firmware's own entry carries, minus the initrd=
-// parameters: this loader stages the archives from its own initrd
-// lines, so naming them twice would load each one twice.
+// slotLoaderEntryText returns the Boot Loader Specification entry that
+// boots this slot. The options line is the firmware entry's command
+// line without its initrd= parameters, because the initrd lines
+// already load each archive.
 //
-// The entry names only the archives that this slot holds. systemd-boot
-// refuses an entry whose initrd is missing, and a release older than an
-// archive does not carry it. Such an entry would be worse than no
-// fallback, because it fails after the firmware has already committed
-// to it.
+// The entry lists only the archives that the slot has, because an
+// older release can lack one and systemd-boot refuses an entry whose
+// initrd file is missing.
 func slotLoaderEntryText(mount, slot, machineName string) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "title    %s\n", slotEntryDescription(slot))

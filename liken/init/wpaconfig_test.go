@@ -1,12 +1,8 @@
 package main
 
-// The injection cases are the point of this file. The supplicant
-// treats an unknown line as a fatal error and a recognized one as an
-// instruction, so a network name or a passphrase that could write a
-// line of its own could turn the encryption off. Every value the
-// generator writes must be unable to hold a quote, a space, a comment
-// character, or a newline, and these tests hold that rule against the
-// worst names they can spell.
+// Several tests use network names and passphrases that hold quotes,
+// spaces, comment characters, and newlines, and check that none of
+// them adds a line to the generated configuration.
 
 import (
 	"os"
@@ -17,9 +13,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// passphraseFiles points both passphrase homes at directories of their
-// own and returns the machineState root. A test writes into either one
-// to say where a passphrase lives.
+// passphraseFiles points the image passphrase directory at a temporary
+// directory and returns an empty temporary machineState root. A test
+// writes a passphrase file into either one.
 func passphraseFiles(t *testing.T) (stateRoot string) {
 	t.Helper()
 	stateRoot = t.TempDir()
@@ -30,14 +26,13 @@ func passphraseFiles(t *testing.T) (stateRoot string) {
 	return stateRoot
 }
 
-// writePassphrase puts one passphrase file in one of the two homes.
 func writePassphrase(t *testing.T, dir, ssid, passphrase string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the passphrase directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, ssid), []byte(passphrase), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the passphrase file: %v", err)
 	}
 }
 
@@ -47,33 +42,30 @@ func TestPassphraseComesFromTheImageWhenNothingIsStaged(t *testing.T) {
 
 	got, source, err := readPassphrase(stateRoot, "homenet")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the passphrase: %v", err)
 	}
 	if got != "correcthorse" {
-		t.Errorf("passphrase = %q", got)
+		t.Errorf("the passphrase is %q, want \"correcthorse\"", got)
 	}
 	if !strings.HasPrefix(source, imagePassphraseDir) {
-		t.Errorf("source = %q, want the image's copy", source)
+		t.Errorf("the source is %q, want a path under %s", source, imagePassphraseDir)
 	}
 }
 
 func TestTheStagedPassphraseWinsOverTheImages(t *testing.T) {
-	// This is the read order every other document already resolves in.
-	// Nothing writes the staged copy today; rotation becomes a writer
-	// of it, not a change to this order.
 	stateRoot := passphraseFiles(t)
 	writePassphrase(t, imagePassphraseDir, "homenet", "theoldone")
 	writePassphrase(t, stagedPassphraseDir(stateRoot), "homenet", "thenewone")
 
 	got, source, err := readPassphrase(stateRoot, "homenet")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the passphrase: %v", err)
 	}
 	if got != "thenewone" {
-		t.Errorf("passphrase = %q", got)
+		t.Errorf("the passphrase is %q, want \"thenewone\"", got)
 	}
 	if !strings.HasPrefix(source, stateRoot) {
-		t.Errorf("source = %q, want the staged copy", source)
+		t.Errorf("the source is %q, want a path under %s", source, stateRoot)
 	}
 }
 
@@ -82,11 +74,11 @@ func TestAMissingPassphraseNamesWhereOneBelongs(t *testing.T) {
 	stateRoot := passphraseFiles(t)
 	_, _, err := readPassphrase(stateRoot, "homenet")
 	if err == nil {
-		t.Fatal("a network with no passphrase file must refuse")
+		t.Fatal("readPassphrase returned no error, want one for a network with no passphrase file")
 	}
 	for _, want := range []string{"homenet", imagePassphraseDir} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the error must carry %q: %v", want, err)
+			t.Errorf("the error is %q, want it to contain %q", err, want)
 		}
 	}
 }
@@ -117,32 +109,31 @@ func TestCheckPassphraseRefusesWhatNoAccessPointCouldHold(t *testing.T) {
 		"a byte over 7": "passw\xffrd",
 	} {
 		if err := checkPassphrase("homenet", passphrase); err == nil {
-			t.Errorf("%s: expected a refusal", name)
+			t.Errorf("checkPassphrase accepted a passphrase with %s, want an error", name)
 		}
 	}
 }
 
 func TestCheckPassphraseAcceptsEveryPrintableCharacter(t *testing.T) {
-	// A quote, a backslash, a comment character, and a space are all
-	// legal in a WPA2 passphrase, and the generated file must be able
-	// to carry every one of them.
+	// A WPA2 passphrase can contain a quote, a backslash, a comment
+	// character, and a space.
 	for _, passphrase := range []string{
 		`say "hello"`, `back\slash`, "hash#mark", "with space", "8charact",
 		strings.Repeat("x", 63),
 	} {
 		if err := checkPassphrase("homenet", passphrase); err != nil {
-			t.Errorf("%q: %v", passphrase, err)
+			t.Errorf("checkPassphrase refused %q: %v, want it accepted", passphrase, err)
 		}
 	}
 }
 
 func TestDerivePMKMatchesTheStandardsOwnTestVector(t *testing.T) {
-	// IEEE 802.11's reference vector for the passphrase "password" on
-	// the network "IEEE". Getting this wrong produces a machine that
-	// joins nothing and says only that the key was refused.
+	// The IEEE 802.11 test vector for the passphrase "password" on the
+	// network "IEEE". A wrong derivation shows on a machine only as an
+	// access point that refuses the key.
 	const want = "f42c6fc52df0ebef9ebb4b90b38a5f902e83fe1b135a70e23aed762e9710a12e"
 	if got := derivePMK("IEEE", "password"); got != want {
-		t.Errorf("derivePMK = %q, want %q", got, want)
+		t.Errorf("derivePMK is %q, want %q", got, want)
 	}
 }
 
@@ -157,7 +148,7 @@ func TestWirelessConfigJoinsWPA2AndWPA3AtOnce(t *testing.T) {
 
 	got, err := wirelessConfig(wpaPSK("homenet"), stateRoot, "/run/liken/wireless/wlan0/ctrl")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the configuration: %v", err)
 	}
 	for _, want := range []string{
 		"ctrl_interface=/run/liken/wireless/wlan0/ctrl\n",
@@ -169,41 +160,40 @@ func TestWirelessConfigJoinsWPA2AndWPA3AtOnce(t *testing.T) {
 		"\tsae_password=636f7272656374686f727365\n",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("the configuration must carry %q:\n%s", want, got)
+			t.Errorf("the configuration lacks %q:\n%s", want, got)
 		}
 	}
 }
 
-func TestWirelessConfigForAnOpenNetworkCarriesNoKey(t *testing.T) {
+func TestWirelessConfigForAnOpenNetworkHasNoKey(t *testing.T) {
 	stateRoot := passphraseFiles(t)
 	got, err := wirelessConfig(machine.WirelessSpec{SSID: "guest", Security: machine.WirelessOpen},
 		stateRoot, "/run/liken/wireless/wlan0/ctrl")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the configuration: %v", err)
 	}
 	if !strings.Contains(got, "\tkey_mgmt=NONE\n") {
-		t.Errorf("an open network takes no key: %s", got)
+		t.Errorf("the configuration of an open network has no key_mgmt=NONE, want it:\n%s", got)
 	}
 	if !strings.Contains(got, "\tbgscan=\"simple:30:-70:3600\"\n") {
-		t.Errorf("an open network scans for a stronger access point too: %s", got)
+		t.Errorf("the configuration of an open network has no bgscan, want bgscan=\"simple:30:-70:3600\":\n%s", got)
 	}
 	for _, unwanted := range []string{"psk=", "sae_password="} {
 		if strings.Contains(got, unwanted) {
-			t.Errorf("an open network must carry no %s: %s", unwanted, got)
+			t.Errorf("the configuration of an open network has %s, want none:\n%s", unwanted, got)
 		}
 	}
 }
 
 func TestWirelessConfigWritesEveryValueAsHex(t *testing.T) {
-	// The injection rule, checked by its consequence rather than by
-	// naming the characters: no value line in the generated file holds
-	// a character that the parser reads as syntax.
+	// No value line in the generated file contains a character that
+	// the parser reads as syntax.
 	stateRoot := passphraseFiles(t)
 	writePassphrase(t, imagePassphraseDir, `a "b" #c`, `say "hi" # now\n`)
 
 	got, err := wirelessConfig(wpaPSK(`a "b" #c`), stateRoot, "/run/liken/wireless/wlan0/ctrl")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the configuration: %v", err)
 	}
 	for _, line := range strings.Split(strings.TrimSpace(got), "\n") {
 		_, value, found := strings.Cut(line, "=")
@@ -212,27 +202,26 @@ func TestWirelessConfigWritesEveryValueAsHex(t *testing.T) {
 			continue
 		}
 		if strings.ContainsAny(value, `"# `) {
-			t.Errorf("value line carries syntax: %q", line)
+			t.Errorf("the value line %q has a quote, a hash, or a space, want hex", line)
 		}
 	}
 }
 
 func TestWirelessConfigCountsTheLinesItMeansTo(t *testing.T) {
-	// A passphrase that could write a line of its own would show up
-	// here as an extra line, whatever it said.
+	// A passphrase that wrote a line of its own would add a line here.
 	stateRoot := passphraseFiles(t)
 	writePassphrase(t, imagePassphraseDir, "homenet", "aaaaaaaa")
 	plain, err := wirelessConfig(wpaPSK("homenet"), stateRoot, "/ctrl")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("generating the configuration: %v", err)
 	}
 	writePassphrase(t, imagePassphraseDir, "homenet", `a" b`+"\n\tkey_mgmt=NONE")
 	injected, cerr := wirelessConfig(wpaPSK("homenet"), stateRoot, "/ctrl")
 	if cerr == nil {
-		t.Fatalf("a passphrase holding a newline must be refused:\n%s", injected)
+		t.Fatalf("wirelessConfig accepted a passphrase with a newline, want an error:\n%s", injected)
 	}
 	if strings.Count(plain, "\n") != 9 {
-		t.Errorf("the configuration is %d lines:\n%s", strings.Count(plain, "\n"), plain)
+		t.Errorf("the configuration has %d lines, want 9:\n%s", strings.Count(plain, "\n"), plain)
 	}
 }
 
@@ -240,31 +229,28 @@ func TestWirelessConfigRefusesAPassphraseItCannotRender(t *testing.T) {
 	stateRoot := passphraseFiles(t)
 	writePassphrase(t, imagePassphraseDir, "homenet", "short\n")
 	if _, err := wirelessConfig(wpaPSK("homenet"), stateRoot, "/ctrl"); err == nil {
-		t.Fatal("a passphrase WPA2 cannot hold must be refused")
+		t.Fatal("wirelessConfig returned no error, want one for a passphrase of 5 bytes")
 	}
 }
 
 func TestWirelessConfigRefusesWhenNoPassphraseFileExists(t *testing.T) {
 	stateRoot := passphraseFiles(t)
 	if _, err := wirelessConfig(wpaPSK("homenet"), stateRoot, "/ctrl"); err == nil {
-		t.Fatal("a wpa-psk network with no passphrase must be refused")
+		t.Fatal("wirelessConfig returned no error, want one for a wpa-psk network with no passphrase file")
 	}
 }
 
 func TestWirelessConfigDefaultsToWPAPSKWhenTheSpecSaysNothing(t *testing.T) {
-	// An unset security field means wpa-psk, the common case, so an
-	// unset field must reach the passphrase and not the open path.
 	stateRoot := passphraseFiles(t)
 	if _, err := wirelessConfig(machine.WirelessSpec{SSID: "homenet"}, stateRoot, "/ctrl"); err == nil {
-		t.Fatal("an unset security field means wpa-psk, which needs a passphrase")
+		t.Fatal("wirelessConfig returned no error, want one: an unset security field means wpa-psk, which needs a passphrase")
 	}
 }
 
-// TestWirelessConfigDumpsForTheVendoredSupplicant writes the generated
-// configuration where the LIKEN_WPA_DUMP environment variable points, so
-// a person can run the vendored supplicant's own parser over it. The
-// supplicant validates a file and exits when it is given no interface,
-// which is the only exact check of this grammar that exists.
+// TestWirelessConfigDumpsForTheVendoredSupplicant writes each generated
+// configuration into the directory in LIKEN_WPA_DUMP. Run the vendored
+// wpa_supplicant on a file with no interface, and it parses the file
+// and exits, which checks the file against its real parser.
 func TestWirelessConfigDumpsForTheVendoredSupplicant(t *testing.T) {
 	dir := os.Getenv("LIKEN_WPA_DUMP")
 	if dir == "" {
@@ -280,10 +266,10 @@ func TestWirelessConfigDumpsForTheVendoredSupplicant(t *testing.T) {
 		writePassphrase(t, imagePassphraseDir, spec.SSID, `say "hi" # now\`+"\n")
 		config, err := wirelessConfig(spec, stateRoot, "/run/liken/wireless/wlan0/ctrl")
 		if err != nil {
-			t.Fatalf("%s: %v", name, err)
+			t.Fatalf("generating the %s configuration: %v", name, err)
 		}
 		if err := os.WriteFile(filepath.Join(dir, name+".conf"), []byte(config), 0o600); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the %s configuration: %v", name, err)
 		}
 	}
 }

@@ -15,8 +15,8 @@ import (
 	"github.com/liken-sh/liken/liken/machine/supplicanttest"
 )
 
-// The near and far access points of one network, as STATUS answers
-// for each.
+// The near and far access points of one network, with the STATUS
+// reply that the supplicant gives when connected to each.
 const (
 	nearAP       = "04:4a:2c:11:22:33"
 	farAP        = "04:4a:2c:44:55:66"
@@ -31,10 +31,10 @@ var (
 	watchTime = boot.Add(time.Hour)
 )
 
-// watchedRadio serves a stand-in supplicant for wlan0 under a
-// temporary wirelessRunDir and answers a joined radio whose control is
-// attached to it, with the given standing.
-func watchedRadio(t *testing.T, standing radio) (*connection, *supplicanttest.Supplicant) {
+// watchedRadio starts a fake supplicant for wlan0 in a temporary
+// wirelessRunDir, and returns a connection whose radio is attached to
+// it and starts in the given state.
+func watchedRadio(t *testing.T, current radio) (*connection, *supplicanttest.Supplicant) {
 	t.Helper()
 	dir := t.TempDir()
 	orig := wirelessRunDir
@@ -44,14 +44,14 @@ func watchedRadio(t *testing.T, standing radio) (*connection, *supplicanttest.Su
 	s := supplicanttest.Start(t, dir, "wlan0")
 	control, err := attachWPAControl(s.Socket)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("attaching to the fake supplicant: %v", err)
 	}
 	t.Cleanup(control.close)
-	<-control.events() // the attach marker
+	<-control.events() // the wpaAttached event
 
 	conn := addressed("wlan0", "192.168.1.20/24")
-	standing.ifname, standing.ssid, standing.control = "wlan0", "homenet", control
-	conn.radio = &standing
+	current.ifname, current.ssid, current.control = "wlan0", "homenet", control
+	conn.radio = &current
 	return conn, s
 }
 
@@ -65,21 +65,21 @@ func event(t *testing.T, message string) wpaEvent {
 	t.Helper()
 	e, ok := parseWPAEvent(message)
 	if !ok {
-		t.Fatalf("%q does not parse", message)
+		t.Fatalf("parseWPAEvent(%q) does not parse, want an event", message)
 	}
 	return e
 }
 
 func TestTheRadioWatchFollowsTheSupplicant(t *testing.T) {
 	cases := []struct {
-		name     string
-		standing radio
-		status   string
-		event    string
-		want     machine.WirelessStatus
+		name    string
+		current radio
+		status  string
+		event   string
+		want    machine.WirelessStatus
 	}{
 		{
-			name: "a move to another access point", standing: onNear, status: statusFar,
+			name: "a move to another access point", current: onNear, status: statusFar,
 			event: "<3>CTRL-EVENT-CONNECTED - Connection to " + farAP + " completed [id=0 id_str=]",
 			want: machine.WirelessStatus{
 				SSID: "homenet", State: machine.WirelessConnected,
@@ -87,8 +87,8 @@ func TestTheRadioWatchFollowsTheSupplicant(t *testing.T) {
 			},
 		},
 		{
-			name:     "a new channel on the same access point keeps the association",
-			standing: onNear, status: statusNearCh,
+			name:    "a new channel on the same access point keeps the association",
+			current: onNear, status: statusNearCh,
 			event: "<3>CTRL-EVENT-CONNECTED - Connection to " + nearAP + " completed [id=0 id_str=]",
 			want: machine.WirelessStatus{
 				SSID: "homenet", State: machine.WirelessConnected,
@@ -96,17 +96,17 @@ func TestTheRadioWatchFollowsTheSupplicant(t *testing.T) {
 			},
 		},
 		{
-			name: "a lost access point", standing: onNear, status: statusLost,
+			name: "a lost access point", current: onNear, status: statusLost,
 			event: "<3>CTRL-EVENT-DISCONNECTED bssid=" + nearAP + " reason=4 locally_generated=1",
 			want: machine.WirelessStatus{
 				SSID: "homenet", State: machine.WirelessAssociating,
-				Message:              "lost " + nearAP + " (reason 4, disassociated because of inactivity, sent by this machine); the supplicant is rejoining",
+				Message:              "lost " + nearAP + " (reason 4, disassociated because of inactivity, sent by this machine), and the supplicant is joining again",
 				LastDisconnectReason: 4,
 			},
 		},
 		{
 			name: "a rejoin of the same access point after a loss",
-			standing: radio{
+			current: radio{
 				state: machine.WirelessAssociating, message: "lost " + nearAP + " (reason 4)", lastDisconnectReason: 4,
 			},
 			status: statusNear,
@@ -118,8 +118,8 @@ func TestTheRadioWatchFollowsTheSupplicant(t *testing.T) {
 			},
 		},
 		{
-			name:     "an attach after a restart reads the association again",
-			standing: radio{state: machine.WirelessAssociating}, status: statusNear,
+			name:    "an attach after a restart reads the association again",
+			current: radio{state: machine.WirelessAssociating}, status: statusNear,
 			event: wpaAttached,
 			want: machine.WirelessStatus{
 				SSID: "homenet", State: machine.WirelessConnected,
@@ -127,8 +127,8 @@ func TestTheRadioWatchFollowsTheSupplicant(t *testing.T) {
 			},
 		},
 		{
-			name:     "a passphrase the access point refuses after the join",
-			standing: onNear, status: statusLost,
+			name:    "a passphrase the access point refuses after the join",
+			current: onNear, status: statusLost,
 			event: "<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid=\"homenet\" auth_failures=1 duration=10 reason=WRONG_KEY",
 			want: machine.WirelessStatus{
 				SSID: "homenet", State: machine.WirelessWrongKey,
@@ -138,15 +138,15 @@ func TestTheRadioWatchFollowsTheSupplicant(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			conn, s := watchedRadio(t, c.standing)
+			conn, s := watchedRadio(t, c.current)
 			s.Answer("STATUS", c.status)
 			w := &radioWatch{conns: []*connection{conn}, now: func() time.Time { return watchTime }}
 
 			if !w.apply(radioEvent{ifname: "wlan0", event: event(t, c.event)}) {
-				t.Fatal("the event changed nothing")
+				t.Fatal("apply reported no change, want a change of the radio status")
 			}
 			if got := w.conns[0].radio.wirelessStatus(); !reflect.DeepEqual(got, &c.want) {
-				t.Errorf("status is\n%+v\nwant\n%+v", got, &c.want)
+				t.Errorf("the radio status is\n%+v\nwant\n%+v", got, &c.want)
 			}
 		})
 	}
@@ -154,73 +154,73 @@ func TestTheRadioWatchFollowsTheSupplicant(t *testing.T) {
 
 func TestTheRadioWatchIgnoresWhatChangesNothing(t *testing.T) {
 	cases := []struct {
-		name     string
-		standing radio
-		status   string
-		event    string
+		name    string
+		current radio
+		status  string
+		event   string
 	}{
 		{
-			name: "a connect to the access point already in status", standing: onNear, status: statusNear,
+			name: "a connect to the access point already in status", current: onNear, status: statusNear,
 			event: "<3>CTRL-EVENT-CONNECTED - Connection to " + nearAP + " completed [id=0 id_str=]",
 		},
 		{
-			name:     "a disconnect of a radio that was not connected",
-			standing: radio{state: machine.WirelessNoCarrier}, status: statusLost,
+			name:    "a disconnect of a radio that was not connected",
+			current: radio{state: machine.WirelessNoCarrier}, status: statusLost,
 			event: "<3>CTRL-EVENT-DISCONNECTED bssid=" + nearAP + " reason=15",
 		},
 		{
-			name: "a scan", standing: onNear, status: statusNear,
+			name: "a scan", current: onNear, status: statusNear,
 			event: "<3>CTRL-EVENT-SCAN-RESULTS ",
 		},
 		{
-			name: "a signal change", standing: onNear, status: statusNear,
+			name: "a signal change", current: onNear, status: statusNear,
 			event: "<3>CTRL-EVENT-SIGNAL-CHANGE above=0 signal=-74 noise=9999 txrate=144400",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			conn, s := watchedRadio(t, c.standing)
+			conn, s := watchedRadio(t, c.current)
 			s.Answer("STATUS", c.status)
 			w := &radioWatch{conns: []*connection{conn}, now: func() time.Time { return watchTime }}
 
 			if w.apply(radioEvent{ifname: "wlan0", event: event(t, c.event)}) {
-				t.Errorf("the event changed the radio to %+v", w.conns[0].radio.wirelessStatus())
+				t.Errorf("apply reported a change to %+v, want no change", w.conns[0].radio.wirelessStatus())
 			}
 		})
 	}
 }
 
 func TestTheRadioWatchLeavesTheBootsListAlone(t *testing.T) {
-	// The boot hands its list to the watch, and other readers of the
-	// boot's list must never see a radio change under them.
+	// Other readers use the boot's list while the watch runs, so the
+	// watch must not change the radios in it.
 	conn, s := watchedRadio(t, onNear)
 	s.Answer("STATUS", statusFar)
 	w := &radioWatch{conns: []*connection{conn}, now: func() time.Time { return watchTime }}
 	w.apply(radioEvent{ifname: "wlan0", event: event(t, "<3>CTRL-EVENT-CONNECTED - Connection to "+farAP+" completed")})
 	if conn.radio.bssid != nearAP {
-		t.Errorf("the boot's radio moved to %s", conn.radio.bssid)
+		t.Errorf("the radio in the boot's list is on %s, want %s", conn.radio.bssid, nearAP)
 	}
 }
 
 func TestTheRadioWatchPublishesTheBaselineAndEndsWhenTheStreamCloses(t *testing.T) {
-	// The radio joined at boot, and the supplicant already holds the
-	// near access point. The watch reads STATUS once before it reads
-	// any event, writes the association, and ends when the stream
-	// closes. The stream closes before the watch starts, which is the
-	// order a shutdown during the boot gives, and the baseline still
-	// lands, because STATUS goes over a socket of its own.
+	// The radio joined at boot and is on the near access point. The
+	// watch sends STATUS once before it reads any event, publishes the
+	// association, and ends when the stream closes. The stream closes
+	// before the watch starts, as it does when the boot shuts down, and
+	// the baseline is still published, because STATUS uses its own
+	// socket.
 	conn, s := watchedRadio(t, radio{state: machine.WirelessConnected})
 	s.Answer("STATUS", statusNear)
 	tree := machine.FactsTree{Dir: filepath.Join(t.TempDir(), "facts")}
 	conn.radio.control.close()
 
 	if err := watchRadios([]*connection{conn}, nil, nil, tree, nil)(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the radio watch: %v", err)
 	}
 
 	status, err := tree.Read()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the facts: %v", err)
 	}
 	want := &machine.WirelessStatus{
 		SSID: "homenet", State: machine.WirelessConnected,
@@ -228,11 +228,11 @@ func TestTheRadioWatchPublishesTheBaselineAndEndsWhenTheStreamCloses(t *testing.
 	}
 	got := *status.Network.Interfaces[0].Wireless
 	if got.AssociatedAt == nil {
-		t.Error("the baseline must record when the radio associated")
+		t.Error("the facts have no associatedAt, want the time the radio associated")
 	}
 	got.AssociatedAt = nil
 	if !reflect.DeepEqual(&got, want) {
-		t.Errorf("the facts hold\n%+v\nwant\n%+v", &got, want)
+		t.Errorf("the wireless facts are\n%+v\nwant\n%+v", &got, want)
 	}
 }
 
@@ -251,7 +251,7 @@ func lateRadio(t *testing.T, address func(machine.InterfaceSpec) (*connection, e
 }
 
 func TestARadioThatJoinsLateGetsAnAddress(t *testing.T) {
-	resolv := aimResolvConf(t)
+	resolv := useResolvConf(t)
 	w := lateRadio(t, func(ifc machine.InterfaceSpec) (*connection, error) {
 		return withNameserver(addressed(ifc.Name, "192.168.1.20/24"), "192.168.1.1"), nil
 	})
@@ -260,22 +260,22 @@ func TestARadioThatJoinsLateGetsAnAddress(t *testing.T) {
 
 	got := w.conns[0]
 	if got.addr == nil || got.addr.String() != "192.168.1.20/24" {
-		t.Errorf("the radio holds the address %v", got.addr)
+		t.Errorf("the connection address is %v, want 192.168.1.20/24", got.addr)
 	}
 	if got.radio.state != machine.WirelessConnected || got.radio.bssid != nearAP {
-		t.Errorf("the radio is %+v", got.radio.wirelessStatus())
+		t.Errorf("the radio is %+v, want Connected on %s", got.radio.wirelessStatus(), nearAP)
 	}
 	written, err := os.ReadFile(resolv)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading resolv.conf: %v", err)
 	}
 	if !strings.Contains(string(written), "nameserver 192.168.1.1") {
-		t.Errorf("resolv.conf holds\n%s", written)
+		t.Errorf("resolv.conf is\n%s\nwant nameserver 192.168.1.1", written)
 	}
 }
 
 func TestARadioThatJoinsLateAndFailsItsAddressingSaysWhy(t *testing.T) {
-	aimResolvConf(t)
+	useResolvConf(t)
 	w := lateRadio(t, func(machine.InterfaceSpec) (*connection, error) {
 		return nil, errors.New("no DHCP offer on wlan0 in 30s")
 	})
@@ -284,15 +284,15 @@ func TestARadioThatJoinsLateAndFailsItsAddressingSaysWhy(t *testing.T) {
 
 	got := w.conns[0]
 	if got.addr != nil {
-		t.Errorf("the radio holds the address %v", got.addr)
+		t.Errorf("the connection address is %v, want none because addressing failed", got.addr)
 	}
 	if got.radio.state != machine.WirelessConnected || got.radio.message != "no DHCP offer on wlan0 in 30s" {
-		t.Errorf("the radio is %+v", got.radio.wirelessStatus())
+		t.Errorf("the radio is %+v, want Connected with the addressing error as its message", got.radio.wirelessStatus())
 	}
 }
 
-// pendingRetries is a watch's stand-in for time.AfterFunc: it records
-// each delay, and the test runs the function itself.
+// pendingRetries replaces time.AfterFunc in a watch. It records each
+// delay and keeps the function for the test to call.
 type pendingRetries struct {
 	delays []time.Duration
 	fire   []func()
@@ -336,7 +336,7 @@ func TestTheRadioWatchCapsTheWaitAfterAnAccessPointRefusesTheJoin(t *testing.T) 
 			w.apply(radioEvent{ifname: "wlan0", event: event(t, c.event)})
 
 			if !reflect.DeepEqual(retries.delays, c.want) {
-				t.Errorf("the watch scheduled %v, want %v", retries.delays, c.want)
+				t.Errorf("the watch scheduled retries after %v, want %v", retries.delays, c.want)
 			}
 		})
 	}
@@ -358,7 +358,7 @@ func TestARetrySelectsTheNetworkAgain(t *testing.T) {
 	w.apply(<-w.events)
 
 	if asked := s.Asked(); !slices.Contains(asked, "SELECT_NETWORK 0") {
-		t.Errorf("the watch asked %q", asked)
+		t.Errorf("the supplicant received %q, want it to include SELECT_NETWORK 0", asked)
 	}
 }
 
@@ -369,6 +369,6 @@ func TestARetryLeavesAJoinedRadioAlone(t *testing.T) {
 	w.apply(radioEvent{ifname: "wlan0", event: wpaEvent{name: wpaRetry, fields: map[string]string{"id": "0"}}})
 
 	if asked := s.Asked(); len(asked) != 0 {
-		t.Errorf("the watch asked %q of a joined radio", asked)
+		t.Errorf("the supplicant received %q, want no request because the radio is joined", asked)
 	}
 }

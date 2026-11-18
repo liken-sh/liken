@@ -1,10 +1,5 @@
 package main
 
-// The role-specific half of slot formatting. The FAT32 format itself
-// lives in the disks package, shared with the install-media builder.
-// This file holds init's policy: which label a slot carries, and the
-// identity field a machine creates at format time.
-
 import (
 	"crypto/rand"
 	"encoding/binary"
@@ -14,16 +9,12 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// formatSlot formats one of the FAT32 roles' partitions. It labels
-// the partition for the role it serves, so the volume shows its role
-// in any directory listing. For these roles, the label also lets
-// GRUB find the partition, because the label is what GRUB's search
-// command uses. The volume ID is FAT's only identity field; FAT32
-// has no UUIDs. formatSlot draws the volume ID from crypto/rand,
-// the same source a claim already uses for each partition's GPT
-// unique GUID, because a claim formats bootHome and both system
-// slots inside one second, and volumes formatted in the same second
-// must still carry ids that tell them apart.
+// formatSlot writes a FAT32 filesystem on the partition of a system
+// slot or bootHome. GRUB's search command finds a system slot by its
+// label. FAT32 has no UUID, so the volume ID is the value that
+// /dev/disk/by-uuid names the partition by. Init formats all three
+// partitions within one second, so an ID taken from the clock would
+// repeat, and the ID comes from crypto/rand.
 func formatSlot(devPath string, sizeBytes uint64, role machine.StorageRoleName) error {
 	f, err := os.OpenFile(devPath, os.O_RDWR, 0)
 	if err != nil {
@@ -40,11 +31,9 @@ func formatSlot(devPath string, sizeBytes uint64, role machine.StorageRoleName) 
 	return disks.FormatFAT32(f, sizeBytes, label, randomVolumeID())
 }
 
-// randomVolumeID draws a 32-bit FAT volume id from crypto/rand. A
-// failure here means the kernel has no randomness source at all, the
-// same fault that RandomGUID treats as fatal for a partition's GPT
-// unique GUID, so formatSlot stops rather than mint an id two slots
-// might end up sharing.
+// randomVolumeID panics when crypto/rand fails, as disks.RandomGUID
+// does, because two partitions with the same ID would hide each other
+// from /dev/disk/by-uuid.
 func randomVolumeID() uint32 {
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {

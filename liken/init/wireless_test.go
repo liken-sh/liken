@@ -1,11 +1,5 @@
 package main
 
-// The park decision is the one rule in this milestone that a person
-// cannot check by looking at a machine, because it fires only when a
-// radio has already failed. So it is a pure function over the
-// connections and one route question, and every case the plan names
-// has a test here.
-
 import (
 	"fmt"
 	"net"
@@ -19,7 +13,6 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// addressed is an interface that came up and holds an address.
 func addressed(name, cidr string) *connection {
 	ip, subnet, err := net.ParseCIDR(cidr)
 	if err != nil {
@@ -28,8 +21,8 @@ func addressed(name, cidr string) *connection {
 	return &connection{ifname: name, addr: &net.IPNet{IP: ip, Mask: subnet.Mask}}
 }
 
-// refusedRadio is an interface whose radio failed for a reason that no
-// amount of waiting corrects.
+// refusedRadio returns a connection whose access point refused the
+// passphrase, a deterministic failure.
 func refusedRadio(name, ssid string) *connection {
 	return &connection{ifname: name, radio: &radio{
 		ifname: name, ssid: ssid, state: machine.WirelessWrongKey,
@@ -37,8 +30,8 @@ func refusedRadio(name, ssid string) *connection {
 	}}
 }
 
-// silentRadio is an interface whose radio heard nothing. The plan's
-// rule is that this never parks a boot, however long it lasts.
+// silentRadio returns a connection whose access point never answered,
+// a failure that is not deterministic.
 func silentRadio(name, ssid string) *connection {
 	return &connection{ifname: name, radio: &radio{
 		ifname: name, ssid: ssid, state: machine.WirelessNoCarrier,
@@ -46,138 +39,130 @@ func silentRadio(name, ssid string) *connection {
 	}}
 }
 
-// routesVia answers every route question with one interface, which is
-// all the park decision asks.
+// routesVia returns a routeLookup that routes every address through
+// the named interface.
 func routesVia(name string) routeLookup {
 	return func(net.IP) (string, error) { return name, nil }
 }
 
-// routesNowhere is a machine with no route toward the endpoint.
 func routesNowhere() routeLookup {
 	return func(dst net.IP) (string, error) { return "", fmt.Errorf("no route toward %s", dst) }
 }
 
 const labEndpoint = "https://10.10.0.1:6443"
 
-func TestParkDecisionLetsAWiredMachineBoot(t *testing.T) {
-	// The drill's machine: the radio refuses, the ethernet port
-	// carries the cluster, and the boot goes on degraded.
+func TestRadioToWaitForLetsAWiredMachineBoot(t *testing.T) {
 	conns := []*connection{addressed("eth0", "10.10.0.5/24"), refusedRadio("wlan0", "homenet")}
-	failed, reason := parkDecision(conns, labEndpoint, routesVia("eth0"))
+	failed, reason := radioToWaitFor(conns, labEndpoint, routesVia("eth0"))
 	if failed != nil {
-		t.Errorf("a machine with a route to its cluster must boot: %s", reason)
+		t.Errorf("radioToWaitFor chose a radio to wait for (%s), want none when a route reaches the cluster", reason)
 	}
 }
 
-func TestParkDecisionHoldsAMachineWithNoOtherPath(t *testing.T) {
-	// The field case: a stick PC whose only interface is the radio.
+func TestRadioToWaitForHoldsAMachineWithNoOtherPath(t *testing.T) {
+	// The radio is the machine's only interface.
 	conns := []*connection{refusedRadio("wlan0", "homenet")}
-	failed, reason := parkDecision(conns, labEndpoint, routesVia("eth0"))
+	failed, reason := radioToWaitFor(conns, labEndpoint, routesVia("eth0"))
 	if failed == nil {
-		t.Fatal("a machine whose only path refused must wait")
+		t.Fatal("radioToWaitFor returns no radio, want the radio that is the only interface")
 	}
-	for _, want := range []string{"wlan0", "homenet", "WRONG_KEY", "waits here"} {
+	for _, want := range []string{"wlan0", "homenet", "WRONG_KEY"} {
 		if !strings.Contains(reason, want) {
-			t.Errorf("the reason must carry %q: %q", want, reason)
+			t.Errorf("the reason is %q, want it to contain %q", reason, want)
 		}
 	}
 }
 
-func TestParkDecisionHoldsWhenNothingRoutesToTheCluster(t *testing.T) {
-	// An interface came up, and it reaches nothing the cluster is on.
+func TestRadioToWaitForHoldsWhenNothingRoutesToTheCluster(t *testing.T) {
 	conns := []*connection{addressed("eth0", "192.168.9.5/24"), refusedRadio("wlan0", "homenet")}
-	failed, reason := parkDecision(conns, labEndpoint, routesNowhere())
+	failed, reason := radioToWaitFor(conns, labEndpoint, routesNowhere())
 	if failed == nil {
-		t.Fatal("no route toward the endpoint must wait")
+		t.Fatal("radioToWaitFor returns no radio, want one because no route reaches the endpoint")
 	}
 	if !strings.Contains(reason, "10.10.0.1") {
-		t.Errorf("the reason must name the endpoint: %q", reason)
+		t.Errorf("the reason is %q, want it to contain the endpoint 10.10.0.1", reason)
 	}
 }
 
-func TestParkDecisionHoldsWhenTheRouteLeavesByAnInterfaceThatNeverCameUp(t *testing.T) {
+func TestRadioToWaitForHoldsWhenTheRouteLeavesByAnInterfaceThatNeverCameUp(t *testing.T) {
 	conns := []*connection{addressed("eth0", "192.168.9.5/24"), refusedRadio("wlan0", "homenet")}
-	failed, reason := parkDecision(conns, labEndpoint, routesVia("eth1"))
+	failed, reason := radioToWaitFor(conns, labEndpoint, routesVia("eth1"))
 	if failed == nil {
-		t.Fatal("a route by an interface with no address must wait")
+		t.Fatal("radioToWaitFor returns no radio, want one because the route leaves by eth1, which has no address")
 	}
 	if !strings.Contains(reason, "eth1") {
-		t.Errorf("the reason must name the interface the route leaves by: %q", reason)
+		t.Errorf("the reason is %q, want it to contain eth1", reason)
 	}
 }
 
-func TestParkDecisionLetsALeaderBoot(t *testing.T) {
-	// A leader's endpoint is its own address, so the kernel answers
-	// loopback. A leader must never wait on a radio it does not need.
+func TestRadioToWaitForLetsALeaderBoot(t *testing.T) {
+	// A leader's endpoint is its own address, so the route leaves by
+	// loopback.
 	conns := []*connection{addressed("eth0", "10.10.0.1/24"), refusedRadio("wlan0", "homenet")}
-	if failed, reason := parkDecision(conns, labEndpoint, routesVia("lo")); failed != nil {
-		t.Errorf("a leader must boot: %s", reason)
+	if failed, reason := radioToWaitFor(conns, labEndpoint, routesVia("lo")); failed != nil {
+		t.Errorf("radioToWaitFor chose a radio to wait for (%s), want none on a leader, whose route to the endpoint leaves by lo", reason)
 	}
 }
 
-func TestParkDecisionNeverHoldsOnAbsence(t *testing.T) {
-	// The plan's hardest rule: an access point that is off, rebooting,
-	// or out of range must never stop a machine from booting.
+func TestRadioToWaitForNeverHoldsOnAbsence(t *testing.T) {
+	// An access point that is off, rebooting, or out of range must not
+	// stop a machine from booting.
 	conns := []*connection{silentRadio("wlan0", "homenet")}
-	if failed, reason := parkDecision(conns, labEndpoint, routesNowhere()); failed != nil {
-		t.Errorf("absence must never park: %s", reason)
+	if failed, reason := radioToWaitFor(conns, labEndpoint, routesNowhere()); failed != nil {
+		t.Errorf("radioToWaitFor chose a radio to wait for (%s), want none for a radio that only finds no access point", reason)
 	}
 }
 
-func TestParkDecisionLetsAMachineWithNoEndpointBoot(t *testing.T) {
-	// A machine alone is its own cluster. There is no endpoint to
-	// route toward, and an interface did come up.
+func TestRadioToWaitForLetsAMachineWithNoEndpointBoot(t *testing.T) {
 	conns := []*connection{addressed("eth0", "10.10.0.5/24"), refusedRadio("wlan0", "homenet")}
-	if failed, reason := parkDecision(conns, "", routesNowhere()); failed != nil {
-		t.Errorf("a machine with no endpoint must boot: %s", reason)
+	if failed, reason := radioToWaitFor(conns, "", routesNowhere()); failed != nil {
+		t.Errorf("radioToWaitFor chose a radio to wait for (%s), want none on a machine with no endpoint", reason)
 	}
 }
 
-func TestParkDecisionLetsAMachineWithANamedEndpointBoot(t *testing.T) {
-	// A name needs DNS, and DNS needs the network in question. The
-	// decision refuses to guess, and the bias is to boot.
+func TestRadioToWaitForLetsAMachineWithAHostNameEndpointBoot(t *testing.T) {
 	conns := []*connection{addressed("eth0", "10.10.0.5/24"), refusedRadio("wlan0", "homenet")}
-	if failed, reason := parkDecision(conns, "https://cluster.example.com:6443", routesNowhere()); failed != nil {
-		t.Errorf("a named endpoint must not park a machine that came up: %s", reason)
+	if failed, reason := radioToWaitFor(conns, "https://cluster.example.com:6443", routesNowhere()); failed != nil {
+		t.Errorf("radioToWaitFor chose a radio to wait for (%s), want none when the endpoint is a host name", reason)
 	}
 }
 
-func TestParkDecisionOnAWiredMachineAsksNothing(t *testing.T) {
+func TestRadioToWaitForNeverHoldsAMachineWithNoRadio(t *testing.T) {
 	conns := []*connection{addressed("eth0", "10.10.0.5/24")}
-	if failed, _ := parkDecision(conns, labEndpoint, routesNowhere()); failed != nil {
-		t.Error("a machine with no radio can never park")
+	if failed, _ := radioToWaitFor(conns, labEndpoint, routesNowhere()); failed != nil {
+		t.Error("radioToWaitFor returns a radio, want nil for a machine with no radio")
 	}
 }
 
 func TestEndpointAddressReadsTheLiteralAddress(t *testing.T) {
 	ip, ok := endpointAddress("https://10.10.0.1:6443")
 	if !ok || !ip.Equal(net.ParseIP("10.10.0.1")) {
-		t.Errorf("got %v, %v", ip, ok)
+		t.Errorf("endpointAddress returned %v, %v, want an address and true", ip, ok)
 	}
 }
 
-func TestEndpointAddressRefusesWhatItCannotResolve(t *testing.T) {
+func TestEndpointAddressRejectsAnEmptyOrNamedEndpoint(t *testing.T) {
 	for _, endpoint := range []string{"", "https://cluster.example.com:6443", "::::"} {
 		if _, ok := endpointAddress(endpoint); ok {
-			t.Errorf("%q names no literal address", endpoint)
+			t.Errorf("endpointAddress(%q) returned an address, want none", endpoint)
 		}
 	}
 }
 
-func TestAnyAddressedSeparatesAPathFromAReport(t *testing.T) {
+func TestAnyAddressedIgnoresInterfacesWithoutAnAddress(t *testing.T) {
 	if anyAddressed([]*connection{refusedRadio("wlan0", "homenet")}) {
-		t.Error("an interface with no address is a report, not a path")
+		t.Error("anyAddressed is true for an interface with no address, want false")
 	}
 	if !anyAddressed([]*connection{refusedRadio("wlan0", "x"), addressed("eth0", "10.10.0.5/24")}) {
-		t.Error("an addressed interface is a path")
+		t.Error("anyAddressed is false with an addressed interface, want true")
 	}
 }
 
-func TestRadioReportsItsStatusForTheFactsTree(t *testing.T) {
+func TestRadioWirelessStatusCopiesSSIDAndState(t *testing.T) {
 	r := &radio{ifname: "wlan0", ssid: "homenet", state: machine.WirelessConnected}
 	got := r.wirelessStatus()
 	if got.SSID != "homenet" || got.State != machine.WirelessConnected {
-		t.Errorf("got %+v", got)
+		t.Errorf("wirelessStatus is %+v, want SSID homenet and state Connected", got)
 	}
 }
 
@@ -194,18 +179,18 @@ func TestOnlyAWrongKeyIsDeterministic(t *testing.T) {
 	}
 }
 
-// stubControl is a control client whose events a test pushes by hand,
-// so the wait and the park run with no supplicant and no radio.
+// stubControl returns a control client with no socket. pushEvent
+// queues events on it.
 func stubControl() *wpaControl {
 	return &wpaControl{out: make(chan wpaEvent, 8)}
 }
 
-// pushEvent puts one of the supplicant's own lines onto a stub client.
+// pushEvent parses a supplicant message and queues it as an event on c.
 func pushEvent(t *testing.T, c *wpaControl, message string) {
 	t.Helper()
 	event, ok := parseWPAEvent(message)
 	if !ok {
-		t.Fatalf("%q must parse", message)
+		t.Fatalf("parsing the supplicant message %q: no event", message)
 	}
 	c.out <- event
 }
@@ -217,7 +202,7 @@ func TestAwaitAssociationEndsOnTheJoin(t *testing.T) {
 
 	awaitAssociation(r)
 	if r.state != machine.WirelessConnected {
-		t.Errorf("state = %q, message = %q", r.state, r.message)
+		t.Errorf("state is %q (%q), want Connected", r.state, r.message)
 	}
 }
 
@@ -227,24 +212,22 @@ func TestAwaitAssociationEndsOnARefusedPassphrase(t *testing.T) {
 
 	awaitAssociation(r)
 	if r.state != machine.WirelessWrongKey || !r.deterministic() {
-		t.Errorf("state = %q", r.state)
+		t.Errorf("state is %q, want WrongKey", r.state)
 	}
 }
 
-func TestAwaitAssociationGivesUpWithoutCallingItAWrongKey(t *testing.T) {
+func TestAwaitAssociationTimesOutAsNoCarrier(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// An access point that never answers is the case the plan says must
-		// never park a boot, so this wait must end in NoCarrier.
 		r := &radio{ifname: "wlan0", ssid: "homenet", state: machine.WirelessAssociating, control: stubControl()}
 		pushEvent(t, r.control, "<3>CTRL-EVENT-NETWORK-NOT-FOUND ")
 
 		start := time.Now()
 		awaitAssociation(r)
 		if r.state != machine.WirelessNoCarrier || r.deterministic() {
-			t.Errorf("state = %q, message = %q", r.state, r.message)
+			t.Errorf("state is %q (%q), want NoCarrier", r.state, r.message)
 		}
-		if elapsed := time.Since(start); elapsed != associationPatience {
-			t.Errorf("the wait gave up after %s, want its patience of %s", elapsed, associationPatience)
+		if elapsed := time.Since(start); elapsed != associationTimeout {
+			t.Errorf("the wait gave up after %s, want its timeout of %s", elapsed, associationTimeout)
 		}
 	})
 }
@@ -255,28 +238,27 @@ func TestAwaitAssociationEndsWhenTheSupplicantsStreamCloses(t *testing.T) {
 
 	awaitAssociation(r)
 	if r.state != machine.WirelessNoCarrier {
-		t.Errorf("state = %q", r.state)
+		t.Errorf("state is %q, want NoCarrier", r.state)
 	}
 }
 
-// heldConsole points a park at a file, so a test can read what a person
-// at the machine would have seen.
+// heldConsole points radioWaitConsole at a temporary file and returns
+// its path.
 func heldConsole(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "console")
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the console file: %v", err)
 	}
-	orig := parkConsole
-	parkConsole = path
-	t.Cleanup(func() { parkConsole = orig })
+	orig := radioWaitConsole
+	radioWaitConsole = path
+	t.Cleanup(func() { radioWaitConsole = orig })
 	return path
 }
 
-func TestParkReleasesTheBootWhenTheRadioJoins(t *testing.T) {
-	// The park is a hold, not a halt: a fix on the network side must
-	// resume the boot with nobody at the machine. A scan and another
-	// refusal before the join must not release it.
+func TestWaitForRadioReturnsWhenTheRadioJoins(t *testing.T) {
+	// waitForRadio starts on a refused passphrase, so a second refusal
+	// must not end the wait. Only the join does.
 	console := heldConsole(t)
 	r := &radio{
 		ifname: "wlan0", ssid: "homenet", state: machine.WirelessWrongKey,
@@ -286,46 +268,42 @@ func TestParkReleasesTheBootWhenTheRadioJoins(t *testing.T) {
 	pushEvent(t, r.control, `<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid="homenet" auth_failures=2 duration=20 reason=WRONG_KEY`)
 	pushEvent(t, r.control, "<3>CTRL-EVENT-CONNECTED - Connection to 04:4a:2c:11:22:33 completed [id=0]")
 
-	park(r, "liken: wireless: wlan0 cannot join homenet")
+	waitForRadio(r, "liken: wireless: wlan0 cannot join homenet")
 
 	if r.state != machine.WirelessConnected {
-		t.Errorf("state = %q", r.state)
+		t.Errorf("state is %q, want Connected", r.state)
 	}
 	held, err := os.ReadFile(console)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the console file: %v", err)
 	}
 	if !strings.Contains(string(held), "cannot join homenet") {
-		t.Errorf("the console must carry the reason: %q", held)
+		t.Errorf("the console file is %q, want it to contain the reason", held)
 	}
 }
 
-func TestParkEndsWhenTheSupplicantsStreamCloses(t *testing.T) {
-	// Nothing else can release this hold, so a stream that ends must,
-	// rather than leaving a machine stopped with no way to report why.
+func TestWaitForRadioEndsWhenTheSupplicantsStreamCloses(t *testing.T) {
 	heldConsole(t)
 	r := &radio{
 		ifname: "wlan0", ssid: "homenet", state: machine.WirelessWrongKey,
 		message: "refused", control: stubControl(),
 	}
 	close(r.control.out)
-	park(r, "liken: wireless: wlan0 cannot join homenet")
+	waitForRadio(r, "liken: wireless: wlan0 cannot join homenet")
 }
 
-func TestWriteWirelessConfigKeepsThePassphraseToItself(t *testing.T) {
-	// The file holds the network's passphrase, so its mode is part of
-	// the design and not an accident of the umask.
+func TestWriteWirelessConfigIsOwnerReadableOnly(t *testing.T) {
 	orig := wirelessRunDir
 	wirelessRunDir = filepath.Join(t.TempDir(), "wireless")
 	t.Cleanup(func() { wirelessRunDir = orig })
 
 	path, err := writeWirelessConfig("wlan0", "network={\n}\n")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the supplicant configuration: %v", err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the mode of the configuration file: %v", err)
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("mode = %v, want 0600", info.Mode().Perm())
@@ -333,11 +311,11 @@ func TestWriteWirelessConfigKeepsThePassphraseToItself(t *testing.T) {
 }
 
 func TestControlSocketDirIsShortEnoughForAUnixSocket(t *testing.T) {
-	// The supplicant refuses a control path longer than the kernel's
-	// sun_path, and the refusal is a boot that never joins.
+	// A UNIX socket path must fit in the 108 bytes of sockaddr_un's
+	// sun_path on Linux, or the supplicant cannot create its socket.
 	const sunPathMax = 108
 	socket := filepath.Join(controlSocketDir("wlp0s20f3"), "wlp0s20f3")
 	if len(socket) >= sunPathMax {
-		t.Errorf("%q is %d bytes; a UNIX socket path holds %d", socket, len(socket), sunPathMax)
+		t.Errorf("the control socket path %q is %d bytes, want fewer than the %d of sun_path", socket, len(socket), sunPathMax)
 	}
 }

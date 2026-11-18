@@ -1,8 +1,5 @@
 package main
 
-// Tests for the default-path loader on a slot: the program a firmware
-// with no boot variables finds by itself.
-
 import (
 	"os"
 	"path/filepath"
@@ -10,9 +7,8 @@ import (
 	"testing"
 )
 
-// slotWithMenu builds a directory that stands in for a mounted system
-// slot: the boot menu program that every release carries, and the
-// kernel and archives beside it.
+// slotWithMenu returns a temporary directory with the files of a
+// mounted slot: systemd-boot, the kernel, and the archives.
 func slotWithMenu(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -24,7 +20,7 @@ func slotWithMenu(t *testing.T) string {
 		"deployment.cpio": "the layer",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing %s to the slot: %v", name, err)
 		}
 	}
 	return dir
@@ -35,26 +31,26 @@ func TestWriteSlotLoader(t *testing.T) {
 	mount := slotWithMenu(t)
 
 	if err := writeSlotLoader(mount, "A", "node-1"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the loader to slot A: %v", err)
 	}
 
 	loader, err := os.ReadFile(filepath.Join(mount, "EFI", "BOOT", "BOOTX64.EFI"))
 	if err != nil {
-		t.Fatalf("a firmware at its defaults looks for this one path: %v", err)
+		t.Fatalf("reading the loader at the default path %s: %v", defaultLoaderPath(mount), err)
 	}
 	if string(loader) != "the menu program" {
-		t.Errorf("the loader is a copy of the slot's own menu program: %q", loader)
+		t.Errorf("the loader is %q, want a copy of the slot's menu program", loader)
 	}
 	conf, err := os.ReadFile(filepath.Join(mount, "loader", "loader.conf"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading loader.conf: %v", err)
 	}
 	if !strings.Contains(string(conf), "timeout 0") {
-		t.Errorf("nobody is standing at this boot, so it must not wait: %q", conf)
+		t.Errorf("loader.conf is %q, want timeout 0 because nobody is at the console to choose", conf)
 	}
 	entry, err := os.ReadFile(filepath.Join(mount, "loader", "entries", "liken-A.conf"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the entry of slot A: %v", err)
 	}
 	text := string(entry)
 	for _, want := range []string{
@@ -66,31 +62,27 @@ func TestWriteSlotLoader(t *testing.T) {
 		"options  console=ttyS0 rdinit=/liken liken.machine=node-1 liken.slot=A panic=10\n",
 	} {
 		if !strings.Contains(text, want) {
-			t.Errorf("the entry is missing %q:\n%s", want, text)
+			t.Errorf("the entry is\n%s\nwant it to contain %q", text, want)
 		}
 	}
 	if strings.Contains(text, "initrd=") {
-		t.Error("this loader stages the archives itself, so the options must not name them")
+		t.Error("the options line names initrd= parameters, want none because the initrd lines load the archives")
 	}
 }
 
-// A slot that carries an older release names only the archives it
-// actually has. systemd-boot refuses an entry whose initrd is missing,
-// and an entry that refuses to boot is worse than no fallback: it
-// fails after the firmware has already committed to it.
-func TestSlotLoaderEntryNamesOnlyTheArchivesTheSlotCarries(t *testing.T) {
+func TestSlotLoaderEntryListsOnlyTheArchivesTheSlotHas(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0\n")
 	mount := slotWithMenu(t)
 	if err := os.Remove(filepath.Join(mount, "microcode.cpio")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the microcode archive: %v", err)
 	}
 
 	text := string(slotLoaderEntryText(mount, "B", "node-1"))
 	if strings.Contains(text, "microcode.cpio") {
-		t.Errorf("the slot has no microcode archive, so the entry must not name one:\n%s", text)
+		t.Errorf("the entry is\n%s\nwant no microcode.cpio because the slot has none", text)
 	}
 	if !strings.Contains(text, "initrd   /boot.cpio\n") {
-		t.Errorf("the archives that are present stay:\n%s", text)
+		t.Errorf("the entry is\n%s\nwant it to name boot.cpio", text)
 	}
 }
 
@@ -99,37 +91,35 @@ func TestWriteSlotLoaderRefusesASlotWithNoMenuProgram(t *testing.T) {
 	mount := t.TempDir()
 
 	if err := writeSlotLoader(mount, "A", "node-1"); err == nil {
-		t.Fatal("a slot with no menu program cannot carry a loader; the caller must hear about it")
+		t.Fatal("writeSlotLoader returned no error for a slot with no menu program, want one")
 	}
 	if _, err := os.Stat(filepath.Join(mount, "EFI")); err == nil {
-		t.Error("a refusal leaves nothing behind")
+		t.Error("writeSlotLoader wrote EFI files and returned an error, want no files written")
 	}
 }
 
-// The second run must write nothing. A slot is FAT on a real disk, and
-// a rewrite on every boot buys nothing.
 func TestWriteSlotLoaderWritesNothingTwice(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0\n")
 	mount := slotWithMenu(t)
 	if err := writeSlotLoader(mount, "A", "node-1"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the loader to slot A: %v", err)
 	}
 	loader := defaultLoaderPath(mount)
 	before, err := os.Stat(loader)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the loader file: %v", err)
 	}
 
 	if err := writeSlotLoader(mount, "A", "node-1"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the loader to slot A: %v", err)
 	}
 
 	after, err := os.Stat(loader)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the loader file: %v", err)
 	}
 	if !after.ModTime().Equal(before.ModTime()) {
-		t.Error("the loader already agreed, so nothing needed writing")
+		t.Error("the loader file was written again, want no write when its contents match")
 	}
 }
 
@@ -137,50 +127,45 @@ func TestRemoveSlotLoader(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0\n")
 	mount := slotWithMenu(t)
 	if err := writeSlotLoader(mount, "A", "node-1"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the loader to slot A: %v", err)
 	}
 
 	removeSlotLoader(mount)
 
 	if _, err := os.Stat(defaultLoaderPath(mount)); !os.IsNotExist(err) {
-		t.Error("only the proven slot answers the firmware's default path")
+		t.Error("the loader program is still on the slot, want it removed")
 	}
 	if _, err := os.Stat(filepath.Join(mount, "loader", "entries", "liken-A.conf")); err != nil {
-		t.Error("the entry stays, because the program is what a firmware looks for")
+		t.Error("the entry is gone, want removeSlotLoader to leave it")
 	}
 }
 
 func TestOtherSlot(t *testing.T) {
 	if otherSlot("A") != "B" || otherSlot("B") != "A" {
-		t.Error("the pair has two halves")
+		t.Errorf("otherSlot(\"A\") is %q and otherSlot(\"B\") is %q, want B and A", otherSlot("A"), otherSlot("B"))
 	}
 }
 
-// A slot whose loader files lost their contents gets them back. This is
-// the state a machine reaches when a power cut lands between the write
-// and the flush: the entry keeps its name and holds nothing. A firmware
-// starts such a loader and then has nothing to boot, so every boot
-// compares the contents and not just the names.
 func TestWriteSlotLoaderRepairsAnEmptyEntry(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0\n")
 	mount := slotWithMenu(t)
 	if err := writeSlotLoader(mount, "A", "node-1"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the loader to slot A: %v", err)
 	}
 	entry := filepath.Join(mount, "loader", "entries", "liken-A.conf")
 	if err := os.WriteFile(entry, nil, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("emptying the entry: %v", err)
 	}
 
 	if err := writeSlotLoader(mount, "A", "node-1"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the loader to slot A: %v", err)
 	}
 
 	body, err := os.ReadFile(entry)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the entry: %v", err)
 	}
 	if !strings.Contains(string(body), "linux    /vmlinuz\n") {
-		t.Errorf("the entry is whole again: %q", body)
+		t.Errorf("the entry is %q, want it written again with its contents", body)
 	}
 }

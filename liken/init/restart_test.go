@@ -1,9 +1,8 @@
 package main
 
-// Tests for the restart path's decisions and file effects: what a
-// restart intent applies, what it refuses, and what the facts show
-// afterward. The supervisor handles the restart itself, stopping and
-// starting k3s, and the lab tests prove that part.
+// Tests for what a restart intent applies, what it refuses, and the
+// facts and files it leaves. The supervisor stops and starts k3s, and
+// the lab tests cover that part.
 
 import (
 	"errors"
@@ -20,9 +19,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// restartFixture builds a restartState over tempdir stores. It uses
-// recording seams instead of the real renderers, plus a current
-// cluster document that stands in for the one this boot ran.
+// restartFixture builds a restartState over temporary stores. Its
+// renderers record their arguments, and its current cluster document
+// stands in for the one this boot started with.
 type restartFixture struct {
 	state           *restartState
 	root            string
@@ -75,7 +74,7 @@ func (f *restartFixture) factFile(t *testing.T, rel string) string {
 		return ""
 	}
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading a restart fact: %v", err)
 	}
 	return strings.TrimSuffix(string(raw), "\n")
 }
@@ -87,10 +86,10 @@ func (f *restartFixture) stageCluster(t *testing.T, mutate func(*cluster.Cluster
 	mutate(&doc.Spec)
 	raw, err := yaml.Marshal(&doc)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("marshalling the staged cluster document: %v", err)
 	}
 	if err := machine.ClusterManifests(f.root).WriteStaged(raw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("staging the cluster document: %v", err)
 	}
 	return machine.ManifestHash(raw)
 }
@@ -101,10 +100,10 @@ func (f *restartFixture) stageCredentials(t *testing.T) string {
 		{Host: "mirror.example:5000", Username: "liken", Password: "p"},
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the registry credentials: %v", err)
 	}
 	if err := machine.RegistryCredentialsStore(f.root).WriteStaged(raw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("staging the registry credentials: %v", err)
 	}
 	return hash
 }
@@ -115,43 +114,41 @@ func TestRestartAppliesAStagedFeatureToggle(t *testing.T) {
 		s.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
 	})
 
-	// Seed a feature that the restart's actuation no longer reports, so
-	// the reconcile in WriteFeatures must remove its directory.
+	// Write a feature that the restart's actuation does not report, so
+	// WriteFeatures has to remove its directory.
 	if err := f.state.tree.WriteFeatures([]machine.FeatureStatus{{Name: "gone", State: machine.FeatureActive}}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the feature status: %v", err)
 	}
 
 	if !f.state.apply(machine.RestartIntent{Reason: "test"}) {
-		t.Fatal("a staged features-only document is exactly what a restart applies")
+		t.Fatal("apply returned false, want true for a staged document that changes only features")
 	}
 	if len(f.bootConfigs) != 1 || f.bootConfigs[0].Spec.Features["traefik"] == nil {
-		t.Error("the boot drop-in must re-render under the staged document")
+		t.Errorf("the boot drop-in was rendered %d times, want once under the staged document with traefik", len(f.bootConfigs))
 	}
 	if len(f.actuations) != 1 {
-		t.Error("features must re-actuate under the staged document")
+		t.Errorf("the features were actuated %d times, want once under the staged document", len(f.actuations))
 	}
 	if attempted, _ := machine.ClusterManifests(f.root).LoadAttempted(); attempted != hash {
-		t.Errorf("the trial must be marked, exactly as a proving boot would: %q", attempted)
+		t.Errorf("the attempted hash is %q, want %q, as a trial boot marks it", attempted, hash)
 	}
-	// The facts name the staged document for the operator's promotion.
-	// boot/clusterManifest is a record file of key=value lines.
+	// boot/clusterManifest is a file of key=value lines. The operator
+	// promotes the staged document when it reads its hash here.
 	record := f.factFile(t, "boot/clusterManifest")
 	if !strings.Contains(record, "source=Staged") || !strings.Contains(record, "hash="+hash) {
-		t.Errorf("boot/clusterManifest = %q", record)
+		t.Errorf("boot/clusterManifest is %q, want source=Staged and hash=%s", record, hash)
 	}
 	if got := f.factFile(t, "boot/restarts"); got != "1" {
-		t.Errorf("the restart counter is the observable: %q", got)
+		t.Errorf("boot/restarts is %q, want 1", got)
 	}
-	// The reconcile removes the vanished feature and keeps the current
-	// one.
 	if _, err := os.Stat(filepath.Join(f.state.tree.Dir, "features", "gone")); !os.IsNotExist(err) {
-		t.Error("a retracted feature's directory must be gone")
+		t.Error("the directory of a retracted feature still exists, want it deleted")
 	}
 	if f.factFile(t, "features/traefik/state") != "Active" {
-		t.Error("the re-actuated feature must be reported")
+		t.Errorf("features/traefik/state is %q, want Active", f.factFile(t, "features/traefik/state"))
 	}
 	if f.state.clusterDoc.Spec.Features["traefik"] == nil {
-		t.Error("the applied document becomes current")
+		t.Error("the current document has no traefik feature, want the applied document to be current")
 	}
 }
 
@@ -160,31 +157,30 @@ func TestRestartAppliesStagedCredentialsAlone(t *testing.T) {
 	hash := f.stageCredentials(t)
 
 	if !f.state.apply(machine.RestartIntent{Reason: "test"}) {
-		t.Fatal("staged credentials are restart work")
+		t.Fatal("apply returned false, want true for staged credentials")
 	}
 	if len(f.bootConfigs) != 0 {
-		t.Error("an unchanged cluster document must not re-render the drop-in")
+		t.Errorf("the drop-in was rendered %d times, want none when the cluster document did not change", len(f.bootConfigs))
 	}
 	if len(f.renderedCreds) != 1 || f.renderedCreds[0] == nil ||
 		f.renderedSources[0] != machine.ManifestSourceStaged {
-		t.Errorf("the staged credentials must render as staged: %+v %+v", f.renderedCreds, f.renderedSources)
+		t.Errorf("the rendered credentials are %+v from %+v, want one set from the staged source", f.renderedCreds, f.renderedSources)
 	}
 	record := f.factFile(t, "boot/credentials")
 	if !strings.Contains(record, "source=Staged") || !strings.Contains(record, "hash="+hash) {
-		t.Errorf("boot/credentials = %q", record)
+		t.Errorf("boot/credentials is %q, want source=Staged and hash=%s", record, hash)
 	}
 	if got := f.factFile(t, "boot/restarts"); got != "1" {
-		t.Errorf("got %q restarts", got)
+		t.Errorf("the restart counter is %q, want 1", got)
 	}
 }
 
-func TestRestartCarriesANextBootDocumentWhenItRunsAnyway(t *testing.T) {
-	// An endpoint edit alone never asks for a restart: the operator
-	// stages it and waits for the machine's next boot
-	// (machine-operator/cluster.go). Some other document can still
-	// raise a restart intent while that copy waits, and then this path
-	// applies it, because the drop-in it renders from the staged
-	// document is the same drop-in a boot would render.
+func TestRestartAppliesANextBootDocumentWhenAnotherDocumentRaisesTheIntent(t *testing.T) {
+	// For an endpoint change alone, the operator stages the document
+	// and requests no restart (machine-operator/cluster.go). When a
+	// restart runs for another document, it applies the staged
+	// endpoint too, because it renders the same drop-in that a boot
+	// would.
 	f := newRestartFixture(t)
 	hash := f.stageCluster(t, func(s *cluster.ClusterSpec) {
 		s.Endpoint = "https://10.10.0.9:6443"
@@ -192,57 +188,55 @@ func TestRestartCarriesANextBootDocumentWhenItRunsAnyway(t *testing.T) {
 	f.stageCredentials(t)
 
 	if !f.state.apply(machine.RestartIntent{Reason: "credentials"}) {
-		t.Fatal("staged credentials are restart work")
+		t.Fatal("apply returned false, want true for staged credentials")
 	}
 	if len(f.bootConfigs) != 1 || f.bootConfigs[0].Spec.Endpoint != "https://10.10.0.9:6443" {
-		t.Error("the drop-in must re-render with the staged endpoint")
+		t.Errorf("the drop-in renders are %+v, want one with the staged endpoint https://10.10.0.9:6443", f.bootConfigs)
 	}
 	if attempted, _ := machine.ClusterManifests(f.root).LoadAttempted(); attempted != hash {
-		t.Errorf("the applied document takes its trial: %q", attempted)
+		t.Errorf("the attempted hash is %q, want %q for the applied document", attempted, hash)
 	}
 }
 
 func TestRestartRefusesWithNothingStaged(t *testing.T) {
 	f := newRestartFixture(t)
 	if f.state.apply(machine.RestartIntent{Reason: "duplicate"}) {
-		t.Error("nothing staged means nothing to bounce for")
+		t.Error("apply returned true with nothing staged, want false and no restart")
 	}
 	if got := f.factFile(t, "boot/restarts"); got != "" {
-		t.Errorf("a refused restart must not count: %q", got)
+		t.Errorf("boot/restarts is %q, want empty after a refused restart", got)
 	}
 }
 
 func TestRestartRefusesAnAlreadyAttemptedDocument(t *testing.T) {
-	// The intent only signals that work might exist; the stores
-	// determine what to apply. A document that this restart, or a
-	// previous boot, already tried waits for the operator's promotion
-	// or the next boot's decision.
+	// An attempted document waits for the operator's promotion or the
+	// next boot's rejection, so a restart does not apply it again.
 	f := newRestartFixture(t)
 	hash := f.stageCluster(t, func(s *cluster.ClusterSpec) {
 		s.Features = map[string]*cluster.FeatureConfig{"traefik": {}}
 	})
 	if err := machine.ClusterManifests(f.root).WriteAttempted(hash); err != nil {
-		t.Fatal(err)
+		t.Fatalf("marking the document attempted: %v", err)
 	}
 	if f.state.apply(machine.RestartIntent{Reason: "duplicate"}) {
-		t.Error("an attempted document is not new work")
+		t.Error("apply returned true for a document already attempted, want false")
 	}
 }
 
-func TestRestartLeavesARebootClassDocumentStanding(t *testing.T) {
+func TestRestartLeavesARebootClassDocumentStaged(t *testing.T) {
 	f := newRestartFixture(t)
 	f.stageCluster(t, func(s *cluster.ClusterSpec) {
 		s.Network.ClusterCIDR = "10.44.0.0/16"
 	})
 
 	if f.state.apply(machine.RestartIntent{Reason: "racing intent"}) {
-		t.Error("a reboot-class document is the reboot path's business")
+		t.Error("apply returned true for a document that needs a reboot, want false")
 	}
 	if staged, _ := machine.ClusterManifests(f.root).LoadStaged(); staged == nil {
-		t.Error("the document must stay staged for the reboot")
+		t.Error("no document is staged, want it to stay staged for the reboot")
 	}
 	if attempted, _ := machine.ClusterManifests(f.root).LoadAttempted(); attempted != "" {
-		t.Error("an unapplied document must not be marked attempted")
+		t.Errorf("the attempted hash is %q, want none for a document that was not applied", attempted)
 	}
 }
 
@@ -250,26 +244,24 @@ func TestRestartRejectsAGarbageStagedDocument(t *testing.T) {
 	f := newRestartFixture(t)
 	store := machine.ClusterManifests(f.root)
 	if err := store.WriteStaged([]byte("kind: Nonsense\n")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("staging the document: %v", err)
 	}
 
 	if f.state.apply(machine.RestartIntent{Reason: "test"}) {
-		t.Error("garbage applies nothing")
+		t.Error("apply returned true for a staged document that does not parse, want false")
 	}
 	if staged, _ := store.LoadStaged(); staged != nil {
-		t.Error("garbage must be quarantined, exactly as at boot")
+		t.Error("the document that does not parse is still staged, want it rejected as at boot")
 	}
 	if rejection, _ := store.LoadRejection(); rejection == nil {
-		t.Error("the rejection must be recorded")
+		t.Error("the store has no rejection, want it recorded")
 	}
 }
 
-// retractionFixture stages one feature the way a machine carries it
-// after a boot that declared it: the image's copy under
-// /etc/liken/features, and the seeded copy in liken's subdirectory of
-// k3s's auto-deploy directory. It returns both directories, so a test
-// can add the rendered files that no image ships. The names are the
-// files the image would carry for the slug.
+// retractionFixture sets up a feature as a boot that declared it
+// leaves it: the files in names under the image's features directory,
+// and copies of them in k3s's auto-deploy directory. It returns both
+// directories, so a test can add files that init renders.
 func retractionFixture(t *testing.T, slug string, names ...string) (features, seeded string) {
 	t.Helper()
 	features = t.TempDir()
@@ -278,25 +270,24 @@ func retractionFixture(t *testing.T, slug string, names ...string) (features, se
 	featuresDir, k3sManifestsDir = features, seeded
 	t.Cleanup(func() { featuresDir, k3sManifestsDir = originalFeatures, originalManifests })
 	if err := os.MkdirAll(filepath.Join(features, slug, "manifests"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the feature manifests directory: %v", err)
 	}
 	if err := os.MkdirAll(seeded, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the k3s manifests directory: %v", err)
 	}
 	for _, name := range names {
 		for _, dir := range []string{filepath.Join(features, slug, "manifests"), seeded} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte("kind: DaemonSet\n"), 0o644); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing a feature manifest: %v", err)
 			}
 		}
 	}
 	return features, seeded
 }
 
-// The retraction itself, called directly. Whether a given retraction
-// reaches this path or waits for a boot is the classifier's decision
-// (cluster/changes.go). This test covers what happens to the files,
-// not that decision.
+// This test calls retractFeatureManifests directly. It does not cover
+// the classifier in cluster/changes.go, which decides whether a change
+// reaches the restart path.
 func TestRetractionRemovesADroppedFeaturesManifests(t *testing.T) {
 	f := newRestartFixture(t)
 	_, seeded := retractionFixture(t, "iscsi", "iscsid.yaml")
@@ -308,25 +299,22 @@ func TestRetractionRemovesADroppedFeaturesManifests(t *testing.T) {
 	f.state.retractFeatureManifests(declared, f.state.clusterDoc)
 
 	if _, err := os.Stat(filepath.Join(seeded, "iscsid.yaml")); !os.IsNotExist(err) {
-		t.Error("the retracted feature's manifest must leave the auto-deploy directory")
+		t.Error("iscsid.yaml is still in the auto-deploy directory, want it deleted with its feature")
 	}
-	if len(f.state.offlineRetractions) != 0 {
-		t.Errorf("a default teardown removes its files here: %v", f.state.offlineRetractions)
+	if len(f.state.queuedRetractions) != 0 {
+		t.Errorf("the queued retractions are %v, want none, because a feature with the default teardown has its files deleted at once", f.state.queuedRetractions)
 	}
 }
 
-// A janitor-teardown feature's files must survive the apply, while
-// k3s still watches the directory, and leave only after the stop.
-// If k3s saw the removal, it would delete the sync objects while
-// their controller still runs, and the engine's deletion finalizer
-// would prune everything the repository ever applied.
-func TestRestartRetractsFluxOnlyAfterTheStop(t *testing.T) {
+// retractFeatureManifests explains why flux's files must stay while
+// k3s runs.
+func TestRestartDeletesFluxManifestsOnlyAfterK3sStops(t *testing.T) {
 	f := newRestartFixture(t)
-	// The feature's ground ships in the image; the sync objects are
-	// rendered, so retraction needs both names.
+	// The image ships flux-system.yaml, and init renders
+	// flux-sync.yaml, so the retraction has to remove both.
 	_, seeded := retractionFixture(t, "flux", "flux-system.yaml")
 	if err := os.WriteFile(filepath.Join(seeded, "flux-sync.yaml"), []byte("kind: GitRepository\n"), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing flux-sync.yaml: %v", err)
 	}
 
 	f.state.clusterDoc.Spec.Features = map[string]*cluster.FeatureConfig{
@@ -337,18 +325,18 @@ func TestRestartRetractsFluxOnlyAfterTheStop(t *testing.T) {
 	})
 
 	if !f.state.apply(machine.RestartIntent{Reason: "retraction"}) {
-		t.Fatal("a flux retraction is restart work")
+		t.Fatal("apply returned false, want true for a flux retraction")
 	}
 	for _, file := range []string{"flux-system.yaml", "flux-sync.yaml"} {
 		if _, err := os.Stat(filepath.Join(seeded, file)); err != nil {
-			t.Errorf("%s must still exist while k3s watches: %v", file, err)
+			t.Errorf("%s is missing while k3s runs: %v, want it kept until k3s stops", file, err)
 		}
 	}
 
-	f.state.removeOfflineRetractions()
+	f.state.removeQueuedRetractions()
 	for _, file := range []string{"flux-system.yaml", "flux-sync.yaml"} {
 		if _, err := os.Stat(filepath.Join(seeded, file)); !os.IsNotExist(err) {
-			t.Errorf("%s must leave once k3s is down", file)
+			t.Errorf("%s still exists after k3s stopped, want it deleted", file)
 		}
 	}
 }

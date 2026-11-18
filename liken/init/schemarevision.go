@@ -1,22 +1,19 @@
 package main
 
-// A boot seeds k3s's manifests from its own image, and the image is
-// sometimes older than the cluster it boots: a fallback to the
-// previous slot is the designed answer to a release that fails. For
-// most manifests an older copy is merely stale. A CRD is different.
-// When an older schema replaces a newer one, the API server keeps
-// serving the stored objects, but it prunes the fields the older
-// schema does not declare, and the next write persists the pruned
-// object. No error is reported, and the object's generation does not
-// change, so nothing that watches the object learns that data was
-// lost.
+// At every boot, seedClusterState copies the manifests in the OS image
+// into k3s's auto-deploy directory on the disk. The image can be older
+// than the cluster, because a machine whose new release fails falls
+// back to the previous slot. An older copy of a CRD loses data: the API
+// server prunes the fields of stored objects that the older schema does
+// not declare, and the next write saves the pruned object. No error is
+// reported and the generation does not change, so no watcher learns
+// that data was lost.
 //
-// This file is the guard against that path. Each CRD manifest carries
-// a revision annotation, the seed compares the image's copy against
-// the copy already on the disk, and the disk's copy stays when it
-// carries the higher revision. The guard runs in the image doing the
-// seeding, so it protects a cluster only once every slot a machine
-// can fall back to carries it.
+// This file is the guard against that. Each CRD manifest declares a
+// revision annotation, and the seed keeps the disk's copy when its
+// revision is higher than the image's. The guard runs in the image that
+// seeds, so it protects a machine only when every slot the machine can
+// fall back to has the guard.
 
 import (
 	"encoding/json"
@@ -33,27 +30,22 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// schemaRevisionAnnotation names the integer that orders a CRD's
-// schemas across releases. Every change to the schema raises it, and
-// the pin test in schemarevision_test.go fails any change that does
-// not, so the annotation cannot silently fall behind the schema it
-// orders.
+// schemaRevisionAnnotation holds the integer that orders a CRD's
+// schemas across releases. Every schema change must raise it, and
+// TestTheSeededCRDsPinTheirSchemaRevision fails when one does not.
 const schemaRevisionAnnotation = "liken.sh/schema-revision"
 
-// manifestSizeLimit caps what the guard will read into memory. The
-// reader runs in PID 1 on a machine that can boot with 1GB, and the
-// largest seeded CRD is 178KB, so one megabyte is generous headroom
-// rather than a constraint anyone meets.
+// manifestSizeLimit caps how much of a manifest the guard reads into
+// memory. init is PID 1 on machines that can boot with 1GB, and no
+// seeded CRD comes near one megabyte.
 const manifestSizeLimit = 1 << 20
 
-// documentSeparator matches a YAML document separator on its own
-// line, with the trailing spaces and the carriage return that a file
-// written on another system carries.
+// documentSeparator matches a YAML document separator line, with
+// trailing spaces or the carriage return of a CRLF file.
 var documentSeparator = regexp.MustCompile(`(?m)^---[ \t]*\r?$`)
 
-// yamlDocuments splits a manifest into its documents and drops the
-// empty ones, which a file that opens or closes with a separator
-// leaves behind.
+// yamlDocuments splits a manifest into its documents, without the empty
+// ones that a leading or trailing separator leaves.
 func yamlDocuments(raw []byte) [][]byte {
 	var documents [][]byte
 	for _, doc := range documentSeparator.Split(string(raw), -1) {
@@ -65,26 +57,26 @@ func yamlDocuments(raw []byte) [][]byte {
 	return documents
 }
 
-// schemaRevision is what one manifest declares about its schema: this
-// is a CustomResourceDefinition, this is the revision it carries,
-// and, when the annotation names no revision at all, this is what it
-// said instead.
+// schemaRevision is what one manifest declares about its schema. isCRD
+// is true when the manifest contains a CustomResourceDefinition. invalid
+// is the annotation's text when that text is not a non-negative integer.
 type schemaRevision struct {
 	isCRD    bool
 	revision int
-	bad      string
+	invalid  string
 }
 
-// crdSchemaRevision reads what a manifest declares about its schema.
-// A manifest with no annotation is revision 0, which is what every
-// release from before the annotation existed effectively declares.
-// Two rules cover a value that does not fit an int. A run of digits
-// too long to hold means the highest revision there is: the author's
-// intent is unambiguous, and reading it as 0 would be the silent
-// downgrade this file exists to stop. Anything else names no revision
-// at all; it compares as 0, and the caller reports it, so a corrupted
-// annotation is recoverable by the next seed instead of pinning the
-// file forever on a machine with no shell.
+// crdSchemaRevision returns the schema revision of the first
+// CustomResourceDefinition in a manifest. A CRD with no annotation has
+// revision 0, like the manifests of releases from before the
+// annotation.
+//
+// A positive number too large for an int reads as math.MaxInt, because
+// reading it as 0 would allow the downgrade. Any other value that is not
+// a non-negative integer is returned in invalid and compares as 0, so
+// the next seed replaces the file with the image's copy. Comparing it
+// as a high revision would keep a corrupt file on a machine that has no
+// shell to repair it.
 func crdSchemaRevision(raw []byte) (schemaRevision, error) {
 	for _, doc := range yamlDocuments(raw) {
 		body, err := yaml.YAMLToJSON(doc)
@@ -98,7 +90,7 @@ func crdSchemaRevision(raw []byte) (schemaRevision, error) {
 			} `json:"metadata"`
 		}
 		if err := json.Unmarshal(body, &meta); err != nil {
-			return schemaRevision{}, fmt.Errorf("reading a manifest document: %w", err)
+			return schemaRevision{}, fmt.Errorf("decoding the kind and annotations of a manifest document: %w", err)
 		}
 		if meta.Kind != "CustomResourceDefinition" {
 			continue
@@ -112,17 +104,17 @@ func crdSchemaRevision(raw []byte) (schemaRevision, error) {
 			return schemaRevision{isCRD: true, revision: math.MaxInt}, nil
 		}
 		if err != nil || revision < 0 {
-			return schemaRevision{isCRD: true, bad: declared}, nil
+			return schemaRevision{isCRD: true, invalid: declared}, nil
 		}
 		return schemaRevision{isCRD: true, revision: revision}, nil
 	}
 	return schemaRevision{}, nil
 }
 
-// readManifest reads a file that is a manifest and nothing else.
-// init is PID 1: a read of a fifo never returns, and a read of a
-// device or of a file the size of the disk takes the memory the
-// machine boots with.
+// readManifest reads a manifest file. It refuses a symlink, and
+// anything else that is not a regular file of at most manifestSizeLimit
+// bytes, because init is PID 1. A read of a fifo can block forever, and
+// a read of a device or a huge file can use all of the machine's memory.
 func readManifest(path string) ([]byte, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -138,22 +130,21 @@ func readManifest(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-// newerCRDsOnDisk names the manifests whose disk copy outranks the
-// image's: the files that declare a CRD on both sides, with the
-// higher schema revision on the disk. The disk got a higher revision
-// from a newer release that ran here before this one, so replacing it
-// would downgrade the schema the cluster already serves.
+// newerCRDsOnDisk returns the names of the manifests that the seed
+// must keep: those where both copies contain a CRD and the disk's copy
+// has the higher schema revision. A newer release wrote that copy on an
+// earlier boot, and replacing it would downgrade the schema that the
+// cluster serves.
 //
-// Every failure to read or parse falls through to the ordinary
-// refresh, and the image's copy wins. That direction is deliberate: a
-// file this function cannot judge must not be able to stop a boot,
-// and an unreadable disk copy protects nothing anyway. The console
-// line is the record that the comparison did not happen.
+// When either copy cannot be read or parsed, the function prints a
+// console line and does not keep the manifest, so the image's copy
+// replaces it as usual. A file that cannot be compared must not stop a
+// boot, and an unreadable disk copy has no schema to protect.
 func newerCRDsOnDisk(src, dst string) map[string]bool {
 	keep := map[string]bool{}
 	entries, err := os.ReadDir(src)
 	if err != nil {
-		fmt.Printf("liken: k3s: reading the image's manifests: %v; seeding them all\n", err)
+		fmt.Printf("liken: k3s: reading the image's manifests: %v, so every image manifest is seeded\n", err)
 		return keep
 	}
 	for _, entry := range entries {
@@ -162,70 +153,61 @@ func newerCRDsOnDisk(src, dst string) map[string]bool {
 		}
 		name := entry.Name()
 		if _, err := os.Lstat(filepath.Join(dst, name)); err != nil {
-			continue // the disk holds no copy of this manifest to keep
+			continue // nothing on the disk to keep
 		}
 		onDisk, err := readManifest(filepath.Join(dst, name))
 		if err != nil {
-			fmt.Printf("liken: k3s: %v; %s cannot be compared, so the image's copy replaces the disk's\n", err, name)
+			fmt.Printf("liken: k3s: %v, so %s cannot be compared and the image's copy replaces the disk's\n", err, name)
 			continue
 		}
 		incoming, err := readManifest(filepath.Join(src, name))
 		if err != nil {
-			fmt.Printf("liken: k3s: %v; %s cannot be compared, so the image's copy replaces the disk's\n", err, name)
+			fmt.Printf("liken: k3s: %v, so %s cannot be compared and the image's copy replaces the disk's\n", err, name)
 			continue
 		}
 		disk, err := crdSchemaRevision(onDisk)
 		if err != nil {
-			fmt.Printf("liken: k3s: %s on the disk does not parse: %v; the image's copy replaces it\n", name, err)
+			fmt.Printf("liken: k3s: %s on the disk does not parse: %v, so the image's copy replaces it\n", name, err)
 			continue
 		}
 		image, err := crdSchemaRevision(incoming)
 		if err != nil {
-			fmt.Printf("liken: k3s: %s in the image does not parse: %v; the image's copy replaces it\n", name, err)
+			fmt.Printf("liken: k3s: %s in the image does not parse: %v, so the image's copy replaces it\n", name, err)
 			continue
 		}
-		reportBadRevision(name, "on the disk", disk)
-		reportBadRevision(name, "in the image", image)
+		reportInvalidRevision(name, "on the disk", disk)
+		reportInvalidRevision(name, "in the image", image)
 		if !disk.isCRD || !image.isCRD || disk.revision <= image.revision {
 			continue
 		}
-		fmt.Printf("liken: k3s: %s on the disk declares schema revision %d and this image carries %d; keeping the disk's copy\n",
+		fmt.Printf("liken: k3s: %s on the disk declares schema revision %d and the image has %d, so the disk's copy stays\n",
 			name, disk.revision, image.revision)
 		keep[name] = true
 	}
 	return keep
 }
 
-// reportBadRevision names a manifest whose annotation names no
-// revision. The file then compares as revision 0, which is what a
-// manifest with no annotation at all compares as.
-func reportBadRevision(name, where string, declared schemaRevision) {
-	if declared.bad == "" {
+// reportInvalidRevision prints a console line for a manifest whose
+// revision annotation is not a non-negative integer.
+func reportInvalidRevision(name, where string, declared schemaRevision) {
+	if declared.invalid == "" {
 		return
 	}
-	fmt.Printf("liken: k3s: %s %s declares %s: %q, which is no revision; it compares as 0\n",
-		name, where, schemaRevisionAnnotation, declared.bad)
+	fmt.Printf("liken: k3s: %s %s declares %s: %q, which is not a non-negative integer, so it compares as 0\n",
+		name, where, schemaRevisionAnnotation, declared.invalid)
 }
 
-// refreshSeedDir replaces a seed directory's content entry by entry,
-// skipping the kept names on both the remove side and the copy side.
-// The alternative, a wipe of the directory and a copy with the kept
-// files written back, holds the kept content only in memory for a
-// moment, and a power cut in that moment leaves the disk with the
-// older schema and no record that a newer one existed. Entry by
-// entry, the kept manifest is never removed and never rewritten, so
-// no instant of the boot leaves the disk without the schema the
-// cluster serves.
+// refreshSeedDir makes dst match src one entry at a time, and never
+// removes or rewrites the names in keep. Removing dst whole and writing
+// the kept files back would leave a kept manifest only in memory for a
+// moment, and a power cut then would leave the disk with the older
+// schema.
 //
-// The refresh is also best effort per entry, and only the failures
-// are collected. A refresh that stopped at its first failure would
-// let one stuck file decide the fate of every entry after it in
-// directory order: files already removed would never be copied back,
-// and a directory of six manifests could end the boot holding one.
-// Attempted one by one, a file the disk refuses to give up costs
-// exactly itself, and it stays as it stood rather than being
-// half-replaced, because the copy loop skips what the removal could
-// not take away.
+// Each entry succeeds or fails on its own, and the function returns all
+// the failures together. If it stopped at the first failure, the
+// entries it had already removed would not be copied back. An entry
+// that cannot be removed is also not copied, so no file is half
+// replaced.
 func refreshSeedDir(dst, src string, keep map[string]bool) error {
 	var failures []string
 	existing, err := os.ReadDir(dst)
@@ -267,9 +249,9 @@ func refreshSeedDir(dst, src string, keep map[string]bool) error {
 	return collectSeedFailures(failures)
 }
 
-// collectSeedFailures turns the entries that failed into one error.
-// It reads as one line, because the console reports one fact per line
-// and every line begins with liken:.
+// collectSeedFailures joins the failure messages into one error. The
+// error is one line, because the console prints one fact per line and
+// every line starts with liken:.
 func collectSeedFailures(failures []string) error {
 	if len(failures) == 0 {
 		return nil
@@ -277,9 +259,10 @@ func collectSeedFailures(failures []string) error {
 	return errors.New(strings.Join(failures, "; "))
 }
 
-// copySeedFile copies one seed file, streaming it rather than holding
-// it in memory: the operator images beside the manifests are tens of
-// megabytes on a machine that boots with 1GB.
+// copySeedFile streams one regular file to dst, which must not exist.
+// It does not read the file into memory, because refreshSeedDir also
+// copies the operator image tarballs of k3s/agent/images, which are
+// tens of megabytes, and the machine can boot with 1GB.
 func copySeedFile(dst, src string) error {
 	in, err := os.Open(src)
 	if err != nil {

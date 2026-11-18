@@ -1,31 +1,28 @@
 package main
 
-// The installer: the USB-stick boot that puts liken on its own disk.
+// The installer copies the release payload from external media onto the
+// machine's own disk.
 //
-// A machine booted with liken.install on its command line is running
-// from external media: QEMU's -kernel flag in the lab, or an
-// installer stick or PXE on real hardware. Its job this boot is not
-// to serve a cluster but to make external media unnecessary. It
-// verifies the release payload it carries, copies it into system
-// slot A, registers both slots with whatever governs booting
-// (firmware boot entries on a UEFI machine, liken's own GRUB on a
-// machine that declares the biosBoot and bootHome roles), and powers
-// off. Every boot after this one comes from the disk.
+// A machine boots in install mode when liken.install is on its kernel
+// command line, booted from QEMU's -kernel flag in the lab, or from an
+// install stick or PXE on real hardware. The installer verifies the
+// release payload in the image, copies it into system slot A, registers
+// both slots with the boot loader (firmware boot entries on a UEFI
+// machine, liken's GRUB on a machine that declares the biosBoot and
+// bootHome roles), and powers off. Every later boot comes from the
+// disk.
 //
-// The installer is liken itself, not a separate program. It uses the
-// same init, the same storage reconciliation (which claimed and
-// formatted the slots moments earlier, on a fresh machine), and the
-// same manifest selection. Two things differ: the destination, and
-// the ending. An install boot ends in a power-off because the
-// install medium must not boot again. With QEMU's -kernel flag
-// present, a reboot would just run the installer again.
+// The installer runs inside the normal init, after the same storage
+// reconciliation, which claims and formats the slots on a fresh
+// machine, and the same manifest selection. It powers off instead of
+// rebooting, because a reboot would start the installer again from the
+// install medium.
 //
-// Idempotence is what makes a crash safe. A power cut in the middle
-// of an install leaves claimed slots (claiming is resumable by
-// name), half-copied files that fail verification and are copied
-// again, and boot entries that are found by description and
-// rewritten in place. Running the installer twice converges to the
-// same result; there is no state to clean up first.
+// When an install crashes, running it again gives the same result.
+// Storage reconciliation finds the slots it already claimed by their
+// partition names, a half-written file fails verification and is copied
+// again, and boot entries are found by description and rewritten in
+// place.
 
 import (
 	"fmt"
@@ -40,35 +37,29 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// releasePayloadDir is where the install image carries the release
-// it installs: the artifacts that the release document lists, byte
-// for byte, plus the deployment layer and its sidecar. image/media.go
-// assembles this as a wrapper cpio archive, concatenated onto the
-// composed system. The kernel unpacks concatenated archives in
-// order, the same mechanism that early microcode updates use. This
-// is a variable, so tests can supply a payload of their own.
+// releasePayloadDir is the directory of the release that the install
+// image contains: the artifacts that the release document lists, plus
+// the deployment layer and its sidecar. image/media.go appends it to
+// the initramfs as one more cpio archive, and the kernel unpacks
+// concatenated archives in order. It is a variable so that tests can
+// supply their own payload.
 var releasePayloadDir = "/usr/share/liken/release"
 
-// installSlot is the slot a fresh install lands on. An install always
-// writes slot A and registers slot B empty, because the blue-green pair
-// fills its second slot only at the first upgrade. installToDisk returns
-// this letter so an attended install can name the slot in the message a
-// person reads before the machine powers off.
+// installSlot is the slot that an install writes. Slot B stays empty
+// until the first upgrade fills it.
 const installSlot = "A"
 
-// installToDisk performs the whole install against the slots that
-// storage reconciliation just mounted. It returns rather than powers
-// off, so main can apply boot policy. On success it returns the slot
-// letter it installed to, and the machine has nothing left to do but
-// stop.
+// installToDisk runs the whole install against the slots that storage
+// reconciliation just mounted, and returns the letter of the slot that
+// it wrote. It does not power off, so that main can apply the boot
+// policy first.
 func installToDisk(machineName string) (string, error) {
 	if machineName == "" {
-		return "", fmt.Errorf("install: this machine has no name (liken.machine= or a manifest must supply one); boot entries carry identity, so an anonymous install would be wrong on every later boot")
+		return "", fmt.Errorf("install: this machine has no name. Boot entries identify the machine, so set liken.machine= or declare the name in a manifest")
 	}
 
-	// The slots must both exist before anything is copied. The design
-	// depends on a fallback slot being registered from the start, so
-	// an install that can only register one slot must not proceed.
+	// Both slots must exist before anything is copied, because the
+	// fallback slot has to be registered from the first boot.
 	parts := discoverPartitions()
 	slotA, err := findSlotPartition(parts, machine.SystemARole)
 	if err != nil {
@@ -79,9 +70,6 @@ func installToDisk(machineName string) (string, error) {
 		return "", err
 	}
 
-	// This code verifies the payload before it copies a single byte.
-	// The release document names each artifact's digest, and the
-	// copies that this image carries must match it exactly.
 	raw, err := os.ReadFile(filepath.Join(releasePayloadDir, "release.yaml"))
 	if err != nil {
 		return "", fmt.Errorf("install: reading the release document: %w", err)
@@ -90,62 +78,53 @@ func installToDisk(machineName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("install: %w", err)
 	}
-	fmt.Printf("liken: install: release %s, %d artifacts\n", release.Metadata.Name, len(release.Artifacts))
+	fmt.Printf("liken: install: installing release %s, which lists %d artifacts\n", release.Metadata.Name, len(release.Artifacts))
 
 	slotMount := roleMounts[machine.SystemARole].path
 	for _, artifact := range release.Artifacts {
 		source := filepath.Join(releasePayloadDir, artifact.Name)
 		if err := verifyFile(artifact, source); err != nil {
-			return "", fmt.Errorf("install: the payload this image carries doesn't match its own release document: %w", err)
+			return "", fmt.Errorf("install: %s in this image does not match the release document: %w", artifact.Name, err)
 		}
 		dest := filepath.Join(slotMount, artifact.Name)
 		if err := copyDurably(source, dest); err != nil {
 			return "", fmt.Errorf("install: copying %s: %w", artifact.Name, err)
 		}
-		// This verifies what was written, not what was meant to be
-		// written. The copy is re-read from the slot and hashed
-		// again, so a torn or corrupted write is caught now rather
-		// than on a later boot.
+		// Hash the copy on the slot too, so that a torn or corrupted
+		// write fails the install now and not a later boot.
 		if err := verifyFile(artifact, dest); err != nil {
-			return "", fmt.Errorf("install: the copy on the slot doesn't verify: %w", err)
+			return "", fmt.Errorf("install: %s on slot %s does not match the release document: %w", artifact.Name, installSlot, err)
 		}
-		fmt.Printf("liken: install: %s verified and installed (%d bytes)\n", artifact.Name, artifact.Size)
+		fmt.Printf("liken: install: verified and installed %s (%d bytes)\n", artifact.Name, artifact.Size)
 	}
 
-	// The deployment layer travels beside the listed artifacts, not
-	// among them. The release document is the public one, and the
-	// layer belongs to this deployment alone, vouched for by its
-	// sidecar. The same discipline applies: verify the payload's
-	// copy, copy it durably, and verify what landed. The sidecar is
-	// written last, so a slot with a sidecar is a slot whose layer
-	// was complete when it was written.
+	// The deployment layer is not an artifact of the release document,
+	// because that document is public and the layer belongs to one
+	// deployment. Its sidecar holds its digest instead. installLayer
+	// writes the sidecar last, so a slot that has a sidecar has a
+	// complete layer.
 	if err := installLayer(slotMount); err != nil {
 		return "", err
 	}
 
-	// The release document lands after the artifacts it describes, so
-	// that the slot records which release it holds without asking the
-	// network. The fetcher writes the same file for the same reason
-	// when it fills the other slot. A slot that cannot name its own
-	// release is a slot nothing can later check, and a later boot has
-	// to take its contents on trust (fatstate.go).
+	// The release document goes on the slot after the artifacts it
+	// lists, so a slot that has release.yaml has every artifact.
+	// verifySlotContents (fatstate.go) reads it to check the slot on a
+	// later boot. machine-operator writes the same file last when it
+	// downloads a release into the other slot.
 	if err := copyDurably(filepath.Join(releasePayloadDir, "release.yaml"),
 		filepath.Join(slotMount, "release.yaml")); err != nil {
-		return "", fmt.Errorf("install: writing the release document to the slot: %w", err)
+		return "", fmt.Errorf("install: copying the release document to slot %s: %w", installSlot, err)
 	}
 
-	// The actuator half: register the slots with whatever will hold
-	// this machine's boot choices. A UEFI machine gets firmware boot
-	// entries. A machine whose spec declares the GRUB roles gets its
-	// own bootloader written. Both at once is valid: a disk prepared
-	// under UEFI can carry its GRUB for a BIOS life, and the lab's
-	// dual-firmware disks do exactly that. But an install that no
-	// firmware could ever boot is refused, before the power-off makes
-	// it permanent.
+	// A UEFI machine gets firmware boot entries, and a machine whose
+	// spec declares the GRUB roles gets liken's GRUB. A machine can get
+	// both, so that one disk boots under UEFI or BIOS. An install that
+	// no firmware could boot fails here, before the power-off.
 	actuators := 0
 	if firmwareIsUEFI() {
-		// The fallback comes first, because it is the half that still
-		// works when the firmware holds no variables at all
+		// The slot loader at the firmware's default boot path boots the
+		// machine when the firmware has lost its boot entries
 		// (slotloader.go).
 		if err := writeSlotLoader(slotMount, installSlot, machineName); err != nil {
 			return "", fmt.Errorf("install: %w", err)
@@ -162,38 +141,32 @@ func installToDisk(machineName string) (string, error) {
 		actuators++
 	}
 	if actuators == 0 {
-		return "", fmt.Errorf("install: this machine's firmware holds no boot variables (BIOS) and its spec declares no biosBoot/bootHome roles for GRUB; there is nothing that could boot the installed disk")
+		return "", fmt.Errorf("install: this machine boots by BIOS and its spec declares no biosBoot role, so nothing can boot the installed disk")
 	}
 
-	// Everything must reach the disk before the caller announces
-	// success, because an attended install holds at the console after
-	// that announcement and a person may cut power instead of pressing
-	// Enter. The per-file fsync in copyDurably makes each file's data
-	// durable, but not the rename that gave the file its final name:
-	// on FAT, that directory update sits in the page cache until
-	// something flushes it. The power-off after the hold would flush
-	// it, but the success message must be true at the moment it
-	// prints, not at the moment the machine obeys it.
+	// Flush everything to the disk before the caller prints success. An
+	// attended install waits at the console after that message, and a
+	// person may cut power instead of pressing Enter. copyDurably makes
+	// each file's data durable, but on FAT the rename that gave the
+	// file its final name stays in the page cache until something
+	// flushes it.
 	//
-	// Two calls, because they do different halves of the job. unix.Sync
-	// walks every mounted filesystem and writes its dirty pages back to
-	// the drivers. It stops there: it asks no drive to empty its own
-	// write cache. syncDirectory does that for the slot.
+	// unix.Sync writes the dirty pages of every mounted filesystem to
+	// the drivers, but does not flush the drive's write cache.
+	// syncDirectory does that for the slot.
 	unix.Sync()
 	if err := syncDirectory(slotMount); err != nil {
-		return "", fmt.Errorf("install: flushing the slot's directory to the disk: %w", err)
+		return "", fmt.Errorf("install: flushing the directory of slot %s to the disk: %w", installSlot, err)
 	}
 	return installSlot, nil
 }
 
-// installGRUB writes the bootloader for a machine that boots
-// BIOS-style: the patched boot chain into the MBR and the biosBoot
-// partition (grubinstall.go handles the arithmetic), and the config
-// and environment block onto the boot home. The GRUB artifacts come
-// from the slot that the release was just verified onto. They
-// arrived through the same verify-copy-verify pipeline as everything
-// else. Like the rest of the installer, this converges on re-run:
-// every write puts down the same bytes.
+// installGRUB writes GRUB for a machine that boots by BIOS: the
+// patched boot code into the MBR and the biosBoot partition
+// (grubinstall.go computes the sector layout), and grub.cfg and the
+// environment block onto the boot home. It reads the GRUB images from
+// slot A, which installToDisk has already verified. A second run writes
+// the same bytes.
 func installGRUB(parts []partition, machineName, slotMount string) error {
 	biosBoot, err := findSlotPartition(parts, machine.BIOSBootRole)
 	if err != nil {
@@ -206,11 +179,11 @@ func installGRUB(parts []partition, machineName, slotMount string) error {
 
 	bootImg, err := os.ReadFile(filepath.Join(slotMount, "grub-boot.img"))
 	if err != nil {
-		return fmt.Errorf("install: this release carries no grub-boot.img, so it cannot boot a BIOS machine: %w", err)
+		return fmt.Errorf("install: reading grub-boot.img from the slot, which a BIOS machine needs to boot: %w", err)
 	}
 	coreImg, err := os.ReadFile(filepath.Join(slotMount, "grub-core.img"))
 	if err != nil {
-		return fmt.Errorf("install: this release carries no grub-core.img, so it cannot boot a BIOS machine: %w", err)
+		return fmt.Errorf("install: reading grub-core.img from the slot, which a BIOS machine needs to boot: %w", err)
 	}
 	plan, err := planGRUBBootSectors(bootImg, coreImg, biosBoot)
 	if err != nil {
@@ -225,12 +198,11 @@ func installGRUB(parts []partition, machineName, slotMount string) error {
 		writeErr = err
 	}
 	if writeErr != nil {
-		return fmt.Errorf("install: writing the boot sectors on %s: %w", diskDev, writeErr)
+		return fmt.Errorf("install: writing the GRUB boot sectors to %s: %w", diskDev, writeErr)
 	}
 
-	// The boot home: the rendered config and a fresh environment
-	// block that name slot A as the default. Slot A is where this
-	// install just put the release.
+	// The config and a fresh environment block make slot A the default,
+	// because slot A holds the release that this install wrote.
 	home := roleMounts[machine.BootHomeRole].path
 	grubDir := filepath.Join(home, "grub")
 	if err := os.MkdirAll(grubDir, 0o755); err != nil {
@@ -247,22 +219,19 @@ func installGRUB(parts []partition, machineName, slotMount string) error {
 	if err := writeFileDurably(filepath.Join(grubDir, "grubenv"), env); err != nil {
 		return fmt.Errorf("install: writing grubenv: %w", err)
 	}
-	// Both files landed through a rename, and a rename is a directory
-	// update. This flush carries those updates, and the drive's write
-	// cache with them, out to the medium. A BIOS machine whose boot home
-	// lost its grub.cfg to a power cut has no bootloader configuration
-	// at all, and GRUB stops at a rescue prompt.
+	// Flush both renames and the drive's write cache, because GRUB
+	// stops at its rescue prompt when a power cut loses grub.cfg.
 	if err := syncDirectory(grubDir); err != nil {
 		return fmt.Errorf("install: flushing the boot home to the disk: %w", err)
 	}
 
-	fmt.Printf("liken: install: GRUB installed on %s; grub.cfg and grubenv on the boot home prefer slot A\n", diskDev)
+	fmt.Printf("liken: install: installed GRUB on %s, with grub.cfg and grubenv on the boot home set to boot slot A\n", diskDev)
 	return nil
 }
 
-// diskDevice names the whole-disk device that a role's partition
-// lives on. Boot-sector writes address the disk, not the partition,
-// because the MBR belongs to no partition at all.
+// diskDevice returns the whole-disk device that holds a role's
+// partition. The MBR is outside every partition, so the boot-sector
+// writes address the disk.
 func diskDevice(parts []partition, role machine.StorageRoleName) (string, error) {
 	name := machine.DeclaredRole{Name: role}.PartitionName()
 	for _, p := range parts {
@@ -270,13 +239,12 @@ func diskDevice(parts []partition, role machine.StorageRoleName) (string, error)
 			return devRoot + "/" + p.disk, nil
 		}
 	}
-	return "", fmt.Errorf("no partition carries the name %q, so its disk cannot be found", name)
+	return "", fmt.Errorf("no partition is named %q, so its disk is unknown", name)
 }
 
-// hasPartition reports whether a role's partition exists on this
-// machine. For the installer, this is the sign that the machine's
-// spec declared the role, since storage reconciliation claimed the
-// partitions moments before the install began.
+// hasPartition reports whether a partition for the role exists. Storage
+// reconciliation creates partitions only for the roles that the
+// machine's spec declares.
 func hasPartition(parts []partition, role machine.StorageRoleName) bool {
 	name := machine.DeclaredRole{Name: role}.PartitionName()
 	for _, p := range parts {
@@ -288,12 +256,9 @@ func hasPartition(parts []partition, role machine.StorageRoleName) bool {
 }
 
 // installLayer copies the deployment layer and its sidecar from the
-// payload to the slot. The sidecar is the layer's trust root. The
-// release document cannot name the layer, because the document is
-// public and the layer belongs to one deployment alone. Media that
-// carries a layer without its sidecar, or a layer that its sidecar
-// rejects, is incomplete, and the install refuses rather than install
-// something that no later boot could verify.
+// payload to the slot. The sidecar holds the layer's digest. When the
+// sidecar is missing, or the layer does not match it, the install fails
+// because no later boot could verify the layer.
 func installLayer(slotMount string) error {
 	sidecar, err := os.ReadFile(filepath.Join(releasePayloadDir, machine.LayerSidecarName))
 	if err != nil {
@@ -315,27 +280,27 @@ func installLayer(slotMount string) error {
 
 	source := filepath.Join(releasePayloadDir, machine.LayerName)
 	if err := verify(source); err != nil {
-		return fmt.Errorf("install: the layer this image carries doesn't match its sidecar: %w", err)
+		return fmt.Errorf("install: the layer in this image does not match its sidecar: %w", err)
 	}
 	dest := filepath.Join(slotMount, machine.LayerName)
 	if err := copyDurably(source, dest); err != nil {
 		return fmt.Errorf("install: copying %s: %w", machine.LayerName, err)
 	}
 	if err := verify(dest); err != nil {
-		return fmt.Errorf("install: the layer on the slot doesn't verify: %w", err)
+		return fmt.Errorf("install: the layer on slot %s does not match its sidecar: %w", installSlot, err)
 	}
 	if err := copyDurably(filepath.Join(releasePayloadDir, machine.LayerSidecarName),
 		filepath.Join(slotMount, machine.LayerSidecarName)); err != nil {
 		return fmt.Errorf("install: copying %s: %w", machine.LayerSidecarName, err)
 	}
-	fmt.Printf("liken: install: %s verified and installed against its sidecar\n", machine.LayerName)
+	fmt.Printf("liken: install: verified %s against its sidecar and installed it\n", machine.LayerName)
 	return nil
 }
 
-// findSlotPartition locates one slot by the name written on it at
-// claim time, and reads its GPT identity: the unique GUID that a
-// boot entry uses to pin the partition regardless of device
-// position.
+// findSlotPartition finds a slot by the partition name that storage
+// reconciliation wrote when it claimed the slot, and reads the slot's
+// GPT entry. A boot entry uses the entry's unique GUID to identify the
+// partition wherever the disk appears.
 func findSlotPartition(parts []partition, role machine.StorageRoleName) (*slotPartition, error) {
 	declared := machine.DeclaredRole{Name: role}
 	for _, p := range parts {
@@ -345,7 +310,7 @@ func findSlotPartition(parts []partition, role machine.StorageRoleName) (*slotPa
 		device := devRoot + "/" + p.disk
 		disk := diskByPath(device)
 		if disk == nil {
-			return nil, fmt.Errorf("install: %s found on %s but the disk is not in the inventory", role, device)
+			return nil, fmt.Errorf("install: the %s partition is on %s, which is not in the disk inventory", role, device)
 		}
 		f, err := os.Open(device)
 		if err != nil {
@@ -370,9 +335,9 @@ func findSlotPartition(parts []partition, role machine.StorageRoleName) (*slotPa
 				}, nil
 			}
 		}
-		return nil, fmt.Errorf("install: %s appears in sysfs but not in %s's table; refusing to guess", role, device)
+		return nil, fmt.Errorf("install: sysfs lists the %s partition on %s, but the partition table of %s has no entry named %s", role, device, device, declared.PartitionName())
 	}
-	return nil, fmt.Errorf("install: no partition carries %s; the manifest must declare both system slots before a machine can install itself", declared.PartitionName())
+	return nil, fmt.Errorf("install: no partition is named %s. The manifest must declare both system slots before the machine can install itself", declared.PartitionName())
 }
 
 type slotPartition struct {
@@ -382,20 +347,17 @@ type slotPartition struct {
 	guid     [16]byte
 }
 
-// partitionNumber recovers the partition's index from the kernel's
-// node name: the suffix after the disk's name (vdc1 means 1), with
-// the "p" separator that NVMe-style names insert (nvme0n1p2 means 2).
-// The kernel numbers partitions by their position in the GPT entry
-// array, starting at 1. This function refuses a suffix that is not a
-// number. The index goes into a firmware boot entry, and 0 is not a
-// valid GPT slot, so a malformed name must stop the install rather
-// than encode garbage that the firmware would trust.
+// partitionNumber reads the partition number from the kernel's device
+// name: the suffix after the disk's name (vdc1 is 1), without the "p"
+// that NVMe-style names add (nvme0n1p2 is 2). The number goes into a
+// firmware boot entry, and the kernel numbers partitions from 1, so a
+// suffix that is not a number of at least 1 fails the install.
 func partitionNumber(p partition) (uint32, error) {
 	suffix := strings.TrimPrefix(p.name, p.disk)
 	suffix = strings.TrimPrefix(suffix, "p")
 	n, err := strconv.ParseUint(suffix, 10, 32)
 	if err != nil || n < 1 {
-		return 0, fmt.Errorf("install: cannot read a partition number from %q on disk %s", p.name, p.disk)
+		return 0, fmt.Errorf("install: the partition name %q on disk %s has no partition number of 1 or more", p.name, p.disk)
 	}
 	return uint32(n), nil
 }

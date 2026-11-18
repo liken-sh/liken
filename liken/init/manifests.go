@@ -1,42 +1,27 @@
 package main
 
-// Choosing the manifest a boot runs under.
+// Init chooses the Machine manifest that a boot runs under.
 //
-// The machine's most important input is a file on a disk that it has
-// not set up yet. The way out of that circle is the same recognition
-// that drives all of storage: this code finds the machineState
-// partition by the name written on it, which needs no spec at all.
-// Init peeks at it first: mount read-only, read the staged and
-// proven manifests, unmount. The unmount matters. The same disk may
-// need its partition table rewritten minutes later (a grow), and the
-// kernel refuses to re-read the table of a disk that is in use.
-// Because the peek leaves nothing mounted, machineState's own disk
-// stays growable.
+// The manifests are files on the machineState partition, and init
+// needs one before it has set up any disk. So init finds the partition
+// by its GPT name, mounts it read-only, reads the manifests, and
+// unmounts it. The unmount matters because storage reconciliation can
+// rewrite the same disk's partition table next, and the kernel refuses
+// to re-read the table of a disk with a mounted partition.
 //
-// Then the attempt order applies: a staged manifest is tried first,
-// and if its storage cannot be reconciled, the boot does not stop.
-// This code quarantines the staged manifest durably, with the
-// reason, tears storage back down, and reconciles the proven manifest
-// (the last spec that actually booted) instead. The machine comes up
-// degraded but present, which beats a machine that is off.
-// Power-off remains the answer only when even the proven spec fails,
-// because at that point the machine has no configuration it can
-// trust.
+// A boot tries the staged manifest first. When storage cannot be
+// reconciled under it, init rejects it, tears storage down, and tries
+// the proven manifest, the last one that completed a boot. A machine
+// on older configuration is better than one that is off, so init
+// powers off only when the last manifest it tries fails too.
 //
-// The image's baked-in manifest takes part only when the machine has
-// no machineState partition, or that partition is empty. It seeds
-// the very first boot, and that boot's success writes it down as the
-// first proven manifest. From then on, the file in the image plays no
-// further role.
-//
-// A first boot runs end to end like this: no machineState partition
-// exists, so this code chooses the seed. Reconciliation claims the
-// disks (machineState is first in canonical order, so it becomes
-// partition 1). The role mounts at its path. The seed's bytes become
-// proven.yaml. Every crash point along the way resumes correctly: a
-// claim that died before mkfs completes through recognition (the
-// name goes on first), and an empty manifests directory simply
-// re-selects the seed.
+// The seed is the manifest in the image. init reads it only when
+// machineState holds no manifest, which is a first boot. Reconciling
+// storage under a seed that declares machineState creates the
+// partition, and the boot writes the seed as proven.yaml, so later
+// boots never read the image's manifest. A first boot that crashes
+// before proven.yaml exists leaves no manifest, so the next boot
+// selects the seed again.
 
 import (
 	"errors"
@@ -52,13 +37,13 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// manifestPeekPoint is the private mountpoint for the early look at
-// machineState, used and released before storage reconciliation runs.
+// manifestPeekPoint is where init mounts machineState while the role
+// itself is not mounted.
 var manifestPeekPoint = "/.liken-machine-state"
 
-// A manifestChoice is one candidate manifest and its identity: the
-// hash travels into facts (and rejections) so the operator can tell
-// exactly which bytes this boot ran.
+// A manifestChoice is one candidate manifest with the bytes it was
+// parsed from. The boot record and each rejection include the hash of
+// those bytes, so the operator can tell which manifest a boot ran.
 type manifestChoice struct {
 	m      *machine.Machine
 	raw    []byte
@@ -66,19 +51,17 @@ type manifestChoice struct {
 	hash   string
 }
 
-// manifestCandidates is everything the peek learned.
 type manifestCandidates struct {
-	part      *partition // the machineState partition; nil on first boot
+	part      *partition // the machineState partition, or nil on the first boot
 	staged    *manifestChoice
 	proven    *manifestChoice
-	rejection *machine.Rejection // the standing quarantine record, if any
+	rejection *machine.Rejection // the last rejection the store recorded, if any
 }
 
-// findMachineStatePartition scans for the one partition named
-// liken:machineState. A missing partition means a first boot, not an
-// error. Two of them is the same cloned-disk ambiguity that
-// matchRoles refuses, and this function refuses it for the same
-// reason.
+// findMachineStatePartition returns the partition named
+// liken:machineState, or nil on a first boot. Two partitions with that
+// name, as on a cloned disk, are an error, because init cannot tell
+// which one holds this machine's manifests.
 func findMachineStatePartition() (*partition, error) {
 	var found *partition
 	for _, p := range discoverPartitions() {
@@ -86,18 +69,19 @@ func findMachineStatePartition() (*partition, error) {
 			continue
 		}
 		if found != nil {
-			return nil, fmt.Errorf("two partitions claim to be %smachineState (%s and %s); refusing to guess",
-				machine.PartitionPrefix, found.name, p.name)
+			return nil, fmt.Errorf("partitions %s and %s are both named %smachineState, so init cannot tell which one holds the manifests",
+				found.name, p.name, machine.PartitionPrefix)
 		}
 		found = &p
 	}
 	return found, nil
 }
 
-// loadManifestCandidates performs the peek. A machineState partition
-// with no filesystem yet (a boot that died between claim and mkfs)
-// yields no candidates. The seed carries that boot, and mountRole's
-// resumable claiming makes the filesystem.
+// loadManifestCandidates reads the staged and proven manifests and the
+// last rejection from machineState. A partition with no ext4
+// filesystem returns no candidates. A boot that died after it named
+// the partition and before mkfs leaves one, and the next boot then
+// uses the seed and creates the filesystem.
 func loadManifestCandidates() (manifestCandidates, error) {
 	var c manifestCandidates
 	part, err := findMachineStatePartition()
@@ -116,23 +100,20 @@ func loadManifestCandidates() (manifestCandidates, error) {
 	if err := os.MkdirAll(manifestPeekPoint, 0o755); err != nil {
 		return c, err
 	}
-	// Read-only means "this code writes nothing", not "the device is
-	// untouched". Mounting ext4 replays its journal if the last boot
-	// died mid-write, which is the filesystem's recovery mechanism
-	// working exactly as intended.
+	// A read-only mount writes no files, but ext4 still replays its
+	// journal on mount when the last boot died during a write.
 	if err := mountFilesystem(dev, manifestPeekPoint, "ext4", unix.MS_RDONLY, ""); err != nil {
-		return c, fmt.Errorf("peeking at machineState on %s: %w", dev, err)
+		return c, fmt.Errorf("mounting %s read-only to read the manifests: %w", dev, err)
 	}
-	// The store returns bytes. Whether they parse as a Machine is
-	// this caller's question, asked below after the peek unmounts.
 	store := machine.MachineManifests(manifestPeekPoint)
 	stagedRaw, stagedErr := store.LoadStaged()
 	provenRaw, provenErr := store.LoadProven()
 	c.rejection, _ = store.LoadRejection()
 	if err := unmountFilesystem(manifestPeekPoint, 0); err != nil {
-		// Loud but not fatal: if this mount lingers, a later rewrite
-		// of this disk's table fails with EBUSY and names the problem.
-		fmt.Fprintf(os.Stderr, "liken: storage: unmounting the manifest peek: %v\n", err)
+		// The boot continues. A later rewrite of this disk's
+		// partition table then fails with EBUSY, and this line
+		// explains why.
+		fmt.Fprintf(os.Stderr, "liken: storage: unmounting %s: %v\n", manifestPeekPoint, err)
 	}
 	_ = os.Remove(manifestPeekPoint)
 
@@ -142,11 +123,9 @@ func loadManifestCandidates() (manifestCandidates, error) {
 		c.proven = provenCandidate(provenRaw)
 	}
 
-	// A staged manifest is checked before it even becomes a
-	// candidate. One that does not parse, or that does not declare
-	// the machineState role its own lifecycle lives on, would fail
-	// every future boot the same way, so this code rejects it without
-	// trying it.
+	// A staged manifest that does not parse, or that declares no
+	// machineState role to store the manifests on, would fail every
+	// boot. So init rejects it without trying it.
 	if stagedErr != nil {
 		c.rejection = rejectStaged(part, nil, fmt.Sprintf("the staged manifest is unreadable: %v", stagedErr))
 	} else if stagedRaw != nil {
@@ -163,14 +142,13 @@ func loadManifestCandidates() (manifestCandidates, error) {
 	return c, nil
 }
 
-// provenCandidate parses the proven manifest. The parse skips the
-// fields this release does not know (machine.ParseKnown), because a
-// rollback boots an older release under a manifest that a newer one
-// proved, and that manifest still holds this machine's storage and
-// network. The console names each field the boot leaves out. A proven
-// manifest that does not parse even then is a corrupted
-// last-known-good record. This code reports it and continues without
-// one, rather than fail over a file whose whole job is recovery.
+// provenCandidate parses the proven manifest with machine.ParseKnown,
+// which skips fields this release does not know and returns their
+// names. After a rollback, an older release boots under a manifest
+// that a newer release proved, and it still needs that manifest's
+// storage and network settings. A manifest that does not parse at all
+// is corrupt: provenCandidate prints the error and returns nil, so the
+// boot continues without a proven manifest.
 func provenCandidate(raw []byte) *manifestChoice {
 	proven, ignored, err := machine.ParseKnown(raw)
 	if err != nil {
@@ -184,23 +162,16 @@ func provenCandidate(raw []byte) *manifestChoice {
 	return &manifestChoice{m: proven, raw: raw, source: machine.ManifestSourceProven, hash: machine.ManifestHash(raw)}
 }
 
-// rejectStagedDocument renders the verdict that every staged
-// lifecycle shares: announce the reason, quarantine the document
-// durably (the store moves the bytes aside, so the same document is
-// never tried twice), and return the rejection for this boot's
-// facts. The document lifecycles differ in what they stage, such as
-// the cluster document, registry credentials, a system release, or
-// the Machine manifest itself, but they all reject in the same way.
-// The domain and noun exist only to keep each console line specific
-// to its owner. The record step is a parameter because most stores
-// can write immediately (their filesystem is already mounted), while
-// the Machine manifest's rejection must mount machineState around
-// the write (rejectStaged below).
+// rejectStagedDocument prints the reason a staged document is rejected,
+// calls record to store the rejection, and returns it for the boot
+// record. The store renames the staged file to rejected, so later boots
+// do not try the same bytes. domain and what only label the console
+// lines. record is a parameter because the Machine manifest's store
+// must mount machineState around the write (see rejectStaged).
 //
-// The rejection outlasts the boot that rendered it. Each store keeps
-// it standing, and because the facts rebuild from scratch every
-// boot, each chooser republishes the standing rejection into the
-// boot record before it consults anything staged.
+// The stored rejection outlasts this boot, but the boot record is
+// built again on every boot. So each caller copies the stored
+// rejection into the boot record before it reads anything staged.
 func rejectStagedDocument(domain, what string, record func(machine.Rejection) error,
 	raw []byte, reason string) *machine.Rejection {
 	fmt.Fprintf(os.Stderr, "liken: %s: rejecting the staged %s: %s\n", domain, what, reason)
@@ -211,9 +182,9 @@ func rejectStagedDocument(domain, what string, record func(machine.Rejection) er
 	return &rejection
 }
 
-// rejectStaged quarantines the staged Machine manifest with its
-// reason. It runs during the peek, before the machineState role is
-// properly mounted, so the record step mounts the partition itself.
+// rejectStaged rejects the staged Machine manifest. It runs before
+// the machineState role is mounted, so it mounts the partition to
+// write the rejection.
 func rejectStaged(part *partition, raw []byte, reason string) *machine.Rejection {
 	return rejectStagedDocument("storage", "manifest", func(rejection machine.Rejection) error {
 		return touchMachineState(*part, func(root string) error {
@@ -223,9 +194,7 @@ func rejectStaged(part *partition, raw []byte, reason string) *machine.Rejection
 }
 
 // touchMachineState mounts the machineState partition read-write at
-// the private point, runs fn against it, and unmounts. This is the
-// narrow window in which init allows itself to write manifests
-// before, or after, the role is properly mounted.
+// manifestPeekPoint, runs fn on it, and unmounts.
 func touchMachineState(p partition, fn func(root string) error) error {
 	if err := os.MkdirAll(manifestPeekPoint, 0o755); err != nil {
 		return err
@@ -241,27 +210,22 @@ func touchMachineState(p partition, fn func(root string) error) error {
 	return ferr
 }
 
-// errIdentity marks the failures where a machine could not tell
-// which manifest is its own. main treats these differently from
-// storage failures when it explains the power-off on the console.
+// errIdentity marks a failure to select this machine's own manifest,
+// so that failBoot prints a different reason for the power-off.
 var errIdentity = errors.New("machine identity")
 
-// seedPath selects this machine's own file from the manifests
-// directory. One image boots many machines, so the image carries a
-// manifest per machine, and each boot selects its own: explicitly, by
-// the liken.machine=<name> kernel parameter (the one parameter the
-// bootloader already sets), or implicitly when there is exactly one
-// manifest to choose. This function refuses anything else rather than
-// guess. A name that matches no manifest is a typo that someone must
-// see, and a directory of manifests with no name given is ambiguity,
-// the same situation as two disks that claim the same partition
-// name. An empty or absent directory is not an error: a machine with
-// no manifest is still a valid machine.
+// seedPath returns the path of this machine's manifest in dir. One
+// image can boot many machines and holds one manifest for each. The
+// kernel parameter liken.machine=<name> selects <name>.yaml. Without
+// it, a directory with exactly one manifest selects that one. A name
+// with no file, or several manifests and no name, is an errIdentity
+// error. An empty or missing directory returns "" and no error,
+// because a machine with no manifest is valid.
 func seedPath(dir, requested string) (string, error) {
 	if requested != "" {
 		path := filepath.Join(dir, requested+".yaml")
 		if _, err := os.Stat(path); err != nil {
-			return "", fmt.Errorf("%w: liken.machine=%s names no manifest at %s", errIdentity, requested, path)
+			return "", fmt.Errorf("%w: the kernel command line has liken.machine=%s, and %s does not exist", errIdentity, requested, path)
 		}
 		return path, nil
 	}
@@ -284,19 +248,15 @@ func seedPath(dir, requested string) (string, error) {
 	case 1:
 		return filepath.Join(dir, names[0]), nil
 	default:
-		return "", fmt.Errorf("%w: %d manifests in %s and no liken.machine=<name> on the kernel command line to choose among %s; refusing to guess",
-			errIdentity, len(names), dir, strings.Join(names, ", "))
+		return "", fmt.Errorf("%w: %s holds %d manifests (%s), and the kernel command line has no liken.machine=<name> to choose one",
+			errIdentity, dir, len(names), strings.Join(names, ", "))
 	}
 }
 
-// loadSeed reads the image's baked-in manifest for this machine,
-// selecting by the requested name within the given directory. A seed
-// that cannot be selected or parsed is an error rather than a silent
-// default. loadSeed runs only on a boot with no proven manifest to
-// fall back to, and a first boot under the wrong or empty identity
-// could join the wrong cluster or claim the wrong disks. A machine
-// that stays down can be fixed. A machine running under the wrong
-// identity can do real damage.
+// loadSeed reads the manifest that seedPath selects. A seed that cannot
+// be selected or parsed is an error, not an empty manifest, because a
+// first boot under the wrong identity could join the wrong cluster or
+// claim the wrong disks.
 func loadSeed(dir, requested string) (*manifestChoice, error) {
 	choice := &manifestChoice{m: &machine.Machine{}, source: machine.ManifestSourceSeed}
 	path, err := seedPath(dir, requested)
@@ -312,18 +272,16 @@ func loadSeed(dir, requested string) (*manifestChoice, error) {
 	}
 	m, err := machine.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %v", errIdentity, path, err)
+		return nil, fmt.Errorf("%w: parsing %s: %v", errIdentity, path, err)
 	}
 	fmt.Printf("liken: this is %s (manifest %s)\n", m.Metadata.Name, path)
 	choice.m, choice.raw, choice.hash = m, raw, machine.ManifestHash(raw)
 	return choice, nil
 }
 
-// attemptOrder is the whole preference policy in one place: staged
-// before proven. The seed is deliberately not among the candidates.
-// It is a first-boot input, not a fallback (a machine that has ever
-// proven a manifest never consults the image again), so settleStorage
-// loads the seed only when this function returns an empty list.
+// attemptOrder returns the manifests to try, staged first and then
+// proven. It leaves out the seed, which settleStorage reads only when
+// this list is empty.
 func attemptOrder(c manifestCandidates) []*manifestChoice {
 	switch {
 	case c.staged != nil && c.proven != nil:
@@ -337,13 +295,13 @@ func attemptOrder(c manifestCandidates) []*manifestChoice {
 	}
 }
 
-// settleStorage actuates storage under the best available manifest
-// and reports which one won. An error means that even the last
-// manifest in the attempt order failed (or, wrapped as errIdentity,
-// that a first boot could not tell which manifest is its own), and
-// the caller stops the boot. The winning choice comes back whole,
-// raw bytes and all, because init later publishes those exact bytes
-// for the operator.
+// settleStorage reconciles storage under the first manifest in
+// attemptOrder that works, and returns that manifest, the storage
+// status, and the boot record. It returns an error when the last
+// manifest fails, or an errIdentity error when a first boot cannot
+// select its seed. The caller then stops the boot. The returned
+// choice keeps its raw bytes, which init later publishes for the
+// operator.
 func settleStorage() (*manifestChoice, machine.StorageStatus, machine.BootStatus, error) {
 	status := machine.AllRolesInMemory()
 	boot := machine.BootStatus{}
@@ -356,9 +314,6 @@ func settleStorage() (*manifestChoice, machine.StorageStatus, machine.BootStatus
 
 	attempts := attemptOrder(candidates)
 	if len(attempts) == 0 {
-		// A machine with no durable manifests is on its first boot.
-		// Only now does the image's seed matter, along with the
-		// question of which seed belongs to this machine.
 		seed, err := loadSeed(machine.MachineManifestDir, bootParamValue("liken.machine"))
 		if err != nil {
 			return nil, status, boot, err
@@ -374,19 +329,17 @@ func settleStorage() (*manifestChoice, machine.StorageStatus, machine.BootStatus
 			boot.ManifestSource = choice.source
 			boot.ManifestHash = choice.hash
 			boot.Storage = choice.m.Spec.Storage
-			// The network is recorded here, where the manifest wins,
-			// and not later, where the links come up. The record says
-			// what this boot ran under, which is the question the
-			// operator's drift detection asks. What each interface
-			// actually got is a different question, and status.network
-			// answers that one.
+			// The boot record holds the network the manifest
+			// declared, which the operator compares with the current
+			// spec to detect drift. status.network reports what each
+			// interface received.
 			network := choice.m.Spec.Network
 			boot.Network = &network
 			settleManifests(machine.MachineManifests(machine.MachineStateDir), choice, status, &boot)
 			return choice, status, boot, nil
 		}
 		if choice.source == machine.ManifestSourceStaged && i+1 < len(attempts) {
-			fmt.Fprintf(os.Stderr, "liken: storage: the staged manifest failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "liken: storage: reconciling storage under the staged manifest: %v\n", err)
 			fmt.Fprintln(os.Stderr, "liken: storage: falling back to the proven manifest")
 			teardownStorage()
 			rejection := machine.NewRejection(choice.raw, err.Error(), time.Now().UTC())
@@ -400,19 +353,16 @@ func settleStorage() (*manifestChoice, machine.StorageStatus, machine.BootStatus
 		}
 		return choice, status, boot, err
 	}
-	// attemptOrder never returns an empty list, so the loop always returns.
 	panic("unreachable")
 }
 
-// settleManifests finishes the lifecycle bookkeeping after a
-// successful reconcile. A staged manifest that just proved itself is
-// promoted, and a seed's first success becomes the first proven
-// manifest. Failures here are loud but not fatal. The machine is up,
-// and the next boot simply repeats the step (a staged manifest that
-// boots once boots again).
+// settleManifests promotes a staged manifest that booted to proven,
+// and writes a seed with bytes as the first proven manifest. A failed
+// write prints a message and does not stop the boot, and the boot
+// record keeps the source the boot ran.
 func settleManifests(store machine.ManifestStore, choice *manifestChoice, status machine.StorageStatus, boot *machine.BootStatus) {
 	if status.MachineState.Backing != machine.BackingPartition {
-		return // nothing durable to keep manifests on
+		return // no partition to store manifests on
 	}
 	switch choice.source {
 	case machine.ManifestSourceStaged:
@@ -422,7 +372,7 @@ func settleManifests(store machine.ManifestStore, choice *manifestChoice, status
 		}
 		fmt.Printf("liken: storage: the staged manifest is now proven (%.12s)\n", choice.hash)
 		boot.ManifestSource = machine.ManifestSourceProven
-		boot.Rejection = nil // a success supersedes old history
+		boot.Rejection = nil // Promote deletes the stored rejection
 	case machine.ManifestSourceSeed:
 		if len(choice.raw) == 0 {
 			return

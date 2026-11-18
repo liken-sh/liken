@@ -1,11 +1,9 @@
 package main
 
-// Tests for the discipline loop that runs after boot: when it
-// publishes the standing, when it writes the reading, when it slews,
-// when it reports that the sources are gone, and when it writes the
-// hardware clock. Each test runs the loop in a
-// synctest bubble, so a 64-second poll takes no real time, and the
-// loop measures through the scripted sources of `fakeClockActions`.
+// Tests for the loop that disciplines the clock after boot. Each test
+// runs the loop in a synctest bubble, so a poll interval passes in no
+// real time, and the time sources answer from the script of
+// fakeClockActions.
 
 import (
 	"context"
@@ -19,16 +17,15 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// runDiscipline starts the loop over a facts tree that already holds
-// the boot step's status, the way main starts it. The loop writes its
-// reading to the returned readingDir. The returned stop function
-// cancels the loop and waits for it to return.
+// runDiscipline starts the loop as main does, on a facts tree that
+// already holds the time status from the boot step. stop cancels the
+// loop and waits for it to return.
 func runDiscipline(t *testing.T, initial machine.TimeStatus) (tree machine.FactsTree, readingDir string, stop func()) {
 	t.Helper()
 	tree = machine.FactsTree{Dir: t.TempDir()}
 	readingDir = t.TempDir()
 	if err := tree.WriteTime(initial); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the boot time status: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -40,7 +37,7 @@ func runDiscipline(t *testing.T, initial machine.TimeStatus) (tree machine.Facts
 	return tree, readingDir, func() {
 		cancel()
 		if err := <-done; err != nil {
-			t.Errorf("the loop ends cleanly at shutdown: %v", err)
+			t.Errorf("the loop returned %v at shutdown, want nil", err)
 		}
 	}
 }
@@ -49,13 +46,13 @@ func publishedTime(t *testing.T, tree machine.FactsTree) machine.TimeStatus {
 	t.Helper()
 	status, err := tree.Read()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the facts tree: %v", err)
 	}
 	return status.Time
 }
 
-// bootSynchronized is the status a boot step publishes after a good
-// measurement at the bubble's start.
+// bootSynchronized is the time status that the boot step publishes
+// after a good measurement at the start of the bubble.
 func bootSynchronized(offset string) machine.TimeStatus {
 	return machine.TimeStatus{
 		State:   machine.TimeSynchronized,
@@ -65,10 +62,11 @@ func bootSynchronized(offset string) machine.TimeStatus {
 	}
 }
 
-// A machine that booted with no answer publishes its first sync at
-// the first poll that gets one, slews by the measured offset, and
-// writes the hardware clock. A shutdown writes the hardware clock
-// again, so the next boot starts from the best time this boot had.
+// A machine that booted with no answer from a time source publishes
+// Synchronized at the first poll that gets an answer. At that poll it
+// also slews the clock by the measured offset and writes the hardware
+// clock. A shutdown writes the hardware clock again, so the next boot
+// starts from the best time that this boot had.
 func TestDisciplineClockPublishesTheFirstSync(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t, timeAnswer(3*time.Millisecond))
@@ -79,26 +77,25 @@ func TestDisciplineClockPublishesTheFirstSync(t *testing.T) {
 
 		got := publishedTime(t, tree)
 		if got.State != machine.TimeSynchronized || got.Source != "10.10.0.1" || got.Stratum != 3 || got.Offset != "±5ms" {
-			t.Errorf("the first sync is published: %+v", got)
+			t.Errorf("the published time is %+v, want Synchronized from 10.10.0.1 at stratum 3 with offset ±5ms", got)
 		}
 		_, _, slews, rtcWrites := f.recorded()
 		if !slices.Equal(slews, []time.Duration{3 * time.Millisecond}) {
-			t.Errorf("the loop slews by the measured offset: %v", slews)
+			t.Errorf("the slews are %v, want one of 3ms", slews)
 		}
 		if rtcWrites != 1 {
-			t.Errorf("the first sync corrects the hardware clock, got %d writes", rtcWrites)
+			t.Errorf("the hardware clock was written %d times after the first sync, want 1", rtcWrites)
 		}
 
 		stop()
 		if _, _, _, rtcWrites := f.recorded(); rtcWrites != 2 {
-			t.Errorf("a shutdown writes the hardware clock again, got %d writes", rtcWrites)
+			t.Errorf("the hardware clock was written %d times after shutdown, want 2", rtcWrites)
 		}
 	})
 }
 
-// A failed slew does not hide the measurement. Status still reports
-// the source that answered, because the clock follows it on the next
-// poll's slew.
+// A failed slew does not stop the loop from publishing the
+// measurement.
 func TestDisciplineClockPublishesDespiteAFailedSlew(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t, timeAnswer(3*time.Millisecond))
@@ -110,18 +107,19 @@ func TestDisciplineClockPublishesDespiteAFailedSlew(t *testing.T) {
 		synctest.Wait()
 
 		if got := publishedTime(t, tree); got.State != machine.TimeSynchronized {
-			t.Errorf("the measurement is published: %+v", got)
+			t.Errorf("the published time is %+v, want Synchronized", got)
 		}
 	})
 }
 
-// A worse bound publishes at the poll that measures it. A better
-// bound publishes only at the third poll in a row inside it, so a
-// clock near a boundary does not write status at each crossing.
+// A larger offset bound is published at the poll that measures it. A
+// smaller bound is published only after three polls in a row measure
+// inside it, so a clock near the boundary between two bounds does not
+// rewrite the status each time it crosses.
 func TestDisciplineClockPublishesAWorseBoundAtOnceAndABetterOneAfterThreePolls(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		// Each answer has a shorter round trip than the last, so the
-		// filter selects each one as it arrives.
+		// Each answer has a shorter round trip than the one before, so
+		// the filter selects each new answer.
 		installFakeClock(t,
 			timeAnswerOver(200*time.Millisecond, 9*time.Millisecond),
 			timeAnswerOver(3*time.Millisecond, 8*time.Millisecond),
@@ -133,26 +131,27 @@ func TestDisciplineClockPublishesAWorseBoundAtOnceAndABetterOneAfterThreePolls(t
 		time.Sleep(timePollInterval + time.Second)
 		synctest.Wait()
 		if got := publishedTime(t, tree).Offset; got != "±1s" {
-			t.Errorf("a worse bound publishes at once, got %q", got)
+			t.Errorf("the published offset is %q after a worse bound, want ±1s", got)
 		}
 
 		time.Sleep(2 * timePollInterval)
 		synctest.Wait()
 		if got := publishedTime(t, tree).Offset; got != "±1s" {
-			t.Errorf("two better polls publish nothing, got %q", got)
+			t.Errorf("the published offset is %q after two better polls, want ±1s", got)
 		}
 
 		time.Sleep(timePollInterval)
 		synctest.Wait()
 		if got := publishedTime(t, tree).Offset; got != "±5ms" {
-			t.Errorf("the third better poll publishes, got %q", got)
+			t.Errorf("the published offset is %q after three better polls, want ±5ms", got)
 		}
 	})
 }
 
-// Over wifi, the samples with a long round trip swing by tens of
-// milliseconds. The filter keeps the short one, so the clock slews by
-// its offset once, and the bound holds.
+// Over wifi, samples with a long round trip vary by tens of
+// milliseconds. The filter selects the sample with the shortest round
+// trip, so the clock slews by that sample's offset once and the
+// published bound does not change.
 func TestDisciplineClockFiltersOutSlowRoundTrips(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t,
@@ -166,19 +165,19 @@ func TestDisciplineClockFiltersOutSlowRoundTrips(t *testing.T) {
 		synctest.Wait()
 
 		if got := publishedTime(t, tree).Offset; got != "±5ms" {
-			t.Errorf("noise on slow round trips moved the bound to %q", got)
+			t.Errorf("the published offset is %q after slow round trips, want ±5ms", got)
 		}
 		if _, _, slews, _ := f.recorded(); !slices.Equal(slews, []time.Duration{-2 * time.Millisecond, 0, 0}) {
-			t.Errorf("the clock slews by the short round trip, and then by nothing: %v", slews)
+			t.Errorf("the slews are %v, want -2ms, 0, 0", slews)
 		}
 	})
 }
 
-// A machine that boots 37ms off slews by the shortest round trip, and
-// once the slew has applied, that sample reports a clock that is right.
-// The bound falls at the third poll after the correction, not after the
-// sample ages out of the filter eight polls later, and the reading
-// follows the newer samples as the old one's drift bound grows.
+// A machine that boots 37ms off slews by 37ms. The filter subtracts the
+// slew from the offset of the sample measured before it, so the
+// published bound falls at the third poll after the correction instead
+// of waiting for that sample to leave the filter. As the drift bound of
+// the old sample grows, the clock reading follows the newer samples.
 func TestDisciplineClockReportsTheErrorThatRemainsAfterASlew(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		installFakeClock(t,
@@ -193,17 +192,18 @@ func TestDisciplineClockReportsTheErrorThatRemainsAfterASlew(t *testing.T) {
 		synctest.Wait()
 
 		if got := publishedTime(t, tree).Offset; got != "±1ms" {
-			t.Errorf("the bound after the slew is %q", got)
+			t.Errorf("the published offset is %q after the slew, want ±1ms", got)
 		}
 		if got, _ := machine.ReadClockReading(readingDir); got.Offset != 500*time.Microsecond {
-			t.Errorf("the reading after the slew is %v", got.Offset)
+			t.Errorf("the clock reading offset is %v after the slew, want 500µs", got.Offset)
 		}
 	})
 }
 
 // A clock that drifts 3ms between polls on a quiet wired path is
-// slewed back by 3ms at every poll. An old sample with the same round
-// trip measured the clock before that drift, so it must not win.
+// slewed by 3ms at every poll. An older sample with the same round trip
+// measured the clock before that drift, so the filter must not select
+// it.
 func TestDisciplineClockCorrectsDriftAtEveryPoll(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t, timeAnswer(3*time.Millisecond), timeAnswer(3*time.Millisecond), timeAnswer(3*time.Millisecond))
@@ -220,8 +220,9 @@ func TestDisciplineClockCorrectsDriftAtEveryPoll(t *testing.T) {
 	})
 }
 
-// Every answered poll writes the reading, the exact filtered offset
-// that Prometheus scrapes, even when the standing does not change.
+// Every answered poll writes the clock reading, which machine-operator
+// serves to Prometheus, even when the published time status does not
+// change.
 func TestDisciplineClockWritesTheReadingAtEveryAnsweredPoll(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		installFakeClock(t, timeAnswer(1200*time.Microsecond), timeAnswerOver(1300*time.Microsecond, 500*time.Microsecond))
@@ -233,21 +234,21 @@ func TestDisciplineClockWritesTheReadingAtEveryAnsweredPoll(t *testing.T) {
 
 		got, err := machine.ReadClockReading(readingDir)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the clock reading: %v", err)
 		}
 		want := machine.ClockReading{
 			Offset: 1300 * time.Microsecond, Delay: 500 * time.Microsecond,
 			Source: "10.10.0.1", At: time.Now().Add(-time.Second),
 		}
 		if !got.At.Equal(want.At) || got.Offset != want.Offset || got.Delay != want.Delay || got.Source != want.Source {
-			t.Errorf("got %+v, want %+v", got, want)
+			t.Errorf("the clock reading is %+v, want %+v", got, want)
 		}
 	})
 }
 
-// A steady clock rewrites nothing, however long it holds. The test
-// changes the published standing under the loop, and a loop that
-// republished would write its own standing back over it.
+// A clock that stays steady does not rewrite the time status. The test
+// changes the published status while the loop runs, and a loop that
+// republished would overwrite that change.
 func TestDisciplineClockRewritesNothingWhileTheClockHoldsSteady(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		installFakeClock(t, slices.Repeat([]pollAnswer{timeAnswer(time.Millisecond)}, 12)...)
@@ -256,21 +257,21 @@ func TestDisciplineClockRewritesNothingWhileTheClockHoldsSteady(t *testing.T) {
 		marked := bootSynchronized("±1ms")
 		marked.Source = "marker"
 		if err := tree.WriteTime(marked); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the marked time status: %v", err)
 		}
 
 		time.Sleep(12*timePollInterval + time.Second)
 		synctest.Wait()
 
 		if got := publishedTime(t, tree).Source; got != "marker" {
-			t.Errorf("twelve steady polls rewrote the standing, source %q", got)
+			t.Errorf("the published source is %q after twelve steady polls, want marker", got)
 		}
 	})
 }
 
 // A machine keeps reporting Synchronized through three missed polls,
-// and reports Unsynchronized at stratum 16 at the fourth. A source
-// that misses one poll is busy; a source that misses three is gone.
+// and reports Unsynchronized at stratum 16 at the fourth, because
+// syncStaleAfter is three poll intervals.
 func TestDisciplineClockReportsLostSourcesAfterThreeMissedPolls(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		installFakeClock(t)
@@ -280,21 +281,21 @@ func TestDisciplineClockReportsLostSourcesAfterThreeMissedPolls(t *testing.T) {
 		time.Sleep(3*timePollInterval + time.Second)
 		synctest.Wait()
 		if got := publishedTime(t, tree).State; got != machine.TimeSynchronized {
-			t.Errorf("three missed polls are inside the window, got %q", got)
+			t.Errorf("the published state is %q after three missed polls, want Synchronized", got)
 		}
 
 		time.Sleep(timePollInterval)
 		synctest.Wait()
 		got := publishedTime(t, tree)
 		if got.State != machine.TimeUnsynchronized || got.Stratum != stratumUnsynchronized || got.Offset != "" {
-			t.Errorf("the fourth missed poll reports the clock on its own, with no bound: %+v", got)
+			t.Errorf("the published time is %+v after four missed polls, want Unsynchronized at stratum 16 with no offset", got)
 		}
 	})
 }
 
-// A machine that never had good time leaves the hardware clock alone
-// at shutdown. Writing the system clock into the RTC then would only
-// copy the RTC's own error back into it.
+// A machine that never had a good time does not write the hardware
+// clock at shutdown, because writing the system clock to the RTC would
+// only copy the RTC's own error back into it.
 func TestDisciplineClockLeavesTheRTCAloneWithoutGoodTime(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t)
@@ -304,7 +305,7 @@ func TestDisciplineClockLeavesTheRTCAloneWithoutGoodTime(t *testing.T) {
 		stop()
 
 		if _, _, _, rtcWrites := f.recorded(); rtcWrites != 0 {
-			t.Errorf("no sync means no RTC write, got %d", rtcWrites)
+			t.Errorf("the hardware clock was written %d times without a sync, want 0", rtcWrites)
 		}
 	})
 }

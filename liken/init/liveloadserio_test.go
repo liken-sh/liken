@@ -7,9 +7,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// An added serio entry applies in the same live load as an added
-// module: the load records it, promotes the manifest, and declares it
-// to the serio watch.
+// A live load applies an added serio entry the way it applies an added
+// module: it records the entry in the boot record, promotes the staged
+// manifest, and declares the entry to the serio registry.
 func TestLiveLoadDeclaresAnAddedSerioEntry(t *testing.T) {
 	staged := liveLoadable()
 	staged.Serio = []machine.SerioAttachment{pulse8Entry}
@@ -20,15 +20,16 @@ func TestLiveLoadDeclaresAnAddedSerioEntry(t *testing.T) {
 
 	boot := bootManifestRecord(t, loader)
 	if boot.ManifestHash != hash || !slices.Equal(boot.Serio, staged.Serio) {
-		t.Errorf("the boot record should carry the applied entry: %+v", boot)
+		t.Errorf("the boot record is %+v, want the applied serio entry and the manifest hash", boot)
 	}
 	if got := loader.serio.declaredEntries(); !slices.Equal(got, staged.Serio) {
-		t.Errorf("declared = %+v", got)
+		t.Errorf("the declared entries are %+v, want %+v", got, staged.Serio)
 	}
 }
 
-// A removed entry's holder keeps the port for the pods that hold its
-// devices, so the removal waits for a boot.
+// A live load does not remove a serio entry, because pods can hold
+// devices that the port created. The manifest stays staged until the
+// next boot.
 func TestLiveLoadRefusesASerioRetraction(t *testing.T) {
 	store, base, loader, hash := liveLoadFixture(t, liveLoadable(), []string{"loop"})
 	loader.bootSerio = []machine.SerioAttachment{pulse8Entry}
@@ -37,13 +38,13 @@ func TestLiveLoadRefusesASerioRetraction(t *testing.T) {
 	loader.apply(machine.ModulesIntent{ManifestHash: hash}, store, base)
 
 	if staged, _ := store.LoadStaged(); staged == nil {
-		t.Error("a retracting manifest must stay staged for its boot")
+		t.Error("the retracting manifest is not staged, want it staged until the next boot")
 	}
 	if boot := bootManifestRecord(t, loader); boot.ManifestHash != "before" {
-		t.Errorf("the boot record must be untouched: %+v", boot)
+		t.Errorf("the boot record is %+v, want it unchanged", boot)
 	}
 	if got := loader.serio.declaredEntries(); got != nil {
-		t.Errorf("declared = %+v", got)
+		t.Errorf("the declared entries are %+v, want none", got)
 	}
 }
 
@@ -63,7 +64,7 @@ func TestAppliedInPlaceNamesWhatTheLoadApplied(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if got := appliedInPlace(test.loaded, test.attached); got != test.want {
-				t.Errorf("got %q", got)
+				t.Errorf("appliedInPlace = %q, want %q", got, test.want)
 			}
 		})
 	}

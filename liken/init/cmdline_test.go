@@ -1,24 +1,19 @@
 package main
 
-// Tests for the kernel command-line parsers. The real file is
-// /proc/cmdline. These tests point cmdlinePath at files of their own
-// making, so they pin every shape: present, absent, unreadable.
-
 import (
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-// fakeCmdline points the parsers at a command line of the test's
-// choosing, and restores the real path when the test ends. Like the
-// fake sysfs, this swaps a package variable, so tests in this
-// package must not run in parallel.
+// fakeCmdline points the readers at a file with the given content. It
+// sets a package variable, so tests that call it must not run in
+// parallel.
 func fakeCmdline(t *testing.T, content string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "cmdline")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the command line file: %v", err)
 	}
 	old := cmdlinePath
 	cmdlinePath = path
@@ -28,25 +23,23 @@ func fakeCmdline(t *testing.T, content string) {
 func TestBootParamValue(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 rdinit=/liken liken.machine=node-3 liken.slot=B\n")
 	if got := bootParamValue("liken.machine"); got != "node-3" {
-		t.Errorf("liken.machine: got %q", got)
+		t.Errorf("bootParamValue(liken.machine) = %q, want node-3", got)
 	}
 	if got := bootParamValue("liken.slot"); got != "B" {
-		t.Errorf("liken.slot: got %q", got)
+		t.Errorf("bootParamValue(liken.slot) = %q, want B", got)
 	}
 	if got := bootParamValue("liken.absent"); got != "" {
-		t.Errorf("an absent parameter reads empty: got %q", got)
+		t.Errorf("bootParamValue of an absent parameter = %q, want an empty string", got)
 	}
 }
 
-// The whole line, kept as one string for Machine status. The kernel
-// ends the file with a newline that must not reach the status field,
-// and the spaces inside the line have to survive, because a reader
-// compares this against what the bootloader wrote.
+// The trailing newline is dropped and the spaces inside the line stay,
+// so status shows exactly what the bootloader wrote.
 func TestCmdlineRawKeepsTheWholeLine(t *testing.T) {
 	const line = "console=ttyS0 rdinit=/liken liken.machine=node-3 liken.slot=B panic=10"
 	fakeCmdline(t, line+"\n")
 	if got := cmdlineRaw(); got != line {
-		t.Errorf("got %q, want %q", got, line)
+		t.Errorf("cmdlineRaw() = %q, want %q", got, line)
 	}
 }
 
@@ -55,7 +48,7 @@ func TestCmdlineRawWithNoCmdline(t *testing.T) {
 	cmdlinePath = filepath.Join(t.TempDir(), "missing")
 	t.Cleanup(func() { cmdlinePath = old })
 	if got := cmdlineRaw(); got != "" {
-		t.Errorf("an unreadable command line reads empty: got %q", got)
+		t.Errorf("cmdlineRaw() = %q with no command line file, want an empty string", got)
 	}
 }
 
@@ -64,23 +57,22 @@ func TestBootParamValueWithNoCmdline(t *testing.T) {
 	cmdlinePath = filepath.Join(t.TempDir(), "missing")
 	t.Cleanup(func() { cmdlinePath = old })
 	if got := bootParamValue("liken.machine"); got != "" {
-		t.Errorf("an unreadable command line reads empty: got %q", got)
+		t.Errorf("bootParamValue(liken.machine) = %q with no command line file, want an empty string", got)
 	}
 	if bootParam("liken.install") {
-		t.Error("an unreadable command line carries no flags")
+		t.Error("bootParam(liken.install) is true with no command line file, want false")
 	}
 }
 
 func TestBootParam(t *testing.T) {
 	fakeCmdline(t, "console=ttyS0 liken.install panic=10\n")
 	if !bootParam("liken.install") {
-		t.Error("liken.install is on the command line")
+		t.Error("bootParam(liken.install) is false, want true because the command line has the word")
 	}
 	if bootParam("liken.oneshot") {
-		t.Error("liken.oneshot is not on the command line")
+		t.Error("bootParam(liken.oneshot) is true, want false because the command line does not have the word")
 	}
-	// A flag must be a whole word; a prefix of a word does not count.
 	if bootParam("liken.inst") {
-		t.Error("a prefix of a word is not the word")
+		t.Error("bootParam(liken.inst) is true, want false because it is only a prefix of liken.install")
 	}
 }

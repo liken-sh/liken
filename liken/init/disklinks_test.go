@@ -1,12 +1,7 @@
 package main
 
-// Tests for the by-path tree, run against a fake machine: the two
-// iSCSI class directories and a /dev/disk/by-path, all built in
-// tempdirs. The fixture writes the same files the kernel writes, in
-// the same shape, so a test describes a session and the fixture owns
-// the layout. This is the point of the tests: the names liken
-// publishes come from nothing but a handful of small text files, and
-// these tests show which ones and what they compose into.
+// The fixtures build the sysfs files that the kernel writes for an
+// iSCSI session or a local disk in temporary directories.
 
 import (
 	"os"
@@ -17,12 +12,11 @@ import (
 	"github.com/liken-sh/liken/liken/disks"
 )
 
-// fakeInitiator points the three link trees, and the two iSCSI class
-// directories that feed the by-path tree, at empty tempdirs, and
-// restores the real paths when the test ends. Because the roots are
-// package variables, tests in this package must not run in parallel.
-// It returns the by-path directory, the one every test before this
-// task already expected back.
+// fakeInitiator points the three link trees and the two iSCSI class
+// directories at empty temporary directories, and restores the real
+// paths when the test ends. The roots are package variables, so tests
+// in this package must not run in parallel. It returns the by-path
+// directory.
 func fakeInitiator(t *testing.T) string {
 	t.Helper()
 	sessions, connections, links, ids, uuids := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
@@ -37,69 +31,63 @@ func fakeInitiator(t *testing.T) string {
 	return links
 }
 
-// addSession gives the fake machine one logged-in session: the
-// session's target name, its first connection's address and port, and
-// one SCSI target under it. It returns the target's directory, so
-// addLUN can hang devices off it.
+// addSession adds one logged-in session with its target name, the
+// address and port of its connection 0, and one SCSI target. It
+// returns the target's directory for addLUN.
 func addSession(t *testing.T, number, targetName, address, port string) string {
 	t.Helper()
 	session := filepath.Join(iscsiSessionClass, "session"+number)
 	if err := os.MkdirAll(session, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the session directory: %v", err)
 	}
 	writeSysfs(t, session, "targetname", targetName+"\n")
 
 	connection := filepath.Join(iscsiConnectionClass, "connection"+number+":0")
 	if err := os.MkdirAll(connection, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the connection directory: %v", err)
 	}
 	writeSysfs(t, connection, "persistent_address", address+"\n")
 	writeSysfs(t, connection, "persistent_port", port+"\n")
 
-	// The session's device directory holds one entry per SCSI target
-	// it reached, plus the connection and the class entry that the
-	// walk has to pass over. The kernel writes those too, so the
-	// fixture does.
+	// The kernel also puts connection and class entries in the
+	// session's device directory, and sessionLUNs must skip them.
 	device := filepath.Join(session, "device")
 	scsiTarget := filepath.Join(device, "target"+number+":0:0")
 	if err := os.MkdirAll(scsiTarget, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the SCSI target directory: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(device, "connection"+number+":0"), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the connection directory of the SCSI device: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(device, "iscsi_session", "session"+number), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the iscsi_session directory: %v", err)
 	}
 	writeSysfs(t, device, "uevent", "DEVTYPE=scsi_target\n")
 	return scsiTarget
 }
 
-// addLUN gives a SCSI target one disk at one LUN, named the way the
-// kernel names it: a four-part SCSI address holding a block directory
-// holding the disk.
+// addLUN adds a disk at one LUN under a SCSI target, as the directory
+// host:0:0:lun/block/device. It returns the disk's directory.
 func addLUN(t *testing.T, scsiTarget, host, lun, device string) string {
 	t.Helper()
 	disk := filepath.Join(scsiTarget, host+":0:0:"+lun, "block", device)
 	if err := os.MkdirAll(disk, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the disk directory: %v", err)
 	}
 	return disk
 }
 
-// addLUNPartition gives a disk one partition, with the partition file
-// that marks it as one.
+// addLUNPartition adds a partition directory to a disk directory, with
+// the partition file that holds its number.
 func addLUNPartition(t *testing.T, disk, name, number string) {
 	t.Helper()
 	dir := filepath.Join(disk, name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the partition directory: %v", err)
 	}
 	writeSysfs(t, dir, "partition", number+"\n")
 }
 
-// linkTarget reads one published name, and fails the test when the
-// name is missing.
 func linkTarget(t *testing.T, dir, name string) string {
 	t.Helper()
 	target, err := os.Readlink(filepath.Join(dir, name))
@@ -109,8 +97,7 @@ func linkTarget(t *testing.T, dir, name string) string {
 	return target
 }
 
-// publishedNames lists what the by-path directory holds, so a test
-// can claim that a name is gone as easily as that one is present.
+// publishedNames returns nil when the directory does not exist.
 func publishedNames(t *testing.T, dir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -118,7 +105,7 @@ func publishedNames(t *testing.T, dir string) []string {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		t.Fatal(err)
+		t.Fatalf("reading the directory %s: %v", dir, err)
 	}
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -129,13 +116,13 @@ func publishedNames(t *testing.T, dir string) []string {
 
 func TestOneSessionNamesItsLUNTheWayUdevWould(t *testing.T) {
 	links := fakeInitiator(t)
-	scsiTarget := addSession(t, "1", "iqn.2000-01.com.synology:syn.pvc-5a35461e", "10.0.0.18", "3260")
+	scsiTarget := addSession(t, "1", "iqn.2026-07.sh.liken.lab:pvc-0001", "10.0.0.18", "3260")
 	addLUN(t, scsiTarget, "2", "1", "sdb")
 
 	if err := reconcileLinks(links, iscsiPaths()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
-	name := "ip-10.0.0.18:3260-iscsi-iqn.2000-01.com.synology:syn.pvc-5a35461e-lun-1"
+	name := "ip-10.0.0.18:3260-iscsi-iqn.2026-07.sh.liken.lab:pvc-0001-lun-1"
 	if target := linkTarget(t, links, name); target != "../../sdb" {
 		t.Errorf("link points at %q, want ../../sdb", target)
 	}
@@ -143,16 +130,16 @@ func TestOneSessionNamesItsLUNTheWayUdevWould(t *testing.T) {
 
 func TestNULPaddedSysfsValuesStillNameTheirLUN(t *testing.T) {
 	// A target that reports these values from fixed-width buffers pads
-	// the remainder with NUL. The kernel refuses a path holding a NUL,
-	// so padding that reached the name would cost this disk its link.
+	// them with NUL. A symlink name cannot contain NUL, so the link
+	// would fail if the padding reached the name.
 	links := fakeInitiator(t)
-	scsiTarget := addSession(t, "1", "iqn.2000-01.com.synology:syn.pvc-5a35461e\x00", "10.0.0.18\x00", "3260\x00")
+	scsiTarget := addSession(t, "1", "iqn.2026-07.sh.liken.lab:pvc-0001\x00", "10.0.0.18\x00", "3260\x00")
 	addLUN(t, scsiTarget, "2", "1", "sdb")
 
 	if err := reconcileLinks(links, iscsiPaths()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
-	name := "ip-10.0.0.18:3260-iscsi-iqn.2000-01.com.synology:syn.pvc-5a35461e-lun-1"
+	name := "ip-10.0.0.18:3260-iscsi-iqn.2026-07.sh.liken.lab:pvc-0001-lun-1"
 	if target := linkTarget(t, links, name); target != "../../sdb" {
 		t.Errorf("link points at %q, want ../../sdb", target)
 	}
@@ -169,7 +156,7 @@ func TestAPartitionTakesThePartSuffix(t *testing.T) {
 	addLUNPartition(t, disk, "sdb3", "3")
 
 	if err := reconcileLinks(links, iscsiPaths()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	base := "ip-10.10.0.100:3260-iscsi-iqn.2026-07.sh.liken.lab:storage-lun-1"
 	if target := linkTarget(t, links, base+"-part1"); target != "../../sdb1" {
@@ -191,7 +178,7 @@ func TestTwoSessionsNameTheirOwnDisks(t *testing.T) {
 	addLUN(t, second, "3", "7", "sdc")
 
 	if err := reconcileLinks(links, iscsiPaths()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	if target := linkTarget(t, links, "ip-10.10.0.100:3260-iscsi-iqn.2026-07.sh.liken.lab:storage-lun-1"); target != "../../sdb" {
 		t.Errorf("the first session's disk points at %q, want ../../sdb", target)
@@ -207,19 +194,18 @@ func TestASessionThatLogsOutLosesItsNames(t *testing.T) {
 	disk := addLUN(t, scsiTarget, "2", "1", "sdb")
 	addLUNPartition(t, disk, "sdb1", "1")
 	if err := reconcileLinks(links, iscsiPaths()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 
-	// A logout takes the whole session out of sysfs, along with the
-	// disks it carried.
+	// A logout removes the session and its disks from sysfs.
 	if err := os.RemoveAll(filepath.Join(iscsiSessionClass, "session1")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the session directory: %v", err)
 	}
 	if err := reconcileLinks(links, iscsiPaths()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	if names := publishedNames(t, links); len(names) != 0 {
-		t.Errorf("the logged-out session left %v behind", names)
+		t.Errorf("the links %v remain after the session logged out, want none", names)
 	}
 }
 
@@ -228,18 +214,17 @@ func TestADiskThatChangesLettersKeepsItsNamePointedRight(t *testing.T) {
 	scsiTarget := addSession(t, "1", "iqn.2026-07.sh.liken.lab:storage", "10.10.0.100", "3260")
 	addLUN(t, scsiTarget, "2", "1", "sdb")
 	if err := reconcileLinks(links, iscsiPaths()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 
-	// The same LUN, reached again after a reboot that probed a local
-	// disk first, is sdc this time. The by-path name is the one thing
-	// that did not change, which is why a CSI driver uses it.
+	// After a reboot that probes a local disk first, the same LUN is
+	// sdc. The by-path name stays the same.
 	if err := os.RemoveAll(filepath.Join(scsiTarget, "2:0:0:1")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing the old disk directory: %v", err)
 	}
 	addLUN(t, scsiTarget, "2", "1", "sdc")
 	if err := reconcileLinks(links, iscsiPaths()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	name := "ip-10.10.0.100:3260-iscsi-iqn.2026-07.sh.liken.lab:storage-lun-1"
 	if target := linkTarget(t, links, name); target != "../../sdc" {
@@ -250,22 +235,21 @@ func TestADiskThatChangesLettersKeepsItsNamePointedRight(t *testing.T) {
 	}
 }
 
-func TestTheWalkOwnsTheDirectoryOutright(t *testing.T) {
+func TestReconcileRemovesEntriesItDidNotProduce(t *testing.T) {
 	links := fakeInitiator(t)
-	// Nothing else on a liken machine writes here, so an entry this
-	// walk did not produce is stale by definition. A crash between
-	// the symlink and the rename leaves exactly this kind of entry.
+	// A crash between reconcileLinks creating the temporary symlink
+	// and renaming it leaves an entry like this one.
 	if err := os.Symlink("../../sdz", filepath.Join(links, ".ip-stale.new")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the leftover temporary link: %v", err)
 	}
 	if err := os.Symlink("../../sdy", filepath.Join(links, "ip-10.0.0.1:3260-iscsi-gone-lun-0")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the link of a session that is gone: %v", err)
 	}
 	scsiTarget := addSession(t, "1", "iqn.2026-07.sh.liken.lab:storage", "10.10.0.100", "3260")
 	addLUN(t, scsiTarget, "2", "1", "sdb")
 
 	if err := reconcileLinks(links, iscsiPaths()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	names := publishedNames(t, links)
 	if len(names) != 1 || names[0] != "ip-10.10.0.100:3260-iscsi-iqn.2026-07.sh.liken.lab:storage-lun-1" {
@@ -277,30 +261,28 @@ func TestASessionMidLoginPublishesNothing(t *testing.T) {
 	links := fakeInitiator(t)
 	scsiTarget := addSession(t, "1", "iqn.2026-07.sh.liken.lab:storage", "10.10.0.100", "3260")
 	addLUN(t, scsiTarget, "2", "1", "sdb")
-	// The connection publishes its address only once the login gets
-	// that far. A name built without it would be wrong, and a wrong
-	// name is worse than no name, because a CSI driver would mount it.
+	// The connection has no persistent_address until the login gets
+	// that far, and a name without it would be wrong.
 	if err := os.Remove(filepath.Join(iscsiConnectionClass, "connection1:0", "persistent_address")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("removing persistent_address: %v", err)
 	}
 
 	if err := reconcileLinks(links, iscsiPaths()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	if names := publishedNames(t, links); len(names) != 0 {
-		t.Errorf("a half-published session named %v", names)
+		t.Errorf("the links %v remain from a session that was not fully published, want none", names)
 	}
 }
 
 func TestNoSessionsLeaveNoDirectoryBehind(t *testing.T) {
 	links := fakeInitiator(t)
-	// A machine that runs no network storage should not carry a tree
-	// that claims to name its disks. The fixture made the directory,
-	// so this test asks the walk for a path that does not exist.
+	// The fixture already created the by-path directory, so point
+	// diskLinksDir at a path that does not exist.
 	diskLinksDir = filepath.Join(links, "by-path")
 
 	if err := reconcileLinks(diskLinksDir, iscsiPaths()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	if _, err := os.Stat(diskLinksDir); !os.IsNotExist(err) {
 		t.Errorf("stat of an unused by-path tree returned %v, want it absent", err)
@@ -312,21 +294,17 @@ func TestAnUnwritableTreeReportsAndDoesNotPanic(t *testing.T) {
 	scsiTarget := addSession(t, "1", "iqn.2026-07.sh.liken.lab:storage", "10.10.0.100", "3260")
 	addLUN(t, scsiTarget, "2", "1", "sdb")
 	if err := os.Chmod(links, 0o555); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the tree read-only: %v", err)
 	}
 	t.Cleanup(func() { os.Chmod(links, 0o755) })
 
 	if err := reconcileLinks(links, iscsiPaths()); err == nil {
-		t.Error("writing into a read-only tree reported no error")
+		t.Error("reconcileLinks returned no error when it could not write into a read-only tree, want one")
 	}
 }
 
-// A local disk has no session and no connection: it is a plain sysfs
-// tree under /sys/block, the same fixture diskpaths_test.go and
-// diskids_test.go already build. These tests reuse fakeDisk and
-// addLUNPartition (generic despite its name: it only needs a
-// directory and a partition number) rather than inventing a second
-// set of fixtures for the same shape of data.
+// The tests below build local disks with fakeDisk from
+// diskids_test.go. addLUNPartition works on any disk directory.
 
 func TestALocalDiskSharesByPathWithAnISCSISession(t *testing.T) {
 	sys, _ := fakeMachine(t)
@@ -338,7 +316,7 @@ func TestALocalDiskSharesByPathWithAnISCSISession(t *testing.T) {
 
 	want, _ := localPaths()
 	if err := reconcileLinks(links, want); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	if target := linkTarget(t, links, "pci-0000:00:1f.2-ata-3"); target != "../../sda" {
 		t.Errorf("the local disk's link points at %q, want ../../sda", target)
@@ -349,7 +327,7 @@ func TestALocalDiskSharesByPathWithAnISCSISession(t *testing.T) {
 	}
 }
 
-func TestByIDLinksCarryTheirPartitions(t *testing.T) {
+func TestByIDLinksIncludeTheirPartitions(t *testing.T) {
 	sys, _ := fakeMachine(t)
 	fakeInitiator(t)
 	dir := fakeDisk(t, sys, "sda", "pci0000:00", "0000:00:1f.2", "ata3", "host2",
@@ -359,7 +337,7 @@ func TestByIDLinksCarryTheirPartitions(t *testing.T) {
 
 	want, _ := idPaths()
 	if err := reconcileLinks(diskIDsDir, want); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	if target := linkTarget(t, diskIDsDir, "wwn-0x5002538d40a45c88-part1"); target != "../../sda1" {
 		t.Errorf("the by-id partition link points at %q, want ../../sda1", target)
@@ -373,12 +351,12 @@ func TestByUUIDLinksAPartitionsFilesystem(t *testing.T) {
 	addPartition(t, sys, "vda", "vda1", "", 1<<20)
 	uuid := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
 	if err := os.WriteFile(filepath.Join(dev, "vda1"), ext4DeviceWithUUID(uuid), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the vda1 device: %v", err)
 	}
 
 	links, _ := uuidPaths()
 	if err := reconcileLinks(diskUUIDsDir, links); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	want := "01020304-0506-0708-090a-0b0c0d0e0f10"
 	if target := linkTarget(t, diskUUIDsDir, want); target != "../../vda1" {
@@ -398,7 +376,7 @@ func TestTwoDisksWithOneWWIDPublishNoWWNButKeepBothByPathNames(t *testing.T) {
 
 	idLinks, _ := idPaths()
 	if err := reconcileLinks(diskIDsDir, idLinks); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	if names := publishedNames(t, diskIDsDir); len(names) != 0 {
 		t.Errorf("two disks sharing a wwid published %v, want no by-id names for either", names)
@@ -406,7 +384,7 @@ func TestTwoDisksWithOneWWIDPublishNoWWNButKeepBothByPathNames(t *testing.T) {
 
 	pathLinks, _ := localPaths()
 	if err := reconcileLinks(diskLinksDir, pathLinks); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	if target := linkTarget(t, diskLinksDir, "pci-0000:00:1f.2-ata-3"); target != "../../sda" {
 		t.Errorf("sda's by-path link points at %q, want ../../sda", target)
@@ -416,10 +394,9 @@ func TestTwoDisksWithOneWWIDPublishNoWWNButKeepBothByPathNames(t *testing.T) {
 	}
 }
 
-// twoClonedPartitions builds the fixture every test below shares: two
-// disks, each with one partition, cloned so both partitions carry the
-// same filesystem UUID. It returns the device root, so a test can
-// change one partition's UUID to clear the collision.
+// twoClonedPartitions builds two disks with one partition each, and
+// gives both partitions the same filesystem UUID. It returns the
+// device root, so a test can change one UUID to clear the collision.
 func twoClonedPartitions(t *testing.T) (dev string, uuid []byte) {
 	t.Helper()
 	sys, dev := fakeMachine(t)
@@ -430,24 +407,22 @@ func twoClonedPartitions(t *testing.T) (dev string, uuid []byte) {
 	addPartition(t, sys, "vdb", "vdb1", "", 1<<20)
 	uuid = []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
 	if err := os.WriteFile(filepath.Join(dev, "vda1"), ext4DeviceWithUUID(uuid), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the vda1 device: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dev, "vdb1"), ext4DeviceWithUUID(uuid), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the vdb1 device: %v", err)
 	}
 	return dev, uuid
 }
 
 func TestTwoClonedPartitionsPublishNoByUUIDLinkForEither(t *testing.T) {
-	// Cloning a disk, or restoring the same image onto two disks,
-	// copies the filesystem's UUID along with its bytes. Two
-	// partitions then carry the same identity, and the by-uuid tree
-	// cannot say which one a mount by that UUID means.
+	// Cloning a disk copies the filesystem UUID with the data, and a
+	// by-uuid link cannot point at two partitions.
 	twoClonedPartitions(t)
 
 	links, collisions := uuidPaths()
 	if err := reconcileLinks(diskUUIDsDir, links); err != nil {
-		t.Fatal(err)
+		t.Fatalf("reconciling the links: %v", err)
 	}
 	if names := publishedNames(t, diskUUIDsDir); len(names) != 0 {
 		t.Errorf("two partitions sharing a UUID published %v, want no by-uuid link for either", names)
@@ -462,22 +437,18 @@ func TestTwoClonedPartitionsPublishNoByUUIDLinkForEither(t *testing.T) {
 }
 
 func TestAPersistentCollisionPrintsOnce(t *testing.T) {
-	// Two walks over a fixture whose collision never changes describe
-	// the same fact twice. reportNewCollisions is what a real boot
-	// runs on every uevent, so this drives it directly rather than the
-	// full watchDiskLinks loop, which needs a live uevent source.
 	twoClonedPartitions(t)
 	logs := fakeLogStream(t)
 
 	_, first := uuidPaths()
 	seen := reportNewCollisions(first, nil)
-	if got := strings.Count(logs(), "names both"); got != 1 {
+	if got := strings.Count(logs(), "would point at both"); got != 1 {
 		t.Fatalf("the first walk printed %d lines, want 1", got)
 	}
 
 	_, second := uuidPaths()
 	reportNewCollisions(second, seen)
-	if got := strings.Count(logs(), "names both"); got != 1 {
+	if got := strings.Count(logs(), "would point at both"); got != 1 {
 		t.Errorf("a walk that repeats the same collision printed %d lines total, want still 1", got)
 	}
 }
@@ -488,41 +459,39 @@ func TestACollisionThatClearsAndReturnsPrintsAgain(t *testing.T) {
 
 	_, first := uuidPaths()
 	seen := reportNewCollisions(first, nil)
-	if got := strings.Count(logs(), "names both"); got != 1 {
+	if got := strings.Count(logs(), "would point at both"); got != 1 {
 		t.Fatalf("the first walk printed %d lines, want 1", got)
 	}
 
-	// Give vdb1 a UUID of its own. The collision is gone, and the walk
-	// that finds it gone must stay quiet.
+	// Give vdb1 its own UUID. The walk that finds no collision must
+	// print nothing.
 	clear := []byte{0x02, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
 	if err := os.WriteFile(filepath.Join(dev, "vdb1"), ext4DeviceWithUUID(clear), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the vdb1 device: %v", err)
 	}
 	_, second := uuidPaths()
 	seen = reportNewCollisions(second, seen)
-	if got := strings.Count(logs(), "names both"); got != 1 {
+	if got := strings.Count(logs(), "would point at both"); got != 1 {
 		t.Fatalf("the walk that cleared the collision printed %d lines total, want still 1", got)
 	}
 
-	// Put the shared UUID back. The collision returns as a fresh fact,
-	// because the previous walk's set held none of it.
+	// Restore the shared UUID. The previous walk found no collision,
+	// so this one prints it again.
 	shared := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
 	if err := os.WriteFile(filepath.Join(dev, "vdb1"), ext4DeviceWithUUID(shared), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the vdb1 device: %v", err)
 	}
 	_, third := uuidPaths()
 	reportNewCollisions(third, seen)
-	if got := strings.Count(logs(), "names both"); got != 2 {
+	if got := strings.Count(logs(), "would point at both"); got != 2 {
 		t.Errorf("the walk that reintroduced the collision printed %d lines total, want 2", got)
 	}
 }
 
-// threeSlotsSharingAVolumeID formats three FAT32 partitions the way a
-// claim formats bootHome and both system slots inside one boot: the
-// same volume id on all three, standing in for a machine that
-// installed under a release whose volume id came from the clock
-// rather than crypto/rand. It returns the partition names, in the
-// order discoverPartitions reports them.
+// threeSlotsSharingAVolumeID formats three FAT32 partitions, like
+// bootHome and the two system slots, with the same volume ID. It
+// returns the partition names in the order discoverPartitions reports
+// them.
 func threeSlotsSharingAVolumeID(t *testing.T) []string {
 	t.Helper()
 	sys, dev := fakeMachine(t)
@@ -533,49 +502,40 @@ func threeSlotsSharingAVolumeID(t *testing.T) []string {
 		addPartition(t, sys, "vdc", name, "", 512<<20)
 		f, err := os.OpenFile(filepath.Join(dev, name), os.O_RDWR|os.O_CREATE, 0o644)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("opening the partition device: %v", err)
 		}
 		if err := f.Truncate(512 << 20); err != nil {
-			t.Fatal(err)
+			t.Fatalf("resizing the partition device: %v", err)
 		}
 		if err := disks.FormatFAT32(f, 512<<20, "SLOT", 0x6A6CDB4B); err != nil {
-			t.Fatal(err)
+			t.Fatalf("formatting the partition: %v", err)
 		}
 		if err := f.Close(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("closing the partition device: %v", err)
 		}
 	}
 	return names
 }
 
-// TestWalkDiskLinksPrintsAPersistentCollisionOnceOnItsFirstWalk pins
-// watchDiskLinks' own loop body, not just reportNewCollisions in
-// isolation. A boot that finds three same-id FAT32 volumes already on
-// disk, left by a release that minted volume ids from the clock,
-// must behave exactly as a fresh claim under the old code did: one
-// line naming the first two claimants, both of their by-uuid links
-// withheld, and the third claimant silently caught by the blocked
-// name once mergeDiskLinks has already refused to link it. A second walk
-// over the same, still-colliding disks must stay quiet, the way every
-// walk after the first one did under the old code's own per-call
-// print.
+// The third volume finds the name already blocked, so the first walk
+// prints one line, for the first two volumes.
 func TestWalkDiskLinksPrintsAPersistentCollisionOnceOnItsFirstWalk(t *testing.T) {
 	threeSlotsSharingAVolumeID(t)
 	logs := fakeLogStream(t)
 
 	seen := walkDiskLinks(diskLinkSeen{})
-	if got := strings.Count(logs(), "names both"); got != 1 {
+	if got := strings.Count(logs(), "would point at both"); got != 1 {
 		t.Fatalf("the first walk printed %d lines, want 1", got)
 	}
-	if !strings.Contains(logs(), "6A6C-DB4B names both vdc2 and vdc3") {
-		t.Errorf("stderr %q does not name the first two claimants", logs())
+	if !strings.Contains(logs(), "vdc2 and vdc3") {
+		t.Errorf("stderr is %q, want it to name vdc2 and vdc3", logs())
 	}
 	if names := publishedNames(t, diskUUIDsDir); len(names) != 0 {
 		t.Errorf("three slots sharing a volume id published %v, want no by-uuid link for any of them", names)
 	}
 
 	walkDiskLinks(seen)
-	if got := strings.Count(logs(), "names both"); got != 1 {
+	if got := strings.Count(logs(), "would point at both"); got != 1 {
 		t.Errorf("a second walk over the same collision printed %d lines total, want still 1", got)
 	}
 }
@@ -596,14 +556,14 @@ func TestAStaleLinkInEachNewTreeIsPruned(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			stale := filepath.Join(*c.dir, "stale-name")
 			if err := os.Symlink("../../sdz", stale); err != nil {
-				t.Fatal(err)
+				t.Fatalf("creating the stale link: %v", err)
 			}
 			want, _ := c.build()
 			if err := reconcileLinks(*c.dir, want); err != nil {
-				t.Fatal(err)
+				t.Fatalf("reconciling the links: %v", err)
 			}
 			if names := publishedNames(t, *c.dir); len(names) != 0 {
-				t.Errorf("the %s tree kept %v with no disks behind it", c.name, names)
+				t.Errorf("the %s tree has %v with no disks behind them, want none", c.name, names)
 			}
 		})
 	}

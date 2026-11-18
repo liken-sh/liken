@@ -1,15 +1,11 @@
 package main
 
-// Everything the boot does for an interface that declares a radio.
-// The split of the work is deliberate: the supplicant owns the 802.11
-// session, the association, the keys, and the rekeys, and nothing
-// else. Init keeps its own addressing, so once a radio associates the
-// interface takes DHCP or a static address on the same code a wired
-// port does. The order is the supplicant, then the join, then the
-// address. The events on the supplicant's control socket
-// matter because the kernel cannot tell a wrong passphrase apart from
-// an access point that is switched off; only the supplicant can say
-// which one it is (plans/completed/62-wifi.md).
+// Init sets up each wireless interface at boot. wpa_supplicant runs the
+// 802.11 session: association, keys, and rekeying. After the radio
+// associates, init gives the interface its address with the same DHCP
+// or static code as a wired port. Init reads the supplicant's events
+// from its control socket, because those events tell a wrong
+// passphrase apart from an access point that does not answer.
 
 import (
 	"context"
@@ -28,70 +24,60 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// supplicantBinary is the program the image carries for the 802.11
-// session. userland/build.sh builds it static, with the nl80211
-// driver, the control interface, and SAE, and nothing else.
+// supplicantBinary is a static build from buildroot, with the features
+// that userland/wpa_supplicant.config selects.
 const supplicantBinary = "/sbin/wpa_supplicant"
 
-// The whole wireless runtime lives under /run because /run is a
-// tmpfs, the generated configuration holds the passphrase, and a
-// passphrase must never reach a disk that outlives the boot. /run is
-// mounted with the essential filesystems rather than with k3s's,
-// because a radio comes up long before k3s does (worldreport.go).
-//
-// It is a variable rather than a constant so tests can write into a
-// directory of their own. A real boot never points it anywhere but /run.
+// wirelessRunDir holds the supplicant's configuration and control
+// sockets. It is on /run, a tmpfs, because the configuration contains
+// the passphrase and must not be written to a disk. worldreport.go
+// mounts /run with the essential filesystems, because a radio comes up
+// long before k3s does. Tests point it at a temporary directory.
 var wirelessRunDir = machine.WirelessDir
 
-// How long a boot waits for a radio to associate. A scan of both
-// bands plus a four-way handshake finishes in a few seconds on a
-// healthy network, and the DHCP exchange beside this wait already
-// bounds itself at 30 seconds. A boot still waiting at 45 seconds is
-// waiting on something that waiting will not fix. The wait ends early
-// on the first settling event either way, so the bound costs nothing
-// when the join works.
-const associationPatience = 45 * time.Second
+// associationTimeout is how long awaitAssociation waits for the radio
+// to associate. A scan of both bands and the four-way handshake take a
+// few seconds on a working network, so 45 seconds leaves a wide margin.
+const associationTimeout = 45 * time.Second
 
-// radio holds everything init keeps about one wireless interface: what
-// the manifest asked for, what the join did, and the two things that
-// stay live for the rest of the boot, the supervised process and the
-// event stream it publishes.
+// radio is the state of one wireless interface: the SSID from the
+// manifest, the result of the join, and the control client that stays
+// attached to the supplicant for the rest of the boot.
 type radio struct {
 	ifname string
 	ssid   string
 
-	// state and message are the join's verdict, bound for the facts
-	// tree and, through it, for the Machine's status.
+	// state and message are the result of the join. They are reported
+	// in the machine's facts and, from there, in the Machine status.
 	state   machine.WirelessState
 	message string
 
-	// The access point the radio is associated with, from the
-	// supplicant's answer to STATUS, and when it associated. The radio
-	// watch keeps them current (radiowatch.go).
+	// The access point that the radio is associated with, read from
+	// the supplicant's reply to STATUS, and the time it associated.
+	// The radio watch updates them (radiowatch.go).
 	bssid        string
 	frequency    int
 	associatedAt time.Time
 
-	// lastDisconnectReason is the 802.11 reason code of the last time
-	// the radio lost an access point, or zero.
+	// lastDisconnectReason is the 802.11 reason code of the radio's
+	// most recent disconnect, or zero if it has not disconnected.
 	lastDisconnectReason int
 
-	// control is the attached client on the supplicant's control
-	// socket. The park below keeps reading it, which is what lets a fix
-	// on the network side resume a parked boot with no power cycle.
+	// control is the client attached to the supplicant's control
+	// socket. It stays open after the join, so a boot that waits in
+	// waitForRadio returns when the radio joins later.
 	control *wpaControl
 }
 
-// deterministic says which failures no amount of waiting corrects. A
-// wrong passphrase, a missing passphrase file, and a passphrase with
-// no safe rendering are all decisions the machine can state now; all
-// three carry the WrongKey state. Every other failure looks exactly
-// like an access point that has not answered yet.
+// deterministic reports whether the radio failed in a way that waiting
+// does not fix: the access point refused the passphrase, or init could
+// not build a supplicant configuration from the manifest and the
+// passphrase file. Both set WrongKey. Every other failure looks the
+// same as an access point that has not answered yet.
 func (r *radio) deterministic() bool {
 	return r.state == machine.WirelessWrongKey
 }
 
-// wirelessStatus renders the radio for the facts tree.
 func (r *radio) wirelessStatus() *machine.WirelessStatus {
 	w := &machine.WirelessStatus{
 		SSID: r.ssid, State: r.state, Message: r.message,
@@ -105,17 +91,15 @@ func (r *radio) wirelessStatus() *machine.WirelessStatus {
 	return w
 }
 
-// joinWireless runs the wireless half of one interface's bring-up: it
-// generates the supplicant's configuration, starts the supplicant
-// under supervision, and waits for the association. It returns a
-// radio in every case, because a radio that failed to join is exactly
-// what the status must report.
+// joinWireless generates the supplicant's configuration, starts the
+// supplicant under supervision, and waits for the radio to associate.
+// It always returns a radio, including when the join fails, because
+// the status has to report that failure.
 //
-// liken does not touch rfkill. The kernel starts radios unblocked, a
-// soft block does not survive a reboot, and nothing in liken writes
-// one, so there is no block to clear. A hardware kill switch shows up
-// as a radio that never associates, and no software unblock can clear
-// that either.
+// It does not touch rfkill. The kernel starts radios unblocked, a soft
+// block does not survive a reboot, and nothing in liken sets one. A
+// hardware kill switch makes the radio never associate, and no
+// software unblock can clear that.
 func joinWireless(ifc machine.InterfaceSpec, stateRoot string) *radio {
 	w := *ifc.Wireless
 	r := &radio{ifname: ifc.Name, ssid: w.SSID, state: machine.WirelessAssociating}
@@ -150,17 +134,16 @@ func joinWireless(ifc machine.InterfaceSpec, stateRoot string) *radio {
 	return r
 }
 
-// awaitAssociation reads the supplicant's events until one of them
-// settles the join, or until associationPatience runs out. It writes
-// the verdict onto the radio.
+// awaitAssociation reads the supplicant's events until one settles the
+// join or associationTimeout runs out, and records the result on the
+// radio.
 //
-// A scan that finds nothing is not a verdict. An access point that is
-// off, rebooting, or out of range produces exactly these events, and
-// the plan's rule is that absence never parks a boot. The console
-// line still goes out for every event, because a person watching the
-// boot needs to know what the radio is doing.
+// A scan that finds no network does not settle the join, because an
+// access point that is off, rebooting, or out of range must never make
+// a boot wait (see radioToWaitFor). awaitAssociation still prints every
+// event, so a person at the console can see what the radio does.
 func awaitAssociation(r *radio) {
-	deadline := time.After(associationPatience)
+	deadline := time.After(associationTimeout)
 	for {
 		select {
 		case event, ok := <-r.control.events():
@@ -172,64 +155,57 @@ func awaitAssociation(r *radio) {
 			if line := describeWirelessEvent(r.ifname, event); line != "" {
 				fmt.Println(line)
 			}
-			if state, message, settled := judgeWirelessEvent(event); settled {
+			if state, message, settled := classifyWirelessEvent(event); settled {
 				r.state, r.message = state, message
 				return
 			}
 		case <-deadline:
 			r.state = machine.WirelessNoCarrier
-			r.message = fmt.Sprintf("no access point answered for %s; the supplicant keeps trying", associationPatience)
+			r.message = fmt.Sprintf("no access point answered for %s, and the supplicant keeps trying", associationTimeout)
 			fmt.Fprintf(os.Stderr, "liken: wireless: %s: %s\n", r.ifname, r.message)
 			return
 		}
 	}
 }
 
-// controlSocketDir is where the supplicant puts one interface's control
-// socket. Each interface gets its own directory, so the socket's name
-// inside it is always the interface's name and nothing has to be
-// cleaned up between interfaces.
+// controlSocketDir returns the directory for one interface's control
+// socket. The supplicant names the socket after the interface, and a
+// directory per interface keeps two interfaces' sockets apart.
 func controlSocketDir(ifname string) string {
 	return filepath.Join(wirelessRunDir, ifname, "ctrl")
 }
 
-// writeWirelessConfig puts one interface's generated configuration on
-// the tmpfs and reports where. The mode is owner-only, because the file
-// holds the network's passphrase.
+// writeWirelessConfig writes one interface's supplicant configuration
+// under wirelessRunDir and returns its path. The mode is 0600 because
+// the file contains the passphrase.
 func writeWirelessConfig(ifname, config string) (string, error) {
 	dir := filepath.Join(wirelessRunDir, ifname)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", fmt.Errorf("preparing %s: %w", dir, err)
+		return "", fmt.Errorf("preparing the supplicant's directory for %s: %w", ifname, err)
 	}
 	path := filepath.Join(dir, "wpa_supplicant.conf")
 	if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
-		return "", fmt.Errorf("writing %s: %w", path, err)
+		return "", fmt.Errorf("writing the supplicant configuration of %s: %w", ifname, err)
 	}
 	return path, nil
 }
 
-// supplicants holds every supplicant this boot started, so the shutdown
-// can stop them before it signals the rest of the machine. It is a
-// package variable for the same reason the death registry is: init is
-// one program, and these are its children.
-//
-// The lock exists because background radios register their
-// supplicants from the radio component's goroutine while the boot
-// and the shutdown run on others. The stopping flag latches when the
-// shutdown runs, and no supplicant starts after it: a radio that
-// settles late during a reboot must not leave a process the shutdown
-// already finished stopping.
+// supplicants lists the supervised supplicants, so the shutdown can
+// stop them before it signals the other processes. supplicantsMu
+// guards the list, because a radio that joins in the background
+// registers its supplicant from the radio component's goroutine, while
+// the boot and the shutdown run on others. supplicantsStopping is set
+// when the shutdown takes the list. A supplicant started after that
+// would never be stopped, so registerSupplicant refuses it.
 var (
 	supplicantsMu       sync.Mutex
 	supplicants         []*supplicantProcess
 	supplicantsStopping bool
 )
 
-// registerSupplicant adds one supervised supplicant to the list the
-// shutdown stops, and reports false once the shutdown has run. The
-// check and the append happen under one hold of the lock, so a
-// supplicant either makes the list the shutdown will stop, or is
-// refused; there is no window between the two.
+// registerSupplicant adds a supplicant to the list that the shutdown
+// stops, or returns false when the shutdown has already taken the
+// list.
 func registerSupplicant(p *supplicantProcess) bool {
 	supplicantsMu.Lock()
 	defer supplicantsMu.Unlock()
@@ -240,42 +216,40 @@ func registerSupplicant(p *supplicantProcess) bool {
 	return true
 }
 
-// supplicantProcess is one supervised supplicant: the loop that keeps
-// it running, and the channels that stop it.
+// supplicantProcess is the supervision of one interface's supplicant.
+// Closing stop ends the supervision loop, which then closes done.
 type supplicantProcess struct {
 	ifname string
 	stop   chan struct{}
 	done   chan struct{}
 
-	// The restart loop holds the control client because a supplicant
-	// keeps its list of attached clients in memory. The process that
-	// dies takes liken's attachment with it, and the new process
-	// reports to nobody until it is asked again.
+	// control is the control client. The loop attaches it again after
+	// each restart, because a supplicant keeps its list of attached
+	// clients in memory, and a new process sends events to no one
+	// until a client attaches.
 	control *wpaControl
 
-	// Restart pacing, in the machine plane's own form: a start that
-	// keeps failing waits twice as long each time, up to a cap, and a
-	// process that ran for a while before dying starts the pacing over.
-	// They are fields rather than constants so a test can run the loop
-	// without waiting out real seconds.
+	// backoff is the first restart delay and maxBackoff is the longest.
+	// The delay doubles at each restart, and returns to backoff when a
+	// process ran for over a minute before it died. Tests set short
+	// delays.
 	backoff    time.Duration
 	maxBackoff time.Duration
 }
 
-// superviseSupplicant starts the supplicant for one interface, keeps it
-// running for the life of the boot, and returns a client attached to
-// its control socket.
+// superviseSupplicant starts the supplicant for one interface, restarts
+// it whenever it exits, and returns a client attached to its control
+// socket.
 //
-// This is the k3s supervisor's second resident, on the supervisor's
-// own terms: the reaper stays the only caller of wait, and this loop
-// subscribes to the death registry exactly as superviseK3s does. The
-// association dies with the process, so a restart is the only repair.
-// The address stays on the interface across the restart, which is
-// what makes the outage seconds rather than a reboot.
+// It supervises the way superviseK3s does: the reaper collects each
+// exit, and the loop reads it from the death registry. A dead
+// supplicant drops the association, so the loop starts a new one. The
+// address stays on the interface across the restart, so the machine
+// does not reboot.
 func superviseSupplicant(ifname, config string) (*wpaControl, error) {
 	dir := controlSocketDir(ifname)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("preparing %s: %w", dir, err)
+		return nil, fmt.Errorf("creating the control socket directory of %s: %w", ifname, err)
 	}
 
 	proc, err := startSupplicant(ifname, config)
@@ -284,14 +258,12 @@ func superviseSupplicant(ifname, config string) (*wpaControl, error) {
 	}
 	control, err := attachWPAControl(filepath.Join(dir, ifname))
 	if err != nil {
-		// A supplicant that never attached is not supervised, so it is
-		// stopped here and its death awaited. The start marked its pid
-		// as expected, and a death that nothing awaits stays parked in
-		// the registry. A later child that reuses the pid, k3s in the
-		// worst case, would then read that status at once as its own
-		// death.
+		// Nothing supervises this supplicant yet, so stop it and wait
+		// for its exit here. The death registry keeps the exit status
+		// of a process that nobody awaits, and a later child that
+		// reuses the pid, such as k3s, would read it as its own exit.
 		endSupplicant(ifname, proc)
-		return nil, fmt.Errorf("attaching to the supplicant on %s: %w", ifname, err)
+		return nil, fmt.Errorf("attaching to the control socket of the supplicant on %s: %w", ifname, err)
 	}
 
 	p := &supplicantProcess{
@@ -299,14 +271,10 @@ func superviseSupplicant(ifname, config string) (*wpaControl, error) {
 		stop: make(chan struct{}), done: make(chan struct{}),
 		backoff: time.Second, maxBackoff: 30 * time.Second,
 	}
-	// A radio that settles after the shutdown began gets its
-	// supplicant stopped, not supervised. The process just started,
-	// so it is stopped by the same deliberate path the shutdown
-	// uses, and the caller reports the refusal.
 	if !registerSupplicant(p) {
 		control.close()
 		endSupplicant(ifname, proc)
-		return nil, fmt.Errorf("the machine is stopping its supplicants; the one on %s was stopped again", ifname)
+		return nil, fmt.Errorf("the shutdown has started, so the supplicant on %s was stopped instead of supervised", ifname)
 	}
 	plane.start("the supplicant on "+ifname, func(ctx context.Context) error {
 		p.run(ctx, proc, config)
@@ -315,33 +283,32 @@ func superviseSupplicant(ifname, config string) (*wpaControl, error) {
 	return control, nil
 }
 
-// endSupplicant stops a supplicant that no supervision loop holds,
-// and awaits its death, so the registry keeps nothing for its pid.
+// endSupplicant stops a supplicant that no supervision loop owns and
+// waits for its exit, so the death registry keeps nothing for its pid.
 func endSupplicant(ifname string, proc runningSupplicant) {
 	died := make(chan unix.WaitStatus, 1)
 	go func() { died <- deaths.await(proc.pid) }()
 	stopSupplicant(ifname, proc, died)
 }
 
-// supplicantOutcome is why one wait inside the supervision loop ended.
+// supplicantOutcome is the reason a wait in the supervision loop
+// ended.
 type supplicantOutcome int
 
 const (
 	supplicantDied   supplicantOutcome = iota // the process exited on its own
-	supplicantEnded                           // the loop was asked to finish
-	supplicantWaited                          // the delay elapsed and nothing else happened
+	supplicantEnded                           // stop or the context ended the loop
+	supplicantWaited                          // the delay elapsed first
 )
 
-// await waits for whichever comes first: the process exiting, the loop
-// being asked to finish, or a delay elapsing. A nil died channel says
-// there is no process to wait on, and a nil delay says wait as long as
-// it takes.
+// await waits for the process to exit, for stop or the context to end
+// the loop, or for delay to elapse, whichever happens first. A nil
+// died channel means there is no process, and a nil delay means no
+// time limit.
 //
-// The stop step is conditional because between a death and the next
-// successful start there is no process, so a stop arriving in that
-// window has nothing to signal. Stopping a process whose exit the
-// reaper already collected would wait on an exit that can never be
-// reported a second time.
+// A stop calls stopSupplicant only when died is not nil. Between a
+// death and the next start there is no process, and stopping the dead
+// one would wait forever for an exit that the reaper already reported.
 func (p *supplicantProcess) await(ctx context.Context, proc runningSupplicant,
 	died <-chan unix.WaitStatus, delay <-chan time.Time) supplicantOutcome {
 	select {
@@ -363,8 +330,7 @@ func (p *supplicantProcess) await(ctx context.Context, proc runningSupplicant,
 	}
 }
 
-// next doubles the restart delay, up to the cap. A start that keeps
-// failing then retries at a steady pace rather than faster and faster.
+// next returns the delay after backoff: double it, up to maxBackoff.
 func (p *supplicantProcess) next(backoff time.Duration) time.Duration {
 	if backoff >= p.maxBackoff {
 		return p.maxBackoff
@@ -372,15 +338,9 @@ func (p *supplicantProcess) next(backoff time.Duration) time.Duration {
 	return backoff * 2
 }
 
-// run keeps one supplicant running for the life of the boot, modelled on
-// superviseK3s: the reaper reports each death, the loop reports it on the
-// console, and the next start waits out a backoff that doubles while the
-// failures stay fast.
-//
-// The loop has exactly two states, and they are separate functions
-// because they wait on different things. While a process runs, watch
-// holds it. Between processes, restart holds it, and there is no
-// process to signal or to wait on until restart hands back a live one.
+// run supervises one supplicant until stop closes or ctx ends. It
+// alternates between watch, while a process runs, and restart, after a
+// death, when there is no process to signal or wait on.
 func (p *supplicantProcess) run(ctx context.Context, proc runningSupplicant, config string) {
 	defer close(p.done)
 	backoff := p.backoff
@@ -388,17 +348,13 @@ func (p *supplicantProcess) run(ctx context.Context, proc runningSupplicant, con
 	for {
 		started := time.Now()
 		died := make(chan unix.WaitStatus, 1)
-		// The pid is passed in rather than captured, because the loop
-		// gives the variable the next process's pid before this
-		// goroutine is guaranteed to have read it.
+		// The pid is a parameter because the loop reassigns proc, and
+		// the goroutine could otherwise read the next process's pid.
 		go func(pid int) { died <- deaths.await(pid) }(proc.pid)
 
 		if p.watch(ctx, proc, died, attached) == supplicantEnded {
 			return
 		}
-		// A supplicant that ran for a while and then died is a fresh
-		// failure, not a continuing one, so its restart starts the
-		// pacing over.
 		if time.Since(started) > time.Minute {
 			backoff = p.backoff
 		}
@@ -407,22 +363,18 @@ func (p *supplicantProcess) run(ctx context.Context, proc runningSupplicant, con
 		if !ok {
 			return
 		}
-		// A new process arrives unattached. The list of attached
-		// clients lives in the process that died, so the new one
-		// reports to nobody until it is asked, and a parked boot is
-		// waiting on exactly those reports.
 		proc, attached = next, false
 	}
 }
 
-// watch holds one running supplicant. It returns supplicantDied when the
-// process exited on its own, and supplicantEnded when the loop was asked
-// to finish, in which case it has already stopped the process.
+// watch supervises one running supplicant. It returns supplicantDied
+// when the process exits on its own, and supplicantEnded after it
+// stops the process because stop closed or ctx ended.
 //
-// While the event stream is detached, watch keeps asking for it, on the
-// same backoff the restarts use. A single failed attach would otherwise
-// leave the supplicant running and reporting to nobody, which reads on
-// the console and in the status exactly like a radio that went quiet.
+// While the control client is not attached, watch retries the attach
+// with the same doubling delay as restart. Without the retry, one
+// failed attach leaves a supplicant that sends its events to no one,
+// and on the console and in the status that looks like a quiet radio.
 func (p *supplicantProcess) watch(ctx context.Context, proc runningSupplicant,
 	died <-chan unix.WaitStatus, attached bool) supplicantOutcome {
 	backoff := p.backoff
@@ -430,14 +382,14 @@ func (p *supplicantProcess) watch(ctx context.Context, proc runningSupplicant,
 		if attached {
 			return p.await(ctx, proc, died, nil)
 		}
-		// The attach runs in a goroutine so that waiting for the
-		// supplicant's socket to appear cannot delay a stop.
+		// attach waits for the supplicant's socket to appear. It runs
+		// in a goroutine so that a stop does not have to wait for it.
 		attempt := make(chan error, 1)
 		go func() { attempt <- p.control.attach() }()
 		select {
 		case err := <-attempt:
 			if err == nil {
-				fmt.Printf("liken: wireless: the event stream on %s is attached again\n", p.ifname)
+				fmt.Printf("liken: wireless: the control client of the supplicant on %s attached again\n", p.ifname)
 				attached = true
 				continue
 			}
@@ -459,11 +411,10 @@ func (p *supplicantProcess) watch(ctx context.Context, proc runningSupplicant,
 	}
 }
 
-// restart gets a supplicant running again, however many attempts that
-// takes. It returns a live process, or false when the loop
-// was asked to finish. It never returns after a failed start, because a
-// start that failed leaves the machine with no supplicant at all, and
-// the radio then has nothing keeping its session alive.
+// restart starts the supplicant again, with a doubling delay before
+// each attempt, until a start succeeds. It returns the new process, or
+// false when stop closes or ctx ends. It never gives up, because
+// without a supplicant the radio stays disconnected.
 func (p *supplicantProcess) restart(ctx context.Context, config string, backoff *time.Duration) (runningSupplicant, bool) {
 	for {
 		*backoff = p.next(*backoff)
@@ -480,40 +431,28 @@ func (p *supplicantProcess) restart(ctx context.Context, config string, backoff 
 	}
 }
 
-// runningSupplicant is one supplicant process: its pid, for the death
-// registry and the console, and the way to signal it. The signal goes
-// through the os.Process that started the process. The Process holds a
-// pidfd, and Go signals through pidfd_send_signal, so a signal to a
-// process that the reaper already collected returns os.ErrProcessDone
-// and cannot reach a later process that reuses the pid. signal is a
-// function so that a test can record the signals the loop sends
-// without any real process being signalled.
+// runningSupplicant is one supplicant process. signal sends through
+// the os.Process that started it. That Process holds a pidfd, and Go
+// signals with pidfd_send_signal, so a signal to a process that the
+// reaper already collected returns os.ErrProcessDone and cannot reach
+// a later process that reuses the pid. Tests replace signal to record
+// signals.
 type runningSupplicant struct {
 	pid    int
 	signal func(os.Signal) error
 }
 
-// supplicantHandle wraps the os.Process that started a supplicant.
 func supplicantHandle(p *os.Process) runningSupplicant {
 	return runningSupplicant{pid: p.Pid, signal: p.Signal}
 }
 
-// startSupplicant launches the supplicant for one interface and reports
-// the running process. It is a variable holding the real launcher below, so a
-// test can script the outcomes of the restart loop without a radio, a
-// binary, or a reaper, the same way parkConsole and wirelessRunDir let a
-// test stand in for a device and a tmpfs.
+// startSupplicant is a variable so that a test can script start
+// results without a radio, the binary, or the reaper.
 var startSupplicant = execSupplicant
 
-// execSupplicant runs the vendored program.
-//
-// -i names the interface and -c names the generated file. -D names
-// the driver outright rather than letting the program try each one it
-// was built with; nl80211 is the only driver in liken's build anyway.
-// The program stays in the foreground because the supervisor above is
-// what keeps it running, and a daemonized process would exit
-// immediately and put its own child out of the death registry's
-// reach.
+// execSupplicant runs the supplicant in the foreground, without -B.
+// With -B the supplicant forks and the parent exits at once, so the
+// death registry would report only the exit of that parent.
 func execSupplicant(ifname, config string) (runningSupplicant, error) {
 	cmd := exec.Command(supplicantBinary, "-i", ifname, "-c", config, "-D", "nl80211")
 	cmd.Stdout = &lineWriter{dest: console, prefix: "wpa | "}
@@ -525,34 +464,29 @@ func execSupplicant(ifname, config string) (runningSupplicant, error) {
 	return supplicantHandle(cmd.Process), nil
 }
 
-// stopSupplicant asks one supplicant to exit and waits for the reaper
-// to confirm it, escalating when it does not.
-//
-// The supplicant is stopped deliberately rather than left to the
-// general kill. On SIGTERM it deauthenticates from the access point
-// and takes the interface down, which leaves the radio in a state the
-// next boot can start from. And the shutdown's kill(-1) would race
-// the restart loop above into starting a supplicant it is about to
-// kill.
+// stopSupplicant sends SIGTERM to a supplicant and waits for the
+// reaper to report its exit, and sends SIGKILL after 5 seconds. On
+// SIGTERM the supplicant deauthenticates from the access point and
+// takes the interface down, which leaves the radio ready for the next
+// boot.
 func stopSupplicant(ifname string, proc runningSupplicant, died <-chan unix.WaitStatus) {
 	fmt.Printf("liken: wireless: stopping the supplicant on %s (pid %d)\n", ifname, proc.pid)
 	_ = proc.signal(unix.SIGTERM)
 	select {
 	case <-died:
 	case <-time.After(5 * time.Second):
-		fmt.Fprintf(os.Stderr, "liken: wireless: the supplicant on %s ignored SIGTERM for 5s; killing it\n", ifname)
+		fmt.Fprintf(os.Stderr, "liken: wireless: the supplicant on %s did not exit 5s after SIGTERM, so init sends SIGKILL\n", ifname)
 		_ = proc.signal(unix.SIGKILL)
 		<-died
 	}
 }
 
-// stopSupplicants ends every supervised supplicant. The shutdown calls
-// it before it signals the rest of the machine, so the restart loops are
-// finished before kill(-1) reaches anything.
+// stopSupplicants stops every supervised supplicant and waits up to 10
+// seconds for each supervision loop to finish. The shutdown calls it
+// before kill(-1). Otherwise a supervision loop restarts the
+// supplicant that the SIGTERM of kill(-1) stopped, and the new process
+// gets only the SIGKILL that follows, so it never deauthenticates.
 func stopSupplicants() {
-	// The latch and the list move under one hold of the lock: after
-	// this block, every registered supplicant is in running, and
-	// every later register is refused.
 	supplicantsMu.Lock()
 	supplicantsStopping = true
 	running := supplicants
@@ -566,18 +500,17 @@ func stopSupplicants() {
 		select {
 		case <-p.done:
 		case <-time.After(10 * time.Second):
-			fmt.Fprintf(os.Stderr, "liken: wireless: the supplicant on %s did not stop; going on without it\n", p.ifname)
+			fmt.Fprintf(os.Stderr, "liken: wireless: the supervision of the supplicant on %s did not finish within 10s, so the shutdown continues without it\n", p.ifname)
 		}
 	}
 }
 
-// routeLookup answers which interface a packet toward one address would
-// leave by. It is a function value so that the park decision below is a
-// pure function that a test can drive with no netlink and no kernel.
+// routeLookup returns the name of the interface that a packet to the
+// address would leave by. It is a function type so that tests can run
+// radioToWaitFor without netlink.
 type routeLookup func(net.IP) (string, error)
 
-// routeVia asks the kernel's routing table the same question the
-// kernel would ask when a packet is sent.
+// routeVia is the routeLookup that reads the kernel's routing table.
 func routeVia(dst net.IP) (string, error) {
 	routes, err := netlink.RouteGet(dst)
 	if err != nil {
@@ -593,10 +526,9 @@ func routeVia(dst net.IP) (string, error) {
 	return link.Attrs().Name, nil
 }
 
-// endpointAddress reads the literal address out of a cluster endpoint,
-// for example https://10.10.0.1:6443. It reports false for an endpoint
-// that names no address, which covers both an empty endpoint and a
-// name that only DNS could resolve.
+// endpointAddress returns the IP address in a cluster endpoint such as
+// https://10.10.0.1:6443. It returns false when the endpoint is empty
+// or has a host name instead of an address.
 func endpointAddress(endpoint string) (net.IP, bool) {
 	if endpoint == "" {
 		return nil, false
@@ -609,26 +541,17 @@ func endpointAddress(endpoint string) (net.IP, bool) {
 	return ip, ip != nil
 }
 
-// parkDecision answers the plan's question: does this boot stop and
-// wait, or does it go on degraded? It returns the radio to wait on and
-// the reason to print, or nil when the boot goes on.
+// radioToWaitFor decides whether the boot waits for a radio or
+// continues without it. It returns the radio to wait for and the
+// message to print, or nil when the boot continues.
 //
-// The rule is the plan's: only a deterministic failure qualifies, and
-// the boot goes on whenever any settled interface gives a route
-// toward the cluster's endpoint. A machine whose only path was the
-// failed radio waits, because a machine that cannot reach its cluster
-// has nothing to do anyway.
-//
-// An endpoint that names no address never parks. A DNS name needs
-// DNS, and DNS needs the network that is in question, so nothing
-// reliable can be decided from it. A machine alone is its own cluster
-// and declares no endpoint at all. The plan's bias in both cases is
-// to boot rather than to wait.
-//
-// A route that leaves by loopback counts as reaching the endpoint. A
-// leader's endpoint is its own address, so the kernel answers
-// loopback, and a leader must never park on a radio it does not need.
-func parkDecision(conns []*connection, endpoint string, route routeLookup) (*radio, string) {
+// The boot waits only when a radio failed deterministically and no
+// interface that came up has a route toward the cluster's endpoint
+// (see routeToward). A machine that cannot reach its cluster has
+// nothing to do until the radio joins. Any other radio failure never
+// makes the boot wait, so an access point that is off or out of range
+// cannot stop a machine from booting.
+func radioToWaitFor(conns []*connection, endpoint string, route routeLookup) (*radio, string) {
 	var failed *radio
 	for _, conn := range conns {
 		if failed == nil && conn.radio != nil && conn.radio.deterministic() {
@@ -643,20 +566,19 @@ func parkDecision(conns []*connection, endpoint string, route routeLookup) (*rad
 		return nil, ""
 	}
 	reason := fmt.Sprintf("liken: wireless: %s cannot join %s: %s", failed.ifname, failed.ssid, failed.message)
-	return failed, fmt.Sprintf("%s; %s, so this boot waits here", reason, why)
+	return failed, fmt.Sprintf("%s, and %s, so the boot waits for the radio", reason, why)
 }
 
-// routeToward answers the one question both the park and the pass
-// split ask: can this machine, on the interfaces that settled, send
-// a packet toward its cluster's endpoint? The false answers carry
-// the reason, in the words the park has always printed.
+// routeToward reports whether the machine can send a packet to its
+// cluster's endpoint through an interface that has an address. When it
+// cannot, the second result says why, for the console. With no
+// addressed interface it always returns false.
 //
-// An endpoint that names no address counts as routed. A DNS name
-// needs DNS, and DNS needs the network in question, so nothing
-// reliable can be decided from it; a machine alone declares no
-// endpoint at all. The bias in both cases is the plan's: boot rather
-// than wait. A route that leaves by loopback also counts, because a
-// leader's endpoint is its own address.
+// When some interface has an address, an empty endpoint or a host name
+// counts as reachable. A machine with no endpoint is its own cluster,
+// and a host name needs DNS, which can need the network that is
+// failing, so its route cannot be checked. A route through loopback
+// also counts, because a leader's endpoint is its own address.
 func routeToward(conns []*connection, endpoint string, route routeLookup) (bool, string) {
 	settled := map[string]bool{}
 	for _, conn := range conns {
@@ -673,43 +595,42 @@ func routeToward(conns []*connection, endpoint string, route routeLookup) (bool,
 	}
 	ifname, err := route(dst)
 	if err != nil {
-		return false, fmt.Sprintf("nothing on this machine has a route toward %s", dst)
+		return false, fmt.Sprintf("the machine has no route toward %s", dst)
 	}
 	if ifname == "lo" || settled[ifname] {
 		return true, ""
 	}
-	return false, fmt.Sprintf("the route toward %s leaves by %s, which never came up", dst, ifname)
+	return false, fmt.Sprintf("the route toward %s leaves by %s, which has no address", dst, ifname)
 }
 
-// parkConsole is the device a park writes its reason to. It is a
-// variable so a test can point the hold at a file of its own.
-var parkConsole = consoleDevice
+// radioWaitConsole is the device that waitForRadio writes its message
+// to. It is a variable so that a test can use a file.
+var radioWaitConsole = consoleDevice
 
-// park holds the boot on a radio that cannot join, and releases it the
-// moment the supplicant reports that the radio did.
+// waitForRadio blocks the boot until the supplicant reports that the
+// radio has joined, or until its control socket closes.
 //
-// The message goes out twice: the log copy travels the kmsg pipeline
-// to every console the command line named, and the direct copy
-// reaches the one device a person is looking at. Unlike the
-// installer's holds, this hold reads no key. The thing that ends it
-// is an event on the socket rather than a keypress, so a fix on the
-// network side resumes the boot with nobody at the machine.
-func park(r *radio, reason string) {
+// It prints the reason to stderr, which init sends to the kernel log
+// and so to every console on the kernel command line, and to
+// radioWaitConsole, the device a person most likely watches. Unlike the
+// installer's waits it reads no keys, so a repair to the network
+// resumes the boot with nobody at the machine.
+func waitForRadio(r *radio, reason string) {
+	retrying := "liken: wireless: the supplicant keeps retrying, and the boot continues when the radio joins"
 	fmt.Fprintln(os.Stderr, reason)
-	fmt.Fprintln(os.Stderr, "liken: wireless: the supplicant keeps trying; this boot goes on the moment the radio joins")
-	if device, err := os.OpenFile(parkConsole, os.O_RDWR, 0); err == nil {
+	fmt.Fprintln(os.Stderr, retrying)
+	if device, err := os.OpenFile(radioWaitConsole, os.O_RDWR, 0); err == nil {
 		fmt.Fprintln(device, reason)
-		fmt.Fprintln(device, "liken: wireless: the supplicant keeps trying; this boot goes on the moment the radio joins")
+		fmt.Fprintln(device, retrying)
 		device.Close()
 	}
 
-	// A park with no supplicant waits anyway. The configuration
-	// itself was refused, so no process is running to report a
-	// repair, and nothing this machine can do would produce one; the
-	// fix is the install media. PID 1 must not exit, which is why
-	// this waits rather than returning.
+	// A WrongKey radio with no supplicant is one whose configuration
+	// init could not build, so no event can end the wait, and only a
+	// new passphrase on the install media fixes it. PID 1 must not
+	// exit, so waitForRadio sleeps forever.
 	if r.control == nil {
-		fmt.Fprintln(os.Stderr, "liken: wireless: no supplicant is running for this interface; the passphrase on the install media is the fix")
+		fmt.Fprintf(os.Stderr, "liken: wireless: no supplicant runs on %s, so the radio cannot join until the install media has a new passphrase\n", r.ifname)
 		for {
 			time.Sleep(time.Hour)
 		}
@@ -719,7 +640,7 @@ func park(r *radio, reason string) {
 		if line := describeWirelessEvent(r.ifname, event); line != "" {
 			fmt.Println(line)
 		}
-		state, message, settled := judgeWirelessEvent(event)
+		state, message, settled := classifyWirelessEvent(event)
 		if !settled {
 			continue
 		}
@@ -728,8 +649,7 @@ func park(r *radio, reason string) {
 			return
 		}
 	}
-	// A closed stream ends the hold. The events are the only thing
-	// that can release this wait, and a boot stopped forever with no
-	// way to report why is worse than a boot that goes on degraded.
-	fmt.Fprintf(os.Stderr, "liken: wireless: %s: the supplicant's control socket closed; going on without the radio\n", r.ifname)
+	// When the event stream closes, nothing can end the wait, so the
+	// boot continues without the radio rather than stop with no report.
+	fmt.Fprintf(os.Stderr, "liken: wireless: %s: the supplicant's control socket closed, so the boot continues without the radio\n", r.ifname)
 }

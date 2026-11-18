@@ -1,21 +1,17 @@
 package main
 
-// Reading and writing the firmware's variables.
+// This file reads and writes UEFI variables, which hold the boot
+// entries and the boot order. loadoption.go describes the entry
+// format.
 //
-// A UEFI machine's firmware keeps a small store of variables in
-// non-volatile memory. This store is the modern equivalent of "BIOS
-// settings", and the boot menu lives there (loadoption.go describes
-// the records). The kernel exposes the store as efivarfs, a tiny
-// filesystem where every variable is a file, so reading a variable
-// is only reading its file. Each file's first four bytes are the
-// variable's attribute flags (non-volatile, visible at boot time,
-// visible at runtime); the payload follows those flags.
+// The kernel exposes the firmware's variable store as efivarfs, where
+// each variable is a file. The first four bytes of the file are the
+// variable's attribute flags (non-volatile, boot services access,
+// runtime access), and the payload follows them.
 //
-// None of this is guaranteed to exist: /sys/firmware/efi appears only
-// when UEFI actually booted the kernel. Its absence is a fact worth
-// reporting, not an error. A direct-kernel QEMU boot and an old BIOS
-// server are both real machines that liken runs on. Everything here
-// handles a machine with no variable store by reporting nothing.
+// /sys/firmware/efi exists only when UEFI booted the kernel. liken also
+// runs on BIOS machines and in direct-kernel QEMU boots, which have no
+// variable store, so a missing store is not an error.
 
 import (
 	"encoding/binary"
@@ -30,35 +26,25 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// Every variable's filename carries its owner's GUID, because
-// variable names are unique only per vendor. The boot manager's
-// variables all belong to the specification's own GUID, fixed
-// permanently as EFI_GLOBAL_VARIABLE.
+// efiGlobalVariable is EFI_GLOBAL_VARIABLE, the vendor GUID of the boot
+// manager's variables, such as Boot####, BootOrder, and BootNext.
+// efivarfs names each file <name>-<vendor GUID>, because a variable
+// name is unique only within its vendor GUID.
 const efiGlobalVariable = "8be4df61-93ca-11d2-aa0d-00e098032b8c"
 
-// efiSysDir is where the kernel exposes UEFI runtime services. Its
-// existence is the whole test for which firmware kind is present. It
-// is a variable rather than a constant, so tests can set which
-// firmware kind they run under, regardless of the machine running
-// them.
+// efiSysDir and efiVarsDir are variables so that a test can point them
+// at a fake store, or at nothing to act as a BIOS machine.
 var efiSysDir = "/sys/firmware/efi"
 
-// efiVarsDir is a variable rather than a constant so tests can stand
-// up a directory of fake variables and exercise everything above the
-// mount itself.
 var efiVarsDir = efiSysDir + "/efivars"
 
-// firmwareIsUEFI reports whether UEFI firmware booted this kernel.
-// The kernel creates /sys/firmware/efi only when the EFI runtime
-// services came up with it.
 func firmwareIsUEFI() bool {
 	_, err := os.Stat(efiSysDir)
 	return err == nil
 }
 
-// mountEFIVars mounts the firmware's variable store, when there is
-// one. It does nothing on non-UEFI machines. EBUSY means something
-// already mounted the store, which serves the same purpose.
+// mountEFIVars mounts efivarfs on a UEFI machine. EBUSY means that it
+// is already mounted.
 func mountEFIVars() {
 	if !firmwareIsUEFI() {
 		return
@@ -74,45 +60,37 @@ func mountEFIVars() {
 	}
 }
 
-// readEFIVar reads one global variable's payload, with the efivarfs
-// attribute word stripped. Callers get the variable's value, in the
-// form the specification describes.
+// readEFIVar returns the payload of one global variable, without the
+// attribute word.
 func readEFIVar(dir, name string) ([]byte, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, name+"-"+efiGlobalVariable))
 	if err != nil {
 		return nil, err
 	}
 	if len(raw) < 4 {
-		return nil, fmt.Errorf("variable %s is %d bytes; even an empty one carries 4 of attributes", name, len(raw))
+		return nil, fmt.Errorf("variable %s has %d bytes, and every variable starts with a 4-byte attribute word", name, len(raw))
 	}
 	return raw[4:], nil
 }
 
-// fsImmutableFlag is the kernel's per-file immutable bit
-// (FS_IMMUTABLE_FL), part of the fixed ioctl ABI that chattr uses.
-// x/sys does not export it, so this file spells it out here, the
-// same way it spells out the ext4 superblock offsets.
+// fsImmutableFlag is the kernel's FS_IMMUTABLE_FL file flag, the one
+// that chattr +i sets. golang.org/x/sys/unix does not export it.
 const fsImmutableFlag = 0x00000010
 
-// efiVarAttrs is the attribute word every liken-written variable
-// carries: stored in NVRAM (survives power loss), visible to the
-// firmware's boot services, and visible to the running OS. Boot
-// entries need all three attributes. An entry that the boot manager
-// cannot see can never be chosen.
+// efiVarAttrs is the attribute word of every variable that liken
+// writes. The variable must survive power loss and be readable by the
+// boot manager, or the firmware cannot boot from it.
 const efiVarAttrs = 0x00000007 // NON_VOLATILE | BOOTSERVICE_ACCESS | RUNTIME_ACCESS
 
-// writeEFIVar writes one global variable: the attribute word and the
-// payload in a single write. This is the only way efivarfs lets a
-// variable change, because a partial variable is worse than none, so
-// the filesystem refuses piecemeal writes.
+// writeEFIVar writes one global variable. efivarfs requires the
+// attribute word and the payload in a single write.
 //
-// The complication is the immutable flag. The kernel marks every
-// variable file immutable, so that a stray `rm -rf /` cannot
-// permanently disable the motherboard, a real failure mode on early
-// UEFI machines. That flag is why this helper exists instead of a
-// plain WriteFile. Clearing the flag takes two ioctls on the
-// existing file. A variable that does not exist yet has no flag to
-// clear.
+// efivarfs marks a variable's file immutable unless the variable is on
+// the kernel's list of variables that are safe to delete, so that
+// `rm -rf /` cannot delete a variable that the firmware needs to boot.
+// The boot variables are on that list, but this clears the flag of an
+// existing file before it writes, so that a write never fails on the
+// flag.
 func writeEFIVar(dir, name string, payload []byte) error {
 	path := filepath.Join(dir, name+"-"+efiGlobalVariable)
 	if f, err := os.Open(path); err == nil {
@@ -135,10 +113,9 @@ func writeEFIVar(dir, name string, payload []byte) error {
 	return nil
 }
 
-// removeEFIVar deletes one variable, which efivarfs passes to the
-// firmware as a SetVariable of no data. It clears the immutable flag
-// first, as writeEFIVar does. A variable that is already gone is not
-// an error.
+// removeEFIVar deletes one variable, and clears the immutable flag
+// first as writeEFIVar does. A variable that does not exist is not an
+// error.
 func removeEFIVar(dir, name string) error {
 	path := filepath.Join(dir, name+"-"+efiGlobalVariable)
 	if f, err := os.Open(path); err == nil {
@@ -158,10 +135,9 @@ func removeEFIVar(dir, name string) error {
 	return nil
 }
 
-// listBootEntries reads every Boot#### variable, decodes it, and
-// keys the result by entry number. It skips entries that will not
-// decode; those belong to the firmware, and liken finds its own
-// entries by description, never by assuming a number.
+// listBootEntries returns every Boot#### variable that decodes, keyed
+// by entry number. An entry that does not decode is not one that liken
+// wrote, so it is skipped.
 func listBootEntries(dir string) map[uint16]loadOption {
 	entries := map[uint16]loadOption{}
 	files, err := os.ReadDir(dir)
@@ -186,22 +162,21 @@ func listBootEntries(dir string) map[uint16]loadOption {
 	return entries
 }
 
-// setBootEntry writes a boot entry under the number that already
-// carries its description, or under the lowest free number. This is
-// recognition by name, the same as with partitions: the number is a
-// handle the firmware owns, and the description is the identity
-// liken owns.
+// setBootEntry writes a boot entry and returns its number. It
+// overwrites the entry with the same description, or else uses the
+// lowest number that has no variable. liken finds its entries by
+// description because the firmware can number entries any way it likes.
 func setBootEntry(dir string, option loadOption) (uint16, error) {
 	entries := listBootEntries(dir)
 	number := uint16(0)
 	for {
 		existing, taken := entries[number]
 		if taken && existing.description == option.description {
-			break // ours already; overwrite in place
+			break
 		}
 		if !taken {
 			if _, err := readEFIVar(dir, bootEntryID(number)); err != nil {
-				break // genuinely free, not just undecodable
+				break // an entry that does not decode still uses its number
 			}
 		}
 		number++
@@ -209,11 +184,8 @@ func setBootEntry(dir string, option loadOption) (uint16, error) {
 	return number, writeEFIVar(dir, bootEntryID(number), encodeLoadOption(option))
 }
 
-// readBootOrder decodes the firmware's standing preference list.
-// BootOrder is a packed array of 16-bit little-endian entry numbers,
-// with the first preference first. readBootOrder returns nil when
-// the variable is missing or unreadable; nil reads the same as an
-// empty order everywhere that matters.
+// readBootOrder returns the entry numbers in BootOrder, first choice
+// first, or nil when the variable is missing or unreadable.
 func readBootOrder(dir string) []uint16 {
 	b, err := readEFIVar(dir, "BootOrder")
 	if err != nil {
@@ -226,8 +198,6 @@ func readBootOrder(dir string) []uint16 {
 	return order
 }
 
-// writeBootOrder packs a preference list back into the firmware's
-// format and writes it.
 func writeBootOrder(dir string, order []uint16) error {
 	payload := make([]byte, len(order)*2)
 	for i, n := range order {
@@ -236,38 +206,25 @@ func writeBootOrder(dir string, order []uint16) error {
 	return writeEFIVar(dir, "BootOrder", payload)
 }
 
-// firmwareFacts reads the machine's boot facts from wherever this
-// machine keeps them: which mode it booted in, which entry the boot
-// used, and the standing preference. The code decodes each fact to a
-// name, so a fleet listing reads "liken slot A", not a hex dump. The
-// console parity principle holds here as everywhere: reportFirmware
-// prints these same facts at boot.
-//
-// The variable store's presence determines the mode: efivarfs exists
-// only when UEFI booted this kernel. Everything else counts as
-// "BIOS", and a BIOS machine's boot facts live on disk instead, in
-// GRUB's environment block (biosFirmwareFacts).
+// firmwareFacts returns the firmware mode, BootCurrent, BootNext, and
+// BootOrder, with each entry shown with its description. When dir does
+// not exist, the machine is BIOS, and biosFirmwareFacts reads the boot
+// facts from GRUB's environment block.
 func firmwareFacts(dir string) machine.FirmwareStatus {
 	if _, err := os.Stat(dir); err != nil {
 		return biosFirmwareFacts()
 	}
 	fw := machine.FirmwareStatus{Mode: machine.FirmwareUEFI}
 
-	// BootCurrent and BootNext are single entry numbers; BootOrder is
-	// a list of them. All are 16-bit little-endian, and all are
-	// optional: a firmware that direct-booted a kernel may have set
-	// none of them.
+	// A direct-kernel boot can set none of these variables.
 	if b, err := readEFIVar(dir, "BootCurrent"); err == nil && len(b) >= 2 {
 		fw.BootCurrent = describeBootEntry(dir, binary.LittleEndian.Uint16(b), "")
 	}
 	order := readBootOrder(dir)
-	// A healthy firmware consumes BootNext at power-on, and this runs
-	// after power-on, so any value found here deserves a word in the
-	// report. Two kinds of value exist. An entry that repeats the
-	// head of the order is the pin that assertBootNext leaves
-	// (bootentries.go), which means the firmware did not consume the
-	// variable. An entry that names anything else is a trial that has
-	// not run. The note tells a reader which of the two they see.
+	// The firmware deletes BootNext when it boots from it.
+	// assertBootNext writes the proven slot to BootNext on every boot,
+	// so a BootNext equal to the first BootOrder entry is that copy.
+	// Any other value is a trial boot that has not happened yet.
 	if b, err := readEFIVar(dir, "BootNext"); err == nil && len(b) >= 2 {
 		next, note := binary.LittleEndian.Uint16(b), ""
 		if len(order) > 0 && order[0] == next {
@@ -282,15 +239,9 @@ func firmwareFacts(dir string) machine.FirmwareStatus {
 	return fw
 }
 
-// describeBootEntry renders one entry in a readable form: the
-// firmware's own name for the variable, plus the entry's description
-// when the code can decode it. An entry that is missing or corrupted
-// still appears by its ID, so nothing in the order stays hidden.
-//
-// The note is what the caller knows about this entry that the entry
-// itself does not say. It joins the description inside the same
-// parentheses, and it appears even for an entry that will not
-// decode, because what the caller knows is true either way.
+// describeBootEntry returns entry n as "Boot0001 (description, note)".
+// It leaves out the description when the entry is missing or does not
+// decode, and the parentheses when there is nothing to put in them.
 func describeBootEntry(dir string, n uint16, note string) string {
 	id, inside := bootEntryID(n), []string{}
 	if payload, err := readEFIVar(dir, id); err == nil {
@@ -307,32 +258,27 @@ func describeBootEntry(dir string, n uint16, note string) string {
 	return fmt.Sprintf("%s (%s)", id, strings.Join(inside, ", "))
 }
 
-// reportFirmware prints the firmware's facts on the console: the
-// same facts firmwareFacts publishes, formatted for the world
-// report. Both modes print the same shape of report, so reading a
-// BIOS machine's console teaches the same things that reading a UEFI
-// machine's console does. Only the mode line and the mechanisms
-// behind the facts differ.
+// reportFirmware prints the facts of firmwareFacts on the console.
 func reportFirmware() {
 	fw := firmwareFacts(efiVarsDir)
 	if fw.Mode == machine.FirmwareUEFI {
 		fmt.Println("liken: firmware: UEFI")
 		if fw.BootCurrent == "" {
-			fmt.Println("liken: firmware: BootCurrent not set (a direct-kernel boot never picks an entry)")
+			fmt.Println("liken: firmware: BootCurrent is not set, because a direct-kernel boot does not select a boot entry")
 		}
 	} else {
-		fmt.Println("liken: firmware: BIOS (no /sys/firmware/efi; boot preferences live with GRUB, when installed)")
+		fmt.Println("liken: firmware: BIOS, because /sys/firmware/efi does not exist. Boot preferences are in GRUB when it is installed")
 	}
 	if fw.BootCurrent != "" {
 		fmt.Printf("liken: firmware: booted via %s\n", fw.BootCurrent)
 	}
 	if fw.BootNext != "" {
-		fmt.Printf("liken: firmware: BootNext holds %s\n", fw.BootNext)
+		fmt.Printf("liken: firmware: BootNext is %s\n", fw.BootNext)
 	}
 	for _, entry := range fw.BootOrder {
 		fmt.Printf("liken: firmware: boot order: %s\n", entry)
 	}
 	if fw.BootOrderKept != nil {
-		fmt.Printf("liken: firmware: the proven slot led the boot order at power-on: %t\n", *fw.BootOrderKept)
+		fmt.Printf("liken: firmware: the proven slot was first in the boot order at power-on: %t\n", *fw.BootOrderKept)
 	}
 }

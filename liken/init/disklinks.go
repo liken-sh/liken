@@ -1,64 +1,37 @@
 package main
 
-// Stable names for the disks a machine reaches over the network.
+// Init creates stable names for disks under /dev/disk/by-path, by-id,
+// and by-uuid. It computes them from sysfs and the partitions' own
+// bytes because it does not run udev.
 //
-// The kernel names a SCSI disk in probe order: sda, sdb, sdc. That
-// name is useless as an identity, because it depends on which disk
-// answered first, and an iSCSI LUN that logs in one boot later gets a
-// different letter. A full distribution solves this with udev, which
-// runs a rules engine over every device event and publishes a tree of
-// symlinks under /dev/disk. One of those trees is by-path, whose
-// names describe how to reach a device rather than which letter it
-// won.
-//
-// A CSI driver has no other option. It asks the target for a LUN, and
-// the answer it gets back is an address, a target name, and a LUN
-// number, never a kernel letter. So every iSCSI CSI driver waits for
-// the by-path name and mounts nothing until that name exists.
-//
-// liken does not run udev, for the reason disks.go states: every
-// value udev publishes comes from reading sysfs, and liken can read
-// sysfs itself. That holds here too. udev builds an iSCSI by-path
-// name in its path_id builtin out of four values, and all four are
-// plain sysfs attributes that exist the moment the LUN appears:
+// The kernel names a SCSI disk in probe order (sda, sdb, sdc), so the
+// name changes when an iSCSI LUN logs in later in one boot than in
+// the last. A CSI driver gets an address, a target name, and a LUN
+// number from the target, never a kernel letter, so it waits for the
+// by-path name and mounts nothing until that name exists. udev builds
+// that name in its path_id builtin from four sysfs attributes, which
+// exist as soon as the LUN appears:
 //
 //	ip-<persistent_address>:<persistent_port>-iscsi-<targetname>-lun-<lun>
 //
-// This file is that computation, and the directories under /dev/disk
-// that hold its results. The component owns every one of them
-// outright: nothing else on a liken machine writes into any of them,
-// so an entry a walk did not produce is stale by definition, and
-// reconcileLinks removes it. This is why a disk's departure, whether
-// an iSCSI session logs out or a local drive is unplugged, needs no
-// handling of its own: the disk leaves sysfs, the next walk stops
-// naming it, and the next reconcile takes its names away.
+// iscsiPaths and localPaths build /dev/disk/by-path, which names a
+// disk by the port it is reached on. idPaths builds /dev/disk/by-id
+// from the identity values that the disk's firmware reports.
+// uuidPaths builds /dev/disk/by-uuid from the filesystem UUID that
+// mke2fs or liken's FAT formatter wrote into each partition.
 //
-// The tree grew as designed. iscsiPaths and localPaths both answer
-// one question, which port does a disk answer on, and their pairs
-// share one directory, /dev/disk/by-path, because that is the one
-// question a CSI driver and a person tracing a cable both ask.
-// idPaths answers a different question, which disk is this, from the
-// identity values a disk's own firmware reports, and publishes them
-// under /dev/disk/by-id. uuidPaths answers a third question, what
-// filesystem does this partition hold, from the bytes mke2fs or
-// liken's own FAT formatter wrote there, and publishes them under
-// /dev/disk/by-uuid. Every link in every one of these trees is
-// relative (../../sdb), for the reason given above: a relative link
-// resolves the same on both sides of the bind mount that carries
-// /dev into a CSI node plugin's container.
+// Nothing else on a machine writes into these directories, so
+// reconcileLinks removes every entry that a walk did not produce. When
+// an iSCSI session logs out or a local drive is unplugged, the disk
+// leaves sysfs and the next walk removes its names.
 //
-// A name two disks produce in the same tree is a collision.
-// mergeDiskLinks, where every builder's pairs land, publishes such a
-// name for neither disk, rather than pointing it at whichever disk it
-// read last. A walk re-reads the whole truth on every uevent, so a
-// collision that persists would otherwise report itself again on
-// every one of those walks, forever. watchDiskLinks is the one place
-// that remembers what the previous walk already reported, so a
-// persistent collision prints one line to stderr naming both disks,
-// once, and a collision that clears and later returns is a fresh
-// fact and prints again.
+// Every link is relative (../../sdb), because a CSI node plugin reads
+// the host's /dev through a bind mount at another path, and an
+// absolute link would not resolve there.
 //
-// Nothing here is specific to iSCSI except iscsiPaths itself.
+// When two disks produce the same name in one tree, mergeDiskLinks
+// publishes the name for neither, because pointing it at whichever
+// disk was read last would be a guess.
 
 import (
 	"context"
@@ -71,9 +44,8 @@ import (
 	"github.com/liken-sh/liken/liken/hardware"
 )
 
-// These are the roots this file reads and writes. They are variables
-// rather than constants so that tests can build a fake machine in a
-// tempdir. On a real boot, they never hold anything else.
+// The roots this file reads and writes. Tests replace them to build a
+// fake machine in a temporary directory.
 var (
 	iscsiSessionClass    = "/sys/class/iscsi_session"
 	iscsiConnectionClass = "/sys/class/iscsi_connection"
@@ -82,26 +54,16 @@ var (
 	diskUUIDsDir         = "/dev/disk/by-uuid"
 )
 
-// diskLinksQuiet is how long the walk waits for a burst of uevents to
-// stop. It is shorter than the hardware watch's interval, because a
-// CSI driver is blocked on the name this walk publishes, while the
-// unclaimed-device report is something a person reads later.
+// diskLinksQuiet is how long watchDiskLinks waits for a burst of
+// uevents to stop before it walks. It is shorter than the hardware
+// watch's interval because a CSI driver is blocked until the name
+// appears, while the unclaimed-device report is read later by a person.
 const diskLinksQuiet = 250 * time.Millisecond
 
-// watchDiskLinks is the machine-plane component that keeps
-// /dev/disk/by-path, /dev/disk/by-id, and /dev/disk/by-uuid correct.
-// It reconciles all three once at start, so a machine that already
-// holds disks and sessions is right without waiting for an event, and
-// then again after every settled burst of uevents.
-//
-// A login and a logout both announce themselves: the kernel sends add
-// events as the SCSI target, the SCSI device, the block device, and
-// the partitions appear, and remove events as they go. Attaching or
-// detaching a local disk announces itself the same way. The existing
-// uevent filter passes all of it. As everywhere else in liken, the
-// event is only a signal that something changed, and the walk
-// re-reads the whole truth, so a coalesced or missed event costs
-// nothing.
+// watchDiskLinks keeps the three link trees matching the disks
+// present. It walks once at start and again after each burst of
+// uevents settles. Each walk reads all of sysfs again, so an event
+// that Settle coalesced loses nothing.
 func watchDiskLinks(ctx context.Context) error {
 	uevents, err := listenForUevents(ctx)
 	if err != nil {
@@ -118,10 +80,9 @@ func watchDiskLinks(ctx context.Context) error {
 				return errUeventsStopped
 			}
 		}
-		// One LUN or local disk arriving produces a burst: the SCSI
-		// target, the SCSI device, the block device, and one event
-		// per partition. A walk into a half-populated tree would name
-		// the disk wrong, so this waits for the burst to finish.
+		// A new disk sends uevents for its SCSI target, its SCSI
+		// device, its block device, and each partition. Wait for them
+		// to stop, so the walk reads sysfs after the disk is complete.
 		hardware.Settle(ctx, uevents, diskLinksQuiet, 5*time.Second)
 		if ctx.Err() != nil {
 			return nil
@@ -129,22 +90,16 @@ func watchDiskLinks(ctx context.Context) error {
 	}
 }
 
-// diskLinkSeen carries the collision memory reportNewCollisions needs
-// from one walk to the next, one field per tree. Each tree keeps its
-// own memory, so a name that collides in two trees at once, unlikely
-// as that is, still gets one line per tree rather than being folded
-// into one or dropped. The zero value is the state watchDiskLinks
-// starts a boot with: nothing reported yet.
+// diskLinkSeen holds the collisions each tree reported on the previous
+// walk, so reportNewCollisions prints only new ones. The zero value
+// means nothing was reported yet.
 type diskLinkSeen struct {
 	path, id, uuid map[diskLinkCollision]bool
 }
 
-// walkDiskLinks runs the one reconcile watchDiskLinks repeats on
-// every settled burst of uevents: read the truth from sysfs and the
-// partitions, publish it to all three trees, and report whatever
-// collision is new since the walk seen described. It is pulled out
-// on its own so a test can drive a walk, or a sequence of walks,
-// directly, without needing a live uevent socket.
+// walkDiskLinks reconciles all three trees and returns this walk's
+// collisions for the next call. Tests call it directly, without a
+// uevent socket.
 func walkDiskLinks(seen diskLinkSeen) diskLinkSeen {
 	pathLinks, pathCollisions := localPaths()
 	idLinks, idCollisions := idPaths()
@@ -159,33 +114,26 @@ func walkDiskLinks(seen diskLinkSeen) diskLinkSeen {
 	}
 }
 
-// reconcileDiskLinks reconciles one tree and reports a failure to
-// stderr rather than stopping the boot: a CSI driver blocked on a
-// by-path name cannot wait for a person to notice a log line, but a
-// fault reconciling one tree, for example a full /dev, must not cost
-// the other two trees their own reconcile.
+// reconcileDiskLinks prints a failure to stderr instead of returning
+// it, so a failure in one tree, such as a full /dev, does not stop the
+// other trees from reconciling.
 func reconcileDiskLinks(dir string, want map[string]string) {
 	if err := reconcileLinks(dir, want); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: disk links: %v\n", err)
 	}
 }
 
-// diskLinkCollision names one link two claimants both produced in a
-// single walk, and the two claimants that produced it, with their
-// "../../" prefix trimmed off. It is comparable, so a set of these
-// can say whether a walk's collision is one an earlier walk already
-// reported.
+// diskLinkCollision is a link name that two devices produced in one
+// walk. first and second are the devices' kernel names, such as sdb.
 type diskLinkCollision struct {
 	name          string
 	first, second string
 }
 
-// reportNewCollisions prints the collisions in current that are not
-// in seen, and returns current as the set the next walk should
-// compare against. A collision two consecutive walks both find is the
-// same fact reported twice, so only the first walk to find it prints;
-// one that dropped out of current since the last walk and later comes
-// back is a fresh fact, and prints again.
+// reportNewCollisions prints the collisions in current that are not in
+// seen, and returns current as seen for the next walk. Every uevent
+// starts a walk, so without seen a collision that lasts would print on
+// every walk. A collision that clears and later returns prints again.
 func reportNewCollisions(current []diskLinkCollision, seen map[diskLinkCollision]bool) map[diskLinkCollision]bool {
 	next := make(map[diskLinkCollision]bool, len(current))
 	for _, c := range current {
@@ -193,25 +141,19 @@ func reportNewCollisions(current []diskLinkCollision, seen map[diskLinkCollision
 		if seen[c] {
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "liken: disk links: %s names both %s and %s; publishing neither\n",
+		fmt.Fprintf(os.Stderr, "liken: disk links: %s would point at both %s and %s, so it is published for neither\n",
 			c.name, c.first, c.second)
 	}
 	return next
 }
 
-// iscsiPaths returns the by-path links this machine's iSCSI sessions
-// imply, as link name to the relative target the link points at.
-//
-// The links are relative (../../sdb), as udev writes them. Every CSI
-// node plugin sees the host's /dev through a bind mount, and a
-// relative link resolves the same on both sides of that mount, while
-// an absolute one would only resolve where /dev sits at /dev.
+// iscsiPaths returns the by-path links for the machine's iSCSI
+// sessions, as link name to relative target, such as "../../sdb".
 func iscsiPaths() map[string]string {
 	sessions, err := os.ReadDir(iscsiSessionClass)
 	if err != nil {
-		// scsi_transport_iscsi creates this class, and that module
-		// loads only when the cluster declares the iscsi feature. Its
-		// absence is the ordinary case on most machines, not a fault.
+		// The scsi_transport_iscsi module creates this class, and it
+		// loads only when the cluster declares the iscsi feature.
 		return nil
 	}
 	links := map[string]string{}
@@ -223,25 +165,21 @@ func iscsiPaths() map[string]string {
 		dir := filepath.Join(iscsiSessionClass, session.Name())
 		target := sysfsString(dir, "targetname")
 
-		// The address belongs to the connection, not the session, and
-		// a session numbers its connections from zero. iSCSI allows
-		// several connections in one session, and udev reads the
-		// first one, so a multi-connection session still yields one
-		// name for the LUN rather than one name per path to it.
+		// The address is an attribute of the connection, not the
+		// session. Like udev, this reads only connection 0, so a LUN
+		// has one name however many connections reach it.
 		//
-		// These are the persistent values, the ones the login was
-		// configured with, rather than address and port, which hold
-		// whatever the current connection negotiated. A target that
-		// redirects a login would otherwise change the disk's name
-		// out from under whoever mounted it.
+		// persistent_address and persistent_port hold the address and
+		// port that the login was configured with. address and port
+		// change when the target redirects the login, and the name of
+		// a mounted disk must not change.
 		connection := filepath.Join(iscsiConnectionClass, "connection"+number+":0")
 		address := sysfsString(connection, "persistent_address")
 		port := sysfsString(connection, "persistent_port")
 
-		// A session mid-login, or one being torn down while this walk
-		// reads it, publishes some of these files and not others. A
-		// partial name would be wrong, so this session contributes
-		// nothing and the next uevent brings another walk.
+		// A session that is logging in or logging out can lack some
+		// of these files. Skip it. The uevent of the next change
+		// starts another walk.
 		if target == "" || address == "" || port == "" {
 			continue
 		}
@@ -253,16 +191,11 @@ func iscsiPaths() map[string]string {
 	return links
 }
 
-// sessionLUNs finds the block devices one session carries, keyed by
-// LUN number. The values are sysfs directories, because the caller
-// needs both the disk's name, which is the directory's base name, and
-// its partitions, which are its subdirectories.
+// sessionLUNs returns the block devices of one session, as LUN number
+// to the device's sysfs directory.
 //
-// deviceDir is the session's own device directory, which holds one
-// entry per SCSI target the session reached. Under each target sits
-// one directory per SCSI device, named with the four-part address
-// host:bus:target:lun. That last field is the LUN the target
-// advertised, and it is the number the CSI driver asked for.
+// deviceDir has one directory per SCSI target, and each target has
+// one directory per SCSI device, named host:bus:target:lun.
 func sessionLUNs(deviceDir string) map[string]string {
 	luns := map[string]string{}
 	targets, err := os.ReadDir(deviceDir)
@@ -270,9 +203,8 @@ func sessionLUNs(deviceDir string) map[string]string {
 		return luns
 	}
 	for _, scsiTarget := range targets {
-		// The session directory also holds its connections, its
-		// class entry, and the usual power and uevent files. Only the
-		// target directories lead to disks.
+		// The directory also has connection, class, power, and uevent
+		// entries.
 		if !strings.HasPrefix(scsiTarget.Name(), "target") {
 			continue
 		}
@@ -286,9 +218,8 @@ func sessionLUNs(deviceDir string) map[string]string {
 			if len(fields) != 4 {
 				continue
 			}
-			// A SCSI device that is not a disk, such as the
-			// controller most targets expose at LUN 0, has no block
-			// directory, and this read passes over it.
+			// A SCSI device that is not a disk, such as the controller
+			// that most targets expose at LUN 0, has no block directory.
 			blockDir := filepath.Join(targetDir, address.Name(), "block")
 			devices, err := os.ReadDir(blockDir)
 			if err != nil {
@@ -302,12 +233,11 @@ func sessionLUNs(deviceDir string) map[string]string {
 	return luns
 }
 
-// addDiskLinks records the names one block device answers to: the
-// disk itself, and name-part<N> for each partition it carries. The
-// suffix is udev's, from the by-path rule in
-// 60-persistent-storage.rules, and the number is the kernel's own
-// partition number rather than a count, so a disk whose second
-// partition was deleted still names the third one part3.
+// addDiskLinks adds to links the name for the disk at deviceDir, and
+// name-part<N> for each of its partitions, as udev's
+// 60-persistent-storage.rules does. N is the kernel's partition
+// number, so the third partition stays part3 after the second is
+// deleted.
 func addDiskLinks(links map[string]string, name, deviceDir string) {
 	device := filepath.Base(deviceDir)
 	links[name] = "../../" + device
@@ -316,9 +246,6 @@ func addDiskLinks(links map[string]string, name, deviceDir string) {
 		return
 	}
 	for _, entry := range entries {
-		// A partition's directory sits inside its disk's, is named
-		// for the partition, and holds a partition file that no other
-		// entry there has.
 		number := sysfsString(filepath.Join(deviceDir, entry.Name()), "partition")
 		if number == "" {
 			continue
@@ -327,12 +254,9 @@ func addDiskLinks(links map[string]string, name, deviceDir string) {
 	}
 }
 
-// localPaths returns the by-path links this machine's local disks
-// imply: the port each one answers on, from diskPathName, plus its
-// partitions. It merges iscsiPaths in as well, so the whole by-path
-// tree comes from one map and one reconcileLinks call: a local disk's
-// port and an iSCSI LUN's address answer the same question, and
-// belong in the same directory.
+// localPaths returns the whole by-path tree: the local disks, named by
+// diskPathName, and the iSCSI LUNs from iscsiPaths, merged into one map
+// so that a local disk and a LUN with the same name collide.
 func localPaths() (map[string]string, []diskLinkCollision) {
 	links := map[string]string{}
 	blocked := map[string]bool{}
@@ -350,10 +274,9 @@ func localPaths() (map[string]string, []diskLinkCollision) {
 	return links, collisions
 }
 
-// idPaths returns the by-id links this machine's local disks imply:
-// every name diskIDNames computes for a disk, plus that disk's
-// partitions under each of those names. A disk with no by-id name,
-// for example a SATA disk with no WWN, contributes nothing.
+// idPaths returns the by-id links for the machine's local disks: each
+// name that diskIDNames returns for a disk, with the disk's partitions
+// under each name.
 func idPaths() (map[string]string, []diskLinkCollision) {
 	links := map[string]string{}
 	blocked := map[string]bool{}
@@ -369,19 +292,10 @@ func idPaths() (map[string]string, []diskLinkCollision) {
 	return links, collisions
 }
 
-// uuidPaths returns the by-uuid links this machine's partitions
-// imply: one link per partition whose filesystem carries a UUID, from
-// filesystemUUID. There is no -part<N> suffix here, unlike the other
-// two trees: a UUID already names one filesystem, and a suffix naming
-// the disk it happens to sit on this boot would say nothing the UUID
-// does not already say.
-//
-// Reading a UUID means reading a partition's own bytes, the
-// superblock or the FAT boot sector, through its device node under
-// devRoot. This is the one builder in this file that touches a
-// device's contents; iscsiPaths, localPaths, and idPaths read only
-// sysfs, which is why they run safely against a disk whose partitions
-// carry no filesystem yet.
+// uuidPaths returns one by-uuid link for each partition whose
+// filesystem has a UUID. filesystemUUID reads the UUID from the
+// superblock or the FAT boot sector through the partition's device
+// node under devRoot. The other builders read only sysfs.
 func uuidPaths() (map[string]string, []diskLinkCollision) {
 	links := map[string]string{}
 	blocked := map[string]bool{}
@@ -396,24 +310,13 @@ func uuidPaths() (map[string]string, []diskLinkCollision) {
 	return links, collisions
 }
 
-// mergeDiskLinks folds one claimant's pairs into a tree's link map,
-// enforcing the rule every tree in this file shares: a name two
-// claimants produce is published for neither, and the reason is
-// recorded as a fact for the caller rather than turned into a guess
-// about which claimant is right. A silent overwrite would point the
-// name at whichever claimant this pass happened to read last.
-//
-// links and blocked carry the state across every call for one tree,
-// so the rule holds however many claimants contribute to it and
-// whichever builder they came from: a local disk and an iSCSI LUN
-// competing for the same by-path name lose it exactly as two local
-// disks competing for the same by-id name do. collisions accumulates
-// the same way, and mergeDiskLinks returns the extended slice because
-// a fresh walk of a tree starts with no collisions of its own; a walk
-// stays stateless, so nothing here remembers what an earlier walk
-// already reported. reportNewCollisions is where that memory lives.
-func mergeDiskLinks(links map[string]string, blocked map[string]bool, collisions []diskLinkCollision, claim map[string]string) []diskLinkCollision {
-	for name, target := range claim {
+// mergeDiskLinks adds one device's links to a tree's links. When a
+// name is already in links with a different target, it deletes the
+// name, adds it to blocked so that no later device publishes it, and
+// appends the collision. The caller passes the same links, blocked,
+// and collisions for every device of one tree.
+func mergeDiskLinks(links map[string]string, blocked map[string]bool, collisions []diskLinkCollision, deviceLinks map[string]string) []diskLinkCollision {
+	for name, target := range deviceLinks {
 		if blocked[name] {
 			continue
 		}
@@ -436,17 +339,14 @@ func mergeDiskLinks(links map[string]string, blocked map[string]bool, collisions
 	return collisions
 }
 
-// reconcileLinks makes dir hold exactly the links in want, and
-// nothing else. It returns the first error it meets, but it keeps
-// going past that error, so one link that cannot be written does not
-// cost every other disk its name.
+// reconcileLinks makes dir contain exactly the links in want. It
+// continues past an error and returns the first one, so one link that
+// cannot be written does not stop the others.
 func reconcileLinks(dir string, want map[string]string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		// Nothing to prune and nothing to publish means there is no
-		// reason for the directory to exist. This is the state of
-		// every machine that runs no network storage, and an empty
-		// by-path tree there would claim more than liken does.
+		// Create the directory only when there is a link to put in
+		// it.
 		if len(want) == 0 {
 			return nil
 		}
@@ -470,15 +370,13 @@ func reconcileLinks(dir string, want map[string]string) error {
 		if current, err := os.Readlink(path); err == nil && current == target {
 			continue
 		}
-		// A link whose disk moved letters has to be replaced, and a
-		// replacement that unlinks first leaves a window where the
-		// name does not exist. A CSI driver polling for that name
-		// would read the window as a missing device. So the new link
-		// is built beside the old one and renamed over it, which the
-		// kernel does in one step. The temporary name starts with a
-		// dot, so it can never collide with a name this file
-		// publishes, and the prune above clears any that a crash left
-		// behind.
+		// Removing the old link before creating the new one would
+		// leave a moment with no link, and a CSI driver that polls for
+		// the name would find the disk missing. So create the link
+		// under a temporary name and rename it over the old one, which
+		// replaces it atomically. No published name starts with a dot,
+		// and the removal loop above deletes a temporary link that a
+		// crash left behind.
 		staging := filepath.Join(dir, "."+name+".new")
 		os.Remove(staging)
 		if err := os.Symlink(target, staging); err != nil {

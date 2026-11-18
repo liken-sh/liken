@@ -6,13 +6,12 @@ import (
 	"testing"
 )
 
-// A hand-assembled EFI_LOAD_OPTION, byte for byte from the UEFI
-// specification, mirroring the structure of a real "ubuntu" entry
-// read from a laptop's firmware: active, named, pointing at a file
-// on one GPT partition, no optional data. Building it by hand rather
-// than with this package's own encoder is the point: this test checks
-// the decoder against the specification, not against the encoder's
-// own output.
+// specFixture is an EFI_LOAD_OPTION assembled by hand from the UEFI
+// specification. It has the structure of a typical "ubuntu" entry:
+// active, named, pointing at a file on one GPT partition, with no
+// optional data. It is not built with this package's encoder, so the
+// tests check the decoder and the encoder against the specification
+// and not against each other.
 func specFixture() []byte {
 	var b bytes.Buffer
 	b.Write([]byte{0x01, 0x00, 0x00, 0x00}) // attributes: LOAD_OPTION_ACTIVE
@@ -40,35 +39,35 @@ func specFixture() []byte {
 func TestParseLoadOptionAgainstTheSpecification(t *testing.T) {
 	o, err := parseLoadOption(specFixture())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the load option: %v", err)
 	}
 	if o.attributes != loadOptionActive {
-		t.Errorf("attributes: got %#x", o.attributes)
+		t.Errorf("the attributes are %#x, want %#x", o.attributes, loadOptionActive)
 	}
 	if o.description != "ubuntu" {
-		t.Errorf("description: got %q", o.description)
+		t.Errorf("the description is %q, want %q", o.description, "ubuntu")
 	}
 	if o.hardDrive == nil {
-		t.Fatal("the hard-drive node should be decoded")
+		t.Fatal("the load option has no hard-drive node, want one")
 	}
 	if o.hardDrive.partitionNumber != 1 || o.hardDrive.firstLBA != 0x800 || o.hardDrive.sectors != 0x100000 {
-		t.Errorf("hard-drive geometry: %+v", o.hardDrive)
+		t.Errorf("the hard-drive node is %+v, want partition 1, first LBA 0x800, 0x100000 sectors", o.hardDrive)
 	}
 	if o.hardDrive.partitionGUID != [16]byte(bytes.Repeat([]byte{0xAB}, 16)) {
-		t.Errorf("partition GUID: % X", o.hardDrive.partitionGUID)
+		t.Errorf("the partition GUID is % X, want 16 bytes of AB", o.hardDrive.partitionGUID)
 	}
 	if o.filePath != `\EFI\ubuntu\shimx64.efi` {
-		t.Errorf("file path: got %q", o.filePath)
+		t.Errorf("the file path is %q, want %q", o.filePath, `\EFI\ubuntu\shimx64.efi`)
 	}
 	if len(o.optionalData) != 0 {
-		t.Errorf("optional data: got % X, want none", o.optionalData)
+		t.Errorf("the optional data is % X, want none", o.optionalData)
 	}
 }
 
 func TestEncodeLoadOptionAgainstTheSpecification(t *testing.T) {
-	// The encoder must produce the hand-assembled fixture byte for
-	// byte. This is a much stronger check than the round trip below,
-	// which a self-consistent pair of bugs could still pass.
+	// The round trip below passes even when the encoder and the
+	// decoder have the same bug, so this test compares the encoder's
+	// output with the fixture byte for byte.
 	o := loadOption{
 		attributes:  loadOptionActive,
 		description: "ubuntu",
@@ -81,7 +80,7 @@ func TestEncodeLoadOptionAgainstTheSpecification(t *testing.T) {
 		filePath: `\EFI\ubuntu\shimx64.efi`,
 	}
 	if got, want := encodeLoadOption(o), specFixture(); !bytes.Equal(got, want) {
-		t.Errorf("encoded bytes differ from the specification fixture:\n got % X\nwant % X", got, want)
+		t.Errorf("the encoded bytes are\n% X\nwant\n% X", got, want)
 	}
 }
 
@@ -100,62 +99,58 @@ func TestLoadOptionRoundTrip(t *testing.T) {
 	}
 	decoded, err := parseLoadOption(encodeLoadOption(original))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the load option: %v", err)
 	}
 	if decoded.description != original.description ||
 		decoded.filePath != original.filePath ||
 		*decoded.hardDrive != *original.hardDrive ||
 		!bytes.Equal(decoded.optionalData, original.optionalData) {
-		t.Errorf("round trip changed the option:\n got %+v\nwant %+v", decoded, original)
+		t.Errorf("the decoded option is %+v, want %+v", decoded, original)
 	}
 }
 
 func TestParseLoadOptionRejectsTruncation(t *testing.T) {
 	fixture := specFixture()
-	// Every truncation point should error, never panic or misread.
 	for _, cut := range []int{0, 3, 5, 8, 19, 30, len(fixture) - 5} {
 		if _, err := parseLoadOption(fixture[:cut]); err == nil {
-			t.Errorf("truncation at %d bytes should be an error", cut)
+			t.Errorf("parsing the first %d bytes returned no error, want one", cut)
 		}
 	}
 }
 
 func TestParseLoadOptionRejectsUnterminatedDescription(t *testing.T) {
-	// Attributes and length, then description characters that never
-	// reach a NUL: the parser must not run off the end.
+	// The description has no NUL terminator, so the parser must stop
+	// at the end of the input and return an error.
 	b := []byte{0x01, 0, 0, 0, 0x04, 0, 'h', 0, 'i', 0}
 	if _, err := parseLoadOption(b); err == nil {
-		t.Fatal("an unterminated description should be an error")
+		t.Fatal("parsing a description with no terminator returned no error, want one")
 	}
 }
 
 func TestParseLoadOptionSkipsUnknownNodes(t *testing.T) {
-	// Firmware entries routinely carry vendor-specific device-path
-	// nodes. The parser keeps what it understands and walks past the
-	// rest, using each node's own declared length.
 	var b bytes.Buffer
 	b.Write([]byte{0x01, 0, 0, 0})
-	b.Write([]byte{14, 0})                                    // device path list: one 10-byte vendor node + end
+	b.Write([]byte{14, 0})                                    // device path list: one 10-byte node + end
 	b.Write([]byte{0, 0})                                     // empty description
-	b.Write([]byte{0x01, 0x17, 0x0A, 0x00, 1, 2, 3, 4, 5, 6}) // ACPI-ish mystery node
+	b.Write([]byte{0x01, 0x17, 0x0A, 0x00, 1, 2, 3, 4, 5, 6}) // hardware node of an undefined subtype
 	b.Write([]byte{0x7F, 0xFF, 0x04, 0x00})
 	o, err := parseLoadOption(b.Bytes())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parsing the load option: %v", err)
 	}
 	if o.hardDrive != nil || o.filePath != "" {
-		t.Errorf("nothing recognizable should decode: %+v", o)
+		t.Errorf("the option has a hard drive or a file path, %+v, want neither", o)
 	}
 }
 
-func TestDescribeBootEntryFormatting(t *testing.T) {
+func TestBootEntryIDIsBootAndFourUppercaseHexDigits(t *testing.T) {
 	if got := bootEntryID(0); got != "Boot0000" {
-		t.Errorf("got %q", got)
+		t.Errorf("bootEntryID is %q, want %q", got, "Boot0000")
 	}
 	if got := bootEntryID(0x2001); got != "Boot2001" {
-		t.Errorf("got %q", got)
+		t.Errorf("bootEntryID is %q, want %q", got, "Boot2001")
 	}
 	if !strings.HasPrefix(bootEntryID(0xABC), "Boot0ABC") {
-		t.Errorf("got %q", bootEntryID(0xABC))
+		t.Errorf("bootEntryID(0xABC) is %q, want a prefix of Boot0ABC", bootEntryID(0xABC))
 	}
 }

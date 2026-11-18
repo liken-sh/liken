@@ -1,41 +1,25 @@
 package main
 
-// Loading kernel modules, without modprobe.
+// liken ships no modprobe, so init loads kernel modules itself, in
+// the two steps that modprobe takes:
 //
-// The kernel cannot use a driver that was built as a module until
-// something feeds that module back to it, and the kernel itself does
-// not locate modules on disk; that is userspace's job. The usual
-// program for this is modprobe, from the kmod project. liken ships
-// no modprobe, so init does the two things that modprobe would have
-// done:
+//  1. Find the dependencies. At image build time, depmod writes
+//     modules.dep, which lists each module with every module it
+//     needs, in an order that loads correctly from right to left.
 //
-//  1. Resolve dependencies. Modules depend on other modules (overlay
-//     needs nothing; iptable_nat pulls in a chain of netfilter
-//     pieces). Nothing scans the module tree at runtime to work this
-//     out. At image build time, depmod wrote an index, modules.dep,
-//     that maps every module to the full list of modules it needs,
-//     already ordered so that loading right-to-left satisfies every
-//     dependency.
+//  2. Call finit_module on each file. The files are zstd-compressed
+//     (.ko.zst), as Ubuntu ships them. The MODULE_INIT_COMPRESSED_FILE
+//     flag makes the kernel decompress the file, which works because
+//     liken's kernel config sets CONFIG_MODULE_DECOMPRESS=y.
 //
-//  2. Ask the kernel to load each file. This is the finit_module
-//     syscall: "here is an open file descriptor, it is a kernel
-//     module, trust it." liken's modules are zstd-compressed
-//     (.ko.zst) exactly as Ubuntu shipped them. The
-//     MODULE_INIT_COMPRESSED_FILE flag tells the kernel to decompress
-//     the module itself (liken's vendored config sets
-//     CONFIG_MODULE_DECOMPRESS=y), so init never touches the bytes.
-//
-// Which modules to load comes from two lists, loaded in two passes.
-// The first list is /etc/liken/modules.conf, a plain list baked into
-// the image, the same list that the image build used to select which
-// module files to ship: the OS's own needs, loaded up front because
-// the alternative (on-demand autoloading) works by the kernel
-// exec'ing /sbin/modprobe itself, and a fixed, reviewable list is
-// better than a hidden runtime dependency. The second list is the
-// Machine spec's declared extras (spec.modules), the drivers for
-// whatever hardware this machine's workloads use, which cannot load
-// until the boot settles which manifest won. loadDeclaredModules below
-// explains what each outcome means.
+// init loads two lists, in two passes. The first is
+// /etc/liken/modules.conf, the OS's own list, which the image build
+// also reads to choose which module files to ship. init loads that
+// list at boot because on-demand autoloading makes the kernel exec
+// /sbin/modprobe, and a fixed list is easier to review. The second
+// is spec.modules of the Machine manifest, the drivers for this
+// machine's hardware. init loads it after settleStorage has chosen
+// the manifest for this boot.
 
 import (
 	"errors"
@@ -50,15 +34,13 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// modulesConf is the image's fixed module list. A package variable
-// rather than a constant so tests can point the first pass at a list
-// of their own making.
+// modulesConf is the path of the OS's module list. It is a variable so
+// that a test can point the first pass at its own list.
 var modulesConf = "/etc/liken/modules.conf"
 
-// finitModule is the syscall behind every load, a variable so a test
-// can watch exactly which file and which parameter string the kernel
-// would have received, without a test run being able to load
-// anything real.
+// finitModule is the finit_module syscall. It is a variable so that a
+// test can record the file and the parameter string of each load
+// without loading a module.
 var finitModule = unix.FinitModule
 
 func loadModules() {
@@ -67,7 +49,7 @@ func loadModules() {
 
 	names, err := readModuleList(modulesConf)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: modules: %v\n", err)
+		fmt.Fprintf(os.Stderr, "liken: modules: reading the module list: %v\n", err)
 		return
 	}
 	if len(names) == 0 {
@@ -76,7 +58,7 @@ func loadModules() {
 
 	deps, err := readModulesDep(filepath.Join(base, "modules.dep"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: modules: %v\n", err)
+		fmt.Fprintf(os.Stderr, "liken: modules: reading modules.dep: %v\n", err)
 		return
 	}
 
@@ -92,49 +74,43 @@ func loadModules() {
 	fmt.Printf("liken: loaded %d kernel modules for %s\n", count, strings.Join(names, ", "))
 }
 
-// loadDeclaredModules loads the extra modules that the winning
-// Machine manifest declared, and reports each name's outcome. Unlike
-// the fixed list, whose failures are printed and forgotten (the image
-// build ships every module on that list), a declared module is a
-// deployment's request, and the answer must reach the cluster.
-// These outcomes travel through the facts tree into status.modules.
-// Nothing here can stop the boot. A machine missing a workload's
-// driver is degraded, not down.
+// loadDeclaredModules loads spec.modules of this boot's Machine
+// manifest and returns the outcome for each name, which init
+// publishes to status.modules through the facts tree. loadModules
+// only prints its failures, because the image build ships every
+// module on its list, but a declared name can be wrong. A failure
+// does not stop the boot, because a machine without a workload's
+// driver still runs.
 func loadDeclaredModules(names []string, parameters map[string]string) []machine.ModuleStatus {
 	return loadDeclaredModulesFrom(filepath.Join("/lib/modules", kernelRelease()), names, parameters)
 }
 
-// loadDeclaredModulesFrom is the same pass with the module tree as a
-// parameter, so tests can point it at a fabricated tree. Only the
-// kernel's own tree ever has real modules to load.
+// loadDeclaredModulesFrom is loadDeclaredModules with the module tree
+// as a parameter, so that a test can build its own tree.
 //
-// The parameters map is spec.moduleParameters, and only this pass
-// carries one. The fixed list and a feature's list ship with the
-// release, and a machine that needs to modify how the OS loads its own
-// drivers has a bug for liken to fix, not a knob to turn
-// (plans/completed/55-kernel-module-parameters.md).
+// parameters is spec.moduleParameters, and only declared modules take
+// parameters. The OS's own modules and a feature's modules ship with
+// the release, so a machine that needs other parameters for them has
+// found a bug in the release.
 func loadDeclaredModulesFrom(base string, names []string, parameters map[string]string) []machine.ModuleStatus {
 	if len(names) == 0 {
 		return nil
 	}
-	// The last guard before the kernel. Admission refuses these
-	// shapes, but a manifest carried in on a stick never met
-	// admission (moduleparams.go explains each drop).
+	// A manifest on an install stick never passes admission, so
+	// drop the parameters that the CRD would refuse.
 	parameters = usableModuleParameters(parameters)
 
-	// Both indexes are depmod's work, shipped beside the modules
-	// themselves. modules.dep maps every shipped module to its
-	// dependency chain. modules.builtin names what is compiled into
-	// vmlinuz, which is what lets a declared name that matches no
-	// file mean "already there" instead of "missing".
+	// modules.builtin lists the modules compiled into the kernel, so
+	// that a declared name with no module file reports as builtin and
+	// not as missing.
 	deps, err := readModulesDep(filepath.Join(base, "modules.dep"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: modules: %v\n", err)
+		fmt.Fprintf(os.Stderr, "liken: modules: reading modules.dep: %v\n", err)
 		deps = map[string][]string{}
 	}
 	builtin, err := readModulesBuiltin(filepath.Join(base, "modules.builtin"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "liken: modules: %v\n", err)
+		fmt.Fprintf(os.Stderr, "liken: modules: reading modules.builtin: %v\n", err)
 	}
 
 	loaded := map[string]bool{}
@@ -144,7 +120,7 @@ func loadDeclaredModulesFrom(base string, names []string, parameters map[string]
 			_, err := loadModule(base, name, params, deps, loaded)
 			return err
 		},
-		readback: func(name string) map[string]string {
+		readParameters: func(name string) map[string]string {
 			return readModuleParameters(sysModuleDir, name, parameters)
 		},
 	})
@@ -154,10 +130,9 @@ func loadDeclaredModulesFrom(base string, names []string, parameters map[string]
 	return statuses
 }
 
-// declaredModuleLine renders one declared module's console line. A
-// load that carried parameters names the exact string the kernel
-// got, so the console and the log record what this boot passed, the
-// same record status.boot.moduleParameters keeps for the API.
+// declaredModuleLine returns the console line for one declared
+// module. When the load passed parameters, the line shows the exact
+// string that the kernel received.
 func declaredModuleLine(s machine.ModuleStatus, parameters map[string]string) string {
 	line := fmt.Sprintf("liken: modules: %s: %s", s.Name, strings.ToLower(string(s.State)))
 	if params := passedParameters(s, parameters); params != "" {
@@ -166,10 +141,9 @@ func declaredModuleLine(s machine.ModuleStatus, parameters map[string]string) st
 	if s.Message != "" {
 		line += ": " + s.Message
 	}
-	// A resident module's line, and a builtin's line, would otherwise
-	// read exactly like a clean load, and the console is the live
-	// record on a machine with no shell; the dropped string has to be
-	// said here, not only in status.
+	// A module that was already loaded or is builtin did not receive
+	// its parameters. Say so on the console, because the console is
+	// the only live output on a machine with no shell.
 	if declared := machine.ModuleParameterString(s.Name, parameters); declared != "" {
 		switch {
 		case s.AlreadyResident:
@@ -181,9 +155,10 @@ func declaredModuleLine(s machine.ModuleStatus, parameters map[string]string) st
 	return line
 }
 
-// passedParameters is the string to show beside a load, and only a
-// load that actually delivered one: a resident module never received
-// the string, and a refused load already names it in its message.
+// passedParameters returns the parameter string that a load passed to
+// the kernel. It returns "" for a module that was already loaded,
+// because the kernel ignored the string, and for a failed load,
+// because its message already includes the string.
 func passedParameters(s machine.ModuleStatus, parameters map[string]string) string {
 	if s.AlreadyResident || s.State != machine.ModuleLoaded {
 		return ""
@@ -191,24 +166,22 @@ func passedParameters(s machine.ModuleStatus, parameters map[string]string) stri
 	return machine.ModuleParameterString(s.Name, parameters)
 }
 
-// declaredPass is the three questions a declared pass asks the
-// machine: is this module already in the kernel, load it with this
-// string, and what does /sys hold now. They are fields so a test can
-// answer each one without a kernel.
+// declaredPass holds the kernel operations that declaredModuleOutcomes
+// calls: whether a module is loaded, loading a module with a parameter
+// string, and reading a module's parameters from /sys. A test replaces
+// them so that it needs no kernel.
 type declaredPass struct {
-	resident func(name string) bool
-	load     func(name, parameters string) error
-	readback func(name string) map[string]string
+	resident       func(name string) bool
+	load           func(name, parameters string) error
+	readParameters func(name string) map[string]string
 }
 
-// declaredModuleOutcomes classifies each declared name before it
-// asks the kernel for anything, so the verdicts do not depend on the
-// order that failures happen to occur in. The vocabulary belongs to
-// machine.ModuleState: Loaded and Builtin are healthy. Missing means
-// the image's kernel build has no module by this name: the image
-// carries the kernel's whole module tree, so a missing name is a
-// misspelled name, or a driver from outside this kernel build.
-// Failed means the kernel refused a module that the image does ship.
+// declaredModuleOutcomes returns a machine.ModuleStatus for each
+// declared name. Missing means that neither modules.dep nor
+// modules.builtin has the name. The image ships the kernel's whole
+// module tree, so the name is misspelled or belongs to another kernel
+// build. Failed means that modules.dep has the name and the load
+// failed.
 func declaredModuleOutcomes(names []string, deps map[string][]string,
 	builtin map[string]bool, parameters map[string]string, pass declaredPass) []machine.ModuleStatus {
 	statuses := make([]machine.ModuleStatus, 0, len(names))
@@ -218,12 +191,10 @@ func declaredModuleOutcomes(names []string, deps map[string][]string,
 		params := machine.ModuleParameterString(name, parameters)
 		switch {
 		case deps[key] != nil:
-			// Residency is read before the load, because the load
-			// cannot report it: finit_module returns EEXIST for a
-			// module the kernel already holds and drops the
-			// parameter string without a trace. The string is
-			// cleared here so the record shows what was delivered,
-			// not what was hoped.
+			// For a module that is already loaded, finit_module
+			// returns EEXIST and ignores the parameter string, and
+			// loadModule treats EEXIST as success. So check first,
+			// and pass no string that the kernel would ignore.
 			status.AlreadyResident = pass.resident(name)
 			if status.AlreadyResident {
 				params = ""
@@ -236,23 +207,22 @@ func declaredModuleOutcomes(names []string, deps map[string][]string,
 				}
 			} else {
 				status.State = machine.ModuleLoaded
-				status.Parameters = pass.readback(name)
+				status.Parameters = pass.readParameters(name)
 			}
 		case builtin[key]:
 			status.State = machine.ModuleBuiltin
-			status.Parameters = pass.readback(name)
+			status.Parameters = pass.readParameters(name)
 		default:
 			status.State = machine.ModuleMissing
-			status.Message = "not a module in this image's kernel build; check the spelling against the machine's unclaimed-hardware report"
+			status.Message = "this image's kernel has no module and no built-in code with this name. For a module in spec.modules, check the spelling against the drivers in status.hardware.unclaimed"
 		}
 		statuses = append(statuses, status)
 	}
 	return statuses
 }
 
-// readModuleList reads the requested module names: one per line, with
-// blank lines and # comments allowed, since the file doubles as
-// documentation.
+// readModuleList reads one module name per line, and skips blank
+// lines and lines that start with #. A missing file is an empty list.
 func readModuleList(path string) ([]string, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -272,13 +242,14 @@ func readModuleList(path string) ([]string, error) {
 	return names, nil
 }
 
-// readModulesDep parses depmod's index. Each line looks like this:
+// readModulesDep parses modules.dep. Each line is a module's path,
+// then every module that it needs, directly or indirectly:
 //
 //	kernel/fs/overlayfs/overlay.ko.zst: kernel/a.ko.zst kernel/b.ko.zst
 //
-// That is, a module's path, then every module it transitively needs.
-// This function keys the map by module name (the filename minus
-// extensions), because module names use "_" and "-" interchangeably.
+// The map is keyed by module name, which is the file name without its
+// extensions and with "-" replaced by "_", because the kernel treats
+// the two characters as the same.
 func readModulesDep(path string) (map[string][]string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -296,14 +267,12 @@ func readModulesDep(path string) (map[string][]string, error) {
 	return deps, nil
 }
 
-// readModulesBuiltin parses depmod's record of what is compiled into
-// vmlinuz itself: one module path per line, for example:
+// readModulesBuiltin parses modules.builtin, which lists the modules
+// compiled into vmlinuz, one path per line:
 //
 //	kernel/fs/binfmt_misc.ko
 //
-// A name found here needs no loading, because the kernel already
-// contains it. This set is keyed the same way as modules.dep, with
-// names normalized to "_".
+// The set uses the same keys as readModulesDep.
 func readModulesBuiltin(path string) (map[string]bool, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -327,21 +296,20 @@ func moduleName(path string) string {
 	return strings.ReplaceAll(name, "-", "_")
 }
 
-// loadModule feeds one module and its dependencies to the kernel,
-// dependencies first (modules.dep lists them ready to load
-// right-to-left), and returns how many files the kernel actually
-// loaded. An already-loaded module, whether loaded by this call or
-// by an earlier dependency chain, returns EEXIST, which counts as
-// success but not toward the count.
+// loadModule loads a module and its dependencies, dependencies first,
+// and returns how many files the kernel loaded. loaded records the
+// files that earlier calls loaded, so that they are not opened again.
+// A file that the kernel already has makes finit_module return
+// EEXIST, which is not an error and is not counted.
 //
-// The parameter string goes to the module's own file alone, which is
-// entry zero of its modules.dep line; every dependency loads with an
-// empty string, exactly as modprobe would load it. A parameter meant
-// for a dependency belongs to that module's own declaration.
+// parameters goes only to the module's own file, the first entry of
+// its modules.dep line. Dependencies load with no parameters, as
+// modprobe loads them. To set a dependency's parameters, declare that
+// module before the module that needs it.
 func loadModule(base, name, parameters string, deps map[string][]string, loaded map[string]bool) (int, error) {
 	entry, ok := deps[strings.ReplaceAll(name, "-", "_")]
 	if !ok {
-		return 0, fmt.Errorf("not in modules.dep (is it built into the kernel?)")
+		return 0, errors.New("modules.dep has no entry for the module, which can be built into the kernel")
 	}
 	count := 0
 	for i := len(entry) - 1; i >= 0; i-- {
@@ -360,7 +328,7 @@ func loadModule(base, name, parameters string, deps map[string][]string, loaded 
 		err = finitModule(int(f.Fd()), params, unix.MODULE_INIT_COMPRESSED_FILE)
 		f.Close()
 		if err != nil && !errors.Is(err, unix.EEXIST) {
-			return count, fmt.Errorf("finit_module %s: %w", file, err)
+			return count, fmt.Errorf("loading %s with finit_module: %w", file, err)
 		}
 		if err == nil {
 			count++

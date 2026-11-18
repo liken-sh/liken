@@ -15,10 +15,9 @@ func bound(text string) machine.OffsetBound {
 	return b
 }
 
-// publishes feeds the hold one bound per poll, starting from the
-// published bound, and answers the bound published after each poll.
-func publishes(published string, polls ...string) []string {
-	h := &boundHold{}
+// publishedAfterEachPoll returns the published bound after each poll.
+func publishedAfterEachPoll(published string, polls ...string) []string {
+	h := &betterBoundStreak{}
 	var after []string
 	for _, p := range polls {
 		if next, ok := h.next(published, bound(p)); ok {
@@ -29,7 +28,7 @@ func publishes(published string, polls ...string) []string {
 	return after
 }
 
-func TestBoundHold(t *testing.T) {
+func TestBetterBoundStreakPublishesAWorseBoundAtOnceAndABetterOneAfterTheStreak(t *testing.T) {
 	cases := map[string]struct {
 		published string
 		polls     []string
@@ -56,21 +55,19 @@ func TestBoundHold(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := publishes(tc.published, tc.polls...); !slices.Equal(got, tc.want) {
-				t.Errorf("got %v, want %v", got, tc.want)
+			if got := publishedAfterEachPoll(tc.published, tc.polls...); !slices.Equal(got, tc.want) {
+				t.Errorf("the published bounds are %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-// The kernel escapes every byte outside printable ASCII when a reader
-// reads /dev/kmsg, so a console line spells the bound in ASCII.
 func TestConsoleBoundIsASCII(t *testing.T) {
 	cases := map[string]string{"±5ms": "+/-5ms", ">1s": ">1s", "": "unknown"}
 	for bound, want := range cases {
 		t.Run(want, func(t *testing.T) {
 			if got := consoleBound(bound); got != want {
-				t.Errorf("got %q", got)
+				t.Errorf("consoleBound(%q) = %q, want %q", bound, got, want)
 			}
 		})
 	}

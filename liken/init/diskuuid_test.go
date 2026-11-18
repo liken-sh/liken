@@ -1,10 +1,9 @@
 package main
 
-// Tests for the by-uuid readers. An ext4 case pins the superblock
-// offsets against a hand-built superblock, the same way ext4_test.go
-// does. A FAT32 case formats a real volume with disks.FormatFAT32, the
-// way fatstate_test.go does, so the test proves the reader against the
-// exact bytes liken itself writes.
+// The ext4 test builds a superblock by hand to check the offsets. The
+// FAT32 test formats a real volume with disks.FormatFAT32, as
+// fatstate_test.go does, so the reader is tested against the bytes that
+// liken writes.
 
 import (
 	"os"
@@ -14,10 +13,8 @@ import (
 	"github.com/liken-sh/liken/liken/disks"
 )
 
-// ext4DeviceWithUUID builds a device image carrying ext4's magic and a
-// given 16-byte UUID at the offsets the by-uuid reader parses: the
-// superblock starts 1024 bytes into the device, so the image pads that
-// much before it.
+// ext4DeviceWithUUID returns a device image with ext4's magic and the
+// given 16-byte UUID in a superblock at offset 1024.
 func ext4DeviceWithUUID(uuid []byte) []byte {
 	dev := make([]byte, 2048)
 	dev[1024+56], dev[1024+57] = 0x53, 0xEF
@@ -25,13 +22,13 @@ func ext4DeviceWithUUID(uuid []byte) []byte {
 	return dev
 }
 
-// deviceFile writes bytes to a tempdir path and returns the path, standing
-// in for a partition's device node.
+// deviceFile writes content to a file in a temporary directory, which
+// stands in for a partition's device node, and returns its path.
 func deviceFile(t *testing.T, content []byte) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "partition")
 	if err := os.WriteFile(path, content, 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the device file: %v", err)
 	}
 	return path
 }
@@ -47,7 +44,7 @@ func TestFilesystemUUIDReadsAnExt4Superblock(t *testing.T) {
 	dev := deviceFile(t, ext4DeviceWithUUID(uuid))
 	want := "01020304-0506-0708-090a-0b0c0d0e0f10"
 	if got := filesystemUUID(dev); got != want {
-		t.Errorf("got %q, want %q", got, want)
+		t.Errorf("filesystemUUID is %q, want %q", got, want)
 	}
 }
 
@@ -55,21 +52,20 @@ func TestFilesystemUUIDReadsAFAT32VolumeID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "volume.img")
 	f, err := os.Create(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the volume image: %v", err)
 	}
 	defer f.Close()
 	if err := f.Truncate(64 << 20); err != nil {
-		t.Fatal(err)
+		t.Fatalf("sizing the volume image: %v", err)
 	}
-	// Little-endian bytes 0x34 0x12 0x78 0x56 at offset 67 assemble into
-	// this volume ID, and the reader must render them back as the high
-	// half, a dash, then the low half: 5678-1234.
+	// FormatFAT32 stores the ID little-endian at offset 67, as the bytes
+	// 0x34 0x12 0x78 0x56. The reader prints the high half first.
 	if err := disks.FormatFAT32(f, 64<<20, "TEST", 0x5678_1234); err != nil {
-		t.Fatal(err)
+		t.Fatalf("formatting the volume image: %v", err)
 	}
 	want := "5678-1234"
 	if got := filesystemUUID(path); got != want {
-		t.Errorf("got %q, want %q", got, want)
+		t.Errorf("filesystemUUID is %q, want %q", got, want)
 	}
 }
 
@@ -85,7 +81,7 @@ func TestFilesystemUUIDIsEmptyWithoutAKnownFilesystem(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := filesystemUUID(c.dev); got != "" {
-				t.Errorf("got %q, want no UUID", got)
+				t.Errorf("filesystemUUID is %q, want no UUID", got)
 			}
 		})
 	}

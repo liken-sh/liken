@@ -1,11 +1,8 @@
 package main
 
-// Tests for the clock discipline's decisions: where a machine gets
-// its time, what it reports about its clock, and how much slewing it
-// asks of the kernel at once. The syscalls that act on these
-// decisions, clock_settime and adjtimex, run only as PID 1, so the
-// boot step's tests replace them with `fakeClockActions`. Tests for
-// the syscalls themselves belong to the QEMU harness.
+// The syscalls clock_settime and adjtimex need PID 1's privileges, so
+// these tests replace them with fakeClockActions. The QEMU harness
+// tests the real syscalls.
 
 import (
 	"errors"
@@ -38,9 +35,9 @@ func clusterWithTime(upstreams []string, endpoint string, leaders ...string) *cl
 	}
 }
 
-// manifestsDir builds a machines directory in the same form the
-// image uses: one Machine manifest per name, each declaring a static
-// address on the node network.
+// manifestsDir writes a directory like the image's machines directory:
+// one Machine manifest per name, each with a static address on the
+// node network.
 func manifestsDir(t *testing.T, addresses map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -57,34 +54,34 @@ spec:
         address: ` + address + `
 `
 		if err := os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(doc), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the manifest of %s: %v", name, err)
 		}
 	}
 	return dir
 }
 
-func TestTimeSourcesLeaderAsksTheUpstreams(t *testing.T) {
+func TestTimeSourcesLeaderUsesTheUpstreams(t *testing.T) {
 	c := clusterWithTime([]string{"time.cloudflare.com", "192.168.1.1"}, "https://10.10.0.1:6443")
 	sources := timeSources(c, api.RoleLeader, t.TempDir())
 	if len(sources) != 2 || sources[0] != "time.cloudflare.com" || sources[1] != "192.168.1.1" {
-		t.Errorf("got %v", sources)
+		t.Errorf("sources are %v, want [time.cloudflare.com 192.168.1.1]", sources)
 	}
 }
 
 func TestTimeSourcesLeaderWithoutUpstreamsFreeRuns(t *testing.T) {
 	c := clusterWithTime(nil, "https://10.10.0.1:6443")
 	if sources := timeSources(c, api.RoleLeader, t.TempDir()); sources != nil {
-		t.Errorf("expected free-running, got %v", sources)
+		t.Errorf("sources are %v, want none (free-running)", sources)
 	}
 }
 
 func TestTimeSourcesNilClusterFreeRuns(t *testing.T) {
 	if sources := timeSources(nil, api.RoleLeader, t.TempDir()); sources != nil {
-		t.Errorf("expected free-running, got %v", sources)
+		t.Errorf("sources are %v, want none (free-running)", sources)
 	}
 }
 
-func TestTimeSourcesFollowerAsksEveryLeader(t *testing.T) {
+func TestTimeSourcesFollowerUsesEveryLeader(t *testing.T) {
 	c := clusterWithTime(nil, "https://cluster.example.com:6443", "node-1", "node-3")
 	dir := manifestsDir(t, map[string]string{
 		"node-1": "10.10.0.1/24",
@@ -94,16 +91,16 @@ func TestTimeSourcesFollowerAsksEveryLeader(t *testing.T) {
 	sources := timeSources(c, api.RoleFollower, dir)
 	want := []string{"10.10.0.1", "10.10.0.3", "cluster.example.com"}
 	if !slices.Equal(sources, want) {
-		t.Errorf("got %v, want %v", sources, want)
+		t.Errorf("sources are %v, want %v", sources, want)
 	}
 }
 
-func TestTimeSourcesFollowerDoesNotAskTheEndpointTwice(t *testing.T) {
+func TestTimeSourcesFollowerListsTheEndpointOnce(t *testing.T) {
 	c := clusterWithTime(nil, "https://10.10.0.1:6443")
 	dir := manifestsDir(t, map[string]string{"node-1": "10.10.0.1/24"})
 	sources := timeSources(c, api.RoleFollower, dir)
 	if !slices.Equal(sources, []string{"10.10.0.1"}) {
-		t.Errorf("got %v", sources)
+		t.Errorf("sources are %v, want [10.10.0.1]", sources)
 	}
 }
 
@@ -111,11 +108,11 @@ func TestTimeSourcesFollowerFallsBackToTheEndpoint(t *testing.T) {
 	c := clusterWithTime(nil, "https://10.10.0.1:6443")
 	sources := timeSources(c, api.RoleFollower, t.TempDir())
 	if !slices.Equal(sources, []string{"10.10.0.1"}) {
-		t.Errorf("got %v", sources)
+		t.Errorf("sources are %v, want [10.10.0.1]", sources)
 	}
 }
 
-// A leader that cannot be resolved leaves the follower asking the
+// When a leader's address cannot be resolved, the follower queries the
 // endpoint's host. A typo in `nodeCIDR` or a damaged manifest must not
 // leave a follower with no time source.
 func TestTimeSourcesFollowerFallsBackPastAnUnresolvableLeader(t *testing.T) {
@@ -133,13 +130,13 @@ func TestTimeSourcesFollowerFallsBackPastAnUnresolvableLeader(t *testing.T) {
 			c.Spec.Network.NodeCIDR = one.nodeCIDR
 			dir := t.TempDir()
 			if err := os.WriteFile(filepath.Join(dir, "node-1.yaml"), []byte(one.manifest), 0o644); err != nil {
-				t.Fatal(err)
+				t.Fatalf("writing node-1.yaml: %v", err)
 			}
 
 			sources := timeSources(c, api.RoleFollower, dir)
 
 			if !slices.Equal(sources, []string{"cluster.example.com"}) {
-				t.Errorf("got %v", sources)
+				t.Errorf("sources are %v, want [cluster.example.com]", sources)
 			}
 		})
 	}
@@ -155,122 +152,118 @@ func TestTimeStatusAfterASync(t *testing.T) {
 	}
 	status := timeStatus(sync, []string{"time.cloudflare.com"})
 	if status.State != machine.TimeSynchronized {
-		t.Errorf("a fresh sync should report Synchronized, got %q", status.State)
+		t.Errorf("the state is %q, want Synchronized", status.State)
 	}
 	if status.Source != "time.cloudflare.com" {
-		t.Errorf("source: got %q", status.Source)
+		t.Errorf("the source is %q, want time.cloudflare.com", status.Source)
 	}
 	if status.Stratum != 3 {
-		t.Errorf("a stratum-2 source makes this machine stratum 3, got %d", status.Stratum)
+		t.Errorf("the stratum is %d, want 3 (one more than the source)", status.Stratum)
 	}
 	if status.Offset != "±5ms" {
-		t.Errorf("status holds the bound the offset fits inside, got %q", status.Offset)
+		t.Errorf("the offset is %q, want the bound ±5ms", status.Offset)
 	}
 }
 
-// A boot that stepped the clock measured it before the step, so its
-// offset says nothing about the clock now, and status holds no bound
-// until the first poll.
-func TestTimeStatusAfterAStepHoldsNoBound(t *testing.T) {
+// A boot that stepped the clock measured the offset before the step, so
+// it says nothing about the clock now. Status has no bound until the
+// first poll.
+func TestTimeStatusAfterAStepHasNoBound(t *testing.T) {
 	sync := &timeSync{source: "time.cloudflare.com", stratum: 2, offset: 2 * time.Second, stepped: true}
 	if got := timeStatus(sync, []string{"time.cloudflare.com"}).Offset; got != "" {
-		t.Errorf("got %q", got)
+		t.Errorf("the offset is %q, want none after a step", got)
 	}
 }
 
 func TestTimeStatusFreeRunning(t *testing.T) {
 	status := timeStatus(nil, nil)
 	if status.State != machine.TimeFreeRunning {
-		t.Errorf("no sources means free-running by design, got %q", status.State)
+		t.Errorf("the state is %q, want FreeRunning", status.State)
 	}
 	if status.Stratum != 10 {
-		t.Errorf("free-running reports the local-clock convention, got %d", status.Stratum)
+		t.Errorf("the stratum is %d, want 10", status.Stratum)
 	}
 }
 
 func TestTimeStatusNeverSynced(t *testing.T) {
 	status := timeStatus(nil, []string{"10.10.0.1"})
 	if status.State != machine.TimeUnsynchronized {
-		t.Errorf("sources declared but never reached is an outage, got %q", status.State)
+		t.Errorf("the state is %q, want Unsynchronized", status.State)
 	}
 	if status.Stratum != 16 {
-		t.Errorf("unsynchronized reports stratum 16, got %d", status.Stratum)
+		t.Errorf("the stratum is %d, want 16", status.Stratum)
 	}
 }
 
 func TestSlewAmountPassesSmallOffsetsThrough(t *testing.T) {
 	if got := slewAmount(3 * time.Millisecond); got != 3*time.Millisecond {
-		t.Errorf("got %v", got)
+		t.Errorf("the slew of 3ms is %v, want 3ms", got)
 	}
 	if got := slewAmount(-3 * time.Millisecond); got != -3*time.Millisecond {
-		t.Errorf("got %v", got)
+		t.Errorf("the slew of -3ms is %v, want -3ms", got)
 	}
 }
 
 func TestSlewAmountClampsLargeOffsets(t *testing.T) {
 	if got := slewAmount(3 * time.Second); got != 500*time.Millisecond {
-		t.Errorf("got %v", got)
+		t.Errorf("the slew of 3s is %v, want 500ms", got)
 	}
 	if got := slewAmount(-3 * time.Second); got != -500*time.Millisecond {
-		t.Errorf("got %v", got)
+		t.Errorf("the slew of -3s is %v, want -500ms", got)
 	}
 }
 
 func TestStepClockAtBootWithNoSourcesFreeRuns(t *testing.T) {
 	if sync := stepClockAtBoot(nil); sync != nil {
-		t.Errorf("no sources means no measurement, not a fake one: %+v", sync)
+		t.Errorf("the measurement is %+v, want nil", sync)
 	}
 }
 
-func TestQuerySourcesTakesTheFirstAnswer(t *testing.T) {
+func TestQuerySourcesReturnsTheFirstAnswer(t *testing.T) {
 	addr := startResponder(t, syncedClock())
 	sync, err := querySources([]string{addr})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("querying the responder at %s: %v", addr, err)
 	}
 	if sync.source != addr || sync.stratum != 4 {
-		t.Errorf("the answer names its source and stratum: %+v", sync)
+		t.Errorf("the measurement is %+v, want source %s and stratum 4", sync, addr)
 	}
 	if sync.offset.Abs() > 250*time.Millisecond {
-		t.Errorf("a loopback measurement is near zero: %v", sync.offset)
+		t.Errorf("the offset is %v, want under 250ms on loopback", sync.offset)
 	}
 }
 
 func TestQuerySourcesReportsTheLastFailure(t *testing.T) {
 	if _, err := querySources([]string{"not::a::valid::address::"}); err == nil {
-		t.Error("an unreachable source is an error, never a fake measurement")
+		t.Error("querySources returned no error for an invalid address, want one")
 	}
 }
 
 func TestStepClockAtBootSlewsWhenTheClockIsClose(t *testing.T) {
-	// The responder answers using this same machine's clock, so the
-	// measured offset is only microseconds, far under the step
-	// threshold. This means stepClockAtBoot returns the measurement
-	// without calling clock_settime. TestStepClockAtBootStepsAWrongClock
-	// covers the step against a fake clock. A real clock_settime
-	// needs the QEMU harness's -rtc drills.
+	// The responder answers from this machine's own clock, so the
+	// offset is under stepThreshold and stepClockAtBoot does not call
+	// clock_settime. TestStepClockAtBootStepsAWrongClock tests the step.
 	addr := startResponder(t, syncedClock())
 	sync := stepClockAtBoot([]string{addr})
 	if sync == nil || sync.source != addr {
-		t.Fatalf("the first sync comes back for status: %+v", sync)
+		t.Fatalf("the measurement is %+v, want one from source %s", sync, addr)
 	}
 }
 
-// pollAnswer is one scripted poll of the time sources: the offset a
-// source measured and the round trip it took, or no answer at all.
+// pollAnswer is one scripted poll: the offset and round trip that a
+// source measured, or no answer.
 type pollAnswer struct {
 	offset   time.Duration
 	delay    time.Duration
 	answered bool
 }
 
-// timeAnswer is an answer over a quiet wired path, with a round trip
-// of one millisecond.
+// timeAnswer is an answer with a round trip of 1ms.
 func timeAnswer(offset time.Duration) pollAnswer {
 	return pollAnswer{offset: offset, delay: time.Millisecond, answered: true}
 }
 
-// timeAnswerOver is an answer whose round trip took delay.
+// timeAnswerOver is an answer with the given round trip.
 func timeAnswerOver(offset, delay time.Duration) pollAnswer {
 	return pollAnswer{offset: offset, delay: delay, answered: true}
 }
@@ -279,10 +272,9 @@ var noTimeAnswer = pollAnswer{}
 
 var errNoTimeAnswer = errors.New("no time source answered")
 
-// fakeClockActions stands in for the network query and the clock
-// syscalls. Each query takes the next scripted answer, and a script
-// that has run out answers nothing. The fake records each step, slew,
-// and RTC write, so a test checks what the machine did to its clocks.
+// fakeClockActions replaces the network query and the clock syscalls.
+// Each query returns the next scripted answer, then no answer when the
+// script is used up. It records each step, slew, and RTC write.
 type fakeClockActions struct {
 	mu        sync.Mutex
 	polls     []pollAnswer
@@ -347,9 +339,8 @@ func (f *fakeClockActions) recorded() (queries int, steps []time.Time, slews []t
 	return f.queries, slices.Clone(f.steps), slices.Clone(f.slews), f.rtcWrites
 }
 
-// A boot whose clock is 2 seconds slow steps the clock forward by
-// exactly the measured offset before k3s starts. A smaller correction
-// would leave certificates from the cluster's CA in the future.
+// A boot whose clock is 2 seconds slow steps the clock forward by the
+// measured offset.
 func TestStepClockAtBootStepsAWrongClock(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t, timeAnswer(2*time.Second))
@@ -359,17 +350,16 @@ func TestStepClockAtBootStepsAWrongClock(t *testing.T) {
 
 		_, steps, _, _ := f.recorded()
 		if !slices.Equal(steps, []time.Time{start.Add(2 * time.Second)}) {
-			t.Errorf("the clock steps once, to the measured time: %v", steps)
+			t.Errorf("the clock steps are %v, want one step to %v", steps, start.Add(2*time.Second))
 		}
 		if sync == nil || sync.offset != 2*time.Second || sync.source != "10.10.0.1" || !sync.stepped {
-			t.Errorf("the measurement comes back for status, marked as stepped: %+v", sync)
+			t.Errorf("the measurement is %+v, want offset 2s, source 10.10.0.1, stepped", sync)
 		}
 	})
 }
 
-// A refused step does not stop the boot. The measurement still comes
-// back, so status reports what the source said, and the discipline
-// loop slews the clock toward it.
+// A failed step does not stop the boot. stepClockAtBoot still returns
+// the measurement for status, and the discipline loop slews toward it.
 func TestStepClockAtBootKeepsTheMeasurementWhenTheStepFails(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t, timeAnswer(-5*time.Second))
@@ -378,14 +368,13 @@ func TestStepClockAtBootKeepsTheMeasurementWhenTheStepFails(t *testing.T) {
 		sync := stepClockAtBoot([]string{"10.10.0.1"})
 
 		if sync == nil || sync.offset != -5*time.Second {
-			t.Errorf("a failed step still reports the measurement: %+v", sync)
+			t.Errorf("the measurement is %+v, want offset -5s", sync)
 		}
 	})
 }
 
-// A boot asks its sources three times over 6 seconds and then boots
-// on the hardware clock. A machine's boot must not wait without limit
-// for a network that may never answer.
+// A boot queries its sources 3 times, over 6 seconds, and then boots on
+// the hardware clock, so a network that never answers cannot block it.
 func TestStepClockAtBootGivesUpAfterThreeAttempts(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t)
@@ -395,21 +384,20 @@ func TestStepClockAtBootGivesUpAfterThreeAttempts(t *testing.T) {
 
 		queries, steps, _, _ := f.recorded()
 		if sync != nil || len(steps) != 0 {
-			t.Errorf("no answer means no measurement and no step: %+v %v", sync, steps)
+			t.Errorf("the measurement is %+v and the steps are %v, want nil and none", sync, steps)
 		}
 		if queries != 3 {
-			t.Errorf("the boot asks 3 times, got %d", queries)
+			t.Errorf("the boot made %d queries, want 3", queries)
 		}
 		if waited := time.Since(start); waited != 6*time.Second {
-			t.Errorf("the boot waits 1s, 2s, and 3s between attempts, got %v", waited)
+			t.Errorf("the boot waited %v, want 6s", waited)
 		}
 	})
 }
 
-// A source that answers on the second attempt still sets the boot's
-// time. A close clock is left for the discipline loop to slew, and is
-// never stepped.
-func TestStepClockAtBootTakesALateAnswer(t *testing.T) {
+// A source that answers on the second attempt is still used. An offset
+// under stepThreshold is left for the discipline loop to slew.
+func TestStepClockAtBootUsesALateAnswer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := installFakeClock(t, noTimeAnswer, timeAnswer(10*time.Millisecond))
 		start := time.Now()
@@ -418,13 +406,13 @@ func TestStepClockAtBootTakesALateAnswer(t *testing.T) {
 
 		_, steps, _, _ := f.recorded()
 		if sync == nil || sync.offset != 10*time.Millisecond {
-			t.Errorf("the second attempt's answer comes back: %+v", sync)
+			t.Errorf("the measurement is %+v, want offset 10ms", sync)
 		}
 		if len(steps) != 0 {
-			t.Errorf("an offset under the step threshold is slewed, not stepped: %v", steps)
+			t.Errorf("the clock steps are %v, want none", steps)
 		}
 		if waited := time.Since(start); waited != time.Second {
-			t.Errorf("one failed attempt costs one second, got %v", waited)
+			t.Errorf("the boot waited %v, want 1s", waited)
 		}
 	})
 }

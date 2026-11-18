@@ -1,13 +1,5 @@
 package main
 
-// Tests for the boot-time sysctl application: failures are reported
-// and skipped, never fatal, and the two passes leave the machine
-// holding the values a deployment asked for. The QEMU harness tests
-// this against a real kernel. What these tests confirm is the part
-// that has nothing to do with the kernel: that a bad parameter name
-// cannot stop a boot, that every declared default is applyable, and
-// that the second pass wins.
-
 import (
 	"io/fs"
 	"os"
@@ -18,11 +10,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// fakeSysctlDir builds a directory shaped like /proc/sys, with an
-// existing file for every named parameter, and points applySysctls at
-// it. The files have to exist already: ApplySysctl opens without
-// creating, so that a name the kernel does not have fails rather than
-// turning into a new file nobody reads.
+// fakeSysctlDir builds a directory laid out like /proc/sys, with a
+// file for each named parameter, and points applySysctls at it.
+// ApplySysctl does not create a file, so an unknown parameter fails.
 func fakeSysctlDir(t *testing.T, names ...string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -52,14 +42,13 @@ func readParameter(t *testing.T, dir, name string) string {
 
 func TestApplySysctlsSkipsFailuresAndContinues(t *testing.T) {
 	applySysctls(map[string]string{
-		"liken.test.no.such.parameter": "1", // fails to open; init reports and skips it
-		"../escape/attempt":            "1", // the traversal guard refuses this path
+		"liken.test.no.such.parameter": "1", // the file does not exist
+		"../escape/attempt":            "1", // the path leaves the sysctl directory
 	})
 }
 
-// Every parameter liken declares has to be one this code can actually
-// write. A name with a typo in it, or a value the table's author never
-// tried, would otherwise reach a booting machine before anyone noticed.
+// A typo in a parameter name or an unwritable value in OSSysctls would
+// otherwise first show up on a booting machine.
 func TestApplySysctlsAppliesEveryDeclaredDefault(t *testing.T) {
 	names := make([]string, 0, len(machine.OSSysctls))
 	for name := range machine.OSSysctls {
@@ -76,9 +65,6 @@ func TestApplySysctlsAppliesEveryDeclaredDefault(t *testing.T) {
 	}
 }
 
-// The two passes in the boot, in the order the boot runs them. A name
-// in both sets holds the spec's value, because the spec is written
-// second and the last write is the one that holds.
 func TestSpecSysctlsOverrideTheDeclaredDefaults(t *testing.T) {
 	const shared = "vm.max_map_count"
 	const untouched = "kernel.pid_max"
@@ -94,14 +80,10 @@ func TestSpecSysctlsOverrideTheDeclaredDefaults(t *testing.T) {
 		t.Errorf("%s: got %q, want the spec's value", shared, got)
 	}
 	if got := readParameter(t, dir, untouched); got != machine.OSSysctls[untouched] {
-		t.Errorf("%s: got %q, want the default to stand", untouched, got)
+		t.Errorf("%s: got %q, want the default", untouched, got)
 	}
 }
 
-// /tmp is writable by every user and carries the sticky bit, the Unix
-// convention, so a process can delete or rename only its own files
-// there. The mode is set exactly, whether the directory is new or is a
-// mounted filesystem's root that arrived with mode 0755.
 func TestOpenTmpMakesAStickyDirectoryForEveryUser(t *testing.T) {
 	cases := []struct {
 		name  string

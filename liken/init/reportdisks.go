@@ -1,17 +1,11 @@
 package main
 
-// The report boot's view of the machine's block devices.
-//
-// Before the report can propose a manifest it has to answer three
-// questions about the disks in front of it. Which device is the
-// installation stick, so that no role lands on the one disk that
-// leaves with the person? Which of the rest can hold a role at all,
-// as against an optical drive or an empty card reader that the kernel
-// also presents as a block device? And which of those can an install
-// reach, as against a disk that exists only because this boot loaded
-// a driver? Every answer is a small read of sysfs, the way the rest
-// of liken discovers storage: the kernel publishes these facts
-// already, so nothing here has to derive them.
+// This file chooses the disks that the report boot considers for its
+// proposed manifest. For each block device, the report reads sysfs to
+// learn whether it is the install stick, whether it can hold a storage
+// role at all (the kernel also lists optical drives and empty card
+// readers), and whether it exists only because this boot loaded a
+// driver that an install would not have.
 
 import (
 	"path/filepath"
@@ -22,40 +16,35 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// installStick is the report's one answer about the installation
-// stick, resolved once and threaded through everything that needs it:
-// the disk walk that leaves the stick out, the proposal that places no
-// role on it, and the write of the proposal onto it. Two independent
-// lookups could disagree, and a disagreement here has teeth. A stick
-// that one lookup missed would be proposed as a data disk, and the
-// "wipe and reinstall" entry blanks every disk the manifest names.
+// installStick is the result of one lookup of the install stick,
+// which the report passes to every step that must leave the stick
+// alone. Separate lookups could disagree, and a stick that one of them
+// missed would be proposed as a data disk, which the "wipe and
+// reinstall" entry would then erase.
 type installStick struct {
-	// Disk is the kernel name of the disk that carries the stick, and
-	// Path is that disk's device node. Both are empty when the report
-	// cannot name one disk with confidence.
+	// Disk is the kernel name of the stick's disk, and Path is its
+	// device node. Both are empty unless exactly one partition is
+	// named liken:install.
 	Disk string
 	Path string
-	// Partition is the device node of the FAT volume to mount to write
-	// the proposal.
+	// Partition is the device node of the FAT volume that the report
+	// mounts to write the proposal.
 	Partition string
-	// Candidates names every disk that carries a partition called
-	// liken:install. One is the ordinary case. More than one is an
-	// ambiguity the report refuses to guess through, and every disk in
-	// the list must then stay out of the proposal.
+	// Candidates lists every disk that has a partition named
+	// liken:install.
 	Candidates []string
 }
 
-// ambiguous reports whether more than one disk claims to be the
-// stick. The report can neither write to such a stick nor place a
-// role on any disk that might be it.
+// ambiguous reports whether liken:install partitions exist but the
+// report could not pick one. The report then writes no proposal to a
+// stick, and places no role on any candidate disk.
 func (s installStick) ambiguous() bool {
 	return s.Disk == "" && len(s.Candidates) > 0
 }
 
-// resolveInstallStick finds the installation stick the same way liken
-// recognizes everything else on a disk: by the GPT partition name that
-// image/stick.go writes, not by a device path, which changes with
-// enumeration order.
+// resolveInstallStick finds the stick by the GPT partition name that
+// image/stick.go writes, because a device path changes with the order
+// in which the kernel enumerates disks.
 func resolveInstallStick() installStick {
 	var stick installStick
 	var partitions []string
@@ -77,19 +66,17 @@ func resolveInstallStick() installStick {
 	return stick
 }
 
-// awaitInstallStick polls for the installation stick until it appears
-// or the ceiling passes, ending the moment anything claims to be one.
-// The poll is on the partition table itself, not on uevents, so it
-// also covers the moment between the disk's arrival and its
-// partitions'.
+// awaitInstallStick polls every 200ms until a liken:install partition
+// appears or stickCeiling passes, and returns the last lookup. It
+// polls the partitions instead of waiting for a uevent, so a disk
+// whose partitions appear after the disk itself is still found.
 //
-// The wait exists because usb-storage delays its scan a full second
-// after the device attaches (its delay_use), and USB enumeration runs
-// on past the settle the report does before this. An immediate walk
-// can therefore run before the stick's disk exists. A report boot
-// expects a stick by construction: a person picked the entry from one.
-// A boot with no stick at all (a hand-typed liken.report) pays the
-// ceiling once, and its report stays on the console.
+// The wait is needed because usb-storage waits one second after a
+// device attaches before it scans it (its delay_use parameter), and
+// USB enumeration can continue after the settle that the report does
+// before this. A boot with no stick, such as one started by typing
+// liken.report by hand, waits the full stickCeiling and then shows its
+// report on the console.
 func awaitInstallStick() installStick {
 	deadline := time.Now().Add(stickCeiling)
 	for {
@@ -101,14 +88,11 @@ func awaitInstallStick() installStick {
 	}
 }
 
-// readReportDisks lists the disks that could carry a storage role, in
-// the form the proposal records. It reuses the same sysfs walk the
-// world report uses, and adds the transport, which a person reads to
-// recognize a disk by how it attaches. The installation stick is left
-// out entirely, because it belongs to the person and not to the
-// machine. A disk that only might be the stick stays in the list as
-// evidence, marked, so the proposal can account for it and still place
-// no role on it.
+// readReportDisks returns the disks that could hold a storage role,
+// and separately the memory cards in slots. It leaves out the
+// install stick. When the stick is ambiguous, each candidate
+// stays in the list with MaybeStick set, so the proposal shows it but
+// places no role on it.
 func readReportDisks(stick installStick) (disks, cards []reportDisk) {
 	for _, d := range discoverBlockDevices() {
 		if d.Name == stick.Disk || !canHoldARole(d) {
@@ -132,19 +116,13 @@ func readReportDisks(stick installStick) (disks, cards []reportDisk) {
 	return disks, cards
 }
 
-// cardInASlot reports whether a block device is a memory card a
-// person put in a slot, as against an eMMC module soldered to the
-// board. A card leaves the machine with the person, like the install
-// stick, so the report names it and proposes nothing onto it. The mmc
-// bus publishes what the card is on the card device: MMC for an eMMC
-// module, SD for an SD card, SDcombo for an SD card with SDIO on it.
-// Only the mmc bus writes a word here at all; a SCSI disk writes its
-// peripheral device type as a number in the same attribute, which is
-// what canHoldARole reads.
-//
-// This is about the report's proposal alone. A spec that names an SD
-// card by hand still installs onto it, because a person who declares a
-// card has decided something the report may not decide for them.
+// cardInASlot reports whether a block device is a removable memory
+// card, as opposed to an eMMC module soldered to the board. A card can
+// be taken out like the install stick, so the report lists it but
+// proposes no role on it. A spec that a person writes can still name
+// an SD card, and the install uses it. The mmc bus sets device/type to
+// MMC for an eMMC module, SD for an SD card, and SDcombo for an SD
+// card with SDIO.
 func cardInASlot(name string) bool {
 	switch sysfsString(filepath.Join(sysBlock, name), "device/type") {
 	case "SD", "SDcombo":
@@ -154,12 +132,8 @@ func cardInASlot(name string) bool {
 }
 
 // firstByIDName returns the first by-id name among a disk's stable
-// names, or "" when the disk offers none. stableNames orders by-id
-// names before the by-path name, so the first entry under
-// stableDiskByID is the disk's own identity: a by-path name that
-// might precede it in some other order would name the disk's port
-// instead, a different fact that the proposal must not present as the
-// same thing.
+// names, or "". A by-path name is skipped because it identifies the
+// port the disk is on, not the disk.
 func firstByIDName(names []string) string {
 	for _, name := range names {
 		if strings.HasPrefix(name, stableDiskByID) {
@@ -169,20 +143,13 @@ func firstByIDName(names []string) string {
 	return ""
 }
 
-// canHoldARole rejects the block devices that a storage role cannot
-// live on. /sys/block lists every device with a bus parent, and a
-// repurposed desktop offers several that no partition table belongs
-// on: an optical drive, a card reader with no card in it, a
-// write-protected medium. A role proposed onto one of those is a
-// layout that cannot be claimed.
-//
-// The three checks are deliberately narrow, because the mistake in the
-// other direction is worse. A small disk is still a disk: a SATA DOM
-// of a few gigabytes is exactly the boot device some industrial boards
-// ship with, and a memory card holding a role is a legitimate, if
-// slow, machine. So the filter tests only for the absence of a medium,
-// a read-only device, and the SCSI device types that name optical
-// drives.
+// canHoldARole reports whether a storage role can be placed on a block
+// device. It rejects only a device with no medium, a read-only device,
+// and an optical drive, because none of them can take a partition
+// table. The checks are narrow because rejecting a usable disk is
+// worse than proposing an unusable one. There is no minimum size, for
+// example, because some industrial boards boot from a SATA DOM of a
+// few gigabytes.
 func canHoldARole(d machine.BlockDevice) bool {
 	if d.SizeBytes == 0 {
 		return false
@@ -191,12 +158,9 @@ func canHoldARole(d machine.BlockDevice) bool {
 	if sysfsString(dir, "ro") == "1" {
 		return false
 	}
-	// The SCSI peripheral device type is the kernel's own word for
-	// what a device is. Type 5 is a CD or DVD drive and type 7 is
-	// optical memory; an ordinary disk is type 0. Every disk that
-	// arrives through the SCSI layer publishes this attribute, which
-	// includes SATA and USB disks, because libata and usb-storage both
-	// present their devices to that layer.
+	// device/type is the SCSI peripheral device type: 5 is a CD or DVD
+	// drive and 7 is optical memory. SATA and USB disks have it too,
+	// because libata and usb-storage present them as SCSI devices.
 	switch sysfsString(dir, "device/type") {
 	case "5", "7":
 		return false
@@ -204,29 +168,23 @@ func canHoldARole(d machine.BlockDevice) bool {
 	return true
 }
 
-// diskTransport names the bus that carries a disk, read from the disk's
-// place in the sysfs device tree. The tree's path names every bus the
-// device hangs off, so a SATA disk's path passes through an ata node, an
-// NVMe disk's through nvme, and so on. This is the same information udev
-// derives its ID_BUS from, read straight from the one file the kernel
-// already maintains.
+// diskTransport returns the bus that a disk attaches through, or "",
+// so that a person can recognize the disk in the proposal. The disk's
+// resolved sysfs path has a directory for each controller between the
+// disk and the CPU, such as ata2 for a SATA disk.
 func diskTransport(name string) string {
 	real, err := filepath.EvalSymlinks(filepath.Join(sysBlock, name))
 	if err != nil {
 		return ""
 	}
-	// The order matters only where a path could match more than one
-	// word. A disk reached through libata shows both an ata node and the
-	// SCSI layer that libata presents it through, and "sata" is the
-	// answer a person wants.
+	// The first match wins. A path can contain more than one marker,
+	// and this order picks the bus that the person would name.
 	for _, bus := range []struct{ marker, transport string }{
 		{"/nvme", "nvme"},
 		{"/ata", "sata"},
 		{"/usb", "usb"},
 		{"/virtio", "virtio"},
-		// An mmc card's sysfs path passes through its host
-		// controller's mmc_host node, so that segment names the bus
-		// for an eMMC module or an SD card.
+		// eMMC modules and SD cards are under an mmc_host directory.
 		{"/mmc", "mmc"},
 	} {
 		if strings.Contains(real, bus.marker) {
@@ -236,17 +194,12 @@ func diskTransport(name string) string {
 	return ""
 }
 
-// markDisksBehindDrivers finds the disks that exist only because this
-// report loaded a driver, and records which chain reached them.
-//
-// A device is unclaimed exactly because the boot path had no driver
-// for it. So a disk that sits below such a device is a disk the boot
-// path cannot see, and the install path is the boot path: it claims
-// and mounts the manifest's disks before it loads a single module the
-// manifest declares. Naming the driver in spec.modules would not
-// help, and would read as though it did. The proposal says so instead,
-// and the machine needs an image that carries the driver in its boot
-// modules.
+// markDisksBehindDrivers sets BehindModules on each disk that is below
+// a device of a module recommendation, to the modules of those
+// recommendations' Chain. The image's boot modules had no driver for
+// that device, and an install mounts the manifest's disks before it
+// loads spec.modules. So the machine needs an image with the driver in
+// its boot modules, and the proposal says so.
 func markDisksBehindDrivers(disks []reportDisk, recs []moduleRecommendation) []reportDisk {
 	for i, d := range disks {
 		for _, rec := range recs {
@@ -261,10 +214,9 @@ func markDisksBehindDrivers(disks []reportDisk, recs []moduleRecommendation) []r
 	return disks
 }
 
-// blockDeviceUnder reports whether a disk sits below one device in the
-// sysfs device tree. Both paths resolve through their symlinks first,
-// because /sys/block holds links into /sys/devices, where the real
-// parent-and-child structure is.
+// blockDeviceUnder reports whether a disk is below a device in the
+// sysfs device tree. It resolves both paths first, because the entries
+// in /sys/block are symlinks into /sys/devices.
 func blockDeviceUnder(diskName, deviceDir string) bool {
 	if diskName == "" {
 		return false
@@ -280,16 +232,12 @@ func blockDeviceUnder(diskName, deviceDir string) bool {
 	return strings.HasPrefix(disk+"/", device+"/")
 }
 
-// withoutStickRecommendations drops the recommendations that exist
-// only to reach the installation stick. The stick's own controller
-// requires a driver like any unclaimed device, and the report rightly
-// loaded it, because without it there is no stick to write the
-// proposal to. But the stick leaves the machine with the person, so
-// its driver does not belong in the machine's manifest. A device
-// serves the stick when the stick's disk sits below it in the sysfs
-// device tree; a recommendation is dropped only when every device
-// that named it serves the stick, so a second, permanent disk on the
-// same kind of controller keeps its driver recommended.
+// withoutStickRecommendations drops each module recommendation whose
+// devices all have the stick's disk below them. The report loaded that
+// driver only to write the proposal to the stick, and the stick does
+// not stay in the machine. A recommendation that also has another
+// device, such as a permanent disk on the same kind of controller,
+// stays.
 func withoutStickRecommendations(recs []moduleRecommendation, stick string) []moduleRecommendation {
 	if stick == "" {
 		return recs
@@ -310,10 +258,8 @@ func withoutStickRecommendations(recs []moduleRecommendation, stick string) []mo
 	return kept
 }
 
-// appendNew adds the names that are not in the list already, keeping
-// the order they arrive in. Two controllers of the same kind reach
-// their disks through the same chain, and a disk names each chain
-// that reached it once.
+// appendNew appends each name that the list does not contain yet, in
+// the order given.
 func appendNew(existing []string, names ...string) []string {
 	for _, name := range names {
 		if !slices.Contains(existing, name) {

@@ -111,7 +111,7 @@ func opener(line *fakeLine, err error) openLine {
 var pulse8Protocol, _ = machine.LookupSerioProtocol("pulse8-cec")
 
 // The line settings are inputattach's setline for a 9600-baud, 8-bit
-// device, and the two ioctls carry serport's discipline number and the
+// device, and the two ioctls pass serport's discipline number and the
 // table's serio type.
 func TestAttachSerioRunsInputattachsSequence(t *testing.T) {
 	line := &fakeLine{}
@@ -119,7 +119,7 @@ func TestAttachSerioRunsInputattachsSequence(t *testing.T) {
 	got, err := attachSerio(opener(line, nil), "/dev/ttyACM0", pulse8Protocol)
 
 	if err != nil || got != line {
-		t.Fatalf("attachSerio = %v, %v", got, err)
+		t.Fatalf("attachSerio returned %v, %v, want the open line and no error", got, err)
 	}
 	want := unix.Termios{
 		Cflag:  unix.CS8 | unix.CREAD | unix.HUPCL | unix.CLOCAL | unix.B9600,
@@ -128,16 +128,16 @@ func TestAttachSerioRunsInputattachsSequence(t *testing.T) {
 	}
 	want.Cc[unix.VMIN] = 1
 	if *line.termios != want {
-		t.Errorf("termios = %+v", *line.termios)
+		t.Errorf("the termios are %+v, want %+v", *line.termios, want)
 	}
 	if line.discipline != 2 || line.serioType != 0x40 || line.closed {
-		t.Errorf("discipline %d, type %#x, closed %v", line.discipline, line.serioType, line.closed)
+		t.Errorf("the discipline is %d, the type is %#x, and closed is %v, want 2, 0x40, and false", line.discipline, line.serioType, line.closed)
 	}
 }
 
-// Every refusal names the call and carries the kernel's text word for
-// word, and a refused line is closed so the tty is not left holding a
-// half-set discipline.
+// Each error starts with the failed call and keeps the kernel's text.
+// A line that fails after the open is closed, so the tty does not keep
+// a partly set discipline.
 func TestAttachSerioNamesTheCallThatFailed(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -146,19 +146,19 @@ func TestAttachSerioNamesTheCallThatFailed(t *testing.T) {
 		want    string
 		closed  bool
 	}{
-		{"open", &fakeLine{}, unix.ENOENT, "open /dev/ttyACM0: no such file or directory", false},
-		{"the line settings", &fakeLine{termiosErr: unix.EIO}, nil, "TCSETS: input/output error", true},
-		{"the discipline", &fakeLine{disciplineErr: unix.EPERM}, nil, "TIOCSETD: operation not permitted", true},
-		{"the serio type", &fakeLine{typeErr: unix.EINVAL}, nil, "SPIOCSTYPE: invalid argument", true},
+		{"open", &fakeLine{}, unix.ENOENT, "opening /dev/ttyACM0: no such file or directory", false},
+		{"the line settings", &fakeLine{termiosErr: unix.EIO}, nil, "setting the line speed and mode (TCSETS): input/output error", true},
+		{"the discipline", &fakeLine{disciplineErr: unix.EPERM}, nil, "setting the serport line discipline (TIOCSETD): operation not permitted", true},
+		{"the serio type", &fakeLine{typeErr: unix.EINVAL}, nil, "setting the serio type (SPIOCSTYPE): invalid argument", true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := attachSerio(opener(test.line, test.openErr), "/dev/ttyACM0", pulse8Protocol)
 			if err == nil || err.Error() != test.want {
-				t.Errorf("err = %v", err)
+				t.Errorf("the error is %v, want %q", err, test.want)
 			}
 			if test.line.closed != test.closed {
-				t.Errorf("closed = %v", test.line.closed)
+				t.Errorf("closed is %v, want %v", test.line.closed, test.closed)
 			}
 		})
 	}
@@ -172,7 +172,7 @@ func TestAttachSerioRefusesASpeedItHasNoSettingFor(t *testing.T) {
 	_, err := attachSerio(opener(line, nil), "/dev/ttyACM0", odd)
 
 	if err == nil || !strings.Contains(err.Error(), "12345") || !line.closed {
-		t.Errorf("err = %v, closed = %v", err, line.closed)
+		t.Errorf("the error is %v and closed is %v, want an error that names 12345 and true", err, line.closed)
 	}
 }
 
@@ -193,29 +193,26 @@ func TestHoldReadRepeatsAnInterruptedRead(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			line := &fakeLine{reads: test.reads}
 			if err := holdRead(line); !errors.Is(err, test.want) || line.readCalls != test.calls {
-				t.Errorf("holdRead = %v after %d reads", err, line.readCalls)
+				t.Errorf("holdRead returned %v after %d reads, want %v after %d", err, line.readCalls, test.want, test.calls)
 			}
 		})
 	}
 }
 
-// The mask blocks everything that can arrive from outside the thread,
-// SIGCHLD above all, and leaves the fault signals open. A fault signal
-// that is blocked when the thread faults kills the process, and in
-// PID 1 that panics the kernel, where an open one reaches Go's panic
-// and the holder's recover.
+// The mask blocks every signal that can arrive from outside the
+// thread, and leaves the fault signals unblocked (see faultSignals).
 func TestTheHolderMaskLeavesOnlyTheFaultSignalsOpen(t *testing.T) {
 	mask := holderSignalMask()
 	// Signal 33 is SIGRTMIN+1, which the Go runtime sends to every
 	// thread to run a setuid-family call on each one.
 	for _, sig := range []unix.Signal{unix.SIGCHLD, unix.SIGURG, unix.SIGTERM, unix.SIGINT, unix.SIGHUP, unix.SIGPIPE, unix.Signal(33)} {
 		if !sigsetHas(&mask, sig) {
-			t.Errorf("%v is open", sig)
+			t.Errorf("%v is open in the mask, want blocked", sig)
 		}
 	}
 	for _, sig := range faultSignals {
 		if sigsetHas(&mask, sig) {
-			t.Errorf("%v is blocked", sig)
+			t.Errorf("%v is blocked in the mask, want open", sig)
 		}
 	}
 }
@@ -229,7 +226,7 @@ func startHolder(t *testing.T, line *fakeLine, openErr error) (*serioHolder, cha
 	select {
 	case <-h.settled:
 	case <-time.After(5 * time.Second):
-		t.Fatal("the holder never finished its attach calls")
+		t.Fatal("the holder did not finish its attach calls within 5 seconds, want them finished")
 	}
 	return h, nudge
 }
@@ -240,13 +237,12 @@ func waitDone(t *testing.T, h *serioHolder) {
 	select {
 	case <-h.done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("the holder never ended")
+		t.Fatal("the holder did not end within 5 seconds, want it to end")
 	}
 }
 
-// waitNudge waits for the holder's nudge. The holder closes done
-// before it sends the nudge, so a test that has seen done can still
-// reach the channel before the send.
+// waitNudge waits for the holder's send on nudge. The holder closes
+// done before it sends, so the send can come after waitDone returns.
 func waitNudge(t *testing.T, nudge <-chan struct{}, msg string) {
 	t.Helper()
 	select {
@@ -260,19 +256,19 @@ func TestAHolderReadsOnAThreadThatBlocksSignals(t *testing.T) {
 	line := &fakeLine{release: make(chan struct{})}
 	h, nudge := startHolder(t, line, nil)
 	if h.attachErr != nil {
-		t.Fatal(h.attachErr)
+		t.Fatalf("attaching the line: %v", h.attachErr)
 	}
 	close(line.release)
 	waitDone(t, h)
 
 	if line.sigBlk&(1<<(unix.SIGCHLD-1)) == 0 {
-		t.Errorf("the read ran with SigBlk %#x", line.sigBlk)
+		t.Errorf("SigBlk during the read is %#x, want SIGCHLD blocked", line.sigBlk)
 	}
 	if line.sigBlk&(1<<(unix.SIGSEGV-1)) != 0 {
-		t.Errorf("the read ran with SIGSEGV blocked: %#x", line.sigBlk)
+		t.Errorf("SigBlk during the read is %#x, want SIGSEGV open", line.sigBlk)
 	}
 	if h.endErr != nil || !line.closed {
-		t.Errorf("endErr %v, closed %v", h.endErr, line.closed)
+		t.Errorf("endErr is %v and closed is %v, want nil and true", h.endErr, line.closed)
 	}
 	waitNudge(t, nudge, "an ended holder must wake the walk")
 }
@@ -281,21 +277,20 @@ func TestAHolderReportsARefusedAttach(t *testing.T) {
 	h, nudge := startHolder(t, &fakeLine{disciplineErr: unix.EPERM}, nil)
 	waitDone(t, h)
 
-	if h.attachErr == nil || h.attachErr.Error() != "TIOCSETD: operation not permitted" {
-		t.Errorf("attachErr = %v", h.attachErr)
+	if h.attachErr == nil || h.attachErr.Error() != "setting the serport line discipline (TIOCSETD): operation not permitted" {
+		t.Errorf("attachErr is %v, want the TIOCSETD error", h.attachErr)
 	}
 	waitNudge(t, nudge, "a refused holder must wake the walk")
 }
 
-// A panic in the holder's goroutine is outside the machine plane's
-// recovery boundary, so the holder carries its own. Without it, the
-// panic would end PID 1.
-func TestAHolderRecoversAPanicAsAStatusFact(t *testing.T) {
+// The machine plane does not recover a panic in the holder's
+// goroutine, so the holder must, or the panic would end PID 1.
+func TestAHolderRecoversAPanicAsItsEndError(t *testing.T) {
 	h, _ := startHolder(t, &fakeLine{readPanics: true}, nil)
 	waitDone(t, h)
 
 	if h.attachErr != nil || h.endErr == nil || !strings.Contains(h.endErr.Error(), "a fault in the read") {
-		t.Errorf("attachErr %v, endErr %v", h.attachErr, h.endErr)
+		t.Errorf("attachErr is %v and endErr is %v, want nil and an error that holds the panic text", h.attachErr, h.endErr)
 	}
 }
 
@@ -305,24 +300,23 @@ func TestAPanicInTheReadClosesTheLine(t *testing.T) {
 	waitDone(t, h)
 
 	if !line.closed {
-		t.Error("a line left open keeps serport's discipline on the tty")
+		t.Error("the line is open after a panic in the read, want it closed")
 	}
 }
 
-// A panic in the final close is recovered, and the recovery does not
-// close the line a second time.
+// A panic in the close after the read is recovered, and the recover
+// does not close the line a second time.
 func TestAPanicInTheFinalCloseClosesOnce(t *testing.T) {
 	line := &fakeLine{closePanics: true}
 	h, _ := startHolder(t, line, nil)
 	waitDone(t, h)
 
 	if line.closeCalls != 1 || h.endErr == nil {
-		t.Errorf("closes %d, endErr %v", line.closeCalls, h.endErr)
+		t.Errorf("close ran %d times and endErr is %v, want 1 time and an error", line.closeCalls, h.endErr)
 	}
 }
 
-// A second panic, in the close, must not escape the holder's own
-// recovery.
+// A panic in closeAfterPanic's close must not escape it.
 func TestAPanicInTheCloseAfterAPanicStaysInside(t *testing.T) {
 	closeAfterPanic(panickingClose{})
 	closeAfterPanic(nil)
@@ -335,6 +329,6 @@ func (panickingClose) close() error { panic("a fault in the close") }
 func TestSpiocstypeIsTheKernelsNumber(t *testing.T) {
 	// _IOW('q', 0x01, unsigned long) on a 64-bit kernel.
 	if spiocstype != 0x40087101 {
-		t.Errorf("SPIOCSTYPE = %#x", spiocstype)
+		t.Errorf("SPIOCSTYPE is %#x, want 0x40087101", spiocstype)
 	}
 }

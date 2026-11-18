@@ -1,11 +1,8 @@
 package main
 
-// Tests for the feature pass: what init reports about the cluster's
-// opt-ins, and what actuating a vendored payload does. k3s_test.go
-// pins the disable-list rendering that bundled features act through.
-// Module verdicts use a fabricated tree, the same as the module
-// tests, and lean on builtins, because only a real kernel can
-// actually load anything.
+// k3s_test.go tests the disable settings that turn on bundled
+// features. The module tests list iscsi_tcp as built in, because only
+// a real kernel can load a module.
 
 import (
 	"os"
@@ -19,13 +16,13 @@ import (
 
 func TestActuateFeaturesWithNoClusterReportsNothing(t *testing.T) {
 	if got := actuateFeatures(nil, "node-1"); got != nil {
-		t.Errorf("a machine alone enables nothing: %v", got)
+		t.Errorf("the statuses are %v, want none for a machine that enables nothing", got)
 	}
 }
 
 func TestActuateFeaturesWithNoFeaturesReportsNothing(t *testing.T) {
 	if got := actuateFeatures(labCluster(), "node-1"); got != nil {
-		t.Errorf("a cluster with no opt-ins reports nothing: %v", got)
+		t.Errorf("the statuses are %v, want none for a cluster with no opt-ins", got)
 	}
 }
 
@@ -34,11 +31,11 @@ func TestActuateFeaturesReportsSlugsFromANewerVocabulary(t *testing.T) {
 	c.Spec.Features = map[string]*cluster.FeatureConfig{"from-the-future": {}}
 	got := actuateFeatures(c, "node-1")
 	if len(got) != 1 || got[0].State != machine.FeatureMissing {
-		t.Fatalf("a slug this binary predates reports Missing: %+v", got)
+		t.Fatalf("the statuses are %+v, want one Missing for a slug this image does not define", got)
 	}
-	if !strings.Contains(got[0].Message, "upgrade to a release") ||
-		!strings.Contains(got[0].Message, "misspelling") {
-		t.Errorf("the message should name both causes: %q", got[0].Message)
+	if !strings.Contains(got[0].Message, "Upgrade to a release") ||
+		!strings.Contains(got[0].Message, "misspelled") {
+		t.Errorf("the message is %q, want both an upgrade and a misspelling as causes", got[0].Message)
 	}
 }
 
@@ -49,28 +46,23 @@ func TestActuateFeaturesReportsBundledFeaturesActive(t *testing.T) {
 		"traefik":        {},
 	}
 	got := actuateFeatures(c, "node-1")
-	// Three statuses come from two declarations: traefik requires
-	// helm, and an implied feature reports its standing the same as
-	// a declared one, so status.features tells the whole truth about
-	// what runs.
+	// traefik requires helm, so helm is reported too.
 	if len(got) != 3 {
-		t.Fatalf("expected three feature statuses, got %v", got)
+		t.Fatalf("the statuses are %v, want three", got)
 	}
-	// Sorted by slug, the same as every rendering of the same spec.
 	if got[0].Name != "helm" || got[1].Name != "metrics-server" || got[2].Name != "traefik" {
-		t.Errorf("expected sorted slugs, got %v", got)
+		t.Errorf("the statuses are %v, want helm, metrics-server, traefik in that order", got)
 	}
 	for _, s := range got {
 		if s.State != machine.FeatureActive || s.Message != "" {
-			t.Errorf("a bundled feature has nothing that can be missing: %+v", s)
+			t.Errorf("the status is %+v, want Active with no message", s)
 		}
 	}
 }
 
 // featureFixture points the package's path variables at temporary
-// directories, and builds a module tree where the feature's one
-// module is compiled into the kernel, so the healthy path needs no
-// syscalls. It returns the fabricated module tree's base directory.
+// directories and returns a fake module tree in which iscsi_tcp is
+// built into the kernel.
 func featureFixture(t *testing.T) string {
 	t.Helper()
 	featuresDir = t.TempDir()
@@ -92,18 +84,13 @@ func featureFixture(t *testing.T) string {
 func writeTreeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the directory of %s: %v", path, err)
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing %s: %v", path, err)
 	}
 }
 
-// An unknown parameter on a known feature has the same two causes as
-// an unknown slug: a newer vocabulary defined it, or a hand-written
-// seed misspelled it. The pass reports it the same way, degraded
-// with both causes named, rather than quietly ignoring the key and
-// actuating half a declaration.
 func TestActuateFeaturesReportsUnknownParameters(t *testing.T) {
 	c := labCluster()
 	c.Spec.Features = map[string]*cluster.FeatureConfig{
@@ -111,11 +98,11 @@ func TestActuateFeaturesReportsUnknownParameters(t *testing.T) {
 	}
 	got := actuateFeatures(c, "node-1")
 	if len(got) != 1 || got[0].State != machine.FeatureFailed {
-		t.Fatalf("an unknown parameter reports Failed: %+v", got)
+		t.Fatalf("the statuses are %+v, want one Failed for an unknown parameter", got)
 	}
 	if !strings.Contains(got[0].Message, "replicas") ||
 		!strings.Contains(got[0].Message, "misspelling") {
-		t.Errorf("the message should name the parameter and both causes: %q", got[0].Message)
+		t.Errorf("the message is %q, want the parameter name and both causes", got[0].Message)
 	}
 }
 
@@ -129,19 +116,14 @@ func TestWorkloadFeatureSeedsItsManifests(t *testing.T) {
 	}
 	got := actuateFeatures(c, "node-1")
 	if len(got) != 1 || got[0].State != machine.FeatureActive {
-		t.Fatalf("a declared workload feature reports Active: %+v", got)
+		t.Fatalf("the statuses are %+v, want one Active", got)
 	}
 	seeded := filepath.Join(k3sManifestsDir, "flux-system.yaml")
 	if _, err := os.Stat(seeded); err != nil {
-		t.Errorf("the manifest should be seeded for k3s: %v", err)
+		t.Errorf("reading the seeded manifest: %v", err)
 	}
 }
 
-// The flux feature's sync objects are rendered, not copied: the
-// declared parameters become the GitRepository and Kustomization
-// that point the engine at the fleet's repository. liken owns these
-// two objects forever (the repository must never carry them), so
-// they re-render on every boot like any seeded manifest.
 func TestWorkloadFeatureRendersTheFluxSyncObjects(t *testing.T) {
 	featureFixture(t)
 	c := labCluster()
@@ -153,11 +135,11 @@ func TestWorkloadFeatureRendersTheFluxSyncObjects(t *testing.T) {
 	}
 	got := actuateFeatures(c, "node-1")
 	if len(got) != 1 || got[0].State != machine.FeatureActive {
-		t.Fatalf("expected Active, got %+v", got)
+		t.Fatalf("the statuses are %+v, want one Active", got)
 	}
 	raw, err := os.ReadFile(filepath.Join(k3sManifestsDir, "flux-sync.yaml"))
 	if err != nil {
-		t.Fatalf("the sync objects should be rendered for k3s: %v", err)
+		t.Fatalf("reading flux-sync.yaml: %v", err)
 	}
 	rendered := string(raw)
 	for _, want := range []string{
@@ -170,15 +152,11 @@ func TestWorkloadFeatureRendersTheFluxSyncObjects(t *testing.T) {
 		"name: flux-system",
 	} {
 		if !strings.Contains(rendered, want) {
-			t.Errorf("the rendering should contain %q:\n%s", want, rendered)
+			t.Errorf("flux-sync.yaml is\n%s\nwant it to contain %q", rendered, want)
 		}
 	}
 }
 
-// The Kustomization's prune field comes from the declaration, not
-// from a constant. A repository that carries its own copy of the
-// flux-system Kustomization declares prune: "false", so the rendered
-// object never deletes what that repository applied.
 func TestWorkloadFeatureRendersTheDeclaredPrune(t *testing.T) {
 	for declared, want := range map[string]string{
 		"":      "prune: true",
@@ -196,14 +174,14 @@ func TestWorkloadFeatureRendersTheDeclaredPrune(t *testing.T) {
 			}
 			got := actuateFeatures(c, "node-1")
 			if len(got) != 1 || got[0].State != machine.FeatureActive {
-				t.Fatalf("expected Active, got %+v", got)
+				t.Fatalf("the statuses are %+v, want one Active", got)
 			}
 			raw, err := os.ReadFile(filepath.Join(k3sManifestsDir, "flux-sync.yaml"))
 			if err != nil {
-				t.Fatalf("the sync objects should be rendered for k3s: %v", err)
+				t.Fatalf("reading flux-sync.yaml: %v", err)
 			}
 			if !strings.Contains(string(raw), want) {
-				t.Errorf("the rendering should contain %q:\n%s", want, raw)
+				t.Errorf("flux-sync.yaml is\n%s\nwant it to contain %q", raw, want)
 			}
 		})
 	}
@@ -215,13 +193,13 @@ func TestWorkloadFeatureFailsOnABadConfiguration(t *testing.T) {
 	c.Spec.Features = map[string]*cluster.FeatureConfig{"flux": {}}
 	got := actuateFeatures(c, "node-1")
 	if len(got) != 1 || got[0].State != machine.FeatureFailed {
-		t.Fatalf("flux without a repository reports Failed: %+v", got)
+		t.Fatalf("the statuses are %+v, want one Failed for flux with no repository", got)
 	}
 	if !strings.Contains(got[0].Message, "repository") {
-		t.Errorf("the message should name the missing parameter: %q", got[0].Message)
+		t.Errorf("the message is %q, want it to name the repository parameter", got[0].Message)
 	}
 	if entries, _ := os.ReadDir(k3sManifestsDir); len(entries) != 0 {
-		t.Errorf("a failed feature must not seed workloads: %v", entries)
+		t.Errorf("the manifests directory holds %v, want nothing after a Failed feature", entries)
 	}
 }
 
@@ -229,10 +207,10 @@ func TestVendoredFeatureMissingFromAnOlderImage(t *testing.T) {
 	base := featureFixture(t)
 	got := actuateVendoredFeature(base, "iscsi", "node-1")
 	if got.State != machine.FeatureMissing {
-		t.Fatalf("no staged payload means the image predates the feature: %+v", got)
+		t.Fatalf("the status is %+v, want Missing when the image has no modules.conf", got)
 	}
-	if !strings.Contains(got.Message, "upgrade to a release") {
-		t.Errorf("the message should name the fix: %q", got.Message)
+	if !strings.Contains(got.Message, "Upgrade to a release") {
+		t.Errorf("the message is %q, want it to tell the reader to upgrade", got.Message)
 	}
 }
 
@@ -245,23 +223,23 @@ func TestVendoredFeatureActuatesEndToEnd(t *testing.T) {
 
 	got := actuateVendoredFeature(base, "iscsi", "node-1")
 	if got.State != machine.FeatureActive || got.Message != "" {
-		t.Fatalf("got %+v", got)
+		t.Fatalf("the status is %+v, want Active with no message", got)
 	}
 
 	iqn, err := os.ReadFile(filepath.Join(iscsiDir, "initiatorname.iscsi"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the initiator name: %v", err)
 	}
 	if string(iqn) != "InitiatorName=iqn.2026-07.sh.liken:node-1\n" {
-		t.Errorf("initiator name: got %q", iqn)
+		t.Errorf("the initiator name file is %q, want the machine name in an iqn", iqn)
 	}
 
 	seeded, err := os.ReadFile(filepath.Join(k3sManifestsDir, "iscsid.yaml"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the seeded manifest: %v", err)
 	}
 	if string(seeded) != "kind: DaemonSet\n" {
-		t.Errorf("seeded manifest: got %q", seeded)
+		t.Errorf("the seeded manifest is %q, want a copy of the image's manifest", seeded)
 	}
 }
 
@@ -271,10 +249,10 @@ func TestVendoredFeatureFailsWhenAModuleIsUnloadable(t *testing.T) {
 
 	got := actuateVendoredFeature(base, "iscsi", "node-1")
 	if got.State != machine.FeatureFailed {
-		t.Fatalf("an unloadable module fails the whole feature: %+v", got)
+		t.Fatalf("the status is %+v, want Failed for an unloadable module", got)
 	}
 	if !strings.Contains(got.Message, "not_a_module") {
-		t.Errorf("the message should name the module: %q", got.Message)
+		t.Errorf("the message is %q, want it to name the module", got.Message)
 	}
 }
 
@@ -284,10 +262,10 @@ func TestVendoredFeatureWithoutManifestsSeedsNothing(t *testing.T) {
 
 	got := actuateVendoredFeature(base, "nfs", "node-1")
 	if got.State != machine.FeatureActive {
-		t.Fatalf("a payload with no workload is still a whole feature: %+v", got)
+		t.Fatalf("the status is %+v, want Active for a feature with no manifests", got)
 	}
 	if _, err := os.Stat(k3sManifestsDir); !os.IsNotExist(err) {
-		t.Errorf("nothing should have been seeded: %v", err)
+		t.Errorf("checking the manifests directory returned %v, want it not to exist", err)
 	}
 }
 
@@ -296,26 +274,26 @@ func TestVendoredFeatureFailsOnAnUnreadableModuleList(t *testing.T) {
 	conf := filepath.Join(featuresDir, "iscsi", "modules.conf")
 	writeTreeFile(t, conf, "iscsi_tcp\n")
 	if err := os.Chmod(conf, 0o000); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making modules.conf unreadable: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(conf, 0o644) })
 
 	got := actuateVendoredFeature(base, "iscsi", "node-1")
 	if got.State != machine.FeatureFailed {
-		t.Errorf("a payload that can't be read is a failure, not an absence: %+v", got)
+		t.Errorf("the status is %+v, want Failed for an unreadable modules.conf", got)
 	}
 }
 
 func TestVendoredFeatureFailsWhenItsBootHookFails(t *testing.T) {
 	base := featureFixture(t)
 	writeTreeFile(t, filepath.Join(featuresDir, "iscsi", "modules.conf"), "iscsi_tcp\n")
-	// A plain file where the hook expects to create its directory.
+	// A plain file blocks the boot hook from creating its directory.
 	writeTreeFile(t, filepath.Join(filepath.Dir(iscsiDir), "blocker"), "")
 	iscsiDir = filepath.Join(filepath.Dir(iscsiDir), "blocker", "iscsi")
 
 	got := actuateVendoredFeature(base, "iscsi", "node-1")
 	if got.State != machine.FeatureFailed || got.Message == "" {
-		t.Errorf("a hook that can't write its file fails the feature: %+v", got)
+		t.Errorf("the status is %+v, want Failed with a message when the boot hook cannot write", got)
 	}
 }
 
@@ -325,26 +303,25 @@ func TestVendoredFeatureFailsWhenItsManifestIsUnreadable(t *testing.T) {
 	manifest := filepath.Join(featuresDir, "nfs", "manifests", "nfs.yaml")
 	writeTreeFile(t, manifest, "kind: DaemonSet\n")
 	if err := os.Chmod(manifest, 0o000); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the manifest unreadable: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(manifest, 0o644) })
 
 	got := actuateVendoredFeature(base, "nfs", "node-1")
 	if got.State != machine.FeatureFailed {
-		t.Errorf("a workload that can't be seeded fails the feature: %+v", got)
+		t.Errorf("the status is %+v, want Failed when the manifest cannot be read", got)
 	}
 }
 
 func TestSeedFeatureManifestsReportsAnUnwritableDeployDir(t *testing.T) {
 	featureFixture(t)
 	writeTreeFile(t, filepath.Join(featuresDir, "nfs", "manifests", "nfs.yaml"), "kind: DaemonSet\n")
-	// The auto-deploy path is blocked by a plain file, so MkdirAll
-	// can't create the directory.
+	// A plain file blocks MkdirAll from creating the directory.
 	blocked := filepath.Join(t.TempDir(), "blocker")
 	writeTreeFile(t, blocked, "")
 	k3sManifestsDir = filepath.Join(blocked, "manifests")
 
 	if err := seedFeatureManifests("nfs"); err == nil {
-		t.Error("an unwritable deploy directory is an error")
+		t.Error("seedFeatureManifests returned no error when it could not create the manifests directory, want one")
 	}
 }

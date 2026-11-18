@@ -1,10 +1,8 @@
 package main
 
-// Tests for resolving a declared disk name in the claim path. They
-// run against the same fake sysfs fixtures diskids_test.go and
-// diskpaths_test.go use, because resolveDeclaredDisk recomputes a
-// disk's names the same way those files do, rather than reading a
-// link tree.
+// These tests build disks with the fake sysfs fixtures of
+// diskids_test.go and diskpaths_test.go, because resolveDeclaredDisk
+// computes disk names from sysfs and reads no links.
 
 import (
 	"fmt"
@@ -25,14 +23,14 @@ func TestResolveDeclaredDiskPlainKernelPath(t *testing.T) {
 
 	disk, err := resolveDeclaredDisk(filepath.Join(dev, "vda"))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the kernel path: %v", err)
 	}
 	if disk == nil || disk.Name != "vda" {
-		t.Errorf("got %+v, want vda", disk)
+		t.Errorf("the disk is %+v, want vda", disk)
 	}
 }
 
-func TestResolveDeclaredDiskByIDNameMatchesTheDiskCarryingIt(t *testing.T) {
+func TestResolveDeclaredDiskByIDNameMatchesTheDiskWithThatID(t *testing.T) {
 	sys, _ := fakeMachine(t)
 	dir := fakeDisk(t, sys, "sda", "pci0000:00", "0000:00:1f.2", "ata3", "host2",
 		"target2:0:0", "2:0:0:0", "block", "sda")
@@ -40,10 +38,10 @@ func TestResolveDeclaredDiskByIDNameMatchesTheDiskCarryingIt(t *testing.T) {
 
 	disk, err := resolveDeclaredDisk("/dev/disk/by-id/wwn-0x5002538d40a45c88")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the by-id name: %v", err)
 	}
 	if disk == nil || disk.Name != "sda" {
-		t.Errorf("got %+v, want sda", disk)
+		t.Errorf("the disk is %+v, want sda", disk)
 	}
 }
 
@@ -53,10 +51,10 @@ func TestResolveDeclaredDiskByPathNameMatchesTheDiskOnThatPort(t *testing.T) {
 
 	disk, err := resolveDeclaredDisk("/dev/disk/by-path/pci-0000:00:05.0")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving the by-path name: %v", err)
 	}
 	if disk == nil || disk.Name != "vda" {
-		t.Errorf("got %+v, want vda", disk)
+		t.Errorf("the disk is %+v, want vda", disk)
 	}
 }
 
@@ -64,18 +62,15 @@ func TestResolveDeclaredDiskUnattachedNameResolvesNil(t *testing.T) {
 	fakeMachine(t) // a machine with no disks at all
 	disk, err := resolveDeclaredDisk("/dev/disk/by-id/wwn-0xdeadbeef")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("resolving a name that no disk has: %v", err)
 	}
 	if disk != nil {
-		t.Errorf("got %+v, want no match", disk)
+		t.Errorf("the disk is %+v, want nil", disk)
 	}
 }
 
 func TestResolveDeclaredDiskAmbiguousNameRefusesToGuess(t *testing.T) {
-	// Two disks report the same WWN, the way a clone or a disk moved
-	// from another machine would. Guessing which one the spec meant
-	// could partition the wrong disk and destroy whatever it holds, so
-	// the resolver refuses instead of choosing.
+	// Two disks report the same WWN, as a cloned disk would.
 	sys, _ := fakeMachine(t)
 	for _, name := range []string{"sda", "sdb"} {
 		dir := fakeDisk(t, sys, name, "pci0000:00", "0000:00:1f.2", "ata3", "host2",
@@ -85,39 +80,28 @@ func TestResolveDeclaredDiskAmbiguousNameRefusesToGuess(t *testing.T) {
 
 	_, err := resolveDeclaredDisk("/dev/disk/by-id/wwn-0x5002538d40a45c88")
 	if err == nil {
-		t.Fatal("expected an error for a name that matches two disks")
+		t.Fatal("resolving a name that matches two disks returned no error, want one")
 	}
 	for _, want := range []string{"refusing to guess", "2 disks", "sda", "sdb"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error should mention %q: %v", want, err)
+			t.Errorf("the error is %q, want it to contain %q", err, want)
 		}
 	}
 }
 
 func TestResolveDeclaredDiskRefusesOtherDiskTrees(t *testing.T) {
-	// Validate refuses a by-uuid name, and every tree but by-id and
-	// by-path, before a spec ever reaches init. The resolver checks
-	// again anyway: the code about to partition a disk must not depend
-	// on an earlier gate having run.
 	fakeMachine(t)
 	_, err := resolveDeclaredDisk("/dev/disk/by-uuid/deadbeef-dead-beef-dead-beefdeadbeef")
 	if err == nil || !strings.Contains(err.Error(), "by-uuid") {
-		t.Errorf("expected a refusal naming the tree: %v", err)
+		t.Errorf("the error is %v, want one that names by-uuid", err)
 	}
 }
 
-// The declared-disk wait tests run in synctest bubbles with the boot's
-// own poll and deadline, so a wait's sleeps pass on the fake clock.
-
-// An install boot claims disks moments after the boot archive
-// loads its modules, and an eMMC card attaches on a workqueue up
-// to a second later. The claim path waits for a declared disk the
-// same bounded way a reinstall does.
 func TestPlanAllClaimsWaitsForALateDeclaredDisk(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		sys, dev := fakeMachine(t)
-		// The disk is built out of the way first, so the goroutine that
-		// attaches it does one rename and reports one error.
+		// The disk is built in another directory, so that it attaches
+		// with one rename.
 		staged := t.TempDir()
 		addDisk(t, staged, dev, "mmcblk0", 2<<30, make([]byte, 2_048))
 
@@ -131,13 +115,13 @@ func TestPlanAllClaimsWaitsForALateDeclaredDisk(t *testing.T) {
 		begin := time.Now()
 		claims, err := planAllClaims(roles, nil)
 		if err := <-attached; err != nil {
-			t.Fatal(err)
+			t.Fatalf("attaching the disk: %v", err)
 		}
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("planning the claims: %v", err)
 		}
 		if len(claims) != 1 || claims[0].device != filepath.Join(dev, "mmcblk0") {
-			t.Errorf("got %+v, want one claim on the card", claims)
+			t.Errorf("the claims are %+v, want one claim on the card", claims)
 		}
 		if elapsed := time.Since(begin); elapsed != declaredDiskPoll {
 			t.Errorf("the wait took %s, want the first poll after the disk attached, at %s", elapsed, declaredDiskPoll)
@@ -145,8 +129,6 @@ func TestPlanAllClaimsWaitsForALateDeclaredDisk(t *testing.T) {
 	})
 }
 
-// A declared disk that never attaches fails with the message it
-// always failed with, after the wait rather than before it.
 func TestPlanAllClaimsFailsWhenADeclaredDiskNeverAttaches(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		_, dev := fakeMachine(t)
@@ -155,25 +137,23 @@ func TestPlanAllClaimsFailsWhenADeclaredDiskNeverAttaches(t *testing.T) {
 		begin := time.Now()
 		_, err := planAllClaims(roles, nil)
 		if err == nil || !strings.Contains(err.Error(), "is not attached") {
-			t.Errorf("a disk that never attaches must fail as it always did: %v", err)
+			t.Errorf("the error is %v, want one that says the disk is not attached", err)
 		}
 		if elapsed := time.Since(begin); elapsed != declaredDiskDeadline {
-			t.Errorf("the wait gave up after %s, want the deadline, %s", elapsed, declaredDiskDeadline)
+			t.Errorf("the wait ended after %s, want the deadline, %s", elapsed, declaredDiskDeadline)
 		}
 	})
 }
 
 func TestPlanAllClaimsGroupsTwoSpellingsOfOneDiskIntoOneClaim(t *testing.T) {
-	// One role names its disk by kernel path, and another names the
-	// same disk by its by-id name. Both roles are missing, and both
-	// belong to the same blank disk, so claiming must produce one plan
-	// that carries both roles, not two plans fighting over one disk.
+	// Neither role has a partition yet. One names the disk by kernel
+	// path and the other by its by-id name.
 	sys, dev := fakeMachine(t)
 	dir := fakeDisk(t, sys, "vda", "pci0000:00", "0000:00:05.0", "virtio2", "block", "vda")
 	writeSysfs(t, dir, "serial", "liken-a\n")
 	writeSysfs(t, dir, "size", fmt.Sprintf("%d\n", (2<<30)/disks.SectorSize))
 	if err := os.WriteFile(filepath.Join(dev, "vda"), make([]byte, 2_048), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the disk's device file: %v", err)
 	}
 
 	roles := []machine.DeclaredRole{
@@ -182,12 +162,12 @@ func TestPlanAllClaimsGroupsTwoSpellingsOfOneDiskIntoOneClaim(t *testing.T) {
 	}
 	claims, err := planAllClaims(roles, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("planning the claims: %v", err)
 	}
 	if len(claims) != 1 {
 		t.Fatalf("got %d claims, want 1: %+v", len(claims), claims)
 	}
 	if len(claims[0].roles) != 2 {
-		t.Errorf("the one claim should carry both roles: %+v", claims[0].roles)
+		t.Errorf("the claim has roles %+v, want both roles", claims[0].roles)
 	}
 }

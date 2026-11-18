@@ -1,23 +1,17 @@
 package main
 
-// Local by-path names: udev's path_id for a disk on this machine's
-// own PCI, SATA, USB, or virtio bus.
+// This file computes the by-path name of a local disk, the same name
+// that udev's path_id builtin gives it under /dev/disk/by-path, for
+// disks on SATA, NVMe, USB, virtio, and mmc.
 //
-// A by-id name follows the disk. A by-path name follows the port: it
-// stays the same when the disk moves, because it names the wire that
-// connects the disk rather than the disk's own firmware. This is why a
-// port name matters at all, on top of the identity names diskids.go
-// already builds. Wiping and swapping in a spare drive is easier when
-// an operator can say "whatever disk uses this bay" instead
-// of tracking a serial number, and a spec that says so keeps working
-// after the swap.
+// A by-id name follows the disk, and a by-path name follows the port
+// the disk is plugged into. So a spec that gives a by-path name selects
+// whatever disk is in that bay, including a spare swapped in after a
+// failure. diskids.go builds the by-id names.
 //
-// udev builds the same name in its path_id builtin, by walking a
-// disk's chain of parent devices in sysfs from the disk up to the
-// bus. Every step of that chain is a directory name the kernel
-// already publishes, in the resolved path behind /sys/block/<name>,
-// so this file walks the same chain udev does and reads nothing udev
-// would not also read.
+// path_id builds the name from the parent devices between the disk and
+// its bus. The kernel lists those parents as the directories of the
+// resolved path of /sys/block/<name>, and this file reads that path.
 
 import (
 	"fmt"
@@ -26,78 +20,56 @@ import (
 	"strings"
 )
 
-// pciSlotPattern matches a PCI address segment: a four-digit domain, a
-// two-digit bus, and a two-digit device and function, the way the
-// kernel names a PCI device's directory. A disk's path can pass
-// through more than one such segment, for example a root port and the
-// storage controller behind it, so diskPathName keeps the last match:
-// the slot closest to the disk is the one that identifies its port.
+// pciSlotPattern matches a PCI address directory such as 0000:00:1f.2
+// (domain:bus:device.function). A disk's path can contain several, for
+// example a root port and the storage controller behind it, so
+// diskPathName keeps the last one, which is closest to the disk.
 var pciSlotPattern = regexp.MustCompile(`^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]$`)
 
-// ataSegmentPattern matches the ataN directory libata creates for
-// each port it drives, one per SATA disk.
+// ataSegmentPattern matches the ataN directory that libata creates for
+// each port.
 var ataSegmentPattern = regexp.MustCompile(`^ata(\d+)$`)
 
-// virtioSegmentPattern matches the virtioN directory the virtio bus
-// creates for each device, disk or otherwise, attached to it.
 var virtioSegmentPattern = regexp.MustCompile(`^virtio\d+$`)
 
-// usbPortSegmentPattern matches a USB device's own directory, named
-// for its position in the bus: the bus number, a dash, and the port
-// path down through any hubs to reach it. A USB device's interface
-// is one level below it, in a directory named the same way with
-// ":<interface>" appended, which this pattern excludes on purpose so
-// it never matches the interface by mistake.
+// usbPortSegmentPattern matches a USB device directory: the bus number,
+// a dash, and the port path through any hubs, such as 1-2.4. It does
+// not match the interface directory below it, such as 1-2.4:1.0.
 var usbPortSegmentPattern = regexp.MustCompile(`^\d+-[0-9.]+$`)
 
-// iscsiSessionPattern matches the sessionN directory scsi_transport_iscsi
-// creates for each login. A session number is reassigned on every
-// login, so a name built from it would change out from under a mount
-// on the next reboot; disklinks.go already gives an iSCSI disk a
-// stable by-path name built from its target and address instead.
+// iscsiSessionPattern matches the sessionN directory that
+// scsi_transport_iscsi creates for each login. The session number
+// changes on every login, so diskPathName gives an iSCSI disk no name.
+// disklinks.go builds a stable by-path name for an iSCSI disk from its
+// target and address.
 var iscsiSessionPattern = regexp.MustCompile(`^session\d+$`)
 
-// nvmeNsidPattern reads the namespace ID off the end of an NVMe block
-// device's own name, for example the 1 in nvme0n1. diskPathName only
-// falls back to this parse when the kernel's own nsid attribute is
-// absent, because the two numbers agree only when a controller's
-// namespaces are created in order starting at 1: the block name's
-// trailing digit is the Nth namespace this controller probed, while
-// the nsid attribute is the namespace's own number as the controller
-// reports it. A controller that lost namespace 1 and kept only
-// namespace 2 still names its sole block device nvme0n1, because the
-// kernel numbers by probe order, so a name built from that digit
-// would claim namespace 1 while the disk is actually namespace 2.
+// nvmeNsidPattern matches the trailing number of an NVMe block device
+// name, the 1 in nvme0n1. diskPathName uses it only on a kernel with no
+// nsid attribute in sysfs, because the kernel numbers block devices in
+// probe order. The number equals the namespace ID only when the
+// controller's namespaces start at 1 and have no gaps.
 var nvmeNsidPattern = regexp.MustCompile(`n(\d+)$`)
 
-// mmcHostSegment is the directory the mmc core creates under a host
-// controller for the cards it manages. It is directly below the
-// controller's own device, so the segment before it names the
-// controller.
+// mmcHostSegment is the directory that the mmc core creates directly
+// below the host controller's device directory.
 const mmcHostSegment = "mmc_host"
 
-// mmcPathName is udev's by-path answer for an eMMC module or an SD
-// card, which is a name only when the host controller is a platform
-// device.
+// mmcPathName returns the by-path name of an eMMC or SD card, or ""
+// when udev gives it none. segments is the resolved sysfs path split
+// into directories, and pciSlot is the PCI address that diskPathName
+// found in it, or "".
 //
-// udev's path_id builtin has no mmc handler at all. It walks the
-// parents of a block device and prepends a segment for each bus it
-// recognizes, and mmc is not one of them. A card's parents are the mmc
-// card, the mmc host, and then the controller, so the name a card gets
-// is the name of its controller and nothing else. A controller the
-// firmware enumerates through ACPI or a device tree is a platform
-// device, and path_id names a platform device platform-<name>, with
-// the PCI slot ahead of it when the platform device is below a PCI
-// function. That is where an eMMC's by-path name comes from.
+// path_id has no handler for mmc, so a card's name comes from its host
+// controller alone. A controller that ACPI or a device tree describes
+// is a platform device, and path_id names it platform-<name>, with
+// pci-<slot>- in front when it is below a PCI function.
 //
-// A controller that enumerates over PCI on its own, which is what
-// sdhci-pci drives, gets no name. path_id counts a PCI slot as a
-// parent and not as a transport, and it refuses to name a block device
-// whose walk found no transport, so udev writes no ID_PATH and builds
-// no link under /dev/disk/by-path. liken publishes no name there
-// either, because a by-path name that udev does not build is a name no
-// other tool on the machine agrees with. Such a card is named by its
-// by-id name alone (diskids.go).
+// A controller that is itself a PCI function, as with sdhci-pci, has no
+// platform device. path_id counts a PCI slot as a parent but not as a
+// transport, and it writes no ID_PATH for a disk with no transport, so
+// udev makes no by-path link. mmcPathName returns "" there too, so that
+// every name matches udev's. The card still has a by-id name.
 func mmcPathName(segments []string, pciSlot string) string {
 	host := -1
 	for i, seg := range segments {
@@ -120,11 +92,10 @@ func mmcPathName(segments []string, pciSlot string) string {
 	return "platform-" + segments[host]
 }
 
-// diskPathName computes the local by-path name for one disk: the port
-// it answers on, read from the resolved sysfs path behind
-// /sys/block/<name>. It returns "" for a disk with no such name,
-// which includes any disk this machine reaches over iSCSI, and any
-// disk whose bus this function does not recognize.
+// diskPathName returns the by-path name of the disk /sys/block/<name>.
+// It returns "" for an iSCSI disk, a disk on a bus this file does not
+// handle, a USB disk with no SCSI address in its path, and a disk whose
+// /sys/block entry does not resolve.
 func diskPathName(name string) string {
 	real, err := filepath.EvalSymlinks(filepath.Join(sysBlock, name))
 	if err != nil {
@@ -160,10 +131,7 @@ func diskPathName(name string) string {
 	}
 	for _, seg := range segments {
 		if seg == "nvme" {
-			// udev's path_id builtin reads the namespace's own nsid
-			// attribute rather than parsing the block name, so this
-			// does the same and only parses the name on an old kernel
-			// that predates the attribute.
+			// path_id reads the nsid attribute.
 			if nsid := sysfsString(filepath.Join(sysBlock, name), "nsid"); nsid != "" {
 				return "pci-" + pciSlot + "-nvme-" + nsid
 			}
@@ -187,11 +155,8 @@ func diskPathName(name string) string {
 	}
 	for _, seg := range segments {
 		if virtioSegmentPattern.MatchString(seg) {
-			// The virtio segment names the device but contributes
-			// nothing to the name beyond the PCI slot: a virtio-blk
-			// device has no port structure of its own to describe, only
-			// the PCI function QEMU or the hypervisor assigned it. This
-			// matches udev's own path_id rule for virtio.
+			// A virtio-blk disk has no port, so its name is the PCI
+			// slot alone, as in path_id.
 			return "pci-" + pciSlot
 		}
 	}

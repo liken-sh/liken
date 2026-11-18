@@ -1,9 +1,5 @@
 package main
 
-// Tests for the soft-dependency reader: the .modinfo strings that name
-// a module's "pre" dependencies, and the walk that turns one driver
-// name into the full list a manifest declares.
-
 import (
 	"encoding/binary"
 	"os"
@@ -15,21 +11,19 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// modinfoBytes joins strings the way a real .modinfo section holds
-// them: NUL-separated, with a trailing NUL.
+// modinfoBytes joins strings as a .modinfo section does: separated by
+// NUL, with a NUL at the end.
 func modinfoBytes(entries ...string) []byte {
 	return []byte(strings.Join(entries, "\x00") + "\x00")
 }
 
-// modinfoELF builds a minimal ELF64 object that carries the given
-// bytes in a .modinfo section, so a test can exercise the section
-// reader and the whole soft-dependency walk without a real compiled
-// module. The object holds only what debug/elf must find: the header,
-// the .modinfo section, and the section-name string table.
+// modinfoELF returns the smallest ELF64 object that debug/elf reads,
+// with modinfo as its .modinfo section, so that tests need no compiled
+// kernel module.
 func modinfoELF(t *testing.T, modinfo []byte) []byte {
 	t.Helper()
-	// The string table names the sections. Its first byte is a NUL, so
-	// name offset 1 is ".modinfo" and offset 10 is ".shstrtab".
+	// The first byte of the string table is NUL, so name offset 1 is
+	// ".modinfo" and offset 10 is ".shstrtab".
 	shstrtab := []byte("\x00.modinfo\x00.shstrtab\x00")
 	modinfoOff := 64
 	shstrtabOff := modinfoOff + len(modinfo)
@@ -74,33 +68,31 @@ const (
 func TestParseSoftdepPreReadsPreNamesInOrder(t *testing.T) {
 	modinfo := modinfoBytes("license=GPL", "softdep=pre: realtek", "author=someone")
 	if got := parseSoftdepPre(modinfo); !slices.Equal(got, []string{"realtek"}) {
-		t.Errorf("got %v", got)
+		t.Errorf("result is %v, want [realtek]", got)
 	}
 }
 
 func TestParseSoftdepPreDropsPostNames(t *testing.T) {
-	// A module can name one module before it and another after it. Only
-	// the "pre" names change the probe outcome, so only they survive.
 	modinfo := modinfoBytes("softdep=pre: a b post: c")
 	if got := parseSoftdepPre(modinfo); !slices.Equal(got, []string{"a", "b"}) {
-		t.Errorf("got %v", got)
+		t.Errorf("result is %v, want [a b]", got)
 	}
 }
 
 func TestParseSoftdepPreGathersEveryLine(t *testing.T) {
 	modinfo := modinfoBytes("softdep=pre: a", "softdep=pre: b")
 	if got := parseSoftdepPre(modinfo); !slices.Equal(got, []string{"a", "b"}) {
-		t.Errorf("got %v", got)
+		t.Errorf("result is %v, want [a b]", got)
 	}
 }
 
-func TestParseSoftdepPreFindsNothingWhenAbsent(t *testing.T) {
+func TestParseSoftdepPreReturnsNilWithoutASoftdepEntry(t *testing.T) {
 	if got := parseSoftdepPre(modinfoBytes("license=GPL")); got != nil {
-		t.Errorf("no softdep means no names: %v", got)
+		t.Errorf("names are %v, want none without a softdep entry", got)
 	}
 }
 
-func TestExpandSoftdepsOrdersPreDepsThenSelf(t *testing.T) {
+func TestExpandSoftdepsPutsDependenciesBeforeTheModule(t *testing.T) {
 	pre := func(name string) []string {
 		if name == "r8169" {
 			return []string{"realtek"}
@@ -108,65 +100,58 @@ func TestExpandSoftdepsOrdersPreDepsThenSelf(t *testing.T) {
 		return nil
 	}
 	if got := expandSoftdeps("r8169", pre); !slices.Equal(got, []string{"realtek", "r8169"}) {
-		t.Errorf("got %v", got)
+		t.Errorf("result is %v, want [realtek r8169]", got)
 	}
 }
 
-func TestExpandSoftdepsRecursesThroughSoftdeps(t *testing.T) {
-	// A soft dependency can carry its own, so the walk goes deep and
-	// still lists every name before the one that wanted it.
+func TestExpandSoftdepsResolvesDependenciesOfDependencies(t *testing.T) {
 	pre := func(name string) []string {
 		return map[string][]string{"a": {"b"}, "b": {"c"}}[name]
 	}
 	if got := expandSoftdeps("a", pre); !slices.Equal(got, []string{"c", "b", "a"}) {
-		t.Errorf("got %v", got)
+		t.Errorf("result is %v, want [c b a]", got)
 	}
 }
 
-func TestExpandSoftdepsGuardsAgainstCycles(t *testing.T) {
-	// Soft dependencies are only a hint, so two modules can name each
-	// other. The walk must terminate and place each name once.
+func TestExpandSoftdepsTerminatesOnModulesThatNameEachOther(t *testing.T) {
 	pre := func(name string) []string {
 		return map[string][]string{"a": {"b"}, "b": {"a"}}[name]
 	}
 	if got := expandSoftdeps("a", pre); !slices.Equal(got, []string{"b", "a"}) {
-		t.Errorf("got %v", got)
+		t.Errorf("result is %v, want [b a]", got)
 	}
 }
 
-func TestElfSectionReadsANamedSection(t *testing.T) {
+func TestElfSectionReturnsTheNamedSection(t *testing.T) {
 	image := modinfoELF(t, modinfoBytes("softdep=pre: realtek"))
 	data, err := elfSection(image, ".modinfo")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the .modinfo section: %v", err)
 	}
 	if !slices.Equal(parseSoftdepPre(data), []string{"realtek"}) {
-		t.Errorf("section bytes did not round-trip: %q", data)
+		t.Errorf("parsing the section returned the wrong names from %q, want realtek", data)
 	}
 }
 
 func TestReadModinfoDecompressesAZstModule(t *testing.T) {
-	// The runtime tree holds .ko.zst files, so the reader must undo the
-	// zstd frame the kernel would otherwise decompress itself.
 	image := modinfoELF(t, modinfoBytes("softdep=pre: realtek"))
 	encoder, err := zstd.NewWriter(nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the zstd encoder: %v", err)
 	}
 	path := writeBytes(t, "r8169.ko.zst", encoder.EncodeAll(image, nil))
 	encoder.Close()
 	modinfo, err := readModinfo(path)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the module info: %v", err)
 	}
 	if !slices.Equal(parseSoftdepPre(modinfo), []string{"realtek"}) {
-		t.Errorf("got %q", modinfo)
+		t.Errorf("pre names are %q, want realtek", modinfo)
 	}
 }
 
-// softdepTree writes a module tree the soft-dependency walk can read:
-// a modules.dep that names each module's file, and the .ko files
-// themselves, each carrying its own .modinfo.
+// softdepTree writes a module tree of .ko files and a modules.dep that
+// lists them, and returns its root.
 func softdepTree(t *testing.T, modinfos map[string][]byte) string {
 	t.Helper()
 	base := t.TempDir()
@@ -174,50 +159,49 @@ func softdepTree(t *testing.T, modinfos map[string][]byte) string {
 	for path, modinfo := range modinfos {
 		full := filepath.Join(base, path)
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
+			t.Fatalf("creating the module directory: %v", err)
 		}
 		if err := os.WriteFile(full, modinfoELF(t, modinfo), 0o644); err != nil {
-			t.Fatal(err)
+			t.Fatalf("writing the module file: %v", err)
 		}
 		dep.WriteString(path + ":\n")
 	}
 	if err := os.WriteFile(filepath.Join(base, "modules.dep"), []byte(dep.String()), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing modules.dep: %v", err)
 	}
 	return base
 }
 
-func TestSoftdepChainWalksAFabricatedTree(t *testing.T) {
+func TestSoftdepChainReadsModinfoFromTheModuleTree(t *testing.T) {
 	base := softdepTree(t, map[string][]byte{
 		"kernel/drivers/net/ethernet/realtek/r8169.ko": modinfoBytes("softdep=pre: realtek"),
 		"kernel/drivers/net/phy/realtek.ko":            modinfoBytes("license=GPL"),
 	})
 	if got := softdepChain(base, "r8169"); !slices.Equal(got, []string{"realtek", "r8169"}) {
-		t.Errorf("got %v", got)
+		t.Errorf("result is %v, want [realtek r8169]", got)
 	}
 }
 
-func TestSoftdepChainReturnsTheNameAloneWithoutAnIndex(t *testing.T) {
+func TestSoftdepChainReturnsOnlyTheNameWithoutModulesDep(t *testing.T) {
 	if got := softdepChain(t.TempDir(), "r8169"); !slices.Equal(got, []string{"r8169"}) {
-		t.Errorf("a tree with no index resolves to the name alone: %v", got)
+		t.Errorf("chain is %v, want r8169 alone without modules.dep", got)
 	}
 }
 
-func TestDriverChainAddsTheCompanionABusDriverNeeds(t *testing.T) {
-	// hid-generic binds the HID device that usbhid creates, so no
-	// modalias and no soft dependency ever names it. A recommendation
-	// that stops at usbhid leaves a keyboard that still types nothing.
+func TestDriverChainAppendsTheBusCompanionOfAModule(t *testing.T) {
+	// hid-generic binds the HID device that usbhid creates, and no
+	// modalias or soft dependency names it.
 	if got := driverChain(t.TempDir(), "usbhid"); !slices.Equal(got, []string{"usbhid", "hid_generic"}) {
-		t.Errorf("got %v", got)
+		t.Errorf("result is %v, want [usbhid hid_generic]", got)
 	}
 }
 
-func TestDriverChainLeavesAnOrdinaryDriverAlone(t *testing.T) {
+func TestDriverChainAddsNoCompanionToAModuleWithoutOne(t *testing.T) {
 	base := softdepTree(t, map[string][]byte{
 		"kernel/drivers/net/ethernet/realtek/r8169.ko": modinfoBytes("softdep=pre: realtek"),
 		"kernel/drivers/net/phy/realtek.ko":            modinfoBytes("license=GPL"),
 	})
 	if got := driverChain(base, "r8169"); !slices.Equal(got, []string{"realtek", "r8169"}) {
-		t.Errorf("got %v", got)
+		t.Errorf("result is %v, want [realtek r8169]", got)
 	}
 }

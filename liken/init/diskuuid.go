@@ -1,30 +1,17 @@
 package main
 
-// Reading a partition's filesystem UUID, for the by-uuid link tree.
+// Init reads the filesystem UUID of each partition for the by-uuid
+// links.
 //
-// A filesystem UUID names the contents of a partition, not the disk that
-// holds it. mke2fs assigns ext4's UUID, and liken assigns FAT32's volume
-// ID (FormatFAT32, in the disks package), the moment each filesystem is
-// created. Reformat the same disk and it gets a new identity; move a
-// filesystem's bytes to a different disk and the identity follows the
-// bytes. This is why a role's own device can never appear under
-// by-uuid: claiming a role (claim.go) takes a disk that carries no
-// partition table at all, and a disk with no partitions has no
-// filesystem yet to carry a UUID.
+// A filesystem UUID identifies the filesystem, not the disk. mke2fs
+// assigns the UUID of an ext4 filesystem, and disks.FormatFAT32 assigns
+// the volume ID of a FAT32 filesystem. A reformatted disk gets a new
+// UUID, and a filesystem copied to another disk keeps its UUID.
 //
-// The tree exists for consumers that have no notion of liken's role
-// names. A CSI driver, or a line in /etc/fstab, names a volume to mount
-// by the UUID its filesystem carries, and expects to find it under
-// /dev/disk/by-uuid, the way every other Linux distribution's udev
-// publishes it.
-//
-// filesystemUUID reads a device's raw bytes, the same way hasExt4 and
-// disks.HasFAT32 already do, rather than mounting the filesystem or
-// shelling out to blkid. It returns "" for anything it does not
-// recognize: a missing device, a read shorter than the structure it
-// expects, or bytes that carry neither filesystem's magic. This is the
-// ordinary answer for a disk a role has claimed but not yet formatted,
-// and for a raw or blank partition generally, not a failure to report.
+// The links are for programs that do not know liken's role names. A CSI
+// driver or an /etc/fstab line mounts a volume by the UUID of its
+// filesystem and expects to find it under /dev/disk/by-uuid, where
+// udev puts it on other Linux distributions.
 
 import (
 	"encoding/binary"
@@ -34,6 +21,12 @@ import (
 	"github.com/liken-sh/liken/liken/disks"
 )
 
+// filesystemUUID returns the UUID of an ext4 filesystem or the volume
+// ID of a FAT32 filesystem on devPath. It reads the device's bytes, as
+// hasExt4 and disks.HasFAT32 do, so it needs no mount and no blkid. It
+// returns "" for a missing device, a device too short to hold the
+// field, and a device with neither filesystem, because an unformatted
+// disk or a blank partition is an ordinary case and not an error.
 func filesystemUUID(devPath string) string {
 	if hasExt4(devPath) {
 		return ext4UUID(devPath)
@@ -44,14 +37,11 @@ func filesystemUUID(devPath string) string {
 	return ""
 }
 
-// ext4SuperblockUUIDOffset is s_uuid's position within the superblock:
-// 16 bytes at 0x68, right after the 4-byte fields the resize code reads
-// (ext4.go). The layout is ext4's on-disk format, fixed permanently.
+// s_uuid is a 16-byte field at offset 0x68 of the superblock.
 const ext4SuperblockUUIDOffset = ext4SuperblockOffset + 0x68
 
-// ext4UUID reads s_uuid and renders it in the canonical 8-4-4-4-12 form
-// that blkid and every other UUID-aware tool uses: lowercase hex, split
-// by the fields the UUID standard defines, joined with dashes.
+// ext4UUID returns s_uuid in the 8-4-4-4-12 form that blkid prints, in
+// lowercase hex.
 func ext4UUID(devPath string) string {
 	f, err := os.Open(devPath)
 	if err != nil {
@@ -66,13 +56,13 @@ func ext4UUID(devPath string) string {
 		uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16])
 }
 
-// fat32VolumeIDOffset is where the boot sector carries the volume ID:
-// byte 67, right after the extended boot signature (fat32.go).
+// The FAT32 boot sector has the volume ID at byte 67, after the
+// extended boot signature.
 const fat32VolumeIDOffset = 67
 
-// fat32VolumeID reads the 4-byte volume ID FAT keeps in place of a UUID
-// and renders it the way Windows and every FAT tool display it: the
-// high 16 bits, a dash, the low 16 bits, in uppercase hex.
+// fat32VolumeID returns the 4-byte volume ID as the high 16 bits, a
+// dash, and the low 16 bits, in uppercase hex, which is how other FAT
+// tools print it.
 func fat32VolumeID(devPath string) string {
 	f, err := os.Open(devPath)
 	if err != nil {

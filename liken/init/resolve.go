@@ -1,22 +1,16 @@
 package main
 
-// Resolving a declared disk name to the disk it names, for the claim
-// path.
+// spec.storage.<role>.device is a kernel device path (/dev/vda) or a
+// stable name under /dev/disk/by-id/ or /dev/disk/by-path/
+// (machine/storage.go explains both forms). The claim and the reinstall
+// must find the disk that the name refers to.
 //
-// spec.storage.<role>.device may hold a kernel device path (/dev/vda)
-// or a stable name under /dev/disk/by-id/ or /dev/disk/by-path/
-// (machine/storage.go explains why a manifest may use either form).
-// Claiming a blank disk is the only place that reads this field, so
-// it is the only place that has to turn a stable name back into a
-// disk.
-//
-// The resolution never reads /dev/disk. That tree is built by
-// disklinks.go and its siblings, code that runs once storage has
-// already settled, so the very first boot that claims a disk under a
-// stable name has no tree there yet to read. Instead,
-// resolveDeclaredDisk recomputes every attached disk's own names
-// straight from sysfs, the same computation disklinks.go uses to
-// build the tree, and compares the declared name against that.
+// The lookup does not read /dev/disk, because init creates those links
+// (disklinks.go) only after the boot steps finish, so they do not exist
+// yet when init claims a disk. resolveDeclaredDisk computes each attached
+// disk's names from sysfs with diskIDNames and diskPathName, the
+// functions that disklinks.go uses, and compares the declared name with
+// them.
 
 import (
 	"fmt"
@@ -27,23 +21,20 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// The shape of the declared-disk wait. The deadline is long enough
-// that reaching it means the disk is not coming, not that it is
-// slow.
 const (
 	declaredDiskPoll     = 500 * time.Millisecond
 	declaredDiskDeadline = 30 * time.Second
 )
 
-// awaitDeclaredDisk waits, boundedly, for a declared device to
-// attach. Every path that claims or wipes a disk hits the same probe
-// race: the controller's driver has loaded, but the SATA link, the
-// USB device, or the mmc card finishes attaching a moment later, and
-// mmc card detection runs on a workqueue up to a second behind. A
-// device the manifest names is expected to exist, so the caller
-// reports its continued absence at the deadline. Only the not-found
-// case waits: an ambiguity is two disks however long the code waits,
-// and a disk that attaches later cannot un-name them.
+// awaitDeclaredDisk resolves a declared device, and while no disk
+// matches, retries every declaredDiskPoll until declaredDiskDeadline.
+// A disk can attach after its controller's driver has loaded: a SATA
+// link or a USB device takes time to come up, and the kernel detects an
+// mmc card from a workqueue that can run up to a second later. At the
+// deadline it returns nil with no error, and the caller reports the
+// missing disk. It does not retry an error, because a name that matches
+// two disks still matches them after a wait. It prints notice once
+// before the first wait.
 func awaitDeclaredDisk(declared string, notice string) (*machine.BlockDevice, error) {
 	disk, err := resolveDeclaredDisk(declared)
 	if err != nil || disk != nil {
@@ -60,20 +51,10 @@ func awaitDeclaredDisk(declared string, notice string) (*machine.BlockDevice, er
 	return nil, nil
 }
 
-// resolveDeclaredDisk turns one declared device string into the disk
-// it names. A plain device path, such as /dev/vda, names whichever
-// disk currently answers to that kernel name; it returns nil when no
-// attached disk does. A stable name under /dev/disk/by-id/ or
-// /dev/disk/by-path/ is matched against every attached disk's own
-// computed names instead of read back from a link.
-//
-// A declared name that matches no disk is the ordinary missing-disk
-// case: the disk has not attached yet, or the spec names one that
-// does not exist at all. A name that matches two disks is different.
-// Guessing which one the spec meant could partition the wrong disk
-// and destroy whatever it holds, so resolveDeclaredDisk refuses
-// instead, the same way matchRoles refuses two partitions that answer
-// to one role's name.
+// resolveDeclaredDisk returns the attached disk that a declared device
+// refers to, or nil with no error when no disk matches. It returns an
+// error when a name matches more than one disk, because a guess could
+// partition the wrong disk and destroy its data.
 func resolveDeclaredDisk(declared string) (*machine.BlockDevice, error) {
 	suffix, ok := strings.CutPrefix(declared, "/dev/disk/")
 	if !ok {
@@ -91,19 +72,15 @@ func resolveDeclaredDisk(declared string) (*machine.BlockDevice, error) {
 			return nil
 		})
 	}
-	// Validate refuses every other /dev/disk tree before a spec ever
-	// reaches init: by-uuid names a filesystem, and a role claims a
-	// blank disk, so no other tree is legal at all
-	// (machine/storage.go's Validate). The claim path checks again
-	// anyway, because the code about to partition a disk must not
-	// depend on an earlier gate having run.
-	return nil, fmt.Errorf("declared device %s names a /dev/disk/%s tree; only by-id and by-path names resolve to a disk", declared, tree)
+	// Validate (machine/storage.go) already rejects every other tree.
+	// The code that is about to partition a disk checks again, so it
+	// does not depend on validation having run.
+	return nil, fmt.Errorf("declared device %s is in the /dev/disk/%s tree, and only by-id and by-path names resolve to a disk", declared, tree)
 }
 
-// resolveStableName matches one stable name against every attached
-// disk's own computed names, calling namesFor once per disk to get
-// the names that disk answers to under the tree the declared name
-// came from.
+// resolveStableName returns the attached disk for which namesFor
+// returns name. namesFor computes one disk's names in the by-id or
+// by-path tree.
 func resolveStableName(declared, name string, namesFor func(disk string) []string) (*machine.BlockDevice, error) {
 	var matches []machine.BlockDevice
 	for _, d := range discoverBlockDevices() {
@@ -121,6 +98,6 @@ func resolveStableName(declared, name string, namesFor func(disk string) []strin
 	for _, d := range matches {
 		disks = append(disks, d.Name)
 	}
-	return nil, fmt.Errorf("declared device %s matches %d disks (%s); refusing to guess",
+	return nil, fmt.Errorf("declared device %s matches %d disks (%s), refusing to guess",
 		declared, len(matches), strings.Join(disks, ", "))
 }

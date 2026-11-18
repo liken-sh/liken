@@ -1,32 +1,17 @@
 package main
 
-// Facts: init's half of the Machine status.
+// Init writes the facts it discovers during boot, such as the DHCP
+// lease and the hardware the kernel found, under /run/liken/facts as a
+// tree of small files with the same shape as the Machine's status.
+// Init never talks to Kubernetes. machine-operator runs in the
+// cluster, reads the tree from the host, and copies it into the
+// Machine's status. It also reads the manifests that
+// publishBootManifest and publishBootClusterManifest write in
+// /run/liken.
 //
-// Init is the only program that observes the boot: the DHCP exchange,
-// and the hardware as the kernel first presents it. So it is the only
-// program that can report those facts. It writes them under
-// /run/liken/facts as a tree of small files (machine/factstree.go),
-// shaped exactly like the Machine's status block. The liken operator,
-// which runs in the cluster and cannot see any of this directly,
-// reads the tree and publishes it to the API. Init never talks to
-// Kubernetes; this tree is the entire interface between the two.
-//
-// No single owner holds the facts. Each fact has its own file, so each
-// init component writes its own subtree with no shared lock. A boot
-// step writes its subtree once, at the point where it discovered the
-// fact. The long-lived components own the subtrees that change after
-// boot: the clock owns time/, the hardware watch owns
-// hardware/blockDevices/ and hardware/unclaimed/, the module loader
-// owns modules/ and boot/manifest, the restart path owns features/,
-// registries/, and the boot/ manifest records it rewrites, and the
-// proving watch writes firmware/ again after a promotion.
-// factstree.go documents the whole ownership map.
-//
-// The boot's write-once facts land together, in publishBootFacts,
-// rather than each at its own discovery line. Each boot step holds
-// its discovered facts locally and hands them here, so the tree
-// appears once, complete, instead of growing in pieces while the
-// operator's watch reads it.
+// Each fact has its own file, so the init components that update facts
+// after boot each rewrite their own subtree with no shared lock.
+// machine/factstree.go lists which component owns each subtree.
 
 import (
 	"fmt"
@@ -42,34 +27,22 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// Where the facts tree and the boot manifest land. These are package
-// variables rather than constants, so tests can publish into a
-// tempdir. A real boot never points them anywhere but /run.
+// These are variables so that tests can write into a temporary
+// directory and run an iptables that does not exist.
 var (
 	factsTree        = machine.FactsTree{Dir: machine.FactsDir, Report: reportFactsError}
 	bootManifestPath = machine.BootManifestPath
-
-	// xtablesProbe is the command that reports the netfilter
-	// userspace's version. It is a variable so tests can aim it at
-	// nothing.
-	xtablesProbe = "iptables"
+	xtablesProbe     = "iptables"
 )
 
-// reportFactsError reports a failed facts write to stderr. The facts
-// tree calls it for each failed write, so a boot step calls the writers
-// bare. A write failure must never stop the boot: the machine keeps
-// running and the operator falls back to a partial tree, which reads a
-// missing fact as its zero value. Losing a fact is a reporting gap, not
-// a reason to halt PID 1.
+// reportFactsError prints a failed facts write and lets the boot go on,
+// so callers of the tree's writers ignore their errors. The operator
+// reads a missing fact as its zero value, which loses one report. That
+// is no reason to stop PID 1.
 func reportFactsError(err error) {
 	fmt.Fprintf(os.Stderr, "liken: writing facts: %v\n", err)
 }
 
-// bootFacts gathers the write-once facts that the boot discovered. It
-// is a struct rather than a parameter list because nearly a dozen
-// positional arguments invite mixed-up order, and named fields read
-// correctly at the call site. It carries values the boot already
-// holds; nothing routes through a shared owner.
 type bootFacts struct {
 	clusterDoc   *cluster.Cluster
 	role         api.Role
@@ -86,35 +59,23 @@ type bootFacts struct {
 	lastFailStop *machine.FailStop
 }
 
-// publishBootFacts writes every fact the boot discovered once and never
-// revisits. It calls one per-subtree writer for each, so each fact
-// lands in its own file through the same atomic rename as every later
-// write. The tree carries the same facts the boot printed to the
-// console, the console-parity principle: anything reported only to the
-// serial port is invisible to anyone operating the machine remotely, so
-// the status must repeat what the console reports. The hardware,
-// version, and firmware blocks are re-derived here rather than
-// remembered from earlier boot steps.
+// publishBootFacts writes the first value of every fact in the tree.
+// Later components rewrite their own subtrees. The tree repeats what
+// the boot printed to the console, because a person who manages the
+// machine remotely cannot see its serial console. publishBootFacts
+// reads the version, firmware, CPU count, memory, and boot time itself.
+// Everything else comes in through in.
 func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	now := time.Now()
 	memoryBytes, bootedAt := machineUptimeFacts(now)
 
 	tree.WriteRole(in.role)
-	// The crash stub arrives settled rather than being re-read here,
-	// because settling it has side effects (preserving and clearing the
-	// platform store) that belong to one moment early in boot.
+	// The caller runs settleCrashRecords early in boot, because it
+	// moves or deletes records in pstore, and that must happen once.
 	tree.WriteLastCrash(in.lastCrash)
-	// The fail-stop record arrives read rather than being re-read here,
-	// so that the console line and this fact come from one reading of
-	// one file.
 	tree.WriteLastFailStop(in.lastFailStop)
 	tree.WriteVersion(versionFacts())
-	// Network facts exist only for interfaces that came up; a machine
-	// that failed DHCP still publishes the facts it has.
 	tree.WriteNetwork(networkFacts(in.clusterDoc, in.conns))
-	// The clock's state so far: the boot-time measurement, if one
-	// succeeded, or an accurate unsynchronized or free-running report.
-	// The clock loop owns time/ after this seed.
 	tree.WriteTime(in.time)
 	tree.WriteHardwareBasics(runtime.NumCPU(), memoryBytes)
 	tree.WriteBlockDevices(in.blockDevices)
@@ -125,22 +86,12 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	tree.WriteFeatures(in.features)
 	tree.WriteRegistries(in.registries)
 	tree.WriteRuntime(runtimeFacts(in.clusterDoc, memoryBytes))
-	// The limits are read back from init itself rather than passed in,
-	// like the hardware and firmware blocks above. Init is PID 1, so
-	// its limits are the ones every process on the machine inherits,
-	// and one Getrlimit here needs no earlier boot step to remember
-	// anything. The names to read are the union of the table and the
-	// spec, and the boot record carries the spec.
+	// Init reads its own limits, because every process on the machine
+	// inherits them from PID 1. in.boot.Rlimits is the spec's set.
 	tree.WriteRlimits(readRlimits(machine.OSRlimits, in.boot.Rlimits))
 
-	// The boot record: what this boot ran under. The four manifest
-	// records seed here at boot; the module loader and the restart path
-	// own the ones they rewrite afterward.
 	tree.WriteBootTime(bootedAt)
 	tree.WriteBootSlot(in.boot.Slot)
-	// The command line is read here rather than passed in, like the
-	// hardware and firmware blocks above, because the kernel holds it
-	// and no earlier boot step has to remember it.
 	tree.WriteBootCommandLine(cmdlineRaw())
 	tree.WriteBootStorage(in.boot.Storage)
 	tree.WriteBootNetwork(in.boot.Network)
@@ -158,23 +109,12 @@ func publishBootFacts(tree machine.FactsTree, in bootFacts) {
 	tree.WriteRejection(machine.RejectCredentials, in.boot.CredentialsRejection)
 }
 
-// runtimeFacts resolves the runtime discipline init imposed on k3s, on
-// the kubelet inside it, and on containerd beside it, so the facts
-// carry the same values init printed to the console.
-//
-// The Go environment reports the resolved ceiling, not the spec string:
-// an absolute quantity in MiB, or no ceiling at all when the cluster
-// left the limit unset or turned it off. It reads the same section and
-// memory that k3sRuntimeEnv reads, so the facts and the process
-// environment can never disagree.
-//
-// The other values need no resolving, because each is already in the
-// grammar of the file it lands in. The image collection policy is the
-// lines that kubeletImageGCSettings wrote into the kubelet's file, the
-// debug flag is the drop-in key, and the containerd level is the one
-// the drop-in gives containerd. An unset field reports nothing, and an
-// unset section yields a zero status, so WriteRuntime writes no files
-// and status.runtime is absent.
+// runtimeFacts returns the settings that init applies to k3s, the
+// kubelet, and containerd. The k3s memory limit is the value in MiB
+// that k3sRuntimeEnv computes for GOMEMLIMIT from the same spec and
+// memory size, written with Kubernetes's Mi suffix where GOMEMLIMIT
+// takes MiB. A limit of 0 reports nothing. The other values are copied
+// from the spec, and an unset field reports nothing.
 func runtimeFacts(clusterDoc *cluster.Cluster, memoryBytes uint64) machine.RuntimeStatus {
 	spec := clusterDoc.RuntimeSpec()
 	st := machine.RuntimeStatus{}
@@ -199,10 +139,8 @@ func runtimeFacts(clusterDoc *cluster.Cluster, memoryBytes uint64) machine.Runti
 	return st
 }
 
-// machineMemoryBytes reports the machine's total memory in bytes from
-// one syscall. The restart path uses it to resolve the runtime facts
-// again, because a restart re-derives the k3s environment the same way
-// a boot does.
+// machineMemoryBytes returns the machine's total memory in bytes, or 0
+// when sysinfo fails.
 func machineMemoryBytes() uint64 {
 	var si unix.Sysinfo_t
 	if err := unix.Sysinfo(&si); err != nil {
@@ -211,11 +149,10 @@ func machineMemoryBytes() uint64 {
 	return uint64(si.Totalram) * uint64(si.Unit)
 }
 
-// machineUptimeFacts answers two questions from one syscall: how much
-// memory the machine has, and the moment it booted. Sysinfo reports
-// total memory and uptime; subtracting uptime from the clock gives the
-// boot instant. The wall clock at this point comes from the
-// hypervisor's RTC, because no NTP synchronization has happened yet.
+// machineUptimeFacts returns the machine's total memory and its boot
+// time, or zero and nil when sysinfo fails. The boot time is now minus
+// the uptime, so it is only as accurate as the clock. At this point in
+// boot the clock can still be the RTC's time, before NTP corrects it.
 func machineUptimeFacts(now time.Time) (memoryBytes uint64, bootedAt *time.Time) {
 	var si unix.Sysinfo_t
 	if err := unix.Sysinfo(&si); err != nil {
@@ -225,13 +162,10 @@ func machineUptimeFacts(now time.Time) (memoryBytes uint64, bootedAt *time.Time)
 	return uint64(si.Totalram) * uint64(si.Unit), &booted
 }
 
-// versionFacts assembles the machine's version inventory. Two kinds of
-// value live here. The kernel release and the netfilter userspace
-// version are observed from the running machine, so the code asks the
-// machine itself rather than copying a build pin. The rest, the boot
-// artifacts and bundled payloads, have no version command of their own,
-// so applyComponentFacts reports them from the record the image build
-// staged beside the bytes (versions.go).
+// versionFacts returns the versions of the software on the machine.
+// The kernel release, the iptables version, and the microcode revision
+// come from the running machine. The other versions come from the
+// record that the image build wrote (versions.go).
 func versionFacts() machine.VersionStatus {
 	v := machine.VersionStatus{Liken: machine.Version}
 
@@ -240,29 +174,25 @@ func versionFacts() machine.VersionStatus {
 		v.Kernel = unix.ByteSliceToString(u.Release[:])
 	}
 
-	// The netfilter userspace reports itself as "iptables vX.Y.Z
-	// (legacy)"; the version and variant are the interesting part.
+	// "iptables -V" prints a line such as "iptables v1.8.10 (legacy)".
+	// The status keeps the version and the backend in parentheses.
 	if out, ok := run(xtablesProbe, "-V"); ok {
 		v.Xtables = strings.TrimPrefix(out, "iptables ")
 	}
 
-	// The CPU's running microcode revision is observed the same way.
-	// The microcode pin says which early cpio the release carries; this
-	// says which revision the CPU actually runs. The two agreeing is the
-	// proof that the early cpio applied, and only real hardware can give
-	// it: on a virtual machine the hypervisor owns the microcode, and
-	// this reports the hypervisor's value.
+	// This is the revision that the CPU runs. When it matches the
+	// release's microcode pin, the early microcode archive was applied.
+	// On a virtual machine it is the revision that the hypervisor
+	// reports, so only real hardware proves the match.
 	v.MicrocodeRevision = microcodeRevision(cpuinfoPath)
 
 	applyComponentFacts(&v)
 	return v
 }
 
-// publishBootManifest writes the Machine manifest this boot ran under,
-// byte for byte. This is how the operator identifies which Machine it
-// manages, and, on a first boot, the spec to seed the in-cluster
-// Machine from. It stays one whole file, beside the facts tree, because
-// it shares the tree's lifetime and the operator needs its exact bytes.
+// publishBootManifest writes the exact bytes of the Machine manifest
+// that this boot ran under. The operator reads it to find which Machine
+// it manages, and on a first boot it creates the Machine from its spec.
 func publishBootManifest(choice *manifestChoice) {
 	if len(choice.raw) == 0 {
 		return
@@ -272,11 +202,11 @@ func publishBootManifest(choice *manifestChoice) {
 	}
 }
 
-// publishBootClusterManifest is the cluster document's version of the
-// boot manifest publication: the exact bytes this boot derived its
-// role from. The operator's drift detection needs these bytes, since
-// it compares documents by meaning and needs bytes to parse, not
-// just a hash.
+// publishBootClusterManifest writes the exact bytes of the cluster
+// document that this boot took its role from. The operator parses it
+// and renders it again before it compares it with the Cluster, so a
+// difference in formatting alone is not drift. A hash of the bytes
+// could not tell the two apart.
 func publishBootClusterManifest(raw []byte) {
 	if len(raw) == 0 {
 		return
@@ -286,11 +216,10 @@ func publishBootClusterManifest(raw []byte) {
 	}
 }
 
-// networkFacts folds every connection into a NetworkStatus. Every
-// value comes from the connections themselves, and nothing reads a
-// clock or the kernel, so the background radio pass can call this
-// again after boot and every unchanged interface renders exactly the
-// facts it rendered the first time.
+// networkFacts builds the NetworkStatus from the connections. It reads
+// no clock and no kernel state, so when the radio watch calls it again
+// after boot, every interface that did not change reports the same
+// facts.
 func networkFacts(clusterDoc *cluster.Cluster, conns []*connection) machine.NetworkStatus {
 	status := machine.NetworkStatus{}
 	if len(conns) == 0 {
@@ -301,10 +230,11 @@ func networkFacts(clusterDoc *cluster.Cluster, conns []*connection) machine.Netw
 		status.Interfaces = append(status.Interfaces, interfaceFacts(conn))
 	}
 
-	// The summary skips an addressless interface. The top-level
-	// fields describe the interface that carries the machine's
-	// traffic, and a radio that did not join carries none, so it
-	// appears in the collection below and never as the summary.
+	// The top-level fields describe the primary interface: the one with
+	// the node address, else the first with an address, else the first.
+	// A radio that did not join a network has no address, so it is
+	// listed in Interfaces but is not primary while another interface
+	// has an address.
 	primary := conns[0]
 	for _, conn := range conns {
 		if conn.addr != nil {
@@ -329,8 +259,6 @@ func networkFacts(clusterDoc *cluster.Cluster, conns []*connection) machine.Netw
 	return status
 }
 
-// interfaceFacts turns one connection into status: the same facts
-// the console report prints, in a form other code can query.
 func interfaceFacts(conn *connection) machine.InterfaceStatus {
 	status := machine.InterfaceStatus{
 		Name:        conn.ifname,
@@ -344,9 +272,8 @@ func interfaceFacts(conn *connection) machine.InterfaceStatus {
 	if conn.radio != nil {
 		status.Wireless = conn.radio.wirelessStatus()
 	}
-	// applyLease fixed this instant when the ACK landed, so a later
-	// rewrite reports the same expiry instead of inventing a new
-	// one.
+	// applyLease set leaseExpires when the DHCP ACK arrived, so every
+	// call reports the same expiry.
 	if conn.method == machine.MethodDHCP && !conn.leaseExpires.IsZero() {
 		expires := conn.leaseExpires
 		status.LeaseExpires = &expires

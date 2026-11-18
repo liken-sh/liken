@@ -1,11 +1,8 @@
 package main
 
-// The pass split is a pure decision over function values, so these
-// tests run the whole of it, the route question included, with no
-// kernel, no radio, and no supplicant: the passes are scripted, the
-// raise is a variable, and the resolver file is a temp file. The one
-// thing no unit test can produce is a real wedged driver; the raise
-// deadline test stands a blocked channel in for it.
+// These tests run the two passes with scripted steps, so they need no
+// kernel, no radio, and no supplicant. In place of a wedged driver,
+// the raise deadline tests use a raise that blocks on a channel.
 
 import (
 	"context"
@@ -25,12 +22,10 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// wired is one wired interface as a spec names it.
 func wired(name string) machine.InterfaceSpec {
 	return machine.InterfaceSpec{Name: name}
 }
 
-// declaredRadio is one wireless interface as a spec names it.
 func declaredRadio(name, ssid string) machine.InterfaceSpec {
 	return machine.InterfaceSpec{
 		Name:     name,
@@ -38,26 +33,25 @@ func declaredRadio(name, ssid string) machine.InterfaceSpec {
 	}
 }
 
-// joinedRadio is an interface whose radio associated and then took an
-// address.
+// joinedRadio returns the connection of a radio that associated and
+// then got an address.
 func joinedRadio(name, ssid, cidr string) *connection {
 	conn := addressed(name, cidr)
 	conn.radio = &radio{ifname: name, ssid: ssid, state: machine.WirelessConnected}
 	return conn
 }
 
-// stuckRadio is an interface whose raise never returned, the verdict
-// bringUpRadio hands back when the deadline runs out.
+// stuckRadio returns the connection that bringUpRadio returns when
+// the raise does not return before the deadline.
 func stuckRadio(name, ssid string) *connection {
 	return &connection{ifname: name, radio: &radio{
 		ifname: name, ssid: ssid, state: machine.WirelessNotRaised,
-		message: raiseStuck{ifname: name, patience: raisePatience}.Error(),
+		message: raiseStuck{ifname: name, timeout: raiseTimeout}.Error(),
 	}}
 }
 
-// clusterAt builds a cluster document holding the two facts the pass
-// split's gate reads: where the cluster answers, and which subnet a
-// node address must fall inside.
+// clusterAt returns a cluster document with the two fields that
+// backgroundable reads: the endpoint and the nodeCIDR.
 func clusterAt(endpoint, nodeCIDR string) *cluster.Cluster {
 	return &cluster.Cluster{
 		Metadata: api.ObjectMeta{Name: "lab"},
@@ -68,7 +62,6 @@ func clusterAt(endpoint, nodeCIDR string) *cluster.Cluster {
 	}
 }
 
-// names lists the connections in the order they came back.
 func names(conns []*connection) string {
 	listed := make([]string, len(conns))
 	for i, conn := range conns {
@@ -77,10 +70,10 @@ func names(conns []*connection) string {
 	return strings.Join(listed, ",")
 }
 
-// scriptedPasses stands in for both passes. It records which
-// interfaces each pass was asked for, and answers from a script.
-// hold gates the wireless pass, so a test can prove that the boot
-// went on while a radio was still joining.
+// scriptedPasses replaces the steps of both passes. It records which
+// interfaces each step ran for and returns the connection in answers
+// for that name. The radio step waits for hold to close, so a test can
+// show that the boot went on while a radio was still joining.
 type scriptedPasses struct {
 	mu        sync.Mutex
 	wired     []string
@@ -145,9 +138,8 @@ func (s *scriptedPasses) passes(route routeLookup) interfacePasses {
 }
 
 func TestAWiredOnlySpecNeverEntersPassTwo(t *testing.T) {
-	// A machine with no radio must run exactly the boot it ran
-	// before this milestone: pass one in spec order, no cipher
-	// loads, and nothing behind the boot.
+	// With no radio in the spec, run brings up the wired interfaces
+	// in spec order, loads no ciphers, and starts no background pass.
 	s := scripted(map[string]*connection{
 		"eth0": addressed("eth0", "10.10.0.5/24"),
 		"eth1": addressed("eth1", "192.168.9.5/24"),
@@ -155,28 +147,26 @@ func TestAWiredOnlySpecNeverEntersPassTwo(t *testing.T) {
 	conns, pass := s.passes(routesVia("eth0")).run([]machine.InterfaceSpec{wired("eth0"), wired("eth1")}, labCluster())
 
 	if pass != nil {
-		t.Error("a wired-only spec must leave no background pass")
+		t.Error("run returned a background pass, want none for a spec with no radio")
 	}
 	wiredNames, radios, ciphers, _ := s.asked()
 	if len(radios) != 0 {
-		t.Errorf("pass two ran for %v", radios)
+		t.Errorf("pass two ran for %v, want no radio", radios)
 	}
 	if ciphers != 0 {
-		t.Errorf("the ciphers loaded %d times on a machine with no radio", ciphers)
+		t.Errorf("the ciphers loaded %d times, want 0 on a machine with no radio", ciphers)
 	}
 	if got := strings.Join(wiredNames, ","); got != "eth0,eth1" {
-		t.Errorf("pass one ran for %q, and spec order is the order", got)
+		t.Errorf("pass one ran for %q, want the spec order", got)
 	}
 	if len(conns) != 2 {
-		t.Errorf("got %d connections", len(conns))
+		t.Errorf("the pass returned %d connections, want 2", len(conns))
 	}
 }
 
 func TestARoutedMachineJoinsItsRadioInTheBackground(t *testing.T) {
-	// The 2026-08-26 wedge, restated as a rule: run must return
-	// while the radio is still joining. The held channel keeps the
-	// scripted radio unsettled until the test releases it, which is
-	// the proof that nothing in the boot path waited.
+	// run must return while the radio is still joining. The scripted
+	// radio cannot finish until the test closes hold.
 	s := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "10.10.0.5/24"),
 		"wlan0": joinedRadio("wlan0", "homenet", "192.168.1.20/24"),
@@ -187,30 +177,26 @@ func TestARoutedMachineJoinsItsRadioInTheBackground(t *testing.T) {
 		[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "homenet")}, labCluster())
 
 	if pass == nil {
-		t.Fatal("a routed machine must background its radio")
+		t.Fatal("run returned no background pass, want one for a machine with a wired route to the cluster")
 	}
 	if _, radios, ciphers, _ := s.asked(); len(radios) != 0 || ciphers != 1 {
-		t.Errorf("the ciphers loaded %d times, and pass two had already run for %v", ciphers, radios)
+		t.Errorf("the ciphers loaded %d times and pass two ran for %v, want neither before the radio joined", ciphers, radios)
 	}
 	if len(conns) != 2 || conns[1].ifname != "wlan0" || conns[1].addr != nil {
-		t.Fatalf("got %d connections; the radio must appear with no address yet", len(conns))
+		t.Fatalf("the connections are %+v, want eth0 and wlan0 with no address on wlan0 yet", conns)
 	}
 	if got := conns[1].radio.state; got != machine.WirelessAssociating {
-		t.Errorf("state = %q", got)
+		t.Errorf("the radio state is %q, want Associating", got)
 	}
 
 	close(s.hold)
 	settled := <-pass.settled
 	if settled.addr == nil || settled.radio.state != machine.WirelessConnected {
-		t.Errorf("the background pass must report its verdict: %+v", settled.radio)
+		t.Errorf("the background pass sent %+v, want an address and the state Connected", settled)
 	}
 }
 
 func TestAnUnroutedRadioOnlyMachineJoinsInTheForeground(t *testing.T) {
-	// A machine whose only declared path is its radio has nothing
-	// to do until the radio joins, so the boot may wait for it, and
-	// the join's address must be on the connections the boot goes on
-	// with.
 	s := scripted(map[string]*connection{
 		"wlan0": joinedRadio("wlan0", "homenet", "192.168.1.20/24"),
 	})
@@ -218,22 +204,21 @@ func TestAnUnroutedRadioOnlyMachineJoinsInTheForeground(t *testing.T) {
 		[]machine.InterfaceSpec{declaredRadio("wlan0", "homenet")}, labCluster())
 
 	if pass != nil {
-		t.Error("a foreground pass leaves nothing running behind the boot")
+		t.Error("run returned a background pass after a foreground pass, want none")
 	}
 	_, radios, ciphers, _ := s.asked()
 	if len(radios) != 1 || ciphers != 1 {
-		t.Fatalf("pass two ran for %v with %d cipher loads", radios, ciphers)
+		t.Fatalf("pass two ran for %v with %d cipher loads, want one radio and one load", radios, ciphers)
 	}
 	if len(conns) != 1 || conns[0].addr == nil {
-		t.Fatalf("the radio's address must be on the boot's connections: %+v", conns)
+		t.Fatalf("the connections are %+v, want only the radio, with an address", conns)
 	}
 }
 
-func TestAnUnroutedRadioOnlyMachineStillParks(t *testing.T) {
-	// The park rule survives the restructure unchanged for the one
-	// machine that may wait: a deterministic failure with no other
-	// path holds the boot, the reason reaches the console, and a
-	// join during the hold gets the radio addressed.
+func TestAnUnroutedRadioOnlyMachineStillWaitsForTheRadio(t *testing.T) {
+	// A wrong key with no other path to the cluster makes the boot
+	// wait in waitForRadio, which prints the reason to the console. The radio
+	// joins during the wait, so run must address it.
 	console := heldConsole(t)
 	refused := refusedRadio("wlan0", "homenet")
 	refused.radio.control = stubControl()
@@ -243,42 +228,39 @@ func TestAnUnroutedRadioOnlyMachineStillParks(t *testing.T) {
 	s.passes(routesNowhere()).run([]machine.InterfaceSpec{declaredRadio("wlan0", "homenet")}, labCluster())
 
 	if _, _, _, readdress := s.asked(); readdress != 1 {
-		t.Errorf("a radio that joined during the park must be addressed: %d", readdress)
+		t.Errorf("the radio that joined during the wait was addressed %d times, want 1", readdress)
 	}
 	held, err := os.ReadFile(console)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the console: %v", err)
 	}
 	if !strings.Contains(string(held), "cannot join homenet") {
-		t.Errorf("the console must carry the reason: %q", held)
+		t.Errorf("the console holds %q, want it to contain \"cannot join homenet\"", held)
 	}
 }
 
 func TestABackgroundRadioThatCannotBeReachedStillReports(t *testing.T) {
-	// A declared radio the machine does not have still answers: the
-	// background pass sends a failed connection, because a verdict
-	// that never arrives would leave status saying Associating
+	// A declared radio that the machine does not have must still send
+	// a connection on settled, or status shows it as Associating
 	// forever.
 	s := scripted(map[string]*connection{"eth0": addressed("eth0", "10.10.0.5/24")})
 	conns, pass := s.passes(routesVia("eth0")).run(
 		[]machine.InterfaceSpec{wired("eth0"), declaredRadio("wlan0", "homenet")}, labCluster())
 	if pass == nil {
-		t.Fatal("a routed machine must background its radio")
+		t.Fatal("run returned no background pass, want one for a machine with a wired route to the cluster")
 	}
 	settled := <-pass.settled
 	if settled.radio.state != machine.WirelessNoCarrier || !strings.Contains(settled.radio.message, "wlan0") {
-		t.Errorf("got %+v", settled.radio)
+		t.Errorf("the settled radio is %+v, want NoCarrier with a message that names wlan0", settled.radio)
 	}
 	if len(conns) != 2 {
-		t.Errorf("got %d connections", len(conns))
+		t.Errorf("the pass returned %d connections, want 2", len(conns))
 	}
 }
 
-func TestANodeCIDRThatOnlyTheRadioAnswersHoldsTheBoot(t *testing.T) {
-	// The uplink settled and carries a route toward the endpoint, but
-	// the address k3s starts with is inside the nodeCIDR, and only the
-	// radio can hold one. k3s must not start without its node IP, so
-	// this machine waits for the radio in the foreground.
+func TestANodeCIDRThatOnlyTheRadioMatchesWaitsForTheRadio(t *testing.T) {
+	// The wired interface has a route toward the endpoint, but only
+	// the radio's address is inside the nodeCIDR.
 	s := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "192.168.9.5/24"),
 		"wlan0": joinedRadio("wlan0", "homenet", "10.10.0.20/24"),
@@ -288,19 +270,17 @@ func TestANodeCIDRThatOnlyTheRadioAnswersHoldsTheBoot(t *testing.T) {
 		clusterAt(labEndpoint, "10.10.0.0/24"))
 
 	if pass != nil {
-		t.Fatal("a machine with no node address must wait for its radio")
+		t.Fatal("run returned a background pass, want none, so the boot waits for the radio when no wired address is in the nodeCIDR")
 	}
 	if _, radios, _, _ := s.asked(); len(radios) != 1 {
-		t.Errorf("pass two ran for %v in the foreground", radios)
+		t.Errorf("pass two ran for %v in the foreground, want none", radios)
 	}
 	if ip, _ := nodeAddress(clusterAt(labEndpoint, "10.10.0.0/24"), conns); ip != "10.10.0.20" {
-		t.Errorf("the radio must supply the node address, got %q", ip)
+		t.Errorf("the node address is %q, want the address of the radio", ip)
 	}
 }
 
-func TestANodeCIDRAWiredPortAnswersBackgroundsTheRadio(t *testing.T) {
-	// Pass one already holds the address k3s starts with, so the
-	// radio is additional and the boot goes on without it.
+func TestANodeCIDRThatAWiredPortMatchesBackgroundsTheRadio(t *testing.T) {
 	s := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "10.10.0.5/24"),
 		"wlan0": joinedRadio("wlan0", "homenet", "192.168.1.20/24"),
@@ -310,15 +290,12 @@ func TestANodeCIDRAWiredPortAnswersBackgroundsTheRadio(t *testing.T) {
 		clusterAt(labEndpoint, "10.10.0.0/24"))
 
 	if pass == nil {
-		t.Fatal("a machine whose wired port answers the nodeCIDR must background its radio")
+		t.Fatal("run returned no background pass, want one when a wired address is in the nodeCIDR")
 	}
 	<-pass.settled
 }
 
 func TestAClusterWithNoNodeCIDRBackgroundsOnTheRouteAlone(t *testing.T) {
-	// With no nodeCIDR, k3s picks the node address itself, so there is
-	// no address for the gate to require. The route question decides
-	// alone, exactly as it did before the node address joined the gate.
 	s := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "192.168.9.5/24"),
 		"wlan0": joinedRadio("wlan0", "homenet", "192.168.1.20/24"),
@@ -328,15 +305,15 @@ func TestAClusterWithNoNodeCIDRBackgroundsOnTheRouteAlone(t *testing.T) {
 		clusterAt(labEndpoint, ""))
 
 	if pass == nil {
-		t.Fatal("a cluster with no nodeCIDR keeps the route question alone")
+		t.Fatal("run returned no background pass, want one when the cluster declares no nodeCIDR and a wired route exists")
 	}
 	<-pass.settled
 }
 
-func TestTheGateOnAnEndpointNothingCanResolve(t *testing.T) {
-	// A machine alone declares no endpoint, and a DNS name needs the
-	// network in question. Neither can be checked, so the route
-	// question answers yes, and the node address decides on its own.
+func TestAnEndpointWithNoIPAddressBackgroundsOnTheNodeCIDRAlone(t *testing.T) {
+	// routeToward counts an empty endpoint and a DNS name as
+	// reachable, so only the nodeCIDR check decides, even though the
+	// route lookup fails.
 	for name, endpoint := range map[string]string{
 		"a machine alone": "",
 		"a DNS name":      "https://cluster.homenet.example:6443",
@@ -350,17 +327,15 @@ func TestTheGateOnAnEndpointNothingCanResolve(t *testing.T) {
 			clusterAt(endpoint, "10.10.0.0/24"))
 
 		if pass == nil {
-			t.Fatalf("%s must boot rather than wait", name)
+			t.Fatalf("%s: run returned no background pass, want one, so the boot goes on without waiting for the radio", name)
 		}
 		<-pass.settled
 	}
 }
 
 func TestAStuckRaiseStopsTheRadiosBehindIt(t *testing.T) {
-	// A raise that does not return holds the kernel lock every
-	// interface's configuration needs, so the next radio's raise would
-	// wait inside the kernel where no deadline reaches it. The pass
-	// must stop, and every radio it never tried must say so.
+	// After a stuck raise, joinRadios must try no other radio, and
+	// each radio it skipped must report that it was not attempted.
 	s := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "10.10.0.5/24"),
 		"wlan0": stuckRadio("wlan0", "homenet"),
@@ -370,40 +345,39 @@ func TestAStuckRaiseStopsTheRadiosBehindIt(t *testing.T) {
 		wired("eth0"), declaredRadio("wlan0", "homenet"), declaredRadio("wlan1", "homenet"),
 	}, labCluster())
 	if pass == nil {
-		t.Fatal("a routed machine must background its radios")
+		t.Fatal("run returned no background pass, want one for a machine with a wired route to the cluster")
 	}
 	if len(conns) != 3 {
-		t.Fatalf("got %d connections", len(conns))
+		t.Fatalf("run returned %d connections, want 3", len(conns))
 	}
 
-	verdicts := map[string]*radio{}
+	results := map[string]*radio{}
 	for range 2 {
 		settled := <-pass.settled
-		verdicts[settled.ifname] = settled.radio
+		results[settled.ifname] = settled.radio
 	}
-	if got := verdicts["wlan0"].state; got != machine.WirelessNotRaised {
+	if got := results["wlan0"].state; got != machine.WirelessNotRaised {
 		t.Errorf("the wedged radio is %q, want NotRaised", got)
 	}
-	if got := verdicts["wlan1"].state; got != machine.WirelessNoCarrier {
+	if got := results["wlan1"].state; got != machine.WirelessNoCarrier {
 		t.Errorf("a radio nothing tried is %q, want NoCarrier", got)
 	}
 	for _, want := range []string{"not attempted", "wlan0"} {
-		if !strings.Contains(verdicts["wlan1"].message, want) {
-			t.Errorf("the skipped radio's message must carry %q: %q", want, verdicts["wlan1"].message)
+		if !strings.Contains(results["wlan1"].message, want) {
+			t.Errorf("the message of the skipped radio is %q, want it to contain %q", results["wlan1"].message, want)
 		}
 	}
 	if _, radios, _, _ := s.asked(); strings.Join(radios, ",") != "wlan0" {
-		t.Errorf("pass two ran for %v; nothing runs behind a stuck raise", radios)
+		t.Errorf("pass two ran for %v, want only wlan0 because nothing runs behind a stuck raise", radios)
 	}
 }
 
-func TestTheVerdictComponentEndsAfterAStuckRaise(t *testing.T) {
-	// Two radios, one wedge, and both verdicts arrive, so the
-	// component that lands them counts to its total and returns. A
-	// component that never returns would hold the pass forever and
-	// leave the second radio reporting Associating.
+func TestTheRadioWatcherEndsAfterAStuckRaise(t *testing.T) {
+	// Both radios must send a connection after one raise is stuck, so
+	// watchRadios counts pending down to zero and returns. If it did
+	// not, the skipped radio would stay Associating in status.
 	tree := machine.FactsTree{Dir: filepath.Join(t.TempDir(), "facts")}
-	aimResolvConf(t)
+	useResolvConf(t)
 	s := scripted(map[string]*connection{
 		"eth0":  addressed("eth0", "10.10.0.5/24"),
 		"wlan0": stuckRadio("wlan0", "homenet"),
@@ -418,21 +392,20 @@ func TestTheVerdictComponentEndsAfterAStuckRaise(t *testing.T) {
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("running watchRadios: %v", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("the verdict component never counted its second radio")
+		t.Fatal("watchRadios did not return within 10 seconds, want it to return after the second radio settles")
 	}
 	if state := readFactFile(t, tree, "network/interfaces/wlan1/wireless/state"); state != string(machine.WirelessNoCarrier) {
-		t.Errorf("the skipped radio reaches the facts tree as %q", state)
+		t.Errorf("the facts tree has the skipped radio as %q, want NoCarrier", state)
 	}
 }
 
 func TestTheRadioComponentJoinsEachRadioOnlyOnce(t *testing.T) {
-	// The plane restarts a component that panics. A second run would
-	// start a second supplicant on a radio that already has one, and
-	// send a second verdict nothing is counting. The component must
-	// do nothing the second time.
+	// The machine plane runs the component again after an error or a
+	// panic. A second run must not start another supplicant on a radio
+	// that has one, or send a second connection for it.
 	s := scripted(map[string]*connection{
 		"wlan0": joinedRadio("wlan0", "homenet", "192.168.1.20/24"),
 	})
@@ -441,24 +414,21 @@ func TestTheRadioComponentJoinsEachRadioOnlyOnce(t *testing.T) {
 	component := s.passes(routesVia("eth0")).joinRadios(pass, radios)
 
 	if err := component(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the radio component: %v", err)
 	}
 	if err := component(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running the radio component: %v", err)
 	}
 
 	if len(pass.settled) != 1 {
-		t.Errorf("the component sent %d verdicts for one radio", len(pass.settled))
+		t.Errorf("the component sent %d verdicts for one radio, want 1", len(pass.settled))
 	}
 	if _, joined, _, _ := s.asked(); strings.Join(joined, ",") != "wlan0" {
-		t.Errorf("the component joined %v", joined)
+		t.Errorf("the component joined %v, want only wlan0 once", joined)
 	}
 }
 
 func TestTheConnectionsComeBackInSpecOrder(t *testing.T) {
-	// resolv.conf keeps the first three nameservers in interface
-	// order, and the facts summarize the first addressed interface. A
-	// radio the spec named first must appear first, in both passes.
 	interfaces := []machine.InterfaceSpec{declaredRadio("wlan0", "homenet"), wired("eth0")}
 
 	background := scripted(map[string]*connection{
@@ -467,7 +437,7 @@ func TestTheConnectionsComeBackInSpecOrder(t *testing.T) {
 	})
 	conns, pass := background.passes(routesVia("eth0")).run(interfaces, labCluster())
 	if pass == nil {
-		t.Fatal("a routed machine must background its radio")
+		t.Fatal("run returned no background pass, want one for a machine with a wired route to the cluster")
 	}
 	if got := names(conns); got != "wlan0,eth0" {
 		t.Errorf("the background pass returned %q, want the spec's order", got)
@@ -483,15 +453,15 @@ func TestTheConnectionsComeBackInSpecOrder(t *testing.T) {
 	})
 	conns, pass = foreground.passes(routesNowhere()).run(interfaces, labCluster())
 	if pass != nil {
-		t.Fatal("an unrouted machine waits in the foreground")
+		t.Fatal("run returned a background pass, want none for a machine with no route to the cluster")
 	}
 	if got := names(conns); got != "wlan0,eth0" {
 		t.Errorf("the foreground pass returned %q, want the spec's order", got)
 	}
 }
 
-// stalledRaise points the raise at a call that never returns, which is
-// what the rtw88 driver did on 2026-08-26.
+// stalledRaise replaces the netlink calls with a link lookup that
+// succeeds and a raise that blocks until the test ends.
 func stalledRaise(t *testing.T) {
 	t.Helper()
 	stall := make(chan struct{})
@@ -513,38 +483,31 @@ func stalledRaise(t *testing.T) {
 }
 
 func TestARaiseThatDoesNotReturnGetsItsOwnState(t *testing.T) {
-	// A raise that never returns must yield NotRaised with a message
-	// that names the call, because the report is the whole remedy:
-	// the stuck thread cannot be stopped, and the message is what a
-	// person reads in kubectl get machine.
 	stalledRaise(t)
 	conn, err := bringUpRadio(declaredRadio("wlan0", "homenet"),
 		[]interfaceIdentity{{name: "wlan0"}}, 10*time.Millisecond)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("bringing up the radio: %v", err)
 	}
 	if conn.radio.state != machine.WirelessNotRaised {
-		t.Fatalf("state = %q", conn.radio.state)
+		t.Fatalf("the radio state is %q, want NotRaised", conn.radio.state)
 	}
-	// The message names the interface and says what is true: the call
-	// did not come back. What holds it is not observable from here, so
-	// the message must not name the lock as a fact.
+	// init cannot see which lock the stuck thread holds, so the
+	// message must not name one.
 	for _, want := range []string{"wlan0", "did not return"} {
 		if !strings.Contains(conn.radio.message, want) {
-			t.Errorf("the message must carry %q: %q", want, conn.radio.message)
+			t.Errorf("the message is %q, want it to contain %q", conn.radio.message, want)
 		}
 	}
 	if strings.Contains(conn.radio.message, "holds the kernel's rtnl lock") {
-		t.Errorf("the message states as fact something it cannot observe: %q", conn.radio.message)
+		t.Errorf("the message is %q, want no claim about the lock, which init cannot observe", conn.radio.message)
 	}
 	if conn.addr != nil {
-		t.Error("a link that never came up has no address")
+		t.Errorf("the connection has the address %v, want none for a link that never came up", conn.addr)
 	}
 }
 
 func TestARaiseThatFailsOutrightIsAnError(t *testing.T) {
-	// A refusal the kernel returns is a plain error, not the wedge:
-	// it must surface as one and never be dressed as NotRaised.
 	origSetUp, origByName := linkSetUp, linkByName
 	linkSetUp = func(netlink.Link) error { return fmt.Errorf("operation not permitted") }
 	linkByName = func(name string) (netlink.Link, error) {
@@ -554,13 +517,12 @@ func TestARaiseThatFailsOutrightIsAnError(t *testing.T) {
 
 	if _, err := bringUpRadio(declaredRadio("wlan0", "homenet"),
 		[]interfaceIdentity{{name: "wlan0"}}, time.Second); err == nil {
-		t.Fatal("expected the kernel's refusal to surface")
+		t.Fatal("bringUpRadio returned no error, want the kernel's refusal")
 	}
 }
 
-// raisesCleanly points the two netlink calls at stand-ins that
-// answer at once, for the tests whose subject is what happens after
-// the link is up.
+// raisesCleanly replaces the netlink calls with ones that succeed at
+// once, for tests of what happens after the link is up.
 func raisesCleanly(t *testing.T) {
 	t.Helper()
 	origSetUp, origByName := linkSetUp, linkByName
@@ -575,11 +537,8 @@ func raisesCleanly(t *testing.T) {
 }
 
 func TestARadioThatJoinedButCouldNotBeAddressedKeepsItsJoin(t *testing.T) {
-	// The join is the fact the supplicant reported, and the address
-	// step failing does not undo it. Reporting NoCarrier here would
-	// tell a person the radio never reached the network, which is the
-	// opposite of what happened, and would send them to the access
-	// point instead of to the address in the manifest.
+	// NoCarrier would send a person to check the access point instead
+	// of the address in the manifest.
 	raisesCleanly(t)
 	orig := joinRadio
 	joinRadio = func(ifc machine.InterfaceSpec, stateRoot string) *radio {
@@ -591,22 +550,23 @@ func TestARadioThatJoinedButCouldNotBeAddressedKeepsItsJoin(t *testing.T) {
 	ifc.Address = "not-a-cidr"
 	conn, err := bringUpRadio(ifc, []interfaceIdentity{{name: "wlan0"}}, time.Second)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("bringing up the radio: %v", err)
 	}
 
 	if conn.radio.state != machine.WirelessConnected {
-		t.Errorf("the join's verdict is %q, want Connected", conn.radio.state)
+		t.Errorf("the state is %q, want Connected", conn.radio.state)
 	}
 	if conn.addr != nil {
-		t.Error("an interface whose addressing failed holds no address")
+		t.Errorf("the connection has the address %v, want none after addressing failed", conn.addr)
 	}
 	if !strings.Contains(conn.radio.message, "not-a-cidr") {
-		t.Errorf("the addressing error must reach status: %q", conn.radio.message)
+		t.Errorf("the message is %q, want it to contain not-a-cidr", conn.radio.message)
 	}
 }
 
-// aimResolvConf points the resolver file at a tempdir.
-func aimResolvConf(t *testing.T) string {
+// useResolvConf points resolvConfPath at a temporary file and returns
+// its path.
+func useResolvConf(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "resolv.conf")
 	orig := resolvConfPath
@@ -615,21 +575,17 @@ func aimResolvConf(t *testing.T) string {
 	return path
 }
 
-// withNameserver gives a connection one nameserver, the fact that
-// resolv.conf is rendered from.
 func withNameserver(conn *connection, address string) *connection {
 	conn.nameservers = []net.IP{net.ParseIP(address)}
 	return conn
 }
 
 func TestALateRadioReachesTheFactsTreeAndResolvConf(t *testing.T) {
-	// Console parity for pass two: whatever the background join
-	// decides must reach the facts tree, and through it the Machine
-	// status, and the late nameservers must join resolv.conf. This
-	// drives the verdict component directly, with the channel
-	// already holding a settled radio.
+	// A radio that joins in the background must reach the facts tree,
+	// which the Machine status is built from, and its nameservers must
+	// be added to resolv.conf.
 	tree := machine.FactsTree{Dir: filepath.Join(t.TempDir(), "facts")}
-	resolv := aimResolvConf(t)
+	resolv := useResolvConf(t)
 
 	pass := &radioPass{
 		conns: []*connection{
@@ -642,33 +598,32 @@ func TestALateRadioReachesTheFactsTreeAndResolvConf(t *testing.T) {
 	pass.settled <- withNameserver(joinedRadio("wlan0", "homenet", "192.168.1.20/24"), "192.168.1.1")
 
 	if err := watchRadios(nil, pass, nil, tree, nil)(context.Background()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("running watchRadios: %v", err)
 	}
 
 	state := readFactFile(t, tree, "network/interfaces/wlan0/wireless/state")
 	if state != string(machine.WirelessConnected) {
-		t.Errorf("the facts tree says %q", state)
+		t.Errorf("the facts tree has state %q, want Connected", state)
 	}
 	if address := readFactFile(t, tree, "network/interfaces/wlan0/address"); address != "192.168.1.20/24" {
-		t.Errorf("the facts tree says %q", address)
+		t.Errorf("the facts tree has address %q, want 192.168.1.20/24", address)
 	}
 	rendered, err := os.ReadFile(resolv)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading resolv.conf: %v", err)
 	}
 	for _, want := range []string{"nameserver 10.10.0.1", "nameserver 192.168.1.1"} {
 		if !strings.Contains(string(rendered), want) {
-			t.Errorf("resolv.conf must carry %q: %q", want, rendered)
+			t.Errorf("resolv.conf is %q, want it to contain %q", rendered, want)
 		}
 	}
 }
 
-// readFactFile reads one file out of a facts tree.
 func readFactFile(t *testing.T, tree machine.FactsTree, name string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(tree.Dir, filepath.FromSlash(name)))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reading the fact %s: %v", name, err)
 	}
 	return strings.TrimSpace(string(raw))
 }

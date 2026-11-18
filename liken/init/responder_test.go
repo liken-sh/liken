@@ -1,9 +1,8 @@
 package main
 
-// These tests exercise the time responder the strongest way
-// available: over a real UDP socket on loopback, with the same
-// vendored client that the machines themselves use. If beevik/ntp
-// accepts the response, a follower will accept it too.
+// These tests query the responder over a UDP socket on loopback with
+// beevik/ntp, the client that time.go uses, so a reply that the tests
+// accept is one that a follower accepts.
 
 import (
 	"net"
@@ -19,7 +18,7 @@ func startResponder(t *testing.T, clk *clock) string {
 	t.Helper()
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("listening on loopback: %v", err)
 	}
 	t.Cleanup(func() { pc.Close() })
 	go answerTimeQueries(t.Context(), pc, clk)
@@ -42,16 +41,16 @@ func TestResponderSatisfiesTheRealClient(t *testing.T) {
 	addr := startResponder(t, syncedClock())
 	resp, err := ntp.Query(addr)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("querying the responder: %v", err)
 	}
 	if err := resp.Validate(); err != nil {
 		t.Fatalf("the client rejected our answer: %v", err)
 	}
 	if resp.Stratum != 4 {
-		t.Errorf("a stratum-3 source makes this server stratum 4, got %d", resp.Stratum)
+		t.Errorf("the stratum is %d, want 4 from a stratum-3 source", resp.Stratum)
 	}
 	if offset := resp.ClockOffset.Abs(); offset > 250*time.Millisecond {
-		t.Errorf("loopback offset should be near zero, got %v", resp.ClockOffset)
+		t.Errorf("the clock offset is %v, want at most 250ms on loopback", resp.ClockOffset)
 	}
 }
 
@@ -59,13 +58,13 @@ func TestResponderAdvertisesFreeRunning(t *testing.T) {
 	addr := startResponder(t, newClock(nil))
 	resp, err := ntp.Query(addr)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("querying the responder: %v", err)
 	}
 	if err := resp.Validate(); err != nil {
 		t.Fatalf("a free-running server still serves: %v", err)
 	}
 	if resp.Stratum != stratumFreeRunning {
-		t.Errorf("free-running serves the local-clock convention, got %d", resp.Stratum)
+		t.Errorf("the stratum is %d, want %d for a free-running server", resp.Stratum, stratumFreeRunning)
 	}
 }
 
@@ -73,40 +72,38 @@ func TestResponderRefusesToServeBeforeItsFirstSync(t *testing.T) {
 	addr := startResponder(t, newClock([]string{"time.example.com"}))
 	resp, err := ntp.Query(addr)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("querying the responder: %v", err)
 	}
 	if resp.Validate() == nil {
-		t.Fatal("an unsynchronized server's answer must not validate")
+		t.Fatal("the answer of an unsynchronized server validates, want a rejection")
 	}
 	if resp.KissCode != "INIT" {
-		t.Errorf("expected the INIT kiss code, got %q", resp.KissCode)
+		t.Errorf("the kiss code is %q, want INIT", resp.KissCode)
 	}
 }
 
 func TestRespondToIgnoresGarbage(t *testing.T) {
 	clk := syncedClock()
 	if respondTo([]byte{1, 2, 3}, clk, time.Now()) != nil {
-		t.Error("a short packet deserves silence, not a reply")
+		t.Error("a 3-byte packet got a reply, want none")
 	}
 	server := make([]byte, 48)
 	server[0] = 4 // mode 4: another server, not a client request
 	if respondTo(server, clk, time.Now()) != nil {
-		t.Error("only client (mode 3) requests get answers")
+		t.Error("a mode 4 packet got a reply, want none")
 	}
 }
 
 func TestNTPTimestampEncoding(t *testing.T) {
-	// The NTP epoch is 1900-01-01. The Unix epoch is 1970-01-01. Unix
-	// time zero corresponds to NTP second 2,208,988,800, which is the
-	// standard check for this conversion.
+	// Unix time zero is NTP second 2,208,988,800.
 	epoch := time.Unix(0, 0)
 	if got := ntpTimestamp(epoch); got != 2_208_988_800<<32 {
-		t.Errorf("got %d", got)
+		t.Errorf("the timestamp of the Unix epoch is %d, want %d", got, uint64(2_208_988_800)<<32)
 	}
 	// Half a second equals half of 2^32 in the fraction field.
 	half := time.Unix(0, 500_000_000)
 	want := uint64(2_208_988_800)<<32 | 1<<31
 	if got := ntpTimestamp(half); got != want {
-		t.Errorf("got %d, want %d", got, want)
+		t.Errorf("the timestamp of half a second is %d, want %d", got, want)
 	}
 }

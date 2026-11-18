@@ -1,25 +1,18 @@
 package main
 
-// Where the passphrase comes from, and how a network's name and its
-// passphrase reach the supplicant without either one being able to
-// write a configuration directive of its own.
+// Init writes the wpa_supplicant configuration for each wireless
+// interface from the machine's WirelessSpec and its passphrase file.
 //
-// The passphrase has two homes. The image carries one file for each
-// network under /etc/liken/psk, beside the join token, because a
-// passphrase is the same class of fact: a cluster credential the
-// machine needs before the cluster can give it anything. machineState
-// may hold a staged copy, and the read order is staged then image,
-// the same order the cluster document resolves in. Nothing writes the
-// staged copy today; rotation, when it arrives, becomes a writer of
-// that copy and changes nothing here (plans/completed/62-wifi.md).
+// The machine needs the passphrase before it can reach the cluster, so
+// the image includes it, as it includes the join token: one file per
+// network under /etc/liken/psk. A copy of the file staged on
+// machineState takes precedence. No component writes a staged copy. It
+// is where a passphrase rotation would write the new passphrase.
 //
-// The generated file uses only value forms that carry no syntax. The
-// supplicant's parser reads a value as hex whenever the value does
-// not start with a quote, and an unknown line makes the whole file
-// fail to parse rather than being skipped. A value that could write a
-// line of its own could therefore disable the network block or turn
-// the encryption off. Every value liken writes is hex, which holds no
-// quote, no space, and no comment character.
+// A network name or passphrase that holds a quote or a newline could
+// add a line of its own to the file, such as key_mgmt=NONE. So every
+// value from the spec or the passphrase file is written as hex, which
+// wpa_supplicant reads when a value does not start with a quote.
 
 import (
 	"crypto/pbkdf2"
@@ -35,35 +28,27 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// imagePassphraseDir is where the image carries one passphrase file for
-// each network. It is a variable so tests can point it at a directory
-// of their own.
+// imagePassphraseDir holds one passphrase file per network, named for
+// the SSID. It is a variable so tests can point it elsewhere.
 var imagePassphraseDir = "/etc/liken/psk"
 
-// stagedPassphraseDir is the passphrase's staged home on machineState.
+// stagedPassphraseDir is the passphrase directory on machineState.
 func stagedPassphraseDir(stateRoot string) string {
 	return filepath.Join(stateRoot, "psk")
 }
 
-// The passphrase length WPA2 itself states. liken enforces the range
-// even though the hex form it writes has no length rule, because the
-// access point derives its own key from the same bytes under the same
-// rule. A passphrase outside this range is one no access point could
-// hold, and refusing it here puts the reason on the console instead
-// of into a failed handshake nobody can read.
+// WPA2 limits a passphrase to 8 to 63 characters. The hex form that
+// this file writes has no limit, but no access point accepts a
+// passphrase outside the range. Checking here puts the reason on the
+// console, in place of a failed handshake with no explanation.
 const (
 	minPassphraseBytes = 8
 	maxPassphraseBytes = 63
 )
 
-// readPassphrase resolves one network's passphrase: the staged copy on
-// machineState first, then the image's file. It reports where the
-// passphrase came from, so the console can say which one this boot used.
-//
-// A missing file is a decision, not a wait. The manifest declared a
-// network that needs a key, no file on this machine holds one, and no
-// amount of retrying produces one, so this failure joins WRONG_KEY
-// under the park rule.
+// readPassphrase returns one network's passphrase and the path it read,
+// so the console can show which copy this boot used. It reads the
+// staged copy on machineState first and the image's file second.
 func readPassphrase(stateRoot, ssid string) (passphrase, source string, err error) {
 	staged := filepath.Join(stagedPassphraseDir(stateRoot), ssid)
 	image := filepath.Join(imagePassphraseDir, ssid)
@@ -73,102 +58,87 @@ func readPassphrase(stateRoot, ssid string) (passphrase, source string, err erro
 			continue
 		}
 		if err != nil {
-			return "", "", fmt.Errorf("reading the passphrase at %s: %w", path, err)
+			return "", "", fmt.Errorf("reading the passphrase: %w", err)
 		}
 		return trimPassphraseFile(string(raw)), path, nil
 	}
-	return "", "", fmt.Errorf("no passphrase for %q; the image carries one file for each network at %s/<ssid>, and this machine has none",
-		ssid, imagePassphraseDir)
+	return "", "", fmt.Errorf("no passphrase for %q: neither %s nor %s exists",
+		ssid, staged, image)
 }
 
-// trimPassphraseFile removes the line ending that a text editor
-// leaves on the last line of a file. Exactly one line ending goes and
-// nothing else does: a trailing space is a legal character in a WPA2
-// passphrase, so trimming all trailing whitespace would silently
-// change the key, while the one final newline was never part of the
-// passphrase at all.
+// trimPassphraseFile removes one trailing line ending, which a text
+// editor adds and which is not part of the passphrase. It trims nothing
+// else because a trailing space is a valid passphrase character, and
+// trimming it would change the key.
 func trimPassphraseFile(raw string) string {
 	trimmed := strings.TrimSuffix(raw, "\n")
 	return strings.TrimSuffix(trimmed, "\r")
 }
 
-// checkPassphrase refuses a passphrase the generator has no safe
-// rendering for, and says which rule refused it. The range is WPA2's
-// own. A byte outside printable ASCII in a passphrase file is nearly
-// always a stray line ending or an encoding accident, not a key any
-// access point holds.
+// checkPassphrase returns an error naming the rule that a passphrase
+// breaks: the WPA2 length range, or printable ASCII. A byte outside
+// printable ASCII in a passphrase file is nearly always a stray line
+// ending or an encoding error.
 func checkPassphrase(ssid, passphrase string) error {
 	if n := len(passphrase); n < minPassphraseBytes || n > maxPassphraseBytes {
-		return fmt.Errorf("the passphrase for %q is %d bytes; WPA2 passphrases are %d to %d printable characters",
+		return fmt.Errorf("the passphrase for %q is %d bytes, and a WPA2 passphrase is %d to %d printable characters",
 			ssid, n, minPassphraseBytes, maxPassphraseBytes)
 	}
 	for i := 0; i < len(passphrase); i++ {
 		if b := passphrase[i]; b < 0x20 || b > 0x7e {
-			return fmt.Errorf("the passphrase for %q holds the byte %#02x at position %d; a WPA2 passphrase holds printable characters only",
+			return fmt.Errorf("the passphrase for %q has the byte %#02x at position %d, and a WPA2 passphrase has printable characters only",
 				ssid, b, i)
 		}
 	}
 	return nil
 }
 
-// derivePMK derives the key the WPA2 four-way handshake actually
-// uses, so the supplicant never needs the passphrase for that half.
-// The 802.11 derivation is PBKDF2 over HMAC-SHA1, with the network's
-// name as the salt and 4096 rounds. The supplicant accepts the result
-// as 64 hex digits, a form no passphrase can break out of. The salt
-// binds the result to the network's name, which is why a change to
-// either one re-derives it.
+// derivePMK returns the pairwise master key that the WPA2 four-way
+// handshake uses, as 64 hex digits, which wpa_supplicant accepts in
+// place of the passphrase. The 802.11 derivation is PBKDF2 with
+// HMAC-SHA1, 4096 rounds, and the SSID as the salt, so a change to
+// either the SSID or the passphrase changes the key.
 func derivePMK(ssid, passphrase string) string {
 	key, err := pbkdf2.Key(sha1.New, passphrase, []byte(ssid), 4096, 32)
 	if err != nil {
-		// The parameters are constants, so the only error this call
-		// can report is one this code itself would have to
-		// introduce. An empty result fails the supplicant's parse,
-		// which fails closed.
+		// Key fails only in Go's FIPS 140-only mode, which refuses
+		// SHA-1, and init does not enable that mode. An empty psk
+		// makes the supplicant refuse the file.
 		return ""
 	}
 	return hex.EncodeToString(key)
 }
 
-// wirelessBackgroundScan is the bgscan setting of every network: the
-// simple module, a short interval in seconds, the signal threshold in
-// dBm, and a long interval in seconds.
+// wirelessBackgroundScan is the bgscan value for every network:
+// module:short interval in seconds:signal threshold in dBm:long
+// interval in seconds.
 const wirelessBackgroundScan = "simple:30:-70:3600"
 
-// wirelessConfig renders the supplicant's whole configuration for one
-// interface. It refuses rather than render a value it cannot write
-// safely, because a machine with no shell cannot be asked afterwards.
+// wirelessConfig returns the wpa_supplicant configuration for one
+// interface. It returns an error when the passphrase is missing or
+// invalid. joinWireless records that error as WrongKey, the same state
+// as a passphrase the access point refused, because a retry fixes
+// neither.
 func wirelessConfig(w machine.WirelessSpec, stateRoot, ctrlDir string) (string, error) {
 	var b strings.Builder
 
-	// The one global line. The control directory lives in the file
-	// rather than on the command line because the -C flag overrides
-	// this line, upstream's own help text describes that override
-	// backwards, and one source of truth is worth more than a flag.
+	// The control socket directory is set here and not with the -C
+	// flag. The flag overrides this line, and wpa_supplicant's help
+	// text describes that override backwards.
 	fmt.Fprintf(&b, "ctrl_interface=%s\n", ctrlDir)
 	b.WriteString("network={\n")
 
-	// The name is written as hex because 802.11 lets a network's
-	// name carry any octet. The parser reads an unquoted value as
-	// hex, and hex cannot hold the quote, the space, or the comment
-	// character that would otherwise end the line early.
 	fmt.Fprintf(&b, "\tssid=%s\n", hex.EncodeToString([]byte(w.SSID)))
 
 	// Without bgscan the radio leaves an access point only when the
-	// link drops. A radio that rejoined a far access point while the
-	// near one was off stays on the far one after the near one comes
-	// back, with round trips of seconds. bgscan's simple module scans
-	// every 30 seconds while the signal is below -70 dBm, and once an
-	// hour above it, and the supplicant moves to a stronger access
-	// point of the same network that a scan finds. On a radio with a
-	// good signal, the cost is one background scan an hour. The
-	// module also sets the driver's signal monitor at -70 dBm, which
-	// is what makes a weak signal start the faster scans.
+	// link drops, so a radio that joined a distant access point stays
+	// on it after a nearer one comes back. The simple module scans
+	// every 30 seconds while the signal is below -70 dBm and once an
+	// hour above it, and moves to a stronger access point of the same
+	// network when a scan finds one.
 	fmt.Fprintf(&b, "\tbgscan=%q\n", wirelessBackgroundScan)
 
 	if w.SecurityOrDefault() == machine.WirelessOpen {
-		// NONE is the supplicant's word for a network with no
-		// encryption at all.
 		b.WriteString("\tkey_mgmt=NONE\n")
 		b.WriteString("}\n")
 		return b.String(), nil
@@ -183,33 +153,21 @@ func wirelessConfig(w machine.WirelessSpec, stateRoot, ctrlDir string) (string, 
 	}
 	fmt.Printf("liken: wireless: the passphrase for %s comes from %s\n", w.SSID, source)
 
-	// Every key management is named at once because a home access
-	// point today commonly offers WPA2 and WPA3 together. The
-	// supplicant picks the strongest one the access point
-	// advertises. Naming only one would refuse half the networks a
-	// machine may meet.
-	//
-	// FT-PSK and FT-SAE are the 802.11r forms of the same two keys.
-	// An access point that advertises 802.11r lets the radio move to
-	// another access point of the network with the key it already
-	// holds, so a move takes one exchange and not a full handshake.
-	// The supplicant prefers the FT form when the access point offers
-	// it, and an access point without 802.11r never offers it, so
-	// the two names change nothing on such a network.
+	// Access points offer WPA2, WPA3, or both, and the supplicant picks
+	// the strongest type that the access point advertises, so every
+	// type is listed. FT-PSK and FT-SAE are the 802.11r fast transition
+	// forms, which let the radio move between access points of one
+	// network without a full handshake. An access point without 802.11r
+	// does not advertise them.
 	b.WriteString("\tkey_mgmt=WPA-PSK WPA-PSK-SHA256 SAE FT-PSK FT-SAE\n")
 
-	// Protected management frames are optional (1) rather than off
-	// or required. WPA3 requires them and WPA2 does not: required
-	// (2) refuses every WPA2-only access point, off (0) breaks SAE
-	// against an access point that requires them, and optional lets
-	// the supplicant negotiate whichever each access point offers.
+	// ieee80211w=1 makes protected management frames optional. WPA3
+	// requires them, and some WPA2 access points do not support them,
+	// so neither 0 nor 2 joins both.
 	b.WriteString("\tieee80211w=1\n")
 
-	// Two credential lines carry one passphrase. WPA2 uses the
-	// derived key, and WPA3's SAE uses the passphrase itself. The
-	// derived form leaves the supplicant no passphrase to hand SAE,
-	// so a configuration with only psk= would join a WPA2 access
-	// point and fail against a WPA3 one.
+	// WPA2 uses the derived key in psk. SAE needs the passphrase
+	// itself, in sae_password.
 	fmt.Fprintf(&b, "\tpsk=%s\n", derivePMK(w.SSID, passphrase))
 	fmt.Fprintf(&b, "\tsae_password=%s\n", hex.EncodeToString([]byte(passphrase)))
 

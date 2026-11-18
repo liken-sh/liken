@@ -1,9 +1,7 @@
 package main
 
-// Tests for what the report boot recommends. The recommendation is
-// the one part of the boot flow that a test can drive whole: it reads
-// a sysfs tree and a module tree, and both can be fabricated. The
-// disk-side helpers have their own tests in reportdisks_test.go.
+// These tests of the report's driver recommendations read a fabricated
+// sysfs tree and module tree.
 
 import (
 	"fmt"
@@ -16,9 +14,9 @@ import (
 	"github.com/liken-sh/liken/liken/hardware"
 )
 
-// fakeBus points the hardware walk at a sysfs tree of the test's
-// making, and restores the real one when the test ends.
-func fakeBus(t *testing.T) string {
+// fakeSysfs points sysfsRoot at an empty temporary directory for the
+// test and returns it.
+func fakeSysfs(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	old := sysfsRoot
@@ -27,11 +25,9 @@ func fakeBus(t *testing.T) string {
 	return root
 }
 
-// addPCIDevice writes the four attributes the walk reads for a PCI
-// function: its fingerprint, its class code, and its numeric identity.
-// The class code is what determines whether the report will touch the
-// device at all: 0x02 is a network controller, 0x01 is storage, and
-// 0x03 is a display.
+// addPCIDevice writes the sysfs attributes that the hardware walk reads
+// for a PCI function. The class decides whether the report loads a
+// driver: 0x01 is storage, 0x02 is network, and 0x03 is display.
 func addPCIDevice(t *testing.T, root, address, class, modalias string) {
 	t.Helper()
 	dir := filepath.Join(root, "bus", "pci", "devices", address)
@@ -44,9 +40,9 @@ func addPCIDevice(t *testing.T, root, address, class, modalias string) {
 	writeSysfs(t, dir, "device", "0x8168\n")
 }
 
-// fixtureCatalog builds the smallest catalog that can name a driver:
-// an alias table with one line per module. Nothing is built in and
-// nothing is shipped, so every match reads as a loadable candidate.
+// fixtureCatalog builds a catalog from a modules.alias file with one
+// line for each entry of aliases. No module is built in, so every match
+// is a loadable candidate.
 func fixtureCatalog(t *testing.T, aliases map[string]string) (*hardware.Catalog, string) {
 	t.Helper()
 	base := t.TempDir()
@@ -69,10 +65,9 @@ const (
 )
 
 func TestRecommendationsCoverStorageAndNetworkOnly(t *testing.T) {
-	// A display controller names a driver just as the NIC does, and
-	// loading it would switch the framebuffer console the person is
-	// reading the report on. The report leaves it alone.
-	root := fakeBus(t)
+	// The display controller has a driver too, but loading it would
+	// switch the framebuffer console that shows the report.
+	root := fakeSysfs(t)
 	addPCIDevice(t, root, "0000:00:02.0", "0x030000", displayModalias)
 	addPCIDevice(t, root, "0000:00:1f.6", "0x020000", nicModalias)
 	addPCIDevice(t, root, "0000:03:00.0", "0x010700", hbaModalias)
@@ -89,20 +84,17 @@ func TestRecommendationsCoverStorageAndNetworkOnly(t *testing.T) {
 		chains = append(chains, strings.Join(rec.Chain, ","))
 	}
 	if len(recs) != 2 {
-		t.Fatalf("the report must recommend the NIC and the HBA only: %v", chains)
+		t.Fatalf("the recommendations are %v, want the NIC and the HBA only", chains)
 	}
 	for _, rec := range recs {
 		if rec.Class != "network" && rec.Class != "storage" {
-			t.Errorf("a %s device has no place in the report: %+v", rec.Class, rec)
+			t.Errorf("the recommendation is %+v, want class network or storage, not %s", rec, rec.Class)
 		}
 	}
 }
 
 func TestClaimableCoversWhatTheReportWillNotLoad(t *testing.T) {
-	// The display controller the loading filter drops is exactly the
-	// hardware a workload would claim, so the second list names it. The
-	// NIC and the HBA belong to the install, and stay out of it.
-	root := fakeBus(t)
+	root := fakeSysfs(t)
 	addPCIDevice(t, root, "0000:00:02.0", "0x030000", displayModalias)
 	addPCIDevice(t, root, "0000:00:1f.6", "0x020000", nicModalias)
 	addPCIDevice(t, root, "0000:03:00.0", "0x010700", hbaModalias)
@@ -115,34 +107,31 @@ func TestClaimableCoversWhatTheReportWillNotLoad(t *testing.T) {
 	recs := recommendClaimable(catalog, base)
 
 	if len(recs) != 1 || recs[0].Class != "display" {
-		t.Fatalf("the claimable list is the display device alone: %+v", recs)
+		t.Fatalf("the claimable list is %+v, want the display device alone", recs)
 	}
 	if !slices.Equal(recs[0].Chain, []string{"bochs"}) {
-		t.Errorf("the chain must name the driver that would bind it: %+v", recs[0].Chain)
+		t.Errorf("the chain is %v, want [bochs], the driver that would bind the device", recs[0].Chain)
 	}
 }
 
-func TestClaimableSkipsThePlatformsOwnPlumbing(t *testing.T) {
-	// A bridge is the machine's own structure. Driving it delivers
-	// nothing a pod could hold, so naming it would be noise in the one
-	// list that exists to be read.
+func TestClaimableSkipsClassesWithNoDeviceForAPod(t *testing.T) {
+	// A driver for a bridge gives a pod no device to claim.
 	for _, class := range []string{"bridge", "memory", "system", ""} {
 		if claimableClass(class) {
-			t.Errorf("%q is not hardware a workload can claim", class)
+			t.Errorf("claimableClass(%q) is true, want false because a pod cannot claim it", class)
 		}
 	}
 	for _, class := range []string{"display", "multimedia", "vendor-specific", "hid"} {
 		if !claimableClass(class) {
-			t.Errorf("%q is hardware a workload could claim", class)
+			t.Errorf("claimableClass(%q) is false, want true", class)
 		}
 	}
 }
 
-func TestRecommendationsAreOnePerFingerprint(t *testing.T) {
-	// Two identical NICs are one recommendation with two devices behind
-	// it. One chain drives both cards, and a proposal that printed the
-	// same evidence twice would read as two different findings.
-	root := fakeBus(t)
+func TestRecommendationsAreOnePerModalias(t *testing.T) {
+	// One driver chain serves both identical cards, and listing it twice
+	// would look like two different devices.
+	root := fakeSysfs(t)
 	addPCIDevice(t, root, "0000:01:00.0", "0x020000", nicModalias)
 	addPCIDevice(t, root, "0000:01:00.1", "0x020000", nicModalias)
 	catalog, base := fixtureCatalog(t, map[string]string{nicModalias: "r8169"})
@@ -150,19 +139,19 @@ func TestRecommendationsAreOnePerFingerprint(t *testing.T) {
 	recs := recommendModules(catalog, base)
 
 	if len(recs) != 1 {
-		t.Fatalf("two identical cards are one recommendation: %+v", recs)
+		t.Fatalf("two identical cards give %+v, want one recommendation", recs)
 	}
 	if len(recs[0].SysfsDirs) != 2 {
-		t.Errorf("the recommendation must keep both devices: %+v", recs[0].SysfsDirs)
+		t.Errorf("the recommendation has the devices %v, want both cards", recs[0].SysfsDirs)
 	}
 }
 
 func TestRecommendationsSkipDevicesWithNoCandidate(t *testing.T) {
-	root := fakeBus(t)
+	root := fakeSysfs(t)
 	addPCIDevice(t, root, "0000:00:1f.6", "0x020000", nicModalias)
 	catalog, base := fixtureCatalog(t, map[string]string{"pci:v0000FFFFd*": "nothing"})
 
 	if recs := recommendModules(catalog, base); len(recs) != 0 {
-		t.Errorf("a device no module matches has no recommendation: %+v", recs)
+		t.Errorf("a device that no module matches has the recommendations %+v, want none", recs)
 	}
 }

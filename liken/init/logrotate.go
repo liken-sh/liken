@@ -1,32 +1,23 @@
 package main
 
-// Log rotation, in two forms, both owned by init because init is the
-// only program in a position to do them safely.
+// init rotates the k3s and containerd logs at boot, and caps the size
+// of k3s.log while k3s runs.
 //
-// The first form is rotate-at-boot: before k3s starts, the previous
-// boot's k3s and containerd logs shift aside (k3s.log becomes
-// k3s.log.1, and so on, keeping a few generations). Boot is the one
-// moment when nothing holds either file open, because every process
-// from the previous boot is gone, so a rename cannot strand a
-// writer. That constraint is containerd's whole story: k3s reopens
-// containerd.log each time it starts containerd, but init does not
-// own that file's descriptor, so renaming it mid-run would leave
-// containerd writing to the renamed generation forever, while the
-// fresh path stayed empty. Rotating only at boot also gives the
-// files a useful shape: each generation is one boot, a small
-// journald-style boot index, and a boot that died leaves its log on
-// disk to read afterward.
+// At boot, before k3s starts, init renames the previous boot's logs to
+// numbered generations: k3s.log becomes k3s.log.1, and so on. No
+// process of the previous boot is running, so no process is left
+// writing to a renamed file. That matters for containerd.log, which k3s
+// opens each time it starts containerd. A rename while containerd ran
+// would leave containerd writing to the renamed file. Rotating only at
+// boot also makes each generation the log of one boot, so the log of a
+// boot that crashed is kept.
 //
-// The second form is the in-boot size cap on k3s.log, which init can
-// enforce because it owns that file's writer (supervisor.go tees
-// k3s's output through it). These logs live on clusterState, the
-// same filesystem as etcd's data, and a filesystem that fills up
-// corrupts more than logs. A bounded worst case (the cap times the
-// kept generations) is the difference between a chatty k3s and a
-// machine that eats its own datastore. containerd.log has no
-// equivalent cap, because init does not hold its descriptor. Its
-// volume is a small fraction of k3s's, and this file accepts and
-// records that residual risk.
+// init writes k3s.log itself, from startK3s in supervisor.go, so it can
+// cap that file. The logs are on clusterState, the filesystem that
+// holds etcd's data, and a full filesystem corrupts the datastore.
+// containerd.log has no cap because init does not write it. containerd
+// writes much less than k3s, and this file accepts the risk that its
+// log fills the disk.
 
 import (
 	"errors"
@@ -36,22 +27,21 @@ import (
 )
 
 const (
-	// logGenerations is how many previous boots (or overflowed caps)
-	// each log keeps on disk.
+	// logGenerations is how many rotated files of each log stay on disk.
 	logGenerations = 3
 
-	// k3sLogCap bounds one boot's k3s.log. With rotation, the worst
-	// case on disk per family is logGenerations+1 times this.
+	// k3sLogCap is the size at which k3s.log rotates. The k3s log can
+	// use at most (logGenerations+1) times this on disk, plus the line
+	// being written when it passes the cap.
 	k3sLogCap = 64 << 20
 )
 
-// rotateBootLogs shifts the previous boot's logs aside. It runs in
-// the k3s branch of main, after storage has settled (so clusterState
-// is mounted and these paths land on the persistent disk when the
-// machine has one) and before k3s starts (so nothing holds the
-// files open). On a memory-backed machine, the same paths sit on the
-// root tmpfs, and rotation works the same way. There is just nothing
-// left to rotate after a reboot.
+// rotateBootLogs renames the previous boot's k3s and containerd logs
+// to numbered generations. main calls it after storage is mounted, so
+// the paths are on the persistent disk when the machine has one, and
+// before k3s starts, so no process has the files open. On a machine
+// with no persistent disk the paths are on the root tmpfs, and the
+// reboot has already cleared them.
 func rotateBootLogs() {
 	if err := os.MkdirAll(likenLogDir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "liken: creating %s: %v\n", likenLogDir, err)
@@ -60,13 +50,12 @@ func rotateBootLogs() {
 	rotateGenerations(containerdLog, logGenerations)
 }
 
-// rotateGenerations does the numbered shift. It deletes the oldest
-// generation, moves each survivor down by one, and turns the live
-// file into .1. Missing files are normal (a first boot has no logs
-// at all, and containerd's directory does not exist until k3s has
-// run once), so this function stays silent about absence. Any other
-// failure is worth a console line but never worth stopping a boot
-// over.
+// rotateGenerations deletes the oldest generation of the log at path,
+// renames each remaining generation to the next number, and renames the
+// log itself to .1. A missing file is not reported, because a first
+// boot has no logs and containerd's directory does not exist until k3s
+// has run once. Any other error is printed to the console and does not
+// stop the boot.
 func rotateGenerations(path string, keep int) {
 	if err := os.Remove(fmt.Sprintf("%s.%d", path, keep)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		fmt.Fprintf(os.Stderr, "liken: rotating %s: %v\n", path, err)
@@ -83,23 +72,20 @@ func shiftLog(from, to string) {
 	}
 }
 
-// cappedLogFile is the k3s.log writer. It is append-only, and when a
-// boot's log passes the cap, it shifts the generations and reopens a
-// fresh file. Two details matter for the log relay that tails this
-// file. First, rotation happens only at a line boundary, so the
-// renamed generation always ends with a complete line (the tailer
-// ships a trailing fragment as a whole line, which would garble a
-// line split mid-write). Second, rotation happens by rename, which
-// is exactly the identity change that the tailer's inode check
-// watches for.
+// cappedLogFile is the writer for k3s.log. It appends, and once the
+// file has passed limit, it rotates the generations at the next line
+// boundary and opens a new file. The log relay that tails the file
+// (logs/tail.go) depends on both parts of that. The relay sends a
+// trailing fragment as a whole line, so a rotated file must end with a
+// whole line. The relay reopens the path when its inode changes, so the
+// rotation renames the file and does not truncate it.
 //
-// Write never returns an error. This writer sits inside the
-// io.MultiWriter that carries k3s's output to the console, and
-// io.MultiWriter stops at the first writer that fails. An error
-// here (for example, a full disk) would silence the console echo
-// too, on a machine whose console is the last resort for reading
-// anything. So this code reports a failure once, and file logging
-// goes quiet while the console copy keeps flowing.
+// Write never returns an error. teeOutput puts this writer in an
+// io.MultiWriter with the console, and io.MultiWriter stops at the
+// first writer that fails, so an error such as a full disk would also
+// stop the console copy. A machine has no shell, so the console is the
+// last place to read k3s's output. After a failure the writer prints
+// the reason once and drops later writes.
 type cappedLogFile struct {
 	path        string
 	limit       int64
@@ -109,10 +95,10 @@ type cappedLogFile struct {
 	broken      bool
 }
 
-// openCappedLog opens, or continues, the log at path. Appending to
-// an existing file matters within a boot: k3s restarts under the
-// supervisor's backoff reopen this same log, and each restart must
-// extend the boot's record, not truncate it.
+// openCappedLog opens the log at path for appending, creating it when
+// it is missing. It does not truncate, because the supervisor reopens
+// the same log each time it restarts k3s, and the log of one boot must
+// include every run.
 func openCappedLog(path string, limit int64) (*cappedLogFile, error) {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -168,10 +154,9 @@ func (c *cappedLogFile) rotate() {
 	c.atLineStart = true
 }
 
-// fail reports the failure once and stops file logging. The console
-// copy of k3s's output is not affected.
+// fail prints the reason and stops writing the file.
 func (c *cappedLogFile) fail(reason string) {
-	fmt.Fprintf(os.Stderr, "liken: %s; k3s file logging stops here (console continues)\n", reason)
+	fmt.Fprintf(os.Stderr, "liken: %s. k3s stops logging to the file, and its console output continues\n", reason)
 	c.broken = true
 	if c.f != nil {
 		c.f.Close()

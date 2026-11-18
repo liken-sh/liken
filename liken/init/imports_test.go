@@ -8,11 +8,9 @@ import (
 	"github.com/liken-sh/liken/liken/machine"
 )
 
-// importsFixture points the settle pass at a throwaway tree: a seed
-// images directory that substitutes for what the boot copied onto
-// clusterState, and an agent directory that substitutes for
-// containerd's own directory tree. It returns the machineState root
-// that the store lives under.
+// importsFixture points k3sImagesDir and k3sAgentDir at temporary
+// directories. root is the machineState directory that holds the
+// imported-images record.
 type importsFixture struct {
 	root      string
 	imagesDir string
@@ -35,7 +33,7 @@ func newImportsFixture(t *testing.T) importsFixture {
 func (f importsFixture) writeTarball(t *testing.T, name, contents string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(f.imagesDir, name), []byte(contents), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the image tarball: %v", err)
 	}
 }
 
@@ -43,10 +41,10 @@ func (f importsFixture) writeAgentState(t *testing.T, rel, contents string) stri
 	t.Helper()
 	path := filepath.Join(f.agentDir, rel)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+		t.Fatalf("creating the agent state directory: %v", err)
 	}
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the agent state file: %v", err)
 	}
 	return path
 }
@@ -59,14 +57,14 @@ func (f importsFixture) provenRecord(t *testing.T) {
 	t.Helper()
 	digests, err := machine.HashImageTarballs(f.imagesDir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("hashing the image tarballs: %v", err)
 	}
 	raw, _, err := machine.RenderImportedImages(digests)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the imported-images record: %v", err)
 	}
 	if err := f.store().WriteProven(raw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the proven record: %v", err)
 	}
 }
 
@@ -78,21 +76,21 @@ func TestImportsFirstBootStagesATrial(t *testing.T) {
 	settleImageImports(f.root, true, true, &boot)
 
 	if boot.ImportsSource != machine.ManifestSourceStaged {
-		t.Fatalf("a first boot's imports are a trial, got %q", boot.ImportsSource)
+		t.Fatalf("the first boot's ImportsSource is %q, want staged", boot.ImportsSource)
 	}
 	if boot.ImportsDiscarded {
-		t.Fatal("a first boot has no store to distrust")
+		t.Fatal("the first boot discarded the container store, want it kept because no store exists yet")
 	}
 	staged, err := f.store().LoadStaged()
 	if err != nil || staged == nil {
-		t.Fatalf("the trial record was not staged: %v", err)
+		t.Fatalf("loading the staged record after the first boot: record %v, want a staged record", err)
 	}
 	if machine.ManifestHash(staged) != boot.ImportsHash {
-		t.Fatal("the staged record and the boot record disagree about identity")
+		t.Fatal("the staged record has a different hash than boot.ImportsHash, want the same")
 	}
 }
 
-func TestImportsMatchingProvenRecordIsTheQuietPath(t *testing.T) {
+func TestImportsMatchingProvenRecordKeepsTheStore(t *testing.T) {
 	f := newImportsFixture(t)
 	f.writeTarball(t, "liken-machine-operator.tar", "operator")
 	f.provenRecord(t)
@@ -102,16 +100,16 @@ func TestImportsMatchingProvenRecordIsTheQuietPath(t *testing.T) {
 	settleImageImports(f.root, true, true, &boot)
 
 	if boot.ImportsSource != machine.ManifestSourceProven {
-		t.Fatalf("matching digests boot under the proven record, got %q", boot.ImportsSource)
+		t.Fatalf("with matching digests ImportsSource is %q, want proven", boot.ImportsSource)
 	}
 	if boot.ImportsDiscarded {
-		t.Fatal("a proven store must not be discarded")
+		t.Fatal("the boot discarded a store that matches the proven record, want it kept")
 	}
 	if staged, _ := f.store().LoadStaged(); staged != nil {
-		t.Fatal("the quiet path stages nothing")
+		t.Fatal("the boot staged a record, want none when the digests match the proven record")
 	}
 	if _, err := os.Stat(victim); err != nil {
-		t.Fatalf("the container store was disturbed: %v", err)
+		t.Fatalf("the container store file is missing after the boot: %v, want it kept", err)
 	}
 }
 
@@ -126,23 +124,23 @@ func TestImportsNewDigestsStageWithoutDiscarding(t *testing.T) {
 	settleImageImports(f.root, true, true, &boot)
 
 	if boot.ImportsSource != machine.ManifestSourceStaged {
-		t.Fatalf("new digests are a trial, got %q", boot.ImportsSource)
+		t.Fatalf("with new digests ImportsSource is %q, want staged", boot.ImportsSource)
 	}
 	if boot.ImportsDiscarded {
-		t.Fatal("an upgrade on a proven store keeps the store: only unproven trials are distrusted")
+		t.Fatal("the boot discarded the container store, want it kept because only a staged record left by a previous boot discards it")
 	}
 	if _, err := os.Stat(victim); err != nil {
-		t.Fatalf("the proven store was discarded: %v", err)
+		t.Fatalf("the container store file is missing after the boot: %v, want it kept", err)
 	}
 }
 
-func TestImportsStandingTrialDiscardsTheStore(t *testing.T) {
+func TestImportsLeftoverStagedRecordDiscardsTheStore(t *testing.T) {
 	f := newImportsFixture(t)
 	f.writeTarball(t, "liken-machine-operator.tar", "operator")
 	digests, _ := machine.HashImageTarballs(f.imagesDir)
 	raw, _, _ := machine.RenderImportedImages(digests)
 	if err := f.store().WriteStaged(raw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged record: %v", err)
 	}
 	torn := f.writeAgentState(t, "containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/3/fs/bin", "torn")
 	tarballCopy := f.writeAgentState(t, "images/liken-machine-operator.tar", "operator")
@@ -151,48 +149,48 @@ func TestImportsStandingTrialDiscardsTheStore(t *testing.T) {
 	settleImageImports(f.root, true, true, &boot)
 
 	if !boot.ImportsDiscarded {
-		t.Fatal("a standing trial means the store took writes that were never proven")
+		t.Fatal("the boot kept the container store, want it discarded because a staged record remained from a previous boot")
 	}
 	if _, err := os.Stat(torn); !os.IsNotExist(err) {
-		t.Fatal("the container store survived the discard")
+		t.Fatal("the torn container store file exists after the discard, want it deleted")
 	}
 	if _, err := os.Stat(tarballCopy); err != nil {
-		t.Fatalf("the discard must spare the tarballs k3s is about to import: %v", err)
+		t.Fatalf("the image tarball is missing after the discard: %v, want it kept for k3s to import", err)
 	}
 	if boot.ImportsSource != machine.ManifestSourceStaged {
-		t.Fatalf("the retry is itself a trial, got %q", boot.ImportsSource)
+		t.Fatalf("after the discard ImportsSource is %q, want staged", boot.ImportsSource)
 	}
 	staged, _ := f.store().LoadStaged()
 	if machine.ManifestHash(staged) != boot.ImportsHash {
-		t.Fatal("the staged record does not match this boot's tarballs")
+		t.Fatal("the staged record has a different hash than boot.ImportsHash, want the hash of this boot's tarballs")
 	}
 }
 
-func TestImportsStandingTrialWithNewDigestsStagesTheNewOnes(t *testing.T) {
+func TestImportsLeftoverStagedRecordStagesTheNewDigests(t *testing.T) {
 	f := newImportsFixture(t)
 	f.writeTarball(t, "liken-machine-operator.tar", "operator v2")
 	raw, _, _ := machine.RenderImportedImages(map[string]string{"liken-machine-operator.tar": "digest of v1"})
 	if err := f.store().WriteStaged(raw); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged record: %v", err)
 	}
 
 	boot := machine.BootStatus{}
 	settleImageImports(f.root, true, true, &boot)
 
 	if !boot.ImportsDiscarded {
-		t.Fatal("the v1 trial never proved; the store is not to be trusted")
+		t.Fatal("the boot kept the container store, want it discarded because the staged record of the v1 tarball was never proven")
 	}
 	staged, _ := f.store().LoadStaged()
 	digests, err := machine.HashImageTarballs(f.imagesDir)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("hashing the image tarballs: %v", err)
 	}
 	expected, _, err := machine.RenderImportedImages(digests)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("rendering the imported-images record: %v", err)
 	}
 	if string(staged) != string(expected) {
-		t.Fatalf("the staged record must name this boot's tarballs, not the dead trial's:\n%s", staged)
+		t.Fatalf("the staged record is\n%s\nwant the record of this boot's tarballs, not the record of the previous boot", staged)
 	}
 }
 
@@ -204,10 +202,10 @@ func TestImportsEphemeralMachineStateSkipsTheLifecycle(t *testing.T) {
 	settleImageImports(f.root, false, true, &boot)
 
 	if boot.ImportsSource != "" {
-		t.Fatalf("no durable machineState means no record to boot under, got %q", boot.ImportsSource)
+		t.Fatalf("with ephemeral machineState ImportsSource is %q, want empty", boot.ImportsSource)
 	}
 	if staged, _ := f.store().LoadStaged(); staged != nil {
-		t.Fatal("nothing should be staged without a durable store")
+		t.Fatal("the boot staged a record, want none with ephemeral machineState")
 	}
 }
 
@@ -219,7 +217,7 @@ func TestImportsEphemeralClusterStateSkipsTheLifecycle(t *testing.T) {
 	settleImageImports(f.root, true, false, &boot)
 
 	if boot.ImportsSource != "" {
-		t.Fatalf("an ephemeral container store resets with every boot and cannot wedge, got %q", boot.ImportsSource)
+		t.Fatalf("with ephemeral clusterState ImportsSource is %q, want empty", boot.ImportsSource)
 	}
 }
 
@@ -227,7 +225,7 @@ func TestImportsUnreadableStagedRecordStillDiscards(t *testing.T) {
 	f := newImportsFixture(t)
 	f.writeTarball(t, "liken-machine-operator.tar", "operator")
 	if err := f.store().WriteStaged([]byte("{{{{ not a record")); err != nil {
-		t.Fatal(err)
+		t.Fatalf("writing the staged record: %v", err)
 	}
 	torn := f.writeAgentState(t, "containerd/db", "suspect")
 
@@ -235,22 +233,21 @@ func TestImportsUnreadableStagedRecordStillDiscards(t *testing.T) {
 	settleImageImports(f.root, true, true, &boot)
 
 	if !boot.ImportsDiscarded {
-		t.Fatal("a staged file that won't even parse still marks an unproven trial")
+		t.Fatal("the boot kept the container store, want it discarded because an unreadable staged record still means the previous boot did not prove its imports")
 	}
 	if _, err := os.Stat(torn); !os.IsNotExist(err) {
-		t.Fatal("the store survived")
+		t.Fatal("the container store file exists after the boot, want it deleted")
 	}
 }
 
 func TestImportsReportsUnhashableTarballs(t *testing.T) {
-	// The tarballs cannot even be hashed (an unreadable file). The
-	// lifecycle makes no decision at all, because a record rendered
-	// from partial hashes would be wrong either way.
+	// A record built from some of the tarballs would be wrong, so an
+	// unreadable tarball stops settleImageImports before it decides.
 	f := newImportsFixture(t)
 	f.writeTarball(t, "k3s-airgap.tar", "layers")
 	sealed := filepath.Join(f.imagesDir, "k3s-airgap.tar")
 	if err := os.Chmod(sealed, 0o000); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the image tarball unreadable: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(sealed, 0o644) })
 
@@ -258,10 +255,10 @@ func TestImportsReportsUnhashableTarballs(t *testing.T) {
 	settleImageImports(f.root, true, true, &boot)
 
 	if boot.ImportsSource != "" || boot.ImportsDiscarded {
-		t.Errorf("no hash, no verdict: %+v", boot)
+		t.Errorf("after the hashing failed the boot status is %+v, want no ImportsSource and no discard", boot)
 	}
 	if staged, _ := f.store().LoadStaged(); staged != nil {
-		t.Error("nothing may be staged over hashes that never computed")
+		t.Error("the boot staged a record after the hashing failed, want none")
 	}
 }
 
@@ -272,19 +269,18 @@ func TestDiscardContainerStoreToleratesAMissingAgentDir(t *testing.T) {
 }
 
 func TestDiscardContainerStoreReportsWhatItCannotRemove(t *testing.T) {
-	// One entry refuses removal (its parent is read-only). The other
-	// entries are still removed, and this test checks that the
-	// failure is reported rather than hidden.
+	// The agent directory is read-only, so the removal fails and the
+	// entry stays for the next boot to try again.
 	f := newImportsFixture(t)
 	f.writeAgentState(t, "containerd/io.containerd.snapshotter.v1.overlayfs/torn", "")
 	if err := os.Chmod(f.agentDir, 0o555); err != nil {
-		t.Fatal(err)
+		t.Fatalf("making the agent directory read-only: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(f.agentDir, 0o755) })
 
 	discardContainerStore()
 
 	if _, err := os.Stat(filepath.Join(f.agentDir, "containerd")); err != nil {
-		t.Error("a failed removal leaves the entry for the next boot to retry")
+		t.Error("the containerd directory is missing, want it kept when its deletion fails")
 	}
 }

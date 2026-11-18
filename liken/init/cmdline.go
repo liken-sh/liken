@@ -1,12 +1,9 @@
 package main
 
-// The kernel command line: the one input channel that exists before
-// any filesystem does. rdinit= on the command line pointed the
-// kernel at this program, and the command line is liken's channel
-// for facts a machine needs before it has read a single file. The
-// bootloader owns the command line, which is why it can carry
-// identity: the bootloader configures the command line per machine,
-// even when the image is shared by a fleet.
+// Every machine in a fleet boots the same image, so init reads the
+// facts that differ per machine, such as its name and the slot that
+// booted, from the kernel command line that the bootloader writes. The
+// command line is readable before any storage is mounted.
 
 import (
 	"os"
@@ -14,15 +11,12 @@ import (
 	"strings"
 )
 
-// cmdlinePath is a package variable rather than a constant so tests
-// can point the parsers at a file of their own making.
+// cmdlinePath is a variable so tests can point the readers at a file
+// of their own.
 var cmdlinePath = "/proc/cmdline"
 
-// cmdlineFields reads the kernel command line as its words, split on
-// whitespace. Every parameter lookup starts from this shape. A
-// command line that cannot be read yields no words. The file exists
-// on any booted kernel, so its absence only ever means a test did not
-// fake one, and every lookup then reports "not present".
+// cmdlineFields returns the command line split on whitespace, or nil
+// when the file cannot be read, which happens only in a test.
 func cmdlineFields() []string {
 	raw, err := os.ReadFile(cmdlinePath)
 	if err != nil {
@@ -31,11 +25,9 @@ func cmdlineFields() []string {
 	return strings.Fields(string(raw))
 }
 
-// cmdlineRaw returns the whole command line as one line, with the
-// trailing newline the kernel appends removed. The parsers above take
-// the line apart; this is for reporting it whole, so that an operator
-// reading Machine status sees exactly what the bootloader passed,
-// including any parameter liken itself does not look for.
+// cmdlineRaw returns the whole command line for machine status, so a
+// person sees every parameter the bootloader passed, including the
+// ones that `liken` does not read.
 func cmdlineRaw() string {
 	raw, err := os.ReadFile(cmdlinePath)
 	if err != nil {
@@ -44,10 +36,8 @@ func cmdlineRaw() string {
 	return strings.TrimSpace(string(raw))
 }
 
-// bootParamValue returns the value of a name=value parameter on the
-// kernel command line ("" when absent). Examples are which machine
-// this is (liken.machine=) and which system slot booted it
-// (liken.slot=).
+// bootParamValue returns the value of a name=value parameter, such as
+// liken.machine= or liken.slot=, or "" when it is absent.
 func bootParamValue(name string) string {
 	for _, field := range cmdlineFields() {
 		if value, ok := strings.CutPrefix(field, name+"="); ok {
@@ -57,11 +47,9 @@ func bootParamValue(name string) string {
 	return ""
 }
 
-// bootParam reports whether a word appears on the kernel command
-// line. This is liken's channel for per-boot behavior that is not
-// machine configuration; machine configuration belongs in the
-// Machine manifest. Parameter names use the liken.* prefix, to stay
-// clear of the kernel's own parameters.
+// bootParam reports whether a flag, such as liken.install, is on the
+// command line as a whole word. A flag changes the behavior of one
+// boot. Configuration that persists belongs in the `Machine` manifest.
 func bootParam(name string) bool {
 	return slices.Contains(cmdlineFields(), name)
 }
